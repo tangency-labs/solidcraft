@@ -4,9 +4,10 @@
 //! numbers are defined here: the segments of the caller's regions in order, each region its outer
 //! loop and then its holes ([`profile_loops`]).
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
-use solidcraft_geom::{Loop2, Region2, Seg2};
+use solidcore_record::{Loop2, Region2, Seg2};
 
 /// The loops of `regions` in profile order: each region's outer loop, then its holes.
 pub(crate) fn profile_loops(regions: &[Region2]) -> impl Iterator<Item = &Loop2> {
@@ -85,9 +86,13 @@ impl NumberedLoop {
         NumberedLoop { lp: pieces, from }
     }
 
-    /// Re-split into exactly `n` segments: a full circle gets breaks at `angles` (or evenly),
-    /// other loops split their longest segments in half.
-    pub(crate) fn resample(&self, n: usize, angles: &[f64]) -> NumberedLoop {
+    /// Re-split into exactly `n` segments, other loops split their longest segments in half. A
+    /// full circle is split once round (one turn, every arc a positive sweep) to follow a lead
+    /// loop: at the lead's vertex directions `angles` when they go round in order (counter-
+    /// clockwise, or clockwise when `clockwise`), otherwise from the first of them at the lead's
+    /// perimeter `fractions` (the share of the lead's length before each vertex; evenly when
+    /// those are unusable).
+    pub(crate) fn resample(&self, n: usize, angles: &[f64], fractions: &[f64], clockwise: bool) -> NumberedLoop {
         let lp = &self.lp;
         let circle = lp.segs.iter().all(|s| matches!(s, Seg2::Arc { .. }))
             && lp.segs.windows(2).all(|w| match (w.first(), w.get(1)) {
@@ -96,22 +101,15 @@ impl NumberedLoop {
                 }
                 _ => false,
             });
-        if circle && let Some(Seg2::Arc { center, radius, .. }) = lp.segs.first().copied() {
-            let mut a: Vec<f64> =
-                if angles.len() == n { angles.to_vec() } else { (0..n).map(|i| std::f64::consts::TAU * i as f64 / n as f64).collect() };
-            // Keep the given order but make them increase.
-            for i in 1..a.len() {
-                let Some(prev) = a.get(i - 1).copied() else { continue };
-                if let Some(x) = a.get_mut(i) {
-                    while *x <= prev {
-                        *x += std::f64::consts::TAU;
-                    }
-                }
-            }
-            let segs: Vec<Seg2> = (0..n)
+        if circle
+            && n > 0
+            && let Some(Seg2::Arc { center, radius, .. }) = lp.segs.first().copied()
+        {
+            let a = circle_breaks(n, angles, fractions, clockwise);
+            let segs: Vec<Seg2> = (0..a.len())
                 .filter_map(|i| {
                     let s = *a.get(i)?;
-                    let e = if i + 1 < n { *a.get(i + 1)? } else { a.first()? + std::f64::consts::TAU };
+                    let e = if i + 1 < a.len() { *a.get(i + 1)? } else { a.first()? + std::f64::consts::TAU };
                     Some(Seg2::Arc { center, radius, start: s, sweep: e - s })
                 })
                 .collect();
@@ -154,6 +152,19 @@ impl NumberedLoop {
         out
     }
 
+    /// The same loop started at a segment `joins` does not join to the one before it, so no run of
+    /// joined segments wraps round the loop's end (as it is when every segment joins the next).
+    pub(crate) fn starting_a_run(&self, joins: impl Fn(&Seg2, &Seg2) -> bool) -> NumberedLoop {
+        let segs = &self.lp.segs;
+        let n = segs.len();
+        let joined = |i: usize| matches!((segs.get((i + n - 1) % n), segs.get(i)), (Some(s), Some(t)) if joins(s, t));
+        let mut out = self.clone();
+        if let Some(k) = (0..n).find(|&i| !joined(i)) {
+            out.rotate_left(k);
+        }
+        out
+    }
+
     /// Split segment `k` in half, both halves over what it ran over.
     fn split_half(&mut self, k: usize) {
         if k >= self.lp.segs.len() || k >= self.from.len() {
@@ -188,6 +199,65 @@ impl NumberedRegion {
     pub(crate) fn region(&self) -> Region2 {
         Region2 { outer: self.outer.lp.clone(), holes: self.holes.iter().map(|h| h.lp.clone()).collect() }
     }
+}
+
+/// The smallest arc a circle is split into (radians).
+const MIN_SWEEP: f64 = 1e-9;
+
+/// `n` increasing break angles of one turn round a circle (each step and the closing step back
+/// to the first, one turn on, positive) for a circle following a lead loop: `angles` (the lead's
+/// vertex directions) when they go round once in order in the lead's direction (counter-clockwise,
+/// or clockwise when `clockwise`), otherwise from the first of them at the lead's perimeter
+/// `fractions`, or evenly. A non-star-shaped lead's directions turn back on themselves: forcing
+/// them to increase wound the circle round many times (#2570).
+fn circle_breaks(n: usize, angles: &[f64], fractions: &[f64], clockwise: bool) -> Vec<f64> {
+    use std::f64::consts::TAU;
+    let sign = if clockwise { -1.0 } else { 1.0 };
+    // Angles measured in the lead's direction of travel.
+    let along: Vec<f64> = angles.iter().map(|a| sign * a).collect();
+    let run = (along.len() == n).then(|| one_turn(&along)).flatten().unwrap_or_else(|| {
+        let start = along.first().copied().filter(|a| a.is_finite()).unwrap_or(0.0);
+        let even = || (0..n).map(|i| i as f64 / n as f64).collect::<Vec<f64>>();
+        let f = if usable_fractions(n, fractions) { fractions.to_vec() } else { even() };
+        f.iter().map(|f| start + TAU * f).collect()
+    });
+    let mut breaks: Vec<f64> = run.into_iter().map(|a| sign * a).collect();
+    if clockwise {
+        breaks.reverse();
+    }
+    breaks
+}
+
+/// `along` unwrapped into one increasing turn (each step the shortest positive one), or `None`
+/// when they do not go round once in order.
+fn one_turn(along: &[f64]) -> Option<Vec<f64>> {
+    let mut out: Vec<f64> = Vec::with_capacity(along.len());
+    for &x in along {
+        if !x.is_finite() {
+            return None;
+        }
+        let next = match out.last() {
+            Some(&prev) => {
+                let step = (x - prev).rem_euclid(std::f64::consts::TAU);
+                if step <= MIN_SWEEP {
+                    return None;
+                }
+                prev + step
+            }
+            None => x,
+        };
+        out.push(next);
+    }
+    let (first, last) = (*out.first()?, *out.last()?);
+    (last - first < std::f64::consts::TAU - MIN_SWEEP).then_some(out)
+}
+
+/// `fractions` are `n` finite, strictly increasing shares of a turn from 0, all under one.
+fn usable_fractions(n: usize, fractions: &[f64]) -> bool {
+    fractions.len() == n
+        && fractions.first().is_some_and(|f| f.abs() < MIN_SWEEP)
+        && fractions.windows(2).all(|w| matches!(w, [a, b] if b - a > MIN_SWEEP))
+        && fractions.last().is_some_and(|f| f.is_finite() && *f < 1.0 - MIN_SWEEP)
 }
 
 /// Every number of `sets`, once each, in order.

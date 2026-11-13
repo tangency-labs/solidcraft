@@ -110,8 +110,7 @@
   }
  },
  {
-  "widget": "20 mm",
-  "near": "Spacing"
+  "click": {"handle": "dialog:Spacing"}
  },
  {
   "key": "A",
@@ -124,7 +123,7 @@
   "key": "Tab"
  },
  {
-  "key": "Enter"
+  "click": {"handle": "dialog:OK"}
  },
  {
   "expect": {

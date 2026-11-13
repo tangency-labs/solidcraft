@@ -22,12 +22,14 @@ is the source. Two drawn curves, or two projections, over one edge remain ambigu
 Every other flat face is attached by its exact history name (a `lineage` certificate) when it
 has one: the persistent name the kernel's face history gives it, which says what made the face
 and follows it through every later feature. That covers a Cut's walls and floor
-(`F5:side:l1`, `F5:top`), a chamfer face (`F7:blend:…`), each copy a pattern or mirror makes
+(`F5:side:l1`, `F5:top`), a chamfer face (`F7:blend(…)`), each copy a pattern or mirror makes
 (`F4:top@F6.2`: the seed's face and the copy's instance), a side wall a Join merged from two
 features (named after the first, answering to the other), the pieces a later feature split
-a face into (all pieces of one name on one oriented plane are that face), and the face Split Body
+a face into (all pieces of one name on one oriented plane are that face), the face Split Body
 cuts with a plane (`F4:section` on each part: a construction plane, a sketch line or a plane given
-outright, so a sketch on it follows the plane when a parameter moves it). A lineage face's
+outright, so a sketch on it follows the plane when a parameter moves it), and the faces of a
+thickened surface: the face that was kept, the offset (`F3:inner(F2:side:l1)`) and the walls on
+the surface's edges (`F3:blend(…)`). A sketch on any of those follows the thickness. A lineage face's
 plane is its current exact plane, measured in a frame that depends on the plane alone: its
 origin where the definition origin projects onto it, its x axis the first of the definition's
 X, Y and Z axes not steep to it (`|cos| < 0.6`), projected. The construction certificates
@@ -75,8 +77,16 @@ the point is in world coordinates. A point-only face request must find a unique 
 source. An unsupported or ambiguous request fails with an explanation instead of creating
 an attachment with weaker identity.
 
-When a source is suppressed, deleted, replaced, or loses its certificate, the sketch reports
-a lost attachment. Its saved plane is only a visible repair guide: it does not produce a
+A solid extrude's cap is identified by the curves around its profile, so editing that sketch's
+outline (a line that now splits the profile, a side deleted and drawn again, a notch trimmed into
+it) leaves no cap with the exact identity. The sketch then sits on the cap of the same extrude, at
+the same end, made from the same sketch, on the same body, whose outline shares the most of the
+stored curves, at least half of them (a tie is not guessed; a cap whose exact identity is still
+on another body is never replaced). It warns, naming the face and the curves
+that went or came, until the sketch is placed again with **Redefine Sketch Plane**.
+
+When a source is suppressed, deleted, replaced, or loses its certificate otherwise, the sketch
+reports a lost attachment, naming the face it was on (`the top cap of Extrude1 on `Body1``). Its saved plane is only a visible repair guide: it does not produce a
 healthy solved sketch or let downstream features build at a substitute face.
 
 Use **Redefine Sketch Plane** to select a new supported face explicitly. The draft can be

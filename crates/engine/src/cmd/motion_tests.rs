@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -15,9 +16,489 @@ fn occ(s: &Session, component: &str) -> u64 {
     s.doc.occurrence_of(c).map(|o| o.id).unwrap_or(0)
 }
 
+/// The call that deletes item `id` with `delete`: Edit Contact Set deletes with `delete: true`;
+/// Delete Motion Study and Delete Exploded View take only the item, and strict refuses any other
+/// key (#12155).
+fn deletion(delete: &str, key: &str, id: u64) -> Value {
+    if delete == "contact.edit" { json!({key: id, "delete": true}) } else { json!({key: id}) }
+}
+
+#[test]
+fn deleted_motion_item_ids_are_not_reused_after_reopening() {
+    for (create, delete, key, params) in [
+        ("contact.create", "contact.edit", "set", json!({"occurrences": ["A", "B"]})),
+        ("motion.study", "motion.delete", "study", json!({"name": "Travel", "steps": 10})),
+        ("explode.create", "explode.delete", "view", json!({"moves": [{"occurrence": "B", "translate": [20, 0, 0]}]})),
+    ] {
+        let mut s = Session::default();
+        for name in ["A", "B"] {
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            run(&mut s, "component.create", json!({"name": name}));
+        }
+        let first = run(&mut s, create, params.clone())[key].as_u64().unwrap();
+        let deleting = deletion(delete, key, first);
+        run(&mut s, delete, deleting.clone());
+        let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        *s.doc_mut() = doc;
+        let second = run(&mut s, create, params)[key].as_u64().unwrap();
+        assert!(second > first, "{create}: deleted item {first} was reused as {second}");
+        assert!(s.execute(delete, &deleting).is_err());
+    }
+}
+
+/// #9738: a default name skips the names in use, after a delete too: contact sets, motion
+/// studies, exploded views, and the placements of a component.
+#[test]
+fn default_names_skip_names_in_use() {
+    for (create, delete, key, params, prefix) in [
+        ("contact.create", "contact.edit", "set", json!({"occurrences": ["A", "B"]}), "Contact Set"),
+        ("motion.study", "motion.delete", "study", json!({"steps": 10}), "Motion Study"),
+        ("explode.create", "explode.delete", "view", json!({"moves": [{"occurrence": "B", "translate": [20, 0, 0]}]}), "Exploded View"),
+    ] {
+        let mut s = Session::default();
+        for name in ["A", "B"] {
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            run(&mut s, "component.create", json!({"name": name}));
+        }
+        let made = |s: &mut Session| {
+            let r = run(s, create, params.clone());
+            (r[key].as_u64().unwrap(), r["name"].as_str().unwrap().to_string())
+        };
+        let (first, one) = made(&mut s);
+        let (_, two) = made(&mut s);
+        assert_eq!([one, two], [format!("{prefix}1"), format!("{prefix}2")]);
+        run(&mut s, delete, deletion(delete, key, first));
+        assert_eq!(made(&mut s).1, format!("{prefix}1"), "{create}: the free name, not {prefix}2 again");
+    }
+    // Placements: with the first deleted, a copy takes a name none has.
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Arm"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let arm = occ(&s, "Arm");
+    for _ in 0..2 {
+        run(&mut s, "occurrence.copy", json!({"occurrence": arm, "translate": [20, 0, 0]}));
+    }
+    let names = |s: &Session| s.doc.occurrences.iter().map(|o| o.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&s), ["Arm:1", "Arm:2", "Arm:3"]);
+    run(&mut s, "selection.delete", json!({"occurrences": ["Arm:1"]}));
+    run(&mut s, "occurrence.copy", json!({"occurrence": "Arm:3", "translate": [20, 0, 0]}));
+    assert_eq!(names(&s), ["Arm:2", "Arm:3", "Arm:1"]);
+}
+
 /// Where B's corner (20, 0, 0) is now.
 fn b_x(s: &Session) -> f64 {
     super::world_point(s, occ(s, "B"), Vec3::new(20.0, 0.0, 0.0)).x
+}
+
+#[derive(Clone, Copy)]
+enum PartAuthoring {
+    RootThenTransfer,
+    RootThenNestedTransfer,
+    InComponent,
+}
+
+#[derive(Clone, Copy)]
+enum JoinSelection {
+    Named,
+    Implicit,
+    All,
+}
+
+/// A boolean authored before a later transfer still reads the bodies in its timeline input,
+/// not their final owners. Explicit targets must not turn every occurrence into an input.
+fn joined_motion_part(authoring: PartAuthoring, selection: JoinSelection) -> Session {
+    let mut s = Session::default();
+    if matches!(authoring, PartAuthoring::InComponent) {
+        run(&mut s, "component.create", json!({"name":"Rotor","grounded":false}));
+    }
+    run(&mut s, "solid.box", json!({"length":10,"width":8,"height":6,"body_name":"Part","name":"Base"}));
+    run(&mut s, "select.set", json!({"items":[]}));
+    let mut p = json!({"length":6,"width":4,"height":4,"corner":[8,2,1],"operation":"join","name":"Boss"});
+    match selection {
+        JoinSelection::Named => p["targets"] = json!(["Part"]),
+        JoinSelection::All => p["targets"] = json!(["*"]),
+        JoinSelection::Implicit => {}
+    }
+    run(&mut s, "solid.box", p);
+    if !matches!(authoring, PartAuthoring::InComponent) {
+        let parent = if matches!(authoring, PartAuthoring::RootThenNestedTransfer) {
+            run(&mut s, "component.create", json!({"name":"Group","activate":false,"grounded":false}));
+            "Group"
+        } else {
+            "root"
+        };
+        run(&mut s, "component.create", json!({"name":"Rotor","parent":parent,"activate":false,"grounded":false}));
+        run(&mut s, "component.move_bodies", json!({"bodies":["Part"],"component":"Rotor"}));
+    }
+    let driven = if matches!(authoring, PartAuthoring::RootThenNestedTransfer) { "Group" } else { "Rotor" };
+    attach_motion_rotor(&mut s, driven, "Turn");
+    s
+}
+
+fn attach_motion_rotor(s: &mut Session, component: &str, joint: &str) {
+    run(s, "component.activate", json!({"component":"root"}));
+    run(s, "joint.as_built", json!({"type":"revolute","name":joint,"a":0,"b":component,"at":{"occurrence":0,"point":[0,0,0],"z":[0,0,1]}}));
+}
+
+fn unrelated_motion_rotor(s: &mut Session) {
+    run(s, "component.activate", json!({"component":"root"}));
+    run(s, "component.create", json!({"name":"Unrelated","grounded":false}));
+    run(s, "solid.box", json!({"length":2,"width":2,"height":2,"corner":[100,100,100],"body_name":"Remote"}));
+    attach_motion_rotor(s, "Unrelated", "Other turn");
+}
+
+/// Test work and identity, not elapsed time. Every first visit to an angle must preserve the
+/// definitions and their warm meshes, even across full turns; returning to a cached pose alone
+/// would miss the regression. The world mesh is still in the new physical position.
+fn assert_joint_only_moves(s: &mut Session, joint: &str) {
+    use std::sync::Arc;
+    let definitions = s.model.state();
+    let meshes: Vec<_> = definitions.bodies.iter().map(|b| b.mesh()).collect();
+    for body in &s.world_state().unwrap().bodies {
+        std::hint::black_box(body.mesh());
+        std::hint::black_box(body.display_plan());
+    }
+    let joints = run(s, "joint.list", json!({"quiet":true}));
+    let base = joints["joints"].as_array().unwrap().iter().find(|j| j["name"] == joint).unwrap()["values"][0]["value"].as_f64().unwrap();
+    for offset in [5., 10., 15., 37., 91., 365., 721., 12418., 12423., 37., 0.] {
+        let angle = base + offset;
+        let r = run(s, "joint.drive", json!({"joint":joint,"value":angle,"quiet":true}));
+        assert_eq!(r["moved"], true, "{r}");
+        assert!(r["stopped_by_loop"].is_null() && r["stopped_by_contact"].is_null(), "{r}");
+        let joints = run(s, "joint.list", json!({"quiet":true}));
+        let actual = joints["joints"].as_array().unwrap().iter().find(|j| j["name"] == joint).unwrap()["values"][0]["value"].as_f64().unwrap();
+        assert!((actual - angle).abs() < 1e-8, "{joint} did not reach {angle}: {actual}");
+        assert_eq!(s.model.last_recomputed, 0, "{joint} at {angle}: unchanged geometry was evaluated again");
+        let current = s.model.state();
+        assert!(Arc::ptr_eq(&definitions, &current), "{joint} at {angle}: definition state replaced");
+        for (b, mesh) in current.bodies.iter().zip(&meshes) {
+            assert!(Arc::ptr_eq(&b.mesh(), mesh), "{}: canonical mesh replaced", b.name);
+        }
+        let world = s.world_state().unwrap();
+        let (_, work) = crate::kernel::profile::capture(|| {
+            for b in &world.bodies {
+                let local = definitions.body(b.definition_name()).unwrap().mesh();
+                let placed = b.mesh();
+                assert_eq!(placed.triangles, local.triangles);
+                assert_eq!(placed.tri_face, local.tri_face);
+                assert_eq!(placed.positions.len(), local.positions.len());
+                assert_eq!(placed.normals.len(), local.normals.len());
+                for (p, q) in local.positions.iter().zip(&placed.positions) {
+                    assert!(crate::doc::apply_point(&b.source_transform, *p).dist(*q) < 1e-8);
+                }
+                for (n, q) in local.normals.iter().zip(&placed.normals) {
+                    assert!(crate::doc::apply_vector(&b.source_transform, *n).dist(*q) < 1e-8);
+                }
+            }
+        });
+        assert_eq!(work.tessellate_ms, 0., "{joint} at {angle}: reference tessellation ran");
+    }
+}
+
+fn assert_motion_matches_full_rebuild(s: &Session) {
+    let mut full = crate::doc::Model::default();
+    full.no_cache = true;
+    full.evaluate(&s.doc);
+    assert!(full.results.iter().all(|r| r.error.is_none()), "{:?}", full.results.iter().filter_map(|r| r.error.as_ref()).collect::<Vec<_>>());
+    let (cached, fresh) = (s.model.state(), full.state());
+    assert_eq!(cached.bodies.len(), fresh.bodies.len());
+    for (a, b) in cached.bodies.iter().zip(&fresh.bodies) {
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.body.face_count(), b.body.face_count(), "{}", a.name);
+        let (a_bounds, b_bounds) = (a.mesh().bounds(), b.mesh().bounds());
+        assert!(a_bounds.min.dist(b_bounds.min) < 1e-8 && a_bounds.max.dist(b_bounds.max) < 1e-8, "{}", a.name);
+        let (a_mass, b_mass) = (crate::kernel::measure(&a.body).unwrap(), crate::kernel::measure(&b.body).unwrap());
+        assert!((a_mass.volume - b_mass.volume).abs() < 1e-6, "{}: {} vs {}", a.name, a_mass.volume, b_mass.volume);
+    }
+}
+
+#[test]
+fn joint_pose_named_union_before_transfer_retains_definitions() {
+    assert_joint_only_moves(&mut joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::Named), "Turn");
+}
+
+#[test]
+fn joint_pose_joined_cylinders_keep_mesh_cells_at_unseen_angles() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":8.5,"height":8,"base":[0,32,0],"axis":[0,1,0],"operation":"new","body_name":"Crank"}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"radius":2.8,"height":30,"base":[0,36,0],"axis":[0.981627183447664,0,0.1908089953765448],"operation":"join","targets":["Crank"]}),
+    );
+    run(&mut s, "component.create", json!({"name":"Crank","activate":false,"grounded":false}));
+    run(&mut s, "component.move_bodies", json!({"bodies":["Crank"],"component":"Crank"}));
+    run(&mut s, "joint.as_built", json!({"type":"revolute","name":"Crank","a":0,"b":"Crank","at":{"occurrence":0,"point":[0,0,0],"z":[0,1,0]}}));
+    assert_joint_only_moves(&mut s, "Crank");
+}
+
+#[test]
+fn joint_pose_named_union_in_its_component_retains_definitions() {
+    assert_joint_only_moves(&mut joined_motion_part(PartAuthoring::InComponent, JoinSelection::Named), "Turn");
+}
+
+#[test]
+fn joint_pose_nested_body_transfer_ignores_ancestor_motion() {
+    assert_joint_only_moves(&mut joined_motion_part(PartAuthoring::RootThenNestedTransfer, JoinSelection::Named), "Turn");
+}
+
+#[test]
+fn joint_pose_second_occurrence_shares_the_definition() {
+    let mut s = joined_motion_part(PartAuthoring::InComponent, JoinSelection::Named);
+    let second = run(&mut s, "occurrence.copy", json!({"component":"Rotor","translate":[40,0,0]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "joint.as_built", json!({"type":"revolute","name":"Copy turn","a":0,"b":second,"at":{"occurrence":0,"point":[40,0,0],"z":[0,0,1]}}));
+    assert_eq!(s.world_state().unwrap().bodies.len(), 2);
+    assert_joint_only_moves(&mut s, "Copy turn");
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_implicit_union_in_its_component_retains_definitions() {
+    assert_joint_only_moves(&mut joined_motion_part(PartAuthoring::InComponent, JoinSelection::Implicit), "Turn");
+}
+
+#[test]
+fn joint_pose_unrelated_part_does_not_invalidate_named_union() {
+    let mut s = joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::Named);
+    unrelated_motion_rotor(&mut s);
+    assert_joint_only_moves(&mut s, "Other turn");
+}
+
+#[test]
+fn joint_pose_future_body_is_not_an_input_of_an_earlier_wildcard_union() {
+    let mut s = joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::All);
+    unrelated_motion_rotor(&mut s);
+    assert_joint_only_moves(&mut s, "Other turn");
+}
+
+#[test]
+fn joint_pose_empty_cache_keeps_unchanged_definition_results() {
+    let mut s = joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::Named);
+    *s.model.cache.lock().unwrap() = Default::default();
+    assert_joint_only_moves(&mut s, "Turn");
+}
+
+#[test]
+fn joint_pose_explicit_extrude_targets_ignore_unrelated_motion() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":3,"body_name":"Base"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"BossOutline"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[8,2],"p1":[14,6]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"BossOutline","distance":3,"operation":"join","targets":["Base"],"name":"Boss"}));
+    unrelated_motion_rotor(&mut s);
+    assert_joint_only_moves(&mut s, "Other turn");
+}
+
+#[test]
+fn joint_pose_combine_ignores_unrelated_motion() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base"}));
+    run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"corner":[4,4,9],"body_name":"Boss","operation":"new"}));
+    run(&mut s, "solid.combine", json!({"target":"Base","tools":["Boss"],"operation":"join"}));
+    unrelated_motion_rotor(&mut s);
+    assert_joint_only_moves(&mut s, "Other turn");
+}
+
+/// A fixed tool removes the top 5 mm of the target where x=8..12. Sliding the target
+/// relative to it changes the removed volume from 100 to 200 mm³. Moving the tool together
+/// with the target preserves that volume and must preserve the computed definition too.
+fn cross_component_motion_cut(move_tool_with_target: bool, kind: &str) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"MovingTarget","grounded":false}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Target"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    if move_tool_with_target {
+        run(&mut s, "component.create", json!({"name":"Tool"}));
+    }
+    run(&mut s, "solid.box", json!({"length":4,"width":12,"height":6,"corner":[8,-1,5],"operation":"cut","targets":["Target"],"name":"Notch"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let axis = if kind == "slider" { json!([1, 0, 0]) } else { json!([0, 0, 1]) };
+    run(&mut s, "joint.as_built", json!({"type":kind,"name":"Motion","a":0,"b":"MovingTarget","at":{"occurrence":0,"point":[0,0,0],"z":axis}}));
+    if move_tool_with_target {
+        run(&mut s, "joint.rigid_group", json!({"occurrences":["MovingTarget","Tool"]}));
+    }
+    s
+}
+
+fn motion_target_volume(s: &Session) -> f64 {
+    crate::kernel::measure(&s.model.state().body("Target").unwrap().body).unwrap().volume
+}
+
+fn motion_combine_cut(kind: &str, together: bool) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"MovingTarget","grounded":false}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Target"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(&mut s, "component.create", json!({"name":"Tool"}));
+    run(&mut s, "solid.box", json!({"length":4,"width":12,"height":6,"corner":[8,-1,5],"body_name":"Cutter","operation":"new"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(&mut s, "solid.combine", json!({"target":"Target","tools":["Cutter"],"operation":"cut"}));
+    let axis = if kind == "slider" { json!([1, 0, 0]) } else { json!([0, 0, 1]) };
+    run(&mut s, "joint.as_built", json!({"type":kind,"name":"Motion","a":0,"b":"MovingTarget","at":{"occurrence":0,"point":[0,0,0],"z":axis}}));
+    if together {
+        run(&mut s, "joint.rigid_group", json!({"occurrences":["MovingTarget","Tool"]}));
+    }
+    s
+}
+
+#[test]
+fn joint_pose_combine_common_motion_keeps_the_target_frame() {
+    let mut s = motion_combine_cut("revolute", true);
+    assert_joint_only_moves(&mut s, "Motion");
+    assert!((motion_target_volume(&s) - 900.).abs() < 1e-6);
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_combine_relative_motion_rebuilds_the_cut() {
+    let mut s = motion_combine_cut("slider", false);
+    assert!((motion_target_volume(&s) - 900.).abs() < 1e-6);
+    run(&mut s, "joint.drive", json!({"joint":"Motion","value":5}));
+    let volume = motion_target_volume(&s);
+    assert!((volume - 800.).abs() < 1e-6, "Combine must follow relative motion: {volume}");
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_target_body_offset_rebuilds_the_cut() {
+    let mut s = cross_component_motion_cut(false, "slider");
+    assert!((motion_target_volume(&s) - 900.).abs() < 1e-6);
+    let mut offset = crate::doc::IDENTITY;
+    offset[3][0] = 5.;
+    s.doc_mut().body_offsets.insert("Target".into(), offset);
+    s.refresh();
+    let volume = motion_target_volume(&s);
+    assert!((volume - 800.).abs() < 1e-6, "the input body's offset changes the tool frame: {volume}");
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_unrelated_body_offset_keeps_named_union() {
+    let mut s = joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::Named);
+    unrelated_motion_rotor(&mut s);
+    let before = s.model.state();
+    let mut offset = crate::doc::IDENTITY;
+    offset[3][0] = 5.;
+    s.doc_mut().body_offsets.insert("Remote".into(), offset);
+    s.refresh();
+    assert_eq!(s.model.last_recomputed, 0);
+    assert!(std::sync::Arc::ptr_eq(&before, &s.model.state()));
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_implicit_union_reads_its_target_body_offset() {
+    let mut s = joined_motion_part(PartAuthoring::InComponent, JoinSelection::Implicit);
+    let volume = |s: &Session| crate::kernel::measure(&s.model.state().body("Part").unwrap().body).unwrap().volume;
+    assert!((volume(&s) - 544.).abs() < 1e-6);
+    let mut offset = crate::doc::IDENTITY;
+    offset[3][0] = 5.;
+    s.doc_mut().body_offsets.insert("Part".into(), offset);
+    s.refresh();
+    assert!((volume(&s) - 480.).abs() < 1e-6, "the join's tool is now entirely inside its target: {}", volume(&s));
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_true_relative_target_motion_rebuilds_the_cut() {
+    let mut s = cross_component_motion_cut(false, "slider");
+    assert!((motion_target_volume(&s) - 900.).abs() < 1e-6);
+    run(&mut s, "joint.drive", json!({"joint":"Motion","value":5}));
+    let volume = motion_target_volume(&s);
+    assert!((volume - 800.).abs() < 1e-6, "relative motion should leave 800 mm³, got {volume}");
+    assert!(s.model.last_recomputed > 0, "a target moved relative to its tool");
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_shared_rigid_motion_keeps_the_cut_definition() {
+    let mut s = cross_component_motion_cut(true, "slider");
+    assert!((motion_target_volume(&s) - 900.).abs() < 1e-6);
+    let before = s.model.state();
+    run(&mut s, "joint.drive", json!({"joint":"Motion","value":5}));
+    assert_eq!(s.model.last_recomputed, 0, "relative target/tool placement did not change");
+    assert!(std::sync::Arc::ptr_eq(&before, &s.model.state()));
+    assert!((motion_target_volume(&s) - 900.).abs() < 1e-6);
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_shared_rotation_preserves_relative_cut_geometry() {
+    let mut s = cross_component_motion_cut(true, "revolute");
+    assert_joint_only_moves(&mut s, "Motion");
+    assert!((motion_target_volume(&s) - 900.).abs() < 1e-6);
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_primed_ahead_result_does_not_replace_unchanged_geometry() {
+    let mut s = joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::Named);
+    let definitions = s.model.state();
+    let mesh = definitions.body("Part").unwrap().mesh();
+    let commands = [("joint.drive".into(), json!({"joint":"Turn","value":5,"quiet":true}))];
+    let evaluated = s.ahead().evaluate(&commands).unwrap();
+    *s.model.cache.lock().unwrap() = Default::default();
+    s.prime(&evaluated);
+    run(&mut s, &commands[0].0, commands[0].1.clone());
+    s.unprime();
+    assert!(std::sync::Arc::ptr_eq(&definitions, &s.model.state()), "computing ahead must not replace an unchanged definition");
+    assert!(std::sync::Arc::ptr_eq(&mesh, &s.model.state().body("Part").unwrap().mesh()));
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_save_and_reopen_keep_definitions_at_new_angles() {
+    let mut s = joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::Named);
+    run(&mut s, "joint.drive", json!({"joint":"Turn","value":5}));
+    let directory = std::env::temp_dir().join(format!(
+        "solidcraft-joint-pose-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    std::fs::create_dir(&directory).unwrap();
+    let path = directory.join("part.solidcraft");
+    run(&mut s, "file.save", json!({"path":path,"cache":true,"preview":true}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path":path}));
+    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_dir(&directory).unwrap();
+    assert_motion_matches_full_rebuild(&opened);
+    assert_joint_only_moves(&mut opened, "Turn");
+}
+
+#[test]
+fn joint_pose_undo_and_redo_match_fresh_geometry() {
+    let mut s = joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::Named);
+    for angle in [5, 10] {
+        run(&mut s, "joint.drive", json!({"joint":"Turn","value":angle}));
+    }
+    run(&mut s, "edit.undo", json!({}));
+    let joints = run(&mut s, "joint.list", json!({"quiet":true}));
+    assert!((joints["joints"][0]["values"][0]["value"].as_f64().unwrap() - 5.).abs() < 1e-8);
+    assert_motion_matches_full_rebuild(&s);
+    run(&mut s, "edit.redo", json!({}));
+    let joints = run(&mut s, "joint.list", json!({"quiet":true}));
+    assert!((joints["joints"][0]["values"][0]["value"].as_f64().unwrap() - 10.).abs() < 1e-8);
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_geometry_edit_invalidates_the_warm_definition_mesh() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"span","expression":"10 mm"}));
+    run(&mut s, "component.create", json!({"name":"Rotor","grounded":false}));
+    run(&mut s, "solid.box", json!({"length":"span","width":8,"height":6,"body_name":"Part"}));
+    attach_motion_rotor(&mut s, "Rotor", "Turn");
+    run(&mut s, "joint.drive", json!({"joint":"Turn","value":5}));
+    let before = s.model.state().body("Part").unwrap().mesh();
+    run(&mut s, "parameters.change", json!({"name":"span","expression":"12 mm"}));
+    let model = s.model.state();
+    let body = model.body("Part").unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&before, &body.mesh()));
+    assert!((crate::kernel::measure(&body.body).unwrap().volume - 576.).abs() < 1e-6);
+    assert_motion_matches_full_rebuild(&s);
 }
 
 /// Cubes A (grounded, x 0…10) and B (x 20…30) on a slider along x: B's −x face on A's +x face
@@ -46,7 +527,11 @@ fn contact_sets_stop_a_driven_joint_at_touching() {
     assert!((b_x(&s) - 5.0).abs() < 1e-6);
     run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 10}));
     run(&mut s, "contact.create", json!({"occurrences": ["A", "B"]}));
+    super::super::joints::solve_counts::take();
     let r = run(&mut s, "joint.drive", json!({"joint": "Rail", "value": -5}));
+    let (all, full) = super::super::joints::solve_counts::take();
+    assert!(all > 4, "contact must still test intermediate placements");
+    assert_eq!(full, 1, "contact trials must not repeat DOF analysis");
     assert!(r["stopped_by_contact"].is_object(), "{r}");
     // Stopped where the faces touch (to the search's resolution, 15 mm / 2^14).
     assert!((b_x(&s) - 10.0).abs() < 2e-3, "{}", b_x(&s));
@@ -71,11 +556,62 @@ fn contact_sets_stop_a_driven_joint_at_touching() {
     assert!(s.execute("contact.create", &json!({"occurrences": ["A"]})).is_err());
 }
 
+/// A base plate and a lid plate (both 40 × 40 × 3) hinged along their shared edge, driven
+/// past flat by `angle` degrees.
+fn hinged_plates(angle: f64) -> Session {
+    let mut s = Session::default();
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 40.0, "width": 40.0, "height": 3.0, "corner": [-20.0, -40.0, 0.0], "operation": "new", "body_name": "BasePlate"}),
+    );
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 40.0, "width": 40.0, "height": 3.0, "corner": [-20.0, 0.0, 0.0], "operation": "new", "body_name": "LidPlate"}),
+    );
+    run(&mut s, "component.create", json!({"name": "Base", "parent": "root", "activate": false}));
+    run(&mut s, "component.move_bodies", json!({"bodies": ["BasePlate"], "component": "Base"}));
+    run(&mut s, "component.create", json!({"name": "Lid", "parent": "root", "activate": false}));
+    run(&mut s, "component.move_bodies", json!({"bodies": ["LidPlate"], "component": "Lid"}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": "Base:1", "grounded": true}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "name": "Hinge", "flip": true, "limits": [[0.0, 270.0]],
+        "a": {"occurrence": "Base", "point": [0.0, 0.0, 3.0], "z": [1.0, 0.0, 0.0]},
+        "b": {"occurrence": "Lid", "point": [0.0, 0.0, 3.0], "z": [1.0, 0.0, 0.0]}}),
+    );
+    run(&mut s, "joint.drive", json!({"joint": "Hinge", "value": angle, "quiet": true}));
+    run(&mut s, "contact.create", json!({"occurrences": ["Base:1", "Lid:1"]}));
+    s
+}
+
+/// Regression (#3323): past the angles where a corner lies inside the other plate, no vertex,
+/// mid-edge or triangle centre of either plate is inside it, and `contact.check` reported no
+/// collision while `inspect.interference` found the overlap. The faces crossing is the
+/// collision; the check must see it.
+#[test]
+fn contact_check_finds_plates_crossing_face_to_face() {
+    // Flat against the base: touching is not crossing.
+    let mut s = hinged_plates(180.0);
+    assert_eq!(run(&mut s, "contact.check", json!({}))["collisions"].as_array().map(Vec::len), Some(0), "flat");
+    for angle in [210.0, 240.0, 270.0] {
+        let mut s = hinged_plates(angle);
+        let collisions = run(&mut s, "contact.check", json!({}))["collisions"].clone();
+        let c = collisions.as_array().unwrap();
+        assert_eq!(c.len(), 1, "{angle}°: {c:?}");
+        assert_eq!(c[0]["a"], "Base:1");
+        assert_eq!(c[0]["b"], "Lid:1");
+        assert!(c[0]["depth_mm"].as_f64().unwrap() > 0.5, "{angle}°: {c:?}");
+    }
+}
+
 #[test]
 fn contact_uses_preserved_body_placements_after_component_reassignment() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Transferred"}));
-    let component = run(&mut s, "component.create", json!({"name": "Carrier"}));
+    let component = run(&mut s, "component.create", json!({"name": "Carrier", "grounded": false}));
     run(&mut s, "occurrence.move", json!({"occurrence": component["occurrence"], "translate": [100, 0, 0]}));
     run(&mut s, "component.move_bodies", json!({"bodies": ["Transferred"], "component": component["component"]}));
     run(&mut s, "component.activate", json!({"component": "root"}));
@@ -93,7 +629,7 @@ fn contact_uses_preserved_body_placements_after_component_reassignment() {
 fn automatic_explode_centres_follow_reassigned_bodies() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Transferred"}));
-    let component = run(&mut s, "component.create", json!({"name": "Carrier"}));
+    let component = run(&mut s, "component.create", json!({"name": "Carrier", "grounded": false}));
     run(&mut s, "occurrence.move", json!({"occurrence": component["occurrence"], "translate": [100, 0, 0]}));
     run(&mut s, "component.move_bodies", json!({"bodies": ["Transferred"], "component": component["component"]}));
     run(&mut s, "component.activate", json!({"component": "root"}));
@@ -151,6 +687,54 @@ fn motion_study_plays_and_exports() {
     assert_eq!(run(&mut s, "motion.list", json!({}))["studies"].as_array().map(Vec::len), Some(0));
 }
 
+/// A placement's name in a motion CSV is one field, whatever it holds (#12728). A comma is kept in
+/// quotes, where it used to become a space; a quote or a line break no longer splits the row; and a
+/// name that a spreadsheet would run as a formula opens as text.
+#[test]
+fn a_motion_csv_keeps_each_placement_name_in_its_field() {
+    let mut s = rail();
+    run(&mut s, "motion.study", json!({"name": "Push", "steps": 100, "keys": [{"joint": "Rail", "points": [[0, 10], [100, -5]]}]}));
+    run(&mut s, "component.rename", json!({"component": "B", "name": "=B, \"x\"\ny"}));
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-motion-names-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let csv = dir.join("names.csv");
+    run(&mut s, "motion.export", json!({"study": "Push", "samples": 2, "path": csv.to_string_lossy()}));
+    let text = std::fs::read_to_string(&csv).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(text.contains(",A:1,") && text.contains(",\"'=B, \"\"x\"\"\ny:1\","), "{text}");
+    // A header, a row for each placement at each of the two samples, and the line break in each of B's rows.
+    assert_eq!(text.matches('\n').count(), 1 + 2 * 2 + 2, "{text}");
+}
+
+/// Regression (#9741): `motion.study` takes degrees for angle keys, so `motion.list` must give
+/// the keys back in those same units — feeding a listed study straight back to `motion.study`
+/// must not turn a 90° key into 1.57°.
+#[test]
+fn motion_list_round_trips_key_units_through_motion_study() {
+    let hinge_deg = |s: &mut Session| {
+        run(s, "joint.list", json!({}))["joints"]
+            .as_array()
+            .and_then(|a| a.iter().find(|j| j["name"] == "Hinge").cloned())
+            .and_then(|j| j["values"][0]["value"].as_f64())
+            .unwrap_or(f64::NAN)
+    };
+    let mut s = hinged_plates(0.0);
+    run(&mut s, "motion.study", json!({"name": "Turn", "steps": 10, "keys": [{"joint": "Hinge", "points": [[0, 0], [10, 90]]}]}));
+    run(&mut s, "motion.play", json!({"study": "Turn", "step": 10}));
+    assert!((hinge_deg(&mut s) - 90.0).abs() < 1e-6, "playing step 10 gave {}°", hinge_deg(&mut s));
+    let listed = run(&mut s, "motion.list", json!({}));
+    let key = &listed["studies"][0]["keys"][0];
+    assert_eq!(key["joint_name"], "Hinge");
+    assert_eq!(key["unit"], "deg");
+    assert!((key["points"][1][1].as_f64().unwrap_or(f64::NAN) - 90.0).abs() < 1e-6, "{listed}");
+    // The listed keys go back to `motion.study` unchanged and the study still plays 90°.
+    let keys = listed["studies"][0]["keys"].clone();
+    run(&mut s, "motion.study", json!({"study": "Turn", "keys": keys}));
+    run(&mut s, "motion.play", json!({"study": "Turn", "step": 0}));
+    run(&mut s, "motion.play", json!({"study": "Turn", "step": 10}));
+    assert!((hinge_deg(&mut s) - 90.0).abs() < 1e-6, "the round-tripped study played {}°", hinge_deg(&mut s));
+}
+
 #[test]
 fn exploded_views_show_without_changing_the_design() {
     let mut s = rail();
@@ -160,10 +744,22 @@ fn exploded_views_show_without_changing_the_design() {
     run(&mut s, "explode.show", json!({"view": "Apart"}));
     // Centres at x 5 and 25 → middle 15: each moves 10 mm further out.
     let bb = |s: &mut Session, b: &str| run(s, "inspect.measure", json!({"bodies": [b]}))["bodies"][0]["bbox"]["min"][0].as_f64().unwrap_or(f64::NAN);
-    let names: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     assert!((bb(&mut s, &names[0]) + 10.0).abs() < 1e-6, "{names:?}");
     assert!((bb(&mut s, &names[1]) - 30.0).abs() < 1e-6);
     assert_eq!(s.doc.occurrences, before, "shown only");
+    // The design's placements are not the view's: the properties report where the design
+    // places B, and Capture Position has nothing of the view's to keep (it stays shown).
+    let b_id = occ(&s, "B");
+    let centre =
+        |s: &mut Session| run(s, "occurrence.properties", json!({"occurrence": b_id}))["total"]["center_of_mass"][0].as_f64().unwrap_or(f64::NAN);
+    run(&mut s, "explode.show", json!({"view": null}));
+    let placed = centre(&mut s);
+    run(&mut s, "explode.show", json!({"view": "Apart"}));
+    assert!((centre(&mut s) - placed).abs() < 1e-9, "{} shown, {placed} placed", centre(&mut s));
+    assert_eq!(run(&mut s, "component.capture_position", json!({}))["captured"], 0);
+    assert_eq!(s.doc.occurrences, before, "the exploded view is never captured");
+    assert!((bb(&mut s, &names[1]) - 30.0).abs() < 1e-6, "still shown");
     run(&mut s, "explode.show", json!({"view": null}));
     assert!(bb(&mut s, &names[0]).abs() < 1e-6);
     run(&mut s, "explode.create", json!({"name": "Hand", "moves": [{"occurrence": "B", "translate": [0, 0, 50]}]}));
@@ -174,9 +770,67 @@ fn exploded_views_show_without_changing_the_design() {
     assert_eq!(run(&mut s, "explode.list", json!({}))["views"].as_array().map(Vec::len), Some(2));
 }
 
+/// An exploded view's move is a world translation: a part inside a component turned 90° about z
+/// moves the way the view gives, not along the turned component's own x (#13939).
+#[test]
+fn an_exploded_part_inside_a_turned_component_moves_the_way_given() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Frame"}));
+    run(&mut s, "solid.box", json!({"length": 60, "width": 20, "height": 10, "center": [30, 10, 5], "body_name": "Rail"}));
+    run(&mut s, "component.create", json!({"name": "Pin", "parent": "Frame"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 30, "center": [30, 10, 25], "body_name": "Peg"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let frame = occ(&s, "Frame");
+    run(&mut s, "occurrence.ground", json!({"occurrence": frame, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": frame, "space": "world", "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, 0, 0]}));
+    let centre = |s: &mut Session| {
+        let bbox = run(s, "inspect.measure", json!({"bodies": ["Peg"]}))["bodies"][0]["bbox"].clone();
+        let mid = |k: usize| (bbox["min"][k].as_f64().unwrap_or(f64::NAN) + bbox["max"][k].as_f64().unwrap_or(f64::NAN)) / 2.0;
+        Vec3::new(mid(0), mid(1), mid(2))
+    };
+    let placed = centre(&mut s);
+    assert!(placed.dist(Vec3::new(-10.0, 30.0, 25.0)) < 1e-6, "turned with the frame: {placed:?}");
+
+    let pin = occ(&s, "Pin");
+    let r = run(&mut s, "explode.create", json!({"name": "Out", "moves": [{"occurrence": pin, "translate": [80, 0, 0]}]}));
+    assert_eq!(r["moves"][0]["translate"], json!([80.0, 0.0, 0.0]), "the view keeps the world move it was given");
+    run(&mut s, "explode.show", json!({"view": "Out"}));
+    let shown = centre(&mut s);
+    assert!(shown.dist(placed + Vec3::new(80.0, 0.0, 0.0)) < 1e-6, "80 mm along world x: {placed:?} -> {shown:?}");
+    run(&mut s, "explode.show", json!({"view": null}));
+    assert!(centre(&mut s).dist(placed) < 1e-6, "assembled again");
+}
+
+/// #9142: on a part of plain bodies (the sample plate) Exploded View opened its dialog and failed
+/// on OK ("an exploded view needs two or more occurrences"). It is greyed out instead, saying why,
+/// until the design has two components to pull apart.
+#[test]
+fn exploded_view_is_greyed_out_until_there_are_two_components() {
+    let spec = crate::cmd::find_command("explode.create").unwrap();
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Plate"}));
+    let info = spec.info(&s);
+    assert!(!info.enabled, "a part of plain bodies has nothing to explode");
+    assert_eq!(info.disabled_reason.as_deref(), Some(super::EXPLODE_NEEDS_COMPONENTS));
+    let e = s.execute("explode.create", &json!({"scale": 1.62})).unwrap_err();
+    assert!(e.to_string().contains("two or more of them"), "{e}");
+    assert!(s.doc.assembly.exploded.is_empty(), "nothing was added: {e}");
+    // One component is still nothing to pull apart.
+    run(&mut s, "component.from_bodies", json!({"bodies": ["Plate"]}));
+    assert_eq!(s.doc.occurrences.len(), 1);
+    assert!(!spec.info(&s).enabled);
+    // A second one brings it back, and the automatic view separates the two.
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Lid"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0]}));
+    assert!(spec.info(&s).enabled, "{:?}", spec.info(&s).disabled_reason);
+    let r = run(&mut s, "explode.create", json!({"scale": 1.62}));
+    assert_eq!(r["moves"].as_array().map(Vec::len), Some(2), "{r}");
+}
+
 /// Pictures drawn by the CPU rasterizer (the engine has no GPU): real views of the scene.
-fn cpu(scene: &crate::render::Scene, cam: &crate::render::Camera, w: u32, h: u32) -> Result<crate::capture::Picture, String> {
-    Ok(crate::capture::Picture { rgba: crate::render::render(scene, cam, w as usize, h as usize).rgba, renderer: "cpu" })
+fn cpu(scene: &solidcraft_viewport::Scene, cam: &solidcraft_viewport::Camera, w: u32, h: u32) -> Result<crate::capture::Picture, String> {
+    Ok(crate::capture::Picture { rgba: solidcraft_viewport::render(scene, cam, w as usize, h as usize).rgba, renderer: "cpu" })
 }
 
 /// A folder of its own for one test's files.
@@ -299,7 +953,7 @@ fn an_animation_is_drawn_from_the_camera_given() {
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let record = {
         let seen = seen.clone();
-        move |scene: &crate::render::Scene, cam: &crate::render::Camera, w: u32, h: u32| {
+        move |scene: &solidcraft_viewport::Scene, cam: &solidcraft_viewport::Camera, w: u32, h: u32| {
             seen.lock().unwrap().push(*cam);
             cpu(scene, cam, w, h)
         }
@@ -337,9 +991,77 @@ fn an_animation_is_drawn_from_the_camera_given() {
 }
 
 #[test]
+fn an_exploded_view_animates_apart_and_back_without_moving_the_design() {
+    let mut s = rail();
+    run(&mut s, "explode.create", json!({"name": "Apart", "scale": 1}));
+    // Another view shown: the animation starts from the assembled placement all the same.
+    run(&mut s, "explode.create", json!({"name": "Up", "moves": [{"occurrence": "B", "translate": [0, 0, 50]}]}));
+    run(&mut s, "explode.show", json!({"view": "Up"}));
+    s.mark_saved();
+    let (doc, pending, undo) = (s.doc.clone(), s.pending_moves.clone(), s.undo.len());
+    // Each frame: the lowest x and z of each body drawn, rounded to a micrometre.
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let record = {
+        let seen = seen.clone();
+        move |scene: &solidcraft_viewport::Scene, cam: &solidcraft_viewport::Camera, w: u32, h: u32| {
+            let mut lows: Vec<[i64; 2]> =
+                scene.meshes.iter().map(|m| m.mesh.bounds().min).map(|v| [(v.x * 1e3).round() as i64, (v.z * 1e3).round() as i64]).collect();
+            lows.sort();
+            seen.lock().unwrap().push((lows, *cam));
+            cpu(scene, cam, w, h)
+        }
+    };
+    let dir = out_dir("explode");
+    let gif = dir.join("apart.gif");
+    let frames = |p: Value| {
+        let mut p = p;
+        p["path"] = json!(gif.to_string_lossy());
+        p["width"] = json!(24);
+        p["height"] = json!(16);
+        let r = super::animation::export_with(&s, &p, Some(&record)).unwrap();
+        let seen = std::mem::take(&mut *seen.lock().unwrap());
+        assert_eq!(r["frames"].as_u64(), Some(seen.len() as u64), "{r}");
+        assert_eq!(gif_frames(&std::fs::read(&gif).unwrap()), (24, 16, seen.len()));
+        seen
+    };
+    let lows = |seen: &[(Vec<[i64; 2]>, solidcraft_viewport::Camera)]| seen.iter().map(|(l, _)| l.clone()).collect::<Vec<_>>();
+    // A at x 0, B at x 20: each moves 10 mm out, at a steady pace.
+    let at = |x: i64| vec![[x * 1000, 0], [(20 - x) * 1000, 0]];
+    let apart = frames(json!({"view": "Apart", "samples": 3}));
+    assert_eq!(lows(&apart), [at(0), at(-5), at(-10)]);
+    // Back together too: exploded at the middle frame, assembled at both ends.
+    let round = frames(json!({"view": "Apart", "back": true, "samples": 5}));
+    assert_eq!(lows(&round), [at(0), at(-5), at(-10), at(-5), at(0)]);
+    // One camera for the whole clip, framing the parts assembled and exploded alike.
+    assert!(round.iter().all(|(_, c)| *c == round[0].1));
+    let mut framed = solidcraft_viewport::Camera::default();
+    framed.fit(&solidcraft_render::view_bounds(&solidcraft_geom::Aabb3 { min: Vec3::new(-10.0, 0.0, 0.0), max: Vec3::new(40.0, 10.0, 10.0) }));
+    assert!(round[0].1.target.dist(framed.target) < 1e-9 && (round[0].1.distance - framed.distance).abs() < 1e-9, "{:?}", round[0].1);
+    // Without samples: 41 frames, or 81 with back (the middle one exploded).
+    assert_eq!(frames(json!({"view": "Apart"})).len(), 41);
+    let long = frames(json!({"view": "Up", "back": true}));
+    assert_eq!(long.len(), 81);
+    assert_eq!(long[40].0, [[0, 0], [20_000, 50_000]], "B up at the middle");
+    assert_eq!((long[0].0.clone(), long[80].0.clone()), (vec![[0, 0], [20_000, 0]], vec![[0, 0], [20_000, 0]]));
+    // The design keeps its placements, the view shown, its history and its saved state.
+    assert_eq!((&*s.doc, &s.pending_moves, s.undo.len()), (&*doc, &pending, undo));
+    // Through the registry too.
+    crate::capture::install_test_renderer();
+    let r = run(
+        &mut s,
+        "motion.export_animation",
+        json!({"view": "Apart", "back": true, "path": gif.to_string_lossy(), "samples": 3, "width": 16, "height": 16}),
+    );
+    assert_eq!(r["frames"], 3, "{r}");
+    assert_eq!((&*s.doc, &s.pending_moves, s.undo.len(), s.is_dirty()), (&*doc, &pending, undo, false));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn hostile_animation_params_are_refused() {
     let mut s = rail();
     run(&mut s, "motion.study", json!({"name": "Push", "steps": 10, "keys": [{"joint": "Rail", "points": [[0, 10], [10, 0]]}]}));
+    run(&mut s, "explode.create", json!({"name": "Apart", "scale": 1}));
     let dir = out_dir("hostile");
     let gif = dir.join("x.gif").to_string_lossy().to_string();
     let base = json!({"study": "Push", "path": gif, "samples": 2, "width": 16, "height": 16});
@@ -385,6 +1107,12 @@ fn hostile_animation_params_are_refused() {
         json!({"study": null}),
         json!({"study": "Nope"}),
         json!({"study": null, "joint": "Rail"}),
+        json!({"back": true}),
+        json!({"view": "Apart"}),
+        json!({"study": null, "view": "Nope"}),
+        json!({"study": null, "view": [1]}),
+        json!({"study": null, "view": "Apart", "back": "yes"}),
+        json!({"study": null, "view": "Apart", "joint": "Rail", "from": 0, "to": 1}),
         // 4096 × 4096 frames: a GIF holds four of them.
         json!({"width": 4096, "height": 4096, "samples": 5}),
     ] {
@@ -403,5 +1131,436 @@ fn hostile_animation_params_are_refused() {
         assert!(refused(json!({"path": root.join("in.gif").to_string_lossy()})).is_none());
     });
     assert!(root.join("in.gif").exists() && !dir.join("out").exists());
+    // A design file's exploded view moving parts by no number, too far, or parts gone: those
+    // moves are left out, here and in explode.show.
+    let b = occ(&s, "B");
+    let moves = vec![
+        (b, Vec3::new(f64::NAN, 0.0, 0.0)),
+        (b, Vec3::new(0.0, f64::INFINITY, 0.0)),
+        (b, Vec3::new(1e300, 0.0, 0.0)),
+        (999, Vec3::new(1.0, 0.0, 0.0)),
+    ];
+    s.doc_mut().assembly.exploded.push(solidcraft_doc::motion::ExplodedView { id: 900, name: "Bad".into(), moves });
+    let p = json!({"view": "Bad", "path": gif, "samples": 2, "width": 16, "height": 16});
+    super::animation::export_with(&s, &p, Some(&cpu)).unwrap();
+    run(&mut s, "explode.show", json!({"view": "Bad"}));
+    assert!(s.pending_moves.is_empty(), "{:?}", s.pending_moves);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A grounded Base plate, an Arm turning on it about Z (joint `Pivot`) and a Head fixed to the
+/// arm. The Arm's slot sketch projects the arm's own edge and its axis, the Head's bore sketch
+/// an edge of the arm (they move together). With `in_context`, the slot sketch also projects an
+/// edge of the Base, across the joint.
+fn pivot(in_context: bool) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-20, -20, 0], "body_name": "Plate"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[0, -20, 10]], "distance": 1}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Arm"}));
+    run(&mut s, "solid.box", json!({"length": 50, "width": 8, "height": 5, "corner": [-4, -4, 10], "body_name": "Bar"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Slot"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [20, 4, 15], "body": "Bar"}, "origin"]}));
+    if in_context {
+        run(&mut s, "sketch.project", json!({"refs": [{"edge": [0, 20, 10], "body": "Plate"}]}));
+    }
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, -2], "p1": [30, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Slot", "distance": -2, "operation": "cut", "name": "SlotCut"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[10, -4, 15]], "distance": 0.5}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Head"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 12, "height": 6, "corner": [36, -6, 15], "body_name": "Cap"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 21], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Bore"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [40, 4, 15], "body": "Bar"}]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [41, 0], "radius": 2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Bore", "distance": -4, "operation": "cut", "name": "BoreCut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let (base, arm, head) = (occ(&s, "Base"), occ(&s, "Arm"), occ(&s, "Head"));
+    run(&mut s, "occurrence.ground", json!({"occurrence": base, "grounded": true}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": base, "point": [0, 0, 10]}, "b": {"occurrence": arm, "point": [0, 0, 10]}, "flip": true, "name": "Pivot"}),
+    );
+    run(&mut s, "joint.rigid_group", json!({"occurrences": [arm, head]}));
+    s
+}
+
+/// Every body of `model` and `full` the same: names, faces and where their meshes lie.
+fn same_bodies(model: &solidcraft_doc::ModelState, full: &solidcraft_doc::ModelState) {
+    assert_eq!(model.bodies.len(), full.bodies.len());
+    for (a, b) in model.bodies.iter().zip(&full.bodies) {
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.body.face_count(), b.body.face_count(), "{}", a.name);
+        let (m, n) = (a.mesh().bounds(), b.mesh().bounds());
+        assert!(m.min.dist(n.min) < 1e-9 && m.max.dist(n.max) < 1e-9, "{}: {m:?} vs {n:?}", a.name);
+    }
+}
+
+/// The model `s` shows, evaluated again from nothing.
+fn rebuilt(s: &Session) -> std::sync::Arc<solidcraft_doc::ModelState> {
+    let mut full = solidcraft_doc::Model::default();
+    full.no_cache = true;
+    full.evaluate(&s.doc);
+    full.state()
+}
+
+/// Driving a joint only moves parts: a part that projects its own geometry, or that of a part
+/// moving with it, is not evaluated again (#1989's motion on a finished assembly evaluated the
+/// whole timeline on every drive, and every new pose missed the cache).
+#[test]
+fn driving_a_joint_moves_parts_without_evaluating_them() {
+    let mut s = pivot(false);
+    let model = s.model.state();
+    let head = occ(&s, "Head");
+    let tip = |s: &Session| super::world_point(s, head, Vec3::new(46.0, 0.0, 15.0));
+    let before = tip(&s);
+    for (step, angle) in ["30 deg", "75 deg", "-40 deg", "75 deg"].into_iter().enumerate() {
+        let r = run(&mut s, "joint.drive", json!({"joint": "Pivot", "value": angle}));
+        assert_eq!(r["moved"], true, "{r}");
+        assert_eq!((s.model.last_recomputed, s.model.last_restored), (0, 0), "step {step}: nothing evaluated, nothing taken from the cache");
+        assert!(std::sync::Arc::ptr_eq(&model, &s.model.state()), "the parts' bodies are the ones they were");
+    }
+    // The head went round with the arm: 75° about Z through the origin.
+    let (sin, cos) = 75f64.to_radians().sin_cos();
+    let want = Vec3::new(before.x * cos - before.y * sin, before.x * sin + before.y * cos, before.z);
+    assert!(tip(&s).dist(want) < 1e-6, "{:?} vs {want:?}", tip(&s));
+    same_bodies(&s.model.state(), &rebuilt(&s));
+}
+
+/// A sketch that projects another part's edge is in-context design: it is evaluated again when
+/// that part moves relative to it (and gives what a full rebuild gives), not when the two move
+/// together.
+#[test]
+fn an_in_context_sketch_follows_only_the_parts_it_reads() {
+    let mut s = pivot(true);
+    let slot = s.doc.find_feature("Slot").map(|f| f.id).unwrap();
+    let projected = |s: &Session| s.model.state().sketch(slot).map(|k| k.sketch.clone()).unwrap();
+    let first = projected(&s);
+    run(&mut s, "joint.drive", json!({"joint": "Pivot", "value": "30 deg"}));
+    assert!(s.model.last_recomputed > 0, "the slot sketch reads the base, which turned relative to it");
+    assert_ne!(projected(&s).links, first.links, "the base's edge is where the arm now sees it");
+    same_bodies(&s.model.state(), &rebuilt(&s));
+    // The whole assembly moved as one (both occurrences by the same turn and shift): nothing the
+    // sketch reads moved relative to it.
+    let model = s.model.state();
+    let turn = solidcraft_doc::rigid(Vec3::new(5.0, -3.0, 2.0), Vec3::new(1.0, 2.0, 0.0), Vec3::new(0.3, 0.2, 1.0), 0.7);
+    for o in &mut s.doc_mut().occurrences {
+        o.transform = solidcraft_doc::mat_mul(&turn, &o.transform);
+    }
+    s.refresh();
+    assert_eq!(s.model.last_recomputed, 0);
+    assert!(std::sync::Arc::ptr_eq(&model, &s.model.state()));
+    same_bodies(&s.model.state(), &rebuilt(&s));
+}
+
+/// `deepest` as it was before its triangles were indexed: every sample point and edge tested
+/// against every triangle of the other mesh. The reference the indexed one must equal.
+fn deepest_scanning(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, tol: f64) -> f64 {
+    let tb = super::tris(b);
+    let bx = b.bounds();
+    let mut pts: Vec<Vec3> = a.positions.clone();
+    let mut edges: Vec<(Vec3, Vec3)> = Vec::new();
+    for [p, q, r] in super::tris(a) {
+        pts.extend([(p + q) * 0.5, (q + r) * 0.5, (r + p) * 0.5, (p + q + r) * (1.0 / 3.0)]);
+        edges.extend([(p, q), (q, r), (r, p)]);
+    }
+    let outside = |p: Vec3| {
+        p.x < bx.min.x - tol || p.x > bx.max.x + tol || p.y < bx.min.y - tol || p.y > bx.max.y + tol || p.z < bx.min.z - tol || p.z > bx.max.z + tol
+    };
+    let nearest = |p: Vec3| tb.iter().map(|[a, b, c]| super::closest(p, *a, *b, *c).dist(p)).fold(f64::MAX, f64::min);
+    let mut best = 0.0f64;
+    for p in pts.into_iter().take(200_000) {
+        if outside(p) {
+            continue;
+        }
+        let d = nearest(p);
+        if d > tol.max(best) && super::inside(p, &tb) {
+            best = d;
+        }
+    }
+    for (p, q) in edges.into_iter().take(200_000) {
+        if p.x.max(q.x) < bx.min.x - tol
+            || p.x.min(q.x) > bx.max.x + tol
+            || p.y.max(q.y) < bx.min.y - tol
+            || p.y.min(q.y) > bx.max.y + tol
+            || p.z.max(q.z) < bx.min.z - tol
+            || p.z.min(q.z) > bx.max.z + tol
+        {
+            continue;
+        }
+        let d = q - p;
+        let len2 = d.dot(d);
+        if len2 <= 0.0 {
+            continue;
+        }
+        let mut hits: Vec<f64> =
+            tb.iter().filter_map(|t| super::contact_sweep::segment_hits_triangle(p, q, t)).map(|h| (h - p).dot(d) / len2).collect();
+        if hits.len() < 2 {
+            continue;
+        }
+        hits.sort_by(|x, y| x.total_cmp(y));
+        hits.dedup_by(|x, y| (*x - *y).abs() < 1e-6);
+        let mut deepest = 0.0f64;
+        for pair in hits.chunks(2) {
+            if pair.len() < 2 {
+                break;
+            }
+            let m = p + d * ((pair[0] + pair[1]) * 0.5);
+            let deep = nearest(m);
+            if deep > tol.max(deepest) && super::inside(m, &tb) {
+                deepest = deep;
+            }
+        }
+        best = best.max(deepest);
+    }
+    best
+}
+
+/// A fixed-seed generator for the meshes below (splitmix64).
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+    /// Uniform in [lo, hi).
+    fn range(&mut self, lo: f64, hi: f64) -> f64 {
+        lo + (hi - lo) * ((self.next() >> 11) as f64 / (1u64 << 53) as f64)
+    }
+    fn point(&mut self, centre: Vec3, r: f64) -> Vec3 {
+        centre + Vec3::new(self.range(-r, r), self.range(-r, r), self.range(-r, r))
+    }
+}
+
+fn mesh_of(positions: Vec<Vec3>, triangles: Vec<[u32; 3]>) -> solidcraft_geom::Mesh {
+    solidcraft_geom::Mesh { positions, triangles, ..Default::default() }
+}
+
+/// A closed lumpy sphere: `n` segments round, `n / 2` rings, each vertex's radius jittered.
+fn blob(rng: &mut Rng, centre: Vec3, r: f64, n: usize) -> solidcraft_geom::Mesh {
+    let rings = (n / 2).max(2);
+    let mut positions = vec![centre + Vec3::new(0.0, 0.0, r), centre - Vec3::new(0.0, 0.0, r)];
+    for i in 1..rings {
+        let phi = std::f64::consts::PI * i as f64 / rings as f64;
+        for j in 0..n {
+            let th = std::f64::consts::TAU * j as f64 / n as f64;
+            let rr = r * rng.range(0.8, 1.2);
+            positions.push(centre + Vec3::new(rr * phi.sin() * th.cos(), rr * phi.sin() * th.sin(), rr * phi.cos()));
+        }
+    }
+    let at = |i: usize, j: usize| (2 + (i - 1) * n + j % n) as u32;
+    let mut triangles = Vec::new();
+    for j in 0..n {
+        triangles.push([0, at(1, j), at(1, j + 1)]);
+        triangles.push([1, at(rings - 1, j + 1), at(rings - 1, j)]);
+        for i in 1..rings - 1 {
+            triangles.push([at(i, j), at(i + 1, j), at(i + 1, j + 1)]);
+            triangles.push([at(i, j), at(i + 1, j + 1), at(i, j + 1)]);
+        }
+    }
+    mesh_of(positions, triangles)
+}
+
+/// A closed axis-aligned box (faces square to the axes), its sides split `n` ways.
+fn boxed(lo: Vec3, hi: Vec3, n: usize) -> solidcraft_geom::Mesh {
+    let mut positions = Vec::new();
+    let mut triangles = Vec::new();
+    let lerp = |a: f64, b: f64, t: f64| a + (b - a) * t;
+    // Each face as (fixed axis, its value, whether it faces +).
+    for (axis, side) in [(0, false), (0, true), (1, false), (1, true), (2, false), (2, true)] {
+        let base = positions.len() as u32;
+        for i in 0..=n {
+            for j in 0..=n {
+                let (s, t) = (i as f64 / n as f64, j as f64 / n as f64);
+                let v = if side { 1.0 } else { 0.0 };
+                let c = match axis {
+                    0 => [v, s, t],
+                    1 => [t, v, s],
+                    _ => [s, t, v],
+                };
+                positions.push(Vec3::new(lerp(lo.x, hi.x, c[0]), lerp(lo.y, hi.y, c[1]), lerp(lo.z, hi.z, c[2])));
+            }
+        }
+        let at = |i: usize, j: usize| base + (i * (n + 1) + j) as u32;
+        for i in 0..n {
+            for j in 0..n {
+                let (a, b, c, d) = (at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
+                if side {
+                    triangles.extend([[a, b, c], [a, c, d]]);
+                } else {
+                    triangles.extend([[a, c, b], [a, d, c]]);
+                }
+            }
+        }
+    }
+    mesh_of(positions, triangles)
+}
+
+/// Loose triangles near `centre`: ordinary ones, slivers, repeated and collinear vertices, and
+/// ones lying all but along the parity ray or along an axis.
+fn soup(rng: &mut Rng, centre: Vec3, r: f64, n: usize) -> solidcraft_geom::Mesh {
+    let mut positions = Vec::new();
+    for k in 0..n {
+        let a = rng.point(centre, r);
+        let [b, c] = match k % 6 {
+            0 | 1 => [rng.point(centre, r), rng.point(centre, r)],
+            // A sliver: c a hair off the line ab.
+            2 => {
+                let b = rng.point(centre, r);
+                [b, (a + b) * 0.5 + Vec3::new(1.0, -1.0, 0.5) * (r * 1e-9 * rng.range(0.0, 1.0))]
+            }
+            // Repeated or collinear vertices.
+            3 => {
+                let b = rng.point(centre, r);
+                if rng.next().is_multiple_of(2) { [b, b] } else { [b, a + (b - a) * 2.0] }
+            }
+            // All but along the parity ray.
+            4 => {
+                let tilt = Vec3::new(1.0, -0.5, 0.3) * (r * rng.range(0.0, 1e-6));
+                let across = super::RAY.cross(Vec3::new(1.0, 0.0, 0.0));
+                [a + super::RAY * (r * rng.range(0.1, 1.0)) + tilt, a + across * (r * rng.range(0.1, 1.0))]
+            }
+            // Square to an axis.
+            _ => [a + Vec3::new(r * rng.range(0.1, 1.0), 0.0, 0.0), a + Vec3::new(0.0, r * rng.range(0.1, 1.0), 0.0)],
+        };
+        positions.extend([a, b, c]);
+    }
+    let triangles = (0..n as u32).map(|k| [3 * k, 3 * k + 1, 3 * k + 2]).collect();
+    mesh_of(positions, triangles)
+}
+
+/// Each query of the index answers as a scan of every triangle would: the nearest distance
+/// (bit for bit), ray parity and the multiset of segment hits.
+fn assert_queries_match(rng: &mut Rng, m: &solidcraft_geom::Mesh, label: &str) {
+    let tb = super::tris(m);
+    let surface = super::Surface::new(tb.clone());
+    let bx = m.bounds();
+    let (centre, r) = (bx.center(), bx.diagonal().max(1e-12));
+    for k in 0..60 {
+        // Points near the surface as well as anywhere around it.
+        let p = match (k % 3, tb.get(rng.next() as usize % tb.len().max(1))) {
+            (0, Some([a, b, c])) => {
+                (*a + *b + *c) * (1.0 / 3.0) + Vec3::new(rng.range(-1.0, 1.0), rng.range(-1.0, 1.0), rng.range(-1.0, 1.0)) * (r * 1e-3)
+            }
+            _ => rng.point(centre, r * 0.7),
+        };
+        let scan = tb.iter().map(|[a, b, c]| super::closest(p, *a, *b, *c).dist(p)).fold(f64::MAX, f64::min);
+        assert_eq!(surface.distance(p, f64::NEG_INFINITY).to_bits(), scan.to_bits(), "{label}: distance from {p:?}");
+        let cut = rng.range(0.0, r);
+        let early = surface.distance(p, cut);
+        assert!(if scan > cut { early.to_bits() == scan.to_bits() } else { early <= cut }, "{label}: distance from {p:?} beyond {cut}");
+        assert_eq!(surface.inside(p), super::inside(p, &tb), "{label}: inside {p:?}");
+        let q = if k % 2 == 0 { rng.point(centre, r * 0.7) } else { p + super::RAY * rng.range(-r, r) + Vec3::new(1e-9, 0.0, 0.0) * r };
+        let mut want: Vec<[u64; 3]> = tb
+            .iter()
+            .filter_map(|t| super::contact_sweep::segment_hits_triangle(p, q, t))
+            .map(|h| [h.x.to_bits(), h.y.to_bits(), h.z.to_bits()])
+            .collect();
+        let mut got: Vec<[u64; 3]> = surface.segment_hits(p, q).into_iter().map(|h| [h.x.to_bits(), h.y.to_bits(), h.z.to_bits()]).collect();
+        want.sort_unstable();
+        got.sort_unstable();
+        assert_eq!(got, want, "{label}: hits of {p:?}→{q:?}");
+    }
+}
+
+/// The overlap check's deepest point, with the other mesh's triangles indexed, is the scan's to
+/// the bit, on fixed-seed random meshes: lumpy closed spheres, boxes and loose triangles
+/// (slivers, repeated vertices, triangles along the parity ray), from a thousandth of a
+/// millimetre to a metre, passing into each other or apart.
+#[test]
+fn the_overlap_depth_with_an_index_is_the_scan_of_every_triangle() {
+    let mut rng = Rng(0x5eed_1445_0001);
+    let mut deep = 0;
+    for case in 0..120 {
+        let scale = 10f64.powf(rng.range(-3.0, 3.0));
+        let centre = rng.point(Vec3::ZERO, 100.0 * scale);
+        let make = |rng: &mut Rng, c: Vec3| match rng.next() % 4 {
+            0 | 1 => {
+                let n = 6 + rng.next() as usize % 20;
+                let r = scale * rng.range(0.5, 2.0);
+                blob(rng, c, r, n)
+            }
+            2 => {
+                let half = Vec3::new(rng.range(0.3, 2.0), rng.range(0.3, 2.0), rng.range(0.3, 2.0)) * scale;
+                boxed(c - half, c + half, 1 + rng.next() as usize % 4)
+            }
+            _ => {
+                let n = 30 + rng.next() as usize % 60;
+                soup(rng, c, scale, n)
+            }
+        };
+        let a = make(&mut rng, centre);
+        let near = rng.point(centre, 1.5 * scale);
+        let b = make(&mut rng, near);
+        for tol in [1e-4 * scale.max(1.0), 0.0, 1e-2 * scale] {
+            let (want, got) = (deepest_scanning(&a, &b, tol), super::deepest(&a, &b, tol));
+            assert_eq!(got.to_bits(), want.to_bits(), "case {case}, tol {tol}: {got} vs {want}");
+            deep += usize::from(want > tol);
+        }
+        assert_queries_match(&mut rng, &b, &format!("case {case}"));
+    }
+    assert!(deep > 60, "the cases reach into each other often enough to test the depth: {deep}");
+}
+
+/// The slow case (#14450): an arm whose r3 pin sits inside a post's r5 pin, its plate meeting
+/// the post's stop block as it turns. The arm's bodies turned about the pin, through the angles
+/// where the plate meets the block's corners, give the depth the scan gives, bit for bit.
+#[test]
+fn the_overlap_depth_of_pins_in_each_other_is_the_scan_of_every_triangle() {
+    let mut s = Session::default();
+    for (name, corner, size, radius) in [("Post", [40.0, 10.0, 0.0], [10.0, 10.0, 20.0], 5), ("Arm", [10.0, -2.0, 0.0], [50.0, 4.0, 20.0], 3)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name, "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": size[0], "width": size[1], "height": size[2], "corner": corner}));
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": radius, "height": 20, "operation": "new"}));
+    }
+    let (post, arm) = (occ(&s, "Post"), occ(&s, "Arm"));
+    let mesh = |b: &solidcraft_kernel::Body| b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-3).max(1e-3))).unwrap();
+    let bodies = super::placed(&s);
+    let of = |o: u64| bodies.iter().filter(|(path, _)| path.contains(&o)).map(|(_, b)| (mesh(b), b.size())).collect::<Vec<_>>();
+    let (posts, arms) = (of(post), of(arm));
+    assert!(posts.len() == 2 && arms.len() == 2, "two bodies a part");
+    let mut overlapping = 0;
+    for deg in [0.0f64, 5.0, 10.92, 11.5, 20.0, 45.0, 180.0, 300.0, 332.6] {
+        let (sin, cos) = deg.to_radians().sin_cos();
+        for (ma, sa) in &arms {
+            let mut turned = ma.clone();
+            for p in &mut turned.positions {
+                *p = Vec3::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos, p.z);
+            }
+            for (mb, sb) in &posts {
+                let tol = 1e-4 * sa.max(*sb).max(1.0);
+                for (x, y) in [(&turned, mb), (mb, &turned)] {
+                    let (want, got) = (deepest_scanning(x, y, tol), super::deepest(x, y, tol));
+                    assert_eq!(got.to_bits(), want.to_bits(), "{deg}°: {got} vs {want}");
+                    overlapping += usize::from(want > tol);
+                }
+            }
+        }
+    }
+    // The pins are in each other at every angle (seen at least one way round), and the plate
+    // meets the block at some.
+    assert!(overlapping > 9, "{overlapping}");
+}
+
+#[test]
+fn occurrence_centres_use_exact_body_bounds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "component.from_bodies", json!({"bodies": ["Plate"]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Lid"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0]}));
+    let c = super::centres(&s);
+    assert_eq!(c.len(), 2);
+    assert!((c[0].1.x - 5.0).abs() < 1e-4);
+    assert!((c[1].1.x - 35.0).abs() < 1e-4);
 }

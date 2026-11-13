@@ -1,57 +1,111 @@
 //! Plastic (enclosure) features: Boss, Lip / Groove, Snap Fit and Rest, and plastic rules.
 
-use serde_json::{Value, json};
+use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_doc::BodyName;
 use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::plastic::PlasticRule;
-use solidcraft_doc::{Dir, FacePick, Position};
-use solidcraft_geom::Vec3;
+use solidcraft_doc::{Dir, FacePick};
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr};
 use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
+use crate::schema::features::FeatureResult;
+use crate::schema::plastic::{
+    AssignRuleParams, AssignRuleResult, BossParams, LipParams, ManageRulesParams, ManageRulesResult, RestParams, RuleExpressions, RuleInfo,
+    RuleValuesOrError, RulesParams, RulesResult, SnapFitParams,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const MANAGE_RULES_CONTRACT: TypedContract<ManageRulesParams> = TypedContract::new();
+const ASSIGN_RULE_CONTRACT: TypedContract<AssignRuleParams> = TypedContract::new();
+const RULES_CONTRACT: TypedContract<RulesParams> = TypedContract::new();
+const BOSS_CONTRACT: TypedContract<BossParams> = TypedContract::new();
+const LIP_CONTRACT: TypedContract<LipParams> = TypedContract::new();
+const SNAP_FIT_CONTRACT: TypedContract<SnapFitParams> = TypedContract::new();
+const REST_CONTRACT: TypedContract<RestParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("plastic.boss", "Boss", boss).at("PLASTIC", "CREATE").icon("boss").params(
-        "position: [x,y,z] on a face; direction? (default: out of the face); diameter, height; hole_diameter?, hole_depth? (default: to the face); \
-         draft? (angle), fillet? (root radius); ribs? (count), rib_thickness?, rib_length? (out from the wall), rib_offset? (below the top); body?",
-    ),
-    CommandSpec::new("plastic.lip", "Lip", lip).at("PLASTIC", "CREATE").icon("lip").params(
-        "face: [x,y,z] on the rim face of a shelled body; width, height; type?: lip|groove; gap? (groove clearance); side?: inside|outside (which rim edge); body?",
-    ),
-    CommandSpec::new("plastic.snap_fit", "Snap Fit", snap_fit).at("PLASTIC", "CREATE").icon("snap_fit").params(
-        "position: [x,y,z] on a face; direction? (default: out of the face); hook: [x,y,z] (the catch's direction); length, thickness, width, catch_depth, catch_length; body?",
-    ),
-    CommandSpec::new("plastic.rest", "Rest", rest).at("PLASTIC", "CREATE").icon("rest").params(
-        "position: [x,y,z] on a face (the rest's centre); direction? (default: out of the face); width (round: the diameter); length? (a rectangle, along `along`); along?: [x,y,z]; \
-         height; draft? (angle; default: the body's plastic rule); thickness? (wall of a hollow rest); body?",
-    ),
-    CommandSpec::new("plastic.manage_rules", "Manage Plastic Rules", manage_rules).at("PLASTIC", "SETUP").icon("plastic_rule").params(
+    CommandSpec::new("plastic.boss", "Boss", crate::checked!("plastic.boss", boss))
+        .at("PLASTIC", "CREATE")
+        .icon("boss")
+        .contract(&BOSS_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "position: [x,y,z] on a face; direction? (default: out of the face); diameter, height; hole_diameter?, hole_depth? (default: to the face); \
+             draft? (angle), fillet? (root radius); ribs? (count), rib_thickness?, rib_length? (out from the wall), rib_offset? (below the top); body?",
+        ),
+    CommandSpec::new("plastic.lip", "Lip", crate::checked!("plastic.lip", lip))
+        .at("PLASTIC", "CREATE")
+        .icon("lip")
+        .contract(&LIP_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "face: [x,y,z] on the rim face of a shelled body; width, height; type?: lip|groove; gap? (groove clearance); side?: inside|outside (which rim edge); body?",
+        ),
+    CommandSpec::new("plastic.snap_fit", "Snap Fit", crate::checked!("plastic.snap_fit", snap_fit))
+        .at("PLASTIC", "CREATE")
+        .icon("snap_fit")
+        .contract(&SNAP_FIT_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "position: [x,y,z] on a face; direction? (default: out of the face); hook: [x,y,z] (the catch's direction); length, thickness, width, catch_depth, catch_length; \
+             base_height? (extends the base below the face); new_body?: bool (make a separate body instead of joining); body?",
+        ),
+    CommandSpec::new("plastic.rest", "Rest", crate::checked!("plastic.rest", rest))
+        .at("PLASTIC", "CREATE")
+        .icon("rest")
+        .contract(&REST_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "position: [x,y,z] on a face (the rest's centre); direction? (default: out of the face); width (round: the diameter); length? (a rectangle, along `along`); along?: [x,y,z]; \
+             height; draft? (angle; default: the body's plastic rule); thickness? (wall of a hollow rest); body?",
+        ),
+    CommandSpec::new("plastic.manage_rules", "Manage Plastic Rules", crate::checked!("plastic.manage_rules", manage_rules))
+        .at("PLASTIC", "SETUP")
+        .icon("plastic_rule")
+        .contract(&MANAGE_RULES_CONTRACT)
+        .output(output_schema_for::<ManageRulesResult>)
+        .params(
         "name (library or new rule; a new one starts from `from`, default ABS (1.5mm)); from?; material?; thickness?, nominal_radius?, clearance?, knife_edge?, \
          reveal_height?, thickness_variation?, draft?, max_thickness?, min_thickness?, min_draft? (expressions; `Thickness` is the rule's); active?: bool (rule for bodies without one); \
          delete?: bool (a design rule; a library rule goes back to the library values)",
     ),
-    CommandSpec::new("plastic.assign_rule", "Assign Plastic Rule", assign_rule).at("PLASTIC", "SETUP").icon("plastic_assign").params(
+    CommandSpec::new("plastic.assign_rule", "Assign Plastic Rule", crate::checked!("plastic.assign_rule", assign_rule))
+        .at("PLASTIC", "SETUP")
+        .icon("plastic_assign")
+        .contract(&ASSIGN_RULE_CONTRACT)
+        .output(output_schema_for::<AssignRuleResult>)
+        .params(
         "bodies: [names]; rule: name (empty: no rule) — plastic features on these bodies take its draft and clearance as defaults",
     ),
-    CommandSpec::new("plastic.rules", "List Plastic Rules", list_rules).icon("plastic_rule").noundo().params("→ rules with their expressions and values, the active rule and the rules assigned to bodies"),
+    CommandSpec::new("plastic.rules", "List Plastic Rules", crate::checked!("plastic.rules", list_rules))
+        .icon("plastic_rule")
+        .noundo()
+        .contract(&RULES_CONTRACT)
+        .output(output_schema_for::<RulesResult>)
+        .params("→ rules with their expressions and values, the active rule and the rules assigned to bodies"),
 ];
 
-fn rule_json(s: &Session, r: &PlasticRule) -> Value {
+/// A rule as the rule commands give it back: its expressions, and its values evaluated against
+/// the design's parameters (or why they don't evaluate).
+fn rule_info(s: &Session, r: &PlasticRule) -> RuleInfo {
     let (vals, _) = s.doc.param_values();
-    let values = s.doc.plastic_values(&vals, r).map(|v| {
-        json!({"thickness": v.thickness, "nominal_radius": v.nominal_radius, "clearance": v.clearance, "knife_edge": v.knife_edge,
-            "reveal_height": v.reveal_height, "thickness_variation": v.thickness_variation, "draft_deg": v.draft.to_degrees(),
-            "max_thickness": v.max_thickness, "min_thickness": v.min_thickness, "min_draft_deg": v.min_draft.to_degrees()})
-    });
+    let values = match s.doc.plastic_values(&vals, r) {
+        Ok(v) => RuleValuesOrError::Values(v.into()),
+        Err(e) => RuleValuesOrError::Error { error: e.to_string() },
+    };
     let library = PlasticRule::library().iter().any(|l| l.name == r.name);
-    json!({
-        "name": r.name, "material": r.material, "library": library,
-        "expressions": r.fields().iter().map(|(k, e, _)| (k.to_string(), json!(e))).collect::<serde_json::Map<_, _>>(),
-        "values": values.unwrap_or_else(|e| json!({"error": e.to_string()})),
-    })
+    RuleInfo { name: r.name.clone(), material: r.material.clone(), library, expressions: RuleExpressions::from(r), values }
+}
+
+/// A reply built from its output schema's type (`schema::plastic`), so the two can't drift
+/// apart.
+fn typed_reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn manage_rules(s: &mut Session, p: &Value) -> Result<Value> {
@@ -70,7 +124,7 @@ fn manage_rules(s: &mut Session, p: &Value) -> Result<Value> {
             }
             doc.plastic.assigned.retain(|_, r| *r != name);
         }
-        return Ok(json!({"deleted": name}));
+        return typed_reply(cmd, ManageRulesResult::Deleted { deleted: name, param_warnings: Vec::new() });
     }
     let mut rule = match s.doc.plastic_rule(&name) {
         Some(r) => r,
@@ -114,19 +168,30 @@ fn manage_rules(s: &mut Session, p: &Value) -> Result<Value> {
         _ => {}
     }
     s.refresh();
-    Ok(json!({"rule": rule_json(s, &rule), "active": s.doc.plastic.active}))
+    let reply = ManageRulesResult::Changed { rule: Box::new(rule_info(s, &rule)), active: s.doc.plastic.active.clone(), param_warnings: Vec::new() };
+    typed_reply(cmd, reply)
 }
 
 fn assign_rule(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "plastic.assign_rule";
-    let bodies = string_list(p, "bodies");
+    let bodies = string_list(cmd, p, "bodies")?;
     if bodies.is_empty() || bodies.len() > 10_000 {
         return Err(bad(cmd, "`bodies` must list bodies"));
     }
+    // A placed copy's name means the body it shows (#9740); the rule is kept by that body's own
+    // name. The placed bodies are named once for the whole list, not once per name.
     let st = s.model.state();
-    if let Some(b) = bodies.iter().find(|b| st.body(b).is_none()) {
-        return Err(bad(cmd, format!("no body `{b}`")));
-    }
+    let mut frames = None;
+    let bodies = bodies
+        .iter()
+        .map(|b| {
+            if st.body(b).is_some() {
+                return Ok(b.clone());
+            }
+            let frames = frames.get_or_insert_with(|| s.body_frames());
+            frames.iter().find(|(world, ..)| world == b).map(|(_, own, _)| own.clone()).ok_or_else(|| bad(cmd, format!("no body `{b}`")))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let rule = str_(p, "rule").map(str::trim).unwrap_or_default().to_string();
     if !rule.is_empty() && s.doc.plastic_rule(&rule).is_none() {
         return Err(bad(cmd, format!("no plastic rule `{rule}` (plastic.rules lists them)")));
@@ -140,12 +205,13 @@ fn assign_rule(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     s.refresh();
-    Ok(json!({"bodies": bodies, "rule": if rule.is_empty() { Value::Null } else { json!(rule) }}))
+    typed_reply(cmd, AssignRuleResult { bodies, rule: (!rule.is_empty()).then_some(rule), param_warnings: Vec::new() })
 }
 
 fn list_rules(s: &mut Session, _p: &Value) -> Result<Value> {
-    let rules: Vec<Value> = s.doc.plastic_rules().iter().map(|r| rule_json(s, r)).collect();
-    Ok(json!({"rules": rules, "active": s.doc.plastic.active, "assigned": s.doc.plastic.assigned}))
+    let rules = s.doc.plastic_rules().iter().map(|r| rule_info(s, r)).collect();
+    let reply = RulesResult { rules, active: s.doc.plastic.active.clone(), assigned: s.doc.plastic.assigned.clone(), param_warnings: Vec::new() };
+    typed_reply("plastic.rules", reply)
 }
 
 fn rest(s: &mut Session, p: &Value) -> Result<Value> {
@@ -235,7 +301,7 @@ fn lip(s: &mut Session, p: &Value) -> Result<Value> {
         Some(o) => return Err(bad(cmd, format!("unknown side `{o}` (inside or outside)"))),
     };
     let kind = FeatureKind::Lip {
-        face: Position(face),
+        face: FacePick(face),
         width: required(s, p, "width", Kind::Length, cmd)?,
         height: required(s, p, "height", Kind::Length, cmd)?,
         groove,
@@ -262,6 +328,8 @@ fn snap_fit(s: &mut Session, p: &Value) -> Result<Value> {
         width: required(s, p, "width", Kind::Length, cmd)?,
         catch_depth: required(s, p, "catch_depth", Kind::Length, cmd)?,
         catch_length: required(s, p, "catch_length", Kind::Length, cmd)?,
+        base_height: checked(s, p, "base_height", Kind::Length, cmd)?,
+        new_body: bool_(p, "new_body").unwrap_or(false),
         body: str_(p, "body").map(BodyName::from),
     };
     add_feature(s, p, kind)
@@ -269,7 +337,8 @@ fn snap_fit(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
+    use solidcraft_geom::prelude::*;
     use std::f64::consts::PI;
 
     use serde_json::{Value, json};
@@ -289,6 +358,22 @@ mod tests {
 
     fn rel(a: f64, b: f64) -> f64 {
         (a - b).abs() / b.abs().max(1e-12)
+    }
+
+    /// A placed copy's body name (`KB (K:2)`, as inspect.measure lists it) means the body it
+    /// shows: the rule goes on that body, under its own name, for every placement.
+    #[test]
+    fn a_rule_assigned_by_a_placed_copys_name_goes_on_the_body_it_shows() {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "K"}));
+        run(&mut s, "solid.box", json!({"body_name": "KB", "length": 10, "width": 10, "height": 10}));
+        run(&mut s, "occurrence.copy", json!({"component": "K", "translate": [30, 0, 0]}));
+        run(&mut s, "plastic.manage_rules", json!({"name": "Thin", "thickness": "1.2 mm"}));
+        let r = run(&mut s, "plastic.assign_rule", json!({"bodies": ["KB (K:2)"], "rule": "Thin"}));
+        assert_eq!(r["bodies"], json!(["KB"]), "{r}");
+        assert_eq!(s.doc.plastic.assigned.get("KB").map(String::as_str), Some("Thin"));
+        let err = s.execute("plastic.assign_rule", &json!({"bodies": ["KB (K:9)"], "rule": "Thin"})).unwrap_err().to_string();
+        assert!(err.contains("no body `KB (K:9)`"), "{err}");
     }
 
     #[test]
@@ -339,6 +424,111 @@ mod tests {
     }
 
     #[test]
+    fn groove_on_bottom_rim_of_rounded_shell() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": solidcore_record::Plane::XY, "name": "Outline"}));
+        run(
+            &mut s,
+            "sketch.rectangle.rounded",
+            json!({"p0": [-25.263865881072945, -28.541660374585607], "p1": [25.263865881072945, 28.541660374585607], "radius": 3}),
+        );
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 10}));
+        run(&mut s, "solid.shell", json!({"faces": [[0, 0, 0]], "thickness": 2}));
+        let state = s.model.state();
+        let shell = &state.body("Body1").unwrap().body;
+        assert!(shell.validity().is_empty(), "shell: {:?}", shell.validity());
+        let (plane, band) = solidcraft_kernel::rim_band(shell, Vec3::new(0.0, -27.541660374585607, 0.0), 1.5, 0.0, false).unwrap();
+        let cutter = solidcraft_kernel::extrude(&plane, &[band], -2.0, 0.0).unwrap();
+        for body in &cutter {
+            assert!(body.validity().is_empty(), "cutter: {:?}", body.validity());
+        }
+        let before = volume(&mut s);
+        let result = s.execute("plastic.lip", &json!({"face": [0, -27.541660374585607, 0], "width": 1.5, "height": 2, "type": "groove"}));
+        assert!(result.is_ok(), "{result:?}");
+        let area = |w: f64, h: f64, r: f64| w * h - (4.0 - PI) * r * r;
+        let w = 50.52773176214589;
+        let h = 57.083320749171214;
+        let groove_area = area(w - 1.0, h - 1.0, 2.5) - area(w - 4.0, h - 4.0, 1.0);
+        let removed = before - volume(&mut s);
+        assert!((removed - groove_area * 2.0).abs() < 0.05, "removed {removed}, expected {}", groove_area * 2.0);
+        assert!(s.model.state().body("Body1").unwrap().body.validity().is_empty());
+    }
+
+    /// A lip follows its rim face when a parameter moves it (#11209): it was kept by a point
+    /// only, so a taller box left the point below the rim and the lip failed.
+    #[test]
+    fn a_lip_and_a_groove_follow_their_rim_when_a_parameter_moves_it() {
+        for groove in [false, true] {
+            let mut s = Session::default();
+            run(&mut s, "parameters.add", json!({"name": "h", "expression": "30 mm"}));
+            run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": "h"}));
+            run(&mut s, "solid.shell", json!({"faces": [[40, 25, 30]], "thickness": 2}));
+            let kind = if groove { "groove" } else { "lip" };
+            run(&mut s, "plastic.lip", json!({"face": [1, 25, 30], "width": 1, "height": 2, "type": kind}));
+            let before = volume(&mut s);
+            run(&mut s, "parameters.change", json!({"name": "h", "expression": "40 mm"}));
+            let failing: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+            assert!(failing.is_empty(), "{kind}: {failing:?}");
+            // 10 mm more of the shell's walls: (80·50 − 76·46) · 10, and the same band on top.
+            let walls = (80.0 * 50.0 - 76.0 * 46.0) * 10.0;
+            assert!(rel(volume(&mut s) - before, walls) < 1e-6, "{kind}: {} {walls}", volume(&mut s) - before);
+        }
+    }
+
+    #[test]
+    fn round_rim_lips_and_grooves_keep_curved_walls() {
+        for (obround, tilted) in [(false, false), (true, false), (true, true)] {
+            for outside in [false, true] {
+                for groove in [false, true] {
+                    let mut s = Session::default();
+                    let plane = if tilted {
+                        solidcore_record::Plane::new(Vec3::new(7., -3., 5.), Vec3::new(1., -1., 0.), Vec3::new(1., 1., -2.)).unwrap()
+                    } else {
+                        solidcore_record::Plane::XY
+                    };
+                    if obround {
+                        run(&mut s, "sketch.create", json!({"plane": plane, "name": "Rim"}));
+                        run(&mut s, "sketch.slot.center_to_center", json!({"p0": [-20, 0], "p1": [20, 0], "width": 40}));
+                        run(&mut s, "sketch.finish", json!({}));
+                        run(&mut s, "solid.extrude", json!({"sketch": "Rim", "distance": 12, "body_name": "Case"}));
+                    } else {
+                        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 12, "body_name": "Case"}));
+                    }
+                    let top = plane.origin + plane.normal() * 12.0;
+                    run(&mut s, "solid.shell", json!({"faces": [top], "thickness": 2}));
+                    let before = volume(&mut s);
+                    run(
+                        &mut s,
+                        "plastic.lip",
+                        json!({"face": top + plane.y * 19.0, "width": 0.8, "height": 1.5,
+                        "side": if outside { "outside" } else { "inside" }, "type": if groove { "groove" } else { "lip" }, "gap": 0.2}),
+                    );
+                    let width = if groove { 1.0 } else { 0.8 };
+                    let area = if outside { PI * (400.0 - (20.0_f64 - width).powi(2)) } else { PI * ((18.0_f64 + width).powi(2) - 324.0) };
+                    let area = area + if obround { 80.0 * width } else { 0.0 };
+                    let want = before + if groove { -area * 1.7 } else { area * 1.5 };
+                    let check = |s: &Session| {
+                        let st = s.model.state();
+                        let body = &st.body("Case").unwrap().body;
+                        let m = solidcraft_kernel::measure(body).unwrap();
+                        assert!(
+                            (m.volume - want).abs() < 0.1,
+                            "obround={obround} tilted={tilted} outside={outside} groove={groove}: {} vs {want}",
+                            m.volume
+                        );
+                        assert!(m.faces < 32, "obround={obround} tilted={tilted} outside={outside} groove={groove}: polygonal walls: {m:?}");
+                        assert!(m.merged.face_types.get("cylinder").copied().unwrap_or(0) >= 3, "{m:?}");
+                        assert!(body.validity().is_empty());
+                    };
+                    check(&s);
+                    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn lip_on_a_face_that_is_not_a_rim_says_so() {
         // The Sample Plate's top face (#892): two holes through it and the boss standing on it.
         // The lip used to run round the boss's foot, against its wall, and the join failed in
@@ -347,7 +537,7 @@ mod tests {
         s.run_script(&crate::sample::script()).unwrap();
         let lip = json!({"body": "Plate", "face": [51.89, 45.2, 8.0], "width": "1.5 mm", "height": "3.5 mm", "side": "inside", "type": "lip"});
         let e = s.execute("plastic.lip", &lip).unwrap_err().to_string();
-        assert!(e.contains("rim face") && e.contains("2 openings alike"), "{e}");
+        assert!(e.contains("one clear opening") && e.contains("2 openings alike"), "{e}");
         // The boss alone, no holes: its foot is not an opening either.
         let mut b = Session::default();
         run(&mut b, "solid.box", json!({"length": 80, "width": 50, "height": 8, "body_name": "Plate"}));
@@ -374,6 +564,77 @@ mod tests {
     }
 
     #[test]
+    fn snap_fit_base_height_and_new_body() {
+        let snap =
+            json!({"position": [20, 20, 4], "hook": [1, 0, 0], "length": 15, "thickness": 1.5, "width": 6, "catch_depth": 1, "catch_length": 3});
+        let arm = 1.5 * 15.0 * 6.0 + 0.5 * 1.0 * 3.0 * 6.0;
+        let snap_volume = |s: &mut Session| {
+            let m = run(s, "inspect.measure", json!({}));
+            m["bodies"].as_array().unwrap().iter().map(|b| b["volume_mm3"].as_f64().unwrap()).min_by(f64::total_cmp).unwrap_or(f64::NAN)
+        };
+        // New body: the snap fit stands on its own, its volume exact, so it can be arrayed or moved.
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 4}));
+        let mut p = snap.clone();
+        p["new_body"] = json!(true);
+        run(&mut s, "plastic.snap_fit", p);
+        assert_eq!(run(&mut s, "inspect.measure", json!({}))["body_count"], 2);
+        assert!(rel(snap_volume(&mut s), arm) < 1e-6);
+        // Base height adds a t·w·base_height base below the face.
+        let mut t = Session::default();
+        run(&mut t, "solid.box", json!({"length": 40, "width": 40, "height": 4}));
+        let mut p = snap.clone();
+        p["new_body"] = json!(true);
+        p["base_height"] = json!(4);
+        run(&mut t, "plastic.snap_fit", p);
+        assert!(rel(snap_volume(&mut t), arm + 1.5 * 6.0 * 4.0) < 1e-6);
+        // Joined with a base height it still builds: the base bites into the wall, so the
+        // total grows only by the arm above the face, and there is still one body.
+        let mut u = Session::default();
+        run(&mut u, "solid.box", json!({"length": 40, "width": 40, "height": 4}));
+        let v0 = volume(&mut u);
+        let mut p = snap.clone();
+        p["base_height"] = json!(2);
+        run(&mut u, "plastic.snap_fit", p);
+        assert!(rel(volume(&mut u) - v0, arm) < 1e-6);
+        assert_eq!(run(&mut u, "inspect.measure", json!({}))["body_count"], 1);
+    }
+
+    #[test]
+    fn plastic_sizes_below_the_minimum_are_refused_by_name() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 4}));
+        let v0 = volume(&mut s);
+        let snap =
+            json!({"position": [20, 20, 4], "hook": [1, 0, 0], "length": 15, "thickness": 1.5, "width": 6, "catch_depth": 1, "catch_length": 3});
+        for (key, tiny) in
+            [("thickness", 1e-9), ("thickness", 1e-320), ("length", 1e-5), ("width", 0.005), ("catch_depth", 1e-9), ("catch_length", 1e-9)]
+        {
+            let mut p = snap.clone();
+            p[key] = json!(tiny);
+            let e = s.execute("plastic.snap_fit", &p).unwrap_err().to_string();
+            assert!(e.contains(&format!("snap fit's {key} must be at least 0.01 mm")), "{key}={tiny}: {e}");
+        }
+        let boss = json!({"position": [20, 20, 4], "diameter": 6, "height": 5});
+        for (key, tiny) in [("diameter", 1e-9), ("height", 1e-9), ("hole_diameter", 1e-9), ("rib_thickness", 1e-9)] {
+            let mut p = boss.clone();
+            p[key] = json!(tiny);
+            if key == "rib_thickness" {
+                p["ribs"] = json!(4);
+            }
+            let e = s.execute("plastic.boss", &p).unwrap_err().to_string();
+            assert!(e.contains(&format!("boss's {key} must be at least 0.01 mm")), "{key}={tiny}: {e}");
+        }
+        let e = s.execute("plastic.rest", &json!({"position": [20, 20, 4], "width": 6, "height": 1e-9})).unwrap_err().to_string();
+        assert!(e.contains("rest's height must be at least 0.01 mm"), "{e}");
+        assert!(rel(volume(&mut s), v0) < 1e-9, "the refused features changed nothing");
+        // The minimum itself still builds.
+        let mut p = snap.clone();
+        p["thickness"] = json!(0.01);
+        run(&mut s, "plastic.snap_fit", p);
+    }
+
+    #[test]
     fn enclosure_snap_fit_follows_resized_front_wall() {
         let mut s = Session::default();
         let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/sensor_enclosure.json")).unwrap();
@@ -383,8 +644,7 @@ mod tests {
         let before = s.model.state_before(feature.id);
         let name = feature.face_names.first().unwrap();
         let point = solidcraft_doc::naming::point_on_face(&before, name, Vec3::new(0., -28., 20.))
-            .expect("the original wall identity survives merged pieces")
-            .0;
+            .expect("the original wall identity survives merged pieces");
         assert!((point - Vec3::new(0., -33., 20.)).len() < 1e-8, "{point:?}");
         assert!(s.model.results.iter().all(|result| result.error.is_none()));
         let check = |session: &Session| {
@@ -465,6 +725,26 @@ mod tests {
         assert!(rel(volume(&mut s) - v0, PI * 25.0 * 12.0) < 1e-3, "{}", volume(&mut s) - v0);
         assert!(s.execute("plastic.assign_rule", &json!({"bodies": [body], "rule": "Nope"})).is_err());
         assert!(s.execute("plastic.assign_rule", &json!({"bodies": ["Nope"], "rule": "Thick ABS"})).is_err());
+    }
+
+    /// #9623: `Thickness` in a rule's expressions is the rule's thickness, also when the design
+    /// has a parameter of that name; the rule's own `thickness` may still use that parameter.
+    #[test]
+    fn thickness_in_a_plastic_rule_is_the_rules_even_beside_a_parameter_of_that_name() {
+        let values = |param: Option<&str>, thickness: &str| -> Value {
+            let mut s = Session::default();
+            if let Some(e) = param {
+                run(&mut s, "parameters.add", json!({"name": "Thickness", "expression": e}));
+            }
+            run(&mut s, "plastic.manage_rules", json!({"name": "Thick ABS", "thickness": thickness, "clearance": "Thickness / 10"}))["rule"]["values"]
+                .clone()
+        };
+        let want = values(None, "3 mm");
+        assert_eq!((want["thickness"].as_f64(), want["nominal_radius"].as_f64()), (Some(3.0), Some(1.5)), "{want}");
+        assert!(want["clearance"].as_f64().is_some_and(|c| (c - 0.3).abs() < 1e-12), "{want}");
+        assert!(want["thickness_variation"].as_f64().is_some_and(|v| (v - 0.45).abs() < 1e-12), "{want}");
+        assert_eq!(values(Some("10 mm"), "3 mm"), want);
+        assert_eq!(values(Some("3 mm"), "Thickness"), want);
     }
 
     #[test]

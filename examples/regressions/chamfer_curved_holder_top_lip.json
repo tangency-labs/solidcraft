@@ -1,0 +1,14 @@
+{
+ "description":"Original reconstruction of issue #2408: a 20 mm wide slot, extruded 60 mm, cut with an R60 horizontal cylinder whose top lip meets the slot's tangent junction. Chamfer that top lip by 2 mm.",
+ "commands":[
+  {"command":"sketch.create","params":{"plane":"XY"}},
+  {"command":"sketch.slot.center_to_center","params":{"p0":[10,10],"p1":[10,70],"width":20}},
+  {"command":"sketch.finish","params":{}},
+  {"command":"solid.extrude","params":{"distance":60,"operation":"new"}},
+  {"command":"sketch.create","params":{"plane":{"origin":[-1,0,0],"x_dir":[0,1,0],"y_dir":[0,0,1]}}},
+  {"command":"sketch.circle.center","params":{"center":[70,60],"radius":60}},
+  {"command":"sketch.finish","params":{}},
+  {"command":"solid.extrude","params":{"distance":22,"operation":"cut"}},
+  {"command":"solid.chamfer","params":{"distance":2,"edges":[[10,10,60]]}}
+ ]
+}

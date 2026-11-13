@@ -1,6 +1,6 @@
 [
  {
-  "note": "User bug 4 (owner solidcraft-repo): moving a component carries its sketches, and a sketch on a body face follows the body."
+  "note": "Moving a component with the Browser's Move shortcut carries its sketches, and a sketch on a body face follows the body (#3580)."
  },
  {
   "start": "component.create"
@@ -120,6 +120,9 @@
   }
  },
  {
+  "note": "The design's first part is made grounded (#2804): free it before moving it."
+ },
+ {
   "call": "ui.menu",
   "params": {
    "x": 100,
@@ -133,8 +136,16 @@
  {
   "call": "ui.menuPick",
   "params": {
-   "item": "Move/Copy"
+   "item": "Unground"
   }
+ },
+ {
+  "click": {
+   "handle": "row:occurrence:2"
+  }
+ },
+ {
+  "key": "M"
  },
  {
   "widget": "0.00 mm",

@@ -103,11 +103,13 @@ fn ids_names_suppression_marker_and_failures_survive() {
     run(&mut s, "parameters.add", json!({"name": "twice_depth", "expression": format!("{depth} * 2")}));
     run(&mut s, "parameters.comment", json!({"name": depth, "comment": "plate depth"}));
     run(&mut s, "parameters.favorite", json!({"name": depth}));
-    // A fillet that a parameter change makes too big fails, and the design keeps it.
+    // A fillet that a parameter change makes impossible (a radius below zero) fails, and the
+    // design keeps it. (A convex round wider than its faces is built now, by subtraction.)
     run(&mut s, "parameters.add", json!({"name": "r", "expression": "1 mm"}));
-    run(&mut s, "solid.fillet", json!({"edges": [[5, 0, 10]], "radius": "r"}));
+    // Pick only the plate's edge, clear of the overlapping box's edge.
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": "r"}));
     let fillet = s.doc.features.last().unwrap().id;
-    run(&mut s, "parameters.change", json!({"name": "r", "expression": "50 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "-1 mm"}));
     assert!(s.model.result(fillet).and_then(|r| r.error.clone()).is_some(), "the fillet fails");
     run(&mut s, "timeline.rollback", json!({"position": 3}));
     let mut t = replay(&script(&mut s));
@@ -170,6 +172,25 @@ fn what_the_script_leaves_out_is_listed_and_components_are_refused() {
 }
 
 #[test]
+fn omitted_print_faces_are_reported_without_changing_the_design() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 5, "body_name": "Block"}));
+    assert_eq!(run(&mut s, "timeline.export_script", json!({}))["omitted"], json!([]));
+
+    run(&mut s, "body.print_face", json!({"body": "Block", "point": [10, 5, 0]}));
+    let before = (*s.doc).clone();
+    let r = run(&mut s, "timeline.export_script", json!({}));
+    assert_eq!(r["omitted"], json!(["print-face assignments (body.print_face)"]));
+    assert_eq!(*s.doc, before, "export must keep the saved print-face assignment");
+    let mut t = replay(&r["script"]);
+    assert!(t.doc.print_faces.is_empty(), "the reported omission matches the replay");
+    same(&mut s, &mut t);
+
+    run(&mut s, "body.print_face", json!({"body": "Block"}));
+    assert_eq!(run(&mut s, "timeline.export_script", json!({}))["omitted"], json!([]));
+}
+
+#[test]
 fn a_recorded_feature_that_does_not_fit_is_refused_and_changes_nothing() {
     let mut s = Session::default();
     plate(&mut s);
@@ -188,7 +209,6 @@ fn a_recorded_feature_that_does_not_fit_is_refused_and_changes_nothing() {
     };
     let refused = [
         ("id taken", with(&extrude, &["feature", "name"], json!("Other"))),
-        ("name taken", with(&extrude, &["feature", "id"], json!(0))),
         ("id out of range", with(&with(&extrude, &["feature", "id"], json!(1u64 << 60)), &["feature", "name"], json!("X"))),
         ("parameter taken", with(&with(&sketch, &["feature", "id"], json!(0)), &["feature", "name"], json!("S2"))),
         (
@@ -224,6 +244,34 @@ fn a_recorded_feature_that_does_not_fit_is_refused_and_changes_nothing() {
     assert!(s.doc.feature(r["feature"].as_u64().unwrap()).is_some_and(|f| !f.param_names.is_empty()), "its inputs get parameter names");
 }
 
+/// #10748: `timeline.inspect` reports a feature's design variant name in `type` and display name
+/// in `type_name`; `timeline.add` accepts `timeline.inspect` results and inspect type names.
+#[test]
+fn timeline_add_accepts_inspect_result_and_type_names() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 5, "name": "Block"}));
+    let mut inspected = run(&mut s, "timeline.inspect", json!({"feature": "Block"}));
+    assert_eq!(inspected["type"], "box", "inspect type is the design file variant name");
+    assert_eq!(inspected["type_name"], "BoxFeature", "inspect type_name is the display type");
+
+    // 1. timeline.add accepts the full inspected object directly in a new session
+    let mut s2 = Session::default();
+    let added = run(&mut s2, "timeline.add", json!({"feature": inspected.clone()}));
+    assert!(added["error"].is_null(), "{added}");
+    assert_eq!(s2.doc.features.len(), 1);
+
+    // 2. timeline.add with id 0 allocates a new id in the current session
+    inspected["id"] = json!(0);
+    let added2 = run(&mut s, "timeline.add", json!({"feature": inspected}));
+    assert!(added2["error"].is_null(), "{added2}");
+    assert_eq!(s.doc.features.len(), 2);
+
+    // 3. timeline.add accepts the inspect type name (e.g. BoxFeature, HoleFeature)
+    let added_by_type_name =
+        run(&mut s, "timeline.add", json!({"feature": {"type": "BoxFeature", "length": "5", "width": "5", "height": "5", "corner": [50, 0, 0]}}));
+    assert!(added_by_type_name["error"].is_null(), "{added_by_type_name}");
+}
+
 #[test]
 fn the_script_is_written_to_a_file_that_replays() {
     let mut s = Session::default();
@@ -250,4 +298,79 @@ fn replayed_features_claiming_the_same_body_name_do_not_crash() {
     assert!(!matches!(r, Err(crate::EngineError::Internal(..))), "{r:?}");
     let m = run(&mut s, "inspect.measure", json!({}));
     assert!(m["body_count"].as_u64().is_some_and(|n| n >= 1), "{m}");
+}
+
+/// #1990: a sketch and the extrude built from it may share a name, as the sample and oracle
+/// designs do; the design's script replays into the same design, names included.
+#[test]
+fn a_design_naming_a_sketch_and_its_extrude_alike_replays() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Block"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "5", "name": "Block"}));
+    let names = |t: &Session| t.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&s), ["Block", "Block"]);
+    let written = script(&mut s);
+    assert_eq!(commands(&written), ["timeline.add", "timeline.add"]);
+    let mut t = replay(&written);
+    same(&mut s, &mut t);
+    assert_eq!(names(&t), ["Block", "Block"], "the replay keeps both names");
+    assert_eq!(volume(&mut t), 1000.0);
+    // The replay's own script is the same script.
+    assert_eq!(script(&mut t), written);
+}
+
+/// #1990: `timeline.add` keeps a recorded name another feature has, as `solid.extrude` does.
+#[test]
+fn a_replayed_feature_keeps_a_name_another_feature_has() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": "5", "width": "5", "height": "5", "name": "Twin"}));
+    let r = run(
+        &mut s,
+        "timeline.add",
+        json!({"feature": {"type": "box", "name": "Twin", "length": "5", "width": "5", "height": "5", "corner": [20, 0, 0]}}),
+    );
+    assert_eq!(r["name"], "Twin");
+    assert_eq!(s.doc.features.iter().filter(|f| f.name == "Twin").count(), 2);
+    // A blank recorded name still gets a fresh one.
+    let r = run(
+        &mut s,
+        "timeline.add",
+        json!({"feature": {"type": "box", "name": " ", "length": "5", "width": "5", "height": "5", "corner": [40, 0, 0]}}),
+    );
+    assert_eq!(r["name"], "Box1");
+}
+
+/// #1134: a script recorded before pattern and mirror seeds and construction planes were
+/// keyed by id names them by name; timeline.add resolves the names to ids exactly the way
+/// opening a saved design migrates them, and a name that finds no feature keeps id 0, which
+/// dangles at evaluation with the same error it always gave.
+#[test]
+fn add_resolves_legacy_seed_and_plane_names() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": "5", "width": "5", "height": "5", "name": "Base"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Shelf"}));
+    let base = s.doc.find_feature("Base").unwrap().id;
+    let shelf = s.doc.find_feature("Shelf").unwrap().id;
+    let r = run(
+        &mut s,
+        "timeline.add",
+        json!({"feature": {"type": "mirror", "name": "Copied", "features": ["Base"], "plane": {"type": "construction", "name": "Shelf"}}}),
+    );
+    assert!(r["error"].is_null(), "{r}");
+    let kind = serde_json::to_value(&s.doc.find_feature("Copied").unwrap().kind).unwrap();
+    assert_eq!(kind["features"], json!([base]), "{kind}");
+    assert_eq!(kind["plane"], json!({"type": "construction", "feature": shelf}), "{kind}");
+    // A name that finds no feature keeps id 0: the mirror fails at evaluation, as a design
+    // migrated with a dangling seed does.
+    let r = run(
+        &mut s,
+        "timeline.add",
+        json!({"feature": {"type": "mirror", "name": "Lost", "features": ["Nope"], "plane": {"type": "construction", "name": "Gone"}}}),
+    );
+    assert!(!r["error"].is_null(), "a dangling seed fails at evaluation: {r}");
+    let kind = serde_json::to_value(&s.doc.find_feature("Lost").unwrap().kind).unwrap();
+    assert_eq!(kind["features"], json!([0]), "{kind}");
+    assert_eq!(kind["plane"], json!({"type": "construction", "feature": 0}), "{kind}");
 }

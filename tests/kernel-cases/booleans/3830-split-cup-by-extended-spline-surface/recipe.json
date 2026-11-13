@@ -1,0 +1,155 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 15
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 30,
+    "operation": "new",
+    "body_name": "Body1"
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      -4.2209,
+      -6.6007,
+      30
+     ]
+    ],
+    "thickness": 1,
+    "tangent_chain": true,
+    "body": "Body1"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "YZ",
+    "name": "Cut"
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      -15.2,
+      30
+     ],
+     [
+      3.6,
+      19
+     ],
+     [
+      15,
+      0.1
+     ],
+     [
+      15.345826150212766,
+      -0.4420637743548844
+     ]
+    ],
+    "ids": [
+     "s1"
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.extrude",
+   "params": {
+    "sketch": "Cut",
+    "curves": [
+     "s1"
+    ],
+    "distance": 30,
+    "direction": "symmetric",
+    "convention": "legacy_per_side",
+    "body_name": "Body2"
+   }
+  },
+  {
+   "command": "surface.extend",
+   "params": {
+    "body": "Body2",
+    "edges": [
+     [
+      0,
+      -15.2,
+      30
+     ]
+    ],
+    "distance": 10
+   }
+  },
+  {
+   "command": "surface.extend",
+   "params": {
+    "body": "Body2",
+    "edges": [
+     [
+      0,
+      15.345826150212766,
+      -0.4420637743548844
+     ]
+    ],
+    "distance": 10
+   }
+  },
+  {
+   "command": "solid.split_body",
+   "params": {
+    "body": "Body1",
+    "tool": {
+     "body": "Body2",
+     "point": [
+      21.94918088438493,
+      17.139934956546313,
+      -3.829146796035829
+     ]
+    }
+   }
+  }
+ ]
+}

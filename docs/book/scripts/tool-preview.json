@@ -1,0 +1,7 @@
+{"commands": [
+  {"command": "solid.box", "params": {"length": 60, "width": 40, "height": 20, "center": [0, 0, 10], "body_name": "Plate"}},
+  {"command": "solid.cylinder", "params": {"diameter": 14, "height": 14, "base": [0, 0, 0], "operation": "new_body", "body_name": "Pin"}},
+  {"command": "appearance.assign", "params": {"bodies": ["Plate"], "color": "#b0bac6", "opacity": 0.3}},
+  {"command": "appearance.assign", "params": {"bodies": ["Pin"], "color": "#e8542c"}},
+  {"command": "inspect.section", "params": {"plane": "XZ", "at": 0, "flip": true}}
+]}

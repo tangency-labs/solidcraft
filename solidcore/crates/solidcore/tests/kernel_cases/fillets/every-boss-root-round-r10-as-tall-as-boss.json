@@ -1,0 +1,163 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  36.54294554526382,
+                  24.60324489808139,
+                  10.0
+                ],
+                [
+                  36.54294554526382,
+                  24.60324489808139,
+                  10.0
+                ]
+              ],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              23.457054454736177,
+              15.396755101918616,
+              10.0
+            ]
+          ],
+          "tolerance": 3.7426573867739417
+        },
+        "kind": "round",
+        "sizes": [
+          10.0
+        ]
+      }
+    }
+  ],
+  "case": "every-boss-root-round-r10-as-tall-as-boss",
+  "expected": {
+    "bbox": {
+      "max": [
+        60,
+        40,
+        20
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "faces": 8,
+    "method": "plate 60x40x10 with a boss R8 x 10 on its top at (30, 20): V0 = 24000 + 640 pi = 26010.6193. The concave root (rho = 8, z = 10) rounded r10 adds the spandrel (1-pi/4) r^2 = 21.460184 outside the boss, its first moment about the wall r^3 (5/6-pi/4) = 47.935170, revolved once (Pappus): 2 pi (8 A + M) = 1379.8920. V = 27390.5113. The round is tangent to the wall at z = 20, the boss's top rim: the wall is used up (a round may use up a face). Faces 8 - 1 + 1 = 8.",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 27390.511339043704,
+    "what": "the root circle of a 10 mm tall boss rounded r10: the round uses up the boss's wall and meets its top face at its rim"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 15,
+      "faces": 8,
+      "vertices": 10
+    }
+  },
+  "records": "every-boss-root-round-r10-as-tall-as-boss.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7131.396171535266,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 8,
+      "vertices": 10,
+      "volume_mm3": 27390.51133922414
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the root circle of a 10 mm tall boss rounded r10: the round uses up the boss's wall and meets its top face at its rim",
+  "why_not": []
+}

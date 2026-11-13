@@ -167,14 +167,17 @@
   "widget": "OK"
  },
  {
+  "call": "ui.resize",
+  "params": {"width": 1600, "height": 1200}
+ },
+ {
   "start": "motion.study"
  },
  {
   "widget": "Add Key"
  },
  {
-  "widget": "0 deg",
-  "near": "Value"
+  "click": {"handle": "dialog:Value"}
  },
  {
   "key": "A",
@@ -200,7 +203,7 @@
   "params": {
    "command": "motion.play",
    "params": {
-    "study": 1,
+    "study": "Motion Study1",
     "step": 100
    }
   }

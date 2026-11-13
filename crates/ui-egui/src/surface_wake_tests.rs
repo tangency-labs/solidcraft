@@ -44,7 +44,8 @@ fn wake_without_a_final_resize_restores_the_surface_and_dpi() {
                     ..Default::default()
                 };
                 input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(native_scale);
-                let output = ctx.run_ui(input, |_| {});
+                let mut output = ctx.run_ui(input, |_| {});
+                output.textures_delta.clear();
                 assert_eq!(configured, (live_size.0, live_size.1, 1.0));
                 assert_eq!(output.pixels_per_point, ppp, "native DPI and user zoom must both survive wake");
             }

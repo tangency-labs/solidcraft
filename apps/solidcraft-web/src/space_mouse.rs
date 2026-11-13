@@ -7,7 +7,7 @@
 //! navigation takes them with 3DxWare's object-mode mapping, as the Linux app does without a
 //! profile.
 
-use solidcraft_ui_egui::space_mouse::{Axes, FULL_SCALE};
+use solidcraft_ui_egui::space_mouse::{Axes, Calibration, FULL_SCALE, calibrated};
 
 /// Logitech's vendor id, which older 3Dconnexion devices carry, and those devices' product ids
 /// (usb.ids). Logitech's own gamepads and wheels carry the same vendor id.
@@ -60,9 +60,43 @@ pub fn axes(values: &[f64]) -> Option<Axes> {
     Some(Axes { translation: [raw(0)?, raw(1)?, raw(2)?], rotation: [raw(3)?, raw(4)?, raw(5)?] })
 }
 
+/// What a calibration of the gamepad with this id is saved under: `web` and its vendor and
+/// product ids.
+pub fn device_key(id: &str) -> Option<String> {
+    vendor_product(id).map(|(vendor, product)| format!("web {vendor:04x}:{product:04x}"))
+}
+
 /// The 3D mouse to read among the ones listed: the first device, else the first joystick.
-pub fn choose(found: impl IntoIterator<Item = (Source, Axes)>) -> Option<Axes> {
-    found.into_iter().min_by_key(|(source, _)| *source).map(|(_, axes)| axes)
+pub fn choose<T>(found: impl IntoIterator<Item = (Source, T)>) -> Option<T> {
+    found.into_iter().min_by_key(|(source, _)| *source).map(|(_, reading)| reading)
+}
+
+/// Whether the cap is moving as the next frame will see it: through the device's calibration
+/// (as of the last frame) when it has one. The idle page wakes for a short-range device's push,
+/// and not for a device resting off zero; the wheel filter goes by the same.
+pub fn moving(axes: Axes, calibration: Option<Calibration>) -> bool {
+    calibrated(axes, calibration).moving()
+}
+
+/// The calibration as of the last frame, and the device it was for.
+pub type Cached = (Option<String>, Option<Calibration>);
+
+/// Whether the cap of `device` is moving, judged with the calibration kept from the last frame:
+/// `None` when that was for another device, so another's calibration never judges this one. The
+/// waker then lets a frame look, which brings the cache up to date.
+pub fn moving_as_cached(device: &Option<String>, axes: Axes, cached: &Cached) -> Option<bool> {
+    (*device == cached.0).then(|| moving(axes, cached.1))
+}
+
+/// Whether the idle page's timer redraws: when the cap is moving as the last frame's calibration
+/// judges it, when the device read isn't the one that calibration was for (a frame then judges
+/// it with its own), and once when the device the last frame read is gone, so the page shows
+/// that. With no device, and none last frame, it stays quiet.
+pub fn wakes(reading: Option<(Option<String>, Axes)>, cached: &Cached) -> bool {
+    match reading {
+        Some((device, axes)) => moving_as_cached(&device, axes, cached).unwrap_or(true),
+        None => cached.0.is_some(),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -70,29 +104,29 @@ pub use browser::SpaceMouse;
 
 #[cfg(target_arch = "wasm32")]
 mod browser {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use solidcraft_ui_egui::SolveApp;
-    use solidcraft_ui_egui::space_mouse::{Axes, DriverMapping, navigate_frame};
+    use solidcraft_ui_egui::space_mouse::{Axes, DriverMapping, calibration, navigate_frame};
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::closure::Closure;
 
     use solidcraft_ui_egui::space_mouse::WheelGuard;
 
-    use super::{axes, choose, source};
+    use super::{Cached, axes, choose, device_key, moving_as_cached, source, wakes};
 
     /// How often the page looks for the cap starting to move while nothing else redraws.
     const WAKE_MS: i32 = 50;
 
-    /// The 3D mouse the browser lists, if any.
-    fn read() -> Option<Axes> {
+    /// The 3D mouse the browser lists, if any: its calibration key and its axes.
+    fn read() -> Option<(Option<String>, Axes)> {
         let pads = web_sys::window()?.navigator().get_gamepads().ok()?;
         choose(pads.iter().filter_map(|pad| {
             let pad = pad.dyn_into::<web_sys::Gamepad>().ok().filter(web_sys::Gamepad::connected)?;
             let source = source(&pad.id())?;
             let values: Vec<f64> = pad.axes().iter().map(|v| v.as_f64().unwrap_or(f64::NAN)).collect();
-            Some((source, axes(&values)?))
+            Some((source, (device_key(&pad.id()), axes(&values)?)))
         }))
     }
 
@@ -100,6 +134,8 @@ mod browser {
     #[derive(Default)]
     pub struct SpaceMouse {
         axes: Axes,
+        /// The 3D mouse being read, as `SolveApp::space_mouse` keeps it.
+        device: Option<String>,
         /// The previous frame's time and the step since it (seconds).
         last: Option<f64>,
         seconds: f64,
@@ -111,6 +147,8 @@ mod browser {
         waking: bool,
         /// Navigation is on (the waker reads it).
         enabled: Rc<Cell<bool>>,
+        /// The calibration as of the last frame and its device (the waker and the wheel filter read it).
+        cached: Rc<RefCell<Cached>>,
     }
 
     impl SpaceMouse {
@@ -131,14 +169,18 @@ mod browser {
             }
             let reading = read();
             if reading.is_some() && !self.waking {
-                self.waking = wake(ctx, &self.enabled);
+                self.waking = wake(ctx, &self.enabled, &self.cached);
             }
-            // Inside the dead zone is rest: a cap resting just off zero doesn't keep redrawing.
-            self.axes = reading.filter(|axes| axes.moving()).unwrap_or_default();
-            self.wheel.filter(self.axes.moving(), now, &mut raw.events);
+            // As read: calibration needs the readings at rest too, and `navigate_frame` leaves a
+            // cap resting inside the dead zone alone.
+            (self.device, self.axes) = reading.unwrap_or_default();
+            let moving = moving_as_cached(&self.device, self.axes, &self.cached.borrow()).unwrap_or_else(|| self.axes.moving());
+            self.wheel.filter(moving, now, &mut raw.events);
         }
 
         pub fn logic(&self, app: &mut SolveApp, ctx: &egui::Context) {
+            app.space_mouse.device.clone_from(&self.device);
+            *self.cached.borrow_mut() = (self.device.clone(), calibration(app));
             navigate_frame(app, ctx, DriverMapping::object_mode(), self.axes, self.seconds);
         }
     }
@@ -156,11 +198,11 @@ mod browser {
 
     /// The browser sends no event when a gamepad moves, so a timer looks while the app is idle and
     /// redraws when the cap starts moving; the frames that follow keep going on their own.
-    fn wake(ctx: &egui::Context, enabled: &Rc<Cell<bool>>) -> bool {
+    fn wake(ctx: &egui::Context, enabled: &Rc<Cell<bool>>, cached: &Rc<RefCell<Cached>>) -> bool {
         let Some(window) = web_sys::window() else { return false };
-        let (ctx, enabled) = (ctx.clone(), Rc::clone(enabled));
+        let (ctx, enabled, cached) = (ctx.clone(), Rc::clone(enabled), Rc::clone(cached));
         let tick = Closure::<dyn FnMut()>::new(move || {
-            if enabled.get() && read().is_some_and(Axes::moving) {
+            if enabled.get() && wakes(read(), &cached.borrow()) {
                 ctx.request_repaint();
             }
         });
@@ -190,6 +232,46 @@ mod tests {
             assert_eq!(source(&format!("x (Vendor: 046d Product: {product:04x})")), Some(Source::Device));
             assert_eq!(source(&format!("046d-{product:04X}-x")), Some(Source::Device));
         }
+    }
+
+    #[test]
+    fn a_calibration_is_saved_under_the_ids_whichever_browser_lists_it() {
+        assert_eq!(device_key("SpaceMouse Pro (Vendor: 046d Product: c62b)").as_deref(), Some("web 046d:c62b"));
+        assert_eq!(device_key("46d-c62b-SpaceMouse Pro").as_deref(), Some("web 046d:c62b"));
+        assert_eq!(device_key("Xbox Wireless Controller"), None);
+    }
+
+    #[test]
+    fn the_idle_page_wakes_for_motion_as_calibrated_not_as_read() {
+        let axis =
+            |source, rest, full| solidcraft_ui_egui::space_mouse::AxisCalibration { source, reversed: false, rest, dead_zone: 0, full: [full; 2] };
+        // A short-range device: 15 of its 50 is under the raw dead zone, but 105 of 350 calibrated.
+        let short = Calibration { dead_zone_share: 0.0, kind: Default::default(), axes: std::array::from_fn(|r| axis(r, 0, 50)) };
+        let push = Axes { translation: [15, 0, 0], rotation: [0; 3] };
+        assert!(!push.moving() && moving(push, Some(short)));
+        // A device resting at 100 on every axis: past the raw dead zone, but at rest calibrated.
+        let offset = Calibration { dead_zone_share: 0.0, kind: Default::default(), axes: std::array::from_fn(|r| axis(r, 100, 350)) };
+        let resting = Axes { translation: [100; 3], rotation: [100; 3] };
+        assert!(resting.moving() && !moving(resting, Some(offset)));
+        // Without a calibration, as read.
+        assert!(!moving(push, None) && moving(resting, None));
+        // Kept from the last frame: only for the device it was for.
+        let (a, b) = (Some("web 256f:c63a".to_string()), Some("web 1234:5678".to_string()));
+        assert_eq!(moving_as_cached(&b, push, &(b.clone(), Some(short))), Some(true));
+        assert_eq!(moving_as_cached(&b, push, &(a.clone(), Some(offset))), None, "A's calibration doesn't judge B");
+        assert_eq!(moving_as_cached(&b, push, &(None, None)), None);
+        assert_eq!(moving_as_cached(&a, resting, &(a.clone(), None)), Some(true), "A was read without a calibration");
+    }
+
+    #[test]
+    fn the_idle_page_wakes_once_for_a_device_change_and_stays_quiet_without_one() {
+        let (a, b) = (Some("web 256f:c63a".to_string()), Some("web 1234:5678".to_string()));
+        let still = Axes::default();
+        let last_frame_read_a: Cached = (a.clone(), None);
+        assert!(!wakes(Some((a.clone(), still)), &last_frame_read_a), "A, at rest");
+        assert!(wakes(Some((b.clone(), still)), &last_frame_read_a), "A to B: a frame looks at B");
+        assert!(wakes(None, &last_frame_read_a), "A to none: a frame shows it's gone");
+        assert!(!wakes(None, &(None, None)), "none to none: quiet");
     }
 
     #[test]
@@ -280,6 +362,6 @@ mod tests {
         assert_eq!(choose([(Source::VirtualJoystick, other)]), Some(other));
         // Two devices: the first listed.
         assert_eq!(choose([(Source::Device, moving), (Source::Device, other)]), Some(moving));
-        assert_eq!(choose([]), None);
+        assert_eq!(choose::<Axes>([]), None);
     }
 }

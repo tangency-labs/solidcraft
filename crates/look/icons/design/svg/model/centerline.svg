@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Centerline</title>
+  <path d="M11 53L23.41 40.59M40.59 23.41L53 11" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="32" r="3.6" fill="#236ead"/>
+  <circle cx="11" cy="53" r="5.8" fill="#ffffff"/>
+  <circle cx="11" cy="53" r="3.4" fill="#236ead"/>
+  <circle cx="53" cy="11" r="5.8" fill="#ffffff"/>
+  <circle cx="53" cy="11" r="3.4" fill="#236ead"/>
+</svg>

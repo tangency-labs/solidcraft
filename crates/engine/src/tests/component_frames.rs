@@ -14,12 +14,12 @@ use crate::*;
 fn moved_component_picks_and_frames() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Base"}));
-    let c = run(&mut s, "component.create", json!({"name": "Arm"}));
+    let c = run(&mut s, "component.create", json!({"name": "Arm", "grounded": false}));
     let (cid, occ) = (c["component"].as_u64().unwrap(), c["occurrence"].as_u64().unwrap());
     run(&mut s, "solid.box", json!({"corner": [20, 0, 0], "length": 10, "width": 4, "height": 4, "body_name": "ArmBody"}));
     run(&mut s, "component.activate", json!({"component": 0}));
     run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 50, 0]}));
-    let wbox = |s: &Session, b: &str| s.world_state().body(b).unwrap().mesh().bounds();
+    let wbox = |s: &Session, b: &str| s.world_state().unwrap().body(b).unwrap().mesh().bounds();
     let vol = |s: &mut Session, b: &str| run(s, "inspect.measure", json!({"bodies": [b]}))["total"]["volume_mm3"].as_f64().unwrap();
     // Root active: a fillet picked at the moved edge in the world.
     run(&mut s, "solid.fillet", json!({"edges": [[25, 54, 4]], "radius": 1}));
@@ -40,7 +40,7 @@ fn moved_component_picks_and_frames() {
     // A pasted instance: a pick on it lands on the shared definition.
     run(&mut s, "occurrence.copy", json!({"component": cid, "translate": [0, 20, 0]}));
     let v0 = vol(&mut s, "ArmBody");
-    let names: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     let inst = names.iter().find(|n| n.starts_with("ArmBody (")).cloned().unwrap();
     let ib = wbox(&s, &inst);
     // Its bottom edge along x at the far side (y max, z 0).
@@ -61,6 +61,7 @@ fn extrude_in_a_moved_component_from_a_root_sketch() {
     run(&mut s, "solid.extrude", json!({"distance": 10, "body_name": "Jaw"}));
     let made = run(&mut s, "component.from_bodies", json!({"bodies": ["Jaw"]}));
     let jaw = made["components"][0]["component"].as_u64().unwrap();
+    run(&mut s, "occurrence.ground", json!({"occurrence": "Jaw:1", "grounded": false}));
     // Turned half a turn about Z: the jaw now lies along +X (x 0..40, y -5..5).
     run(&mut s, "occurrence.move", json!({"occurrence": "Jaw:1", "axis": [0, 0, 1], "angle": "180 deg", "origin": [0, 0, 0]}));
     run(&mut s, "component.activate", json!({"component": 0}));
@@ -70,7 +71,7 @@ fn extrude_in_a_moved_component_from_a_root_sketch() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "component.activate", json!({"component": jaw}));
     run(&mut s, "solid.extrude", json!({"sketch": "Tab", "distance": 10, "operation": "join", "targets": ["Jaw"]}));
-    let b = s.world_state().body("Jaw").unwrap().mesh().bounds();
+    let b = s.world_state().unwrap().body("Jaw").unwrap().mesh().bounds();
     let near = |a: f64, e: f64| (a - e).abs() < 1e-6;
     assert!(near(b.min.x, 0.0) && near(b.max.x, 40.0) && near(b.min.y, -5.0) && near(b.max.y, 7.0), "{b:?}");
     let v = run(&mut s, "inspect.measure", json!({"bodies": ["Jaw"]}))["total"]["volume_mm3"].as_f64().unwrap();
@@ -89,6 +90,7 @@ fn extrude_to_a_face_in_a_moved_component() {
     run(&mut s, "solid.extrude", json!({"distance": 10, "body_name": "Jaw"}));
     let made = run(&mut s, "component.from_bodies", json!({"bodies": ["Jaw"]}));
     let jaw = made["components"][0]["component"].as_u64().unwrap();
+    run(&mut s, "occurrence.ground", json!({"occurrence": "Jaw:1", "grounded": false}));
     run(&mut s, "occurrence.move", json!({"occurrence": "Jaw:1", "axis": [0, 0, 1], "angle": "180 deg", "origin": [0, 0, 0]}));
     // Lifted too, so the jaw's own frame and the world differ in height (x 0..40, z 5..15).
     run(&mut s, "occurrence.move", json!({"occurrence": "Jaw:1", "translate": [0, 0, 5]}));
@@ -99,7 +101,7 @@ fn extrude_to_a_face_in_a_moved_component() {
     run(&mut s, "component.activate", json!({"component": jaw}));
     // Up to the jaw's top face, picked in the world at its middle: the tab rises from z 0 to 15.
     run(&mut s, "solid.extrude", json!({"sketch": "Tab", "to": [20, 0, 15], "operation": "join", "targets": ["Jaw"]}));
-    let b = s.world_state().body("Jaw").unwrap().mesh().bounds();
+    let b = s.world_state().unwrap().body("Jaw").unwrap().mesh().bounds();
     let near = |a: f64, e: f64| (a - e).abs() < 1e-6;
     assert!(
         near(b.min.x, 0.0) && near(b.max.x, 40.0) && near(b.min.y, -5.0) && near(b.max.y, 7.0) && near(b.min.z, 0.0) && near(b.max.z, 15.0),
@@ -113,7 +115,7 @@ fn extrude_to_a_face_in_a_moved_component() {
 /// frame), its occurrence moved by `moves`, then a new component `Post`, active, with a 6 x 6 mm
 /// sketch `Pad` centred at the origin (#928).
 fn ramp_and_pad(s: &mut Session, moves: &[serde_json::Value]) {
-    run(s, "component.create", json!({"name": "Target"}));
+    run(s, "component.create", json!({"name": "Target", "grounded": false}));
     run(s, "sketch.create", json!({"plane": "YZ", "name": "Wedge"}));
     run(s, "sketch.line", json!({"points": [[-20, -30], [20, -30], [20, -10], [-20, -30]]}));
     run(s, "sketch.finish", json!({}));
@@ -173,7 +175,7 @@ fn extrude_from_a_slanted_face_in_another_moved_component() {
         "solid.extrude",
         json!({"sketch": "Pad", "from": [0, 5, -20], "distance": 4, "direction": "negative", "operation": "new", "body_name": "Leg"}),
     );
-    let b = s.world_state().body("Leg").unwrap().mesh().bounds();
+    let b = s.world_state().unwrap().body("Leg").unwrap().mesh().bounds();
     assert!((b.max.z + 22.5).abs() < 1e-6 && (b.min.z + 26.5).abs() < 1e-6, "{b:?}");
 }
 
@@ -202,7 +204,7 @@ fn extrude_to_a_face_in_another_component_follows_it() {
 #[test]
 fn revolve_to_a_cylinder_in_another_moved_component() {
     let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name": "Pin"}));
+    run(&mut s, "component.create", json!({"name": "Pin", "grounded": false}));
     run(&mut s, "solid.cylinder", json!({"base": [0, 14, -5], "radius": 4, "height": 15, "body_name": "PostBody"}));
     run(&mut s, "component.activate", json!({"component": "root"}));
     // From 90° round to 45° about Z: the post's axis is at (14 sin 45°, 14 cos 45°).
@@ -218,14 +220,14 @@ fn revolve_to_a_cylinder_in_another_moved_component() {
         "solid.revolve",
         json!({"sketch": "Profile", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "to": to, "operation": "new", "body_name": "Arc"}),
     );
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let arc = &world.body("Arc").unwrap().body;
     let post = &world.body("PostBody").unwrap().body;
     let overlap = solidcraft_kernel::boolean(arc, post, solidcraft_kernel::BoolOp::Intersect).unwrap();
     assert!(overlap.is_none_or(|b| solidcraft_kernel::measure(&b).unwrap().volume < 1e-3), "the arc runs into the post");
     // Past the picked point's angle (29°) on the inner side, where the post leaves room.
     let at = |r: f64, deg: f64| Vec3::new(r * deg.to_radians().cos(), r * deg.to_radians().sin(), -2.5);
-    assert!(arc.contains(at(10.2, 35.0)), "the arc is not cut back to the post's surface");
+    assert_eq!(arc.classify_point(at(10.2, 35.0)).unwrap(), solidcraft_kernel::PointClass::Inside, "the arc is not cut back to the post's surface");
 }
 
 /// A To Object pick is named after the face it is on, the nearest one, even when a face of a
@@ -236,7 +238,7 @@ fn revolve_to_a_cylinder_in_another_moved_component() {
 fn extrude_to_names_the_face_it_is_on() {
     for moved in [false, true] {
         let mut s = Session::default();
-        run(&mut s, "component.create", json!({"name": "Other"}));
+        run(&mut s, "component.create", json!({"name": "Other", "grounded": false}));
         let z = if moved { -40.02 + 10.0 } else { -40.02 };
         run(&mut s, "solid.box", json!({"corner": [-50, -50, z], "length": 100, "width": 100, "height": 20, "body_name": "Shim"}));
         run(&mut s, "component.activate", json!({"component": "root"}));
@@ -253,7 +255,7 @@ fn extrude_to_names_the_face_it_is_on() {
             "solid.extrude",
             json!({"sketch": "Pad", "distance": "1 mm", "direction": "negative", "to": [5, 5, -20], "operation": "new", "body_name": "Leg"}),
         );
-        let b = s.world_state().body("Leg").unwrap().mesh().bounds();
+        let b = s.world_state().unwrap().body("Leg").unwrap().mesh().bounds();
         assert!((b.min.z + 20.0).abs() < 1e-9 && b.max.z.abs() < 1e-9, "moved {moved}: {b:?}");
     }
 }
@@ -264,7 +266,7 @@ fn extrude_to_names_the_face_it_is_on() {
 #[test]
 fn extrude_to_a_named_face_keeps_it_when_another_part_touches_it() {
     let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name": "Other"}));
+    run(&mut s, "component.create", json!({"name": "Other", "grounded": false}));
     // A plate whose top face is z = 50, out of the way for now.
     run(&mut s, "solid.box", json!({"corner": [-50, -50, 30], "length": 100, "width": 100, "height": 20, "body_name": "Plate"}));
     run(&mut s, "component.activate", json!({"component": "root"}));

@@ -3,12 +3,13 @@ use crate::scenario::Harness;
 use crate::sketch_display::{curve_sample, projection_key};
 use crate::viewport::{Hit, Proj, pick, projection};
 use serde_json::json;
-use solidcraft_engine::geom::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::{SampledPath, SamplingQuality};
 use std::sync::Arc;
 
 fn circle(h: &mut Harness) -> u64 {
-    h.app.ui.show_origin = false;
+    h.app.set_origin_shown(false);
     h.app.run("parameters.add", json!({"name":"foreground_diameter","expression":"2 mm"})).unwrap();
     h.app.run("sketch.create", json!({"plane":"XY","name":"PixelCircle"})).unwrap();
     h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":1})).unwrap();
@@ -51,7 +52,7 @@ fn pixel_circle_fit_exact_half_chord_hover_click_and_model_invariance() {
     let sid = circle(&mut h);
     let baseline = h.app.session.doc.to_json();
     let history = (h.app.session.undo.len(), h.app.session.redo.len());
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let ss = state.sketch(sid).unwrap();
     let plane = ss.plane;
     let index = ss.sketch.curve_index("c1").unwrap();
@@ -78,7 +79,7 @@ fn pixel_circle_fit_exact_half_chord_hover_click_and_model_invariance() {
             h.app.viewport.hover
         );
         h.step(&json!({"click":{"world":[world.x,world.y,world.z]}})).unwrap();
-        assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchCurve{id} if id == "c1")));
+        assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchCurve{id, ..} if id == "c1")));
         h.app.session.selection.clear();
     }
     assert_eq!(h.app.session.doc.to_json(), baseline, "display and selection must not alter stored geometry, constraints or expressions");
@@ -97,7 +98,7 @@ fn pixel_cache_full_view_resize_and_hidpi_invalidate_within_same_grid_bucket() {
     h.app.cam.target = Vec3::ZERO;
     let baseline = h.app.session.doc.to_json();
     let history = (h.app.session.undo.len(), h.app.session.redo.len());
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     assert_eq!(state.bodies.len(), 1, "body batch invariance needs an actual mesh");
     let ss = state.sketch(sid).unwrap();
     let index = ss.sketch.curve_index("c1").unwrap();
@@ -159,13 +160,10 @@ fn pixel_adapter_uses_exact_ellipse_periodic_fit_and_control_spline_spans() {
         h.settle();
         let baseline = h.app.session.doc.to_json();
         let sid = h.app.session.active_sketch.unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let ss = state.sketch(sid).unwrap();
         let exact = ss.sketch.exact_segs(0).unwrap();
-        assert!(
-            exact.iter().all(|s| !matches!(s, solidcraft_engine::geom::Seg2::Line { .. })),
-            "freeform display must reach the exact span extractor"
-        );
+        assert!(exact.iter().all(|s| !matches!(s, solidcore_record::Seg2::Line { .. })), "freeform display must reach the exact span extractor");
         let proj = projection(&h.app, h.app.viewport.rect.unwrap());
         let path = curve_sample(&h.app, sid, 0, &ss.plane, &proj);
         assert_eq!(path.quality, SamplingQuality::Complete, "{command}");
@@ -202,7 +200,7 @@ fn pixel_curve_second_nested_rotated_occurrence_uses_its_world_plane() {
     h.app.run("browser.visibility", json!({"paths":[[first]],"visible":false})).unwrap();
     let sid = circle(&mut h);
     let baseline = h.app.session.doc.to_json();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let ss = state.sketch(sid).unwrap();
     assert!(ss.plane.origin.dist(Vec3::new(20.0, 30.0, 40.0)) < 1e-8);
     let tilt = 35.0f64.to_radians();
@@ -216,7 +214,7 @@ fn pixel_curve_second_nested_rotated_occurrence_uses_its_world_plane() {
     assert!(dense_circle_error(&path, &ss.plane, &proj, 1.0, h.app.viewport.pixels_per_point()) <= 1.0);
     let world = ss.plane.to_world(Vec2::new(0.8090169943749475, 0.5877852522924731));
     h.step(&json!({"click":{"world":[world.x,world.y,world.z]}})).unwrap();
-    assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchCurve{id} if id == "c1")));
+    assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchCurve{id, ..} if id == "c1")));
     assert_eq!(h.app.session.doc.to_json(), baseline);
 }
 
@@ -227,7 +225,7 @@ fn pixel_annulus_fill_keeps_hole_and_cpu_bridge_matches_cached_boundaries() {
     h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":0.5})).unwrap();
     h.settle();
     let baseline = h.app.session.doc.to_json();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let ss = state.sketch(sid).unwrap();
     let proj = projection(&h.app, h.app.viewport.rect.unwrap());
     let ppp = h.app.viewport.pixels_per_point();
@@ -271,7 +269,7 @@ fn pixel_frame_budget_does_not_cache_unbounded_empty_curve_results() {
     let mut h = Harness::new();
     let sid = circle(&mut h);
     let baseline = h.app.session.doc.to_json();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let mut plane = state.sketch(sid).unwrap().plane;
     let proj = projection(&h.app, h.app.viewport.rect.unwrap());
     let mut limited = 0;
@@ -290,12 +288,48 @@ fn pixel_frame_budget_does_not_cache_unbounded_empty_curve_results() {
     assert_eq!(h.app.session.doc.to_json(), baseline);
 }
 
+/// #6524: an imported drawing of 5000 lines, shown and sampled first (sketches are drawn in
+/// timeline order), uses up its own sketch's budget only. A line drawn in a later sketch is still
+/// sampled, so drawn and pickable, instead of coming back empty while its end points show.
+#[test]
+fn a_large_sketch_drawn_first_leaves_a_later_sketch_its_curves() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    let mut dxf = String::from("0\nSECTION\n2\nENTITIES\n");
+    for i in 0..5000 {
+        let (x, y) = (f64::from(i % 100) * 2.0, f64::from(i / 100) * 2.0);
+        dxf.push_str(&format!("0\nLINE\n8\n0\n10\n{x}\n20\n{y}\n11\n{}\n21\n{y}\n", x + 1.5));
+    }
+    dxf.push_str("0\nENDSEC\n0\nEOF\n");
+    h.app.run("sketch.insert_dxf", json!({"text": dxf, "plane": "XY", "name": "Drawing"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"After"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[-30,-30],[-10,-20]],"ids":["new"]})).unwrap();
+    h.settle();
+    let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let drawing = state.sketches.iter().find(|s| s.name == "Drawing").unwrap().clone();
+    let after = state.sketches.iter().find(|s| s.name == "After").unwrap().clone();
+    drop(state);
+    assert_eq!(drawing.sketch.curves.len(), 5000);
+    // A fresh frame that samples the drawing first, as the viewport does.
+    *h.app.viewport.display.lock().unwrap() = Default::default();
+    let limited = (0..drawing.sketch.curves.len())
+        .filter(|&i| curve_sample(&h.app, drawing.feature, i, &drawing.plane, &proj).quality == SamplingQuality::BudgetLimited)
+        .count();
+    assert!(limited > 0, "the drawing must exceed one sketch's budget for this to test anything");
+    let line = after.sketch.curve_index("new").unwrap();
+    let path = curve_sample(&h.app, after.feature, line, &after.plane, &proj);
+    assert_eq!((path.quality, path.vertex_count), (SamplingQuality::Complete, 2), "{path:?}");
+    assert_eq!(path.parts.len(), 1);
+}
+
 /// A zoomed-in ring is sampled finely, but each slab of the fill still crosses only its
 /// four boundary edges: its fill must fit the hover highlight's budget (#164).
 #[test]
 fn zoomed_in_ring_fill_fits_the_hover_highlight_budget() {
     let mut h = Harness::new();
-    h.app.ui.show_origin = false;
+    h.app.set_origin_shown(false);
     h.app.ui.perspective = true;
     h.app.run("sketch.create", json!({"plane":"XY","name":"Ring"})).unwrap();
     h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":40})).unwrap();
@@ -307,7 +341,7 @@ fn zoomed_in_ring_fill_fits_the_hover_highlight_budget() {
     h.settle();
     let baseline = h.app.session.doc.to_json();
     let sid = h.app.session.active_sketch.unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let ss = state.sketch(sid).unwrap();
     let proj = projection(&h.app, h.app.viewport.rect.unwrap());
     let ppp = h.app.viewport.pixels_per_point();

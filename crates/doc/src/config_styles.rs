@@ -3,9 +3,10 @@ use super::Column;
 use crate::{DocError, Document, FeatureKind, ModelState, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
-pub(crate) fn shell_plane_family(planes: impl IntoIterator<Item = Option<solidcraft_geom::Plane>>) -> bool {
+pub(crate) fn shell_plane_family(planes: impl IntoIterator<Item = Option<solidcore_record::Plane>>) -> bool {
     let mut planes = planes.into_iter();
     let Some(Some(first)) = planes.next() else { return false };
     first.origin.is_finite() && first.x.is_finite() && first.y.is_finite() && planes.all(|plane| plane == Some(first))
@@ -122,12 +123,13 @@ impl Document {
     /// Certify named generator lineage; generic index-derived naming is unsupported.
     pub fn certify_config_face(&self, target: &ConfigFaceTarget) -> Result<()> {
         target.validate()?;
-        let prefix = format!("F{}:", target.origin_feature);
-        let role = target.name.strip_prefix(&prefix).ok_or_else(|| DocError::Invalid("face lineage does not match its feature".into()))?;
+        let role = crate::persistent_name::split_feature(&target.name)
+            .filter(|(id, _)| *id == target.origin_feature)
+            .map(|(_, role)| role)
+            .ok_or_else(|| DocError::Invalid("face lineage does not match its feature".into()))?;
         // An exact history name may name a piece by the faces around it (`F2:top#[F2:side:l4,…]`),
         // never by a number (an older design's piece, or a tie the faces around it left).
-        let numbered =
-            target.name.match_indices('#').any(|(i, _)| target.name.get(i + 1..).is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit())));
+        let numbered = crate::persistent_name::is_numbered_piece(&target.name);
         let lineage_piece = matches!(target.certificate, Some(super::FaceCertificate::Lineage)) && !numbered;
         if crate::naming::strip_piece(&target.name) != target.name && !lineage_piece {
             return Err(DocError::Invalid("configure a face lineage, not a numbered split piece".into()));
@@ -149,7 +151,10 @@ impl Document {
                     sketch == producer_sketch && extent.taper.is_none() && role == format!("side:{curve}")
                         && self.feature(*sketch).is_some_and(|feature| matches!(&feature.kind, FeatureKind::Sketch { sketch, .. } if sketch.curves.iter().any(|candidate| candidate.id == *curve && !candidate.construction && matches!(candidate.kind, solidcraft_sketch::CurveKind::Line { .. } | solidcraft_sketch::CurveKind::Circle { .. } | solidcraft_sketch::CurveKind::Arc { .. }))))
                 }
-                (super::FaceCertificate::Imported { .. }, FeatureKind::Import { .. }) => role.strip_prefix("face:").is_some_and(|index| index.parse::<usize>().is_ok()),
+                // A linked design's face is named after its name there (`link:…`, see lineage::link_role).
+                (super::FaceCertificate::Imported { .. }, FeatureKind::Import { .. }) => {
+                    role.strip_prefix("face:").is_some_and(|index| index.parse::<usize>().is_ok()) || role.starts_with("link:")
+                }
                 (super::FaceCertificate::Lineage, _) => !role.is_empty(),
                 (super::FaceCertificate::ShellPlanar { source_producer, source, inner }, FeatureKind::Shell { .. }) => {
                     *source_producer != target.origin_feature
@@ -185,6 +190,24 @@ impl Document {
         }
         Ok(())
     }
+    /// A face target for messages: its role on its feature where the certificate tells it, else
+    /// its name, and its body (`the top cap of E1 on `Body1``).
+    pub(crate) fn describe_face_target(&self, target: &ConfigFaceTarget) -> String {
+        let feature = self.feature(target.origin_feature).map_or_else(|| format!("F{}", target.origin_feature), |f| f.name.clone());
+        let end = |high: bool| if high { "top" } else { "bottom" };
+        let role = match &target.certificate {
+            Some(super::FaceCertificate::ExtrudeCap { high, .. }) | Some(super::FaceCertificate::CylinderCap { high }) => {
+                format!("the {} cap", end(*high))
+            }
+            Some(super::FaceCertificate::Box { axis, high }) => {
+                format!("the {}{} side", if *high { "+" } else { "-" }, ["x", "y", "z"].get(usize::from(*axis)).copied().unwrap_or("?"))
+            }
+            Some(super::FaceCertificate::ExtrudeSide { curve, .. }) => format!("the side along `{curve}`"),
+            _ => format!("face `{}`", target.name),
+        };
+        format!("{role} of {feature} on `{}`", target.body)
+    }
+
     /// Verify the current named pieces describe one surface, not ambiguous generated roles.
     pub fn configuration_face_indices(&self, body: &crate::ModelBody, target: &ConfigFaceTarget) -> Result<Vec<usize>> {
         self.certify_config_face(target)?;
@@ -248,7 +271,7 @@ impl Document {
                 })
                 .collect();
             if indices.is_empty() {
-                return Err(DocError::Unknown("attached planar face certificate is missing or ambiguous".into()));
+                return Err(DocError::Invalid(format!("{} no longer exists", self.describe_face_target(target))));
             }
             return self.certified_pieces(body, indices, target.origin_feature);
         }
@@ -257,13 +280,13 @@ impl Document {
             let count = body.body.face_sources().map_or(0, |sources| sources.len());
             let mut indices: Vec<_> = (0..count).filter(|index| side(*index, true)).collect();
             // A side drawn in collinear pieces is one face over all of them (#1788): a certificate
-            // made when the pieces were faces of their own finds it by the piece's name, which
-            // the joined face answers to.
+            // made when the pieces were faces of their own finds it by the piece's name, which is
+            // a name of the joined face too (one of its synonyms).
             if indices.is_empty() {
                 let names = crate::naming::names(body);
                 indices = (0..count)
                     .filter(|index| {
-                        side(*index, false) && crate::history_names::matches(&names, *index, &target.name) == Some(crate::history_names::Match::Alias)
+                        side(*index, false) && crate::history_names::matches(&names, *index, &target.name) == Some(crate::history_names::Match::Exact)
                     })
                     .collect();
             }
@@ -277,7 +300,34 @@ impl Document {
                 matches!(source, Some(solidcraft_kernel::FaceSource::Imported { item: current_item, face: current_face, payload_sha256: Some(digest), producer: Some(producer) }) if current_item == item && current_face == face && digest == payload_sha256 && *producer == target.origin_feature).then_some(index)
             }).collect();
             if indices.is_empty() {
-                return Err(DocError::Unknown("immutable import face certificate no longer exists".into()));
+                // A linked design's face is named after its name in that design (`link:…`, see
+                // lineage::link_role): Update Links brings in a new file, whose digest no
+                // certificate matches, but a face it left as it was keeps that name. Find it by
+                // the name, as joints on linked faces do (#3330); a face numbered by its place
+                // (`face:<k>`) is not followed, since another face may take that place.
+                let linked = crate::persistent_name::split_feature(&target.name)
+                    .is_some_and(|(id, role)| id == target.origin_feature && role.starts_with("link:"));
+                let names = crate::naming::face_names(body);
+                let named: Vec<usize> = if linked {
+                    names
+                        .iter()
+                        .enumerate()
+                        .filter(|(index, name)| {
+                            crate::naming::strip_piece(name) == target.name
+                                && matches!(
+                                    body.body.face_sources().and_then(|sources| sources.get(*index)),
+                                    Some(Some(solidcraft_kernel::FaceSource::Imported { producer: Some(producer), .. })) if *producer == target.origin_feature
+                                )
+                        })
+                        .map(|(index, _)| index)
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                if named.is_empty() {
+                    return Err(DocError::Unknown("immutable import face certificate no longer exists".into()));
+                }
+                return Ok(self.without_copies(body, named));
             }
             return Ok(self.without_copies(body, indices));
         }
@@ -295,7 +345,7 @@ impl Document {
             }
             return Ok(indices);
         }
-        if target.name.ends_with(":side") {
+        if crate::persistent_name::is_wall(&target.name) {
             if indices.len() != 1 {
                 return Err(DocError::Invalid("split curved face lineage is not yet certified".into()));
             }
@@ -303,24 +353,25 @@ impl Document {
         }
         // Caps and box faces must share an oriented plane. This rejects generic cap-role
         // collisions while permitting the coplanar pieces of a split supported face.
-        let mesh = body.mesh();
         let mut plane: Option<(Vec3, Vec3)> = None;
-        for (triangle, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
-            if indices.binary_search(&(*face as usize)).is_err() {
-                continue;
-            }
-            let Some([a, b, c]) = mesh.tri(triangle) else { continue };
-            let Some(normal) = (b - a).cross(c - a).normalized() else { continue };
-            if let Some((point, base)) = plane {
-                let magnitude = [point.x, point.y, point.z, a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z]
+        for &index in &indices {
+            let Some(pf) = body.body.planar_face(index).or_else(|| body.body.face_plane(index)) else {
+                return Err(DocError::Invalid("configured face has no valid surface".into()));
+            };
+            let Some(normal) = pf.normal().normalized() else {
+                return Err(DocError::Invalid("configured face has no valid surface".into()));
+            };
+            let point = pf.origin;
+            if let Some((first_point, base)) = plane {
+                let magnitude = [first_point.x, first_point.y, first_point.z, point.x, point.y, point.z]
                     .iter()
                     .fold(body.body.size(), |scale, value| scale.max(value.abs()));
                 let tolerance = (magnitude * f64::EPSILON * 128.0).max(1e-7);
-                if normal.dot(base) < 1.0 - 1e-6 || [a, b, c].iter().any(|vertex| (*vertex - point).dot(base).abs() > tolerance) {
+                if normal.dot(base) < 1.0 - 1e-6 || (point - first_point).dot(base).abs() > tolerance {
                     return Err(DocError::Invalid("face lineage names more than one oriented surface".into()));
                 }
             } else {
-                plane = Some((a, normal));
+                plane = Some((point, normal));
             }
         }
         if plane.is_none() {

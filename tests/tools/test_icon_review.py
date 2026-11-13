@@ -1,6 +1,7 @@
 """Long-term discovery and acceptance behavior of the repository-owned review app."""
 import contextlib
 import json
+import os
 import re
 from pathlib import Path
 import shutil
@@ -15,7 +16,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
-TOOLS = Path(__file__).resolve().parents[2] / 'assets/icons/ui/design/tools'
+TOOLS = Path(__file__).resolve().parents[2] / 'crates/look/icons/design/tools'
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="20" fill="currentColor"/></svg>'
 
 
@@ -23,14 +24,14 @@ SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="3
 def review_fixture():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
-        design = root / 'assets/icons/ui/design'
+        design = root / 'crates/look/icons/design'
         shutil.copytree(TOOLS, design / 'tools')
         (design / 'svg/model').mkdir(parents=True)
-        (design / 'svg/model/box.svg').write_text(SVG)
+        (design / 'svg/model/box.svg').write_text(SVG, encoding='utf-8')
         shutil.copy2(TOOLS.parent / 'palette.toml', design / 'palette.toml')
-        (design / 'references.toml').write_text('[category.model]\nlabel="Model"\nrule="Standard projection"\nicons=["box"]\n')
-        (design / 'aliases.toml').write_text('[alias]\nbox_alias="box"\n')
-        (design / 'review.json').write_text(json.dumps({'final': {'box': ''}, 'notes': {}}))
+        (design / 'references.toml').write_text('[category.model]\nlabel="Model"\nrule="Standard projection"\nicons=["box"]\n', encoding='utf-8')
+        (design / 'aliases.toml').write_text('[alias]\nbox_alias="box"\n', encoding='utf-8')
+        (design / 'review.json').write_text(json.dumps({'final': {'box': ''}, 'notes': {}}), encoding='utf-8')
         with socket.socket() as available:
             available.bind(('127.0.0.1', 0))
             port = available.getsockname()[1]
@@ -65,6 +66,39 @@ def review_fixture():
 
 
 class IconReviewTest(unittest.TestCase):
+    def test_window_confirm_and_page_list_icons_are_discovered(self):
+        with review_fixture() as (root, design, get, post):
+            source = root / 'crates/ui-egui/src/windows.rs'
+            source.parent.mkdir(parents=True)
+            source.write_text('''fn show() {
+                ui_kit::Window::new(egui::Id::new("prefs"), "settings", title);
+                ui_kit::Confirm::new(id, "status_warning", title);
+                ui_kit::WindowPage { icon: "orbit", label: "ui.navigation", draw: draw_page };
+                ui_kit::Window::new(id, variable_icon, "not_an_icon");
+            }''', encoding='utf-8')
+            page = get('/')
+            for icon in ('settings', 'status_warning', 'orbit'):
+                self.assertIn(f'data-id="{icon}"', page)
+            self.assertNotIn('data-id="not_an_icon"', page)
+
+    def test_runtime_manifest_discovers_variable_ids_and_reports_actual_placeholder(self):
+        with review_fixture() as (root, design, get, post):
+            manifest = design / 'requested_icons.txt'
+            before = get('/api/review')['rev']
+            manifest.write_text('box_alias\tfalse\nonly_in_menu_table\ttrue\n')
+            page = get('/')
+            self.assertIn('data-id="only_in_menu_table"', page)
+            self.assertIn('3 discovered icon ids · 2 with artwork · 1 missing', page)
+            self.assertIn('runtime audit', page)
+            self.assertNotEqual(get('/api/review')['rev'], before)
+            # Even existing artwork can fail to parse in the runtime renderer.
+            manifest.write_text('box_alias\ttrue\nonly_in_menu_table\tfalse\n')
+            self.assertIn('3 discovered icon ids · 1 with artwork · 2 missing', get('/'))
+            # A newly repaired id is discoverable even without any source literal.
+            manifest.write_text('box_alias\tfalse\nonly_in_menu_table\tfalse\n')
+            (design / 'svg/model/only_in_menu_table.svg').write_text(SVG)
+            self.assertIn('3 discovered icon ids · 3 with artwork · 0 missing', get('/'))
+
     def test_inline_clips_and_masks_are_scoped_to_each_preview_and_dashes_use_guides(self):
         with review_fixture() as (root, design, get, post):
             for name in ('environment_map', 'new', 'draft', 'bounding_solid', 'extend'):
@@ -99,7 +133,7 @@ class IconReviewTest(unittest.TestCase):
     def test_live_palette_tokens_save_only_display_colours_and_reject_stale_or_invalid_changes(self):
         with review_fixture() as (root, design, get, post):
             palette_path = design / 'palette.toml'
-            original = palette_path.read_text()
+            original = palette_path.read_text(encoding='utf-8')
             palette = tomllib.loads(original)
             state = json.loads(get('/api/palette'))
             tokens = {token['id']: token for token in state['tokens']}
@@ -125,9 +159,9 @@ class IconReviewTest(unittest.TestCase):
                 target = expected
                 for part in key.split('.'): target = target[part]
                 target.update(colours)
-            self.assertEqual(tomllib.loads(palette_path.read_text()), expected)
-            self.assertIn('# Icon colour roles.', palette_path.read_text(), 'comments remain intact')
-            self.assertEqual(tomllib.loads(palette_path.read_text())['roles']['ink']['source'], palette['roles']['ink']['source'])
+            self.assertEqual(tomllib.loads(palette_path.read_text(encoding='utf-8')), expected)
+            self.assertIn('# Icon colour roles.', palette_path.read_text(encoding='utf-8'), 'comments remain intact')
+            self.assertEqual(tomllib.loads(palette_path.read_text(encoding='utf-8'))['roles']['ink']['source'], palette['roles']['ink']['source'])
             for revision, changes in [
                 (state['revision'], {'roles.ink': paints}),
                 (saved['revision'], {'roles.ink.source': paints}),
@@ -152,7 +186,7 @@ class IconReviewTest(unittest.TestCase):
         with review_fixture() as (root, design, get, post):
             source = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><clipPath id="left"><path d="M0 0L32 0L32 64L0 64Z"/></clipPath></defs><circle id="base" cx="32" cy="32" r="28" fill="#8e9faf"/><g clip-path="url(#left)"><circle cx="32" cy="32" r="12" fill="#ffffff"/></g><circle id="foreground" cx="32" cy="32" r="3" fill="#236ead"/></svg>'''
             path = design / 'svg/model/cutout.svg'
-            path.write_text(source)
+            path.write_text(source, encoding='utf-8')
             accepted = (design / 'review.json').read_bytes()
             page = get('/')
             fragments = [svg for svg in re.findall(r'<svg\b.*?</svg>', page, re.S) if '-base"' in svg]
@@ -172,17 +206,17 @@ class IconReviewTest(unittest.TestCase):
                 self.assertTrue(foreground.get('id').endswith('-foreground'))
                 self.assertIsNone(foreground.get('mask'))
                 self.assertNotIn('roles-gap-', svg)
-            self.assertEqual(path.read_text(), source)
+            self.assertEqual(path.read_text(encoding='utf-8'), source)
             self.assertEqual((design / 'review.json').read_bytes(), accepted)
 
     def test_semantic_colours_reload_from_one_palette_without_changing_acceptance(self):
         with review_fixture() as (root, design, get, post):
             palette = design / 'palette.toml'
-            colours = tomllib.loads(palette.read_text())
+            colours = tomllib.loads(palette.read_text(encoding='utf-8'))
             source = colours['roles']['active-3'].get('source', colours['roles']['active-3']['light'])
             art = SVG.replace('currentColor', source)
             for name in ('line', 'c_fix'):
-                (design / f'svg/model/{name}.svg').write_text(art)
+                (design / f'svg/model/{name}.svg').write_text(art, encoding='utf-8')
             with (design / 'aliases.toml').open('a') as aliases:
                 aliases.write('ground="c_fix"\nsurface_line={master="line",accent="surface"}\n')
             state, accepted = get('/api/review'), (design / 'review.json').read_bytes()
@@ -198,13 +232,13 @@ class IconReviewTest(unittest.TestCase):
             self.assertIn(colours['accents']['surface']['active-3']['light'], card(page, 'surface_line'),
                           'explicit alias accent wins over the Sketch master')
             def set_light(section, colour):
-                lines, current = palette.read_text().splitlines(), ''
+                lines, current = palette.read_text(encoding='utf-8').splitlines(), ''
                 for index, line in enumerate(lines):
                     if line.strip().startswith('['):
                         current = line.strip().split(']', 1)[0] + ']'
                     elif current == '[' + section + ']' and line.split('=', 1)[0].strip() == 'light':
                         lines[index] = 'light = ' + json.dumps(colour)
-                        palette.write_text('\n'.join(lines) + '\n')
+                        palette.write_text('\n'.join(lines) + '\n', encoding='utf-8')
                         return
                 self.fail('missing palette section ' + section)
             replacement = '#123456' if colours['accents']['sketch']['active-3']['light'] != '#123456' else '#654321'
@@ -215,7 +249,7 @@ class IconReviewTest(unittest.TestCase):
             set_light('roles.active-3', base)
             self.assertIn(base, card(get('/'), 'ground'), 'source identifiers survive changing the base display palette too')
             self.assertEqual((design / 'review.json').read_bytes(), accepted)
-            self.assertEqual((design / 'svg/model/line.svg').read_text(), art)
+            self.assertEqual((design / 'svg/model/line.svg').read_text(encoding='utf-8'), art)
 
     def test_new_unused_masters_and_alias_targets_are_never_hidden(self):
         with review_fixture() as (root, design, get, post):
@@ -223,7 +257,7 @@ class IconReviewTest(unittest.TestCase):
             page = get('/')
             self.assertIn('data-id="box"', page, 'unused alias target must still have a card')
             self.assertIn('data-id="box_alias"', page)
-            (design / 'svg/model/brand_new.svg').write_text(SVG)
+            (design / 'svg/model/brand_new.svg').write_text(SVG, encoding='utf-8')
             current = get('/api/review')
             self.assertNotEqual(original['rev'], current['rev'])
             self.assertNotIn('brand_new', current['final'])
@@ -241,25 +275,47 @@ class IconReviewTest(unittest.TestCase):
         with review_fixture() as (root, design, get, post):
             initial = get('/api/review')
             self.assertIn('box', initial['final'])
-            old_hash = json.loads((design / 'review.json').read_text())['final']['box']
-            (design / 'svg/model/box.svg').write_text(SVG.replace('r="20"', 'r="18"'))
+            old_hash = json.loads((design / 'review.json').read_text(encoding='utf-8'))['final']['box']
+            (design / 'svg/model/box.svg').write_text(SVG.replace('r="20"', 'r="18"'), encoding='utf-8')
             changed = get('/api/review')
             self.assertNotIn('box', changed['final'])
             self.assertIn('changed since acceptance', get('/'))
-            self.assertEqual(old_hash, json.loads((design / 'review.json').read_text())['final']['box'])
-            (design / 'svg/model/box.svg').write_text(SVG.replace('r="20"', 'r="17"'))
+            self.assertEqual(old_hash, json.loads((design / 'review.json').read_text(encoding='utf-8'))['final']['box'])
+            artwork = design / 'svg/model/box.svg'
+            before = artwork.stat()
+            artwork.write_text(SVG.replace('r="20"', 'r="17"'), encoding='utf-8')
+            # Equal-length edits can share a filesystem timestamp on fast CI hosts.
+            # Reproduce that deterministically: acceptance must track the content.
+            os.utime(artwork, ns=(before.st_atime_ns, before.st_mtime_ns))
+            self.assertEqual(artwork.stat().st_size, before.st_size)
+            self.assertEqual(artwork.stat().st_mtime_ns, before.st_mtime_ns)
             with self.assertRaises(urllib.error.HTTPError) as error:
                 post(changed, final=['box'])
             self.assertEqual(error.exception.code, 400)
             post(get('/api/review'), final=['box'])
             self.assertIn('box', get('/api/review')['final'])
-            self.assertNotEqual(old_hash, json.loads((design / 'review.json').read_text())['final']['box'])
+            self.assertNotEqual(old_hash, json.loads((design / 'review.json').read_text(encoding='utf-8'))['final']['box'])
+
+    def test_a_same_size_edit_with_the_same_timestamp_still_changes_the_revision(self):
+        # CI VMs can stamp two quick same-size writes with one modification time; the stale page
+        # must still be refused (it once accepted changed art there).
+        with review_fixture() as (root, design, get, post):
+            box = design / 'svg/model/box.svg'
+            box.write_text(SVG.replace('r="20"', 'r="18"'), encoding='utf-8')
+            stamp = box.stat().st_mtime_ns
+            changed = get('/api/review')
+            box.write_text(SVG.replace('r="20"', 'r="17"'), encoding='utf-8')
+            os.utime(box, ns=(stamp, stamp))
+            self.assertNotEqual(changed['rev'], get('/api/review')['rev'])
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                post(changed, final=['box'])
+            self.assertEqual(error.exception.code, 400)
 
     def test_missing_art_is_visible_but_cannot_be_accepted(self):
         with review_fixture() as (root, design, get, post):
             commands = root / 'crates/engine/src/cmd'
             commands.mkdir(parents=True)
-            (commands / 'example.rs').write_text('CommandSpec::new("example.action", "Example", run).icon("missing");')
+            (commands / 'example.rs').write_text('CommandSpec::new("example.action", "Example", run).icon("missing");', encoding='utf-8')
             page = get('/')
             self.assertIn('data-id="missing"', page)
             self.assertIn('aria-label="Accept missing as final" disabled', page)
@@ -275,16 +331,16 @@ class IconReviewTest(unittest.TestCase):
             state = get('/api/review')
             self.assertEqual(post(state, endpoint='/api/export')['sent'], 0)
             # A stale page changes another note; it must not resurrect replaced feedback.
-            saved = json.loads((design / 'review.json').read_text())
+            saved = json.loads((design / 'review.json').read_text(encoding='utf-8'))
             saved['notes']['box'] = 'Newer feedback'
-            (design / 'review.json').write_text(json.dumps(saved))
+            (design / 'review.json').write_text(json.dumps(saved), encoding='utf-8')
             post(state, notes={**state['notes'], 'box_alias': 'Another note'})
             self.assertEqual(get('/api/review')['notes']['box'], 'Newer feedback')
             self.assertFalse(list(design.glob('*.tmp')))
 
     def test_export_resolution_preserves_notes_added_since_the_snapshot(self):
         with review_fixture() as (root, design, get, post):
-            (design / 'svg/model/fresh.svg').write_text(SVG)
+            (design / 'svg/model/fresh.svg').write_text(SVG, encoding='utf-8')
             state = get('/api/review')
             post(state, notes={'fresh': 'Newer feedback'})
             script = """
@@ -312,14 +368,14 @@ assert review_state.load()['notes'] == {}
         with review_fixture() as (root, design, get, post):
             # The fixture's palette is intentionally minimal; the scaffold uses
             # the real helper constants and emits an editable starter SVG.
-            (root / 'ATTRIBUTION.md').write_text('# Attribution\n')
+            (root / 'ATTRIBUTION.md').write_text('# Attribution\n', encoding='utf-8')
             command = [sys.executable, '-B', str(design / 'tools/author/new_icon.py')]
             first = subprocess.run(command + ['fresh_shape', '--base', 'cube'], capture_output=True, text=True)
             self.assertEqual(first.returncode, 0, first.stderr)
             artwork = design / 'svg/model/fresh_shape.svg'
             self.assertTrue(artwork.exists())
             self.assertNotIn('fresh_shape', get('/api/review')['final'])
-            self.assertIn('fresh_shape.svg', (root / 'ATTRIBUTION.md').read_text())
+            self.assertIn('fresh_shape.svg', (root / 'ATTRIBUTION.md').read_text(encoding='utf-8'))
             before = artwork.read_bytes()
             again = subprocess.run(command + ['fresh_shape'], capture_output=True, text=True)
             self.assertNotEqual(again.returncode, 0)

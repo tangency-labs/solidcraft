@@ -1,6 +1,7 @@
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use super::*;
 use crate::Services;
@@ -34,7 +35,7 @@ fn valve() -> SolveApp {
 
 /// A pick of the mesh edge nearest a point.
 fn edge(app: &SolveApp, p: Vec3) -> Sel {
-    let st = app.session.world_state();
+    let st = app.session.world_state().unwrap();
     let mut best: Option<(f64, Sel)> = None;
     for b in &st.bodies {
         for (index, e) in b.mesh().edges.iter().enumerate() {
@@ -67,7 +68,7 @@ fn a_picked_cam_edge_makes_the_cam() {
     let pick = edge(&app, Vec3::new(-20.0, 0.0, 5.0));
     d.pick(&app.session, pick);
     app.dialog = Some(d);
-    let ctx = egui::Context::default();
+    let ctx = crate::fonts::test_context();
     for _ in 0..3 {
         let input =
             egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() };
@@ -104,9 +105,10 @@ fn a_picked_cam_edge_makes_the_cam() {
 /// The dialog's rows pass their English text, which the catalogs translate by its key.
 #[test]
 fn the_cam_dialog_labels_translate() {
-    let de = crate::i18n::Locale::for_language("de");
+    crate::i18n::install();
+    let de = solidcraft_ui_text::Locale::for_language("de");
     for (english, german) in [("Cam", "Nocken"), ("Follower", "Stößel"), ("Roller", "Rolle"), ("Tip (optional)", "Spitze (optional)")] {
         assert_eq!(de.label(english), german);
     }
-    assert_eq!(crate::i18n::Locale::for_language("zh").label("Knife edge"), "尖顶");
+    assert_eq!(solidcraft_ui_text::Locale::for_language("zh").label("Knife edge"), "尖顶");
 }

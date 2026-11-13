@@ -8,11 +8,22 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Opt-in developer instrumentation; normal builds contain no collection or clocks.
+solver-profiling = []
+
+[[example]]
+name = "solve_profile"
+required-features = ["solver-profiling"]
+
 [dependencies]
+solidcore-record = { workspace = true }
+harfrust = "0.12"
 solidcraft-geom = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 ttf-parser = { workspace = true }
+unicode-bidi = "0.3"
 
 [dev-dependencies]
 serde_json = { workspace = true }

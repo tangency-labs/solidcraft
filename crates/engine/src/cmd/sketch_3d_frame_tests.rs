@@ -1,6 +1,7 @@
 use crate::Session;
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::WireSpace;
 
 fn run(s: &mut Session, cmd: &str, params: Value) -> Value {
@@ -40,7 +41,7 @@ fn wire_frame_second_occurrence_world_inputs_move_and_reopen() {
     }
     near(sk.wires[sk.wire_index(&a).unwrap()].fit[0], Vec3::new(2.0, 3.0, 5.0));
     near(sk.wires[sk.wire_index(&point).unwrap()].fit[0], Vec3::new(2.0, 3.0, 5.0));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let ws = &world.sketch(sketch).unwrap().sketch;
     let sw = &ws.wires[ws.wire_index(&spline).unwrap()];
     near(sw.fit[0], Vec3::new(14.0, 32.0, 55.0));
@@ -61,9 +62,9 @@ fn wire_frame_second_occurrence_world_inputs_move_and_reopen() {
     assert_eq!(restored.sketch(sketch).unwrap().wires, s.doc.sketch(sketch).unwrap().wires);
     // Same definition at the first placement has the local geometry; selected second is exact.
     run(&mut s, "component.activate", json!({"component":component,"occurrence":first,"path":[first]}));
-    near(s.world_state().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(3.0, 2.0, 6.0));
+    near(s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(3.0, 2.0, 6.0));
     run(&mut s, "component.activate", json!({"component":component,"occurrence":second,"path":[second]}));
-    near(s.world_state().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(18.0, 33.0, 46.0));
+    near(s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(18.0, 33.0, 46.0));
 }
 
 #[test]
@@ -77,10 +78,10 @@ fn wire_frame_pending_moves_other_owner_and_legacy_world_do_not_join() {
     run(&mut s, "occurrence.move", json!({"occurrence":second,"translate":[5,0,0],"capture":false}));
     let point = run(&mut s, "sketch.point3d", json!({"point":[22,32,45]}))["point"].as_str().unwrap().to_string();
     near(s.doc.sketch(sketch).unwrap().wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(2.0, 3.0, 5.0));
-    near(s.world_state().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == legacy).unwrap().fit[0], Vec3::new(2.0, 3.0, 5.0));
-    near(s.world_state().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(22.0, 32.0, 45.0));
+    near(s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == legacy).unwrap().fit[0], Vec3::new(2.0, 3.0, 5.0));
+    near(s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(22.0, 32.0, 45.0));
     run(&mut s, "component.capture_position", json!({}));
-    near(s.world_state().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(22.0, 32.0, 45.0));
+    near(s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(22.0, 32.0, 45.0));
     // Explicit target in root must not inherit the unrelated active component frame.
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "component.activate", json!({"component":0}));
@@ -123,7 +124,7 @@ fn wire_frame_hostile_inputs_rollback_full_session() {
 fn wire_frame_include_other_component_refresh_break_lost_and_reopen() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10}));
-    let component = run(&mut s, "component.create", json!({"name":"Receiver"}));
+    let component = run(&mut s, "component.create", json!({"name":"Receiver","grounded":false}));
     let occurrence = component["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[20,0,0]}));
     run(&mut s, "sketch.create", json!({"plane":"XY","name":"Include target"}));
@@ -138,7 +139,7 @@ fn wire_frame_include_other_component_refresh_break_lost_and_reopen() {
     let sk = s.doc.sketch(sketch).unwrap();
     assert_eq!(sk.wires[0], initial);
     assert!(!sk.link(&link).unwrap().lost);
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     assert!(world.sketch(sketch).unwrap().sketch.wires[0].pts.iter().all(|p| (p.x - 10.0).abs() < 1e-7));
     let before = s.doc.to_json();
     run(&mut s, "sketch.break_link", json!({"link":link}));
@@ -179,7 +180,7 @@ fn wire_frame_pipe_component_and_world_paths_have_analytic_volume_and_position()
         };
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.pipe", json!({"path_sketch":sketch,"path":[wire],"diameter":4}));
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let body = world.bodies.last().unwrap();
         // Property measurement uses fine adaptive tessellation; the viewport mesh alone
         // undershoots a small circular profile by about 0.64% at its display chord tolerance.
@@ -188,7 +189,7 @@ fn wire_frame_pipe_component_and_world_paths_have_analytic_volume_and_position()
         let bounds = body.mesh().bounds();
         near((bounds.min + bounds.max) / 2.0, Vec3::new(17.0, 32.0, 50.0));
         run(&mut s, "occurrence.move", json!({"occurrence":second,"translate":[5,0,0]}));
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let body = world.bodies.last().unwrap();
         let bounds = body.mesh().bounds();
         near((bounds.min + bounds.max) / 2.0, Vec3::new(if space == WireSpace::Component { 22.0 } else { 17.0 }, 32.0, 50.0));
@@ -215,7 +216,7 @@ fn wire_frame_wide_owner_graph_has_bounded_indexed_traversal() {
     // A legal wide assembly used to force one whole occurrence scan for each leaf.
     let doc = s.doc_mut();
     for i in 0..9998u64 {
-        doc.components.push(solidcraft_doc::Component { id: 10_000 + i, name: format!("Sibling{i}"), parent: 0 });
+        doc.components.push(solidcraft_doc::Component { id: 10_000 + i, name: format!("Sibling{i}"), parent: 0, ..Default::default() });
         doc.occurrences.push(solidcraft_doc::Occurrence {
             id: 100_000 + i,
             component: 10_000 + i,
@@ -223,6 +224,7 @@ fn wire_frame_wide_owner_graph_has_bounded_indexed_traversal() {
             name: format!("Sibling{i}"),
             transform: solidcraft_doc::IDENTITY,
             grounded: false,
+            expressed_moves: Vec::new(),
         });
     }
     assert_eq!(super::inverse_owner_frame(&s, &json!({"sketch":target}), "sketch.point3d").unwrap(), solidcraft_doc::IDENTITY);
@@ -235,14 +237,14 @@ fn wire_frame_cross_owner_sweep_follows_world_path_edit_undo_and_reopen() {
     run(&mut s, "sketch.options", json!({"sketch_3d":true}));
     let wire = run(&mut s, "sketch.line3d", json!({"points":[[17,32,45],[17,32,55]]}))["curves"][0].as_str().unwrap().to_string();
     run(&mut s, "sketch.finish", json!({}));
-    let owner = run(&mut s, "component.create", json!({"name":"Sweep owner"}))["occurrence"].as_u64().unwrap();
+    let owner = run(&mut s, "component.create", json!({"name":"Sweep owner","grounded":false}))["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence":owner,"axis":[0,0,1],"angle":"90 deg","translate":[20,30,40]}));
     let profile = run(&mut s, "sketch.create", json!({"plane":"XY","offset":5,"name":"Profile"}))["sketch"].as_u64().unwrap();
     run(&mut s, "sketch.circle.center", json!({"center":[2,3],"radius":2}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.sweep", json!({"sketch":profile,"path_sketch":path_sketch,"path":[wire],"operation":"new"}));
     let check = |s: &Session, length: f64| {
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let body = world.bodies.last().unwrap();
         let measure = solidcraft_kernel::measure(&body.body).unwrap();
         assert!((measure.volume - 4.0 * std::f64::consts::PI * length).abs() < 0.05, "{}", measure.volume);
@@ -250,7 +252,7 @@ fn wire_frame_cross_owner_sweep_follows_world_path_edit_undo_and_reopen() {
     };
     check(&s, 10.0);
     let saved = s.doc.to_json();
-    run(&mut s, "sketch.edit", json!({"sketch":path_sketch}));
+    run(&mut s, "sketch.edit", json!({"sketch":path_sketch,"restore_marker":false}));
     run(&mut s, "sketch.move3d", json!({"sketch":path_sketch,"wire":wire,"index":1,"by":[0,0,10]}));
     check(&s, 20.0);
     run(&mut s, "edit.undo", json!({}));
@@ -264,7 +266,7 @@ fn wire_frame_cross_owner_sweep_follows_world_path_edit_undo_and_reopen() {
 #[test]
 fn wire_frame_three_owner_sweep_profile_move_invalidates_warm_cache() {
     let mut s = Session::default();
-    let profile_owner = run(&mut s, "component.create", json!({"name":"Profile owner","parent":0}));
+    let profile_owner = run(&mut s, "component.create", json!({"name":"Profile owner","parent":0,"grounded":false}));
     let profile_occurrence = profile_owner["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence":profile_occurrence,"translate":[4,7,5]}));
     let profile = run(&mut s, "sketch.create", json!({"plane":"XY","name":"Foreign profile"}))["sketch"].as_u64().unwrap();
@@ -284,7 +286,7 @@ fn wire_frame_three_owner_sweep_profile_move_invalidates_warm_cache() {
     run(&mut s, "occurrence.move", json!({"occurrence":consumer_occurrence,"axis":[0,0,1],"angle":"90 deg","translate":[100,-30,20]}));
     run(&mut s, "solid.sweep", json!({"sketch":profile,"path_sketch":path_sketch,"path":[wire],"operation":"new"}));
     let measure = |session: &Session, x: f64| {
-        let state = session.world_state();
+        let state = session.world_state().unwrap();
         let body = state.bodies.last().unwrap();
         assert_eq!(body.component, consumer["component"].as_u64().unwrap());
         let result = solidcraft_kernel::measure(&body.body).unwrap();
@@ -312,4 +314,163 @@ fn wire_frame_three_owner_sweep_profile_move_invalidates_warm_cache() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.doc.to_json(), saved);
     measure(&s, 4.0);
+}
+
+#[test]
+fn arc3d_is_exact_inspectable_movable_and_reopens() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let d = 5.0 * std::f64::consts::SQRT_2;
+    let r = run(&mut s, "sketch.arc3d", json!({"start":[10,0,0],"through":[d,d,0],"end":[0,10,0]}));
+    let id = r["curves"][0].as_str().unwrap().to_string();
+    let sk = s.doc.sketch(sketch).unwrap();
+    let w = &sk.wires[sk.wire_index(&id).unwrap()];
+    let arc = w.arc.expect("an exact arc is stored");
+    assert!((arc.radius - 10.0).abs() < 1e-9, "radius {}", arc.radius);
+    assert!(arc.center.dist(Vec3::ZERO) < 1e-9, "centre {:?}", arc.center);
+    assert_eq!(w.fit.len(), 3);
+    assert_eq!(w.pts.first(), w.fit.first());
+    assert_eq!(w.pts.last(), w.fit.get(2));
+    assert!(w.pts.iter().all(|p| (arc.center.dist(*p) - arc.radius).abs() < 1e-6));
+    let _ = sk;
+    let insp = run(&mut s, "sketch.inspect", json!({}));
+    let entry = insp["wires"].as_array().unwrap().iter().find(|e| e["id"] == json!(id)).unwrap();
+    assert!((entry["arc"]["radius"].as_f64().unwrap() - 10.0).abs() < 1e-9);
+    assert!((entry["arc"]["sweep_deg"].as_f64().unwrap() - 90.0).abs() < 1e-6);
+    // Pulling the through point in rebuilds the arc exactly.
+    run(&mut s, "sketch.move3d", json!({"wire":id,"index":1,"to":[0,5,0]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    let arc = sk.wires[sk.wire_index(&id).unwrap()].arc.unwrap();
+    assert!((arc.radius - 62.5_f64.sqrt()).abs() < 1e-9, "radius {}", arc.radius);
+    let saved = s.doc.to_json();
+    let restored = solidcraft_doc::format::read(&saved).unwrap();
+    assert_eq!(restored.sketch(sketch).unwrap().wires, s.doc.sketch(sketch).unwrap().wires);
+    let idx = s.doc.sketch(sketch).unwrap().wire_index(&id).unwrap();
+    run(&mut s, "edit.undo", json!({}));
+    assert!((s.doc.sketch(sketch).unwrap().wires[idx].arc.unwrap().radius - 10.0).abs() < 1e-9);
+}
+
+#[test]
+fn arc3d_follows_the_sketch_owner_placement() {
+    let (mut s, _, _, second) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let d = 5.0 * std::f64::consts::SQRT_2;
+    // World points of a quarter circle whose local centre is (0,0,5), radius 10.
+    let id = run(&mut s, "sketch.arc3d", json!({"start":[20,40,45],"through":[20.0 - d,30.0 + d,45],"end":[10,30,45]}))["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let sk = s.doc.sketch(sketch).unwrap();
+    let arc = sk.wires[sk.wire_index(&id).unwrap()].arc.unwrap();
+    near(arc.center, Vec3::new(0.0, 0.0, 5.0));
+    assert!((arc.radius - 10.0).abs() < 1e-7, "radius {}", arc.radius);
+    let _ = sk;
+    let world = s.world_state().unwrap();
+    let ws = &world.sketch(sketch).unwrap().sketch;
+    let arc = ws.wires[ws.wire_index(&id).unwrap()].arc.unwrap();
+    near(arc.center, Vec3::new(20.0, 30.0, 45.0));
+    near(ws.wires[ws.wire_index(&id).unwrap()].fit[0], Vec3::new(20.0, 40.0, 45.0));
+    drop(world);
+    run(&mut s, "occurrence.move", json!({"occurrence":second,"translate":[5,0,0]}));
+    let world = s.world_state().unwrap();
+    let ws = &world.sketch(sketch).unwrap().sketch;
+    let arc = ws.wires[ws.wire_index(&id).unwrap()].arc.unwrap();
+    near(arc.center, Vec3::new(25.0, 30.0, 45.0));
+    assert!((arc.radius - 10.0).abs() < 1e-7, "radius {}", arc.radius);
+}
+
+#[test]
+fn arc3d_hostile_inputs_rollback_full_session() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let doc = s.doc.to_json();
+    let history = (s.undo.len(), s.redo.len());
+    for (cmd, p) in [
+        ("sketch.arc3d", json!({"start":[0,0,0],"through":[1,0,0],"end":[2,0,0]})), // collinear
+        ("sketch.arc3d", json!({"start":[0,0,0],"through":[0,0,0],"end":[0,10,0]})), // coincident
+        ("sketch.arc3d", json!({"start":[0,0,0],"through":[f64::NAN,5,0],"end":[10,0,0]})),
+        ("sketch.arc3d", json!({"start":[0,0,0],"through":[1e100,5,0],"end":[10,0,0]})),
+        ("sketch.arc3d", json!({"start":[0,0,0],"through":[5,5,0]})), // missing end
+        ("sketch.arc3d", json!({"start":[0,0,0],"through":["x",5,0],"end":[10,0,0]})),
+        ("sketch.arc3d", json!({"through":[5,5,0],"end":[10,0,0]})), // missing start
+    ] {
+        assert!(s.execute(cmd, &p).is_err(), "{cmd}: {p}");
+        assert_eq!(s.doc.to_json(), doc);
+        assert_eq!((s.undo.len(), s.redo.len()), history);
+    }
+}
+
+#[test]
+fn arc3d_pipes_along_the_arc() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let d = 10.0 * std::f64::consts::SQRT_2;
+    let wire = run(&mut s, "sketch.arc3d", json!({"start":[20,0,0],"through":[d,d,0],"end":[0,20,0]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.pipe", json!({"path_sketch":sketch,"path":[wire],"diameter":4}));
+    let world = s.world_state().unwrap();
+    let body = world.bodies.last().unwrap();
+    let measure = solidcraft_kernel::measure(&body.body).unwrap();
+    let quarter = 20.0 * std::f64::consts::FRAC_PI_2;
+    assert!((measure.volume - 4.0 * std::f64::consts::PI * quarter).abs() < 0.5, "{}", measure.volume);
+}
+
+#[test]
+fn line3d_spline3d_point3d_need_a_3d_sketch() {
+    // Same rule as sketch.arc3d: these buttons start interactive tools, so they are only
+    // offered while a 3D sketch is being edited.
+    let ids = ["sketch.line3d", "sketch.spline3d", "sketch.point3d"];
+    let mut s = Session::default();
+    for id in ids {
+        let info = crate::cmd::find_command(id).unwrap().info(&s);
+        assert!(!info.enabled, "{id} offered with no sketch being edited");
+    }
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    for id in ids {
+        let info = crate::cmd::find_command(id).unwrap().info(&s);
+        assert!(!info.enabled, "{id} offered in a plain 2D sketch: {:?}", info.disabled_reason);
+    }
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    for id in ids {
+        let info = crate::cmd::find_command(id).unwrap().info(&s);
+        assert!(info.enabled, "{id} not offered inside a 3D sketch: {:?}", info.disabled_reason);
+    }
+}
+
+#[test]
+fn wire_frame_copies_keep_component_and_legacy_coordinates() {
+    let (mut s, _, first, second) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let fit = [Vec3::new(20.0, 40.0, 45.0), Vec3::new(10.0, 30.0, 45.0), Vec3::new(20.0, 20.0, 45.0)];
+    let local = run(&mut s, "sketch.arc3d", json!({"start":fit[0],"through":fit[1],"end":fit[2]}))["curves"][0].as_str().unwrap().to_owned();
+    let legacy = s.doc_mut().sketch_mut(sketch).unwrap().add_drawn_arc_in(&fit, WireSpace::World).unwrap();
+    s.refresh();
+    let originals = s.doc.sketch(sketch).unwrap().wires.clone();
+    let out = run(&mut s, "sketch.move", json!({"entities":[local,legacy],"copy":true,"translate":[1.6,0],"angle":90}));
+    let copied: Vec<_> = out["curves"].as_array().unwrap().iter().map(|id| id.as_str().unwrap().to_owned()).collect();
+    assert_eq!(copied.len(), 2);
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert_eq!(&sk.wires[..2], &originals);
+    assert_eq!(sk.wires[2].space, WireSpace::Component);
+    assert_eq!(sk.wires[3].space, WireSpace::World);
+    near(sk.wires[2].arc.unwrap().center, Vec3::new(1.6, 0.0, 5.0));
+    near(sk.wires[3].arc.unwrap().center, Vec3::new(20.0, 31.6, 45.0));
+    for wire in s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().filter(|w| copied.contains(&w.id)) {
+        near(wire.arc.unwrap().center, Vec3::new(20.0, 31.6, 45.0));
+        near(wire.fit[0], Vec3::new(10.0, 31.6, 45.0));
+    }
+    let component = s.active_component;
+    run(&mut s, "component.activate", json!({"component":component,"occurrence":first,"path":[first]}));
+    let world = s.world_state().unwrap();
+    let wires = &world.sketch(sketch).unwrap().sketch.wires;
+    near(wires.iter().find(|w| w.id == copied[0]).unwrap().arc.unwrap().center, Vec3::new(1.6, 0.0, 5.0));
+    near(wires.iter().find(|w| w.id == copied[1]).unwrap().arc.unwrap().center, Vec3::new(20.0, 31.6, 45.0));
+    run(&mut s, "component.activate", json!({"component":component,"occurrence":second,"path":[second]}));
+    let restored = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    assert_eq!(restored.sketch(sketch).unwrap().wires, s.doc.sketch(sketch).unwrap().wires);
 }

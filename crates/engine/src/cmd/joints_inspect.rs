@@ -1,0 +1,208 @@
+//! Inspect Joint (`joint.inspect`): what each joint is defined by and attached to — its two
+//! origins (the occurrence, the snap as saved, and the feature, face, edge or sketch curve each
+//! persistent name refers to), whether each origin is found today and why not, its kind, offset,
+//! angle, flip, limits, values, expressions and the motion links it takes part in. Reads only.
+
+use serde_json::Value;
+use solidcraft_doc::joints::{self, Joint, JointOrigin, Snap, XRef};
+use solidcraft_doc::naming::legacy_name;
+use solidcraft_doc::persistent_name::{Base, EdgeName, FaceName, Role};
+use solidcraft_doc::{Document, MAX_PLACEMENT_DEPTH, ModelState};
+
+use super::{component_of, joint_id, link_info, named_value_list, occurrence_name, reply};
+use crate::schema::joints::{
+    EdgeReference, FaceReference, InspectJointResult, InspectedJoint, JointLink, JointSide, LinkRole, MadeBy, Reference, ReferenceRole, Referent,
+    SweptFrom, WorldFrame,
+};
+use crate::{Result, Session};
+
+pub(super) fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "joint.inspect";
+    let ids: Vec<u64> = match p.get("joint") {
+        None | Some(Value::Null) => s.doc.assembly.joints.iter().map(|j| j.id).collect(),
+        v => vec![joint_id(s, v, cmd)?],
+    };
+    let st = s.model.state();
+    let sol = joints::solve(&s.doc, &st);
+    let vals = joints::joint_values(&s.doc.assembly);
+    let out: Vec<InspectedJoint> = ids
+        .iter()
+        .filter_map(|id| s.doc.assembly.joints.iter().find(|j| j.id == *id))
+        .map(|j| {
+            let q = vals.get(&j.id).map(Vec::as_slice).unwrap_or(&j.values);
+            joint_json(s, &st, &sol, j, q)
+        })
+        .collect();
+    reply(cmd, InspectJointResult { joints: out, param_warnings: Vec::new() })
+}
+
+fn joint_json(s: &Session, st: &ModelState, sol: &joints::Solution, j: &Joint, q: &[f64]) -> InspectedJoint {
+    let links: Vec<JointLink> = s
+        .doc
+        .assembly
+        .links
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.a == j.id || l.b == j.id)
+        .map(|(i, l)| JointLink { index: i, role: if l.b == j.id { LinkRole::Driven } else { LinkRole::Driver }, link: link_info(s, st, l) })
+        .collect();
+    let why = |list: &[(u64, String, String)]| list.iter().filter(|(id, ..)| *id == j.id).map(|(.., why)| why.clone()).collect::<Vec<_>>();
+    InspectedJoint {
+        id: j.id,
+        name: j.name.clone(),
+        kind: j.kind,
+        suppressed: j.suppressed,
+        visible: s.joint_visible(j.id),
+        flip: j.flip,
+        offset: j.offset,
+        angle: j.angle.to_degrees(),
+        values: named_value_list(j, q),
+        dofs: j.kind.dofs().iter().map(|d| (*d).to_string()).collect(),
+        a: side_json(s, st, &j.a),
+        b: side_json(s, st, &j.b),
+        links,
+        errors: why(&sol.errors),
+        conflicts: why(&sol.conflicts),
+        expressions: (!j.exprs.is_empty()).then(|| j.exprs.clone()),
+        constraint: j.constraint,
+    }
+}
+
+/// One of a joint's origins: what it sits on, what it refers to, and where it is now.
+fn side_json(s: &Session, st: &ModelState, o: &JointOrigin) -> JointSide {
+    let component = component_of(s, o.occurrence);
+    let component_name = if component == 0 {
+        "root".to_string()
+    } else {
+        s.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default()
+    };
+    let occurrence_name = if o.occurrence == 0 { "root".to_string() } else { occurrence_name(s, o.occurrence) };
+    let mut v = JointSide {
+        occurrence: o.occurrence,
+        occurrence_name,
+        component,
+        component_name,
+        path: occurrence_path(&s.doc, o.occurrence),
+        inside: o.inside.clone(),
+        snap: o.snap.clone(),
+        references: references(&s.doc, &o.snap),
+        resolves: false,
+        frame: None,
+        error: None,
+    };
+    match s.doc.origin_world(st, o) {
+        Ok(m) => {
+            v.resolves = true;
+            v.frame = Some(WorldFrame { origin: [m[3][0], m[3][1], m[3][2]], z: [m[2][0], m[2][1], m[2][2]], x: [m[0][0], m[0][1], m[0][2]] });
+        }
+        Err(e) => v.error = Some(e.to_string()),
+    }
+    v
+}
+
+/// The occurrence names from the top of the assembly down to `occurrence` (`/` between); a
+/// nested component's parent is taken at its first placement. Empty for the root.
+fn occurrence_path(doc: &Document, occurrence: u64) -> String {
+    let mut names = Vec::new();
+    let mut id = occurrence;
+    for _ in 0..=MAX_PLACEMENT_DEPTH {
+        let Some(o) = doc.occurrences.iter().find(|o| o.id == id) else { break };
+        names.push(o.name.as_str());
+        let Some(parent) = (o.parent != 0).then(|| doc.occurrence_of(o.parent)).flatten() else { break };
+        id = parent.id;
+    }
+    names.reverse();
+    names.join("/")
+}
+
+/// Every persistent name the snap holds, with what it refers to.
+fn references(doc: &Document, snap: &Snap) -> Vec<Reference> {
+    let mut out = Vec::new();
+    let mut face = |role: ReferenceRole, name: &Option<String>| {
+        if let Some(n) = name {
+            out.push(Reference { role, to: Referent::Face(face_ref(doc, n)) });
+        }
+    };
+    match snap {
+        Snap::FaceCenter { face: f, x, .. } => {
+            face(ReferenceRole::Face, f);
+            if let Some(XRef::Face { face: n, .. }) = x {
+                face(ReferenceRole::X, &Some(n.clone()));
+            }
+        }
+        Snap::CircleCenter { face: f, end, x, .. } => {
+            face(ReferenceRole::Face, f);
+            face(ReferenceRole::End, end);
+            if let Some(XRef::Face { face: n, .. }) = x {
+                face(ReferenceRole::X, &Some(n.clone()));
+            }
+        }
+        Snap::Edge { edge, face: f, corner, .. } => {
+            if let Some(e) = edge {
+                out.push(Reference { role: ReferenceRole::Edge, to: Referent::Edge(edge_ref(doc, e)) });
+            }
+            if let Some(n) = f {
+                out.push(Reference { role: ReferenceRole::Face, to: Referent::Face(face_ref(doc, n)) });
+            }
+            if let Some(e) = corner {
+                out.push(Reference { role: ReferenceRole::Corner, to: Referent::Edge(edge_ref(doc, e)) });
+            }
+        }
+        Snap::Plane { x, .. } | Snap::Axis { x, .. } => {
+            if let Some(XRef::Face { face: n, .. }) = x {
+                face(ReferenceRole::X, &Some(n.clone()));
+            }
+        }
+        Snap::Frame { .. } | Snap::Point { .. } => {}
+    }
+    out
+}
+
+/// What a face's persistent name refers to: `F<feature>:<role>` names the feature that made the
+/// face, and a side `side:<curve>` (or a later profile's `side:s<k>.<curve>`) the sketch curve
+/// it was swept from. Names of another form are given as they are.
+fn face_ref(doc: &Document, name: &str) -> FaceReference {
+    let mut v = FaceReference { name: name.to_string(), unverified: None, role_in_feature: None, feature: None, sketch: None };
+    let bare = match legacy_name(name) {
+        Some(n) => {
+            v.unverified = Some(true);
+            n
+        }
+        None => name,
+    };
+    let Ok(face) = FaceName::parse(bare) else { return v };
+    let Some(fid) = face.made_by().map(|id| id.0) else { return v };
+    let stem = face.stem().to_string();
+    v.role_in_feature = Some(stem.strip_prefix(&format!("F{fid}:")).unwrap_or(&stem).to_string());
+    let Some(f) = doc.feature(fid) else {
+        v.feature = Some(MadeBy::Gone { id: fid, error: format!("feature {fid} is gone") });
+        return v;
+    };
+    v.feature = Some(MadeBy::Feature { id: f.id, name: f.name.clone(), kind: f.kind.type_name().to_string() });
+    // A side swept from a sketch curve (a later profile's too, `side:s<k>.<curve>`).
+    if let Base::Made { role: Role::Side { curve, .. }, .. } = &face.base {
+        let found = f.kind.input_sketches().into_iter().find_map(|id| {
+            // design-only: a joint names a curve of one of the design's sketches.
+            let sk = doc.sketch(id).ok()?;
+            let c = sk.curves.iter().find(|c| c.id == *curve)?;
+            let curve_type = serde_json::to_value(&c.kind).ok().and_then(|k| k.get("type").and_then(Value::as_str).map(str::to_string));
+            let name = doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+            Some(SweptFrom::Curve { id, name, curve: curve.clone(), curve_type })
+        });
+        v.sketch = Some(
+            found.unwrap_or_else(|| SweptFrom::Missing { curve: curve.clone(), error: format!("no sketch of {} has a curve `{curve}`", f.name) }),
+        );
+    }
+    v
+}
+
+/// An edge's persistent name (`<face A>|<face B>`, `~k` for one of several between them) with
+/// what each of its faces refers to.
+fn edge_ref(doc: &Document, name: &str) -> EdgeReference {
+    let bare = legacy_name(name).unwrap_or(name);
+    let faces: Vec<FaceReference> = match EdgeName::parse(bare) {
+        Ok(e) => e.faces.iter().map(|f| face_ref(doc, &f.to_string())).collect(),
+        Err(_) => Vec::new(),
+    };
+    EdgeReference { name: name.to_string(), faces, unverified: legacy_name(name).is_some().then_some(true) }
+}

@@ -9,11 +9,13 @@
 //! `L = T_A · F_a` and the parent-side joint frame `L · M(q)`, the chain inverted (reversed, axes
 //! negated, so each URDF value still equals SolidCraft's).
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
+use solidcore_record::Vec3;
 use solidcraft_doc::joints::{self, Joint, JointKind};
 use solidcraft_doc::{Document, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelState, Occurrence, apply_point, mat_inverse, mat_mul};
-use solidcraft_geom::{Mesh, Vec3};
+use solidcraft_geom::Mesh;
 
 use crate::{IoError, Result, export_mesh, stl_binary, weld, weld_eps};
 
@@ -148,9 +150,11 @@ fn rotation(u: Vec3, a: f64) -> Mat {
 }
 
 /// The joint's motion as URDF steps, in order from A's frame: (kind, axis, index of the value).
-fn steps(kind: JointKind) -> Vec<(Step, Vec3, usize)> {
+/// `None` for a relation whose turns follow a fixed step (a tilt, or the offset off a plane or
+/// line): URDF has no fixed step inside a joint's chain.
+fn steps(kind: JointKind) -> Option<Vec<(Step, Vec3, usize)>> {
     use Step::{Prismatic as P, Revolute as R};
-    match kind {
+    Some(match kind {
         JointKind::Rigid => vec![],
         JointKind::Revolute => vec![(R, Vec3::Z, 0)],
         JointKind::Slider => vec![(P, Vec3::Z, 0)],
@@ -158,7 +162,9 @@ fn steps(kind: JointKind) -> Vec<(Step, Vec3, usize)> {
         JointKind::PinSlot => vec![(P, Vec3::X, 1), (R, Vec3::Z, 0)],
         JointKind::Planar => vec![(P, Vec3::X, 0), (P, Vec3::Y, 1), (R, Vec3::Z, 2)],
         JointKind::Ball => vec![(R, Vec3::Z, 0), (R, Vec3::Y, 1), (R, Vec3::Z, 2)],
-    }
+        JointKind::Parallel => vec![(P, Vec3::X, 0), (P, Vec3::Y, 1), (P, Vec3::Z, 2), (R, Vec3::Z, 3)],
+        JointKind::Perpendicular | JointKind::Angle | JointKind::PointOnPlane | JointKind::PointOnLine | JointKind::LineOnPlane => return None,
+    })
 }
 
 /// `raw` with every character but `[A-Za-z0-9_]` (and `-` in file names) replaced by `_`, so it
@@ -378,7 +384,14 @@ impl<'a> Tree<'a> {
 
     /// `child` on joint `j` from `p` (already in the tree): the joint's chain and the child's link.
     fn attach(&mut self, j: &Joint, fa: &Mat, p: u64, child: u64, q: &[f64]) -> Option<()> {
-        let m = joints::motion(j.kind, q);
+        // A relation URDF can't write is fixed where it is: the child link's frame is the joint's.
+        let (chain, m) = match steps(j.kind) {
+            Some(chain) => (chain, joints::motion(j.kind, q)),
+            None => {
+                self.warnings.push(format!("joint `{}` is a {:?} relation, which URDF has no joint for: written fixed as it is", j.name, j.kind));
+                (Vec::new(), IDENTITY)
+            }
+        };
         let child_on_b = j.a.occurrence == p;
         // (parent-side joint frame, child link frame) in the world.
         let (jf, lf) = if child_on_b {
@@ -390,7 +403,7 @@ impl<'a> Tree<'a> {
         };
         let (parent_index, parent_frame) = self.placed.get(&p).copied()?;
         let origin = mat_mul(&mat_inverse(&parent_frame)?, &jf);
-        let mut chain = steps(j.kind);
+        let mut chain = chain;
         if !child_on_b {
             chain.reverse();
             for s in &mut chain {

@@ -31,6 +31,12 @@ them to its **Entities** input. Each tool previews the result before **OK**;
   Without Center, a positive angle proceeds counterclockwise from the original;
   Flip reverses it.
 
+Circular **Quantity** accepts a unitless parameter or expression, such as `HoleAmount`
+or `HoleAmount + 1`. The expression stays in the editor after applying and reopening;
+changing its parameters updates the copies. It must evaluate to a whole number from
+2 to 500. Enter a fixed number to replace the parameter link.
+Existing fixed-count patterns keep their counts; enter a parameter name to link an older pattern.
+
 Quantities include the original. Edit the original lines or their dimensions
 to update their copies. Right-click a rectangular or circular pattern instance
 and choose **Edit Sketch Pattern**, or double-click its pattern constraint badge,

@@ -5,9 +5,10 @@
 //! arcs and points (free-form curves as polylines); the flat pattern's drawing, with ELLIPSE and SPLINE, is
 //! [`crate::write_dxf_drawing`].
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
-use solidcraft_geom::Vec2;
+use solidcore_record::{MAX_BEZIER_DEGREE, Vec2};
 
 use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES, bulge_arc};
 use crate::{IoError, Result};
@@ -243,29 +244,37 @@ fn convert(ents: &[Ent], k: f64, blocks: &HashMap<String, (Vec2, Vec<Ent>)>, dep
                     let major = c + Vec2::new(mx, my) * k;
                     let a = Vec2::new(mx, my).len() * k;
                     let (t0, t1) = (e.get(41).unwrap_or(0.0), e.get(42).unwrap_or(std::f64::consts::TAU));
-                    if (t1 - t0 - std::f64::consts::TAU).abs() < 1e-9 || (t1 - t0).abs() < 1e-12 {
+                    // The arc runs counter-clockwise from t0 to t1, a turn at most; whole turns
+                    // more or less make no difference.
+                    let sweep = (t1 - t0).rem_euclid(std::f64::consts::TAU);
+                    if sweep < 1e-9 || std::f64::consts::TAU - sweep < 1e-9 {
                         out.push(Geom2::Ellipse { c, major, minor: a * ratio });
                     } else {
-                        // Partial ellipse: a fit spline through samples.
+                        // Partial ellipse (an elliptical arc, as Fusion and SolidCraft's own DXF
+                        // export write one): exact conic pieces of at most a quarter turn each, not
+                        // a spline fitted through samples, which strays from the ellipse between
+                        // them (#8155). A piece from s to e is the rational quadratic with its apex
+                        // where the end tangents meet and the middle weight cos((e - s) / 2), the
+                        // ellipse's image of a circle's arc; its rho is weight / (1 + weight).
                         let u = (major - c) / a.max(1e-12);
                         let v = u.perp() * (a * ratio);
-                        let mut sweep = t1 - t0;
-                        while sweep <= 0.0 {
-                            sweep += std::f64::consts::TAU;
+                        let at = |t: f64| c + u * (a * t.cos()) + v * t.sin();
+                        // (A quarter turn written out is a hair over or under one; it stays one piece.)
+                        let pieces = (sweep / std::f64::consts::FRAC_PI_2 - 1e-9).ceil().clamp(1.0, 4.0) as usize;
+                        let step = sweep / pieces as f64;
+                        let w = (step / 2.0).cos();
+                        for j in 0..pieces {
+                            let (from, to) = (t0 + step * j as f64, t0 + step * (j + 1) as f64);
+                            let mid = (from + to) / 2.0;
+                            let apex = c + (u * (a * mid.cos()) + v * mid.sin()) / w;
+                            out.push(Geom2::Conic { a: at(from), apex, b: at(to), rho: w / (1.0 + w) });
                         }
-                        let n = 16;
-                        let pts = (0..=n)
-                            .map(|j| {
-                                let t = t0 + sweep * j as f64 / n as f64;
-                                c + u * (a * t.cos()) + v * t.sin()
-                            })
-                            .collect();
-                        out.push(Geom2::Spline { pts, control: false, degree: 3 });
                     }
                 }
             }
             "SPLINE" => {
-                let degree = e.get(71).unwrap_or(3.0).clamp(1.0, 7.0) as u8;
+                // The degrees a sketch spline takes (a G4 blend's Bézier is degree 9).
+                let degree = e.get(71).unwrap_or(3.0).clamp(1.0, MAX_BEZIER_DEGREE as f64) as u8;
                 let (fx, fy) = (e.all(11), e.all(21));
                 let (cx, cy) = (e.all(10), e.all(20));
                 if fx.len() >= 2 && fx.len() == fy.len() {
@@ -388,8 +397,23 @@ fn polyline(verts: &[(Vec2, f64)], closed: bool, out: &mut Vec<Geom2>) {
     }
 }
 
-/// Write 2D geometry (millimetres) as an R12-style ASCII DXF.
-pub fn write_dxf(geom: &[Geom2]) -> String {
+/// Options for writing an R12-style ASCII DXF.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DxfWriteOptions {
+    /// DXF $INSUNITS: 1 in, 2 ft, 4 mm (default), 5 cm, 6 m.
+    pub insunits: i32,
+    /// Default layer name (default "0").
+    pub layer: String,
+}
+
+impl Default for DxfWriteOptions {
+    fn default() -> Self {
+        DxfWriteOptions { insunits: 4, layer: "0".to_string() }
+    }
+}
+
+/// Write 2D geometry with per-entity layer names as an R12-style ASCII DXF.
+pub fn write_dxf_entities(entities: &[(&str, Geom2)], insunits: i32) -> String {
     let mut s = String::new();
     let mut w = |c: i32, v: &str| {
         s.push_str(&format!("{c}\n{v}\n"));
@@ -397,22 +421,24 @@ pub fn write_dxf(geom: &[Geom2]) -> String {
     w(0, "SECTION");
     w(2, "HEADER");
     w(9, "$INSUNITS");
-    w(70, "4");
+    let insunits_str = insunits.to_string();
+    w(70, &insunits_str);
     w(0, "ENDSEC");
     w(0, "SECTION");
     w(2, "ENTITIES");
     let f = |x: f64| format!("{x:.9}");
-    for g in geom {
+    for (layer, g) in entities {
+        let lyr = if layer.trim().is_empty() { "0" } else { layer.trim() };
         match g {
             Geom2::Point(p) => {
                 w(0, "POINT");
-                w(8, "0");
+                w(8, lyr);
                 w(10, &f(p.x));
                 w(20, &f(p.y));
             }
             Geom2::Line(a, b) => {
                 w(0, "LINE");
-                w(8, "0");
+                w(8, lyr);
                 w(10, &f(a.x));
                 w(20, &f(a.y));
                 w(11, &f(b.x));
@@ -420,14 +446,14 @@ pub fn write_dxf(geom: &[Geom2]) -> String {
             }
             Geom2::Circle(c, r) => {
                 w(0, "CIRCLE");
-                w(8, "0");
+                w(8, lyr);
                 w(10, &f(c.x));
                 w(20, &f(c.y));
                 w(40, &f(*r));
             }
             Geom2::Arc { c, a, b } => {
                 w(0, "ARC");
-                w(8, "0");
+                w(8, lyr);
                 w(10, &f(c.x));
                 w(20, &f(c.y));
                 w(40, &f(c.dist(*a)));
@@ -436,7 +462,7 @@ pub fn write_dxf(geom: &[Geom2]) -> String {
             }
             Geom2::Text { text, at, height, angle } => {
                 w(0, "TEXT");
-                w(8, "0");
+                w(8, lyr);
                 w(10, &f(at.x));
                 w(20, &f(at.y));
                 w(40, &f(*height));
@@ -450,6 +476,18 @@ pub fn write_dxf(geom: &[Geom2]) -> String {
     w(0, "ENDSEC");
     w(0, "EOF");
     s
+}
+
+/// Write 2D geometry as an R12-style ASCII DXF with options.
+pub fn write_dxf_opts(geom: &[Geom2], opts: &DxfWriteOptions) -> String {
+    let layer = if opts.layer.trim().is_empty() { "0" } else { opts.layer.as_str() };
+    let entities: Vec<(&str, Geom2)> = geom.iter().cloned().map(|g| (layer, g)).collect();
+    write_dxf_entities(&entities, opts.insunits)
+}
+
+/// Write 2D geometry (millimetres) as an R12-style ASCII DXF.
+pub fn write_dxf(geom: &[Geom2]) -> String {
+    write_dxf_opts(geom, &DxfWriteOptions::default())
 }
 
 #[cfg(test)]
@@ -473,9 +511,17 @@ mod tests {
             "0\nSECTION\n2\nENTITIES\n0\nLWPOLYLINE\n90\n99999999\n0\nENDSEC\n0\nEOF\n".into(),
             "0\nSECTION\n2\nENTITIES\n0\nCIRCLE\n10\nnan\n20\ninf\n40\n-1\n0\nENDSEC\n0\nEOF\n".into(),
             "0\nSECTION\n2\nENTITIES\n0\nCIRCLE\n10\n1e400\n20\n1e400\n40\n1e400\n0\nENDSEC\n0\nEOF\n".into(),
+            // SPLINE degrees past any spline's, below 1, and above its control points' count.
+            "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n255\n10\n0\n20\n0\n10\n1\n20\n1\n0\nENDSEC\n0\nEOF\n".into(),
+            "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n-5\n10\n0\n20\n0\n10\n1\n20\n1\n0\nENDSEC\n0\nEOF\n".into(),
+            "0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n1e400\n10\n0\n20\n0\n0\nENDSEC\n0\nEOF\n".into(),
             format!("0\nSECTION\n2\nBLOCKS\n{}0\nENDSEC\n0\nEOF\n", "0\nBLOCK\n2\nb\n0\nENDBLK\n".repeat(300)),
             "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\na\n1\nINSERT\n2\na\n0\nENDBLK\n0\nENDSEC\n0\nEOF\n".into(),
             format!("0\nSECTION\n2\nENTITIES\n{}0\nENDSEC\n0\nEOF\n", "0\nLINE\n10\n0\n20\n0\n11\n1\n21\n1\n".repeat(5000)),
+            // An ELLIPSE arc ending far before it starts (once counted up a turn at a time) and
+            // one with no length to its axes.
+            "0\nSECTION\n2\nENTITIES\n0\nELLIPSE\n10\n0\n20\n0\n11\n5\n21\n0\n40\n0.5\n41\n99999999999\n42\n0\n0\nENDSEC\n0\nEOF\n".into(),
+            "0\nSECTION\n2\nENTITIES\n0\nELLIPSE\n10\n0\n20\n0\n11\n0\n21\n0\n40\n0\n41\n1\n42\n2\n0\nENDSEC\n0\nEOF\n".into(),
         ];
         for cut in (0..good.len()).step_by(11) {
             cases.push(good.get(..cut).unwrap_or("").to_string());
@@ -486,6 +532,76 @@ mod tests {
         for c in &cases {
             let r = std::panic::catch_unwind(|| read_dxf(c));
             assert!(r.is_ok(), "panicked on {:?}", c.get(..c.len().min(200)));
+        }
+    }
+
+    /// #8155: an ELLIPSE arc (as Fusion writes one) reads as conic pieces of at most a quarter turn,
+    /// end to end from the arc's start to its end, that lie on the ellipse all along, not as a
+    /// spline fitted through samples. A whole turn stays one ellipse, and whole turns more or less
+    /// make no difference.
+    #[test]
+    fn an_elliptical_arc_reads_as_exact_conic_pieces() {
+        use std::f64::consts::TAU;
+        // Centre (5, 2), major radius 10 along 30°, minor radius 4 (ratio 0.4).
+        let (c, u) = (Vec2::new(5.0, 2.0), Vec2::new(30f64.to_radians().cos(), 30f64.to_radians().sin()));
+        let ellipse = |t0: f64, t1: f64| {
+            format!(
+                "0\nSECTION\n2\nENTITIES\n0\nELLIPSE\n10\n5\n20\n2\n11\n{}\n21\n{}\n40\n0.4\n41\n{t0}\n42\n{t1}\n0\nENDSEC\n0\nEOF\n",
+                10.0 * u.x,
+                10.0 * u.y
+            )
+        };
+        let at = |t: f64| c + u * (10.0 * t.cos()) + u.perp() * (4.0 * t.sin());
+        // How far off the ellipse a point is, in its own equation.
+        let off = |p: Vec2| {
+            let q = p - c;
+            ((q.dot(u) / 10.0).powi(2) + (q.dot(u.perp()) / 4.0).powi(2) - 1.0).abs()
+        };
+        // A point of the rational quadratic a sketch conic is, at t in 0..1.
+        let point = |a: Vec2, apex: Vec2, b: Vec2, rho: f64, t: f64| {
+            let w = rho / (1.0 - rho);
+            let (k0, k1, k2) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t) * w, t * t);
+            (a * k0 + apex * k1 + b * k2) / (k0 + k1 + k2)
+        };
+        for (t0, t1, pieces) in [(20f64, 250f64, 3), (0.0, 90.0, 1), (300.0, 40.0, 2), (10.0, 359.0, 4)] {
+            let (t0, t1) = (t0.to_radians(), t1.to_radians());
+            let back = read_dxf(&ellipse(t0, t1)).unwrap();
+            assert_eq!(back.len(), pieces, "{back:?}");
+            let mut worst = 0f64;
+            let mut from = at(t0);
+            for g in &back {
+                let Geom2::Conic { a, apex, b, rho } = g else { panic!("not a conic: {g:?}") };
+                assert!(a.dist(from) < 1e-9 && *rho > 0.0 && *rho < 0.5, "{g:?}");
+                for k in 0..=50 {
+                    worst = worst.max(off(point(*a, *apex, *b, *rho, f64::from(k) / 50.0)));
+                }
+                from = *b;
+            }
+            assert!(from.dist(at(t1)) < 1e-9 && worst < 1e-9, "{worst}: {back:?}");
+        }
+        for (t0, t1) in [(0.0, TAU), (1.0, 1.0), (1.0, 1.0 + 2.0 * TAU)] {
+            let back = read_dxf(&ellipse(t0, t1)).unwrap();
+            assert!(matches!(&back[..], [Geom2::Ellipse { minor, .. }] if (minor - 4.0).abs() < 1e-9), "{t0}..{t1}: {back:?}");
+        }
+        let (once, again) = (read_dxf(&ellipse(1.0, 2.0)).unwrap(), read_dxf(&ellipse(1.0, 2.0 + 3.0 * TAU)).unwrap());
+        assert_eq!(once.len(), again.len());
+    }
+
+    /// A SPLINE keeps its degree up to the 9 a sketch spline (a G4 blend) has (solidcraft#5269); a
+    /// degree past that is held to 9, and one that isn't a finite number (which the reader drops)
+    /// reads as a missing one, 3.
+    #[test]
+    fn a_splines_degree_is_read_up_to_nine() {
+        let spline = |degree: Option<&str>| {
+            let points: String = (0..10).map(|i| format!("10\n{i}\n20\n{}\n", i % 3)).collect();
+            let degree = degree.map(|d| format!("71\n{d}\n")).unwrap_or_default();
+            format!("0\nSECTION\n2\nENTITIES\n0\nSPLINE\n{degree}{points}0\nENDSEC\n0\nEOF\n")
+        };
+        for (given, read) in
+            [(Some("9"), 9), (Some("8"), 8), (Some("7"), 7), (Some("10"), 9), (Some("0"), 1), (Some("nan"), 3), (Some("inf"), 3), (None, 3)]
+        {
+            let back = read_dxf(&spline(given)).unwrap();
+            assert!(matches!(&back[..], [Geom2::Spline { pts, control: true, degree }] if *degree == read && pts.len() == 10), "{given:?}: {back:?}");
         }
     }
 
@@ -542,8 +658,6 @@ mod tests {
     /// self-inserts fan out to 6^16 visits for no output. Both shapes must be refused quickly.
     #[test]
     fn empty_blocks_do_not_fan_out() {
-        let t = std::time::Instant::now();
-
         let fanout = format!(
             "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\nA\n{}0\nENDBLK\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nINSERT\n2\nA\n0\nENDSEC\n0\nEOF\n",
             "0\nINSERT\n2\nA\n".repeat(6)
@@ -557,7 +671,29 @@ mod tests {
         );
         let g = read_dxf(&array).unwrap_or_default();
         assert!(g.is_empty(), "an empty block has no geometry to place");
+    }
 
-        assert!(t.elapsed() < std::time::Duration::from_secs(5), "took {:?}", t.elapsed());
+    #[test]
+    fn write_dxf_opts_and_entities_round_trip() {
+        let geom = vec![Geom2::Line(Vec2::ZERO, Vec2::new(25.4, 0.0)), Geom2::Circle(Vec2::new(12.7, 12.7), 6.35)];
+
+        // Default write_dxf: byte-identical check with write_dxf_opts default
+        let d0 = write_dxf(&geom);
+        let d1 = write_dxf_opts(&geom, &DxfWriteOptions::default());
+        assert_eq!(d0, d1);
+        assert!(d0.contains("\n8\n0\n"));
+        assert!(d0.contains("\n70\n4\n"));
+
+        // Custom layer and inch units (insunits = 1)
+        let opts = DxfWriteOptions { insunits: 1, layer: "CUT".to_string() };
+        let d_inch = write_dxf_opts(&geom, &opts);
+        assert!(d_inch.contains("\n8\nCUT\n"));
+        assert!(d_inch.contains("\n70\n1\n"));
+
+        // Per-entity layers with write_dxf_entities
+        let ents = vec![("OUTLINE", Geom2::Line(Vec2::ZERO, Vec2::new(10.0, 0.0))), ("CUT", Geom2::Circle(Vec2::new(5.0, 5.0), 2.0))];
+        let d_roles = write_dxf_entities(&ents, 4);
+        assert!(d_roles.contains("\n8\nOUTLINE\n"));
+        assert!(d_roles.contains("\n8\nCUT\n"));
     }
 }

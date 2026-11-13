@@ -7,3 +7,7 @@ license.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+# Saving a calibration with the app's preferences; off by default, so the crate needs nothing.
+serde = { workspace = true, optional = true }

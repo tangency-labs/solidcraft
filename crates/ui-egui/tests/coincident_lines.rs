@@ -1,19 +1,14 @@
 //! Coincident accepts clicked line bodies as well as explicit sketch points.
 
+mod support;
+
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::ConstraintKind;
 use solidcraft_ui_egui::scenario::Harness;
 
 fn setup() -> Harness {
-    let mut h = Harness::new();
-    h.run(&json!([
-        {"call":"engine.execute","params":{"command":"sketch.create","params":{"plane":"XY"}}},
-        {"call":"engine.execute","params":{"command":"sketch.line","params":{"points":[[10,10],[30,10]],"infer":false,"connect":false}}},
-        {"call":"engine.execute","params":{"command":"sketch.line","params":{"points":[[35,15],[35,40]],"infer":false,"connect":false}}},
-        {"call":"ui.view","params":{"view":"top"}}
-    ]))
-    .unwrap();
-    h
+    support::sketch_lines(&[[[10, 10], [30, 10]], [[35, 15], [35, 40]]], Some(false))
 }
 
 #[test]

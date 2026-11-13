@@ -1,0 +1,100 @@
+{
+  "description": "#2435: a 30 mm loft from radii 20/12 to 14/8 keeps its tapered passage. Expected volume: 5720*pi mm^3. Previously refused every section containing a hole.",
+  "commands": [
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY",
+        "offset": 0,
+        "name": "Bottom"
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          0,
+          0
+        ],
+        "radius": 20
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          0,
+          0
+        ],
+        "radius": 12
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY",
+        "offset": 30,
+        "name": "Top"
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          0,
+          0
+        ],
+        "radius": 14
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          0,
+          0
+        ],
+        "radius": 8
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.loft",
+      "params": {
+        "sections": [
+          {
+            "sketch": "Bottom",
+            "profiles": [
+              {
+                "point": [
+                  16,
+                  0
+                ]
+              }
+            ]
+          },
+          {
+            "sketch": "Top",
+            "profiles": [
+              {
+                "point": [
+                  11,
+                  0
+                ]
+              }
+            ]
+          }
+        ],
+        "operation": "new",
+        "name": "Hollow loft"
+      }
+    }
+  ]
+}

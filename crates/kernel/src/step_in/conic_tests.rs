@@ -4,10 +4,6 @@
 
 use std::f64::consts::{FRAC_PI_4, PI};
 
-use mt::{BoundedCurve, InnerSpace, ParametricCurve};
-use truck_modeling as mt;
-
-use super::geom::{Frame, hyperbola_arc, parabola_arc};
 use super::*;
 use crate::{measure, step_export};
 
@@ -135,6 +131,8 @@ fn hyperbola_bounded_faces_import() {
     assert!(rel(want, 175.447_506_9) < 1e-9, "{want}");
     let imp = import_piece(&hyperbola_piece(), want);
     round_trip(&imp, want);
+    let v = super::tests::schema_4_volume(&hyperbola_piece());
+    assert!(rel(v, want) < 1e-4, "schema 4: {v} vs {want}");
 }
 
 #[test]
@@ -143,34 +141,8 @@ fn parabola_bounded_faces_import() {
     assert!(rel(want, 447.014_684_29) < 1e-9, "{want}");
     let imp = import_piece(&parabola_piece(), want);
     round_trip(&imp, want);
-}
-
-/// The kernel curves lie exactly on the conics, end to end, whichever way they run.
-#[test]
-fn conic_arcs_are_exact() {
-    let f = Frame { o: mt::Point3::new(1.0, 2.0, 3.0), x: mt::Vector3::unit_y(), y: mt::Vector3::unit_z(), z: mt::Vector3::unit_x() };
-    let local = |p: mt::Point3| ((p - f.o).dot(f.x), (p - f.o).dot(f.y), (p - f.o).dot(f.z));
-    for (t0, t1) in [(-1.5, 2.0), (3.0, -0.25), (0.0, 7.5)] {
-        let c = hyperbola_arc(&f, 3.0, 2.0, t0, t1);
-        let (s0, s1) = c.range_tuple();
-        for i in 0..=200 {
-            let (x, y, z) = local(c.subs(s0 + (s1 - s0) * i as f64 / 200.0));
-            assert!((x * x / 9.0 - y * y / 4.0 - 1.0).abs() < 1e-9 && x > 0.0 && z.abs() < 1e-12, "{x} {y}");
-        }
-        let (x, y, _) = local(c.subs(s0));
-        assert!((x - 3.0 * f64::cosh(t0)).abs() < 1e-9 && (y - 2.0 * f64::sinh(t0)).abs() < 1e-9);
-        let (x, y, _) = local(c.subs(s1));
-        assert!((x - 3.0 * f64::cosh(t1)).abs() < 1e-9 && (y - 2.0 * f64::sinh(t1)).abs() < 1e-9);
-
-        let c = parabola_arc(&f, 1.5, t0, t1);
-        let (s0, s1) = c.range_tuple();
-        for i in 0..=200 {
-            let (x, y, z) = local(c.subs(s0 + (s1 - s0) * i as f64 / 200.0));
-            assert!((y * y - 4.0 * 1.5 * x).abs() < 1e-9 * (1.0 + x.abs()) && z.abs() < 1e-12, "{x} {y}");
-        }
-        let (x, y, _) = local(c.subs(s1));
-        assert!((x - 1.5 * t1 * t1).abs() < 1e-9 && (y - 3.0 * t1).abs() < 1e-9);
-    }
+    let v = super::tests::schema_4_volume(&parabola_piece());
+    assert!(rel(v, want) < 1e-4, "schema 4: {v} vs {want}");
 }
 
 /// Hostile conics are errors (the face is reported and left out), never panics.
@@ -193,5 +165,42 @@ fn hostile_conics_never_panic() {
         if let Ok(imp) = r {
             assert!(!imp.warnings.is_empty(), "a broken conic imported silently");
         }
+    }
+}
+
+/// A cone to a point written with no vertex at its point (#258): the cone face's only loop is
+/// its base circle, or that circle and a VERTEX_LOOP at the point, which has no edges. It was
+/// read as a sliver at the base and the solid came in as a flat disc; the face reaches the
+/// point now.
+#[test]
+fn a_cone_bounded_only_by_its_base_circle_reaches_its_point() {
+    let (r, h) = (6.0f64, 15.0f64);
+    for apex_loop in [false, true] {
+        let mut t = String::from(HEAD);
+        t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,-1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
+        t += &format!("#5=CONICAL_SURFACE('',#4,{r:.1},{:.15});\n", (r / h).atan());
+        t += "#6=DIRECTION('',(0.,0.,1.));\n#7=AXIS2_PLACEMENT_3D('',#1,#6,#3);\n#8=PLANE('',#7);\n";
+        t += &format!("#9=CIRCLE('',#7,{r:.1});\n#10=CARTESIAN_POINT('',({r:.1},0.,0.));\n#11=VERTEX_POINT('',#10);\n");
+        t += "#12=EDGE_CURVE('',#11,#11,#9,.T.);\n";
+        t += "#20=ORIENTED_EDGE('',*,*,#12,.F.);\n#21=EDGE_LOOP('',(#20));\n#22=FACE_OUTER_BOUND('',#21,.T.);\n#23=ADVANCED_FACE('',(#22),#8,.F.);\n";
+        t += "#30=ORIENTED_EDGE('',*,*,#12,.T.);\n#31=EDGE_LOOP('',(#30));\n#32=FACE_OUTER_BOUND('',#31,.T.);\n";
+        if apex_loop {
+            t += &format!(
+                "#33=CARTESIAN_POINT('',(0.,0.,{h:.1}));\n#34=VERTEX_POINT('',#33);\n#35=VERTEX_LOOP('',#34);\n#36=FACE_BOUND('',#35,.T.);\n"
+            );
+            t += "#37=ADVANCED_FACE('',(#32,#36),#5,.T.);\n";
+        } else {
+            t += "#37=ADVANCED_FACE('',(#32),#5,.T.);\n";
+        }
+        t += "#80=CLOSED_SHELL('',(#23,#37));\n#81=MANIFOLD_SOLID_BREP('Cone',#80);\n";
+        t += CONTEXT;
+        t += TAIL;
+        let imp = step_import(&t).unwrap();
+        let body = &imp.bodies[0].body;
+        let m = measure(body).unwrap();
+        let exact = PI * r * r * h / 3.0;
+        assert!(rel(m.volume, exact) < 2e-3, "vertex loop {apex_loop}: volume {} vs {exact}", m.volume);
+        let top = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().positions.iter().map(|p| p.z).fold(f64::MIN, f64::max);
+        assert!((top - h).abs() < 1e-6, "vertex loop {apex_loop}: reaches z = {top}, not {h}");
     }
 }

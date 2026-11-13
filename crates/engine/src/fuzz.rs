@@ -8,7 +8,8 @@
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::MeshGeom;
 use solidcraft_kernel::fuzz::Rng;
 pub use solidcraft_kernel::fuzz::{BoolCase, boolean_case, boolean_shapes};
 
@@ -64,8 +65,6 @@ pub struct Run {
     pub unsupported: Vec<(String, String)>,
     /// Steps whose generated parameters a command refused.
     pub rejected: usize,
-    pub boolean_fallbacks: std::collections::BTreeMap<solidcraft_kernel::BooleanStrategy, usize>,
-    pub boolean_reports_truncated: bool,
 }
 
 impl Run {
@@ -83,15 +82,19 @@ fn classify(e: &EngineError) -> Outcome {
     let msg = e.to_string();
     match e {
         EngineError::Internal(..) => Outcome::new("panic", msg),
-        EngineError::BadParams { .. } | EngineError::Disabled(..) | EngineError::UnknownCommand(_) => Outcome::new("rejected", msg),
-        // A failed boolean is a failure even when it says "not supported" (the planar fallback on
-        // curved bodies): those are the cases to fix. Features the kernel doesn't do yet (a
-        // fillet between curved faces) are limitations.
+        EngineError::Panel(_)
+        | EngineError::BadParams { .. }
+        | EngineError::Disabled(..)
+        | EngineError::Refused { .. }
+        | EngineError::Cancelled(_)
+        | EngineError::UnknownCommand(_) => Outcome::new("rejected", msg),
+        // A failed boolean is a failure even when it says "not supported": those are the cases
+        // to fix. Features the kernel doesn't do yet are limitations.
         // Picks the generator got wrong (a centroid off its face).
         EngineError::Other(_) if msg.starts_with("invalid input") => Outcome::new("rejected", msg),
         EngineError::Other(_) if msg.contains("boolean") => Outcome::new("failed", msg),
         EngineError::Other(_) if msg.contains("not supported") || msg.contains("only ") => Outcome::new("unsupported", msg),
-        EngineError::Other(_) => Outcome::new("failed", msg),
+        EngineError::Other(_) | EngineError::Plugin(_) => Outcome::new("failed", msg),
     }
 }
 
@@ -246,7 +249,9 @@ fn next_step(r: &mut Rng, s: &Session, last_feature: &Option<String>) -> Option<
             let edges = body.body.edges(tol).ok()?;
             let n = 1 + r.below(3);
             let picks: Vec<[f64; 3]> = (0..n).filter_map(|_| edges.get(r.below(edges.len()))).map(|e| [e.mid.x, e.mid.y, e.mid.z]).collect();
-            step("chamfer", Expect::Shrink, vec![("solid.chamfer", json!({"edges": picks, "distance": r.pick(&[0.5, 1.0, 2.0])?}))])
+            // Any, as for fillets: the edges are picked at random, and a chamfer on a concave edge
+            // fills the corner, so it adds material.
+            step("chamfer", Expect::Any, vec![("solid.chamfer", json!({"edges": picks, "distance": r.pick(&[0.5, 1.0, 2.0])?}))])
         }
         8 => {
             let faces: Vec<_> = body.body.faces(tol).ok()?.into_iter().filter(|f| f.plane_normal.is_some()).collect();
@@ -292,55 +297,11 @@ pub fn run_with(seed: u64, max_steps: usize, on_step: &mut dyn FnMut(&Step)) -> 
     run_session(seed, max_steps, on_step).0
 }
 
-/// What a seed builds, as recorded in the robustness goldens (`tests/robustness/goldens.json`):
-/// the steps, how it ended (with the start of the message when it did not end ok) and, for the
-/// design it left, its bodies' total volume and area and their face, edge and shell counts.
-pub fn golden(seed: u64, max_steps: usize) -> Value {
-    let (run, s) = run_session(seed, max_steps, &mut |_| {});
-    let st = s.model.state();
-    let (mut volume, mut area, mut faces, mut edges, mut shells) = (0.0, 0.0, 0, 0, 0);
-    let mut measured = true;
-    for b in &st.bodies {
-        match solidcraft_kernel::measure(&b.body) {
-            Ok(m) => {
-                volume += m.volume;
-                area += m.area;
-                faces += m.faces;
-                edges += m.edges;
-                shells += m.shells;
-            }
-            Err(_) => measured = false,
-        }
-    }
-    let round = |x: f64| (x * 1e6).round() / 1e6;
-    json!({
-        "steps": run.steps.iter().map(|st| st.kind).collect::<Vec<_>>(),
-        "outcome": run.outcome.kind,
-        "error": (run.outcome.kind != "ok").then(|| gist(&run.outcome.detail)),
-        "unsupported": run.unsupported.len(),
-        "rejected": run.rejected,
-        "bodies": st.bodies.len(),
-        "volume": measured.then(|| round(volume)),
-        "area": measured.then(|| round(area)),
-        "faces": faces,
-        "edges": edges,
-        "shells": shells,
-    })
-}
-
 /// [`run_with`], and the session the run left.
 fn run_session(seed: u64, max_steps: usize, on_step: &mut dyn FnMut(&Step)) -> (Run, Session) {
     let mut r = Rng::new(seed);
     let mut s = Session::default();
-    let mut run = Run {
-        seed,
-        steps: Vec::new(),
-        outcome: Outcome::ok(),
-        unsupported: Vec::new(),
-        rejected: 0,
-        boolean_fallbacks: Default::default(),
-        boolean_reports_truncated: false,
-    };
+    let mut run = Run { seed, steps: Vec::new(), outcome: Outcome::ok(), unsupported: Vec::new(), rejected: 0 };
     let mut last_feature: Option<String> = None;
     let n = 2 + r.below(max_steps.max(2) - 1);
     let mut tries = 0;
@@ -365,12 +326,6 @@ fn run_session(seed: u64, max_steps: usize, on_step: &mut dyn FnMut(&Step)) -> (
             continue;
         }
         let kind = st.kind;
-        for result in s.model.results.iter().skip(before).filter(|result| result.error.is_none()) {
-            run.boolean_reports_truncated |= result.boolean_diagnostics.truncated;
-            for event in &result.boolean_diagnostics.events {
-                *run.boolean_fallbacks.entry(event.strategy).or_default() += 1;
-            }
-        }
         run.steps.push(st);
         if out.kind != "ok" {
             run.outcome = out;
@@ -386,19 +341,14 @@ fn run_session(seed: u64, max_steps: usize, on_step: &mut dyn FnMut(&Step)) -> (
 /// Run fixed steps (a recorded or minimised design): the index and outcome of the first step
 /// that isn't ok (or the last step's, ok).
 pub fn replay(steps: &[Step]) -> (usize, Outcome) {
-    let (index, outcome, _) = replay_session(steps);
-    (index, outcome)
-}
-
-fn replay_session(steps: &[Step]) -> (usize, Outcome, Session) {
     let mut s = Session::default();
     for (i, st) in steps.iter().enumerate() {
         let out = apply(&mut s, st);
         if out.kind != "ok" {
-            return (i, out, s);
+            return (i, out);
         }
     }
-    (steps.len().saturating_sub(1), Outcome::ok(), s)
+    (steps.len().saturating_sub(1), Outcome::ok())
 }
 
 /// The start of a message, to tell failures apart (numbers vary between versions of a case).
@@ -429,14 +379,86 @@ pub fn minimise(run: &Run) -> Run {
             }
         }
     }
-    let (_, outcome, session) = replay_session(&steps);
-    let mut boolean_fallbacks = std::collections::BTreeMap::new();
-    let mut boolean_reports_truncated = false;
-    for result in &session.model.results {
-        boolean_reports_truncated |= result.boolean_diagnostics.truncated;
-        for event in &result.boolean_diagnostics.events {
-            *boolean_fallbacks.entry(event.strategy).or_default() += 1;
-        }
+    let (_, outcome) = replay(&steps);
+    Run { seed: run.seed, steps, outcome, unsupported: Vec::new(), rejected: 0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    #[allow(clippy::expect_used)]
+    fn body_measures(s: &Session) -> Vec<solidcraft_kernel::BodyMeasure> {
+        s.model.state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).expect("measure a valid body")).collect()
     }
-    Run { seed: run.seed, steps, outcome, unsupported: Vec::new(), rejected: 0, boolean_fallbacks, boolean_reports_truncated }
+
+    fn seed_measures(seed: u64) -> Vec<solidcraft_kernel::BodyMeasure> {
+        let (run, s) = run_session(seed, 8, &mut |_| {});
+        assert_eq!(run.outcome.kind, "ok", "seed {seed}: {:?}", run.outcome);
+        body_measures(&s)
+    }
+
+    /// Seed 34: a quarter cylinder R15 x 12.5, a spherical bite R2.5 centred
+    /// at (10, 12.5, 0), and an independent R2 x 5 blind drill with a 118° tip.
+    /// The circular-lens surface/volume integrals give these references
+    /// independently of the B-rep and its measurement tessellation (docs/robustness.md).
+    #[test]
+    fn a_spherical_bite_and_blind_drill_match_the_analytic_solid() {
+        let measured = seed_measures(34);
+        assert_eq!(measured.len(), 1);
+        let m = &measured[0];
+        for (name, got, want) in [("volume", m.volume, 2_134.404_133), ("area", m.area, 1_086.316_691)] {
+            // measure uses a chordal mesh with a 5e-5 relative chord tolerance.
+            assert!((got - want).abs() <= 5e-5 * want, "{name}: {got} versus analytic {want}");
+        }
+        assert_eq!(m.merged.face_types, BTreeMap::from([("cone".into(), 1), ("cylinder".into(), 2), ("plane".into(), 4), ("sphere".into(), 1)]));
+    }
+
+    /// The recorded seed-67 design: a notched extrusion with bores and a boss,
+    /// and a chamfered block with a patterned bore. Freeze the commands because
+    /// retaining disconnected shells in one body (#2247) changes later generator picks.
+    /// Redundant raw subdivisions must preserve the original analytic surface inventory.
+    #[test]
+    fn a_patterned_bore_preserves_the_analytic_surfaces() {
+        let commands = [
+            ("sketch.create", json!({"plane":"XY"})),
+            ("sketch.line", json!({"points":[[0,0],[30.0,0],[30.0,32.5],[17.5,32.5],[17.5,17.5],[10.0,17.5],[10.0,32.5],[0,32.5]]})),
+            ("sketch.arc.three_point", json!({"end":[0,0],"start":[0,32.5],"through":[-15.0,16.25]})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance":20.0})),
+            ("solid.cylinder", json!({"axis":[0.0,0.0,-1.0],"base":[-0.0,0.0,20.00000000000001],"height":2.5,"operation":"cut","radius":6.25})),
+            ("solid.hole", json!({"diameter":6.0,"position":[13.749999999999998,17.5,10.00000000000001]})),
+            ("solid.cylinder", json!({"axis":[0.0,0.0,1.0],"base":[-5.0,12.5,2.5],"height":30.0,"operation":"join","radius":3.75})),
+            (
+                "solid.box",
+                json!({"corner":[-14.999881984669182,22.5,32.500000000000014],"height":20.0,"length":12.5,"operation":"join","width":12.5}),
+            ),
+            ("solid.hole", json!({"depth":12.5,"diameter":4.0,"position":[-8.749881984669182,28.75,32.500000000000014]})),
+            (
+                "solid.chamfer",
+                json!({"distance":0.5,"edges":[[-2.499881984669182,28.75,32.500000000000014],[-9.900529629797113,27.11414854074047,32.500000000000014],[-8.749881984669182,35.0,32.500000000000014]]}),
+            ),
+            ("solid.pattern.rectangular", json!({"count1":2,"dir1":[1.0,0.0,0.0],"features":["Hole2"],"spacing1":7.5})),
+        ];
+        let mut s = Session::default();
+        for (command, params) in commands {
+            let result = s.execute(command, &params);
+            assert!(result.is_ok(), "{command}: {result:?}");
+            for body in &s.model.state().bodies {
+                assert!(body.body.validity().is_empty(), "{command}: {:?}", body.body.validity());
+            }
+        }
+        let measured = body_measures(&s);
+        assert_eq!(measured.len(), 1);
+        assert_eq!(measured.iter().map(|m| m.shells).sum::<usize>(), 2);
+        let mut kinds = BTreeMap::new();
+        for m in &measured {
+            for (kind, count) in &m.merged.face_types {
+                *kinds.entry(kind.clone()).or_insert(0) += count;
+            }
+        }
+        assert_eq!(kinds, BTreeMap::from([("cone".into(), 1), ("cylinder".into(), 6), ("plane".into(), 22)]));
+    }
 }

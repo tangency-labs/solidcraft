@@ -13,7 +13,9 @@ fn arrows_move_user_parameters_up_and_down() {
     for (n, e) in [("a", "1 mm"), ("b", "2 mm"), ("c", "3 mm")] {
         h.app.session.execute("parameters.add", &json!({"name": n, "expression": e})).unwrap();
     }
-    h.step(&json!({"widget":"Parameters"})).unwrap();
+    // The Browser's Parameters row starts this command; the ribbon shows only the active tab.
+    h.call("ui.start", json!({"command":"parameters.change"}));
+    h.frames(3);
     assert!(h.app.params.is_some());
     h.frames(3);
     h.run(&json!([{"click":{"handle":"param:after:a"}}])).unwrap();

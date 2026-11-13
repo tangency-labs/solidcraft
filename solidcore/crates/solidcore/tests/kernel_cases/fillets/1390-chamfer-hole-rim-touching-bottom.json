@@ -1,0 +1,201 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "not supported yet: a corner of this kind is not supported yet by SMLib's blends",
+      "inputs": [
+        "b16"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  10.000000000000002,
+                  20.0,
+                  0.0
+                ],
+                [
+                  14.089340965789887,
+                  20.0,
+                  7.8770280613008685
+                ]
+              ],
+              "index": 4
+            },
+            {
+              "at": [
+                [
+                  14.089340965789887,
+                  20.0,
+                  7.8770280613008685
+                ],
+                [
+                  10.000000000000002,
+                  20.0,
+                  0.0
+                ]
+              ],
+              "index": 5
+            },
+            {
+              "at": [
+                [
+                  10.000000000000002,
+                  20.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  20.0,
+                  0.0
+                ]
+              ],
+              "index": 6
+            },
+            {
+              "at": [
+                [
+                  20.0,
+                  20.0,
+                  0.0
+                ],
+                [
+                  10.000000000000002,
+                  20.0,
+                  0.0
+                ]
+              ],
+              "index": 9
+            }
+          ],
+          "points": [
+            [
+              14.42609140090168,
+              19.999999999999996,
+              2.7004358211515114
+            ],
+            [
+              5.573042100335415,
+              19.999999999999996,
+              7.299771442371119
+            ],
+            [
+              5.000000000000001,
+              20.0,
+              0.0
+            ],
+            [
+              15.0,
+              20.0,
+              0.0
+            ]
+          ],
+          "tolerance": 1.7330508075688775
+        },
+        "kind": "chamfer",
+        "sizes": [
+          3.0,
+          3.0,
+          3.0,
+          3.0
+        ]
+      }
+    }
+  ],
+  "case": "1390-chamfer-hole-rim-touching-bottom",
+  "expected": {
+    "method": "cube 20 with a diameter 10 hole along -Y from the back face, its axis at z=5 so the hole wall touches the bottom face z=0 along one line. The hole rim on the back face has no face material between it and the bottom edge there, so a 3 mm setback cannot lie on the face: no chamfer of that size exists. The right answer is a clean refusal (a chamfer of a convex edge only ever removes material; building it grew the part by 1067 mm3 below the bottom face). SMLib refuses it today at the vertex where the rim runs tangentially into the bottom edge: no blend corner it builds handles that, and the refusal says so (the honest reason today; a too-large refusal would need the corner first).",
+    "outcome": "refused",
+    "refusal": "meets a corner of this kind",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#1390",
+      "tangency-labs/solidcraft#1574",
+      "tangency-labs/solidcraft#1428"
+    ],
+    "what": "a 3 mm chamfer on the rim of a hole tangent to the bottom face runs off that face: refused, today because SMLib's blends have no corner of the kind where the rim meets the bottom tangentially (never material added below the part)"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 3 (solid.chamfer): invalid input: not supported yet: the chamfer meets a corner of this kind, which SMLib's blends do not handle yet (where its edges run on tangentially into each other, or meet in a way no blend corner builds) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "kernel_error": "not supported yet: a corner of this kind is not supported yet by SMLib's blends",
+    "ran": false
+  },
+  "records": "1390-chamfer-hole-rim-touching-bottom.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 3 (solid.chamfer): invalid input: not supported yet: the chamfer meets a corner of this kind, which SMLib's blends do not handle yet (where its edges run on tangentially into each other, or meet in a way no blend corner builds) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1390",
+    "tangency-labs/solidcraft#1574",
+    "tangency-labs/solidcraft#1428"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "refusal \"meets a corner of this kind\": SolidCraft's wording of the kernel's error"
+  ],
+  "what": "a 3 mm chamfer on the rim of a hole tangent to the bottom face runs off that face: refused, today because SMLib's blends have no corner of the kind where the rim meets the bottom tangentially (never material added below the part)",
+  "why_not": []
+}

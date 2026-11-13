@@ -17,6 +17,62 @@ fn body(s: &mut Session, b: &str) -> Value {
     run(s, "inspect.measure", json!({ "bodies": [b] }))["bodies"][0].clone()
 }
 
+fn stepped_block() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "step_height", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-5, -5], "p1": [5, 5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "step_height", "operation": "join"}));
+    s
+}
+
+/// A column beside a step ends at the step's top, including when the To point lies on an
+/// edge or corner shared with a vertical wall (#3729).
+#[test]
+fn extrude_to_a_planar_face_boundary_ends_at_its_plane() {
+    for to in [[5, 0, 20], [5, 5, 20], [0, 0, 20], [1000, 1000, 20]] {
+        let mut s = stepped_block();
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+        run(&mut s, "sketch.circle.center", json!({"center": [8, 0], "radius": 1.5}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"to": to, "operation": "join"}));
+        let b = body(&mut s, "Block");
+        let top = b["bbox"]["max"][2].as_f64().unwrap();
+        let volume = b["volume_mm3"].as_f64().unwrap();
+        assert!((top - 20.0).abs() < 1e-6, "To {to:?}: z max {top}");
+        assert!((volume - (5000.0 + 10.0 * PI * 1.5 * 1.5)).abs() < 0.1, "To {to:?}: volume {volume}");
+    }
+}
+
+/// The face chosen at an edge must also be the stored reference: raising the step must raise
+/// the end of the extrusion, including after a save/reload.
+#[test]
+fn extrude_to_a_planar_face_boundary_follows_it_after_reload() {
+    for to in [[5, 0, 20], [5, 5, 20]] {
+        let mut s = stepped_block();
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 30], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+        run(&mut s, "sketch.circle.center", json!({"center": [8, 0], "radius": 1.5}));
+        run(&mut s, "sketch.finish", json!({}));
+        // A negative reach with an offset past the target, away from the start.
+        run(&mut s, "solid.extrude", json!({"to": to, "to_offset": 2, "operation": "new", "body_name": "Post"}));
+        let b = body(&mut s, "Post");
+        assert!((b["bbox"]["min"][2].as_f64().unwrap() - 18.0).abs() < 1e-6, "{b}");
+        let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        let mut cold = Session::new(doc);
+        for current in [&mut s, &mut cold] {
+            run(current, "parameters.change", json!({"name": "step_height", "expression": "15 mm"}));
+            let b = body(current, "Post");
+            let volume = b["volume_mm3"].as_f64().unwrap();
+            assert!((b["bbox"]["min"][2].as_f64().unwrap() - 23.0).abs() < 1e-6, "{b}");
+            assert!((b["bbox"]["max"][2].as_f64().unwrap() - 30.0).abs() < 1e-6, "{b}");
+            assert!((volume - 7.0 * PI * 1.5 * 1.5).abs() < 0.1, "{b}");
+            assert!(current.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", current.model.results);
+        }
+    }
+}
+
 /// A square post extruded up to a horizontal cylinder (axis along x, r 10, centre z 30): its
 /// top takes the cylinder's shape, so the post is shortest in the middle.
 #[test]
@@ -124,4 +180,113 @@ fn extrude_to_a_cylinder_beside_another_body() {
     let end = b["bbox"]["max"][0].as_f64().unwrap_or(f64::MAX);
     assert!((end + (2.75f64 * 2.75 - 1.5 * 1.5).sqrt()).abs() < 1e-3, "{b}");
     assert!((b["bbox"]["min"][0].as_f64().unwrap_or(0.0) + 98.0).abs() < 1e-6, "{b}");
+}
+
+/// A window cut To Object through the side of a tube (r 20 outside, 18 inside), up to the inside
+/// face: it takes the wall under the profile and nothing else. Before, the tool ended in the
+/// curved inner face: the tool less the tube kept only the air before the wall and cut nothing,
+/// or the boolean failed on the coincident curved faces. Picking the outside face from inside
+/// the wall cuts back to it.
+#[test]
+fn cut_to_the_far_side_of_a_curved_wall() {
+    let tube = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 20, "body_name": "Tube"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Bore"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 18}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Bore", "distance": 20, "operation": "cut"}));
+        s
+    };
+    let volume = |s: &mut Session| body(s, "Tube")["volume_mm3"].as_f64().unwrap_or(0.0);
+    let wall = |x: f64, r: f64| (r * r - x * x).sqrt();
+    let n = 2000;
+    let between = |r0: f64, r1: f64| -> f64 {
+        (0..n).map(|i| -3.0 + 6.0 * (i as f64 + 0.5) / n as f64).map(|x| (wall(x, r1) - wall(x, r0)) * 4.0 * 6.0 / n as f64).sum()
+    };
+    // From outside the tube, through the wall, to its inside face.
+    let mut s = tube();
+    let whole = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -30, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Window"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-3, 8], "p1": [3, 12]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Window", "to": [0, -18, 10], "operation": "cut"}));
+    let removed = whole - volume(&mut s);
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    // The same window cut 20 mm, ending in the bore: the tube's own facets set its volume.
+    let mut plain = tube();
+    run(&mut plain, "sketch.create", json!({"plane": {"origin": [0, -30, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Window"}));
+    run(&mut plain, "sketch.rectangle.two_point", json!({"p0": [-3, 8], "p1": [3, 12]}));
+    run(&mut plain, "sketch.finish", json!({}));
+    run(&mut plain, "solid.extrude", json!({"sketch": "Window", "distance": -20, "operation": "cut"}));
+    let reference = whole - volume(&mut plain);
+    assert!((removed - reference).abs() < reference * 1e-6, "removed {removed}, a 20 mm cut {reference}");
+    let want = between(18.0, 20.0);
+    assert!((removed - want).abs() < want * 2e-2, "removed {removed}, want {want}");
+    // From inside the wall (y = -19) back out to the outside face.
+    let mut s = tube();
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -19, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Window"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-3, 8], "p1": [3, 12]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Window", "to": [0, -20, 10], "operation": "cut"}));
+    let removed = whole - volume(&mut s);
+    let want: f64 = (0..n).map(|i| -3.0 + 6.0 * (i as f64 + 0.5) / n as f64).map(|x| (wall(x, 20.0) - 19.0) * 4.0 * 6.0 / n as f64).sum();
+    assert!((removed - want).abs() < want * 2e-2, "removed {removed}, want {want}");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+}
+
+/// #12617: a To Object offset past a curved face used to change nothing: the tool is cut back to
+/// the face, which removes the very part the offset added, so the Cut took nothing off. It is
+/// refused with a reason instead. An offset of 0 or short of the face is not refused.
+#[test]
+fn a_to_offset_past_a_curved_face_is_refused_not_ignored() {
+    let window = |s: &mut Session, to_offset: f64| {
+        run(s, "sketch.create", json!({"plane": {"origin": [0, -30, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+        run(s, "sketch.rectangle.two_point", json!({"p0": [-3, 8], "p1": [3, 12]}));
+        run(s, "sketch.finish", json!({}));
+        s.execute("solid.extrude", &json!({"to": [0, -18, 10], "to_offset": to_offset, "operation": "cut"}))
+    };
+    let tube = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 20, "body_name": "Tube"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Bore"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 18}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Bore", "distance": 20, "operation": "cut"}));
+        s
+    };
+    let mut s = tube();
+    let whole = body(&mut s, "Tube")["volume_mm3"].as_f64().unwrap();
+    let err = window(&mut s, 2.0).expect_err("an offset past the curved wall is refused");
+    assert!(err.to_string().contains("curved") && err.to_string().contains("offset"), "{err}");
+    assert_eq!(body(&mut s, "Tube")["volume_mm3"].as_f64().unwrap(), whole, "a refused cut changes nothing");
+    // No offset, and an offset short of the wall, are not refused.
+    for to_offset in [0.0, -1.0] {
+        let mut s = tube();
+        window(&mut s, to_offset).unwrap_or_else(|e| panic!("offset {to_offset}: {e}"));
+    }
+}
+
+/// #13188: a stored taper of 0 is a straight extrusion, also for a profile with a hole.
+#[test]
+fn extrude_with_a_taper_of_zero_on_a_profile_with_a_hole_is_straight() {
+    let volume = |taper: Option<&str>| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+        run(&mut s, "sketch.circle.center", json!({"center": [20, 15], "radius": 5}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"distance": 10, "body_name": "Plate"});
+        if let Some(t) = taper {
+            p["taper"] = json!(t);
+        }
+        run(&mut s, "solid.extrude", p);
+        body(&mut s, "Plate")["volume_mm3"].as_f64().unwrap()
+    };
+    let plain = volume(None);
+    // Rectangle less the hole, 10 mm tall; the circle is faceted, so within a thousandth.
+    let expected = (40.0 * 30.0 - PI * 25.0) * 10.0;
+    assert!((plain - expected).abs() / expected < 1e-3, "{plain} vs {expected}");
+    let zero = volume(Some("0 deg"));
+    assert!((zero - plain).abs() < 1e-6 * plain, "taper 0 gives {zero}, none gives {plain}");
 }

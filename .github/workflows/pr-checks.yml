@@ -1,0 +1,101 @@
+# Four quick checks on every pull request (CONTRIBUTING.md, "Sending a change"): no second open PR
+# for an issue a lower-numbered one already closes, the "Changes a default:" line is filled in, a PR
+# adding to the showcase shows a picture, and a kernel fix that changes or deletes existing test or
+# golden lines says why on a "Test change:" line. None is a required status check. The logic is in scripts/pr-checks/pr-checks.js (tested in ci.yml).
+name: PR checks
+
+on:
+  # pull_request, never pull_request_target: nothing here checks out or runs the PR's code, and the
+  # token is read-only for fork PRs. Only scripts/pr-checks from the PR's own merge commit is run.
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  duplicate:
+    name: Duplicate PR check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/pr-checks
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const checks = require('./scripts/pr-checks/pr-checks.js');
+            const r = await checks.checkDuplicate({ github, context, core });
+            core.info(JSON.stringify(r));
+
+  defaults:
+    name: Defaults line check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/pr-checks
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const checks = require('./scripts/pr-checks/pr-checks.js');
+            const r = await checks.checkDefaults({ github, context, core });
+            core.info(JSON.stringify(r));
+
+  picture:
+    name: Picture check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/pr-checks
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const checks = require('./scripts/pr-checks/pr-checks.js');
+            const r = await checks.checkPicture({ github, context, core });
+            core.info(JSON.stringify(r));
+
+  test-change:
+    name: Test change check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/pr-checks
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const checks = require('./scripts/pr-checks/pr-checks.js');
+            const r = await checks.checkTestChange({ github, context, core });
+            core.info(JSON.stringify(r));
+
+  # Labelling needs write access, which a fork PR's token never has, so it is its own job and best
+  # effort: a fork PR just doesn't get the `changes-default` label from here.
+  label:
+    name: Label changes-default
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/pr-checks
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const checks = require('./scripts/pr-checks/pr-checks.js');
+            await checks.syncDefaultLabel({ github, context, core });

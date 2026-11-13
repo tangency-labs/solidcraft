@@ -1,14 +1,17 @@
 //! Reviewable sketch-plane rebinding. Saved lost planes are repair guides, never model geometry.
 
-use egui::{Pos2, RichText};
+use crate::ui_kit::BackingTooltipExt as _;
+use egui::RichText;
 use serde_json::{Value, json};
+use solidcore_record::{Plane, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::face_anchor::plane_face_anchor;
-use solidcraft_engine::doc::{EmbossFace, FaceAttachmentStatus, FeatureKind, mat_inverse};
-use solidcraft_engine::geom::{Plane, Vec3};
+use solidcraft_engine::doc::{EmbossFace, FaceAttachmentStatus, FeatureKind, PlaneRef, mat_inverse};
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use crate::ui_kit;
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug)]
 pub struct Draft {
@@ -70,6 +73,7 @@ impl Draft {
 }
 
 pub fn clear(app: &mut SolveApp) {
+    app.viewport.dialog_rect = None;
     app.tree.redefine = None;
     app.tree.redefine_draft = None;
 }
@@ -98,6 +102,29 @@ pub fn face_plane(app: &SolveApp, selection: &Sel) -> Option<Value> {
     }
 }
 
+/// What a sketch's plane is, for the Redefine Sketch Plane panel: `XY`, a construction plane's
+/// name, or the plane it's offset from, turned from or flipped from (#5103).
+pub(crate) fn plane_description(doc: &solidcraft_engine::doc::Document, plane: &PlaneRef) -> String {
+    fn describe(doc: &solidcraft_engine::doc::Document, plane: &PlaneRef, depth: usize) -> String {
+        let base = |b: &PlaneRef| if depth < 8 { describe(doc, b, depth + 1) } else { solidcraft_ui_text::tr("sketch_panel.plane_fixed").to_owned() };
+        match plane {
+            PlaneRef::Origin { name } => solidcraft_ui_text::format("sketch_panel.plane_origin", &[("plane", name)]),
+            PlaneRef::Construction { feature } => {
+                doc.feature(feature.0).map(|f| f.name.clone()).unwrap_or_else(|| solidcraft_ui_text::tr("sketch_panel.plane_fixed").to_owned())
+            }
+            PlaneRef::Offset { base: b, distance } => {
+                solidcraft_ui_text::format("sketch_panel.plane_offset", &[("plane", &base(b)), ("distance", distance)])
+            }
+            PlaneRef::AtAngle { base: b, angle, .. } => {
+                solidcraft_ui_text::format("sketch_panel.plane_angle", &[("plane", &base(b)), ("angle", angle)])
+            }
+            PlaneRef::Flipped { base: b, .. } => solidcraft_ui_text::format("sketch_panel.plane_flipped", &[("plane", &base(b))]),
+            _ => solidcraft_ui_text::tr("sketch_panel.plane_fixed").to_owned(),
+        }
+    }
+    describe(doc, plane, 0)
+}
+
 fn face_label(app: &SolveApp, selection: &Sel) -> String {
     let Sel::Face { body, .. } = selection else { return String::new() };
     let placed = app.session.placed_document();
@@ -120,123 +147,204 @@ fn path_label(app: &SolveApp, path: &[u64]) -> String {
         .join(" / ")
 }
 
-pub fn panel(app: &mut SolveApp, ctx: &egui::Context, at: Pos2) {
+pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(sketch) = app.tree.redefine else { return };
     if app.session.doc.feature(sketch).is_none() {
         clear(app);
         return;
     }
     let mut draft = app.tree.redefine_draft.take().filter(|draft| draft.sketch == sketch).unwrap_or_else(|| Draft::new(app, sketch));
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
     let status = attachment(app, sketch);
     let name = app.session.doc.feature(sketch).map(|feature| feature.name.as_str()).unwrap_or("Sketch");
     let selected = app.session.selection.iter().find(|selection| matches!(selection, Sel::Face { .. })).cloned();
-    let mut open = true;
     let mut apply = false;
     let mut cancel = false;
     let t = Tokens::get();
-    crate::frame::docked(
-        format!("Redefine Sketch Plane: {name}"),
-        egui::Id::new("sc_redefine"),
-        at,
-        app.viewport.rect.map(|rect| rect.bottom()).unwrap_or_else(|| ctx.content_rect().bottom()) - at.y - 8.0,
-        crate::frame::Width::Normal,
-    )
-    .open(&mut open)
-    .scroll([false, true])
-    .show(ctx, |ui| {
-        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-        // The wrapped notes below fill the width anyway, so the band may too.
-        let width = ui.available_width();
-        crate::frame::heading(ui, crate::frame::Level::Title, width, |ui| ui.strong(format!("Redefine Sketch Plane: {name}")));
-        let saved_plane = match &status {
-            FaceAttachmentStatus::Healthy { plane, target, path } => {
-                ui.label(format!("Attached to {} / {}", target.body, path_label(app, path)));
-                Some(*plane)
-            }
-            FaceAttachmentStatus::Lost { message, repair_plane } => {
-                ui.label(RichText::new(crate::i18n::tr_label("Face attachment lost")).color(t.error));
-                ui.label(message);
-                if repair_plane.is_some() {
-                    ui.label(crate::i18n::tr_label("The dashed sketch is a saved plane guide. Select a new face to repair the attachment."));
-                } else {
-                    ui.label(crate::i18n::tr_label("The saved author occurrence is missing. Select a valid author placement before rebinding."));
+    let viewport = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
+    if !viewport.is_finite() || !viewport.is_positive() {
+        app.tree.redefine_draft = Some(draft);
+        return;
+    }
+    let side = crate::frame::Side::Right;
+    let top = crate::shell::panel_top(app, viewport, viewport.bottom(), side);
+    let docked = egui::pos2(side.anchor_x(viewport), top);
+    let moved = crate::frame::dock_offset(ctx, "sc_redefine");
+    let drag_bounds = crate::shell::tool_drag_rect(app, viewport);
+    let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
+    let frame = ui_kit::Panel::feature_frame(ctx, app.ui.layout, side);
+    let spec = solidcraft_engine::find_command("sketch.redefine");
+    let command = spec.as_ref().map_or("", |s| solidcraft_ui_text::tr_label(s.label));
+    let title = solidcraft_ui_text::format("sketch_panel.redefine_title", &[("command", command), ("name", name)]);
+    let panel = ui_kit::Panel::new(&title, egui::Id::unique("sc_redefine"), anchor, drag_bounds, side, frame);
+    let mut painted = false;
+    let response = panel.window(ctx).show(ctx, |ui| {
+        painted = ui.is_visible() && !ui.is_sizing_pass();
+        let (closed, action) = panel.feature(
+            ui,
+            ui_kit::FeatureOptions {
+                icon: spec.as_ref().map_or("", |s| s.icon),
+                title: &title,
+                drag_key: "sc_redefine",
+                moved,
+                docked,
+                apply_label: None,
+            },
+            false,
+            draft.candidate.is_some() && app.preview.error.is_none(),
+            |ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                ui_kit::text(
+                    ui,
+                    solidcraft_ui_text::tr_label(
+                        "Choose a new plane. Sketch geometry and dimensions stay unchanged in its two-dimensional coordinates.",
+                    ),
+                    ui_kit::Text::Hint("tool"),
+                );
+                let saved_plane = match &status {
+                    FaceAttachmentStatus::Healthy { plane, target, path } => {
+                        let attached =
+                            solidcraft_ui_text::format("sketch_panel.attached", &[("body", &target.body), ("path", &path_label(app, path))]);
+                        ui_kit::value_row(ui, "Attachment", &attached);
+                        Some(*plane)
+                    }
+                    FaceAttachmentStatus::Lost { message, repair_plane } => {
+                        ui.label(RichText::new(solidcraft_ui_text::tr_label("Face attachment lost")).color(t.error));
+                        ui.label(message);
+                        if repair_plane.is_some() {
+                            ui.label(solidcraft_ui_text::tr_label(
+                                "The dashed sketch is a saved plane guide. Select a new face to repair the attachment.",
+                            ));
+                        } else {
+                            ui.label(solidcraft_ui_text::tr_label(
+                                "The saved author occurrence is missing. Select a valid author placement before rebinding.",
+                            ));
+                        }
+                        *repair_plane
+                    }
+                    FaceAttachmentStatus::Legacy { plane } => {
+                        ui.label(solidcraft_ui_text::tr_label("Legacy face attachment. Rebinding to a certified face creates an exact attachment."));
+                        *plane
+                    }
+                    FaceAttachmentStatus::Sheet { plane } => {
+                        ui.label(solidcraft_ui_text::tr("sketch_panel.sheet_attachment"));
+                        *plane
+                    }
+                    FaceAttachmentStatus::Fixed { plane } => {
+                        // Name the plane it's on now: an origin or construction plane (#5103).
+                        if let Some(FeatureKind::Sketch { plane: on, .. }) = app.session.doc.feature(sketch).map(|f| &f.kind) {
+                            let now = plane_description(&app.session.doc, on);
+                            ui_kit::value_row(ui, "Current plane", &now);
+                        }
+                        ui.label(solidcraft_ui_text::tr_label("Sketch plane has no body-face attachment."));
+                        *plane
+                    }
+                };
+                ui_kit::divider(ui, "attachment");
+                if matches!(&status, FaceAttachmentStatus::Lost { repair_plane: None, .. }) {
+                    let author = app.session.doc.feature(sketch).map(|feature| feature.component);
+                    let available = author == Some(app.session.active_component);
+                    if ui
+                        .add_enabled_ui(available, |ui| {
+                            ui_kit::button(ui, solidcraft_ui_text::tr_label("Use active author placement"), ui_kit::Button::Normal)
+                        })
+                        .inner
+                        .clicked()
+                    {
+                        draft.author_path = Some(app.session.active_occurrence_path.clone().unwrap_or_default());
+                        draft.error = None;
+                    }
+                    if available && let Some(path) = &draft.author_path {
+                        ui.label(solidcraft_ui_text::format("sketch_panel.author", &[("path", &path_label(app, path))]));
+                    }
                 }
-                *repair_plane
-            }
-            FaceAttachmentStatus::Legacy { plane } => {
-                ui.label(crate::i18n::tr_label("Legacy face attachment. Rebinding to a certified face creates an exact attachment."));
-                *plane
-            }
-            FaceAttachmentStatus::Sheet { plane } => {
-                ui.label("Attached to a flat face of a sheet metal body; it follows that panel when the sheet changes.");
-                *plane
-            }
-            FaceAttachmentStatus::Fixed { plane } => {
-                ui.label(crate::i18n::tr_label("Sketch plane has no body-face attachment."));
-                *plane
-            }
-        };
-        ui.separator();
-        if matches!(&status, FaceAttachmentStatus::Lost { repair_plane: None, .. }) {
-            let author = app.session.doc.feature(sketch).map(|feature| feature.component);
-            let available = author == Some(app.session.active_component);
-            if ui.add_enabled(available, egui::Button::new(crate::i18n::tr_label("Use active author placement"))).clicked() {
-                draft.author_path = Some(app.session.active_occurrence_path.clone().unwrap_or_default());
-                draft.error = None;
-            }
-            if available && let Some(path) = &draft.author_path {
-                ui.label(format!("Author placement: {}", path_label(app, path)));
-            }
-        }
-        ui.label(crate::i18n::tr_label("Choose a new plane. Sketch geometry and dimensions stay unchanged in its two-dimensional coordinates."));
-        ui.horizontal_wrapped(|ui| {
-            for plane in ["XY", "XZ", "YZ"] {
-                if ui.button(format!("Use {plane} plane")).clicked() {
-                    draft.choose(json!(plane), plane.into());
+                ui_kit::row(ui, "Plane", |ui| {
+                    let text = if draft.candidate.is_some() { draft.label.as_str() } else { solidcraft_ui_text::tr("dialog.select") };
+                    let response = ui_kit::selection_field(ui, text, ui_kit::Selection { active: true, filled: draft.candidate.is_some() });
+                    if response
+                        .backing_on_hover_text(solidcraft_ui_text::tr_label(
+                            "Choose a new plane. Sketch geometry and dimensions stay unchanged in its two-dimensional coordinates.",
+                        ))
+                        .clicked()
+                        && let Some(selection) = &selected
+                        && let Some(plane) = face_plane(app, selection)
+                    {
+                        draft.choose(plane, face_label(app, selection));
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    // The command takes the plane's id; the button and the choice show its name.
+                    for plane in crate::prefs::OriginPlaneNames::PLANES {
+                        let label = app.preferences.origin_plane_names.label(plane);
+                        if ui_kit::button(ui, solidcraft_ui_text::format("sketch_panel.use_plane", &[("plane", label)]), ui_kit::Button::Normal)
+                            .clicked()
+                        {
+                            draft.choose(json!(plane), label.into());
+                        }
+                    }
+                });
+                for feature in &app.session.doc.features {
+                    if matches!(feature.kind, FeatureKind::ConstructionPlane { .. })
+                        && ui_kit::button(ui, &feature.name, ui_kit::Button::Normal).clicked()
+                    {
+                        draft.choose(json!(feature.name), feature.name.clone());
+                    }
                 }
-            }
-        });
-        for feature in &app.session.doc.features {
-            if matches!(feature.kind, FeatureKind::ConstructionPlane { .. }) && ui.button(&feature.name).clicked() {
-                draft.choose(json!(feature.name), feature.name.clone());
-            }
-        }
-        if ui.add_enabled(selected.is_some(), egui::Button::new(crate::i18n::tr_label("Reattach selected face"))).clicked()
-            && let Some(selection @ Sel::Face { .. }) = &selected
-            && let Some(plane) = face_plane(app, selection)
-        {
-            let label = face_label(app, selection);
-            draft.choose(plane, label);
-        }
-        if ui.add_enabled(saved_plane.is_some(), egui::Button::new(crate::i18n::tr_label("Use saved fixed plane"))).clicked()
-            && let Some(plane) = saved_plane
-            && let Err(error) = draft.choose_saved_fixed(app, plane)
-        {
-            draft.error = Some(error);
-        }
-        if ui.add_enabled(selected.is_some(), egui::Button::new(crate::i18n::tr_label("Use selected face as fixed plane"))).clicked()
-            && let Some(selection) = &selected
-            && let Some(mut plane) = face_plane(app, selection)
-        {
-            plane["fixed"] = json!(true);
-            draft.choose(plane, "Fixed plane: independent of the selected body".into());
-        }
-        if draft.candidate.is_some() {
-            ui.separator();
-            ui.label(format!("Preview: {}", draft.label));
-        }
-        if let Some(error) = draft.error.as_ref().or(app.preview.error.as_ref()) {
-            ui.label(RichText::new(error).color(t.error));
-        }
-        ui.horizontal(|ui| {
-            if ui.add_enabled(draft.candidate.is_some() && app.preview.error.is_none(), egui::Button::new("Apply")).clicked() {
-                apply = true;
-            }
-            if ui.button("Cancel").clicked() {
-                cancel = true;
-            }
-        });
+                if ui
+                    .add_enabled_ui(selected.is_some(), |ui| {
+                        ui_kit::button(ui, solidcraft_ui_text::tr_label("Reattach selected face"), ui_kit::Button::Normal)
+                    })
+                    .inner
+                    .clicked()
+                    && let Some(selection @ Sel::Face { .. }) = &selected
+                    && let Some(plane) = face_plane(app, selection)
+                {
+                    let label = face_label(app, selection);
+                    draft.choose(plane, label);
+                }
+                if ui
+                    .add_enabled_ui(saved_plane.is_some(), |ui| {
+                        ui_kit::button(ui, solidcraft_ui_text::tr_label("Use saved fixed plane"), ui_kit::Button::Normal)
+                    })
+                    .inner
+                    .clicked()
+                    && let Some(plane) = saved_plane
+                    && let Err(error) = draft.choose_saved_fixed(app, plane)
+                {
+                    draft.error = Some(error);
+                }
+                if ui
+                    .add_enabled_ui(selected.is_some(), |ui| {
+                        ui_kit::button(ui, solidcraft_ui_text::tr_label("Use selected face as fixed plane"), ui_kit::Button::Normal)
+                    })
+                    .inner
+                    .clicked()
+                    && let Some(selection) = &selected
+                    && let Some(mut plane) = face_plane(app, selection)
+                {
+                    plane["fixed"] = json!(true);
+                    draft.choose(plane, "Fixed plane: independent of the selected body".into());
+                }
+                if draft.candidate.is_some() {
+                    ui_kit::divider(ui, "attachment");
+                    ui_kit::row(ui, "Preview", |ui| {
+                        ui.label(solidcraft_ui_text::tr_label(&draft.label));
+                    });
+                }
+                if let Some(error) = draft.error.as_ref().or(app.preview.error.as_ref()) {
+                    ui.label(RichText::new(error).color(t.error));
+                }
+                ui_kit::ComputeStatus { text: None, busy: app.preview.busy, applying: false }
+            },
+        );
+        cancel |= closed || action == ui_kit::Action::Cancel;
+        apply |= action == ui_kit::Action::Ok;
     });
+    app.viewport.dialog_rect = response.filter(|_| painted).map(|r| r.response.rect);
+    if let Some(rect) = app.viewport.dialog_rect {
+        crate::scenario::publish_rect("dialog:outer", rect);
+        crate::scenario::publish_rect("dialog:card", rect);
+    }
     if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
         cancel = true;
         app.esc_handled = true;
@@ -249,7 +357,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context, at: Pos2) {
             }
         }
     }
-    if cancel || !open {
+    if cancel {
         clear(app);
     } else {
         app.tree.redefine_draft = Some(draft);

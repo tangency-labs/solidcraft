@@ -2,7 +2,8 @@
 //! points that keep a degree of freedom, drag continuity, and hostile input. Deterministic
 //! (fixed LCG seeds), no timing.
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 use crate::construct::{Placement, seed};
 use crate::decompose::Budget;
@@ -890,7 +891,7 @@ fn given_points_are_never_placed() {
         sk.add_constraint(ConstraintKind::Fix { p }, None).unwrap();
     }
     let g = sk.points.len();
-    sk.points.push(SPoint { id: "far".into(), pos: v(2e9, 0.0), fixed: true, link: None });
+    sk.points.push(SPoint { id: "far".into(), pos: v(2e9, 0.0), fixed: true, link: None, exprs: None });
     let d = sk.add_point(v(20.0, 30.0), None).unwrap();
     let push = |sk: &mut Sketch, kind: ConstraintKind| {
         sk.constraints.push(Constraint { id: format!("h{}", sk.constraints.len()), kind, param: None, driven: false, text: None })

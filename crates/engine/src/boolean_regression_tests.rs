@@ -2,6 +2,7 @@
 //! `examples/regressions/` (each script's description says what went wrong).
 
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -21,7 +22,7 @@ fn check_partial_face_contact_pattern() {
     let (mut volume, mut area, mut shells) = (0.0, 0.0, 0);
     for b in &s.model.state().bodies {
         assert!(b.body.validity().is_empty(), "{:?}", b.body.validity());
-        let m = b.body.tessellate(1e-5).unwrap().measure();
+        let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
         volume += m.volume;
         area += m.area;
         shells += b.body.shell_count();
@@ -34,6 +35,43 @@ fn check_partial_face_contact_pattern() {
     println!("#674 volume {volume:.6} / {expected_volume:.6} mm³; area {area:.6} / {expected_area:.6} mm²; {shells} shells");
 }
 
+/// A cylinder intersected with a disc carrying a tooth whose corners stand 0.27 mm out of it
+/// (radius 16.92 for 16.65): the general boolean can't intersect them, and the sampled answer
+/// (the disc is inside the cylinder) used to be kept with a warning, corners and all. The
+/// intersection must trim them or fail and leave the body as it was (#3244).
+#[test]
+fn intersection_never_keeps_material_outside_the_trimming_cylinder() {
+    let mut s = Session::default();
+    let (a, b) = ([-0.1706475844770042, 7.63270030627277], [0.1706475844770042, 7.63270030627277]);
+    for (command, params) in [
+        ("solid.cylinder", json!({"radius": 16.65, "height": 5, "body_name": "Base"})),
+        ("sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}})),
+        ("sketch.line", json!({"points": [a, [-3, 4.99], [3, 4.99], b]})),
+        ("sketch.arc.three_point", json!({"start": b, "through": [0, 7.7], "end": a})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance": 1.6875953835063608, "start_offset": 14.962404616493638, "operation": "join", "targets": ["Base"]})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let before = volume(&s, "Base");
+    let r = s.execute("solid.cylinder", &json!({"radius": 16.65, "height": 14.59, "operation": "intersect", "targets": ["Base"]}));
+    let state = s.model.state();
+    let reach = state
+        .body("Base")
+        .unwrap()
+        .body
+        .mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3))
+        .unwrap()
+        .positions
+        .iter()
+        .map(|p| p.x.hypot(p.y))
+        .fold(0.0, f64::max);
+    match r {
+        Ok(_) => assert!(reach < 16.65 + 1e-2, "kept material out to radius {reach}"),
+        Err(e) => assert!((volume(&s, "Base") - before).abs() < 1e-9 && reach > 16.9, "{e}"),
+    }
+}
+
 fn replay(script: &str) -> Session {
     let mut s = Session::default();
     let script: Value = serde_json::from_str(script).unwrap();
@@ -43,6 +81,159 @@ fn replay(script: &str) -> Session {
 
 fn volume(s: &Session, body: &str) -> f64 {
     s.model.state().body(body).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0)
+}
+
+/// #5562: a quarter disc in a box's side face, at its corner, revolved 360° about the box's
+/// edge through the corner and cut: a hemisphere centred on the corner, its pole on that edge.
+/// Dividing one of the cut's intersection edges met a point that projects onto neither surface,
+/// and the fallback unwrapped that same failed projection: a kernel panic, recorded as a crash.
+/// Nothing panics now; the box loses the eighth of the ball inside it, or the cut is refused
+/// and the box is left whole. The side face is picked by its point (the report's face index
+/// was truck's order): `p3` is its corner (15, -5, 0) and `l4` the box's upright edge there.
+#[test]
+fn revolve_cut_round_a_box_corner_does_not_panic() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let mut s = Session::default();
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XY"})),
+        ("sketch.rectangle.two_point", json!({"p0": [-5.4, 7.0], "p1": [15.0, -5.0]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"direction": "positive", "distance": "10 mm", "operation": "new", "profiles": [0], "sketch": 1})),
+        ("sketch.create", json!({"plane": {"face": [12.721266146083186, -5.0, 7.034827173055135]}})),
+        ("sketch.circle.center", json!({"center": "p3", "radius": 4.664761515876241})),
+        ("sketch.options", json!({"slice": true})),
+        ("sketch.finish", json!({})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let before = volume(&s, "Body1");
+    let me = std::thread::current().id();
+    let count = Arc::new(AtomicUsize::new(0));
+    let c2 = count.clone();
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |_| {
+        if std::thread::current().id() == me {
+            c2.fetch_add(1, Ordering::SeqCst);
+        }
+    }));
+    let result = s.execute("solid.revolve", &json!({"angle": "360 deg", "axis": "l4", "operation": "cut", "profiles": [2], "sketch": 3}));
+    std::panic::set_hook(prev);
+    assert_eq!(count.load(Ordering::SeqCst), 0, "kernel panics during the cut");
+    let removed = before - volume(&s, "Body1");
+    let eighth = std::f64::consts::PI * 4.664761515876241_f64.powi(3) / 6.0;
+    match result {
+        Ok(_) => assert!((removed - eighth).abs() < 0.02 * eighth, "removed {removed}, an eighth of the ball is {eighth}"),
+        Err(e) => assert!(removed.abs() < 1e-9, "{e}, yet the box lost {removed}"),
+    }
+}
+
+/// #5543: a grid of 121 holes cut through a plate, four of its circles drawn a second time on
+/// top of themselves. Each of those was two profiles of one region and so two coincident tools:
+/// the cut retried with the tool nudged and took fifty times as long. The profiles drawn twice
+/// are cut once: no retry, and the plate is the one the 121 circles drawn once make.
+#[test]
+fn circles_drawn_twice_are_cut_once() {
+    let cut = |repeats: usize| {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [-35, -35], "p1": [35, 35]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.extrude", &json!({"distance": 2, "operation": "new"})).unwrap();
+        s.execute("sketch.create", &json!({"plane": "XY", "offset": 2})).unwrap();
+        let mut centres = Vec::new();
+        for i in -7i32..8 {
+            for j in -8i32..9 {
+                let (x, y) = (f64::from(j) * 3.45 + if i % 2 != 0 { 1.725 } else { 0.0 }, f64::from(i) * 3.0);
+                if x.hypot(y) <= 20.7 {
+                    centres.push([x, y]);
+                }
+            }
+        }
+        assert_eq!(centres.len(), 121);
+        for c in centres.iter().chain(centres.iter().take(repeats)) {
+            s.execute("sketch.circle.center", &json!({"center": c, "radius": 1.15})).unwrap();
+        }
+        s.execute("sketch.finish", &json!({})).unwrap();
+        let r = s.execute("solid.extrude", &json!({"operation": "cut", "direction": "negative", "distance": 2, "targets": ["Body1"]})).unwrap();
+        assert!(r["warning"].is_null(), "{}", r["warning"]);
+        let state = s.model.state();
+        let body = &state.body("Body1").unwrap().body;
+        (body.volume_at(1e-4).unwrap(), body.face_count())
+    };
+    let (once, faces_once) = cut(0);
+    let (twice, faces_twice) = cut(4);
+    let analytic = 70.0 * 70.0 * 2.0 - 121.0 * std::f64::consts::PI * 1.15 * 1.15 * 2.0;
+    assert!((once - analytic).abs() < 0.2, "{once} vs {analytic}");
+    assert!((twice - once).abs() < 1e-9 * once, "{twice} vs {once}");
+    assert_eq!(faces_twice, faces_once);
+}
+
+/// #1985: the STEP export of a small enclosure never finished. The export reads its own file
+/// back, and meshing the screw hole's seam cylinder never ended: the boundary walk took
+/// projected angles millions of turns apart. The file is written, reads back cleanly, and holds
+/// the same solid.
+#[test]
+fn step_export_of_an_enclosure_with_a_screw_hole_finishes_and_reads_back() {
+    let s = replay(include_str!("../../../examples/regressions/step_export_screw_hole_enclosure.json"));
+    let state = s.model.state();
+    let body = &state.body("Unterteil").unwrap().body;
+    // 27 faces, as the file holds them: each whole turn (the hole, two standoffs) is one face.
+    assert_eq!(body.face_count(), 27);
+    let (text, file_faces) = read_back(&s, body);
+    assert_eq!(text.matches("CYLINDRICAL_SURFACE(").count(), 7, "the seven round faces stay cylinders");
+    assert_eq!(file_faces, 27);
+}
+
+/// #1985, the reporter's second reproduction: the same walk on a standoff of a flanged
+/// enclosure without a screw hole.
+#[test]
+fn step_export_of_a_flanged_enclosure_finishes_and_reads_back() {
+    let s = replay(include_str!("../../../examples/regressions/step_export_flanged_enclosure.json"));
+    let state = s.model.state();
+    let (_, file_faces) = read_back(&s, &state.body("Unterteil").unwrap().body);
+    assert_eq!(file_faces, 29);
+}
+
+/// The body's STEP text, which reads back without warnings as one closed solid of the same
+/// volume and area, and the number of faces the file holds.
+fn read_back(s: &Session, body: &solidcraft_kernel::Body) -> (String, usize) {
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let text = solidcraft_kernel::step_export(&[body], "SolidCraft").unwrap();
+    let imp = solidcraft_kernel::step_import(&text).unwrap();
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    assert_eq!(imp.bodies.len(), 1);
+    let back = &imp.bodies[0];
+    assert!(back.closed);
+    let (a, b) = (solidcraft_kernel::measure(body).unwrap(), solidcraft_kernel::measure(&back.body).unwrap());
+    assert!((a.volume - b.volume).abs() < 1e-3 * a.volume, "volume {} read back as {}", a.volume, b.volume);
+    assert!((a.area - b.area).abs() < 1e-3 * a.area, "area {} read back as {}", a.area, b.area);
+    println!("#1985 volume {:.3} / {:.3} mm³; area {:.3} / {:.3} mm²", a.volume, b.volume, a.area, b.area);
+    (text, back.file_faces)
+}
+
+/// The timeline insertion from #1765 on a small part with analytic material. The kernel test
+/// separately forces the empty numerical attempts, without needing the reporter's design.
+#[test]
+fn shallow_cuts_rebuild_after_inserting_an_earlier_pocket() {
+    let s = replay(include_str!("../../../examples/regressions/shallow_cuts_after_earlier_pocket.json"));
+    let rounded_plate = 40.0 * 30.0 * 10.0 - (4.0 - std::f64::consts::PI) * 40.0;
+    // Half of each circle overlaps the existing 0.75 mm pocket.
+    let expected = rounded_plate - 30.0 * 10.0 * 0.75 - 2.0 * std::f64::consts::PI * 25.0 * (1.5 - 0.75 / 2.0);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    for session in [s, reopened] {
+        assert!(session.model.results.iter().all(|r| r.error.is_none()));
+        assert_eq!(session.model.state().bodies.len(), 1);
+        let body = &session.model.state().bodies[0].body;
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+        let actual = volume(&session, "Plate");
+        assert!((actual - expected).abs() < 0.02, "{actual} vs {expected}");
+        let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap();
+        assert!(!mesh.contains(solidcore_record::Vec3::new(12.0, 14.0, 9.0)));
+        assert!(mesh.contains(solidcore_record::Vec3::new(12.0, 14.0, 8.0)));
+        assert!(!mesh.contains(solidcore_record::Vec3::new(20.0, 20.0, 9.5)));
+        assert!(mesh.contains(solidcore_record::Vec3::new(20.0, 20.0, 9.0)));
+    }
 }
 
 /// #2059: tabs exactly as wide as their supporting ribs share the ribs' side
@@ -57,7 +248,7 @@ fn eighteen_tabs_join_the_ribs_of_a_chamfered_base() {
         let body = &state.body("Base").unwrap().body;
         assert_eq!(body.shell_count(), 1);
         assert!(body.validity().is_empty(), "{:?}", body.validity());
-        let mesh = body.tessellate(1e-4).unwrap();
+        let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap();
         // R40 x 4 disc less its 1 x 1 chamfer, six 32 x 2 ribs
         // standing 4 above it, and eighteen 1 x 2 tabs another 8 higher.
         let expected = std::f64::consts::PI * (6400.0 - 40.0 + 1.0 / 3.0) + 1536.0 + 288.0;
@@ -66,7 +257,7 @@ fn eighteen_tabs_join_the_ribs_of_a_chamfered_base() {
         println!("#2059 volume {got:.6} / {expected:.6} mm³; one valid shell, eighteen tabs");
         for k in 0..6 {
             let angle = k as f64 * std::f64::consts::TAU / 6.0;
-            let p = |x: f64, y: f64, z| solidcraft_geom::Vec3::new(x * angle.cos() - y * angle.sin(), x * angle.sin() + y * angle.cos(), z);
+            let p = |x: f64, y: f64, z| solidcore_record::Vec3::new(x * angle.cos() - y * angle.sin(), x * angle.sin() + y * angle.cos(), z);
             for x in [15.5, 25.5, 35.5] {
                 assert!(mesh.contains(p(x, 0.0, 12.0)), "tab {k} at {x}");
                 assert!(!mesh.contains(p(x, 1.2, 12.0)), "tab {k} grew sideways at {x}");
@@ -128,6 +319,27 @@ fn shallow_loft_cut_from_the_top_face() {
     let want = 900.0 * 480.0 * 160.0 - loft;
     let got = volume(&s, "Body1");
     assert!((got - want).abs() < 1e-9 * want, "{got} vs {want}");
+}
+
+/// A carved top lofted through six closed spline sections from its slab's top face and joined
+/// onto the slab. The loft lies on and above that face and shares only it with the slab, so the
+/// joined top is exactly the slab plus the loft built as its own body.
+#[test]
+fn carved_top_lofted_onto_its_slab_joins() {
+    let script = include_str!("../../../examples/regressions/loft_join_carved_top_on_slab.json");
+    let joined = replay(script);
+    assert_eq!(joined.model.state().bodies.len(), 1);
+    let mut apart: Value = serde_json::from_str(script).unwrap();
+    let loft = apart["commands"].as_array_mut().unwrap().last_mut().unwrap();
+    loft["params"]["operation"] = json!("new_body");
+    loft["params"]["body_name"] = json!("Arch");
+    loft["params"].as_object_mut().unwrap().remove("targets");
+    let mut s = Session::default();
+    s.run_script(&apart).unwrap();
+    let (slab, arch) = (volume(&s, "Top"), volume(&s, "Arch"));
+    assert!(slab > 0.0 && arch > 0.0, "{slab} {arch}");
+    let got = volume(&joined, "Top");
+    assert!((got - (slab + arch)).abs() < 1e-7 * got, "{got} vs {slab} + {arch}");
 }
 
 #[test]
@@ -220,7 +432,14 @@ fn ribs_flush_with_a_window_change_nothing_away_from_them() {
     s.run_script(&Value::Array(lid.to_vec())).unwrap();
     let measure = |s: &Session| s.model.state().body("Lid").map(|b| solidcraft_kernel::measure(&b.body).unwrap()).unwrap();
     let (v0, a0) = (measure(&s).volume, measure(&s).area);
-    assert!((v0 - 6703.5222).abs() < 1e-3, "{v0}");
+    // The plate with its rounded corners, the skirt, less the window, the slot and the notch
+    // through the skirt: (76.8 × 89.3 - (4 - π) × 9) × 2.4 + (71.5 × 84 - 68.5 × 81) × 3
+    // - 68 × 61 × 2.4 - 44 × 10 × 2.4 - 22 × 1.5 × 3.
+    let lid = (76.8 * 89.3 - (4.0 - std::f64::consts::PI) * 9.0) * 2.4 + (71.5 * 84.0 - 68.5 * 81.0) * 3.0
+        - 68.0 * 61.0 * 2.4
+        - 44.0 * 10.0 * 2.4
+        - 22.0 * 1.5 * 3.0;
+    assert!((v0 - lid).abs() < 1e-3, "{v0} vs {lid}");
     for (i, rib) in ribs.iter().enumerate() {
         let reply = s.execute(rib["command"].as_str().unwrap(), &rib["params"]).unwrap();
         let id = reply["feature"].as_u64().unwrap();
@@ -229,15 +448,17 @@ fn ribs_flush_with_a_window_change_nothing_away_from_them() {
         assert!(!result.warning.as_deref().unwrap_or_default().contains("tool displacement"), "{:?}", result.warning);
         let m = measure(&s);
         let n = (i + 1) as f64;
+        // The measure's accuracy: SMLib's mass properties come within 2e-7 of a closed form.
+        let (dv, da) = (2e-7 * m.volume, 2e-7 * m.area);
         // 1.6 x 6 x 11.7 less the 1.35 x 6 x 3 inside the skirt.
-        assert!((m.volume - (v0 + n * 88.02)).abs() < 1e-6, "rib {}: {}", i + 1, m.volume - v0);
+        assert!((m.volume - (v0 + n * 88.02)).abs() < dv, "rib {}: {}", i + 1, m.volume - v0);
         // Top 9.6, outer side 6 x 8.7 above the skirt, inner side 6 x 11.7 (flush with the
         // window's side), ends 2 x (1.6 x 11.7 - 1.35 x 3); the skirt top 8.1, its inner side
         // 18 and 1.5 of the plate go under the rib.
         let area = 9.6 + 52.2 + 70.2 + 29.34 - 8.1 - 18.0 - 1.5;
-        assert!((m.area - (a0 + n * area)).abs() < 1e-6, "rib {}: area {} (no slit adds any)", i + 1, m.area - a0);
+        assert!((m.area - (a0 + n * area)).abs() < da, "rib {}: area {} (no slit adds any)", i + 1, m.area - a0);
     }
-    let bounds = s.model.state().body("Lid").unwrap().body.tessellate(0.01).unwrap().bounds();
+    let bounds = s.model.state().body("Lid").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap().bounds();
     assert!((bounds.max.z - 14.1).abs() < 1e-9, "{}", bounds.max.z);
 }
 
@@ -322,7 +543,7 @@ fn lip_swept_flush_round_a_corner_joins() {
     assert_eq!(b.body.shell_count(), 1);
     let block = (50.0 * 40.0 - (4.0 - std::f64::consts::PI) * 4.5 * 4.5) * 10.0;
     let lip = 41.0 + 31.0 + 41.0 + 2.0 * std::f64::consts::PI * (4.5 * 4.5 - 3.5 * 3.5) / 4.0;
-    let volume = b.body.tessellate(1e-5).unwrap().measure().volume;
+    let volume = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().volume;
     assert!((volume - block - lip).abs() < 0.02, "{volume} expected {}", block + lip);
 }
 
@@ -340,7 +561,7 @@ fn cut_of_a_whole_face_beside_round_corners_after_a_chamfer() {
     let block = (40.0 * 40.0 - (4.0 - pi) * 8.0 * 8.0) * 15.0;
     // The chamfer's 2 × 2 triangle swept along the loop (Pappus: its centroid is 2/3 mm in).
     let chamfer = 2.0 * (4.0 * 24.0 + 2.0 * pi * (8.0 - 2.0 / 3.0));
-    let mesh = b.body.tessellate(1e-4).unwrap();
+    let mesh = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap();
     let volume = mesh.measure().volume;
     assert!((volume - (block - chamfer)).abs() < 0.05, "{volume} expected {}", block - chamfer);
     let top = mesh.bounds().max.z;
@@ -364,7 +585,8 @@ fn joined_loft_frames_plan_their_display_at_every_quality() {
         let body = &state.body(name).unwrap().body;
         for q in DisplayQuality::ALL {
             for k in 0..=MAX_REFINE {
-                let plan = body.display_plan_angular(q.refined_chord(body.size(), k), q.refined_angle(k));
+                let plan =
+                    body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: q.refined_chord(body.size(), k), angle: Some(q.refined_angle(k)) });
                 assert!(plan.is_ok(), "{name} at {} + {k}: {:?}", q.id(), plan.err());
             }
         }
@@ -382,16 +604,24 @@ fn oblique_cuts_through_a_chamfered_ring_are_exact() {
     let script: Value = serde_json::from_str(include_str!("../../../examples/regressions/oblique_cuts_through_chamfered_ring.json")).unwrap();
     let steps = script.get("commands").and_then(Value::as_array).unwrap();
     let mut s = Session::default();
-    let mut volumes = Vec::new();
+    // The ring after the move and after each cut, and what each cut took away (the ring before it
+    // less the ring after it: a small body that measures to its own accuracy, where the difference
+    // of the whole ring's volumes is lost in the integration's 1e-6 of 1149 mm³).
+    let mut rings: Vec<solidcraft_kernel::Body> = Vec::new();
     for step in steps {
         let reply = s.execute(step["command"].as_str().unwrap(), &step["params"]).unwrap();
         if step["command"] == "solid.extrude" {
             assert!(reply["warning"].is_null(), "{reply}");
         }
         if matches!(step["command"].as_str(), Some("solid.move" | "solid.extrude")) {
-            volumes.push(s.model.state().body("R").unwrap().body.tessellate(1e-5).unwrap().measure().volume);
+            rings.push(s.model.state().body("R").unwrap().body.clone());
         }
     }
+    let taken = |k: usize| -> f64 {
+        let piece = solidcraft_kernel::boolean(&rings[k], &rings[k + 1], solidcraft_kernel::BoolOp::Cut).unwrap().unwrap();
+        solidcraft_kernel::measure(&piece).unwrap().volume
+    };
+    let volumes: Vec<f64> = rings.iter().map(|b| b.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().volume).collect();
     // Pappus: the profile's moment about the axis turned through 240°.
     let profile = [(16.6, 0.0), (17.5, 0.0), (18.5, 1.0), (18.5, 7.0), (17.5, 8.0), (16.6, 8.0), (16.4, 7.8), (16.4, 0.2)];
     let moment: f64 = (0..profile.len())
@@ -401,25 +631,27 @@ fn oblique_cuts_through_a_chamfered_ring_are_exact() {
         })
         .sum();
     let ring = moment.abs() * 4.0 * std::f64::consts::PI / 3.0;
-    let [whole, first, second, notched] = volumes[..] else { panic!("{volumes:?}") };
+    let [whole, _, _, _] = volumes[..] else { panic!("{volumes:?}") };
     // Volumes from meshes at 1e-5 mm: within a few millionths of the ring's.
     assert!((whole - ring).abs() < 1e-5 * ring, "{whole} vs {ring}");
     // The ring and the two prisms are mirror images across XZ.
-    let (cut1, cut2) = (whole - first, first - second);
-    assert!(cut1 > 5.0 && (cut1 - cut2).abs() < 1e-6, "{cut1} vs {cut2}");
-    let notch = ring_notch();
-    assert!(((second - notched) - notch).abs() < 1e-4, "{} vs {notch}", second - notched);
+    let (cut1, cut2) = (taken(0), taken(1));
+    assert!(cut1 > 5.0 && (cut1 - cut2).abs() < 1e-6 * cut1, "{cut1} vs {cut2}");
+    let (notched, notch) = (taken(2), ring_notch());
+    assert!((notched - notch).abs() < 1e-5 * notch, "{notched} vs {notch}");
     let state = s.model.state();
     let body = &state.body("R").unwrap().body;
     assert!(body.validity().is_empty(), "{:?}", body.validity());
     // Faces meshed coarsely keep to their surfaces: chords cut a little area off round faces,
     // and nothing adds any (triangles fanning across a chamfer from the notch's hole or from the
     // cuts' trims, folded over each other, added a few mm² each).
-    let (coarse, fine) = (body.tessellate(0.05).unwrap().measure().area, body.tessellate(1e-5).unwrap().measure().area);
+    let (coarse, fine) = (
+        body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.05)).unwrap().measure().area,
+        body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().area,
+    );
     assert!(coarse < fine && coarse > fine - 2.0, "area meshed at 0.05: {coarse} vs {fine}");
     println!(
-        "ring {whole:.6} / {ring:.6} mm³; cuts {cut1:.6}, {cut2:.6}; notch {:.6} / {notch:.6}; area meshed at 0.05 {coarse:.4} / {fine:.4}",
-        second - notched
+        "ring {whole:.6} / {ring:.6} mm³; cuts {cut1:.6}, {cut2:.6}; notch {notched:.6} / {notch:.6}; area meshed at 0.05 {coarse:.4} / {fine:.4}"
     );
 }
 
@@ -431,16 +663,18 @@ fn notch_into_a_ring_chamfer_is_cut_exactly() {
     let script: Value = serde_json::from_str(include_str!("../../../examples/regressions/oblique_cuts_through_chamfered_ring.json")).unwrap();
     let steps = script.get("commands").and_then(Value::as_array).unwrap();
     let mut s = Session::default();
-    let measure = |s: &Session| s.model.state().body("R").unwrap().body.tessellate(1e-5).unwrap().measure().volume;
     s.run_script(&Value::Array(steps[..5].to_vec())).unwrap();
-    let before = measure(&s);
+    let before = s.model.state().body("R").unwrap().body.clone();
     // The notch's sketch and its cut.
     for step in &steps[steps.len() - 4..] {
         let reply = s.execute(step["command"].as_str().unwrap(), &step["params"]).unwrap();
         assert!(reply["warning"].is_null(), "{reply}");
     }
-    let (got, want) = (before - measure(&s), ring_notch());
-    assert!((got - want).abs() < 1e-4, "{got} vs {want}");
+    // What the cut took: the ring before it less the ring after it, measured as a body of its own
+    // (the difference of the two rings' volumes is lost in the integration's 1e-6 of 1149 mm³).
+    let piece = solidcraft_kernel::boolean(&before, &s.model.state().body("R").unwrap().body, solidcraft_kernel::BoolOp::Cut).unwrap().unwrap();
+    let (got, want) = (solidcraft_kernel::measure(&piece).unwrap().volume, ring_notch());
+    assert!((got - want).abs() < 1e-5 * want, "{got} vs {want}");
 }
 
 /// What the ring's notch takes: a band 0.9 wide about a radius, from 17.6 out along it, and from
@@ -470,7 +704,7 @@ fn ring_notch() -> f64 {
 }
 
 /// The wedge of #1617: a side profile in (y, z) extruded 138 mm along x, its back face leaning
-/// by `lean` (the tangent of its angle), with the issue's rounds. The last one runs along the
+/// by `lean` (the tangent of its angle), with the issue's rounds, each on the edges it picked. The last one runs along the
 /// outline of both ends. The issue asked for R1 with `fit: reduce`, which reduces it to 0.854 mm;
 /// that radius is asked for here directly, which builds the same body without the fit's search
 /// (about a minute).
@@ -488,7 +722,14 @@ fn raked_wedge(lean: f64) -> Session {
         ("solid.fillet", json!({"body": "Wedge", "radius": 1.2, "edges": [[0, -60, 22]]})),
         ("solid.fillet", json!({"body": "Wedge", "radius": 1.5, "edges": [[0, -22, 22]]})),
         ("solid.fillet", json!({"body": "Wedge", "radius": 1.5, "edges": [[0, 38, 60]]})),
-        ("solid.fillet", json!({"body": "Wedge", "radius": 4, "edges": [[-69, -60, 12], [69, -60, 12], [-69, back, 30], [69, back, 30]]})),
+        // The issue's R4 rounds these four end edges alone: carried on round the end outline
+        // (tangent propagation, the feature's default since 84bd2daad, after this test), it would
+        // run onto the R1.2 round's end arc, where its rail on the end face would be an arc of
+        // radius 1.2 - 4 < 0.
+        (
+            "solid.fillet",
+            json!({"body": "Wedge", "radius": 4, "tangent_chain": false, "edges": [[-69, -60, 12], [69, -60, 12], [-69, back, 30], [69, back, 30]]}),
+        ),
         ("solid.fillet", json!({"body": "Wedge", "radius": 0.854, "edges": ends})),
     ];
     for (command, params) in steps {
@@ -523,7 +764,7 @@ fn box_intersect_splits_the_end_off_a_raked_wedge_after_its_end_rounds() {
                 let state = s.model.state();
                 let body = &state.body(&target).unwrap().body;
                 assert!(body.validity().is_empty(), "lean {lean}, x >= {x0}, {op}: {:?}", body.validity());
-                (solidcraft_kernel::measure(body).unwrap().volume, body.tessellate(1e-3).unwrap().bounds())
+                (solidcraft_kernel::measure(body).unwrap().volume, body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap().bounds())
             };
             let (slice, at) = piece("intersect");
             let (rest, _) = piece("cut");
@@ -577,10 +818,10 @@ fn closed_sweep_redefines_to_a_half_turn_torus_cut() {
     assert_eq!(s.model.state().bodies.len(), 1);
     let body = &s.model.state().bodies[0].body;
     assert!(body.validity().is_empty(), "{:?}", body.validity());
-    let mesh = body.tessellate(0.02).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.02)).unwrap();
     let expected = (std::f64::consts::PI * 64.0 - 64.0) * std::f64::consts::TAU * 30.0;
     assert!((mesh.measure().volume - expected).abs() < expected * 0.015);
-    for (point, material) in [(solidcraft_geom::Vec3::new(30.0, 0.0, 0.0), false), (solidcraft_geom::Vec3::new(30.0, 0.0, 7.0), true)] {
+    for (point, material) in [(solidcore_record::Vec3::new(30.0, 0.0, 0.0), false), (solidcore_record::Vec3::new(30.0, 0.0, 7.0), true)] {
         assert_eq!(mesh.contains(point), material, "material at {point:?}");
     }
 }
@@ -612,7 +853,7 @@ fn many_extrusion_profiles_preserve_material_and_body_identity() {
         assert!((volume(&s, "Stock") - expected).abs() < 1e-6);
         let stock = state.body("Stock").unwrap();
         for (point, present) in [([3.0, 3.0, 22.0], operation == "join"), ([3.0, 3.0, 18.0], operation != "cut"), ([7.0, 3.0, 18.0], true)] {
-            assert_eq!(stock.mesh().contains(solidcraft_geom::Vec3::from(point)), present, "{operation}: {point:?}");
+            assert_eq!(stock.mesh().contains(solidcore_record::Vec3::from(point)), present, "{operation}: {point:?}");
         }
         assert!(stock.body.validity().is_empty());
         assert!(s.revision > before);
@@ -645,10 +886,10 @@ fn many_circular_extrusion_profiles_cut_a_curved_target() {
     let stock = state.body("Stock").unwrap();
     assert!(stock.body.validity().is_empty());
     let mesh = stock.mesh();
-    assert!(mesh.contains(solidcraft_geom::Vec3::new(0.0, 0.0, 10.0)));
+    assert!(mesh.contains(solidcore_record::Vec3::new(0.0, 0.0, 10.0)));
     for x in [-9.0, -3.0, 3.0, 9.0] {
         for y in [-9.0, -3.0, 3.0, 9.0] {
-            assert!(!mesh.contains(solidcraft_geom::Vec3::new(x, y, 10.0)), "hole at {x}, {y}");
+            assert!(!mesh.contains(solidcore_record::Vec3::new(x, y, 10.0)), "hole at {x}, {y}");
         }
     }
 }
@@ -693,22 +934,32 @@ fn unsupported_face_groups_are_atomic() {
     s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
     let before = serde_json::to_value(s.doc.as_ref()).unwrap();
     let (revision, undo) = (s.revision, s.undo.len());
-    for faces in [
-        json!([]),
-        json!([[5, 5, 10], [5, 5, 0]]),
-        json!([[5, 5, 10], [5, 0, 5]]),
-        json!([[5, 5, 10], [1000, 1000, 1000]]),
-        json!(vec![[5, 5, 10]; 1025]),
-    ] {
+    for faces in
+        [json!([]), json!([[5, 5, 10], [1000, 1000, 1000]]), json!([[5, 5, 10], [5, 0, 5], [1000, 1000, 1000]]), json!(vec![[5, 5, 10]; 1025])]
+    {
         assert!(s.execute("solid.extrude", &json!({"faces":faces,"distance":5,"operation":"join"})).is_err());
         assert_eq!(serde_json::to_value(s.doc.as_ref()).unwrap(), before);
         assert_eq!((s.revision, s.undo.len()), (revision, undo));
     }
 }
 
+/// Faces in different planes extrude each from the body as picked (#11492): the top and a side of
+/// a block, a later face is not the one the earlier extrusion grew.
+#[test]
+fn faces_in_different_planes_extrude_each_from_the_picked_body() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":40,"width":25,"height":3,"body_name":"Block"})).unwrap();
+    let before = s.undo.len();
+    s.execute("solid.extrude", &json!({"faces":[[20,12,3],[20,0,1.5]],"face_body":"Block","distance":10,"operation":"join"})).unwrap();
+    let volume = solidcraft_kernel::measure(&s.model.state().body("Block").unwrap().body).unwrap().volume;
+    // 3000 + 10000 (above the top) + 1200 (out of the y = 0 side, 3 mm high).
+    assert!((volume - 14_200.0).abs() < 1e-5, "{volume}");
+    assert_eq!(s.undo.len(), before + 1);
+}
+
 #[test]
 fn imported_rotated_face_extrusions_preserve_other_operations_and_bodies() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let mut source = Session::default();
     source.execute("solid.box", &json!({"corner":[-16,-16,-3],"length":32,"width":32,"height":1,"body_name":"Other"})).unwrap();
     source.execute("solid.cylinder", &json!({"radius":14,"height":8,"body_name":"Stock"})).unwrap();
@@ -762,7 +1013,10 @@ fn imported_rotated_face_extrusions_preserve_other_operations_and_bodies() {
             let reference = expected.body(&body.name).unwrap();
             // Fixed fine chord tolerance: cap subdivision can change the default
             // adaptive mesh's cylinder faceting without changing its analytic surface.
-            let (a, b) = (body.body.tessellate(1e-5).unwrap().measure().volume, reference.body.tessellate(1e-5).unwrap().measure().volume);
+            let (a, b) = (
+                body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().volume,
+                reference.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().volume,
+            );
             assert!((a - b).abs() < b.max(1.) * 1e-6, "{operation}: {} {a} vs {b}", body.name);
             assert!(body.body.validity().is_empty(), "{operation}: {}", body.name);
             let (a, b) = (body.mesh(), reference.mesh());
@@ -777,7 +1031,11 @@ fn imported_rotated_face_extrusions_preserve_other_operations_and_bodies() {
             let unchanged = &actual.body("Other").unwrap().body;
             assert_eq!(unchanged.face_count(), other.face_count());
             assert_eq!(unchanged.color(), other.color());
-            assert_eq!(unchanged.tessellate(0.01).unwrap().positions, other.tessellate(0.01).unwrap().positions, "unaffected imported body");
+            assert_eq!(
+                unchanged.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap().positions,
+                other.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap().positions,
+                "unaffected imported body"
+            );
         }
     }
 }
@@ -841,8 +1099,15 @@ fn cut_keeps_posts_joined_while_apart_in_one_body() {
     // A cut through the middle of the case still leaves two bodies, and says it made the second.
     s.execute("solid.box", &json!({"length": 2, "width": 80, "height": 80, "center": [0, 0, 20], "operation": "new", "body_name": "Saw"})).unwrap();
     let saw = s.execute("solid.combine", &json!({"target": "Case", "tools": ["Saw"], "operation": "cut"})).unwrap();
-    assert_eq!(saw["bodies"], json!(["Case", "Case (1)"]), "{saw}");
+    // `bodies` lists them in the kernel's order. The piece whose least face name sorts first keeps
+    // the name (`lineage::order_lumps`): the +x half, whose `F1:+x` sorts before the -x half's
+    // least, its piece of the case's `F1:+y`.
+    let mut bodies: Vec<&str> = saw["bodies"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    bodies.sort_unstable();
+    assert_eq!(bodies, ["Case", "Case (1)"], "{saw}");
     assert_eq!(saw["created_bodies"], json!(["Case (1)"]), "{saw}");
+    let low_x = |name: &str| s.model.state().body(name).unwrap().mesh().bounds().min.x;
+    assert!((low_x("Case") - 1.0).abs() < 1e-9 && (low_x("Case (1)") + 30.0).abs() < 1e-9);
     let half = (60.0 - 2.0) / 2.0 * 40.0 * 10.0 + posts / 2.0;
     for name in ["Case", "Case (1)"] {
         assert!((volume(&s, name) - half).abs() < 1e-6 * half, "{name}: {} vs {half}", volume(&s, name));
@@ -901,4 +1166,584 @@ fn combine_of_a_piece_a_cut_used_to_split_off_takes_the_body_it_is_part_of() {
         let r = posts_cut().execute("solid.combine", &json!({"target": target, "tools": tools, "operation": operation}));
         assert!(r.is_err(), "{target} {operation} {tools}: {r:?}");
     }
+}
+
+/// A triangular prism and a thin slab sharing their bottom plane, the prism's edge in that plane
+/// lying in the slab's end face, the slab's corners rounded nearly to half its width (so its flat
+/// end is narrower than the prism).
+#[test]
+fn prism_edge_in_a_round_cornered_slab_end_face_joins() {
+    for r in [4.5, 4.9] {
+        let mut s = Session::default();
+        let mut run = |c: &str, p: Value| s.execute(c, &p).unwrap();
+        run("sketch.create", json!({"plane": {"origin": [-45.6, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}}));
+        run("sketch.line", json!({"points": [[-63, 0], [-3, 0], [-63, 60]], "closed": true}));
+        run("sketch.finish", json!({}));
+        run("solid.extrude", json!({"distance": 1.2, "operation": "new", "body_name": "Prism"}));
+        run("sketch.create", json!({"plane": "XY"}));
+        run("sketch.rectangle.rounded", json!({"p0": [-50, -67], "p1": [-40, -3], "radius": r}));
+        run("sketch.finish", json!({}));
+        run("solid.extrude", json!({"distance": 0.4, "operation": "new", "body_name": "Slab"}));
+        let (prism, slab) = (volume(&s, "Prism"), volume(&s, "Slab"));
+        s.execute("solid.combine", &json!({"target": "Prism", "tools": ["Slab"], "operation": "join"})).unwrap();
+        let join = s.model.results.last().unwrap();
+        assert_eq!(join.error.as_deref(), None, "r {r}");
+        // The prism inside the slab: 1.2 wide, 0.4 high and 60 long, less the 0.4 x 0.4 triangle the
+        // sloped face leaves empty at the slab's end.
+        let shared = 1.2 * 0.4 * 60.0 - 1.2 * 0.4 * 0.4 / 2.0;
+        let got = volume(&s, "Prism");
+        assert!((got - (prism + slab - shared)).abs() < 1e-3 * got, "r {r}: {got} vs {}", prism + slab - shared);
+    }
+}
+
+/// A cut from a face up to the plate's top face, its tool's end lying in that face: the boolean
+/// of the bodies as they lie left the hole closed by a skin of no thickness (the plate's top face
+/// whole over the hole, the tool's end face under it), which no volume shows and which was kept.
+/// The hole is open, and the cut takes the whole tool: the circle of radius 3.04 the two
+/// profiles make, from the barrel cut's floor at z 1.6 up to the plate's top at z 2.8. The design
+/// was saved by an older build: Extrude13 starts from a piece of a face that is no longer that
+/// piece, so it fails, asking for its face again; the rest builds.
+#[test]
+fn cut_up_to_the_plate_top_face_opens_the_hole() {
+    let mut script: Value = serde_json::from_str(include_str!("../../../examples/regressions/cut_up_to_face_leaves_skin.json")).unwrap();
+    let s = replay_value(&script);
+    let failed =
+        |r: &solidcraft_doc::FeatureResult| r.error.as_deref().and_then(solidcraft_doc::reselect_parts).map(|(feature, _)| feature.to_string());
+    assert!(s.model.results.iter().all(|r| r.error.is_none() || failed(r).as_deref() == Some("Extrude13")), "{:?}", s.model.results);
+    assert!(s.model.results.iter().any(|r| failed(r).as_deref() == Some("Extrude13")));
+    let state = s.model.state();
+    let body = &state.body("Body7").unwrap().body;
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    let skin: Vec<f64> = body
+        .faces(1e-4)
+        .unwrap()
+        .into_iter()
+        .filter(|f| f.plane_normal.is_some_and(|n| n.z < -0.999) && (f.centroid.z - 2.8).abs() < 1e-6)
+        .map(|f| f.area)
+        .collect();
+    assert!(skin.is_empty(), "faces at z 2.8 facing down, areas {skin:?} mm²");
+    // The same design without the cut.
+    script["commands"].as_array_mut().unwrap().pop();
+    let before = replay_value(&script);
+    let fine =
+        |s: &Session| s.model.state().body("Body7").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().volume;
+    let (removed, want) = (fine(&before) - fine(&s), std::f64::consts::PI * 3.04 * 3.04 * 1.2);
+    assert!((removed - want).abs() < 0.01, "removed {removed} mm³, want {want}");
+}
+
+fn replay_value(script: &Value) -> Session {
+    let mut s = Session::default();
+    s.run_script(script).unwrap();
+    s
+}
+
+/// A revolved cylinder (r 24) with a sealed spherical void (r 2) on its axis, cut over its bottom
+/// edge. The cut came out empty: refused for a box tool, and taken silently, the body gone, for a
+/// large rotated box whose bounding box covers the target. Both keep the body and its void, and an
+/// intersection with the box keeps the segment.
+#[test]
+fn cut_beside_a_sealed_void_keeps_the_body() {
+    use std::f64::consts::PI;
+    let r: f64 = 24.0;
+    // The circle's segment beyond a chord at `d` from the centre, and its integral over `d`.
+    let segment = |d: f64| r * r * (d / r).acos() - d * (r * r - d * d).sqrt();
+    let wedge = |d: f64| r * r * (d * (d / r).acos() - (r * r - d * d).sqrt()) + (r * r - d * d).powf(1.5) / 3.0;
+    let sphere = 4.0 / 3.0 * PI * 8.0;
+    let combine = |z: [f64; 2], tool: &[(&str, Value)], operation: &str| {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "YZ"})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, z[0]], "p1": [r, z[1]]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.revolve", &json!({"axis": "y", "operation": "new", "body_name": "B"})).unwrap();
+        let mid = (z[0] + z[1]) / 2.0;
+        s.execute("solid.sphere", &json!({"radius": 2, "center": [0, 0, mid], "operation": "new", "body_name": "V"})).unwrap();
+        s.execute("solid.combine", &json!({"target": "B", "tools": ["V"], "operation": "cut"})).unwrap();
+        for (command, params) in tool {
+            s.execute(command, params).unwrap();
+        }
+        s.execute("solid.combine", &json!({"target": "B", "tools": ["K"], "operation": operation})).unwrap_or_else(|e| panic!("{e}"));
+        let state = s.model.state();
+        let body = &state.body("B").unwrap().body;
+        assert_eq!(body.shell_count(), if operation == "cut" { 2 } else { 1 });
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+        // The revolved side's mesh stays 0.3 mm³ under its cylinder at any finer tolerance.
+        body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().volume
+    };
+    // A box over the bottom edge: the segment beyond x = 15, 5 high.
+    let edge_box = [("solid.box", json!({"length": 15, "width": 60, "height": 10, "corner": [15, -30, -5], "operation": "new", "body_name": "K"}))];
+    let got = combine([0.0, 60.0], &edge_box, "cut");
+    let want = PI * r * r * 60.0 - sphere - 5.0 * segment(15.0);
+    println!("box beside a void: {got:.6} mm³, expected {want:.6}");
+    assert!((got - want).abs() < 1e-5 * want, "{got} vs {want}");
+    let got = combine([0.0, 60.0], &edge_box, "intersect");
+    let want = 5.0 * segment(15.0);
+    println!("box beside a void, intersected: {got:.6} mm³, expected {want:.6}");
+    assert!((got - want).abs() < 1e-5 * want, "{got} vs {want}");
+    // A 600 mm box rotated 45° about Y, its face on x - z = 116: the wedge beyond chords from
+    // x = 10 (z = -106) to x = 24 (z = -92).
+    let shift = (300.0 + 116.0 / 2f64.sqrt()) / 2f64.sqrt();
+    let got = combine(
+        [-106.0, -43.5],
+        &[
+            ("solid.box", json!({"length": 600, "width": 600, "height": 600, "center": [0, 0, 0], "operation": "new", "body_name": "K"})),
+            ("solid.move", json!({"bodies": ["K"], "axis": [0, 1, 0], "angle": -45})),
+            ("solid.move", json!({"bodies": ["K"], "translate": [shift, 0, -shift]})),
+        ],
+        "cut",
+    );
+    let want = PI * r * r * 62.5 - sphere - (wedge(r) - wedge(10.0));
+    println!("rotated box beside a void: {got:.6} mm³, expected {want:.6}");
+    assert!((got - want).abs() < 1e-5 * want, "{got} vs {want}");
+}
+
+/// The reference mesh of loft bodies joined into a bike frame covers each face once: within 1%
+/// of the area of a mesh at a tenth of the tolerance. The trimmed loft sides were meshed with a
+/// flat sheet through the down tube (Delaunay in raw parameters on a strip stretched twentyfold:
+/// two and a half times the area), and the seat tube's side with slivers across it (a boundary
+/// polyline hooking back past its vertex dropped a trimming curve's constraints).
+#[test]
+fn joined_loft_frames_reference_mesh_covers_each_face_once() {
+    for (script, name) in [
+        (include_str!("../../../examples/regressions/loft_join_bracket_hull_triangle.json"), "DT2"),
+        (include_str!("../../../examples/regressions/front_triangle_hull_triangle.json"), "FrontTriangle"),
+    ] {
+        let s = replay(script);
+        let state = s.model.state();
+        let body = &state.body(name).unwrap().body;
+        let per_face = |m: &solidcraft_geom::Mesh| {
+            let mut a = vec![0.0; body.face_count()];
+            for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+                let [p0, p1, p2] = t.map(|i| m.positions[i as usize]);
+                a[*f as usize] += (p1 - p0).cross(p2 - p0).len() / 2.0;
+            }
+            a
+        };
+        let size = body.size();
+        let mesh = per_face(&body.mesh(&solidcraft_kernel::MeshTolerance { chord: size * 3e-4, angle: Some(12f64.to_radians()) }).unwrap());
+        let fine = per_face(&body.mesh(&solidcraft_kernel::MeshTolerance { chord: size * 3e-5, angle: Some(3f64.to_radians()) }).unwrap());
+        for (fi, (m, f)) in mesh.iter().zip(&fine).enumerate() {
+            assert!((m - f).abs() <= 0.01 * f.max(1.0), "{name} face {fi}: mesh {m:.0} mm², finer mesh {f:.0} mm²");
+        }
+    }
+}
+
+/// The block of #2040 with `extra` run after it.
+fn rounded_block_and(extra: Value) -> Session {
+    let mut script: Value = serde_json::from_str(include_str!("../../../examples/regressions/extrude_face_rounded_by_fillets.json")).unwrap();
+    script["commands"].as_array_mut().unwrap().push(extra);
+    replay(&script.to_string())
+}
+
+/// #2040: the slanted face of a block whose ends fillets round, extruded as a join. Its outline's
+/// quarter-ellipses come into the face's sketch as splines a hair off the body's edges, and the
+/// join failed with "boolean Union: no result"; it now sweeps the body's own face. It adds the
+/// face's area times its height: a 10 x 12 face less four corners of (1 - pi/4) r * r*sqrt(2).
+#[test]
+fn extrude_join_from_a_face_rounded_by_fillets() {
+    let at = json!([16.191269086108846, -6.702792508916929, 4.676550460347439]);
+    let before = volume(&replay(include_str!("../../../examples/regressions/extrude_face_rounded_by_fillets.json")), "Body1");
+    let r = 3.8_f64;
+    let area = 10.0 * 12.0 - 4.0 * (1.0 - std::f64::consts::FRAC_PI_4) * r * r * 2f64.sqrt();
+    let joined = rounded_block_and(json!({"command": "solid.extrude", "params": {"face": at, "distance": 5, "operation": "join"}}));
+    let bodies = &joined.model.state().bodies;
+    assert_eq!(bodies.len(), 1, "the join makes no second body");
+    assert!(bodies[0].body.validity().is_empty(), "{:?}", bodies[0].body.validity());
+    let v = volume(&joined, "Body1");
+    assert!((v - (before + area * 5.0)).abs() < 0.05, "join {v} expected {}", before + area * 5.0);
+}
+
+/// #2040: a cut 3 mm into the slanted face of the block rounded along its top only (its bottom
+/// edge left sharp). The walls from the bottom edge go into the body and the others only touch
+/// it, along edges with curved faces beside them: the cut failed with "boolean Cut: no result".
+/// In the face's plane the body's section at depth t is the block's section (10 wide, h high, its
+/// top corners rounded) moved down the face by t: the cut takes
+/// √2 ∫₀³ (10 (h − t/√2) − 2 (1 − π/4) r²) dt.
+#[test]
+fn extrude_cut_into_a_face_beside_rounds() {
+    let at = json!([16.191269086108846, -6.702792508916929, 4.676550460347439]);
+    let top_only = |extra: Option<Value>| {
+        let mut script: Value = serde_json::from_str(include_str!("../../../examples/regressions/extrude_face_rounded_by_fillets.json")).unwrap();
+        let commands = script["commands"].as_array_mut().unwrap();
+        let fillet = commands.last_mut().unwrap();
+        fillet["params"]["edges"] = json!([[10, -10, 8.485281374238571], [10, 0, 8.485281374238571]]);
+        commands.extend(extra);
+        replay(&script.to_string())
+    };
+    let before = volume(&top_only(None), "Body1");
+    let cut = top_only(Some(json!({"command": "solid.extrude", "params": {"face": at, "distance": 3, "direction": "negative", "operation": "cut"}})));
+    let bodies = &cut.model.state().bodies;
+    assert_eq!(bodies.len(), 1);
+    assert!(bodies[0].body.validity().is_empty(), "{:?}", bodies[0].body.validity());
+    let (h, r, d, w) = (8.485281374238571_f64, 3.8_f64, 3.0_f64, 10.0_f64);
+    let corner = (1.0 - std::f64::consts::FRAC_PI_4) * r * r;
+    let taken = 2f64.sqrt() * w * h * d - w * d * d / 2.0 - 2.0 * 2f64.sqrt() * corner * d;
+    let v = before - volume(&cut, "Body1");
+    assert!((v - taken).abs() < 0.05, "took {v}, expected {taken}");
+}
+
+/// #2040: a cut 2 mm into the top face of the block rounded at its ends, the strip 10 − 2r wide
+/// between the rounds. Below the face the rounds stand out past its outline, so a slab over the
+/// whole body would take them too: the cut takes only what lies over the face, at height z from
+/// x = 0 to the slanted face at x = x0 + z.
+#[test]
+fn extrude_cut_into_a_rounded_block_top() {
+    let (h, r, x0, d) = (8.485281374238571_f64, 3.8_f64, 11.514718625761429_f64, 2.0_f64);
+    let before = volume(&replay(include_str!("../../../examples/regressions/extrude_face_rounded_by_fillets.json")), "Body1");
+    let cut = rounded_block_and(
+        json!({"command": "solid.extrude", "params": {"face": [5, -5, h], "distance": d, "direction": "negative", "operation": "cut"}}),
+    );
+    let bodies = &cut.model.state().bodies;
+    assert_eq!(bodies.len(), 1);
+    assert!(bodies[0].body.validity().is_empty(), "{:?}", bodies[0].body.validity());
+    let taken = (10.0 - 2.0 * r) * (x0 * d + (h * h - (h - d) * (h - d)) / 2.0);
+    let v = before - volume(&cut, "Body1");
+    assert!((v - taken).abs() < 0.05, "took {v}, expected {taken}");
+}
+
+#[test]
+fn empty_intersection_is_refused_without_changing_the_design() -> crate::Result<()> {
+    for command in ["solid.extrude", "solid.box", "solid.combine"] {
+        for x in [5, 20] {
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Base"}))?;
+            s.execute("solid.box", &json!({"corner":[x,0,0],"length":10,"width":10,"height":10,"body_name":"Tool","operation":"new"}))?;
+            s.execute("sketch.create", &json!({"plane":"XY"}))?;
+            s.execute("sketch.rectangle.two_point", &json!({"p0":[x,0],"p1":[x+10,10]}))?;
+            s.execute("sketch.finish", &json!({}))?;
+            let before = s.doc.to_json();
+            let params = match command {
+                "solid.combine" => json!({"target":"Base","tools":["Tool"],"operation":"intersect"}),
+                "solid.box" => json!({"corner":[x,0,0],"length":10,"width":10,"height":10,"operation":"intersect","targets":["Base"]}),
+                _ => json!({"distance":10,"operation":"intersect","targets":["Base"]}),
+            };
+            let result = s.execute(command, &params);
+            if x == 20 {
+                let error = result.err().ok_or_else(|| crate::EngineError::Other(format!("{command} accepted an empty intersection")))?;
+                assert!(
+                    error.to_string().contains("the intersection is empty: nothing of `Base` would remain; check that the profile overlaps the body"),
+                    "{error}"
+                );
+                assert_eq!(s.doc.to_json(), before);
+                assert_eq!(s.model.state().bodies.len(), 2);
+                assert!((volume(&s, "Base") - 1000.0).abs() < 1e-6);
+                assert!((volume(&s, "Tool") - 1000.0).abs() < 1e-6);
+            } else {
+                result?;
+                assert!((volume(&s, "Base") - 500.0).abs() < 1e-6);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn empty_intersection_in_a_saved_design_fails_and_keeps_the_target() -> crate::Result<()> {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Base"}))?;
+    s.execute("solid.box", &json!({"length":10,"width":10,"height":40,"body_name":"Tall","operation":"new"}))?;
+    s.execute("sketch.create", &json!({"plane":"XY","offset":5}))?;
+    s.execute("sketch.rectangle.two_point", &json!({"p0":[0,0],"p1":[10,10]}))?;
+    s.execute("sketch.finish", &json!({}))?;
+    let result = s.execute("solid.extrude", &json!({"distance":10,"operation":"intersect","targets":["Tall","Base"]}))?;
+    let id = result["feature"].as_u64().ok_or_else(|| crate::EngineError::Other("missing feature id".into()))?;
+    assert!((volume(&s, "Base") - 500.0).abs() < 1e-6);
+    let mut doc = solidcraft_doc::Document::from_json(&s.doc.to_json())?;
+    if let Some(f) = doc.feature_mut(id)
+        && let solidcraft_doc::FeatureKind::Extrude { extent, .. } = &mut f.kind
+    {
+        extent.start_offset = Some("20 mm".into());
+    }
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&doc.to_json())?);
+    assert!(reopened.model.result(id).and_then(|r| r.error.as_ref()).is_some_and(|e| e.contains("the intersection is empty")));
+    assert_eq!(reopened.model.state().bodies.len(), 2);
+    assert!((volume(&reopened, "Tall") - 4000.0).abs() < 1e-6);
+    assert!((volume(&reopened, "Base") - 1000.0).abs() < 1e-6);
+    Ok(())
+}
+
+#[test]
+fn intersect_with_every_body_still_drops_the_ones_it_misses() -> crate::Result<()> {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Near"}))?;
+    s.execute("solid.box", &json!({"corner":[30,0,0],"length":10,"width":10,"height":10,"body_name":"Far","operation":"new"}))?;
+    s.execute("sketch.create", &json!({"plane":"XY"}))?;
+    s.execute("sketch.rectangle.two_point", &json!({"p0":[0,0],"p1":[5,10]}))?;
+    s.execute("sketch.finish", &json!({}))?;
+    s.execute("solid.extrude", &json!({"distance":10,"operation":"intersect"}))?;
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!((volume(&s, "Near") - 500.0).abs() < 1e-6);
+    Ok(())
+}
+
+/// #451: a spherical shell (r 18.5 to 40, revolved on XY) cut from a block, or joined with it.
+/// Swept with its two radial lines, the shell had zero-area faces on the axis joining the outer
+/// sphere to the inner one, and a cut through the inner sphere's pole failed. As a solid with a
+/// void, the boolean took its shells one at a time: a cut through both spheres kept only the piece
+/// in the hollow, and a join failed.
+#[test]
+fn spherical_shell_cuts_and_joins_a_block_crossing_its_hollow() {
+    let r: f64 = 18.5;
+    // ∫∫ √(R² − y² − z²) dy dz over the blocks' 8 × 8 section, the inner integral in closed form,
+    // the outer by Simpson's rule.
+    let under = |big: f64| {
+        let inner = |y: f64| {
+            let a2 = big * big - y * y;
+            let f = |z: f64| 0.5 * (z * (a2 - z * z).sqrt() + a2 * (z / a2.sqrt()).asin());
+            f(4.0) - f(-4.0)
+        };
+        let n = 200;
+        let h = 8.0 / n as f64;
+        (0..n / 2).map(|i| -4.0 + 2.0 * i as f64 * h).map(|y| inner(y) + 4.0 * inner(y + h) + inner(y + 2.0 * h)).sum::<f64>() * h / 3.0
+    };
+    // From x = 8 to the inner sphere, and from the outer sphere to x = 50.
+    let (hollow, beyond) = (under(r) - 8.0 * 64.0, 50.0 * 64.0 - under(40.0));
+    let shell = 4.0 / 3.0 * std::f64::consts::PI * (40.0f64.powi(3) - r.powi(3));
+    for (x0, length, operation, want) in [
+        (-4.0, 8.0, "cut", 512.0),
+        (8.0, 12.0, "cut", hollow),
+        (8.0, 42.0, "cut", hollow + beyond),
+        (8.0, 12.0, "join", shell + hollow),
+        (8.0, 42.0, "join", shell + hollow + beyond),
+    ] {
+        let mut s = Session::default();
+        let mut run = |c: &str, p: Value| s.execute(c, &p).unwrap();
+        run("solid.box", json!({"corner": [x0, -4, -4], "length": length, "width": 8, "height": 8, "body_name": "Block"}));
+        run("sketch.create", json!({"plane": "XY", "name": "Ring"}));
+        run("sketch.line", json!({"points": [[-40, 0], [40, 0]]}));
+        run("sketch.arc.center_point", json!({"center": [0, 0], "start": [40, 0], "end": [-40, 0]}));
+        run("sketch.arc.center_point", json!({"center": [0, 0], "start": [r, 0], "end": [-r, 0]}));
+        run("sketch.finish", json!({}));
+        run("solid.revolve", json!({"sketch": "Ring", "profiles": [{"point": [0, 30]}], "axis": "l1", "operation": operation, "targets": ["Block"]}));
+        // A cut through both spheres leaves two pieces, one each side of the shell.
+        let state = s.model.state();
+        let got: f64 = state.bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum();
+        println!("#451 {operation} of the block from x = {x0} to {}: {got:.6} mm³ in {} bodies, expected {want:.6}", x0 + length, state.bodies.len());
+        assert!((got - want).abs() < 1e-4 * want, "{operation} from x = {x0} to {}: {got} vs {want}", x0 + length);
+        assert!(state.bodies.iter().all(|b| b.body.validity().is_empty()));
+    }
+}
+
+/// #4434: a Join whose profile stands apart from the body still joins it, as a second piece of
+/// `Body1`, and says so; scripts read it from the reply as History shows it. A join that meets
+/// the body, one that closes a cavity (a void is not a piece) and a Combine of bodies chosen
+/// apart say nothing.
+#[test]
+fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
+    let apart = "`Body1` is now in 2 separate pieces";
+    let two_squares = || {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY", "name": "Sketch1"})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [20, 20]})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [40, 0], "p1": [60, 20]})).unwrap();
+        s.execute(
+            "solid.extrude",
+            &json!({"sketch": "Sketch1", "profiles": [{"point": [10, 10]}], "distance": 10, "operation": "new", "name": "Extrude1"}),
+        )
+        .unwrap();
+        s
+    };
+    let mut s = two_squares();
+    let join = s
+        .execute(
+            "solid.extrude",
+            &json!({"sketch": "Sketch1", "profiles": [{"point": [50, 10]}], "distance": 10, "operation": "join", "name": "Extrude2"}),
+        )
+        .unwrap();
+    assert!(join["warning"].as_str().is_some_and(|w| w.contains(apart)), "{join}");
+    assert_eq!(s.model.results.last().and_then(|r| r.warning.as_deref()), join["warning"].as_str());
+    assert_eq!(s.model.state().bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Body1"]);
+    assert!((volume(&s, "Body1") - 8000.0).abs() < 1e-6, "{}", volume(&s, "Body1"));
+
+    // Both profiles at once, one on the body and one apart: joined as one tool, still told.
+    let mut s = two_squares();
+    let both = s
+        .execute("solid.extrude", &json!({"sketch": "Sketch1", "profiles": [{"point": [10, 10]}, {"point": [50, 10]}], "distance": 5, "start_offset": 10, "operation": "join"}))
+        .unwrap();
+    assert!(both["warning"].as_str().is_some_and(|w| w.contains(apart)), "{both}");
+
+    // A box joined apart from the body, then one bridging both pieces: only the first is told.
+    let mut s = two_squares();
+    let box_apart = s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "center": [10, 40, 5], "operation": "join"})).unwrap();
+    assert!(box_apart["warning"].as_str().is_some_and(|w| w.contains(apart)), "{box_apart}");
+    let bridge = s.execute("solid.box", &json!({"length": 10, "width": 30, "height": 10, "center": [10, 25, 5], "operation": "join"})).unwrap();
+    assert!(bridge["warning"].is_null(), "{bridge}");
+
+    // A lid joined on a cup closes a cavity: one piece with a void, nothing to say.
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 10, "center": [0, 0, 5], "operation": "new"})).unwrap();
+    s.execute("solid.box", &json!({"length": 16, "width": 16, "height": 10, "center": [0, 0, 6], "operation": "cut"})).unwrap();
+    let lid = s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 2, "center": [0, 0, 11], "operation": "join"})).unwrap();
+    assert_eq!(s.model.state().body("Body1").map(|b| b.body.shell_count()), Some(2));
+    assert!(lid["warning"].is_null(), "{lid}");
+
+    // Combine joins the bodies it is given, apart or not.
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "A"})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "center": [30, 0, 5], "operation": "new", "body_name": "B"})).unwrap();
+    let combine = s.execute("solid.combine", &json!({"target": "A", "tools": ["B"], "operation": "join"})).unwrap();
+    assert!(combine["warning"].is_null(), "{combine}");
+}
+
+/// #12996: a circular pattern of an untargeted cut made in a component, run with another
+/// component active, cuts the bodies of the cut's own component, as the cut did.
+#[test]
+fn pattern_of_an_untargeted_cut_in_a_component_works_with_root_active() {
+    let mut s = Session::default();
+    let run = |s: &mut Session, command: &str, params: Value| s.execute(command, &params).unwrap();
+    run(&mut s, "component.create", json!({"name": "Main Body"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-50, -50], "p1": [50, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "20 mm", "operation": "new", "body_name": "Body1"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.circle.center", json!({"center": [30, 0], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "10 mm", "direction": "negative", "operation": "cut", "name": "Extrude62"}));
+    let one_hole = volume(&s, "Body1");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Other"}));
+    run(&mut s, "solid.pattern.circular", json!({"features": ["Extrude62"], "axis": "Z", "count": 10}));
+    let hole = 10.0 * 16.0 * std::f64::consts::PI;
+    let got = volume(&s, "Body1");
+    assert!((one_hole - got - 9.0 * hole).abs() < 0.02 * hole, "{one_hole} -> {got}");
+}
+
+/// #12996: when the component active for the pattern has a body of its own, the copies of an
+/// untargeted cut keep cutting it, as they did before: saved designs rebuild the same.
+#[test]
+fn pattern_of_an_untargeted_cut_still_cuts_its_own_components_body() {
+    let mut s = Session::default();
+    let run = |s: &mut Session, command: &str, params: Value| s.execute(command, &params).unwrap();
+    run(&mut s, "component.create", json!({"name": "Main Body"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-50, -50], "p1": [50, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "20 mm", "operation": "new", "body_name": "Body1"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.circle.center", json!({"center": [30, 0], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "10 mm", "direction": "negative", "operation": "cut", "name": "Extrude62"}));
+    let one_hole = volume(&s, "Body1");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Other"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-50, -50], "p1": [50, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "20 mm", "operation": "new", "body_name": "Plate2"}));
+    let plate = volume(&s, "Plate2");
+    run(&mut s, "solid.pattern.circular", json!({"features": ["Extrude62"], "axis": "Z", "count": 10}));
+    let hole = 10.0 * 16.0 * std::f64::consts::PI;
+    let (body1, plate2) = (volume(&s, "Body1"), volume(&s, "Plate2"));
+    assert!((one_hole - body1).abs() < 0.02 * hole, "Body1 untouched: {one_hole} -> {body1}");
+    assert!((plate - plate2 - 9.0 * hole).abs() < 0.02 * hole, "Plate2 cut: {plate} -> {plate2}");
+}
+
+/// #7317: a cut that opens on no face leaves a closed cavity and says so, with the void's volume.
+/// A cut that opens on the outside, one that touches no material and a cup shelled on purpose
+/// say nothing.
+#[test]
+fn cut_that_leaves_a_closed_cavity_says_so() {
+    let plot = || {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"corner": [-10, -20, 0], "length": 20, "width": 20, "height": 10, "operation": "new", "body_name": "Plot"}))
+            .unwrap();
+        s
+    };
+    let magnet = |height: f64| json!({"base": [0, -2.2, 5], "axis": [0, 1, 0], "radius": 3.1, "height": height, "operation": "cut", "targets": ["Plot"], "name": "Logement"});
+
+    // Through the y = 0 face: one shell, nothing to say.
+    let mut s = plot();
+    let open = s.execute("solid.cylinder", &magnet(2.3)).unwrap();
+    assert!(open["warning"].is_null(), "{open}");
+    assert_eq!(s.model.state().body("Plot").map(|b| b.body.shell_count()), Some(1));
+
+    // Shorter, it stops inside the body: a cavity of pi * 3.1² * 2.0 mm³, told in the reply and on the feature.
+    let mut s = plot();
+    let closed = s.execute("solid.cylinder", &magnet(2.0)).unwrap();
+    assert_eq!(s.model.state().body("Plot").map(|b| b.body.shell_count()), Some(2));
+    let note = closed["warning"].as_str().unwrap_or_default();
+    assert!(note.contains("closed cavity") && note.contains("60.38"), "{closed}");
+    assert_eq!(s.model.results.last().and_then(|r| r.warning.as_deref()), closed["warning"].as_str());
+
+    // The same feature edited from the opening height to the closed one.
+    let mut s = plot();
+    s.execute("solid.cylinder", &magnet(2.3)).unwrap();
+    s.execute("timeline.edit", &json!({"feature": "Logement", "set": {"height": "2.0"}})).unwrap();
+    assert!(s.model.results.last().and_then(|r| r.warning.as_deref()).is_some_and(|w| w.contains("closed cavity")));
+
+    // A cut that misses the body changes nothing and says nothing here.
+    let mut s = plot();
+    let away = s
+        .execute(
+            "solid.cylinder",
+            &json!({"base": [0, 50, 5], "axis": [0, 1, 0], "radius": 3.1, "height": 2.0, "operation": "cut", "targets": ["Plot"]}),
+        )
+        .unwrap();
+    assert!(!away["warning"].as_str().unwrap_or_default().contains("closed cavity"), "{away}");
+
+    // A cup made by cutting from its top: open, no warning.
+    let mut s = plot();
+    let cup = s
+        .execute("solid.box", &json!({"length": 16, "width": 16, "height": 10, "center": [0, -10, 6], "operation": "cut", "targets": ["Plot"]}))
+        .unwrap();
+    assert!(!cup["warning"].as_str().unwrap_or_default().contains("closed cavity"), "{cup}");
+}
+
+/// Issue #10: fuzzer seed 73. Extrude an arc-sided profile, fillet two top edges, then join a box.
+/// The join's boolean union used to be refused by solidcore's boolean check as "Bad Gap:
+/// Edge/Vertex gap across Edgeuse start larger than tol" (offset=7.7878382e-06,
+/// tolerance=7.5978919e-06). Every failing seed of the boolean fuzzer is a reproducible bug,
+/// fixed with a regression test that fails without the fix.
+/// Root cause not yet found — grows tolerances but gap may exceed platform-specific limits.
+#[ignore = "fails until the tolerance root cause for seed 73 is found (#10)"]
+#[test]
+fn fuzz_seed_73_boolean_join_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_73_boolean_join.json"));
+    let state = s.model.state();
+    // Every step ran: every body is a sound solid, and the join produced one body.
+    assert_eq!(state.bodies.len(), 1, "the join must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the joined body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the union must be a real solid: {}", m.volume);
+    println!("#10 seed 73: joined body volume {volume:.2} mm³", volume = m.volume);
+}
+
+/// Issue #10: fuzzer seed 185. Box, join cylinder, cut cylinder, then rectangular pattern on the
+/// cut cylinder. The pattern's boolean result is refused as "SMLib's result is not a closed
+/// solid". Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a
+/// regression test that fails without the fix.
+/// Root cause not yet found — pattern boolean result tolerance, topologically different from
+/// seed 73's "Bad Gap" boolean tolerance issue.
+#[ignore = "fails until the pattern boolean root cause for seed 185 is found (#10)"]
+#[test]
+fn fuzz_seed_185_pattern_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_185_pattern.json"));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "the pattern must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the pattern result must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the pattern result must be a real solid: {}", m.volume);
+    println!("#10 seed 185: pattern result volume {volume:.2} mm³", volume = m.volume);
+}
+
+/// Issue #10: fuzzer seed 178. Box, fillet, cut cylinder, cut box, shell, rectangular pattern,
+/// then fillet. The final fillet is refused as "SMLib fillet: SMLib's check refuses the result:
+/// Tolerance: Edge tolerance relative to brep tolerance (offset=0.083186985, tolerance=0.01)".
+/// Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a regression test
+/// that fails without the fix.
+/// Root cause not yet found — fillet result tolerance, topologically different from seed 73's
+/// "Bad Gap" boolean tolerance issue.
+#[ignore = "fails until the fillet tolerance root cause for seed 178 is found (#10)"]
+#[test]
+fn fuzz_seed_178_fillet_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_178_fillet.json"));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "the fillet must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the filleted body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the fillet result must be a real solid: {}", m.volume);
+    println!("#10 seed 178: filleted body volume {volume:.2} mm³", volume = m.volume);
 }

@@ -2,14 +2,15 @@
 //! Endpoint walks exclude support centres. Crossings/touches refuse before nesting.
 use super::{LCurve, curve_points};
 use crate::{Shape, intersections};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::Aabb2;
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
 struct Boundary {
     curves: Vec<usize>,
     shapes: Vec<Shape>,
-    lo: Vec2,
-    hi: Vec2,
+    bounds: Aabb2,
     depth: usize,
     signature: [usize; 3],
 }
@@ -20,10 +21,40 @@ pub(super) struct Roles {
     pub fresh_normal: Vec<Vec2>,
     pub old_lines: Vec<Vec<Vec2>>,
     pub fresh_lines: Vec<Vec<Vec2>>,
+    /// The directions the lines at each point leave it in (as `old_lines`, but with their sense):
+    /// the two end corners of a thin arm have the same lines, leaving them opposite ways.
+    pub old_leaving: Vec<Vec<Vec2>>,
+    pub fresh_leaving: Vec<Vec<Vec2>>,
 }
 
 pub(super) fn same_lines(a: &[Vec2], b: &[Vec2]) -> bool {
     a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| x.dot(*y).abs() > 0.98))
+}
+
+/// Whether the lines leave two points the same ways ([`Roles::old_leaving`]): each direction
+/// of one point matches a different direction of the other. At a sharp corner two nearly
+/// parallel directions must not both match one direction while the other line turned round.
+/// A point with more than 8 lines is never matched: the search stays small.
+pub(super) fn same_leaving(a: &[Vec2], b: &[Vec2]) -> bool {
+    fn assign(a: &[Vec2], b: &[Vec2], used: &mut [bool]) -> bool {
+        let Some((x, rest)) = a.split_first() else { return true };
+        for (i, y) in b.iter().enumerate() {
+            if used.get(i).copied().unwrap_or(true) || x.dot(*y) <= 0.98 {
+                continue;
+            }
+            if let Some(slot) = used.get_mut(i) {
+                *slot = true;
+            }
+            if assign(rest, b, used) {
+                return true;
+            }
+            if let Some(slot) = used.get_mut(i) {
+                *slot = false;
+            }
+        }
+        false
+    }
+    a.len() == b.len() && a.len() <= 8 && assign(a, b, &mut vec![false; b.len()])
 }
 fn on(s: &Shape, p: Vec2, tol: f64) -> bool {
     match *s {
@@ -180,8 +211,7 @@ fn boundaries(curves: &[LCurve], pts: &[Vec2]) -> Option<Vec<Boundary>> {
                 pending.extend(incidence.get(b)?);
             }
         }
-        let mut lo = Vec2::new(f64::INFINITY, f64::INFINITY);
-        let mut hi = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+        let mut bounds = Aabb2::EMPTY;
         let mut signature = [0; 3];
         let mut bound_shapes = Vec::new();
         for i in &members {
@@ -195,10 +225,7 @@ fn boundaries(curves: &[LCurve], pts: &[Vec2]) -> Option<Vec<Boundary>> {
                     }
                 }
             }
-            for p in candidates {
-                lo = Vec2::new(lo.x.min(p.x), lo.y.min(p.y));
-                hi = Vec2::new(hi.x.max(p.x), hi.y.max(p.y));
-            }
+            bounds.extend(candidates);
             signature[match curves.get(*i)? {
                 LCurve::Line(..) => 0,
                 LCurve::Arc(..) => 1,
@@ -206,9 +233,9 @@ fn boundaries(curves: &[LCurve], pts: &[Vec2]) -> Option<Vec<Boundary>> {
             }] += 1;
             bound_shapes.push(shape);
         }
-        out.push(Boundary { curves: members, shapes: bound_shapes, lo, hi, depth: 0, signature });
+        out.push(Boundary { curves: members, shapes: bound_shapes, bounds, depth: 0, signature });
     }
-    let scale = out.iter().map(|b| (b.hi - b.lo).len()).fold(1.0, f64::max);
+    let scale = out.iter().map(|b| b.bounds.diagonal()).fold(1.0, f64::max);
     let tol = (scale * 1e-10).max(1e-7);
     let mut work = 0usize;
     for i in 0..out.len() {
@@ -260,27 +287,20 @@ fn boundaries(curves: &[LCurve], pts: &[Vec2]) -> Option<Vec<Boundary>> {
 pub(super) fn valid(curves: &[LCurve], points: &[Vec2]) -> bool {
     boundaries(curves, points).is_some()
 }
-fn normalize(p: Vec2, lo: Vec2, hi: Vec2) -> Vec2 {
-    Vec2::new((p.x - lo.x) / (hi.x - lo.x).max(1e-9), (p.y - lo.y) / (hi.y - lo.y).max(1e-9))
-}
 pub(super) fn roles(old_curves: &[LCurve], a: &[Vec2], fresh_curves: &[LCurve], b: &[Vec2]) -> Option<Roles> {
     let (previous, incoming) = (boundaries(old_curves, a)?, boundaries(fresh_curves, b)?);
     if previous.len() != incoming.len() {
         return None;
     }
-    let bounds = |loops: &[Boundary]| {
-        loops.iter().fold((Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY)), |(lo, hi), x| {
-            (Vec2::new(lo.x.min(x.lo.x), lo.y.min(x.lo.y)), Vec2::new(hi.x.max(x.hi.x), hi.y.max(x.hi.y)))
-        })
-    };
-    let ((alo, ahi), (blo, bhi)) = (bounds(&previous), bounds(&incoming));
+    let bounds = |loops: &[Boundary]| loops.iter().fold(Aabb2::EMPTY, |a, x| a.union(&x.bounds));
+    let (outer_a, outer_b) = (bounds(&previous), bounds(&incoming));
     let mut mapping = Vec::new();
     for x in &previous {
         let mut candidates: Vec<_> = incoming
             .iter()
             .enumerate()
             .filter(|(_, y)| x.depth == y.depth && x.signature == y.signature)
-            .map(|(i, y)| (i, normalize((x.lo + x.hi) * 0.5, alo, ahi).dist(normalize((y.lo + y.hi) * 0.5, blo, bhi))))
+            .map(|(i, y)| (i, outer_a.relative(x.bounds.center()).dist(outer_b.relative(y.bounds.center()))))
             .collect();
         candidates.sort_by(|x, y| x.1.total_cmp(&y.1));
         let (i, d) = *candidates.first()?;
@@ -290,8 +310,8 @@ pub(super) fn roles(old_curves: &[LCurve], a: &[Vec2], fresh_curves: &[LCurve], 
         let y = incoming.get(i)?;
         // Preserve the conservative bound on relative boundary changes. This does
         // not mistake a stationary hole's coordinates for the outer loop's scaling.
-        let old_size = normalize(x.hi, alo, ahi) - normalize(x.lo, alo, ahi);
-        let new_size = normalize(y.hi, blo, bhi) - normalize(y.lo, blo, bhi);
+        let old_size = outer_a.relative(x.bounds.max) - outer_a.relative(x.bounds.min);
+        let new_size = outer_b.relative(y.bounds.max) - outer_b.relative(y.bounds.min);
         if old_size.dist(new_size) >= 0.1 {
             return None;
         }
@@ -306,7 +326,7 @@ pub(super) fn roles(old_curves: &[LCurve], a: &[Vec2], fresh_curves: &[LCurve], 
                 for p in curve_points(curves.get(*curve)?) {
                     if !roles.get(p)?.contains(&target) {
                         roles.get_mut(p)?.push(target);
-                        *coordinates.get_mut(p)? += normalize(*pts.get(p)?, loop_.lo, loop_.hi);
+                        *coordinates.get_mut(p)? += loop_.bounds.relative(*pts.get(p)?);
                     }
                 }
             }
@@ -322,22 +342,26 @@ pub(super) fn roles(old_curves: &[LCurve], a: &[Vec2], fresh_curves: &[LCurve], 
     };
     let ((old, old_normal), (fresh, fresh_normal)) =
         (membership(&previous, old_curves, a, Some(&mapping))?, membership(&incoming, fresh_curves, b, None)?);
-    let line_roles = |loops: &[Boundary], curves: &[LCurve], pts: &[Vec2]| -> Option<Vec<Vec<Vec2>>> {
+    type Lines = Vec<Vec<Vec2>>;
+    let line_roles = |loops: &[Boundary], curves: &[LCurve], pts: &[Vec2]| -> Option<(Lines, Lines)> {
         let mut roles = vec![Vec::new(); pts.len()];
+        let mut leaving = vec![Vec::new(); pts.len()];
         for loop_ in loops {
-            let size = loop_.hi - loop_.lo;
+            let size = loop_.bounds.max - loop_.bounds.min;
             for i in &loop_.curves {
                 if let LCurve::Line(a, b) = *curves.get(*i)? {
                     let d = *pts.get(b)? - *pts.get(a)?;
                     let direction = Vec2::new(d.x / size.x.max(1e-9), d.y / size.y.max(1e-9)).normalized()?;
                     roles.get_mut(a)?.push(direction);
                     roles.get_mut(b)?.push(direction);
+                    leaving.get_mut(a)?.push(direction);
+                    leaving.get_mut(b)?.push(direction * -1.0);
                 }
             }
         }
-        Some(roles)
+        Some((roles, leaving))
     };
-    let old_lines = line_roles(&previous, old_curves, a)?;
-    let fresh_lines = line_roles(&incoming, fresh_curves, b)?;
-    Some(Roles { old, fresh, old_normal, fresh_normal, old_lines, fresh_lines })
+    let (old_lines, old_leaving) = line_roles(&previous, old_curves, a)?;
+    let (fresh_lines, fresh_leaving) = line_roles(&incoming, fresh_curves, b)?;
+    Some(Roles { old, fresh, old_normal, fresh_normal, old_lines, fresh_lines, old_leaving, fresh_leaving })
 }

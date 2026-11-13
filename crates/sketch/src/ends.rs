@@ -9,7 +9,9 @@
 //! An end is tied when it is shared with another curve's end, joined to one by coincident
 //! constraints, or held on a curve (point on curve, midpoint).
 
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Seg2, Vec2};
+use solidcraft_geom::Aabb2;
+use solidcraft_geom::prelude::*;
 
 use crate::model::{ConstraintKind, CurveKind, Sketch};
 use crate::union_find::{find, union};
@@ -59,18 +61,11 @@ fn profile_curve(sk: &Sketch, ci: usize) -> bool {
 }
 
 /// A box around a segment (conservative for curved ones).
-fn seg_box(s: &Seg2) -> (Vec2, Vec2) {
-    let hull = |pts: &[Vec2]| {
-        pts.iter().fold((Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY)), |(lo, hi), p| {
-            (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y)))
-        })
-    };
+fn seg_box(s: &Seg2) -> Aabb2 {
+    let hull = |pts: &[Vec2]| pts.iter().copied().collect::<Aabb2>();
     match *s {
         Seg2::Line { a, b } => hull(&[a, b]),
-        Seg2::Arc { center, radius, .. } => {
-            let r = Vec2::new(radius.abs(), radius.abs());
-            (center - r, center + r)
-        }
+        Seg2::Arc { center, radius, .. } => Aabb2 { min: center, max: center }.inflated(radius.abs()),
         Seg2::Cubic { p0, p1, p2, p3 } => hull(&[p0, p1, p2, p3]),
         Seg2::Conic { a, apex, b, .. } => hull(&[a, apex, b]),
         Seg2::Bezier { n, p } => hull(p.get(..=usize::from(n)).unwrap_or(p.as_slice())),
@@ -115,7 +110,11 @@ pub fn loose_ends(sk: &Sketch) -> EndReport {
     }
     for c in &sk.constraints {
         let on = match c.kind {
-            ConstraintKind::PointOnCurve { p, c } | ConstraintKind::Midpoint { p, l: c } if profile_curve(sk, c) => Some(p),
+            ConstraintKind::PointOnCurve { p, c } | ConstraintKind::PointAlong { p, c, .. } | ConstraintKind::Midpoint { p, l: c }
+                if profile_curve(sk, c) =>
+            {
+                Some(p)
+            }
             _ => None,
         };
         if let Some(p) = on {
@@ -151,7 +150,7 @@ pub fn loose_ends(sk: &Sketch) -> EndReport {
         }
         let curve_ends = c.kind.ends();
         for seg in sk.segs(ci) {
-            let (lo, hi) = seg_box(&seg);
+            let Aabb2 { min: lo, max: hi } = seg_box(&seg);
             let first = free.partition_point(|f| f.2.x < lo.x - END_TOL);
             for (k, &(p, own, at)) in free.iter().enumerate().skip(first) {
                 if at.x > hi.x + END_TOL {

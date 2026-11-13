@@ -1,13 +1,17 @@
 [
   {
-    "note": "Centerline needs the same CREATE panel placement and icon as its neighbours (sketch.ellipse, sketch.conic): without them it never appeared in the CREATE panel's drop-down at all, pinned or not. Both it and the construction toggle draw their icon in the app's fixed construction orange, not the tab or panel accent colour a caller happens to pass to icons::paint."
+    "note": "Centerline needs the same CREATE panel placement and icon as its neighbours (sketch.ellipse, sketch.conic): without them it never appeared in the CREATE panel's drop-down at all, pinned or not. Both it and the construction toggle draw their icon in the app's fixed construction orange, independently of the tab or panel accent colour."
   },
   {"start": "sketch.create"},
   {"click": {"plane": "XY"}},
   {"expect": {"dialog": null}},
   {"click": {"handle": "panel:SKETCH:CREATE"}},
-  {"expect": {"shown_handles": ["toolbar:sketch.construction", "toolbar:sketch.centerline"]}},
-  {"click": [1000, 500]},
+  {"expect": {"shown_handles": ["toolbar:sketch.centerline"]}},
+  {"key": "Escape"},
+  {"click": {"handle": "panel:SKETCH:CONSTRAIN"}},
+  {"expect": {"shown_handles": ["toolbar:sketch.construction"]}},
+  {"note": "Close the menu with Escape: a fixed canvas pixel can be inside the menu after ribbon families or pins change its position."},
+  {"key": "Escape"},
   {"start": "sketch.rectangle.two_point"},
   {"click": {"sketch": [0, 0]}},
   {"click": {"sketch": [30, 20]}},

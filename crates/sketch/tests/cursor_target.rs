@@ -1,6 +1,7 @@
 //! Analytic cursor oracle plus feasibility checks on every accepted continuation step.
-use solidcraft_geom::Vec2;
-use solidcraft_sketch::{ConstraintKind, Sketch, move_point_towards, solve};
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
+use solidcraft_sketch::{ConstraintKind, Sketch, move_line_towards, move_point_towards, solve};
 
 fn linkage() -> (Sketch, usize, usize) {
     let mut sk = Sketch::new();
@@ -14,6 +15,31 @@ fn linkage() -> (Sketch, usize, usize) {
     }
     assert!(solve(&mut sk).ok());
     (sk, a, c)
+}
+
+#[test]
+fn a_material_point_on_a_link_follows_without_relaxing_its_length() {
+    for along in [0.2, 0.5, 0.8] {
+        for target in [Vec2::new(-10.0, 16.0), Vec2::new(20.0, 0.0), Vec2::new(1000.0, -1000.0)] {
+            let (mut sk, a, c) = linkage();
+            let line = sk.add_line_pts(0, a, None).unwrap();
+            let target = target * along;
+            assert!(move_line_towards(&mut sk, line, Vec2::new(along, 0.0), target, 1.25, None, |before, after| {
+                assert!((after.points[a].pos.len() - 10.0).abs() < 1e-9);
+                assert!((after.points[a].pos.dist(after.points[c].pos) - 40.0).abs() < 1e-9);
+                assert!((after.points[c].pos.dist(Vec2::new(42.0, 0.0)) - 20.0).abs() < 1e-9);
+                assert!((after.points[a].pos * along).dist(target) < (before.points[a].pos * along).dist(target));
+                (Vec2::new(42.0, 0.0) - after.points[a].pos).cross(after.points[c].pos - after.points[a].pos) < 0.0
+            }));
+            let closest = target * (10.0 * along / target.len());
+            assert!((sk.points[a].pos * along).dist(closest) < 1e-4);
+            let before = sk.clone();
+            for invalid in [Vec2::new(f64::NAN, 0.0), Vec2::new(0.5, f64::INFINITY), Vec2::new(1e300, 1e300)] {
+                assert!(!move_line_towards(&mut sk, line, invalid, target, 1.25, None, |_, _| true));
+                assert_eq!(sk, before);
+            }
+        }
+    }
 }
 
 #[test]
@@ -122,6 +148,33 @@ fn zero_cursor_budget_does_not_start_optimization() {
     assert_eq!(sk, before);
     assert_eq!(budget.spent(), 0);
     assert!(budget.exhausted());
+}
+
+#[cfg(feature = "solver-profiling")]
+#[test]
+fn profiling_preserves_budgeted_cursor_motion_and_records_budget_stops() {
+    use solidcraft_sketch::profiling::{StopReason, capture};
+
+    let target = Vec2::new(-10.0, 16.0);
+    let mut saw_budget_stop = false;
+    for work in [0, 128, 256, 512, 1024, 2048, 4096, 8192, 16384] {
+        let (mut plain, a, _) = linkage();
+        let mut measured = plain.clone();
+        let mut plain_budget = solidcraft_sketch::Budget::new(work);
+        let mut measured_budget = solidcraft_sketch::Budget::new(work);
+        let expected = move_point_towards(&mut plain, a, target, 1.25, Some(&mut plain_budget), |_, _| true);
+        let (actual, profile) = capture(|| move_point_towards(&mut measured, a, target, 1.25, Some(&mut measured_budget), |_, _| true));
+        assert_eq!(actual, expected);
+        assert_eq!(measured, plain);
+        assert_eq!(measured_budget.spent(), plain_budget.spent());
+        assert_eq!(measured_budget.exhausted(), plain_budget.exhausted());
+        assert!(profile.runs.iter().all(|run| run.stop_reason.is_some() && run.final_max_residual.is_some()));
+        saw_budget_stop |= profile.runs.iter().any(|run| run.stop_reason == Some(StopReason::WorkBudget));
+        if work == 0 {
+            assert_eq!(profile.counters.lm_runs, 0);
+        }
+    }
+    assert!(saw_budget_stop, "exercise LM returning at its shared work limit");
 }
 
 #[test]

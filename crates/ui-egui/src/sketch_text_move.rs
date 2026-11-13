@@ -29,16 +29,10 @@ pub(crate) fn valid(app: &SolveApp, k: &TextMove) -> bool {
 }
 
 pub(crate) fn rows(ui: &mut egui::Ui, k: &mut TextMove) -> bool {
-    let mut enter = false;
-    for (label, value) in ["Distance X", "Distance Y", "Angle"].iter().zip(&mut k.values) {
-        crate::dialogs::row_label(ui, label);
-        enter |= crate::dialogs::field(ui, value);
-        ui.end_row();
-    }
-    crate::dialogs::row_label(ui, "Create Copy");
-    let response = ui.checkbox(&mut k.copy, "");
-    crate::scenario::publish_handle("dialog:Create Copy", response.rect.center());
-    ui.end_row();
+    let [x, y, angle] = &mut k.values;
+    let mut enter = crate::ui_kit::value_pair(ui, "Position", [x, y], ["X", "Y"], Some(["Distance X", "Distance Y"]));
+    enter |= crate::ui_kit::row(ui, "Angle", |ui| crate::ui_kit::field(ui, angle));
+    crate::ui_kit::options(ui, "text_move_options", &mut [("Create Copy", &mut k.copy)]);
     enter
 }
 
@@ -50,7 +44,7 @@ pub(crate) fn commands(app: &SolveApp, k: &TextMove) -> Result<Vec<(String, Valu
     let mut values = [0.0; 3];
     for (i, (input, value)) in k.values.iter().zip(&mut values).enumerate() {
         let kind = if i == 2 { ValueKind::Angle } else { ValueKind::Length };
-        *value = doc.eval(&doc.with_design_unit(input.trim(), kind), kind).map_err(|e| e.to_string())?;
+        *value = crate::length_input::eval(doc, input.trim(), kind).map_err(|e| e.to_string())?;
         if !value.is_finite() {
             return Err("Move values must be finite".into());
         }
@@ -78,7 +72,7 @@ pub(crate) fn highlighted(app: &SolveApp) -> Vec<Sel> {
     let Some(sk) = app.session.active_sketch.and_then(|sid| app.session.doc.sketch(sid).ok()) else {
         return vec![];
     };
-    sk.curves.iter().filter(|c| c.link.as_deref() == Some(link)).map(|c| Sel::SketchCurve { id: c.id.clone() }).collect()
+    sk.curves.iter().filter(|c| c.link.as_deref() == Some(link)).map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None }).collect()
 }
 
 /// Esc restores the document and both history stacks to the start of this gesture.
@@ -102,18 +96,15 @@ pub(crate) fn end_drag(app: &mut SolveApp) {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+    use solidcraft_engine::geom::prelude::*;
     use solidcraft_engine::sketch::LinkSource;
 
     fn setup() -> (Harness, String) {
-        let mut h = Harness::new();
-        h.app.home.open = false;
-        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-        let result = h.app.run("sketch.text", json!({"text":"II","at":[3,4],"height":10})).unwrap();
-        h.app.session.selection = vec![Sel::SketchCurve { id: result["curves"][0].as_str().unwrap().into() }];
+        let (mut h, link, _) = crate::test_support::selected_text("II", [3, 4]);
         h.app.start("sketch.move");
         h.frames(3);
         assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::TextMove(_))));
-        (h, result["link"].as_str().unwrap().into())
+        (h, link)
     }
 
     fn replace(h: &mut Harness, field: &str, value: &str) {
@@ -136,14 +127,14 @@ mod tests {
         assert!(h.app.dialog.is_none());
         let sk = h.app.session.doc.sketch(1).unwrap();
         let LinkSource::Text { at, angle, text, .. } = &sk.link(&link).unwrap().source else { panic!() };
-        assert!(at.dist(solidcraft_engine::geom::Vec2::new(28.4, 2.0)) < 1e-8);
+        assert!(at.dist(solidcore_record::Vec2::new(28.4, 2.0)) < 1e-8);
         assert!((*angle - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
         assert_eq!(text, "II");
         assert_eq!(h.app.session.undo.len(), undo + 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), before);
         let curve = h.app.session.doc.sketch(1).unwrap().curves[0].id.clone();
-        h.app.session.selection = vec![Sel::SketchCurve { id: curve }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: curve, sketch: None }];
         h.app.start("sketch.move");
         h.frames(3);
         replace(&mut h, "dialog:Distance X", "17");
@@ -177,7 +168,7 @@ mod tests {
         let curve = h.app.session.doc.sketch(1).unwrap().curves[0].id.clone();
         h.app.session.execute("sketch.drag", &json!({"entity":curve,"from":[0,0],"to":[2,3],"live":true})).unwrap();
         h.app.viewport.text_drag = Some((checkpoint, link));
-        h.app.viewport.point_drag = Some((curve, 0, None));
+        h.app.viewport.point_drag = Some((curve, 0, None, solidcore_record::Vec2::ZERO, false));
         crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
         assert!(h.app.viewport.text_drag.is_none());
         assert!(h.app.viewport.point_drag.is_none());

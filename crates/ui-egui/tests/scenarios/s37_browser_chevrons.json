@@ -1,6 +1,16 @@
 [
+  {"call": "ui.prefs", "params": {"browser_components_open": true}},
  {
   "note": "Browser chevrons expand and collapse every kind of node (folders, components, groups, the origin, named views, document settings). Model: two components with a body each, a joint, a sketch, an offset plane, a named view."
+ },
+ {
+  "note": "Each component keeps its Bodies folder (Preferences › Interface › Bodies folders: Always), so that folder's chevron is checked too."
+ },
+ {
+  "call": "ui.prefs",
+  "params": {
+   "browser_bodies_folders": "always"
+  }
  },
  {
   "start": "component.create"
@@ -318,6 +328,21 @@
    ]
   }
  },
+ {"note": "Close the already checked upper folders so the component rows fit in the Browser without scrolling."},
+ {"click": {"handle": "fold:Document Settings"}},
+ {"click": {"handle": "fold:Named Views"}},
+ {"click": {"handle": "fold:Origin"}},
+ {
+  "note": "Expanded rows now scroll within the floating card, above the History strip."
+ },
+ {
+  "call": "ui.scroll",
+  "params": {
+   "x": 150,
+   "y": 500,
+   "delta": -220
+  }
+ },
  {
   "expect": {
    "shown_handles": [
@@ -436,6 +461,14 @@
   }
  },
  {
+  "call": "ui.scroll",
+  "params": {
+   "x": 150,
+   "y": 500,
+   "delta": -180
+  }
+ },
+ {
   "expect": {
    "shown_handles": [
     "row:Sketch2"
@@ -471,6 +504,14 @@
    "shown_handles": [
     "row:Sketch1"
    ]
+  }
+ },
+ {
+  "call": "ui.scroll",
+  "params": {
+   "x": 150,
+   "y": 500,
+   "delta": 1200
   }
  },
  {

@@ -12,10 +12,12 @@
 //! oscillating one from its arm pointing away from the cam's axis) and stops where it first
 //! touches the profile: the follower stays in contact, as a spring would hold it.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::{Aabb2, Aabb3, Ring};
 
 use super::{JointKind, JointOrigin, MotionLink, Size, component_bodies, component_of, flip_of, occurrence_world, size_of};
 use crate::{DocError, Document, IDENTITY, Mat, ModelState, Result, apply_point, apply_vector, mat_inverse, mat_mul};
@@ -108,7 +110,7 @@ fn rot(v: Vec2, a: f64) -> Vec2 {
 /// Where a translating follower coming along `-d` from far along its line through `g` first
 /// touches the closed polygon `poly`: the largest `t` of its point `g + t·d` (its roller's centre
 /// for `r > 0`; for `flat`, its face square to `d`). `None` when it misses the profile.
-pub fn first_contact_along(poly: &[Vec2], g: Vec2, d: Vec2, r: f64, flat: bool) -> Option<f64> {
+pub fn first_contact_along(poly: &Ring<Vec2>, g: Vec2, d: Vec2, r: f64, flat: bool) -> Option<f64> {
     let n = d.perp();
     let mut best: Option<f64> = None;
     let mut take = |t: f64| {
@@ -122,9 +124,7 @@ pub fn first_contact_along(poly: &[Vec2], g: Vec2, d: Vec2, r: f64, flat: bool) 
         }
         return best;
     }
-    let count = poly.len();
-    for i in 0..count {
-        let (Some(&p), Some(&q)) = (poly.get(i), poly.get((i + 1) % count)) else { continue };
+    for (&p, &q) in poly.edges() {
         let (a, b) = ((p - g).dot(n), (q - g).dot(n));
         // Edges wholly outside the band the follower sweeps.
         if a.min(b) > r || a.max(b) < -r {
@@ -167,10 +167,8 @@ pub fn first_contact_along(poly: &[Vec2], g: Vec2, d: Vec2, r: f64, flat: bool) 
 /// The angles in [0, 2π) where an oscillating follower's tip touches the closed polygon `poly`:
 /// its tip (a roller's centre for `r > 0`) at `arm` from the pivot `pivot`, turned from the angle
 /// `start` the way `turn` says (+1 counter-clockwise), sorted.
-fn touches_turning(poly: &[Vec2], pivot: Vec2, arm: f64, r: f64, start: f64, turn: f64) -> Vec<f64> {
+fn touches_turning(poly: &Ring<Vec2>, pivot: Vec2, arm: f64, r: f64, start: f64, turn: f64) -> Vec<f64> {
     let tip = |a: f64| pivot + Vec2::from_angle(a) * arm;
-    let count = poly.len();
-    let edge = |i: usize| Some((*poly.get(i)?, *poly.get((i + 1) % count)?));
     let mut out = Vec::new();
     let mut take = |a: f64, keep: &dyn Fn(Vec2) -> bool| {
         let turned = (turn * (a - start)).rem_euclid(TAU);
@@ -187,7 +185,7 @@ fn touches_turning(poly: &[Vec2], pivot: Vec2, arm: f64, r: f64, start: f64, tur
         let (base, spread) = (w.angle(), (h / len).clamp(-1.0, 1.0).acos());
         vec![base + spread, base - spread]
     };
-    for (p, q) in (0..count).filter_map(edge) {
+    for (&p, &q) in poly.edges() {
         let near = dist_to_segment(pivot, p, q);
         let far = (p - pivot).len().max((q - pivot).len());
         if near > arm + r || far < arm - r {
@@ -216,19 +214,17 @@ fn touches_turning(poly: &[Vec2], pivot: Vec2, arm: f64, r: f64, start: f64, tur
 
 /// Whether an oscillating follower's tip, turned `turned` from `start` the way `turn` says,
 /// overlaps the profile by more than `slack`.
-fn overlaps_turning(poly: &[Vec2], pivot: Vec2, arm: f64, r: f64, (start, turn): (f64, f64), turned: f64, slack: f64) -> bool {
+fn overlaps_turning(poly: &Ring<Vec2>, pivot: Vec2, arm: f64, r: f64, (start, turn): (f64, f64), turned: f64, slack: f64) -> bool {
     let at = pivot + Vec2::from_angle(start + turn * turned) * arm;
-    let n = poly.len();
-    let gap =
-        (0..n).filter_map(|i| Some((*poly.get(i)?, *poly.get((i + 1) % n)?))).map(|(p, q)| dist_to_segment(at, p, q)).fold(f64::INFINITY, f64::min);
+    let gap = poly.edges().map(|(p, q)| dist_to_segment(at, *p, *q)).fold(f64::INFINITY, f64::min);
     // Inside counts only clear of the boundary: a knife on an edge touches it.
-    gap < r - slack || (gap > slack && inside(poly, at))
+    gap < r - slack || (gap > slack && poly.contains(at))
 }
 
 /// Where an oscillating follower first touches the closed polygon `poly` turning from `start`
 /// (the angle it turns through, in (0, 2π)): see `touches_turning`. `None` when it misses the
 /// profile or starts on it.
-pub fn first_contact_turning(poly: &[Vec2], pivot: Vec2, arm: f64, r: f64, start: f64, turn: f64) -> Option<f64> {
+pub fn first_contact_turning(poly: &Ring<Vec2>, pivot: Vec2, arm: f64, r: f64, start: f64, turn: f64) -> Option<f64> {
     if overlaps_turning(poly, pivot, arm, r, (start, turn), 0.0, -f64::EPSILON) {
         return None;
     }
@@ -239,7 +235,7 @@ pub fn first_contact_turning(poly: &[Vec2], pivot: Vec2, arm: f64, r: f64, start
 /// after the cam turned on a little: pushed back to where the profile now lets it be when its tip
 /// overlaps the profile (by more than `slack`), else on to where it next touches. It stays on the
 /// part of the profile it rides, however the profile crosses its tip's circle elsewhere.
-pub fn next_contact_turning(poly: &[Vec2], pivot: Vec2, arm: f64, r: f64, (start, turn): (f64, f64), from: f64, slack: f64) -> Option<f64> {
+pub fn next_contact_turning(poly: &Ring<Vec2>, pivot: Vec2, arm: f64, r: f64, (start, turn): (f64, f64), from: f64, slack: f64) -> Option<f64> {
     let touches = touches_turning(poly, pivot, arm, r, start, turn);
     // A touch where the tip is clear of the rest of the profile (a roller inside the profile is a
     // radius from the parallels of the edges near the one it overlaps too).
@@ -257,23 +253,10 @@ fn dist_to_segment(x: Vec2, p: Vec2, q: Vec2) -> f64 {
     x.dist(p + d * t)
 }
 
-/// Even-odd containment in a closed polygon.
-fn inside(poly: &[Vec2], x: Vec2) -> bool {
-    let n = poly.len();
-    let mut inside = false;
-    for i in 0..n {
-        let (Some(a), Some(b)) = (poly.get(i), poly.get((i + 1) % n)) else { continue };
-        if (a.y > x.y) != (b.y > x.y) && x.x < a.x + (x.y - a.y) / (b.y - a.y) * (b.x - a.x) {
-            inside = !inside;
-        }
-    }
-    inside
-}
-
 /// Everything a cam's table is worked out from, in the cam's fixed frame C.
 struct Setup {
     /// The profile at cam value 0.
-    poly: Vec<Vec2>,
+    poly: Ring<Vec2>,
     /// +1 when the cam turns by +value about C's z (it is the joint's b side), −1 otherwise.
     turn: f64,
     /// A translating follower's line (a point and its unit direction, the slider's +z), or an
@@ -341,8 +324,10 @@ fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, cam: &super::
             }
             // Each body sampled to its own size (a large part beside the cam leaves the cam fine).
             // Each body's edges with the faces beside them.
-            let meshes: Vec<solidcraft_geom::Mesh> =
-                bodies.iter().map(|b| b.body.tessellate(tolerance(b.body.size()))).collect::<std::result::Result<_, _>>()?;
+            let meshes: Vec<solidcraft_geom::Mesh> = bodies
+                .iter()
+                .map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tolerance(b.body.size()))))
+                .collect::<std::result::Result<_, _>>()?;
             let edges: Vec<(usize, &Vec<Vec3>, &[u32])> = meshes
                 .iter()
                 .enumerate()
@@ -358,7 +343,7 @@ fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, cam: &super::
                     let (body, p) = bodies
                         .iter()
                         .enumerate()
-                        .find_map(|(i, b)| crate::naming::find_edge(b, name, *pick).ok().map(|(p, _)| (i, p)))
+                        .find_map(|(i, b)| crate::naming::find_edge(b, name, *pick).ok().map(|p| (i, p)))
                         .ok_or_else(|| bad(&format!("the edge `{name}` no longer exists (edit the cam to pick again)")))?;
                     (on, at) = (Some(body), p);
                 }
@@ -503,7 +488,7 @@ pub fn sketch_profile<'a>(sk: &'a crate::SolvedSketch, curves: &[String]) -> Opt
 }
 
 /// A loop's polyline within `tol`, segment by segment: `None` past `MAX_PROFILE_POINTS` points.
-fn sampled(lp: &solidcraft_geom::Loop2, tol: f64) -> Option<Vec<Vec2>> {
+fn sampled(lp: &solidcore_record::Loop2, tol: f64) -> Option<Vec<Vec2>> {
     let mut out = Vec::new();
     for seg in &lp.segs {
         let p = seg.polyline(tol);
@@ -517,19 +502,11 @@ fn sampled(lp: &solidcraft_geom::Loop2, tol: f64) -> Option<Vec<Vec2>> {
 
 /// The diagonal of the box around some points (0 for none).
 fn extent<'a>(pts: impl Iterator<Item = &'a Vec3>) -> f64 {
-    let (lo, hi) = pts.fold((Vec3::new(f64::MAX, f64::MAX, f64::MAX), Vec3::new(f64::MIN, f64::MIN, f64::MIN)), |(lo, hi), p| {
-        (Vec3::new(lo.x.min(p.x), lo.y.min(p.y), lo.z.min(p.z)), Vec3::new(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z)))
-    });
-    if lo.x <= hi.x { (hi - lo).len() } else { 0.0 }
+    pts.copied().collect::<Aabb3>().diagonal()
 }
 
 fn bounds_2d(pts: &[Vec2]) -> f64 {
-    let (mut lo, mut hi) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN));
-    for p in pts {
-        lo = Vec2::new(lo.x.min(p.x), lo.y.min(p.y));
-        hi = Vec2::new(hi.x.max(p.x), hi.y.max(p.y));
-    }
-    if lo.x <= hi.x { (hi - lo).len() } else { 0.0 }
+    pts.iter().copied().collect::<Aabb2>().diagonal()
 }
 
 /// The chord error a profile is sampled to: 0.1 µm per 100 mm of its size, at least 0.1 µm.
@@ -569,7 +546,7 @@ fn setup(doc: &Document, st: &ModelState, l: &MotionLink, c: &Cam) -> Result<Set
     if v.iter().any(|p| (p.z - mean).abs() > 1e-6 * size + 1e-9) {
         return Err(bad("the profile must lie in a plane square to the cam's axis"));
     }
-    let poly: Vec<Vec2> = v.iter().map(|p| Vec2::new(p.x, p.y)).collect();
+    let poly: Ring<Vec2> = v.iter().map(|p| Vec2::new(p.x, p.y)).collect();
     if !poly.iter().all(|p| p.is_finite()) || area(&poly).abs() <= 1e-12 * size * size {
         return Err(bad("the profile encloses no area"));
     }
@@ -709,9 +686,9 @@ fn follower_is_b(doc: &Document, cam_joint: &super::Joint, fol: &super::Joint, (
 
 /// A polygon's signed area, from its first point (so a small profile far from the axis keeps its
 /// digits).
-fn area(poly: &[Vec2]) -> f64 {
-    let (n, o) = (poly.len(), poly.first().copied().unwrap_or(Vec2::ZERO));
-    (0..n).filter_map(|i| Some((*poly.get(i)? - o).cross(*poly.get((i + 1) % n)? - o))).sum::<f64>() / 2.0
+fn area(poly: &Ring<Vec2>) -> f64 {
+    let o = poly.first().copied().unwrap_or(Vec2::ZERO);
+    poly.edges().map(|(p, q)| (*p - o).cross(*q - o)).sum::<f64>() / 2.0
 }
 
 /// The follower's places at the samples 0 ..= `CAM_SAMPLES` of a turn, `place(u, prev)` giving
@@ -816,7 +793,7 @@ mod tests {
     use super::*;
 
     /// A circle of radius `r` about `c` as a polygon of `n` points (its sag is r·(1 − cos π/n)).
-    fn circle(c: Vec2, r: f64, n: usize) -> Vec<Vec2> {
+    fn circle(c: Vec2, r: f64, n: usize) -> Ring<Vec2> {
         (0..n).map(|k| c + Vec2::from_angle(TAU * k as f64 / n as f64) * r).collect()
     }
 
@@ -874,10 +851,9 @@ mod tests {
         }
         // Followed on from where it touches, it stays on the part of the profile it rides: a C
         // whose two arms both cross the tip's circle, the tip resting on the second arm.
-        let c: Vec<Vec2> = [(-10.0, 20.0), (30.0, 20.0), (30.0, 14.0), (-4.0, 14.0), (-4.0, -14.0), (30.0, -14.0), (30.0, -20.0), (-10.0, -20.0)]
-            .into_iter()
-            .map(|(x, y)| Vec2::new(x, y))
-            .collect();
+        let c = Ring::from(
+            [[-10.0, 20.0], [30.0, 20.0], [30.0, 14.0], [-4.0, 14.0], [-4.0, -14.0], [30.0, -14.0], [30.0, -20.0], [-10.0, -20.0]].map(Vec2::from),
+        );
         let (pv, l) = (Vec2::new(40.0, 0.0), 22.0);
         let touches = touches_turning(&c, pv, l, 0.0, 0.0, 1.0);
         let on = |t: f64| (pv + Vec2::from_angle(t) * l).y;
@@ -887,12 +863,12 @@ mod tests {
         let stay = next_contact_turning(&c, pv, l, 0.0, (0.0, 1.0), second, 1e-9).unwrap_or(f64::NAN);
         assert!((stay - second).abs() < 1e-12, "{stay} vs {second}");
         // A knife on an edge touches it, it doesn't overlap it; just inside, it does.
-        let square: Vec<Vec2> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].into_iter().map(|(x, y)| Vec2::new(x, y)).collect();
+        let square = Ring::from([[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]].map(Vec2::from));
         let (pv, l) = (Vec2::new(0.0, -4.0), 3.0);
         let up = std::f64::consts::FRAC_PI_2;
         assert!(!overlaps_turning(&square, pv, l, 0.0, (up, 1.0), 0.0, 1e-9));
         assert!(overlaps_turning(&square, pv, l + 0.01, 0.0, (up, 1.0), 0.0, 1e-9));
-        assert!((area(&square.iter().map(|p| *p * 0.004 + Vec2::new(524_288.0, 524_288.0)).collect::<Vec<_>>()) - 6.4e-5).abs() < 1e-12);
+        assert!((area(&square.iter().map(|p| *p * 0.004 + Vec2::new(524_288.0, 524_288.0)).collect::<Ring<_>>()) - 6.4e-5).abs() < 1e-12);
         // An arm that can't reach, and one that starts on the cam.
         let poly = circle(Vec2::new(e, 0.0), r, 512);
         assert_eq!(first_contact_turning(&poly, pivot, 5.0, 0.0, start, 1.0), None);
@@ -903,7 +879,7 @@ mod tests {
     /// comes back after the turn: refused. On the eccentric circle it follows smoothly.
     #[test]
     fn a_follower_that_jumps_is_refused() {
-        let arm_round = |poly: &[Vec2], pivot: Vec2, arm: f64| {
+        let arm_round = |poly: &Ring<Vec2>, pivot: Vec2, arm: f64| {
             let start = pivot.angle();
             let place = |u: f64, prev: Option<f64>| -> Result<f64> {
                 let q = -TAU * u / CAM_SAMPLES as f64;
@@ -916,7 +892,7 @@ mod tests {
             };
             round(&place, true, 1e-6)
         };
-        let lobes: Vec<Vec2> = (0..240)
+        let lobes: Ring<Vec2> = (0..240)
             .map(|k| {
                 let t = TAU * f64::from(k) / 240.0;
                 Vec2::from_angle(t) * (28.0 + 2.0 / 3.0 + 13.0 * (3.0 * t).cos())
@@ -954,7 +930,7 @@ mod tests {
     /// a guide only on the cam's own side is refused.
     #[test]
     fn the_guide_is_the_side_fewer_moving_joints_from_the_frame() {
-        let origin = JointOrigin { occurrence: 0, snap: super::super::Snap::Point { point: Vec3::ZERO, z: None } };
+        let origin = JointOrigin::new(0, super::super::Snap::Point { point: Vec3::ZERO, z: None, x: None });
         let joint = |id: u64, kind: JointKind, a: u64, b: u64| super::super::Joint {
             id,
             name: format!("J{id}"),
@@ -968,8 +944,18 @@ mod tests {
             angle: 0.0,
             suppressed: false,
             exprs: Default::default(),
+            captured: None,
+            constraint: None,
         };
-        let occ = |id: u64, grounded: bool| crate::Occurrence { id, component: id, parent: 0, name: format!("O{id}"), transform: IDENTITY, grounded };
+        let occ = |id: u64, grounded: bool| crate::Occurrence {
+            id,
+            component: id,
+            parent: 0,
+            name: format!("O{id}"),
+            transform: IDENTITY,
+            grounded,
+            expressed_moves: Vec::new(),
+        };
         // 1 frame (grounded), 2 cam, 3-6 a rigid chain to the guide 7, 8 the piston, 9 crank, 10 rod.
         let mut doc = Document { occurrences: (1..=10).map(|id| occ(id, id == 1)).collect(), ..Document::default() };
         let (r, v, s) = (JointKind::Rigid, JointKind::Revolute, JointKind::Slider);

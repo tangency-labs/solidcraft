@@ -8,6 +8,8 @@
   {"call": "engine.execute", "params": {"command": "sketch.construction", "params": {"curves": ["l5"], "value": true}}},
   {"call": "engine.execute", "params": {"command": "sketch.centerline", "params": {"curves": ["l6"], "value": true}}},
   {"call": "ui.view", "params": {"view": "top"}},
+  {"call": "ui.view", "params": {"view": "fit"}},
+  {"click": {"handle": "sketch_palette:options_fold"}},
   {"expect": {"shown": "Construction Geometries"}},
   {"expect": {"query": {"command": "sketch.options", "path": ["options", "show_construction"], "value": true}}},
 

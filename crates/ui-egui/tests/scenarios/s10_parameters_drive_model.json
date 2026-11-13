@@ -99,7 +99,7 @@
   }
  },
  {
-  "widget": "Close window"
+  "click": {"handle": "params:close"}
  },
  {
   "expect": {

@@ -1,0 +1,6 @@
+{
+  "unit": "geom.tol",
+  "cases": [
+    {"name": "fuzz00527_object_count", "origin": "fuzz-out/n2000/geom.tol/fuzz00527.json (crash: rust: killed by signal 6 (memory allocation of 4294967296 bytes failed))", "cpp": "harness: invalid argument: object count", "rust": "harness: object count", "inputs": {"n1": 2147483648, "op": "relation"}}
+  ]
+}

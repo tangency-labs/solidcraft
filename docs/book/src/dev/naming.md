@@ -29,13 +29,13 @@ tool built from a sketch, cut from each target, the cut body split into lumps) i
 |---|---|
 | a body of the model before the feature | as they were |
 | a moved copy of one (pattern, mirror) | `<name>@F<feature>.<instance>` |
-| the cavity side of a shell grown outward | `F<feature>:inner:<name>` |
-| a body the feature built | by role: `F<feature>:side:<sketch curve>`, `start`/`top`/`bottom`/`end` caps, `+x`… box sides, `face:<k>` imported faces |
+| the cavity side of a shell grown outward | `F<feature>:inner(<name>)` |
+| a body the feature built | by role: `F<feature>:side:<sketch curve>`, `start`/`top`/`bottom`/`end` caps, `+x`… box sides, `face:<k>` imported faces, `link:<digest>` faces of a linked design (see below) |
 | a copied tool of a patterned feature | `F<feature>:<role>@F<pattern>.<instance>` |
 
 `crates/doc/src/history_names.rs` names each face of the result from its origins: a kept or
-trimmed face keeps its origin's name, a fillet or chamfer face is `F<feature>:blend:<edge>` of the
-edge it replaces, a shell's inner wall `F<feature>:inner:<face>`. A side's sketch curve is the
+trimmed face keeps its origin's name, a fillet or chamfer face is `F<feature>:blend(<edge>)` of the
+edge it replaces, a shell's inner wall `F<feature>:inner(<face>)`. A side's sketch curve is the
 curve the profile segment lies on exactly; nothing is sampled.
 
 - **Pieces.** Faces that end up with one name are pieces of one face, and are told apart by the
@@ -55,6 +55,20 @@ curve the profile segment lies on exactly; nothing is sampled.
   [Older designs](#older-designs)).
 
 Names are worked out lazily, on first request, and shared by a body's clones.
+
+### Linked designs
+
+A linked design (Insert Design) comes in as STEP text, which keeps no names: its faces would be
+named by their place in the file (`face:<k>`), and adding a hole to the part can give that place to
+another face. So when the link is made or updated, each face is matched to the face of the part it
+was written from (the same geometry, so a point well inside one lies on the other) and the Import
+feature keeps that face's name in the part (`Feature::link_faces`). The face is named
+`F<import>:link:<digest>`, a digest of that name (which may hold anything: the part's feature
+numbers and `@`, `|` mean something else in the assembly), and a piece keeps its qualifier with the
+faces around it named the same way. A joint or other reference on a linked face therefore stays on
+it across Update Links exactly as it would inside the part, and says so when the part no longer has
+the face. Every linked face still answers to `face:<k>`, so references made before keep finding
+their face by place; Update Links warns about joints that do.
 
 ### Where there is no history
 
@@ -97,6 +111,32 @@ face (`naming::named_face_point`: the incentre of the face's roomiest triangle, 
 surface of a plane, cylinder, cone, sphere or torus), which the feature stores like a picked one,
 with the name it then gets as before. Nothing new is stored in the design. `model.faces` lists
 that point for every face.
+
+### Profiles picked by their curves
+
+A profile picked by a point or an index is stored by the curve ids of its outer loop
+(`ProfileSel::Curves`), so it follows dimension and parameter edits exactly. Editing the outline
+itself can leave no profile bounded by exactly those curves; the feature then falls back to the
+best match and warns, instead of failing and taking its body and everything after it along
+(`profile_refs::fallback_loop`):
+
+1. all the stored curves are still there and still close a loop on their own, but another curve
+   now cuts the region: the pieces inside that loop that touch it, which together are the region
+   that was picked (islands inside stay holes);
+2. otherwise the profile whose outer loop shares the most of the stored curves, at least half of
+   them (a side deleted and drawn again, a notch trimmed in); a tie goes to the one with the
+   fewest curves the loop did not have, and a tie left after that is an error, as is a loop
+   that matches nothing.
+
+A line, arc or circle listed twice (the pieces a circle was cut into when the pick was saved) is
+one curve to a pick, so a line that ends on a circle and gives it more arcs changes nothing; the
+outputs of an analytic offset take step 1 only, never step 2 (#9368). Loops of free-form offset
+curves, free curves and legacy graph-span multisets keep their exact meaning. Commands still
+check a pick with the exact rule, so a curve list that names no profile is refused when given.
+A sketch on such an extrude's cap falls back the same way: its certificate names the loop, and
+the cap of the same solid extrude at the same end, from the same sketch and on the same body,
+that shares the most (at least half) of its curves stands for it, unless the exact cap is still
+on another body (`Document::anchored_face_indices`).
 
 A hole placed by a position on a face is the exception to "the point nearest the reference's
 point": its position is a place, not a pick. The hole follows its face along its own axis, so it

@@ -7,7 +7,7 @@ A tessellated body loses its faces: a plain mesh says where the surface is, not 
 each triangle came from. Downstream tools that mesh or analyse a part need that back. They apply
 loads and boundary conditions to faces, keep face boundaries as feature edges, and group
 results by face. SolidCraft therefore exports a 3MF in which every triangle carries the index of
-the B-rep face it lies on (**File → Save as mesh…** (format **3MF with face tags**), or `file.export` with
+the B-rep face it lies on (**File → Export 3MF…**, then the format **3MF with face tags**, or `file.export` with
 `format: "3mf-tagged"`).
 
 ## Why 3MF

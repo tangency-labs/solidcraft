@@ -45,7 +45,7 @@ fn raw(kind: ConstraintKind) -> Constraint {
 /// A point pushed past the sketch's own size cap.
 fn push_point(sk: &mut Sketch, pos: Vec2) {
     let id = format!("p{}", sk.points.len());
-    sk.points.push(crate::model::SPoint { id, pos, fixed: false, link: None });
+    sk.points.push(crate::model::SPoint { id, pos, fixed: false, link: None, exprs: None });
 }
 
 /// Every point of `ids` placed at its `want` position.

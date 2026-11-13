@@ -1,5 +1,5 @@
 [
-  {"note": "A command dialog opened while a sketch is being edited no longer hides the Sketch Palette. The dialog docks at the left edge of the viewport, the palette keeps the right edge, and neither covers the other. Finish Sketch and the Sketch Status readout stay reachable the whole time."},
+  {"note": "A command dialog opened while a sketch is being edited no longer hides the Sketch Palette. The dialog docks at the left edge of the viewport, the palette keeps the right edge, and neither covers the other. The palette card, constraint status and ribbon Finish Sketch stay reachable the whole time."},
   {"start": "sketch.create"},
   {"click": {"plane": "XY"}},
   {"start": "sketch.rectangle.two_point"},
@@ -8,14 +8,15 @@
   {"key": "Escape"},
   {"expect": {"sketching": true}},
   {"expect": {"dialog": null}},
-  {"expect": {"shown_handles": ["sketch_palette:finish"]}},
+  {"expect": {"shown_handles": ["sketch_palette:status_header", "button:sketch.finish"]}},
   {"start": "inspect.measure"},
-  {"expect": {"dialog": "Measure"}},
-  {"expect": {"shown_handles": ["sketch_palette:finish"]}},
+  {"expect": {"dialog": "Measure", "shown_handles": ["sketch_palette:status_header"]}},
+  {"click": {"handle": "tab:SKETCH"}},
+  {"expect": {"shown_handles": ["sketch_palette:status_header", "button:sketch.finish"]}},
   {"expect": {"disjoint": ["sketch_palette:outer", "dialog:outer"]}},
   {"shot": "sketch_dialog_keeps_the_palette"},
   {"widget": "Close"},
   {"expect": {"dialog": null}},
   {"expect": {"sketching": true}},
-  {"expect": {"shown_handles": ["sketch_palette:finish"]}}
+  {"expect": {"shown_handles": ["sketch_palette:status_header", "button:sketch.finish"]}}
 ]

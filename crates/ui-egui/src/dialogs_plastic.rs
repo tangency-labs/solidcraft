@@ -1,77 +1,87 @@
 //! Plastic dialogs: Boss, Lip / Groove, Snap Fit and Rest (placed by a pick on a face), Manage
 //! Plastic Rules and Assign Plastic Rule. Values left empty take the body's plastic rule.
 
+use crate::dialogs::put;
+use crate::ui_kit::{choice_row, expr_row, hint_row};
 use serde_json::{Map, Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::FeatureKind;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::plastic::PlasticRule;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
-use crate::dialogs::{Kind, combo, face_sel, field, row_label, shown_expr};
-use crate::selection::{BODIES, FACES, PLANAR_FACES, SelInput};
+use crate::dialogs::{Kind, combo, face_sel, field, form_row, shown_expr};
+use crate::selection::{BODIES, FACES, PLANAR_FACES, SelInput, SelectionExt as _, point_value as pt};
 
-#[derive(Clone, Debug)]
-pub enum Pl {
-    Boss {
-        diameter: String,
-        height: String,
-        hole_diameter: String,
-        hole_depth: String,
-        draft: String,
-        fillet: String,
-        ribs: String,
-        rib_thickness: String,
-        rib_length: String,
-        rib_offset: String,
-    },
-    Lip {
-        groove: bool,
-        width: String,
-        height: String,
-        gap: String,
-        outside: bool,
-    },
-    SnapFit {
-        hook: usize,
-        length: String,
-        thickness: String,
-        width: String,
-        catch_depth: String,
-        catch_length: String,
-    },
-    Rest {
-        round: bool,
-        width: String,
-        length: String,
-        height: String,
-        draft: String,
-        thickness: String,
-    },
-    /// The rule manager: the rule shown (index into the rules, past the end for a new one).
-    Rules {
-        pick: usize,
-        name: String,
-        values: Vec<String>,
-        active: bool,
-        loaded: Option<usize>,
-    },
-    Assign {
-        rule: usize,
-    },
+crate::dialog_descriptor::dialog_descriptors! {
+    #[derive(Clone, Debug)]
+    pub enum Pl {
+        Boss("plastic.boss", "BOSS", [("Position", PLANAR_FACES, false)],
+            FeatureKind::Boss { diameter, height, hole_diameter, hole_depth, draft, fillet, ribs, rib_thickness, rib_length, rib_offset, .. }) {
+            diameter: String = "6 mm".into() => shown_expr(diameter, ValueKind::Length),
+            height: String = "10 mm".into() => shown_expr(height, ValueKind::Length),
+            hole_diameter: String = "3 mm".into() => shown_expr(&s(hole_diameter), ValueKind::Length),
+            hole_depth: String = String::new() => shown_expr(&s(hole_depth), ValueKind::Length),
+            draft: String = String::new() => shown_expr(&s(draft), ValueKind::Angle),
+            fillet: String = String::new() => shown_expr(&s(fillet), ValueKind::Length),
+            ribs: String = "0".into() => ribs.as_deref().map(str::to_string).unwrap_or_else(|| "0".into()),
+            rib_thickness: String = "1 mm".into() => rib_thickness.as_deref().map(|v| shown_expr(v, ValueKind::Length)).unwrap_or_else(|| "1 mm".into()),
+            rib_length: String = "3 mm".into() => rib_length.as_deref().map(|v| shown_expr(v, ValueKind::Length)).unwrap_or_else(|| "3 mm".into()),
+            rib_offset: String = "1 mm".into() => rib_offset.as_deref().map(|v| shown_expr(v, ValueKind::Length)).unwrap_or_else(|| "1 mm".into()),
+        } => json!({"diameter": diameter, "height": height});
+        Lip("plastic.lip", "LIP", [("Rim face", FACES, false)],
+            FeatureKind::Lip { groove, width, height, gap, outside, .. }) {
+            groove: bool = false => *groove,
+            width: String = "1.5 mm".into() => shown_expr(width, ValueKind::Length),
+            height: String = "2 mm".into() => shown_expr(height, ValueKind::Length),
+            gap: String = String::new() => shown_expr(&s(gap), ValueKind::Length),
+            outside: bool = false => *outside,
+        } => json!({"width": width, "height": height, "type": if *groove { "groove" } else { "lip" }, "side": if *outside { "outside" } else { "inside" }});
+        Rest("plastic.rest", "REST", [("Position", PLANAR_FACES, false)],
+            FeatureKind::Rest { width, length, height, draft, thickness, .. }) {
+            round: bool = true => length.is_none(),
+            width: String = "10 mm".into() => shown_expr(width, ValueKind::Length),
+            length: String = "15 mm".into() => length.as_deref().map(|l| shown_expr(l, ValueKind::Length)).unwrap_or_else(|| "15 mm".into()),
+            height: String = "2 mm".into() => shown_expr(height, ValueKind::Length),
+            draft: String = String::new() => shown_expr(&s(draft), ValueKind::Angle),
+            thickness: String = String::new() => shown_expr(&s(thickness), ValueKind::Length),
+        } => json!({"width": width, "height": height});
+        ; custom {
+            SnapFit {
+                hook: usize,
+                length: String,
+                thickness: String,
+                width: String,
+                catch_depth: String,
+                catch_length: String,
+                base_height: String,
+                new_body: bool,
+            },
+            /// The rule manager: the rule shown (index into the rules, past the end for a new one).
+            Rules {
+                pick: usize,
+                name: String,
+                values: Vec<String>,
+                active: bool,
+                loaded: Option<usize>,
+            },
+            Assign {
+                rule: usize,
+            },
+        }
+    }
 }
 
 impl Pl {
     pub fn title(&self) -> &'static str {
         match self {
-            Pl::Boss { .. } => "BOSS",
-            Pl::Lip { groove: false, .. } => "LIP",
-            Pl::Lip { .. } => "GROOVE",
+            Pl::Lip { groove: true, .. } => "GROOVE",
             Pl::SnapFit { .. } => "SNAP FIT",
-            Pl::Rest { .. } => "REST",
             Pl::Rules { .. } => "MANAGE PLASTIC RULES",
             Pl::Assign { .. } => "ASSIGN PLASTIC RULE",
+            _ => self.simple_metadata().map_or("", |(_, title)| title),
         }
     }
 
@@ -88,75 +98,47 @@ impl Pl {
     }
 }
 
-fn boss() -> Pl {
-    Pl::Boss {
-        diameter: "6 mm".into(),
-        height: "10 mm".into(),
-        hole_diameter: "3 mm".into(),
-        hole_depth: String::new(),
-        draft: String::new(),
-        fillet: String::new(),
-        ribs: "0".into(),
-        rib_thickness: "1 mm".into(),
-        rib_length: "3 mm".into(),
-        rib_offset: "1 mm".into(),
-    }
-}
-
-fn snap_fit() -> Pl {
+fn snap_fit(app: &SolveApp) -> Pl {
     Pl::SnapFit {
         hook: 0,
-        length: "10 mm".into(),
-        thickness: "1.5 mm".into(),
-        width: "5 mm".into(),
-        catch_depth: "1 mm".into(),
-        catch_length: "2 mm".into(),
+        length: crate::dialogs::length_default(&app.session, "10"),
+        thickness: crate::dialogs::length_default(&app.session, "1.5"),
+        width: crate::dialogs::length_default(&app.session, "5"),
+        catch_depth: crate::dialogs::length_default(&app.session, "1"),
+        catch_length: crate::dialogs::length_default(&app.session, "2"),
+        base_height: String::new(),
+        new_body: false,
     }
-}
-
-fn rest() -> Pl {
-    Pl::Rest { round: true, width: "10 mm".into(), length: "15 mm".into(), height: "2 mm".into(), draft: String::new(), thickness: String::new() }
-}
-
-fn lip(groove: bool) -> Pl {
-    Pl::Lip { groove, width: "1.5 mm".into(), height: "2 mm".into(), gap: String::new(), outside: false }
 }
 
 /// The dialog for a plastic command.
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let (pl, inputs) = match id {
-        "plastic.boss" => (boss(), vec![SelInput::new("Position", PLANAR_FACES, false)]),
-        "plastic.lip" => (lip(false), vec![SelInput::new("Rim face", FACES, false)]),
-        "plastic.snap_fit" => (snap_fit(), vec![SelInput::new("Position", PLANAR_FACES, false)]),
-        "plastic.rest" => (rest(), vec![SelInput::new("Position", PLANAR_FACES, false)]),
+        "plastic.snap_fit" => (snap_fit(app), vec![SelInput::new("Position", PLANAR_FACES, false)]),
         "plastic.manage_rules" => {
             let rules = app.session.doc.plastic_rules();
             let pick = app.session.doc.plastic.active.as_ref().and_then(|a| rules.iter().position(|r| &r.name == a)).unwrap_or(0);
             (Pl::Rules { pick, name: String::new(), values: Vec::new(), active: false, loaded: None }, vec![])
         }
         "plastic.assign_rule" => (Pl::Assign { rule: 1 }, vec![SelInput::new("Bodies", BODIES, true)]),
-        _ => return None,
+        _ => Pl::simple_start(id)?,
     };
-    Some((Kind::Plastic(pl), inputs))
+    let mut inputs = inputs;
+    // A tool with placement handles snaps its place to sketch points on the face as a Single
+    // hole's does, so the marker can be dragged onto one; a bare sketch point is refused by OK as
+    // before.
+    if crate::place_gizmo::snaps_to_points(app, id)
+        && let Some(position) = inputs.first_mut()
+    {
+        position.accept |= crate::selection::POINTS;
+    }
+    Some((crate::length_input::defaults(&app.session.doc, Kind::Plastic(pl)), inputs))
 }
 
-/// A value row whose empty value means "from the rule" (or another default). `unit` leads the
-/// hint ("mm, from the rule") so the empty field names the unit a typed number takes.
+/// A value row whose empty value means "from the rule" (or another default).
 fn opt_field(ui: &mut egui::Ui, label: &str, v: &mut String, unit: &str, hint: &str) -> bool {
-    row_label(ui, label);
-    let hint = format!("{unit}, {}", crate::i18n::tr_label(hint));
-    let r = ui.add(egui::TextEdit::singleline(v).hint_text(hint));
-    crate::dialogs::publish_row(&r);
-    crate::params_dialog::complete(ui, &r, v);
-    ui.end_row();
-    r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
-}
-
-fn value_row(ui: &mut egui::Ui, label: &str, v: &mut String) -> bool {
-    row_label(ui, label);
-    let e = field(ui, v);
-    ui.end_row();
-    e
+    let hint = format!("{unit}, {}", solidcraft_ui_text::tr_label(hint));
+    hint_row(ui, label, v, &hint)
 }
 
 /// Directions across a face (with normal `n`) a snap fit's catch can point: two axes and their
@@ -183,106 +165,110 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
     let mut enter = false;
     match k {
         Pl::Boss { diameter, height, hole_diameter, hole_depth, draft, fillet, ribs, rib_thickness, rib_length, rib_offset } => {
-            enter |= value_row(ui, "Diameter", diameter);
-            enter |= value_row(ui, "Height", height);
-            enter |= opt_field(ui, "Hole Diameter", hole_diameter, "mm", "no hole");
-            enter |= opt_field(ui, "Hole Depth", hole_depth, "mm", "to the face");
-            enter |= opt_field(ui, "Draft Angle", draft, "deg", "from the rule");
-            enter |= opt_field(ui, "Root Fillet", fillet, "mm", "none");
-            enter |= value_row(ui, "Ribs", ribs);
-            if app.session.doc.eval(ribs, ValueKind::Unitless).is_ok_and(|n| n >= 1.0) {
-                enter |= value_row(ui, "  Rib Thickness", rib_thickness);
-                enter |= value_row(ui, "  Rib Length", rib_length);
-                enter |= value_row(ui, "  Rib Offset", rib_offset);
-            }
+            enter |= expr_row(ui, "Diameter", diameter);
+            enter |= expr_row(ui, "Height", height);
+            crate::ui_kit::section(ui, "boss_options", "Options", true, |ui| {
+                enter |= opt_field(ui, "Hole Diameter", hole_diameter, crate::length_input::unit(&app.session.doc), "no hole");
+                enter |= opt_field(ui, "Hole Depth", hole_depth, crate::length_input::unit(&app.session.doc), "to the face");
+            });
+            crate::ui_kit::section(ui, "boss_advanced", "Advanced", false, |ui| {
+                enter |= opt_field(ui, "Draft Angle", draft, "deg", "from the rule");
+                enter |= opt_field(ui, "Root Fillet", fillet, crate::length_input::unit(&app.session.doc), "none");
+                enter |= expr_row(ui, "Ribs", ribs);
+                if app.session.doc.eval(ribs, ValueKind::Unitless).is_ok_and(|n| n >= 1.0) {
+                    enter |= expr_row(ui, "  Rib Thickness", rib_thickness);
+                    enter |= expr_row(ui, "  Rib Length", rib_length);
+                    enter |= expr_row(ui, "  Rib Offset", rib_offset);
+                }
+            });
         }
         Pl::Lip { groove, width, height, gap, outside } => {
-            row_label(ui, "Type");
-            let mut ty = usize::from(*groove);
-            combo(ui, "pl_lip", &["Lip", "Groove"], &mut ty);
-            *groove = ty == 1;
-            ui.end_row();
-            row_label(ui, "Rim Edge");
-            let mut side = usize::from(*outside);
-            combo(ui, "pl_side", &["Inside", "Outside"], &mut side);
-            *outside = side == 1;
-            ui.end_row();
-            enter |= value_row(ui, "Width", width);
-            enter |= value_row(ui, "Height", height);
+            form_row(ui, "Type", |ui| {
+                let mut ty = usize::from(*groove);
+                combo(ui, "pl_lip", &["Lip", "Groove"], &mut ty);
+                *groove = ty == 1;
+            });
+            form_row(ui, "Rim Edge", |ui| {
+                let mut side = usize::from(*outside);
+                combo(ui, "pl_side", &["Inside", "Outside"], &mut side);
+                *outside = side == 1;
+            });
+            enter |= expr_row(ui, "Width", width);
+            enter |= expr_row(ui, "Height", height);
             if *groove {
-                enter |= opt_field(ui, "Clearance", gap, "mm", "from the rule");
+                enter |= opt_field(ui, "Clearance", gap, crate::length_input::unit(&app.session.doc), "from the rule");
             }
         }
-        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length } => {
+        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length, base_height, new_body } => {
             let dirs = face_normal(app, inputs).map(hook_dirs).unwrap_or_default();
             if !dirs.is_empty() {
                 let names: Vec<&str> = dirs.iter().map(|(n, _)| n.as_str()).collect();
-                row_label(ui, "Catch Direction");
-                combo(ui, "pl_hook", &names, hook);
-                ui.end_row();
+                choice_row(ui, "Catch Direction", "pl_hook", hook, &names);
             }
-            enter |= value_row(ui, "Length", length);
-            enter |= value_row(ui, "Thickness", thickness);
-            enter |= value_row(ui, "Width", width);
-            enter |= value_row(ui, "Catch Depth", catch_depth);
-            enter |= value_row(ui, "Catch Length", catch_length);
+            enter |= expr_row(ui, "Length", length);
+            enter |= expr_row(ui, "Thickness", thickness);
+            enter |= expr_row(ui, "Width", width);
+            enter |= expr_row(ui, "Catch Depth", catch_depth);
+            enter |= expr_row(ui, "Catch Length", catch_length);
+            enter |= opt_field(ui, "Base Height", base_height, crate::length_input::unit(&app.session.doc), "at the face");
+            form_row(ui, "Body", |ui| {
+                let mut op = usize::from(*new_body);
+                combo(ui, "pl_snap_body", &["Join", "New Body"], &mut op);
+                *new_body = op == 1;
+            });
         }
         Pl::Rest { round, width, length, height, draft, thickness } => {
-            row_label(ui, "Shape");
-            let mut sh = usize::from(!*round);
-            combo(ui, "pl_rest", &["Round", "Rectangular"], &mut sh);
-            *round = sh == 0;
-            ui.end_row();
-            enter |= value_row(ui, if *round { "Diameter" } else { "Width" }, width);
+            form_row(ui, "Shape", |ui| {
+                let mut sh = usize::from(!*round);
+                combo(ui, "pl_rest", &["Round", "Rectangular"], &mut sh);
+                *round = sh == 0;
+            });
+            enter |= expr_row(ui, if *round { "Diameter" } else { "Width" }, width);
             if !*round {
-                enter |= value_row(ui, "Length", length);
+                enter |= expr_row(ui, "Length", length);
             }
-            enter |= value_row(ui, "Height", height);
-            enter |= opt_field(ui, "Draft Angle", draft, "deg", "from the rule");
-            enter |= opt_field(ui, "Wall Thickness", thickness, "mm", "solid");
+            enter |= expr_row(ui, "Height", height);
+            crate::ui_kit::section(ui, "rest_advanced", "Advanced", false, |ui| {
+                enter |= opt_field(ui, "Draft Angle", draft, "deg", "from the rule");
+                enter |= opt_field(ui, "Wall Thickness", thickness, crate::length_input::unit(&app.session.doc), "solid");
+            });
         }
         Pl::Rules { pick, name, values, active, loaded } => {
             let rules = app.session.doc.plastic_rules();
-            let mut names: Vec<String> = rules.iter().map(|r| r.name.clone()).collect();
-            names.push("New rule…".into());
-            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-            row_label(ui, "Rule");
-            combo(ui, "pl_rules", &refs, pick);
-            ui.end_row();
-            if *loaded != Some(*pick) {
-                let base = rules.get(*pick).or(rules.first()).cloned();
-                if let Some(b) = base {
-                    *values = std::iter::once(b.material.clone()).chain(b.fields().iter().map(|(_, e, _)| (*e).clone())).collect();
-                    *active = app.session.doc.plastic.active.as_deref() == Some(b.name.as_str()) && *pick < rules.len();
+            crate::rule_editor::rule_editor! {
+                ui, "pl_rules", rules, pick, name, active, loaded;
+                new_name: format!("Plastic Rule{}", app.session.doc.plastic.rules.len() + 1),
+                load: {
+                    let base = rules.get(*pick).or(rules.first()).cloned();
+                    if let Some(b) = base {
+                        *values = std::iter::once(b.material.clone())
+                            .chain(b.fields().iter().map(|(_, e, kind)| {
+                                if *kind == ValueKind::Length {
+                                    crate::length_input::stored(&app.session.doc, e)
+                                } else {
+                                    crate::dialogs::shown_expr(e, *kind)
+                                }
+                            }))
+                            .collect();
+                        *active = app.session.doc.plastic.active.as_deref() == Some(b.name.as_str()) && *pick < rules.len();
+                    }
+                },
+                fields: {
+                    let keys = rule_keys();
+                    for (i, v) in values.iter_mut().enumerate() {
+                        let label = if i == 0 { "Material".to_string() } else { keys.get(i - 1).map(|k| label_of(k)).unwrap_or_default() };
+                        form_row(ui, &label, |ui| {
+                            enter |= if i == 0 { crate::ui_kit::text_field(ui, v, "Material").0 } else { field(ui, v) };
+                        });
+                    }
                 }
-                if *pick >= rules.len() {
-                    *name = format!("Plastic Rule{}", app.session.doc.plastic.rules.len() + 1);
-                }
-                *loaded = Some(*pick);
             }
-            if *pick >= rules.len() {
-                row_label(ui, "Name");
-                ui.text_edit_singleline(name);
-                ui.end_row();
-            }
-            let keys = rule_keys();
-            for (i, v) in values.iter_mut().enumerate() {
-                let label = if i == 0 { "Material".to_string() } else { keys.get(i - 1).map(|k| label_of(k)).unwrap_or_default() };
-                row_label(ui, &label);
-                enter |= if i == 0 { ui.text_edit_singleline(v).lost_focus() && ui.input(|x| x.key_pressed(egui::Key::Enter)) } else { field(ui, v) };
-                ui.end_row();
-            }
-            row_label(ui, "Active rule");
-            ui.checkbox(active, "");
-            ui.end_row();
         }
         Pl::Assign { rule } => {
             let mut names: Vec<String> = vec!["(no rule)".into()];
             names.extend(app.session.doc.plastic_rules().into_iter().map(|r| r.name));
             let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-            row_label(ui, "Rule");
-            combo(ui, "pl_assign", &refs, rule);
-            ui.end_row();
+            choice_row(ui, "Rule", "pl_assign", rule, &refs);
         }
     }
     enter
@@ -303,19 +289,6 @@ fn label_of(key: &str) -> String {
         .join(" ")
 }
 
-fn pt(v: Vec3) -> Value {
-    json!([v.x, v.y, v.z])
-}
-
-/// Put non-empty optional values into the parameters.
-fn put(p: &mut Value, list: &[(&str, &String)]) {
-    for (k, v) in list {
-        if !v.trim().is_empty() {
-            p[*k] = json!(v);
-        }
-    }
-}
-
 /// The commands the dialog's OK runs (`extra`: parameters kept from the feature being edited).
 pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let face = inputs
@@ -327,26 +300,23 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
         Ok(json!({"position": pt(at), "body": body}))
     };
     let (cmd, mut p): (&str, Value) = match k {
-        Pl::Boss { diameter, height, hole_diameter, hole_depth, draft, fillet, ribs, rib_thickness, rib_length, rib_offset } => {
+        Pl::Boss { hole_diameter, hole_depth, draft, fillet, ribs, rib_thickness, rib_length, rib_offset, .. } => {
             let mut p = placed("a point on a face")?;
-            p["diameter"] = json!(diameter);
-            p["height"] = json!(height);
             put(&mut p, &[("hole_diameter", hole_diameter), ("hole_depth", hole_depth), ("draft", draft), ("fillet", fillet)]);
             if app.session.doc.eval(ribs, ValueKind::Unitless).is_ok_and(|n| n >= 1.0) {
                 put(&mut p, &[("ribs", ribs), ("rib_thickness", rib_thickness), ("rib_length", rib_length), ("rib_offset", rib_offset)]);
             }
             ("plastic.boss", p)
         }
-        Pl::Lip { groove, width, height, gap, outside } => {
+        Pl::Lip { groove, gap, .. } => {
             let (body, at) = face.clone().ok_or("select the rim face first")?;
-            let mut p = json!({"face": pt(at), "body": body, "width": width, "height": height,
-                "type": if *groove { "groove" } else { "lip" }, "side": if *outside { "outside" } else { "inside" }});
+            let mut p = json!({"face": pt(at), "body": body});
             if *groove {
                 put(&mut p, &[("gap", gap)]);
             }
             ("plastic.lip", p)
         }
-        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length } => {
+        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length, base_height, new_body } => {
             let mut p = placed("a point on a face")?;
             let n = extra
                 .get("direction")
@@ -359,12 +329,14 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
             {
                 p[key] = json!(v);
             }
+            put(&mut p, &[("base_height", base_height)]);
+            if *new_body {
+                p["new_body"] = json!(true);
+            }
             ("plastic.snap_fit", p)
         }
-        Pl::Rest { round, width, length, height, draft, thickness } => {
+        Pl::Rest { round, length, draft, thickness, .. } => {
             let mut p = placed("a point on a face")?;
-            p["width"] = json!(width);
-            p["height"] = json!(height);
             if !*round {
                 p["length"] = json!(length);
             }
@@ -373,31 +345,12 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
         }
         Pl::Rules { pick, name, values, active, .. } => {
             let rules = app.session.doc.plastic_rules();
-            let n = match rules.get(*pick) {
-                Some(r) => r.name.clone(),
-                None => name.trim().to_string(),
-            };
-            if n.is_empty() {
-                return Err("give the rule a name".into());
-            }
-            let mut p = json!({"name": n, "active": active});
-            if let Some(m) = values.first().filter(|m| !m.trim().is_empty()) {
-                p["material"] = json!(m);
-            }
-            for (key, v) in rule_keys().iter().zip(values.iter().skip(1)) {
-                if !v.trim().is_empty() {
-                    p[*key] = json!(v);
-                }
-            }
+            let fields = std::iter::once("material").chain(rule_keys()).zip(values);
+            let p = crate::rule_editor::params(rules.get(*pick).map(|r| r.name.as_str()), name, *active, fields)?;
             ("plastic.manage_rules", p)
         }
         Pl::Assign { rule } => {
-            let bodies: Vec<String> = inputs
-                .first()
-                .into_iter()
-                .flat_map(|i| &i.items)
-                .filter_map(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None })
-                .collect();
+            let bodies = crate::selection::items(inputs, 0).body_names();
             if bodies.is_empty() {
                 return Err("select bodies first".into());
             }
@@ -405,6 +358,7 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
             ("plastic.assign_rule", json!({"bodies": bodies, "rule": name}))
         }
     };
+    k.fill_simple_params(&mut p);
     if let Value::Object(m) = &mut p {
         for (key, v) in extra {
             m.entry(key.clone()).or_insert_with(|| v.clone());
@@ -422,71 +376,20 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
     let ss = &app.session;
     let mut extra = Map::new();
     let (pl, id, at): (Pl, &str, Vec3) = match kind {
-        FeatureKind::Boss {
-            position,
-            direction,
-            diameter,
-            height,
-            hole_diameter,
-            hole_depth,
-            draft,
-            fillet,
-            ribs,
-            rib_thickness,
-            rib_length,
-            rib_offset,
-            body,
-        } => {
+        FeatureKind::Boss { position, direction, body, .. } => {
             extra.insert("direction".into(), pt(direction.0));
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
             }
-            let mut b = boss();
-            if let Pl::Boss {
-                diameter: d,
-                height: h,
-                hole_diameter: hd,
-                hole_depth: hp,
-                draft: dr,
-                fillet: f,
-                ribs: r,
-                rib_thickness: rt,
-                rib_length: rl,
-                rib_offset: ro,
-            } = &mut b
-            {
-                *d = shown_expr(diameter, ValueKind::Length);
-                *h = shown_expr(height, ValueKind::Length);
-                *hd = shown_expr(&s(hole_diameter), ValueKind::Length);
-                *hp = shown_expr(&s(hole_depth), ValueKind::Length);
-                *dr = shown_expr(&s(draft), ValueKind::Angle);
-                *f = shown_expr(&s(fillet), ValueKind::Length);
-                *r = ribs.as_deref().map(str::to_string).unwrap_or_else(|| "0".into());
-                for (slot, v) in [(rt, rib_thickness), (rl, rib_length), (ro, rib_offset)] {
-                    if let Some(v) = v {
-                        *slot = shown_expr(v, ValueKind::Length);
-                    }
-                }
-            }
-            (b, "plastic.boss", position.0)
+            (Pl::simple_restore(kind)?, "plastic.boss", position.0)
         }
-        FeatureKind::Lip { face, width, height, groove, gap, outside, body } => {
+        FeatureKind::Lip { face, body, .. } => {
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
             }
-            (
-                Pl::Lip {
-                    groove: *groove,
-                    width: shown_expr(width, ValueKind::Length),
-                    height: shown_expr(height, ValueKind::Length),
-                    gap: shown_expr(&s(gap), ValueKind::Length),
-                    outside: *outside,
-                },
-                "plastic.lip",
-                face.0,
-            )
+            (Pl::simple_restore(kind)?, "plastic.lip", face.0)
         }
-        FeatureKind::SnapFit { position, direction, hook, length, thickness, width, catch_depth, catch_length, body } => {
+        FeatureKind::SnapFit { position, direction, hook, length, thickness, width, catch_depth, catch_length, base_height, new_body, body } => {
             extra.insert("direction".into(), pt(direction.0));
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
@@ -502,10 +405,12 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 width: shown_expr(width, ValueKind::Length),
                 catch_depth: shown_expr(catch_depth, ValueKind::Length),
                 catch_length: shown_expr(catch_length, ValueKind::Length),
+                base_height: base_height.as_deref().map(|v| shown_expr(v, ValueKind::Length)).unwrap_or_default(),
+                new_body: *new_body,
             };
             (f, "plastic.snap_fit", position.0)
         }
-        FeatureKind::Rest { position, direction, along, width, length, height, draft, thickness, body } => {
+        FeatureKind::Rest { position, direction, along, body, .. } => {
             extra.insert("direction".into(), pt(direction.0));
             if let Some(a) = along {
                 extra.insert("along".into(), pt(a.0));
@@ -513,14 +418,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
             }
-            let r = Pl::Rest {
-                round: length.is_none(),
-                width: shown_expr(width, ValueKind::Length),
-                length: length.as_deref().map(|l| shown_expr(l, ValueKind::Length)).unwrap_or_else(|| "15 mm".into()),
-                height: shown_expr(height, ValueKind::Length),
-                draft: shown_expr(&s(draft), ValueKind::Angle),
-                thickness: shown_expr(&s(thickness), ValueKind::Length),
-            };
+            let r = Pl::simple_restore(kind)?;
             (r, "plastic.rest", position.0)
         }
         _ => return None,

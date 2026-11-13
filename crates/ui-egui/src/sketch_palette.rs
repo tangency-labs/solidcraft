@@ -3,65 +3,39 @@
 //! buttons. Options: the line type of the selected curves (normal, construction, centerline),
 //! Look At, and the display toggles kept with the sketch (grid, snap, slice, profiles, points,
 //! dimensions, constraints, projected geometry, construction geometry, 3D sketch); the sketch's
-//! degrees of freedom; Finish Sketch. Toggles run `sketch.options`, line types
+//! degrees of freedom. Finish Sketch sits at the bottom, beside the ribbon's Exit group. Toggles run `sketch.options`, line types
 //! `sketch.construction` / `sketch.centerline`.
 //!
 //! The line type is also a drawing mode: with nothing selected, Construction (or X) makes what
 //! is drawn next construction geometry until it is switched back.
+//!
+//! The shared host owns panel placement. In Classic, the palette docks at the right edge and its
+//! header drags it, like a command dialog's title (#8923).
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::cell::Cell;
 
-use egui::{Color32, RichText, Stroke, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 
 use crate::SolveApp;
-use crate::frame::Level;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
+
+pub(crate) const INSTANCE_ID: &str = "sketch-options";
 
 thread_local! {
     /// The drawing line type (0 normal, 1 construction, 2 centerline) and the sketch it is for.
     static MODE: Cell<(u8, Option<u64>)> = const { Cell::new((0, None)) };
-    static FOLDED: Cell<bool> = const { Cell::new(false) };
-    static OPTIONS_FOLDED: Cell<bool> = const { Cell::new(false) };
-    static FEATURE_FOLDED: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Palette width (logical px).
-const WIDTH: f32 = 236.0;
-
-/// The display toggles: option key and label. Plain nouns throughout, no "Show " prefix: the
-/// checkbox itself already says whether each one is on.
-///
-/// Eight of these pass their English source text directly, like the rest of this file's
-/// `app.tr_label(...)` calls: `Locale::label` looks up a literal English string against every
-/// other English catalog entry to find its id. "Profile" and "Points" cannot do that safely:
-/// both already name something else under that same lookup (`SelInput::new("Profile", ...)` /
-/// `SelInput::new("Points", ...)` in `dialogs.rs`, the Extrude/Sweep/Shell/Loft and
-/// point-selection dialogs' own row labels, and "Profile" is also `context_menu.rs`'s "Show
-/// Profile" / "Hide Profile" action by way of the existing `ui.show_profile` key). Giving the
-/// palette row the same bare text would silently repoint one of those unrelated lookups to
-/// whichever translation this file happens to carry. `ui.palette_profile` and
-/// `ui.palette_points` are dedicated keys instead, carrying exactly "Profile" and "Points" in
-/// English; passing the id itself (`Locale::label` falls back to a direct id lookup when the
-/// text it was given does not match any other entry) reaches them without going through the
-/// shared text lookup at all. See `i18n::tests::id_labels_resolve_to_their_own_translation_not_an_english_fallback`
-/// and `i18n_ui_tests::sketch_palette_profile_and_points_rows_show_their_own_translation` for
-/// proof they resolve to the real translation in German, Japanese and Korean rather than
-/// silently falling back to English.
-///
-/// The id-fallback check still runs the text lookup first: a future English catalog entry
-/// whose value happened to be the literal string "ui.palette_profile" or "ui.palette_points"
-/// would silently steal this lookup (`Locale::label`'s `ids.get(label)` would then match
-/// before the id fallback ever runs). Nobody writes UI copy that looks like a dotted id, so
-/// this is a remote hazard, not a likely one, but it is why these two ids are spelled out here
-/// rather than reused anywhere else.
+/// Option keys and existing localized labels. The five primary design rows are selected below;
+/// the remaining display options live in More. Point/profile labels share the dialog IDs.
 pub const TOGGLES: [(&str, &str); 10] = [
     ("grid", "Sketch Grid"),
     ("snap", "Snap"),
     ("slice", "Slice"),
-    ("show_profile", "ui.palette_profile"),
-    ("show_points", "ui.palette_points"),
+    ("show_profile", "ui.profile"),
+    ("show_points", "ui.points"),
     ("show_dimensions", "Dimensions"),
     ("show_constraints", "Constraints"),
     ("show_projected", "Projected Geometries"),
@@ -69,10 +43,31 @@ pub const TOGGLES: [(&str, &str); 10] = [
     ("sketch_3d", "3D Sketch"),
 ];
 
-/// The degrees-of-freedom line: "Fully constrained" or "N degrees of freedom".
-pub fn dof_text(dof: usize, ok: bool) -> String {
+/// Does the sketch hold any geometry of its own: a drawn curve or a 3D curve? Projected curves
+/// and the origin are held in place and do not count.
+pub fn has_geometry(sketch: &solidcraft_engine::sketch::Sketch) -> bool {
+    !sketch.curves.is_empty() || !sketch.wires.is_empty()
+}
+
+/// Nothing the user added: no curve, 3D curve, constraint or dimension, pattern, projection,
+/// text or offset, and no point but the fixed origin.
+pub fn is_blank(sketch: &solidcraft_engine::sketch::Sketch) -> bool {
+    !has_geometry(sketch)
+        && sketch.constraints.is_empty()
+        && sketch.patterns.is_empty()
+        && sketch.links.is_empty()
+        && sketch.offsets.is_empty()
+        && sketch.freeform_offsets.is_empty()
+        && sketch.points.iter().all(|p| p.id == "origin")
+}
+
+/// The degrees-of-freedom line: "No geometry yet" (an empty sketch only has its fixed origin),
+/// "Fully constrained" or "N degrees of freedom".
+pub fn dof_text(dof: usize, ok: bool, has_geometry: bool) -> String {
     if !ok {
         "Constraints conflict".into()
+    } else if !has_geometry {
+        "No geometry yet".into()
     } else if dof == 0 {
         "Fully constrained".into()
     } else if dof == 1 {
@@ -117,11 +112,22 @@ pub fn toggle_construction(app: &mut SolveApp) {
 
 /// Curves a drawing command just made take the drawing line type.
 pub fn apply_mode(app: &mut SolveApp, id: &str, result: &Value) {
+    if solidcraft_engine::cmd::construction_line_mode(id).is_some() {
+        return;
+    }
     let m = mode(app);
     if m == 0 || !solidcraft_engine::find_command(id).is_some_and(|c| c.tab == "SKETCH" && c.panel == "CREATE") {
         return;
     }
-    let curves: Vec<String> = result["curves"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(str::to_string)).collect();
+    // Drawing reports its curves as `curves`; Project and the other link commands report them per
+    // link, `links[].curves` (#9945).
+    let links = result["links"].as_array().into_iter().flatten().map(|l| &l["curves"]);
+    let curves: Vec<String> = std::iter::once(&result["curves"])
+        .chain(links)
+        .filter_map(Value::as_array)
+        .flatten()
+        .filter_map(|c| c.as_str().map(str::to_string))
+        .collect();
     if curves.is_empty() {
         return;
     }
@@ -156,7 +162,7 @@ pub fn apply_mode(app: &mut SolveApp, id: &str, result: &Value) {
 
 /// Selected curves of the active sketch.
 fn selected_curves(app: &SolveApp) -> Vec<String> {
-    app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id } = s { Some(id.clone()) } else { None }).collect()
+    app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id, .. } = s { Some(id.clone()) } else { None }).collect()
 }
 
 /// The line types among the selected curves of the active sketch, indexed like the palette's
@@ -168,7 +174,7 @@ fn selected_linetypes(app: &SolveApp) -> [bool; 4] {
     if curves.is_empty() {
         return types;
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return types };
     for c in curves.iter().filter_map(|id| ss.sketch.curve_index(id).and_then(|i| ss.sketch.curves.get(i))) {
         let k = if c.infinite {
@@ -196,7 +202,7 @@ pub fn set_linetype(app: &mut SolveApp, kind: u8) {
         return;
     }
     let lines: Vec<String> = {
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
         curves
             .iter()
@@ -233,42 +239,17 @@ pub fn set_linetype(app: &mut SolveApp, kind: u8) {
 }
 
 /// The palette's content width in `vp`; it gives way to the viewport on narrow views.
-fn width(vp: egui::Rect) -> f32 {
-    WIDTH.min((vp.width() * 0.46 - 16.0).max(120.0))
-}
-
-/// The viewport the palette docks into.
-fn viewport(app: &SolveApp, ctx: &egui::Context) -> egui::Rect {
-    app.viewport.rect.unwrap_or_else(|| ctx.content_rect())
-}
+/// The line types, in the order of the mode and of the selection flags: key, icon master and name.
+const LINE_TYPES: [(&str, &str, &str); 4] = [
+    ("normal", "normal", "Normal"),
+    ("construction", "construction", "Construction"),
+    ("centerline", "centerline", "Centerline"),
+    ("infinite", "infinite", "Infinite"),
+];
 
 /// Is a sketch being edited? That is the palette's own condition.
 pub fn editing(app: &SolveApp) -> bool {
-    app.session.active_sketch.and_then(|s| app.session.world_state().sketch(s).map(|_| ())).is_some()
-}
-
-/// Has the viewport room for the palette and a command dialog side by side? A narrow view has
-/// not, and there the dialog keeps the right edge on its own.
-pub fn fits_beside_a_dialog(app: &SolveApp, ctx: &egui::Context) -> bool {
-    let vp = viewport(app, ctx);
-    vp.width() >= width(vp) + crate::frame::DIALOG_MIN_W + 40.0
-}
-
-/// Is the palette on screen? It stays for as long as a sketch is being edited, a command dialog
-/// open or not: the dialog takes the left edge of the viewport and the palette keeps the right.
-pub fn visible(app: &SolveApp, ctx: &egui::Context) -> bool {
-    editing(app) && (app.dialog.is_none() || fits_beside_a_dialog(app, ctx))
-}
-
-/// A small disclosure triangle for the Options section: pointing right when collapsed, down
-/// when open. Kept separate from the palette's own "−"/"+" fold, which stays a plain glyph.
-fn disclosure_triangle(p: &egui::Painter, c: egui::Pos2, open: bool, col: Color32) {
-    let pts = if open {
-        vec![egui::pos2(c.x - 4.0, c.y - 2.0), egui::pos2(c.x + 4.0, c.y - 2.0), egui::pos2(c.x, c.y + 3.0)]
-    } else {
-        vec![egui::pos2(c.x - 2.5, c.y - 4.0), egui::pos2(c.x - 2.5, c.y + 4.0), egui::pos2(c.x + 3.0, c.y)]
-    };
-    p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
+    app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&app.session).sketch(s).map(|_| ())).is_some()
 }
 
 /// The creation family of the tool that is running, and the exact variant it is running, when
@@ -289,76 +270,86 @@ fn active_feature(app: &SolveApp) -> Option<(&'static crate::sketch_families::Fa
     (family.commands.len() > 1).then_some((family, id))
 }
 
-/// One row of the Feature Options section: the family's name, then its modes as icon buttons
-/// right-aligned in the same column every other palette row ends at. Five buttons do not fit one
-/// palette-wide row, so the group wraps onto as many rows as it needs.
-fn feature_row(app: &SolveApp, ui: &mut egui::Ui, width: f32, family: &crate::sketch_families::Family, current: &str) -> Option<&'static str> {
-    let t = Tokens::get();
-    let mut start = None;
-    ui.horizontal(|ui| {
-        ui.label(app.tr_label(family.label));
-        let btn_w = 28.0;
-        let btn_h = 22.0;
-        let sp = ui.spacing().item_spacing.x;
-        let room = (width - ui.min_rect().width() - sp).max(btn_w);
-        let fits = ((room + sp) / (btn_w + sp)).floor().clamp(1.0, family.commands.len() as f32) as usize;
-        let per_row = fits.max(1);
-        let group_w = per_row as f32 * btn_w + per_row.saturating_sub(1) as f32 * sp;
-        crate::frame::right_aligned(ui, width, group_w, |ui| {
-            ui.vertical(|ui| {
-                for chunk in family.commands.chunks(per_row) {
-                    ui.horizontal(|ui| {
-                        for spec in chunk.iter().filter_map(|id| solidcraft_engine::find_command(id)) {
-                            let on = spec.id == current;
-                            let enabled = spec.info(&app.session).enabled;
-                            let resp = ui.add_enabled(enabled, egui::Button::new("").selected(on).min_size(vec2(btn_w, btn_h)));
-                            let side = (resp.rect.width().min(resp.rect.height()) - 4.0).max(12.0);
-                            let icon_rect = egui::Rect::from_center_size(resp.rect.center(), vec2(side, side));
-                            let (ink, fill, acc) = if enabled { (t.icon, t.icon_fill, t.accent) } else { (t.border, t.panel_header, t.border) };
-                            crate::icons::paint(ui.painter(), icon_rect, spec.icon, ink, fill, acc);
-                            crate::scenario::publish_handle(&format!("sketch_palette:feature:{}", spec.id), resp.rect.center());
-                            // The button draws an icon and no text of its own, so give a screen
-                            // reader the command's own name and whether it is the mode in use.
-                            let label = app.tr_label(spec.label).to_string();
-                            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, on, &label));
-                            if resp.on_hover_text(app.tr_label(spec.label)).clicked() && enabled {
-                                start = Some(spec.id);
-                            }
-                        }
-                    });
-                }
-            });
-        });
-    });
-    start
+fn section_alias(name: &str, title: &str) {
+    if let Some(at) = crate::scenario::handle_at(&format!("dialog:section:{title}")) {
+        crate::scenario::publish_handle(name, at);
+    }
 }
 
-/// Draw the palette (while a sketch is being edited).
-pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    app.viewport.palette_rect = None;
-    let _language = crate::i18n::scope(&app.preferences.language);
-    if !visible(app, ctx) {
-        return;
+/// Count the sketch's independent input coordinates and radii before constraints. The solver
+/// stores remaining DOF but no total: fixed/projected inputs are constants, not free variables.
+/// Arc endpoints already supply their radii through coordinates, as in the solver's layout.
+fn unconstrained_total(sketch: &solidcraft_engine::sketch::Sketch) -> usize {
+    let coordinates = sketch.points.iter().filter(|p| !p.fixed && p.link.is_none()).count().saturating_mul(2);
+    let radii = sketch
+        .curves
+        .iter()
+        .filter(|c| {
+            !c.fixed
+                && c.link.is_none()
+                && matches!(c.kind, solidcraft_engine::sketch::CurveKind::Circle { .. } | solidcraft_engine::sketch::CurveKind::Ellipse { .. })
+        })
+        .count();
+    coordinates.saturating_add(radii)
+}
+
+fn constrained_fraction(remaining: usize, total: usize, solved: bool) -> f32 {
+    if !solved {
+        0.0
+    } else if total == 0 {
+        if remaining == 0 { 1.0 } else { 0.0 }
+    } else {
+        1.0 - remaining.min(total) as f32 / total as f32
     }
-    let (opts, dof_line, ok, open_ends, untied_ends) = {
-        let st = app.session.world_state();
+}
+
+fn constraint_status(remaining: usize, solved: bool, geometry: bool) -> String {
+    if !solved || !geometry || remaining == 0 {
+        crate::i18n::tr_dyn(&dof_text(remaining, solved, geometry))
+    } else {
+        solidcraft_ui_text::format(if remaining == 1 { "sketch.dof_left_one" } else { "sketch.dof_left" }, &[("count", &remaining.to_string())])
+    }
+}
+
+/// The active sketch supplies presentation while the host retains placement.
+pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime::PanelPresentation> {
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
+    let world = crate::open_meshing::session_world(&app.session);
+    let sketch = world.sketch(app.session.active_sketch?)?;
+    let solved = sketch.report.ok();
+    let title =
+        if sketch.name.trim().is_empty() || sketch.name.len() > 256 { app.tr("ui.palette_sketch_options").to_owned() } else { sketch.name.clone() };
+    Some(crate::panel_runtime::PanelPresentation {
+        title,
+        icon: "sketch".into(),
+        status: Some(constraint_status(sketch.report.dof, solved, has_geometry(&sketch.sketch))),
+        attention: !solved,
+        actions: Vec::new(),
+    })
+}
+
+pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let ctx = ui.ctx().clone();
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
+    let (opts, remaining, solved, total, geometry, open_ends, untied_ends) = {
+        let st = crate::open_meshing::session_world(&app.session);
         let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
         (
             ss.sketch.view.clone(),
-            dof_text(ss.report.dof, ss.report.ok()),
-            ss.report.ok() && ss.report.dof == 0,
+            ss.report.dof,
+            ss.report.ok(),
+            unconstrained_total(&ss.sketch),
+            has_geometry(&ss.sketch),
             ss.ends.open.len(),
             ss.ends.untied.len(),
         )
     };
-    let t = Tokens::get();
-    let vp = viewport(app, ctx);
-    let bottom = vp.bottom().min(ctx.content_rect().bottom()) - 8.0;
-    // Prefer the space below Axis View, but reclaim it on short/HiDPI views.
-    let top = (vp.top() + crate::viewport::AXIS_VIEW_CLEARANCE).min((bottom - 360.0).max(vp.top()));
-    let anchor = egui::pos2(vp.right(), top);
-    let frame = crate::frame::dock_frame(ctx, crate::frame::Side::Right);
-    let shown = |k: &str| match k {
+    let status = constraint_status(remaining, solved, geometry);
+    let fraction = constrained_fraction(remaining, total, solved && geometry);
+    let option_label =
+        |label: &'static str| if matches!(label, "ui.profile" | "ui.points") { solidcraft_ui_text::tr(label) } else { app.tr_label(label) };
+    let more = solidcraft_ui_text::tr("ui.palette_more");
+    let shown = |key: &str| match key {
         "grid" => !opts.hide_grid,
         "snap" => !opts.no_snap,
         "slice" => opts.slice,
@@ -372,237 +363,170 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         _ => false,
     };
     let mut set: Option<(String, bool)> = None;
-    let mut linetype: Option<u8> = None;
+    let mut linetype = None;
+    let mut construction = false;
     let mut look = false;
     let mut finish = false;
+    let mut slice_changed = false;
     let mut tie = false;
-    let mut start: Option<&'static str> = None;
+    let mut start = None;
     let feature = active_feature(app);
     let has_curves = !selected_curves(app).is_empty();
-    let selected_types = selected_linetypes(app);
-    let margin_bottom = f32::from(frame.inner_margin.bottom);
-    let response = crate::frame::docked(
-        app.tr("ui.heading_sketch_palette"),
-        egui::Id::new("sc_sketch_palette"),
-        anchor,
-        bottom - anchor.y,
-        crate::frame::Width::Normal,
-    )
-    .frame(frame)
-    .show(ctx, |ui| {
-        let width = width(vp);
-        ui.set_width(width);
-        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-        let line = ui.text_style_height(&egui::TextStyle::Body);
-        let gap = ui.spacing().item_spacing.y;
-        crate::frame::heading(ui, Level::Title, width, |ui| {
-            let folded = FOLDED.with(Cell::get);
-            if ui.add(egui::Button::new(RichText::new(if folded { "+" } else { "−" }).size(14.0)).frame(false)).clicked() {
-                FOLDED.with(|f| f.set(!folded));
-            }
-            ui.label(RichText::new(app.tr("ui.heading_sketch_palette")).strong().size(12.5));
-        });
-        if FOLDED.with(Cell::get) {
-            return;
-        }
-        // Feature Options sits above Options: the modes of the creation tool that is running.
-        if let Some((family, current)) = feature {
-            let ffold = FEATURE_FOLDED.with(Cell::get);
-            crate::frame::heading(ui, Level::Section, width, |ui| {
-                let (tri_rect, tri_resp) = ui.allocate_exact_size(vec2(14.0, 14.0), egui::Sense::click());
-                disclosure_triangle(ui.painter(), tri_rect.center(), !ffold, t.text);
-                crate::scenario::publish_handle("sketch_palette:feature_fold", tri_rect.center());
-                let label_resp = ui.add(egui::Label::new(RichText::new(app.tr("ui.feature_options")).size(12.0)).sense(egui::Sense::click()));
-                if tri_resp.clicked() || label_resp.clicked() {
-                    FEATURE_FOLDED.with(|f| f.set(!ffold));
-                }
-            });
-            if !ffold {
-                let section = ui.vertical(|ui| feature_row(app, ui, width, family, current));
-                start = section.inner;
-                crate::scenario::publish_rect("sketch_palette:feature_options", section.response.rect);
-            }
-            ui.add_space(2.0);
-        }
-        let ofold = OPTIONS_FOLDED.with(Cell::get);
-        crate::frame::heading(ui, Level::Section, width, |ui| {
-            let (tri_rect, tri_resp) = ui.allocate_exact_size(vec2(14.0, 14.0), egui::Sense::click());
-            disclosure_triangle(ui.painter(), tri_rect.center(), !ofold, t.text);
-            crate::scenario::publish_handle("sketch_palette:options_fold", tri_rect.center());
-            let label_resp = ui.add(egui::Label::new(RichText::new(app.tr("ui.options")).size(12.0)).sense(egui::Sense::click()));
-            if tri_resp.clicked() || label_resp.clicked() {
-                OPTIONS_FOLDED.with(|f| f.set(!ofold));
-            }
-        });
-        if !ofold {
-            // Keep room for the footer: status heading and line, a line, Finish Sketch, a line.
-            let ends_rows = if open_ends > 0 { line + gap } else { 0.0 } + if untied_ends > 0 { ui.spacing().interact_size.y + gap } else { 0.0 };
-            let footer = 5.0 * line + ui.spacing().interact_size.y + 6.0 * gap + 8.0 + ends_rows;
-            let options_height = (bottom - ui.cursor().top() - footer).max(24.0);
-            let options =
-                egui::ScrollArea::vertical().id_salt("sc_palette_options").max_height(options_height).auto_shrink([false, true]).show(ui, |ui| {
-                    // Every row below: its label at the left, its control right-aligned at the
-                    // same column (`frame::right_aligned`), so every row lines up instead of
-                    // each control sitting wherever its label happened to end.
-                    ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(app.tr("ui.linetype"));
-                            // Taller and wider than the old text-only buttons. Construction and
-                            // Centerline need a round dot and a clear gap to read apart. 30 by
-                            // 20 px left too little square room for either.
-                            let btn_w = 36.0;
-                            let group_w = 4.0 * btn_w + 3.0 * ui.spacing().item_spacing.x;
-                            crate::frame::right_aligned(ui, width, group_w, |ui| {
-                                ui.horizontal(|ui| {
-                                    // With a selection: its line type, and a click converts it;
-                                    // without: the mode new curves are drawn in. Each button
-                                    // still carries its old glyph as hidden (transparent) text.
-                                    // That keeps its hit target, size and accessible name
-                                    // exactly as before. A drawn icon (icons.rs) paints over it.
-                                    // Construction and Centerline always draw in the theme's
-                                    // construction orange. Normal's icon never changes with the
-                                    // accent colour. It stays neutral in every case.
-                                    let current = mode(app);
-                                    for (i, (label, icon, tip)) in [
-                                        ("—", "normal", "Normal"),
-                                        ("- -", "construction", "Construction"),
-                                        ("-·-", "centerline", "Centerline"),
-                                        ("↔", "infinite", "Infinite"),
-                                    ]
-                                    .iter()
-                                    .enumerate()
-                                    {
-                                        let on = if has_curves { selected_types.get(i).copied().unwrap_or(false) } else { current == i as u8 };
-                                        let tr_tip = app.tr_label(tip);
-                                        let hover = if has_curves {
-                                            crate::i18n::format("sketch.make_selection", &[("linetype", tr_tip)])
-                                        } else {
-                                            crate::i18n::format("sketch.draw_curves", &[("linetype", tr_tip)])
-                                        };
-                                        let btn = egui::Button::new(RichText::new(*label).color(Color32::TRANSPARENT))
-                                            .selected(on)
-                                            .min_size(vec2(btn_w, 28.0));
-                                        let resp = ui.add(btn).on_hover_text(hover);
-                                        let accent = if *icon == "normal" { t.icon } else { t.construction_geom };
-                                        // A square icon area. The button's own rect is
-                                        // text-shaped, wider than tall. A flattened diagonal
-                                        // leaves less room for a dash pattern's gaps to read.
-                                        let side = (resp.rect.width().min(resp.rect.height()) - 3.0).max(12.0);
-                                        let icon_rect = egui::Rect::from_center_size(resp.rect.center(), vec2(side, side));
-                                        crate::icons::paint(ui.painter(), icon_rect, icon, t.icon, t.icon_fill, accent);
-                                        if resp.clicked() {
-                                            linetype = Some(i as u8);
-                                        }
-                                    }
-                                });
-                            });
-                        });
-                        ui.horizontal(|ui| {
-                            // One label, one icon button (the "lookat" glyph already used on the
-                            // viewport's own navigation overlay): not the word "Look At" twice.
-                            // The button carries no visible text of its own; `labelled_by` gives
-                            // it the row's own label as its accessible name, so a screen reader
-                            // still hears "Look At" the way the old text button said it.
-                            let label_resp = ui.label(app.tr("ui.look_at"));
-                            let icon_w = 28.0;
-                            let resp = crate::frame::right_aligned(ui, width, icon_w, |ui| {
-                                let r = ui.add(egui::Button::new("").min_size(vec2(icon_w, 20.0)));
-                                let side = (r.rect.width().min(r.rect.height()) - 4.0).max(12.0);
-                                let icon_rect = egui::Rect::from_center_size(r.rect.center(), vec2(side, side));
-                                crate::icons::paint(ui.painter(), icon_rect, "lookat", t.icon, t.icon_fill, t.accent);
-                                crate::scenario::publish_handle("sketch_palette:look_at", r.rect.center());
-                                r.labelled_by(label_resp.id)
-                            });
-                            let resp = resp.on_hover_text(app.tr("ui.look_at"));
-                            if resp.clicked() {
-                                look = true;
-                            }
-                        });
-                    });
-                    for (k, label) in TOGGLES {
-                        ui.horizontal(|ui| {
-                            // The label is still part of the toggle: clicking it flips the
-                            // checkbox too, same as before the checkbox moved to its own column.
-                            let label_resp = ui.add(egui::Label::new(app.tr_label(label)).sense(egui::Sense::click()));
-                            let mut on = shown(k);
-                            let box_w = ui.spacing().interact_size.y;
-                            let cb = crate::frame::right_aligned(ui, width, box_w, |ui| {
-                                ui.add(egui::Checkbox::without_text(&mut on)).labelled_by(label_resp.id)
-                            });
-                            if cb.changed() {
-                                set = Some((k.to_string(), on));
-                            } else if label_resp.clicked() {
-                                set = Some((k.to_string(), !on));
-                            }
-                        });
-                    }
-                });
-            crate::scenario::publish_rect("sketch_palette:options", options.inner_rect);
-        }
-        ui.add_space(4.0);
-        // The status changes when the sketch needs attention, so it gets its own heading.
-        crate::frame::heading(ui, Level::Section, width, |ui| {
-            ui.label(RichText::new(app.tr("ui.sketch_status")).size(12.0));
-        });
-        ui.label(RichText::new(crate::i18n::tr_dyn(&dof_line)).color(if ok { t.sketch_accent } else { t.text_dim }));
-        // Where a profile can fail (the viewport rings and diamonds them).
+    let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
+    let draw_body = |ui: &mut egui::Ui| {
+        let t = Tokens::get();
+        let status_label = crate::ui_kit::text(ui, &status, crate::ui_kit::Text::Report("sketch_constraints", !solved));
+        let meter = crate::ui_kit::progress(ui, "sketch_palette", fraction);
+        crate::scenario::publish_target("sketch_palette:status_header", status_label.rect.union(meter.rect).intersect(ui.clip_rect()));
+        crate::scenario::publish_rect("sketch_palette:meter", meter.rect);
+        crate::scenario::publish_count("sketch_palette:constrained_fraction", f64::from(fraction));
         if open_ends > 0 {
-            let text = crate::i18n::format("sketch.open_ends", &[("count", &open_ends.to_string())]);
-            ui.label(RichText::new(text).color(t.warning)).on_hover_text(app.tr("ui.open_ends_tip"));
+            let text = solidcraft_ui_text::format("sketch.open_ends", &[("count", &open_ends.to_string())]);
+            ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.open_ends_tip"));
         }
         if untied_ends > 0 {
             ui.horizontal(|ui| {
-                let text = crate::i18n::format("sketch.untied_ends", &[("count", &untied_ends.to_string())]);
-                ui.label(RichText::new(text).color(t.warning)).on_hover_text(app.tr("ui.untied_ends_tip"));
-                let button = ui.button(app.tr("ui.tie_ends")).on_hover_text(app.tr("ui.tie_ends_tip"));
+                let text = solidcraft_ui_text::format("sketch.untied_ends", &[("count", &untied_ends.to_string())]);
+                ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.untied_ends_tip"));
+                let button =
+                    crate::ui_kit::button(ui, app.tr("ui.tie_ends"), crate::ui_kit::Button::Normal).backing_on_hover_text(app.tr("ui.tie_ends_tip"));
+                crate::panel_runtime::register_content_focus(ui.ctx(), &button);
                 crate::scenario::publish_handle("sketch_palette:tie_ends", button.rect.center());
-                if button.clicked() {
-                    tie = true;
-                }
+                tie = button.clicked();
             });
         }
-        // One line between the status and Finish Sketch, and below it to the edge.
-        ui.add_space((line - gap).max(0.0));
-        // A row as tall as the button, so the gap below it is just the line.
-        ui.allocate_ui_with_layout(vec2(ui.available_width(), 0.0), egui::Layout::right_to_left(egui::Align::Min), |ui| {
-            let button = ui.add(egui::Button::new(RichText::new(app.tr("ui.finish_sketch")).color(Color32::WHITE)).fill(t.accent));
-            crate::scenario::publish_rect("sketch_palette:finish", button.rect);
-            crate::scenario::publish_handle("sketch_palette:finish", button.rect.center());
-            if button.clicked() {
-                finish = true;
+
+        if let Some((family, current)) = feature {
+            let section = crate::ui_kit::section(ui, "feature", "Feature Options", true, |ui| {
+                let choices: Vec<_> = family
+                    .commands
+                    .iter()
+                    .filter_map(|id| solidcraft_engine::find_command(id))
+                    .map(|spec| crate::ui_kit::ToolChoice {
+                        key: spec.id,
+                        icon: spec.icon,
+                        label: app.tr_label(spec.label),
+                        enabled: spec.info(&app.session).enabled,
+                    })
+                    .collect();
+                let section = ui.vertical(|ui| crate::ui_kit::tool_choices(ui, app.tr_label(family.label), current, &choices));
+                crate::scenario::publish_rect("sketch_palette:feature_options", section.response.rect);
+                section.inner
+            });
+            start = section.flatten();
+            section_alias("sketch_palette:feature_fold", "Feature Options");
+        }
+        crate::ui_kit::row(ui, "Line Type", |ui| {
+            // Normal, Construction, Centerline and the Infinite line, as icons. With a
+            // selection a click converts it; without, it picks the mode new curves use.
+            let segments = LINE_TYPES.map(|(key, icon, name)| {
+                let name = app.tr_label(name);
+                let tip = if has_curves {
+                    solidcraft_ui_text::format("sketch.make_selection", &[("linetype", name)])
+                } else {
+                    solidcraft_ui_text::format("sketch.draw_curves", &[("linetype", name)])
+                };
+                crate::ui_kit::IconSegment { key, icon, tip }
+            });
+            let mut selected = selected_types.iter().position(|on| *on).unwrap_or(usize::MAX);
+            if crate::ui_kit::segmented_icons(ui, &mut selected, &segments, &selected_types) {
+                linetype = u8::try_from(selected).ok();
             }
         });
-        ui.add_space((line - margin_bottom).max(0.0));
-    });
-    app.viewport.palette_rect = response.map(|r| r.response.rect);
-    if let Some(r) = app.viewport.palette_rect {
-        crate::scenario::publish_rect("sketch_palette:outer", r);
-    }
-    if let Some((k, on)) = set {
-        let mut p = serde_json::Map::new();
-        p.insert(k, Value::Bool(on));
-        if let Err(e) = app.run("sketch.options", Value::Object(p)) {
-            app.set_status(e, true);
+        // In words: the selection's line types (several for a mixed selection), or the
+        // mode new curves are drawn in.
+        let names: Vec<&str> = LINE_TYPES.iter().zip(selected_types).filter(|(_, on)| *on).map(|((_, _, name), _)| app.tr_label(name)).collect();
+        crate::ui_kit::caption(ui, "Line Type", &names.join(", "));
+        for key in ["show_constraints", "show_dimensions", "show_points", "snap"] {
+            if let Some((_, label)) = TOGGLES.iter().find(|(k, _)| *k == key)
+                && crate::ui_kit::checkbox_row(ui, key, option_label(label), shown(key))
+            {
+                set = Some((key.to_string(), !shown(key)));
+            }
         }
-    }
-    if let Some(k) = linetype {
-        if has_curves {
-            set_linetype(app, k);
+        construction = crate::ui_kit::checkbox_row(
+            ui,
+            "construction_mode",
+            solidcraft_ui_text::tr("ui.palette_construction_mode"),
+            selected_types.get(1).copied().unwrap_or(false),
+        );
+        crate::ui_kit::section(ui, "more", more, false, |ui| {
+            for (key, label) in TOGGLES {
+                if !["show_constraints", "show_dimensions", "show_points", "snap"].contains(&key)
+                    && crate::ui_kit::checkbox_row(ui, key, option_label(label), shown(key))
+                {
+                    set = Some((key.to_string(), !shown(key)));
+                }
+            }
+        });
+        section_alias("sketch_palette:options_fold", more);
+    };
+    let mut draw_footer = |ui: &mut egui::Ui| {
+        let button = crate::ui_kit::wide_primary_button(ui, "Finish Sketch");
+        crate::panel_runtime::register_content_focus(ui.ctx(), &button);
+        crate::scenario::publish_rect("sketch_palette:finish", button.rect);
+        crate::scenario::publish_handle("sketch_palette:finish", button.rect.center());
+        finish = button.clicked();
+        let (at, slice) = crate::ui_kit::button_pair(
+            ui,
+            "sketch_palette",
+            [false, opts.slice],
+            [
+                crate::ui_kit::PairButton { key: "look_at", label: solidcraft_ui_text::tr("ui.look_at"), icon: Some("lookat") },
+                crate::ui_kit::PairButton { key: "slice", label: "Slice", icon: None },
+            ],
+        );
+        look = at;
+        slice_changed = slice;
+    };
+    let at_top = crate::ui_kit::DialogButtons::current(&ctx) == crate::ui_kit::DialogButtons::Top;
+    crate::ui_kit::scope(ui, |ui| {
+        let footer_height = if at_top {
+            draw_footer(ui);
+            0.0
         } else {
-            set_mode(app, k);
+            crate::ui_kit::Panel::pinned_footer(ui, "shared_sketch_palette_footer", 2, draw_footer).response.rect.height()
+        };
+        let top = ui.cursor().top();
+        let options =
+            egui::ScrollArea::vertical().id_salt("sc_palette_options").min_scrolled_height(0.0).auto_shrink([false, true]).show(ui, draw_body);
+        crate::scenario::publish_rect("sketch_palette:options", options.inner_rect);
+        crate::panel_runtime::report_content_extent(ui, top, options.content_size.y + footer_height, false);
+    });
+    if set.is_none() && slice_changed {
+        set = Some(("slice".into(), !opts.slice));
+    }
+    if let Some((key, on)) = set {
+        let mut params = serde_json::Map::new();
+        params.insert(key, Value::Bool(on));
+        if let Err(error) = app.run("sketch.options", Value::Object(params)) {
+            app.set_status(error, true);
         }
+    }
+    if let Some(kind) = linetype {
+        if has_curves {
+            set_linetype(app, kind);
+        } else {
+            set_mode(app, kind);
+        }
+        // The button click would otherwise leave the shape's dimension box without the keyboard.
+        crate::sketch_dims::restore_box_focus(app, &ctx);
+    }
+    if construction {
+        toggle_construction(app);
     }
     if let Some(id) = start {
-        // The same path a toolbar click takes. It drops the half-drawn shape and starts the
-        // chosen mode from its first point, so a partly placed 3-point rectangle does not
-        // carry its stale points into a 2-point one.
         app.start(id);
     }
-    if look {
-        crate::dialogs::look_at_sketch_again(app);
+    if tie && let Err(error) = app.run("sketch.loose_ends.tie", json!({})) {
+        app.set_status(error, true);
     }
-    if tie && let Err(e) = app.run("sketch.loose_ends.tie", json!({})) {
-        app.set_status(e, true);
+    if look {
+        if app.universal_panel_host_enabled() {
+            app.viewport.host_windows = crate::ui_kit::Container::host_window_regions(&ctx);
+            crate::viewport::refresh_layout(app, &ctx);
+        }
+        crate::dialogs::look_at_sketch_again(app);
     }
     if finish {
         app.finish_sketch();
@@ -612,6 +536,94 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn card_uses_design_dimensions_and_all_options_still_run_commands() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        let palette = h.app.viewport.palette_rect.unwrap();
+        assert!(
+            (palette.width() - crate::prefs::DEFAULT_BROWSER_WIDTH).abs() < 1.0,
+            "palette {palette:?}, width {}",
+            crate::prefs::DEFAULT_BROWSER_WIDTH
+        );
+        let look = crate::scenario::rect_of("sketch_palette:look_at").unwrap();
+        let slice = crate::scenario::rect_of("sketch_palette:slice").unwrap();
+        assert_eq!(look.size(), slice.size());
+        assert_eq!(look.height(), Tokens::get().form_button_height);
+        assert_eq!(crate::scenario::rect_of("sketch_palette:meter").unwrap().height(), Tokens::get().space_6);
+        assert!(crate::scenario::handle_at("sketch_palette:toggle:grid").is_none());
+        let more = crate::scenario::handle_at("sketch_palette:options_fold").unwrap();
+        h.call("ui.click", json!({"x":more.x,"y":more.y}));
+        let active = h.app.session.active_sketch.unwrap();
+        for (key, _) in TOGGLES {
+            let before = h.app.session.doc.to_json();
+            let undo = h.app.session.undo.len();
+            let at = crate::scenario::handle_at(&format!("sketch_palette:toggle:{key}")).unwrap();
+            h.call("ui.click", json!({"x":at.x,"y":at.y}));
+            assert_ne!(h.app.session.doc.to_json(), before, "{key}");
+            assert_eq!(h.app.session.undo.len(), undo + 1, "{key}");
+            assert_eq!(h.app.session.active_sketch, Some(active));
+            h.app.run("edit.undo", json!({})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.to_json(), before, "{key}");
+        }
+        let construction = crate::scenario::handle_at("sketch_palette:toggle:construction_mode").unwrap();
+        h.call("ui.click", json!({"x":construction.x,"y":construction.y}));
+        assert_eq!(mode(&h.app), 1);
+        h.call("ui.click", json!({"x":construction.x,"y":construction.y}));
+        assert_eq!(mode(&h.app), 0);
+        let infinite = crate::scenario::handle_at("dialog:Line Type:infinite").expect("the Infinite segment is drawn");
+        h.call("ui.click", json!({"x":infinite.x,"y":infinite.y}));
+        assert_eq!(mode(&h.app), 3);
+        set_mode(&mut h.app, 0);
+    }
+
+    #[test]
+    fn meter_uses_input_variables_and_solver_remaining_dof() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[10,10],"radius":5})).unwrap();
+        h.settle();
+        let state = h.app.session.world_state().unwrap();
+        let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        assert_eq!(unconstrained_total(&sketch.sketch), 3);
+        assert_eq!(sketch.report.dof, 3);
+        assert_eq!(crate::scenario::count_of("sketch_palette:constrained_fraction"), Some(0.0));
+        assert_eq!(constrained_fraction(2, 14, true), 1.0 - 2.0 / 14.0);
+        assert_eq!(constrained_fraction(0, 0, true), 1.0);
+        assert_eq!(constrained_fraction(0, 14, false), 0.0);
+        assert_eq!(constrained_fraction(20, 14, true), 0.0);
+    }
+
+    #[test]
+    fn ribbon_exit_finishes_the_active_sketch() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        assert!(crate::scenario::rect_of("ribbon:section:SKETCH:FINISH SKETCH").is_some());
+        let at = crate::scenario::handle_at("button:sketch.finish").unwrap();
+        h.call("ui.click", json!({"x":at.x,"y":at.y}));
+        assert!(h.app.session.active_sketch.is_none());
+    }
+
+    #[test]
+    fn palette_has_a_finish_sketch_button_that_finishes_the_sketch() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        let at = crate::scenario::handle_at("sketch_palette:finish").expect("the palette ends in Finish Sketch");
+        let look = crate::scenario::rect_of("sketch_palette:look_at").expect("Look At | Slice stay");
+        let slice = crate::scenario::rect_of("sketch_palette:slice").unwrap();
+        let finish = crate::scenario::rect_of("sketch_palette:finish").unwrap();
+        assert_eq!((finish.left(), finish.right()), (look.left(), slice.right()), "Finish {finish:?} shares the pair's inset");
+        assert_eq!(finish.height(), Tokens::get().form_button_height);
+        assert!(look.top() - finish.bottom() >= Tokens::get().space_6, "the footer rows remain distinct");
+        assert!(crate::scenario::handle_at("button:sketch.finish").is_some(), "and so does the ribbon's Finish");
+        h.call("ui.click", json!({"x":at.x,"y":at.y}));
+        assert!(h.app.session.active_sketch.is_none());
+    }
 
     #[test]
     fn construction_shortcut_keeps_the_drawing_tool_and_commits_its_line_type() {
@@ -637,12 +649,58 @@ mod tests {
             assert_eq!(after.dims.iter().map(|d| &d.value).collect::<Vec<_>>(), before.dims.iter().map(|d| &d.value).collect::<Vec<_>>());
             assert_eq!(h.app.session.undo.len(), history);
             h.step(&json!({"click":{"sketch":[20,10]}})).unwrap();
-            let state = h.app.session.world_state();
+            let state = h.app.session.world_state().unwrap();
             let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
             assert!(!sketch.curves.is_empty(), "{command}");
             assert!(sketch.curves.iter().all(|c| c.construction), "{command}");
             h.app.run("edit.undo", json!({})).unwrap();
-            assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
+            assert!(h.app.session.world_state().unwrap().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
+            set_mode(&mut h.app, 0);
+        }
+    }
+
+    /// Project gives the curves it makes the drawing line type, as drawing does (#9945): its
+    /// reply lists them per link, not as `curves`. A projected line becomes construction,
+    /// centerline or infinite; a projected circle, which cannot be either of the last two, becomes
+    /// construction; normal leaves both as they are. One undo takes the projection away whole.
+    #[test]
+    fn project_gives_its_curves_the_drawing_line_type() {
+        let flags = |c: &solidcraft_engine::sketch::Curve| (c.construction, c.centerline, c.infinite);
+        for (m, line, circle) in [
+            (0, (false, false, false), (false, false, false)),
+            (1, (true, false, false), (true, false, false)),
+            (2, (false, true, false), (true, false, false)),
+            // An infinite line is construction too, as when it is drawn.
+            (3, (true, false, true), (true, false, false)),
+        ] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]})).unwrap();
+            h.app.run("sketch.circle.center", json!({"center":[40,0],"radius":5})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            set_mode(&mut h.app, m);
+            let history = h.app.session.undo.len();
+            let r = h.app.run("sketch.project", json!({"refs":[{"sketch":1,"curve":"l1"},{"sketch":1,"curve":"c1"}]})).unwrap();
+            assert_eq!(r["links"].as_array().map(Vec::len), Some(2), "mode {m}: {r}");
+            let state = crate::open_meshing::session_world(&h.app.session);
+            let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+            let kind = |line: bool| {
+                sketch
+                    .curves
+                    .iter()
+                    .find(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { .. }) == line)
+                    .map(flags)
+                    .unwrap_or_else(|| panic!("mode {m}: a projected {}", if line { "line" } else { "circle" }))
+            };
+            assert_eq!(kind(true), line, "mode {m}: the line");
+            assert_eq!(kind(false), circle, "mode {m}: the circle");
+            assert_eq!(h.app.session.undo.len(), history + 1, "mode {m}: one undo step");
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert!(
+                crate::open_meshing::session_world(&h.app.session).sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty(),
+                "mode {m}"
+            );
             set_mode(&mut h.app, 0);
         }
     }
@@ -650,18 +708,18 @@ mod tests {
     #[test]
     fn palette_footer_and_scrolled_lower_option_remain_reachable_at_scale_and_resize() {
         for (scale, height) in [(1.0, 900.0), (2.0, 900.0), (2.0, 720.0)] {
-            FOLDED.with(|v| v.set(false));
-            OPTIONS_FOLDED.with(|v| v.set(false));
             let mut h = crate::scenario::Harness::new();
             h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
             h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":1})).unwrap();
             h.call("ui.resize", json!({"width":1400,"height":height}));
             h.call("ui.prefs", json!({"ui_scale":scale}));
             h.settle();
+            let at = crate::scenario::handle_at("sketch_palette:options_fold").unwrap();
+            h.call("ui.click", json!({"x":at.x,"y":at.y}));
             let baseline = h.app.session.doc.to_json();
             let undo = h.app.session.undo.len();
             let vp = h.app.viewport.rect.unwrap();
-            let footer = crate::scenario::rect_of("sketch_palette:finish").unwrap();
+            let footer = crate::scenario::rect_of("sketch_palette:look_at").unwrap();
             assert!(vp.contains_rect(footer), "scale{scale} height{height}: {footer:?} outside {vp:?}");
             let options = crate::scenario::rect_of("sketch_palette:options").unwrap();
             assert!(vp.contains_rect(options));
@@ -673,49 +731,43 @@ mod tests {
             assert!(options.contains(egui::pos2(x as f32, y as f32)), "lower option must be visible after scrolling");
             h.call("ui.click", json!({"x":x,"y":y}));
             h.settle();
-            assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.view.three_d);
+            assert!(h.app.session.world_state().unwrap().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.view.three_d);
             assert_eq!(h.app.session.undo.len(), undo + 1);
             h.app.run("edit.undo", json!({})).unwrap();
             assert_eq!(h.app.session.doc.to_json(), baseline);
             h.settle();
-            let footer = crate::scenario::rect_of("sketch_palette:finish").unwrap();
-            h.call("ui.click", json!({"x":footer.center().x,"y":footer.center().y}));
+            let at = crate::scenario::handle_at("sketch_palette:finish").unwrap();
+            h.call("ui.click", json!({"x":at.x,"y":at.y}));
             h.settle();
             assert!(h.app.session.active_sketch.is_none(), "Finish Sketch must work at scale{scale} height{height}");
             assert_eq!(h.app.session.doc.to_json(), baseline);
         }
     }
 
-    /// A command dialog opened while sketching used to hide the palette outright. The two now
-    /// share the viewport, the dialog at the left edge and the palette at the right, and a view
-    /// too narrow for both keeps the dialog alone.
+    /// The pane is placed from the viewport's right edge. At a fractional display scale (Windows
+    /// at 125 %) it hopped a physical pixel back and forth on every repaint the pointer caused,
+    /// most visibly docked against the window's edge (#9457).
     #[test]
-    fn a_dialog_opened_while_sketching_keeps_the_palette_beside_it() {
-        FOLDED.with(|v| v.set(false));
-        OPTIONS_FOLDED.with(|v| v.set(false));
-        let mut h = crate::scenario::Harness::new();
-        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
-        h.call("ui.resize", json!({"width":1400,"height":900}));
-        h.settle();
-        assert!(h.app.viewport.palette_rect.is_some(), "the palette is there while sketching");
-        h.app.start("inspect.measure");
-        h.settle();
-        assert!(h.app.dialog.is_some(), "the command opens a dialog");
-        let palette = h.app.viewport.palette_rect.expect("the palette stays on screen while a dialog is open");
-        let dialog = h.app.viewport.dialog_rect.unwrap();
-        assert!(!palette.intersect(dialog).is_positive(), "palette {palette:?} overlaps dialog {dialog:?}");
-        assert!(dialog.left() < palette.left(), "the dialog takes the left edge: {dialog:?}, {palette:?}");
-        let finish = crate::scenario::rect_of("sketch_palette:finish").expect("Finish Sketch stays reachable");
-        assert!(palette.contains_rect(finish));
-        // Neither panel ever covers the other, however narrow the view gets.
-        for width in [1200.0, 1000.0, 860.0, 720.0, 600.0] {
-            h.call("ui.resize", json!({"width":width,"height":800}));
-            h.settle();
-            if let (Some(p), Some(d)) = (h.app.viewport.palette_rect, h.app.viewport.dialog_rect) {
-                assert!(!p.intersect(d).is_positive(), "width {width}: palette {p:?} overlaps dialog {d:?}");
+    fn pane_stays_still_while_the_pointer_moves_at_fractional_scale() {
+        for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+            for (scale, width, height) in [(1.0, 1600.0, 1000.0), (1.25, 1536.0, 921.6), (1.25, 1522.4, 904.8), (1.5, 1280.0, 800.0)] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.ui.layout = layout;
+                h.call("ui.resize", json!({"width":width,"height":height}));
+                h.call("ui.prefs", json!({"ui_scale":scale}));
+                h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+                h.app.run("sketch.line", json!({"points":[[0,0],[30,0],[30,20]],"closed":false})).unwrap();
+                h.app.start("sketch.line");
+                h.settle();
+                let mut seen = Vec::new();
+                for i in 0..8 {
+                    h.app.synthetic.push(egui::Event::PointerMoved(egui::pos2(400.0 + i as f32 * 7.3, 400.0 + i as f32 * 3.1)));
+                    h.frame();
+                    let pane = h.app.viewport.palette_rect.expect("the pane is shown while sketching");
+                    seen.push((pane, crate::scenario::rect_of("sketch_palette:finish")));
+                }
+                assert!(seen.windows(2).all(|w| w[0] == w[1]), "{layout:?} at scale {scale}, {width}x{height}: the pane moved: {seen:?}");
             }
-            assert!(h.app.dialog.is_some(), "width {width}: the dialog stays open");
         }
     }
 
@@ -729,26 +781,31 @@ mod tests {
         let center = curve(h.app.run("sketch.line", json!({"points":[[0,20],[20,20]],"infer":false,"connect":false})).unwrap());
         h.app.run("sketch.construction", json!({"curves":[cons],"value":true})).unwrap();
         h.app.run("sketch.centerline", json!({"curves":[center],"value":true})).unwrap();
-        // Which of Normal, Construction and Centerline the palette shows pressed.
+        // Which of Normal, Construction, Centerline and Infinite the palette shows pressed.
         let pressed = |h: &mut crate::scenario::Harness, ids: &[&String]| {
-            h.app.session.selection = ids.iter().map(|id| Sel::SketchCurve { id: (*id).clone() }).collect();
+            h.app.session.selection = ids.iter().map(|id| Sel::SketchCurve { id: (*id).clone(), sketch: None }).collect();
             h.settle();
             let tree = h.output.accesskit_update.as_ref().unwrap();
-            ["—", "- -", "-·-"]
+            ["normal", "construction", "centerline", "infinite"]
                 .map(|label| tree.nodes.iter().any(|(_, n)| n.label() == Some(label) && n.toggled() == Some(egui::accesskit::Toggled::True)))
         };
-        assert_eq!(pressed(&mut h, &[&normal]), [true, false, false]);
-        assert_eq!(pressed(&mut h, &[&cons]), [false, true, false]);
-        assert_eq!(pressed(&mut h, &[&center]), [false, false, true]);
+        assert_eq!(pressed(&mut h, &[&normal]), [true, false, false, false]);
+        assert_eq!(pressed(&mut h, &[&cons]), [false, true, false, false]);
+        assert_eq!(pressed(&mut h, &[&center]), [false, false, true, false]);
         // A mixed selection shows each of its line types.
-        assert_eq!(pressed(&mut h, &[&normal, &center]), [true, false, true]);
+        assert_eq!(pressed(&mut h, &[&normal, &center]), [true, false, true, false]);
         // Nothing selected: the drawing mode.
-        assert_eq!(pressed(&mut h, &[]), [true, false, false]);
+        assert_eq!(pressed(&mut h, &[]), [true, false, false, false]);
         set_mode(&mut h.app, 1);
-        assert_eq!(pressed(&mut h, &[]), [false, true, false]);
+        assert_eq!(pressed(&mut h, &[]), [false, true, false, false]);
+        set_mode(&mut h.app, 3);
+        assert_eq!(pressed(&mut h, &[]), [false, false, false, true]);
+        set_mode(&mut h.app, 1);
         // A selection overrides the mode until it is cleared.
-        assert_eq!(pressed(&mut h, &[&normal]), [true, false, false]);
-        assert_eq!(pressed(&mut h, &[]), [false, true, false]);
+        assert_eq!(pressed(&mut h, &[&normal]), [true, false, false, false]);
+        assert_eq!(pressed(&mut h, &[]), [false, true, false, false]);
+        // The line types are also named in words under the icons.
+        assert!(crate::scenario::rect_of("dialog:caption:Line Type").is_some_and(|r| r.height() > 0.0));
     }
 
     #[test]
@@ -788,6 +845,7 @@ mod tests {
         h.settle();
         assert!(h.widget("Open 2").is_some(), "the status counts the open ends");
         assert!(h.widget("Untied 4").is_some(), "the status counts the untied ends");
+        assert!(h.widget("Tie").is_some(), "the Tie button shows its label, not its catalog key");
         let at = crate::scenario::handle_at("sketch_palette:tie_ends").unwrap();
         h.call("ui.click", json!({"x": at.x, "y": at.y}));
         h.settle();
@@ -799,19 +857,17 @@ mod tests {
 
     #[test]
     fn options_disclosure_triangle_folds_and_unfolds_the_section() {
-        OPTIONS_FOLDED.with(|v| v.set(false));
         let mut h = crate::scenario::Harness::new();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.settle();
-        assert!(h.widget("Sketch Grid").is_some(), "options are open by default");
+        assert!(h.widget("Sketch Grid").is_none(), "More is collapsed by default");
         let at = crate::scenario::handle_at("sketch_palette:options_fold").unwrap();
         h.call("ui.click", json!({"x": at.x, "y": at.y}));
         h.settle();
-        assert!(h.widget("Sketch Grid").is_none(), "the triangle must fold the options section");
+        assert!(h.widget("Sketch Grid").is_some(), "the triangle must unfold More");
         h.call("ui.click", json!({"x": at.x, "y": at.y}));
         h.settle();
-        assert!(h.widget("Sketch Grid").is_some(), "the triangle must unfold it again");
-        OPTIONS_FOLDED.with(|v| v.set(false));
+        assert!(h.widget("Sketch Grid").is_none(), "the triangle must collapse More again");
     }
 
     #[test]
@@ -820,7 +876,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.settle();
         let active = h.app.session.active_sketch.unwrap();
-        let slice_on = |h: &mut crate::scenario::Harness| h.app.session.world_state().sketch(active).unwrap().sketch.view.slice;
+        let slice_on = |h: &mut crate::scenario::Harness| h.app.session.world_state().unwrap().sketch(active).unwrap().sketch.view.slice;
         assert!(!slice_on(&mut h));
         // Clicking the row's label (not just the checkbox) toggles the option, same as before
         // the checkbox and the label became separate widgets in their own column.
@@ -846,9 +902,8 @@ mod tests {
 
     #[test]
     fn feature_options_show_every_mode_of_the_running_tool_and_switch_between_them() {
-        FOLDED.with(|v| v.set(false));
-        FEATURE_FOLDED.with(|v| v.set(false));
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.start("sketch.circle.center");
         h.settle();
@@ -875,8 +930,6 @@ mod tests {
 
     #[test]
     fn switching_mode_mid_draw_restarts_the_tool_and_leaves_the_design_alone() {
-        FOLDED.with(|v| v.set(false));
-        FEATURE_FOLDED.with(|v| v.set(false));
         let mut h = crate::scenario::Harness::new();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.start("sketch.rectangle.three_point");
@@ -897,8 +950,6 @@ mod tests {
 
     #[test]
     fn feature_options_stay_hidden_without_a_tool_that_has_other_modes() {
-        FOLDED.with(|v| v.set(false));
-        FEATURE_FOLDED.with(|v| v.set(false));
         let mut h = crate::scenario::Harness::new();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.settle();
@@ -920,8 +971,6 @@ mod tests {
 
     #[test]
     fn feature_options_disclosure_triangle_folds_and_unfolds_the_section() {
-        FOLDED.with(|v| v.set(false));
-        FEATURE_FOLDED.with(|v| v.set(false));
         let mut h = crate::scenario::Harness::new();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.start("sketch.slot.center_to_center");
@@ -932,19 +981,169 @@ mod tests {
         h.call("ui.click", json!({"x": at.x, "y": at.y}));
         h.settle();
         assert!(crate::scenario::handle_at(button).is_none(), "the triangle must fold the section");
-        assert!(h.widget("Sketch Grid").is_some(), "folding Feature Options leaves Options open");
+        assert!(h.widget("Constraints").is_some(), "folding Feature Options leaves primary options visible");
         let at = crate::scenario::handle_at("sketch_palette:feature_fold").unwrap();
         h.call("ui.click", json!({"x": at.x, "y": at.y}));
         h.settle();
         assert!(crate::scenario::handle_at(button).is_some(), "the triangle must unfold it again");
-        FEATURE_FOLDED.with(|v| v.set(false));
     }
 
     #[test]
     fn dof_readout() {
-        assert_eq!(dof_text(0, true), "Fully constrained");
-        assert_eq!(dof_text(1, true), "1 degree of freedom");
-        assert_eq!(dof_text(4, true), "4 degrees of freedom");
-        assert_eq!(dof_text(4, false), "Constraints conflict");
+        assert_eq!(dof_text(0, true, true), "Fully constrained");
+        assert_eq!(dof_text(1, true, true), "1 degree of freedom");
+        assert_eq!(dof_text(4, true, true), "4 degrees of freedom");
+        assert_eq!(dof_text(4, false, true), "Constraints conflict");
+        assert_eq!(dof_text(0, true, false), "No geometry yet");
+    }
+
+    /// #2906: a new sketch has no degree of freedom (only the fixed origin), which is not
+    /// "Fully constrained"; the palette says there is no geometry until a curve is drawn.
+    #[test]
+    fn an_empty_sketch_is_not_reported_fully_constrained() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        let line = |h: &crate::scenario::Harness| {
+            let st = h.app.session.world_state().unwrap();
+            let ss = h.app.session.active_sketch.and_then(|s| st.sketch(s)).unwrap();
+            dof_text(ss.report.dof, ss.report.ok(), has_geometry(&ss.sketch))
+        };
+        assert_eq!(line(&h), "No geometry yet");
+        assert!(h.widget("No geometry yet").is_some(), "the kit header shows the empty-sketch status");
+        assert!(h.widget("Fully constrained").is_none());
+        assert_eq!(crate::scenario::count_of("sketch_palette:constrained_fraction"), Some(0.0));
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,5]})).unwrap();
+        h.settle();
+        assert_ne!(line(&h), "No geometry yet", "a drawn rectangle is geometry");
+    }
+
+    /// One Esc cancels the tool and keeps the sketch open; two quick presses finish it (the
+    /// sketch is kept and listed in the timeline), also when the first press cancelled a tool.
+    #[test]
+    fn escape_cancels_then_a_quick_second_escape_finishes_the_sketch() {
+        let apart = |h: &mut crate::scenario::Harness| h.frames(60);
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+        h.settle();
+        h.step(&json!({"start":"sketch.line"})).unwrap();
+        assert!(h.app.tool.is_some());
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(h.app.tool.is_none(), "one Esc puts the tool down");
+        apart(&mut h);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        apart(&mut h);
+        assert!(h.app.session.active_sketch.is_some(), "single presses keep the sketch open");
+
+        // A quick double press finishes and keeps the sketch.
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_none(), "a double Esc finishes the sketch");
+        assert_eq!(h.app.ui.tab, "MODEL");
+        assert!(crate::scenario::handle_at("timeline:Sketch1").is_some(), "the sketch is kept");
+        let sketch = h.app.session.execute("sketch.inspect", &json!({"sketch": 1})).unwrap();
+        assert_eq!(sketch["curves"].as_array().map(Vec::len), Some(4), "{sketch}");
+
+        // With a tool active: the first press cancels it, the second finishes.
+        h.step(&json!({"click": {"handle": "timeline:Sketch1"}, "double": true})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_some());
+        apart(&mut h);
+        h.step(&json!({"start":"sketch.circle.center"})).unwrap();
+        assert!(h.app.tool.is_some());
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.settle();
+        assert!(h.app.tool.is_none() && h.app.session.active_sketch.is_none());
+        assert!(crate::scenario::handle_at("timeline:Sketch1").is_some());
+        // Outside a sketch a double Esc only clears, as before.
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(h.app.session.active_sketch.is_none());
+    }
+
+    /// With "Double Esc finishes the sketch" off (#12069), any number of quick presses only cancel
+    /// the tool and the selection, and the sketch stays open, blank or not; Finish Sketch still
+    /// ends it. On (the default) keeps the double press finishing it.
+    #[test]
+    fn escape_never_leaves_the_sketch_when_the_double_press_preference_is_off() {
+        assert!(crate::prefs::Prefs::default().escape_twice_finishes_sketch, "the default keeps today's double Esc");
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"escape_twice_finishes_sketch": false}));
+        assert!(!h.app.preferences.escape_twice_finishes_sketch, "set through the control channel");
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        let sketch = h.app.session.active_sketch;
+        assert!(sketch.is_some());
+        // Blank: a double Esc would take it away when the preference is on.
+        for _ in 0..10 {
+            h.step(&json!({"key":"Escape"})).unwrap();
+        }
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, sketch, "ten quick presses keep the blank sketch open");
+
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+        h.settle();
+        h.step(&json!({"start":"sketch.line"})).unwrap();
+        assert!(h.app.tool.is_some());
+        for _ in 0..4 {
+            h.step(&json!({"key":"Escape"})).unwrap();
+        }
+        h.settle();
+        assert!(h.app.tool.is_none(), "Esc still puts the tool down");
+        assert!(h.app.session.selection.is_empty(), "and clears the selection");
+        assert_eq!(h.app.session.active_sketch, sketch, "the sketch stays open");
+
+        h.app.finish_sketch();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_none(), "Finish Sketch still ends it");
+        assert!(crate::scenario::handle_at("timeline:Sketch1").is_some(), "the sketch is kept");
+
+        // Back on, a quick double press finishes again.
+        h.call("ui.prefs", json!({"escape_twice_finishes_sketch": true}));
+        h.step(&json!({"click": {"handle": "timeline:Sketch1"}, "double": true})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_some());
+        h.frames(60);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_none(), "on: a double Esc finishes the sketch");
+    }
+
+    /// A double Esc on a sketch left blank takes it away (no empty sketch in the browser or the
+    /// timeline, one undo step) and leaves the view alone; one line is enough to keep it.
+    #[test]
+    fn a_quick_double_escape_discards_a_blank_sketch_and_keeps_one_with_a_line() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.view", json!({"view": "iso"}));
+        h.frames(3);
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.step(&json!({"click": {"plane": "XY"}})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_some());
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.settle();
+        crate::scenario::check(&mut h, &json!({"sketching": false, "camera": {"yaw_deg": 0, "pitch_deg": 90}})).unwrap();
+        assert_eq!(h.app.ui.tab, "MODEL");
+        assert!(h.app.session.doc.features.is_empty(), "the blank sketch is gone");
+        assert!(crate::scenario::handles("timeline:").iter().all(|(n, _)| !n.contains("Sketch")));
+        assert!(crate::scenario::handle_at("row:Sketch1").is_none());
+        assert!(h.app.session.undo.len() <= undo + 2, "creating and discarding are at most two steps");
+
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.step(&json!({"click": {"plane": "XY"}})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 0], [30, 10]]})).unwrap();
+        h.settle();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_none());
+        assert_eq!(h.app.session.doc.features.len(), 1, "a sketch with a line is kept");
+        assert!(crate::scenario::handles("timeline:").iter().any(|(n, _)| n.contains("Sketch")));
     }
 }

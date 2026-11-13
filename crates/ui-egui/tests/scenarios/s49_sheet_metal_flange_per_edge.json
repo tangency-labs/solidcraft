@@ -16,6 +16,7 @@
    "plane": "XY"
   }
  },
+ {"call": "ui.camera", "params": {"target": [30, 20, 0], "distance": 180}},
  {
   "start": "sketch.rectangle.two_point"
  },
@@ -89,6 +90,7 @@
    ]
   }
  },
+ {"click": {"handle": "dialog:section:Advanced"}},
  {
   "click": {
    "handle": "dialog:Edge 2 angle"

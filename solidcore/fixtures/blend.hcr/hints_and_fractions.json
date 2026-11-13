@@ -1,0 +1,2476 @@
+{
+ "cases": [
+  {
+   "name": "curve_visibility_start_hint_3",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 1.0,
+    "start_hint": 3,
+    "end_hint": 0
+   }
+  },
+  {
+   "name": "curve_visibility_start_hint_minus1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 1.0,
+    "start_hint": -1,
+    "end_hint": 0
+   }
+  },
+  {
+   "name": "curve_visibility_start_hint_2",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 1.0,
+    "start_hint": 2,
+    "end_hint": 0
+   }
+  },
+  {
+   "name": "curve_visibility_start_hint_1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 1.0,
+    "start_hint": 1,
+    "end_hint": 0
+   }
+  },
+  {
+   "name": "curve_visibility_end_hint_3",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 1.0,
+    "start_hint": 0,
+    "end_hint": 3
+   }
+  },
+  {
+   "name": "curve_visibility_end_hint_minus1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 1.0,
+    "start_hint": 0,
+    "end_hint": -1
+   }
+  },
+  {
+   "name": "curve_visibility_end_hint_1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 1.0,
+    "start_hint": 0,
+    "end_hint": 1
+   }
+  },
+  {
+   "name": "curve_visibility_end_hint_2",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 1.0,
+    "start_hint": 0,
+    "end_hint": 2
+   }
+  },
+  {
+   "name": "curve_visibility_start_hint_big",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 1.0,
+    "start_hint": 4294967296,
+    "end_hint": 0
+   }
+  },
+  {
+   "name": "curve_visibility_end_hint_big",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 1.0,
+    "start_hint": 0,
+    "end_hint": 1000000000000000.0
+   }
+  },
+  {
+   "name": "curve_visibility_start_hint_1_5",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 1.0,
+    "start_hint": 1.5,
+    "end_hint": 0
+   }
+  },
+  {
+   "name": "curve_visibility_start_hint_0_5_is_none",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 1.0,
+    "start_hint": 0.5,
+    "end_hint": 0
+   }
+  },
+  {
+   "name": "curve_visibility_start_hint_3_end_hint_1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 1.0,
+    "start_hint": 3,
+    "end_hint": 1
+   }
+  },
+  {
+   "name": "curve_visibility_start_hint_1_end_hint_3",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 1.0,
+    "start_hint": 1,
+    "end_hint": 3
+   }
+  },
+  {
+   "name": "intersect_fa_gt_fb",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "intersect",
+    "edge": 0,
+    "fa": 0.7,
+    "fb": 0.2
+   }
+  },
+  {
+   "name": "curve_visibility_fa_gt_fb_start_hint_3",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.7,
+    "fb": 0.2,
+    "start_hint": 3,
+    "end_hint": 0
+   }
+  },
+  {
+   "name": "curve_visibility_fa_gt_fb_end_hint_minus1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.7,
+    "fb": 0.2,
+    "start_hint": 0,
+    "end_hint": -1
+   }
+  },
+  {
+   "name": "curve_visibility_fa_gt_fb_hint_1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.7,
+    "fb": 0.2,
+    "start_hint": 1,
+    "end_hint": 1
+   }
+  },
+  {
+   "name": "intersect_fa_gt_fb_full",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "intersect",
+    "edge": 0,
+    "fa": 1.0,
+    "fb": 0.0
+   }
+  },
+  {
+   "name": "curve_visibility_fa_gt_fb_full_start_hint_3",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 1.0,
+    "fb": 0.0,
+    "start_hint": 3,
+    "end_hint": 0
+   }
+  },
+  {
+   "name": "curve_visibility_fa_gt_fb_full_end_hint_minus1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 1.0,
+    "fb": 0.0,
+    "start_hint": 0,
+    "end_hint": -1
+   }
+  },
+  {
+   "name": "curve_visibility_fa_gt_fb_full_hint_1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 1.0,
+    "fb": 0.0,
+    "start_hint": 1,
+    "end_hint": 1
+   }
+  },
+  {
+   "name": "intersect_fa_eq_fb",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "intersect",
+    "edge": 0,
+    "fa": 0.5,
+    "fb": 0.5
+   }
+  },
+  {
+   "name": "curve_visibility_fa_eq_fb_start_hint_3",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.5,
+    "fb": 0.5,
+    "start_hint": 3,
+    "end_hint": 0
+   }
+  },
+  {
+   "name": "curve_visibility_fa_eq_fb_end_hint_minus1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.5,
+    "fb": 0.5,
+    "start_hint": 0,
+    "end_hint": -1
+   }
+  },
+  {
+   "name": "curve_visibility_fa_eq_fb_hint_1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.5,
+    "fb": 0.5,
+    "start_hint": 1,
+    "end_hint": 1
+   }
+  },
+  {
+   "name": "intersect_fa_eq_fb_zero",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "intersect",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 0.0
+   }
+  },
+  {
+   "name": "curve_visibility_fa_eq_fb_zero_start_hint_3",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 0.0,
+    "start_hint": 3,
+    "end_hint": 0
+   }
+  },
+  {
+   "name": "curve_visibility_fa_eq_fb_zero_end_hint_minus1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 0.0,
+    "start_hint": 0,
+    "end_hint": -1
+   }
+  },
+  {
+   "name": "curve_visibility_fa_eq_fb_zero_hint_1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 0.0,
+    "fb": 0.0,
+    "start_hint": 1,
+    "end_hint": 1
+   }
+  },
+  {
+   "name": "intersect_fa_eq_fb_one",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "intersect",
+    "edge": 0,
+    "fa": 1.0,
+    "fb": 1.0
+   }
+  },
+  {
+   "name": "curve_visibility_fa_eq_fb_one_start_hint_3",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 1.0,
+    "fb": 1.0,
+    "start_hint": 3,
+    "end_hint": 0
+   }
+  },
+  {
+   "name": "curve_visibility_fa_eq_fb_one_end_hint_minus1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 1.0,
+    "fb": 1.0,
+    "start_hint": 0,
+    "end_hint": -1
+   }
+  },
+  {
+   "name": "curve_visibility_fa_eq_fb_one_hint_1",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:332-417",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        0,
+        0,
+        1.0
+       ],
+       [
+        2,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        2,
+        0,
+        1.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       0.25,
+       0.5,
+       0.75,
+       1,
+       1
+      ]
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "view": [
+     0,
+     0,
+     1
+    ],
+    "approx_tol": 0.001,
+    "ang_tol": 0.2,
+    "seams": true,
+    "smooth": true,
+    "sil": [],
+    "back": [],
+    "op": "curve_visibility",
+    "edge": 0,
+    "fa": 1.0,
+    "fb": 1.0,
+    "start_hint": 1,
+    "end_hint": 1
+   }
+  }
+ ]
+}

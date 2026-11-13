@@ -1,62 +1,53 @@
-//! Planar profiles: closed loops of lines, circular arcs, cubic Béziers and conics (rational
-//! quadratic Béziers), and regions (an outer loop minus holes). Sketches produce them; the
-//! kernel turns them into faces.
+//! The geometry of planar profiles ([`Seg2`], [`Loop2`], [`Region2`]: plain data in the
+//! record): evaluation, derivatives, lengths, areas, containment, polylines and triangles.
+//! Sketches produce profiles; the kernel turns them into faces.
 
 use std::f64::consts::TAU;
 
-use serde::{Deserialize, Serialize};
+use solidcore_record::{Loop2, MAX_BEZIER_CTRL, MAX_BEZIER_DEGREE, Region2, Seg2, Vec2};
 
-use crate::Vec2;
+use crate::prelude::*;
+use crate::{Aabb2, Ring};
 
-/// One boundary segment in sketch coordinates.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum Seg2 {
-    Line {
-        a: Vec2,
-        b: Vec2,
-    },
-    /// Arc from `start` angle sweeping `sweep` radians (positive = counter-clockwise).
-    Arc {
-        center: Vec2,
-        radius: f64,
-        start: f64,
-        sweep: f64,
-    },
-    /// Cubic Bézier.
-    Cubic {
-        p0: Vec2,
-        p1: Vec2,
-        p2: Vec2,
-        p3: Vec2,
-    },
-    /// Rational quadratic Bézier from `a` to `b` with control `apex` of weight `w` (end
-    /// weights 1): exact conic arcs (ellipses, parabolas, hyperbolas).
-    Conic {
-        a: Vec2,
-        apex: Vec2,
-        b: Vec2,
-        w: f64,
-    },
-    /// Bézier of degree `n` (4…[`MAX_BEZIER_DEGREE`]) over `p[0..=n]` (the rest unused): pieces of
-    /// higher-degree splines.
-    Bezier {
-        n: u8,
-        p: [Vec2; MAX_BEZIER_CTRL],
-    },
-}
-
-/// Highest degree of [`Seg2::Bezier`]: a degree-9 piece is the single Bézier a G4 blend curve
-/// (`sketch.blend_curve` with `continuity: "g4"`) is made of.
-pub const MAX_BEZIER_DEGREE: usize = 9;
-
-/// Control points a [`Seg2::Bezier`] carries: its highest degree plus one (the unused tail is
-/// zero).
-pub const MAX_BEZIER_CTRL: usize = MAX_BEZIER_DEGREE + 1;
-
-/// Highest derivative order [`Seg2::derivatives`] hands out, and therefore the highest
+/// Highest derivative order [`Seg2Geom::derivatives`] hands out, and therefore the highest
 /// continuity order a blend curve can be built for (4 = G4).
 pub const MAX_DERIVATIVE_ORDER: usize = 4;
+
+/// A similarity of the plane: a point is scaled by `scale` (above 0) about the origin, turned
+/// `angle` radians counter-clockwise, then moved by `shift`. It keeps shapes and the direction
+/// curves turn in, so an arc stays an arc ([`Seg2Geom::similar`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Similarity2 {
+    scale: f64,
+    angle: f64,
+    shift: Vec2,
+    /// The angle's cosine and sine times the scale, worked out once rather than per point.
+    cos: f64,
+    sin: f64,
+}
+
+impl Similarity2 {
+    /// `None` unless `scale` is finite and above 0 and `angle` and `shift` are finite.
+    pub fn new(scale: f64, angle: f64, shift: Vec2) -> Option<Similarity2> {
+        if !(scale.is_finite() && scale > 0.0 && angle.is_finite() && shift.is_finite()) {
+            return None;
+        }
+        let (sin, cos) = angle.sin_cos();
+        Some(Similarity2 { scale, angle, shift, cos: cos * scale, sin: sin * scale })
+    }
+
+    pub fn scale(&self) -> f64 {
+        self.scale
+    }
+
+    pub fn angle(&self) -> f64 {
+        self.angle
+    }
+
+    pub fn apply(&self, p: Vec2) -> Vec2 {
+        Vec2::new(self.cos * p.x - self.sin * p.y, self.sin * p.x + self.cos * p.y) + self.shift
+    }
+}
 
 /// A Bézier segment over `pts` (2…[`MAX_BEZIER_CTRL`] points): a line, a cubic or a higher-degree
 /// piece. A quadratic becomes a conic of weight 1.
@@ -74,6 +65,29 @@ pub fn bezier(pts: &[Vec2]) -> Option<Seg2> {
         }
         _ => return None,
     })
+}
+
+/// Smallest radius, conic weight and absolute arc sweep [`Seg2Geom::check`] accepts.
+const MIN_POSITIVE: f64 = 1e-12;
+/// Largest conic weight [`Seg2Geom::check`] accepts.
+const MAX_WEIGHT: f64 = 1e12;
+/// Largest arc start angle either way, in radians, [`Seg2Geom::check`] accepts.
+const MAX_START_ANGLE: f64 = 1e6;
+
+fn require(condition: bool, message: &'static str) -> Result<(), &'static str> {
+    if condition { Ok(()) } else { Err(message) }
+}
+
+/// Every value finite and at most `max_abs` in size: [`Seg2Geom::check`]'s rule for coordinates, which
+/// `section` applies to its planes and contacts too.
+pub(crate) fn coordinates(values: impl IntoIterator<Item = f64>, max_abs: f64) -> Result<(), &'static str> {
+    require(values.into_iter().all(|v| v.is_finite() && v.abs() <= max_abs), "non-finite or excessive coordinate")
+}
+
+fn controls(points: &[Vec2], max_abs: f64) -> Result<(), &'static str> {
+    coordinates(points.iter().flat_map(|p| [p.x, p.y]), max_abs)?;
+    let Some((first, rest)) = points.split_first() else { return Err("empty controls") };
+    require(rest.iter().any(|p| p != first), "collapsed curve")
 }
 
 /// de Casteljau: the point at `t` and the two halves' control points.
@@ -136,523 +150,15 @@ const GL5: [(f64, f64); 5] = [
     (0.953_089_922_969_332, 0.118_463_442_528_095),
 ];
 
-impl Seg2 {
-    fn bez(n: u8, p: &[Vec2; MAX_BEZIER_CTRL]) -> &[Vec2] {
-        &p[..(n as usize).clamp(1, MAX_BEZIER_DEGREE) + 1]
-    }
-    /// Derivative with respect to the parameter at `t` (Béziers and conics; lines and arcs too).
-    pub fn derivative(&self, t: f64) -> Vec2 {
-        match *self {
-            Seg2::Line { a, b } => b - a,
-            Seg2::Arc { radius, start, sweep, .. } => Vec2::from_angle(start + sweep * t).perp() * (radius * sweep),
-            Seg2::Cubic { p0, p1, p2, p3 } => {
-                let u = 1.0 - t;
-                (p1 - p0) * (3.0 * u * u) + (p2 - p1) * (6.0 * u * t) + (p3 - p2) * (3.0 * t * t)
-            }
-            Seg2::Conic { a, apex, b, w } => {
-                let u = 1.0 - t;
-                let (n, d) = (a * (u * u) + apex * (2.0 * w * u * t) + b * (t * t), u * u + 2.0 * w * u * t + t * t);
-                let (dn, dd) = (a * (-2.0 * u) + apex * (2.0 * w * (1.0 - 2.0 * t)) + b * (2.0 * t), -2.0 * u + 2.0 * w * (1.0 - 2.0 * t) + 2.0 * t);
-                (dn * d - n * dd) / (d * d).max(1e-300)
-            }
-            Seg2::Bezier { n, ref p } => {
-                let c = Self::bez(n, p);
-                let diffs: Vec<Vec2> = c.windows(2).map(|w| (w[1] - w[0]) * (c.len() - 1) as f64).collect();
-                casteljau(&diffs, t).0
-            }
-        }
-    }
-    /// Derivatives 1…`order` with respect to the segment's own parameter at `t`, exactly: a line
-    /// and an arc from their analytic form (an arc's are the circular-motion recurrence, zero
-    /// curvature terms included), a cubic and a higher-degree piece from the forward differences
-    /// of their controls, a conic through the quotient rule of its rational form. A blend curve
-    /// reads a reference curve's derivatives here to build a Hermite interpolation, so this is
-    /// exact at both ends (`t` = 0 and 1) and `None` — never a wrong number — when `order` is
-    /// above [`MAX_DERIVATIVE_ORDER`], `t` is not finite or a value is not finite, as with a
-    /// degenerate rational piece.
-    pub fn derivatives(&self, t: f64, order: usize) -> Option<Vec<Vec2>> {
-        if !t.is_finite() || order > MAX_DERIVATIVE_ORDER {
-            return None;
-        }
-        let mut d = match *self {
-            Seg2::Line { a, b } => {
-                if !a.is_finite() || !b.is_finite() {
-                    return None;
-                }
-                let mut d = vec![b - a];
-                d.resize(MAX_DERIVATIVE_ORDER, Vec2::ZERO);
-                d
-            }
-            Seg2::Arc { center, radius, start, sweep } => {
-                if !center.is_finite() || !radius.is_finite() || !start.is_finite() || !sweep.is_finite() {
-                    return None;
-                }
-                // Differentiating the radial direction twice returns its negative, so the
-                // directions of the successive derivatives are tangential, radial, tangential…
-                // with alternating signs, each order picking up one more factor of the sweep.
-                let mut v = Vec2::from_angle(start + sweep * t).perp();
-                let mut d = Vec::with_capacity(MAX_DERIVATIVE_ORDER);
-                for j in 1..=MAX_DERIVATIVE_ORDER {
-                    d.push(v * (radius * sweep.powi(j as i32)));
-                    v = v.perp();
-                }
-                d
-            }
-            Seg2::Cubic { p0, p1, p2, p3 } => bezier_derivatives(&[p0, p1, p2, p3], t, MAX_DERIVATIVE_ORDER)?,
-            Seg2::Bezier { n, ref p } => bezier_derivatives(Self::bez(n, p), t, MAX_DERIVATIVE_ORDER)?,
-            Seg2::Conic { a, apex, b, w } => {
-                if !a.is_finite() || !apex.is_finite() || !b.is_finite() || !w.is_finite() {
-                    return None;
-                }
-                // The conic is `N(t) / d(t)` with `N` the quadratic through `a`, `w·apex`, `b` and
-                // `d` its weight polynomial; both are evaluated here in the power basis (at the
-                // ends `d` = 1, so a join is never singular). The quotient rule in its
-                // derivative-of-a-product form gives the higher derivatives: the numerator of
-                // `x⁽ʲ⁾` is `N⁽ʲ⁾` minus the terms that already use `d` and a lower `x`.
-                let (n0, n1, n2) = (a, apex * (2.0 * w) - a * 2.0, a - apex * (2.0 * w) + b);
-                let (e1, e2) = (2.0 * (w - 1.0), 2.0 * (1.0 - w));
-                let quotient = |j: usize| match j {
-                    0 => n0 + n1 * t + n2 * (t * t),
-                    1 => n1 + n2 * (2.0 * t),
-                    2 => n2 * 2.0,
-                    _ => Vec2::ZERO,
-                };
-                let weight = |j: usize| match j {
-                    0 => 1.0 + e1 * t + e2 * (t * t),
-                    1 => e1 + e2 * (2.0 * t),
-                    2 => e2 * 2.0,
-                    _ => 0.0,
-                };
-                let den = weight(0);
-                if !(den.abs() > 1e-300) {
-                    return None;
-                }
-                let mut x = vec![quotient(0) / den];
-                for j in 1..=MAX_DERIVATIVE_ORDER {
-                    let mut v = quotient(j);
-                    for i in 1..=j {
-                        v -= x[j - i] * (weight(i) * binom(j, i));
-                    }
-                    x.push(v / den);
-                }
-                x.remove(0);
-                x
-            }
-        };
-        d.truncate(order);
-        d.iter().all(|q| q.is_finite()).then_some(d)
-    }
-    pub fn start(&self) -> Vec2 {
-        match *self {
-            Seg2::Line { a, .. } | Seg2::Conic { a, .. } => a,
-            Seg2::Cubic { p0, .. } => p0,
-            Seg2::Bezier { p, .. } => p[0],
-            Seg2::Arc { center, radius, start, .. } => center + Vec2::from_angle(start) * radius,
-        }
-    }
-    pub fn end(&self) -> Vec2 {
-        match *self {
-            Seg2::Line { b, .. } | Seg2::Conic { b, .. } => b,
-            Seg2::Cubic { p3, .. } => p3,
-            Seg2::Bezier { n, ref p } => Self::bez(n, p).last().copied().unwrap_or(p[0]),
-            Seg2::Arc { center, radius, start, sweep } => center + Vec2::from_angle(start + sweep) * radius,
-        }
-    }
-    pub fn point_at(&self, t: f64) -> Vec2 {
-        match *self {
-            Seg2::Line { a, b } => a.lerp(b, t),
-            Seg2::Arc { center, radius, start, sweep } => center + Vec2::from_angle(start + sweep * t) * radius,
-            Seg2::Cubic { p0, p1, p2, p3 } => {
-                let u = 1.0 - t;
-                p0 * (u * u * u) + p1 * (3.0 * u * u * t) + p2 * (3.0 * u * t * t) + p3 * (t * t * t)
-            }
-            Seg2::Conic { a, apex, b, w } => {
-                let u = 1.0 - t;
-                let d = u * u + 2.0 * w * u * t + t * t;
-                (a * (u * u) + apex * (2.0 * w * u * t) + b * (t * t)) / d.max(1e-300)
-            }
-            Seg2::Bezier { n, ref p } => casteljau(Self::bez(n, p), t).0,
-        }
-    }
-    pub fn mid(&self) -> Vec2 {
-        self.point_at(0.5)
-    }
-    /// Unit tangent at the start (direction of travel).
-    pub fn start_tangent(&self) -> Vec2 {
-        match *self {
-            Seg2::Line { a, b } => (b - a).normalized().unwrap_or(Vec2::X),
-            Seg2::Arc { start, sweep, .. } => Vec2::from_angle(start).perp() * sweep.signum(),
-            Seg2::Cubic { p0, p1, p2, .. } => (p1 - p0).normalized().or_else(|| (p2 - p0).normalized()).unwrap_or(Vec2::X),
-            Seg2::Conic { a, apex, b, .. } => (apex - a).normalized().or_else(|| (b - a).normalized()).unwrap_or(Vec2::X),
-            Seg2::Bezier { n, ref p } => {
-                let c = Self::bez(n, p);
-                c.iter().skip(1).find_map(|q| (*q - c[0]).normalized()).unwrap_or(Vec2::X)
-            }
-        }
-    }
-    /// Unit tangent at the end (direction of travel).
-    pub fn end_tangent(&self) -> Vec2 {
-        match *self {
-            Seg2::Line { a, b } => (b - a).normalized().unwrap_or(Vec2::X),
-            Seg2::Arc { start, sweep, .. } => Vec2::from_angle(start + sweep).perp() * sweep.signum(),
-            Seg2::Cubic { p1, p2, p3, .. } => (p3 - p2).normalized().or_else(|| (p3 - p1).normalized()).unwrap_or(Vec2::X),
-            Seg2::Conic { a, apex, b, .. } => (b - apex).normalized().or_else(|| (b - a).normalized()).unwrap_or(Vec2::X),
-            Seg2::Bezier { n, ref p } => {
-                let c = Self::bez(n, p);
-                let last = c.last().copied().unwrap_or(p[0]);
-                c.iter().rev().skip(1).find_map(|q| (last - *q).normalized()).unwrap_or(Vec2::X)
-            }
-        }
-    }
-    pub fn reversed(&self) -> Seg2 {
-        match *self {
-            Seg2::Line { a, b } => Seg2::Line { a: b, b: a },
-            Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center, radius, start: start + sweep, sweep: -sweep },
-            Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: p3, p1: p2, p2: p1, p3: p0 },
-            Seg2::Conic { a, apex, b, w } => Seg2::Conic { a: b, apex, b: a, w },
-            Seg2::Bezier { n, ref p } => {
-                let mut q = *p;
-                let k = (n as usize).clamp(1, MAX_BEZIER_DEGREE);
-                q[..=k].reverse();
-                Seg2::Bezier { n, p: q }
-            }
-        }
-    }
-    pub fn length(&self) -> f64 {
-        match *self {
-            Seg2::Line { a, b } => a.dist(b),
-            Seg2::Arc { radius, sweep, .. } => (radius * sweep).abs(),
-            Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => self.integrate(|s, t| s.derivative(t).len()),
-        }
-    }
-    /// The segment split at parameter `t` in (0, 1) (same kind, exact; conic halves are
-    /// re-normalised so their end weights stay 1).
-    pub fn split_at(&self, t: f64) -> (Seg2, Seg2) {
-        let t = t.clamp(1e-9, 1.0 - 1e-9);
-        match *self {
-            Seg2::Line { a, b } => {
-                let m = a.lerp(b, t);
-                (Seg2::Line { a, b: m }, Seg2::Line { a: m, b })
-            }
-            Seg2::Arc { center, radius, start, sweep } => (
-                Seg2::Arc { center, radius, start, sweep: sweep * t },
-                Seg2::Arc { center, radius, start: start + sweep * t, sweep: sweep * (1.0 - t) },
-            ),
-            Seg2::Cubic { p0, p1, p2, p3 } => {
-                let (a, b, c) = (p0.lerp(p1, t), p1.lerp(p2, t), p2.lerp(p3, t));
-                let (d, e) = (a.lerp(b, t), b.lerp(c, t));
-                let m = d.lerp(e, t);
-                (Seg2::Cubic { p0, p1: a, p2: d, p3: m }, Seg2::Cubic { p0: m, p1: e, p2: c, p3 })
-            }
-            Seg2::Conic { a, apex, b, w } => {
-                // Homogeneous de Casteljau: (a, 1), (w·apex, w), (b, 1).
-                let h = |p: Vec2, wt: f64| (p * wt, wt);
-                let lerp = |x: (Vec2, f64), y: (Vec2, f64)| (x.0 * (1.0 - t) + y.0 * t, x.1 * (1.0 - t) + y.1 * t);
-                let (p0, p1, p2) = (h(a, 1.0), h(apex, w), h(b, 1.0));
-                let (q0, q1) = (lerp(p0, p1), lerp(p1, p2));
-                let r = lerp(q0, q1);
-                let pt = |x: (Vec2, f64)| x.0 / x.1.max(1e-300);
-                let m = pt(r);
-                (
-                    Seg2::Conic { a, apex: pt(q0), b: m, w: q0.1 / r.1.max(1e-300).sqrt() },
-                    Seg2::Conic { a: m, apex: pt(q1), b, w: q1.1 / r.1.max(1e-300).sqrt() },
-                )
-            }
-            Seg2::Bezier { n, ref p } => {
-                let (_, l, r) = casteljau(Self::bez(n, p), t);
-                let mk = |c: &[Vec2]| bezier(c).unwrap_or(*self);
-                (mk(&l), mk(&r))
-            }
-        }
-    }
-    /// Parameter of the closest point: exact projection for lines,
-    /// sampling followed by Newton for the remaining curves.
-    pub fn closest_param(&self, p: Vec2) -> f64 {
-        let finite = |p: Vec2| p.x.is_finite() && p.y.is_finite();
-        match *self {
-            Seg2::Line { a, b } if finite(a) && finite(b) && finite(p) => {
-                let d = b - a;
-                if a == b {
-                    return 0.0;
-                }
-                let denominator = d.len2();
-                let t = (p - a).dot(d) / denominator;
-                if denominator > 0.0 && denominator.is_finite() && t.is_finite() {
-                    return t.clamp(0.0, 1.0);
-                }
-            }
-            _ => {}
-        }
-        let n = 64;
-        let mut t =
-            (0..=n).map(|i| i as f64 / n as f64).min_by(|x, y| self.point_at(*x).dist(p).total_cmp(&self.point_at(*y).dist(p))).unwrap_or(0.0);
-        for _ in 0..30 {
-            let (q, d) = (self.point_at(t), self.derivative(t));
-            let (d2, h) = ((self.derivative((t + 1e-6).min(1.0)) - self.derivative((t - 1e-6).max(0.0))) / 2e-6, q - p);
-            let f = h.dot(d);
-            let df = d.dot(d) + h.dot(d2);
-            if df.abs() < 1e-300 {
-                break;
-            }
-            let nt = (t - f / df).clamp(0.0, 1.0);
-            if (nt - t).abs() < 1e-14 {
-                t = nt;
-                break;
-            }
-            t = nt;
-        }
-        t
-    }
-    /// The two halves of the segment (same kind, exact).
-    pub fn split_half(&self) -> (Seg2, Seg2) {
-        match *self {
-            Seg2::Line { a, b } => {
-                let m = a.lerp(b, 0.5);
-                (Seg2::Line { a, b: m }, Seg2::Line { a: m, b })
-            }
-            Seg2::Arc { center, radius, start, sweep } => (
-                Seg2::Arc { center, radius, start, sweep: sweep / 2.0 },
-                Seg2::Arc { center, radius, start: start + sweep / 2.0, sweep: sweep / 2.0 },
-            ),
-            Seg2::Cubic { p0, p1, p2, p3 } => {
-                let (a, b, c) = (p0.lerp(p1, 0.5), p1.lerp(p2, 0.5), p2.lerp(p3, 0.5));
-                let (d, e) = (a.lerp(b, 0.5), b.lerp(c, 0.5));
-                let m = d.lerp(e, 0.5);
-                (Seg2::Cubic { p0, p1: a, p2: d, p3: m }, Seg2::Cubic { p0: m, p1: e, p2: c, p3 })
-            }
-            Seg2::Conic { a, apex, b, w } => {
-                // Rational de Casteljau at the middle, weights normalised to 1 at the ends.
-                let m = self.point_at(0.5);
-                let w2 = ((1.0 + w) / 2.0).max(0.0).sqrt();
-                let (l, r) = ((a + apex * w) / (1.0 + w), (apex * w + b) / (1.0 + w));
-                (Seg2::Conic { a, apex: l, b: m, w: w2 }, Seg2::Conic { a: m, apex: r, b, w: w2 })
-            }
-            Seg2::Bezier { .. } => self.split_at(0.5),
-        }
-    }
-    /// ∫₀¹ f(t) dt by composite Gauss–Legendre (16 pieces of 5 points).
-    fn integrate(&self, f: impl Fn(&Seg2, f64) -> f64) -> f64 {
-        let n = 16;
-        let mut sum = 0.0;
-        for k in 0..n {
-            let (t0, h) = (k as f64 / n as f64, 1.0 / n as f64);
-            for (x, w) in GL5 {
-                sum += w * h * f(self, t0 + x * h);
-            }
-        }
-        sum
-    }
-    /// Contribution to the loop's signed area (shoelace integral ½∮(x dy − y dx)).
-    pub fn area_term(&self) -> f64 {
-        match *self {
-            Seg2::Line { a, b } => 0.5 * a.cross(b),
-            Seg2::Arc { radius, sweep, .. } => {
-                let (a, b) = (self.start(), self.end());
-                // Chord term plus the circular segment between chord and arc.
-                0.5 * a.cross(b) + 0.5 * radius * radius * (sweep - sweep.sin())
-            }
-            Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => self.integrate(|s, t| 0.5 * s.point_at(t).cross(s.derivative(t))),
-        }
-    }
-    /// Polyline approximation (including both end points) with at most `tol` chord error.
-    pub fn polyline(&self, tol: f64) -> Vec<Vec2> {
-        match *self {
-            Seg2::Line { a, b } => vec![a, b],
-            Seg2::Arc { radius, sweep, .. } => {
-                let tol = tol.max(radius.abs() * 1e-6).max(1e-9);
-                let step = if tol < radius { 2.0 * (1.0 - tol / radius).clamp(-1.0, 1.0).acos() } else { TAU / 8.0 };
-                let n = ((sweep.abs() / step.max(1e-6)).ceil() as usize).clamp(2, 4096);
-                (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
-            }
-            Seg2::Cubic { p0, p1, p2, p3 } => {
-                // Chord error of n pieces ≈ max second difference / (8 n²).
-                let bow = (p0 - p1 * 2.0 + p2).len().max((p1 - p2 * 2.0 + p3).len()) * 6.0;
-                let n = ((bow / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
-                (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
-            }
-            Seg2::Conic { a, apex, b, w } => {
-                let bow = (a - apex * 2.0 + b).len() * 2.0 * w.max(1.0);
-                let n = ((bow / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
-                (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
-            }
-            Seg2::Bezier { n, ref p } => {
-                // Second derivative ≤ n(n−1) × the largest second difference of the controls.
-                let c = Self::bez(n, p);
-                let d2 = c.windows(3).map(|w| (w[0] - w[1] * 2.0 + w[2]).len()).fold(0.0, f64::max) * (n as f64) * (n as f64 - 1.0);
-                let k = ((d2 / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
-                (0..=k).map(|i| self.point_at(i as f64 / k as f64)).collect()
-            }
-        }
-    }
-}
-
-/// A closed loop of segments, each starting where the previous one ends.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Loop2 {
-    pub segs: Vec<Seg2>,
-}
-
-impl Loop2 {
-    /// The radius of the largest circle inside the loop, to about `tol` ([`Region2::inradius`]).
-    pub fn inradius(&self, tol: f64) -> f64 {
-        max_clearance(&[self.polyline(tol)])
-    }
-    /// Full circle as two half arcs (counter-clockwise).
-    pub fn circle(center: Vec2, radius: f64) -> Loop2 {
-        Loop2 {
-            segs: vec![
-                Seg2::Arc { center, radius, start: 0.0, sweep: std::f64::consts::PI },
-                Seg2::Arc { center, radius, start: std::f64::consts::PI, sweep: std::f64::consts::PI },
-            ],
-        }
-    }
-    /// Full circle starting (and split) at angle `start`.
-    pub fn circle_from(center: Vec2, radius: f64, start: f64) -> Loop2 {
-        use std::f64::consts::PI;
-        Loop2 { segs: vec![Seg2::Arc { center, radius, start, sweep: PI }, Seg2::Arc { center, radius, start: start + PI, sweep: PI }] }
-    }
-    pub fn polygon(pts: &[Vec2]) -> Loop2 {
-        let n = pts.len();
-        Loop2 { segs: (0..n).filter_map(|i| Some(Seg2::Line { a: *pts.get(i)?, b: *pts.get((i + 1) % n)? })).collect() }
-    }
-    /// Signed area: positive when counter-clockwise.
-    pub fn signed_area(&self) -> f64 {
-        self.segs.iter().map(Seg2::area_term).sum()
-    }
-    pub fn reversed(&self) -> Loop2 {
-        Loop2 { segs: self.segs.iter().rev().map(Seg2::reversed).collect() }
-    }
-    /// Whether the loop runs counter-clockwise ([`Loop2::ccw`] keeps it as it is).
-    pub fn is_ccw(&self) -> bool {
-        self.signed_area() >= 0.0
-    }
-    /// Counter-clockwise copy.
-    pub fn ccw(&self) -> Loop2 {
-        if self.is_ccw() { self.clone() } else { self.reversed() }
-    }
-    pub fn polyline(&self, tol: f64) -> Vec<Vec2> {
-        let mut out = Vec::new();
-        for s in &self.segs {
-            let p = s.polyline(tol);
-            out.extend(p.iter().take(p.len().saturating_sub(1)));
-        }
-        out
-    }
-    /// Even-odd point containment against the polyline approximation.
-    pub fn contains(&self, p: Vec2) -> bool {
-        let poly = self.polyline(1e-3);
-        let n = poly.len();
-        let mut inside = false;
-        for i in 0..n {
-            let (Some(a), Some(b)) = (poly.get(i), poly.get((i + 1) % n)) else { continue };
-            if (a.y > p.y) != (b.y > p.y) {
-                let x = a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x);
-                if p.x < x {
-                    inside = !inside;
-                }
-            }
-        }
-        inside
-    }
-    /// Area-weighted centroid (of the polyline approximation).
-    pub fn centroid(&self) -> Vec2 {
-        let poly = self.polyline(1e-3);
-        let n = poly.len();
-        let (mut a2, mut c) = (0.0, Vec2::ZERO);
-        for i in 0..n {
-            let (Some(p), Some(q)) = (poly.get(i), poly.get((i + 1) % n)) else { continue };
-            let k = p.cross(*q);
-            a2 += k;
-            c += (*p + *q) * k;
-        }
-        if a2.abs() < 1e-15 { poly.first().copied().unwrap_or_default() } else { c / (3.0 * a2) }
-    }
-    /// Closed within `tol`?
-    pub fn is_closed(&self, tol: f64) -> bool {
-        let n = self.segs.len();
-        n > 0
-            && (0..n).all(|i| match (self.segs.get(i), self.segs.get((i + 1) % n)) {
-                (Some(a), Some(b)) => a.end().dist(b.start()) <= tol,
-                _ => false,
-            })
-    }
-}
-
-/// A planar region: outer loop (counter-clockwise) minus holes (clockwise).
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Region2 {
-    pub outer: Loop2,
-    pub holes: Vec<Loop2>,
-}
-
-impl Region2 {
-    pub fn area(&self) -> f64 {
-        self.outer.signed_area().abs() - self.holes.iter().map(|h| h.signed_area().abs()).sum::<f64>()
-    }
-    /// A point strictly inside the region (for picking and labels).
-    pub fn interior_point(&self) -> Vec2 {
-        let c = self.centroid();
-        if self.contains(c) {
-            return c;
-        }
-        // Scan a few horizontal lines for the midpoint of the widest inside span.
-        let poly = self.outer.polyline(1e-2);
-        let (mut y0, mut y1) = (f64::INFINITY, f64::NEG_INFINITY);
-        for p in &poly {
-            y0 = y0.min(p.y);
-            y1 = y1.max(p.y);
-        }
-        for k in 1..16 {
-            let y = y0 + (y1 - y0) * k as f64 / 16.0;
-            let mut xs: Vec<f64> = Vec::new();
-            for l in std::iter::once(&self.outer).chain(&self.holes) {
-                let pl = l.polyline(1e-2);
-                let n = pl.len();
-                for i in 0..n {
-                    let (Some(a), Some(b)) = (pl.get(i), pl.get((i + 1) % n)) else { continue };
-                    if (a.y > y) != (b.y > y) {
-                        xs.push(a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x));
-                    }
-                }
-            }
-            xs.sort_by(f64::total_cmp);
-            for w in xs.chunks(2) {
-                if let [a, b] = w {
-                    let p = Vec2::new((a + b) * 0.5, y);
-                    if self.contains(p) {
-                        return p;
-                    }
-                }
-            }
-        }
-        c
-    }
-    pub fn contains(&self, p: Vec2) -> bool {
-        self.outer.contains(p) && !self.holes.iter().any(|h| h.contains(p))
-    }
-    /// The radius of the largest circle inside the region: how far its sides can move inwards
-    /// before they meet (a taper going in closes it there). Found by a grid search refined
-    /// around the best point, to about `tol`.
-    pub fn inradius(&self, tol: f64) -> f64 {
-        let loops: Vec<Vec<Vec2>> = std::iter::once(&self.outer).chain(&self.holes).map(|l| l.polyline(tol)).collect();
-        max_clearance(&loops)
-    }
-}
-
 /// The largest distance from a point inside `loops` (even-odd) to their sides, by a grid search
 /// over their box refined around the best point. Zero for an empty or degenerate outline.
-fn max_clearance(loops: &[Vec<Vec2>]) -> f64 {
-    let sides: Vec<(Vec2, Vec2)> = loops
-        .iter()
-        .flat_map(|pl| (0..pl.len()).filter_map(move |i| Some((*pl.get(i)?, *pl.get((i + 1) % pl.len())?))))
-        .filter(|(a, b)| a.dist(*b) > 0.0)
-        .collect();
-    let (Some(lo), Some(hi)) = (
-        sides.iter().map(|s| s.0).reduce(|a, b| Vec2::new(a.x.min(b.x), a.y.min(b.y))),
-        sides.iter().map(|s| s.0).reduce(|a, b| Vec2::new(a.x.max(b.x), a.y.max(b.y))),
-    ) else {
+fn max_clearance(loops: &[Ring<Vec2>]) -> f64 {
+    let sides: Vec<(Vec2, Vec2)> = loops.iter().flat_map(|pl| pl.edges().map(|(a, b)| (*a, *b))).filter(|(a, b)| a.dist(*b) > 0.0).collect();
+    let corners: Aabb2 = sides.iter().map(|s| s.0).collect();
+    if corners.is_empty() {
         return 0.0;
-    };
+    }
+    let Aabb2 { min: lo, max: hi } = corners;
     let inside = |p: Vec2| {
         let mut odd = false;
         for (a, b) in &sides {
@@ -702,11 +208,663 @@ fn max_clearance(loops: &[Vec<Vec2>]) -> f64 {
     best.0
 }
 
-impl Region2 {
+/// Most boundary segment pairs [`regions_apart`] compares before it gives up (and says no).
+const APART_BUDGET: usize = 50_000_000;
+
+/// Whether no two of the regions meet or come within `gap` of each other (their boundaries
+/// are farther apart than `gap` and none lies inside another; one inside another's hole is
+/// apart). Tools made from them alike (extruded over one interval) are then apart too, and
+/// can be cut as one. False when unsure (a degenerate region, too much to compare).
+pub fn regions_apart(regions: &[Region2], gap: f64) -> bool {
+    if !(gap.is_finite() && gap > 0.0) || regions.len() > 10_000 {
+        return false;
+    }
+    // The polylines lie within `tol` of the curves: boundaries this much farther than the gap
+    // apart are apart.
+    let tol = gap / 4.0;
+    let reach = gap + 2.0 * tol;
+    struct Outline {
+        loops: Vec<Ring<Vec2>>,
+        bounds: Aabb2,
+        inside: Vec2,
+    }
+    let mut outlines = Vec::with_capacity(regions.len());
+    for r in regions {
+        let loops: Vec<Ring<Vec2>> = std::iter::once(&r.outer).chain(&r.holes).map(|l| l.polyline(tol)).collect();
+        let Some(outer) = loops.first().filter(|l| l.len() >= 2) else { return false };
+        if outer.iter().any(|p| !p.is_finite()) {
+            return false;
+        }
+        let bounds = outer.bounds();
+        let Some(inside) = outer.first().copied() else { return false };
+        outlines.push(Outline { loops, bounds, inside });
+    }
+    let mut order: Vec<usize> = (0..outlines.len()).collect();
+    order.sort_by(|&i, &j| {
+        let x = |k: usize| outlines.get(k).map(|o| o.bounds.min.x).unwrap_or(0.0);
+        x(i).total_cmp(&x(j))
+    });
+    let mut work = 0usize;
+    for (k, &i) in order.iter().enumerate() {
+        let Some(a) = outlines.get(i) else { return false };
+        for &j in order.iter().skip(k + 1) {
+            let Some(b) = outlines.get(j) else { return false };
+            let (a_box, b_box) = (a.bounds, b.bounds);
+            if b_box.min.x > a_box.max.x + reach {
+                break;
+            }
+            if b_box.min.y > a_box.max.y + reach || a_box.min.y > b_box.max.y + reach {
+                continue;
+            }
+            // A boundary point of one inside the other: one holds the other (boundaries that do
+            // not come near each other do not cross).
+            let (Some(ra), Some(rb)) = (regions.get(i), regions.get(j)) else { return false };
+            if ra.contains(b.inside) || rb.contains(a.inside) {
+                return false;
+            }
+            for la in &a.loops {
+                for lb in &b.loops {
+                    work = work.saturating_add(la.len().saturating_mul(lb.len()));
+                    if work > APART_BUDGET {
+                        return false;
+                    }
+                    // (Each loop closed: its last point back to its first.)
+                    for (p, q) in la.iter().zip(la.iter().skip(1).chain(la.first())) {
+                        for (r, s) in lb.iter().zip(lb.iter().skip(1).chain(lb.first())) {
+                            if segment_distance(*p, *q, *r, *s) <= reach {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
+/// The distance between segments `ab` and `cd` (0 where they cross).
+fn segment_distance(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> f64 {
+    let side = |p: Vec2, q: Vec2, r: Vec2| (q - p).cross(r - p);
+    let (d1, d2, d3, d4) = (side(c, d, a), side(c, d, b), side(a, b, c), side(a, b, d));
+    if ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0)) && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0)) {
+        return 0.0;
+    }
+    let to = |p: Vec2, s: Vec2, e: Vec2| {
+        let v = e - s;
+        let len2 = v.dot(v);
+        let t = if len2 > 0.0 { ((p - s).dot(v) / len2).clamp(0.0, 1.0) } else { 0.0 };
+        p.dist(s + v * t)
+    };
+    to(a, c, d).min(to(b, c, d)).min(to(c, a, b)).min(to(d, a, b))
+}
+
+/// The geometry of a profile segment ([`Seg2`]): evaluation, derivatives, lengths, splits and
+/// closest points.
+pub trait Seg2Geom {
+    /// Checks a segment read from outside before anything evaluates it: every stored coordinate
+    /// finite and at most `max_abs` in size (a Bézier's unused slots too, as they are serialized),
+    /// a radius in 1e-12..=`max_abs`, an arc's start within ±1e6 radians and its absolute sweep
+    /// 1e-12 to one turn (with 1e-12 radians of allowance), a conic weight in 1e-12..=1e12, a
+    /// Bézier degree of 4 to [`MAX_BEZIER_DEGREE`], controls not all at one point, and finite
+    /// ends. The limits keep evaluation finite; they promise no accuracy. The caller wraps the
+    /// message in its own error.
+    fn check(&self, max_abs: f64) -> Result<(), &'static str>;
+    /// Derivative with respect to the parameter at `t` (Béziers and conics; lines and arcs too).
+    fn derivative(&self, t: f64) -> Vec2;
+    /// Derivatives 1…`order` with respect to the segment's own parameter at `t`, exactly: a line
+    /// and an arc from their analytic form (an arc's are the circular-motion recurrence, zero
+    /// curvature terms included), a cubic and a higher-degree piece from the forward differences
+    /// of their controls, a conic through the quotient rule of its rational form. A blend curve
+    /// reads a reference curve's derivatives here to build a Hermite interpolation, so this is
+    /// exact at both ends (`t` = 0 and 1) and `None` — never a wrong number — when `order` is
+    /// above [`MAX_DERIVATIVE_ORDER`], `t` is not finite or a value is not finite, as with a
+    /// degenerate rational piece.
+    fn derivatives(&self, t: f64, order: usize) -> Option<Vec<Vec2>>;
+    fn start(&self) -> Vec2;
+    fn end(&self) -> Vec2;
+    fn point_at(&self, t: f64) -> Vec2;
+    fn mid(&self) -> Vec2;
+    /// Unit tangent at the start (direction of travel).
+    fn start_tangent(&self) -> Vec2;
+    /// Unit tangent at the end (direction of travel).
+    fn end_tangent(&self) -> Vec2;
+    fn reversed(&self) -> Seg2;
+    /// The segment with each control point mapped by `f`: exact for any affine map of lines,
+    /// Béziers and conics. An arc is returned as it is: only a similarity keeps it an arc
+    /// ([`Seg2Geom::similar`]), and callers that mirror one handle it themselves.
+    fn map_controls(&self, f: impl Fn(Vec2) -> Vec2) -> Seg2;
+    /// The segment moved by the similarity `m`, exactly: an arc's centre maps, its radius scales
+    /// and its start turns; every other kind maps its control points.
+    fn similar(&self, m: &Similarity2) -> Seg2;
+    fn length(&self) -> f64;
+    /// The segment split at parameter `t` in (0, 1) (same kind, exact; conic halves are
+    /// re-normalised so their end weights stay 1).
+    fn split_at(&self, t: f64) -> (Seg2, Seg2);
+    /// Parameter of the closest point: exact for lines and arcs. The remaining curves are sampled and
+    /// refined from every dip in the sampled distance, since the lowest sample can sit on the wrong
+    /// part of the curve; the ends count, so a closed segment is searched from both.
+    fn closest_param(&self, p: Vec2) -> f64;
+    /// The two halves of the segment (same kind, exact).
+    fn split_half(&self) -> (Seg2, Seg2);
+    /// Contribution to the loop's signed area (shoelace integral ½∮(x dy − y dx)).
+    fn area_term(&self) -> f64;
+    /// Polyline approximation (including both end points) with at most `tol` chord error.
+    fn polyline(&self, tol: f64) -> Vec<Vec2>;
+}
+
+impl Seg2Geom for Seg2 {
+    fn check(&self, max_abs: f64) -> Result<(), &'static str> {
+        match *self {
+            Seg2::Line { a, b } => controls(&[a, b], max_abs)?,
+            Seg2::Arc { center, radius, start, sweep } => {
+                coordinates([center.x, center.y], max_abs)?;
+                require(radius.is_finite() && (MIN_POSITIVE..=max_abs).contains(&radius), "arc radius")?;
+                require(start.is_finite() && start.abs() <= MAX_START_ANGLE, "arc start angle")?;
+                require(sweep.is_finite() && (MIN_POSITIVE..=TAU + 1e-12).contains(&sweep.abs()), "arc sweep")?;
+            }
+            Seg2::Cubic { p0, p1, p2, p3 } => controls(&[p0, p1, p2, p3], max_abs)?,
+            Seg2::Conic { a, apex, b, w } => {
+                controls(&[a, apex, b], max_abs)?;
+                require(w.is_finite() && (MIN_POSITIVE..=MAX_WEIGHT).contains(&w), "conic weight")?;
+            }
+            Seg2::Bezier { n, ref p } => {
+                require((4..=MAX_BEZIER_DEGREE).contains(&usize::from(n)), "Bezier degree")?;
+                // The unused slots are serialized too: reject hidden non-finite/excessive values.
+                coordinates(p.iter().flat_map(|q| [q.x, q.y]), max_abs)?;
+                controls(p.get(..=usize::from(n)).ok_or("Bezier degree")?, max_abs)?;
+            }
+        }
+        require(self.start().is_finite() && self.end().is_finite(), "non-finite curve endpoint")
+    }
+    fn derivative(&self, t: f64) -> Vec2 {
+        match *self {
+            Seg2::Line { a, b } => b - a,
+            Seg2::Arc { radius, start, sweep, .. } => Vec2::from_angle(start + sweep * t).perp() * (radius * sweep),
+            Seg2::Cubic { p0, p1, p2, p3 } => {
+                let u = 1.0 - t;
+                (p1 - p0) * (3.0 * u * u) + (p2 - p1) * (6.0 * u * t) + (p3 - p2) * (3.0 * t * t)
+            }
+            Seg2::Conic { a, apex, b, w } => {
+                let u = 1.0 - t;
+                let (n, d) = (a * (u * u) + apex * (2.0 * w * u * t) + b * (t * t), u * u + 2.0 * w * u * t + t * t);
+                let (dn, dd) = (a * (-2.0 * u) + apex * (2.0 * w * (1.0 - 2.0 * t)) + b * (2.0 * t), -2.0 * u + 2.0 * w * (1.0 - 2.0 * t) + 2.0 * t);
+                (dn * d - n * dd) / (d * d).max(1e-300)
+            }
+            Seg2::Bezier { n, ref p } => {
+                let c = bez(n, p);
+                let diffs: Vec<Vec2> = c.windows(2).map(|w| (w[1] - w[0]) * (c.len() - 1) as f64).collect();
+                casteljau(&diffs, t).0
+            }
+        }
+    }
+    fn derivatives(&self, t: f64, order: usize) -> Option<Vec<Vec2>> {
+        if !t.is_finite() || order > MAX_DERIVATIVE_ORDER {
+            return None;
+        }
+        let mut d = match *self {
+            Seg2::Line { a, b } => {
+                if !a.is_finite() || !b.is_finite() {
+                    return None;
+                }
+                let mut d = vec![b - a];
+                d.resize(MAX_DERIVATIVE_ORDER, Vec2::ZERO);
+                d
+            }
+            Seg2::Arc { center, radius, start, sweep } => {
+                if !center.is_finite() || !radius.is_finite() || !start.is_finite() || !sweep.is_finite() {
+                    return None;
+                }
+                // Differentiating the radial direction twice returns its negative, so the
+                // directions of the successive derivatives are tangential, radial, tangential…
+                // with alternating signs, each order picking up one more factor of the sweep.
+                let mut v = Vec2::from_angle(start + sweep * t).perp();
+                let mut d = Vec::with_capacity(MAX_DERIVATIVE_ORDER);
+                for j in 1..=MAX_DERIVATIVE_ORDER {
+                    d.push(v * (radius * sweep.powi(j as i32)));
+                    v = v.perp();
+                }
+                d
+            }
+            Seg2::Cubic { p0, p1, p2, p3 } => bezier_derivatives(&[p0, p1, p2, p3], t, MAX_DERIVATIVE_ORDER)?,
+            Seg2::Bezier { n, ref p } => bezier_derivatives(bez(n, p), t, MAX_DERIVATIVE_ORDER)?,
+            Seg2::Conic { a, apex, b, w } => {
+                if !a.is_finite() || !apex.is_finite() || !b.is_finite() || !w.is_finite() {
+                    return None;
+                }
+                // The conic is `N(t) / d(t)` with `N` the quadratic through `a`, `w·apex`, `b` and
+                // `d` its weight polynomial; both are evaluated here in the power basis (at the
+                // ends `d` = 1, so a join is never singular). The quotient rule in its
+                // derivative-of-a-product form gives the higher derivatives: the numerator of
+                // `x⁽ʲ⁾` is `N⁽ʲ⁾` minus the terms that already use `d` and a lower `x`.
+                let (n0, n1, n2) = (a, apex * (2.0 * w) - a * 2.0, a - apex * (2.0 * w) + b);
+                let (e1, e2) = (2.0 * (w - 1.0), 2.0 * (1.0 - w));
+                let quotient = |j: usize| match j {
+                    0 => n0 + n1 * t + n2 * (t * t),
+                    1 => n1 + n2 * (2.0 * t),
+                    2 => n2 * 2.0,
+                    _ => Vec2::ZERO,
+                };
+                let weight = |j: usize| match j {
+                    0 => 1.0 + e1 * t + e2 * (t * t),
+                    1 => e1 + e2 * (2.0 * t),
+                    2 => e2 * 2.0,
+                    _ => 0.0,
+                };
+                let den = weight(0);
+                if !(den.abs() > 1e-300) {
+                    return None;
+                }
+                let mut x = vec![quotient(0) / den];
+                for j in 1..=MAX_DERIVATIVE_ORDER {
+                    let mut v = quotient(j);
+                    for i in 1..=j {
+                        v -= x[j - i] * (weight(i) * binom(j, i));
+                    }
+                    x.push(v / den);
+                }
+                x.remove(0);
+                x
+            }
+        };
+        d.truncate(order);
+        d.iter().all(|q| q.is_finite()).then_some(d)
+    }
+    fn start(&self) -> Vec2 {
+        match *self {
+            Seg2::Line { a, .. } | Seg2::Conic { a, .. } => a,
+            Seg2::Cubic { p0, .. } => p0,
+            Seg2::Bezier { p, .. } => p[0],
+            Seg2::Arc { center, radius, start, .. } => center + Vec2::from_angle(start) * radius,
+        }
+    }
+    fn end(&self) -> Vec2 {
+        match *self {
+            Seg2::Line { b, .. } | Seg2::Conic { b, .. } => b,
+            Seg2::Cubic { p3, .. } => p3,
+            Seg2::Bezier { n, ref p } => bez(n, p).last().copied().unwrap_or(p[0]),
+            Seg2::Arc { center, radius, start, sweep } => center + Vec2::from_angle(start + sweep) * radius,
+        }
+    }
+    fn point_at(&self, t: f64) -> Vec2 {
+        match *self {
+            Seg2::Line { a, b } => a.lerp(b, t),
+            Seg2::Arc { center, radius, start, sweep } => center + Vec2::from_angle(start + sweep * t) * radius,
+            Seg2::Cubic { p0, p1, p2, p3 } => {
+                let u = 1.0 - t;
+                p0 * (u * u * u) + p1 * (3.0 * u * u * t) + p2 * (3.0 * u * t * t) + p3 * (t * t * t)
+            }
+            Seg2::Conic { a, apex, b, w } => {
+                let u = 1.0 - t;
+                let d = u * u + 2.0 * w * u * t + t * t;
+                (a * (u * u) + apex * (2.0 * w * u * t) + b * (t * t)) / d.max(1e-300)
+            }
+            Seg2::Bezier { n, ref p } => casteljau(bez(n, p), t).0,
+        }
+    }
+    fn mid(&self) -> Vec2 {
+        self.point_at(0.5)
+    }
+    fn start_tangent(&self) -> Vec2 {
+        match *self {
+            Seg2::Line { a, b } => (b - a).normalized().unwrap_or(Vec2::X),
+            Seg2::Arc { start, sweep, .. } => Vec2::from_angle(start).perp() * sweep.signum(),
+            Seg2::Cubic { p0, p1, p2, .. } => (p1 - p0).normalized().or_else(|| (p2 - p0).normalized()).unwrap_or(Vec2::X),
+            Seg2::Conic { a, apex, b, .. } => (apex - a).normalized().or_else(|| (b - a).normalized()).unwrap_or(Vec2::X),
+            Seg2::Bezier { n, ref p } => {
+                let c = bez(n, p);
+                c.iter().skip(1).find_map(|q| (*q - c[0]).normalized()).unwrap_or(Vec2::X)
+            }
+        }
+    }
+    fn end_tangent(&self) -> Vec2 {
+        match *self {
+            Seg2::Line { a, b } => (b - a).normalized().unwrap_or(Vec2::X),
+            Seg2::Arc { start, sweep, .. } => Vec2::from_angle(start + sweep).perp() * sweep.signum(),
+            Seg2::Cubic { p1, p2, p3, .. } => (p3 - p2).normalized().or_else(|| (p3 - p1).normalized()).unwrap_or(Vec2::X),
+            Seg2::Conic { a, apex, b, .. } => (b - apex).normalized().or_else(|| (b - a).normalized()).unwrap_or(Vec2::X),
+            Seg2::Bezier { n, ref p } => {
+                let c = bez(n, p);
+                let last = c.last().copied().unwrap_or(p[0]);
+                c.iter().rev().skip(1).find_map(|q| (last - *q).normalized()).unwrap_or(Vec2::X)
+            }
+        }
+    }
+    fn reversed(&self) -> Seg2 {
+        match *self {
+            Seg2::Line { a, b } => Seg2::Line { a: b, b: a },
+            Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center, radius, start: start + sweep, sweep: -sweep },
+            Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: p3, p1: p2, p2: p1, p3: p0 },
+            Seg2::Conic { a, apex, b, w } => Seg2::Conic { a: b, apex, b: a, w },
+            Seg2::Bezier { n, ref p } => {
+                let mut q = *p;
+                let k = (n as usize).clamp(1, MAX_BEZIER_DEGREE);
+                q[..=k].reverse();
+                Seg2::Bezier { n, p: q }
+            }
+        }
+    }
+    fn map_controls(&self, f: impl Fn(Vec2) -> Vec2) -> Seg2 {
+        match *self {
+            Seg2::Line { a, b } => Seg2::Line { a: f(a), b: f(b) },
+            Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: f(p0), p1: f(p1), p2: f(p2), p3: f(p3) },
+            Seg2::Conic { a, apex, b, w } => Seg2::Conic { a: f(a), apex: f(apex), b: f(b), w },
+            Seg2::Bezier { n, mut p } => {
+                p.iter_mut().take(usize::from(n) + 1).for_each(|q| *q = f(*q));
+                Seg2::Bezier { n, p }
+            }
+            arc @ Seg2::Arc { .. } => arc,
+        }
+    }
+    fn similar(&self, m: &Similarity2) -> Seg2 {
+        match *self {
+            Seg2::Arc { center, radius, start, sweep } => {
+                Seg2::Arc { center: m.apply(center), radius: radius * m.scale(), start: start + m.angle(), sweep }
+            }
+            _ => self.map_controls(|p| m.apply(p)),
+        }
+    }
+    fn length(&self) -> f64 {
+        match *self {
+            Seg2::Line { a, b } => a.dist(b),
+            Seg2::Arc { radius, sweep, .. } => (radius * sweep).abs(),
+            Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => integrate(self, |s, t| s.derivative(t).len()),
+        }
+    }
+    fn split_at(&self, t: f64) -> (Seg2, Seg2) {
+        let t = t.clamp(1e-9, 1.0 - 1e-9);
+        match *self {
+            Seg2::Line { a, b } => {
+                let m = a.lerp(b, t);
+                (Seg2::Line { a, b: m }, Seg2::Line { a: m, b })
+            }
+            Seg2::Arc { center, radius, start, sweep } => (
+                Seg2::Arc { center, radius, start, sweep: sweep * t },
+                Seg2::Arc { center, radius, start: start + sweep * t, sweep: sweep * (1.0 - t) },
+            ),
+            Seg2::Cubic { p0, p1, p2, p3 } => {
+                let (a, b, c) = (p0.lerp(p1, t), p1.lerp(p2, t), p2.lerp(p3, t));
+                let (d, e) = (a.lerp(b, t), b.lerp(c, t));
+                let m = d.lerp(e, t);
+                (Seg2::Cubic { p0, p1: a, p2: d, p3: m }, Seg2::Cubic { p0: m, p1: e, p2: c, p3 })
+            }
+            Seg2::Conic { a, apex, b, w } => {
+                // Homogeneous de Casteljau: (a, 1), (w·apex, w), (b, 1).
+                let h = |p: Vec2, wt: f64| (p * wt, wt);
+                let lerp = |x: (Vec2, f64), y: (Vec2, f64)| (x.0 * (1.0 - t) + y.0 * t, x.1 * (1.0 - t) + y.1 * t);
+                let (p0, p1, p2) = (h(a, 1.0), h(apex, w), h(b, 1.0));
+                let (q0, q1) = (lerp(p0, p1), lerp(p1, p2));
+                let r = lerp(q0, q1);
+                let pt = |x: (Vec2, f64)| x.0 / x.1.max(1e-300);
+                let m = pt(r);
+                (
+                    Seg2::Conic { a, apex: pt(q0), b: m, w: q0.1 / r.1.max(1e-300).sqrt() },
+                    Seg2::Conic { a: m, apex: pt(q1), b, w: q1.1 / r.1.max(1e-300).sqrt() },
+                )
+            }
+            Seg2::Bezier { n, ref p } => {
+                let (_, l, r) = casteljau(bez(n, p), t);
+                let mk = |c: &[Vec2]| bezier(c).unwrap_or(*self);
+                (mk(&l), mk(&r))
+            }
+        }
+    }
+    fn closest_param(&self, p: Vec2) -> f64 {
+        let finite = |p: Vec2| p.x.is_finite() && p.y.is_finite();
+        match *self {
+            Seg2::Line { a, b } if finite(a) && finite(b) && finite(p) => {
+                let d = b - a;
+                if a == b {
+                    return 0.0;
+                }
+                let denominator = d.len2();
+                let t = (p - a).dot(d) / denominator;
+                if denominator > 0.0 && denominator.is_finite() && t.is_finite() {
+                    return t.clamp(0.0, 1.0);
+                }
+            }
+            Seg2::Arc { center, radius, start, sweep } if radius > 0.0 && sweep != 0.0 => {
+                let angle = (p - center).angle();
+                let along = if sweep > 0.0 { (angle - start).rem_euclid(TAU) } else { (start - angle).rem_euclid(TAU) };
+                if along <= sweep.abs() {
+                    return along / sweep.abs();
+                }
+                return if self.start().dist(p) <= self.end().dist(p) { 0.0 } else { 1.0 };
+            }
+            _ => {}
+        }
+        const N: usize = 64;
+        let at = |i: usize| i as f64 / N as f64;
+        let dist: [f64; N + 1] = std::array::from_fn(|i| self.point_at(at(i)).dist(p));
+        // Refined from sample `i`, within its neighbours.
+        let refine = |i: usize| {
+            let t = newton_closest(self, p, at(i), at(i.saturating_sub(1)), at((i + 1).min(N)));
+            (t, self.point_at(t).dist(p))
+        };
+        let lowest = dist.iter().enumerate().min_by(|a, b| a.1.total_cmp(b.1)).map_or(0, |(i, _)| i);
+        let (mut t, mut near) = refine(lowest);
+        for i in (0..=N).filter(|&i| i != lowest && (i == 0 || dist[i] < dist[i - 1]) && (i == N || dist[i] <= dist[i + 1])) {
+            let (other, d) = refine(i);
+            // Clearly nearer only: two parts of a curve the same distance away keep the first answer.
+            if d + 1e-12 * (1.0 + d) < near {
+                (t, near) = (other, d);
+            }
+        }
+        t
+    }
+    fn split_half(&self) -> (Seg2, Seg2) {
+        match *self {
+            Seg2::Line { a, b } => {
+                let m = a.lerp(b, 0.5);
+                (Seg2::Line { a, b: m }, Seg2::Line { a: m, b })
+            }
+            Seg2::Arc { center, radius, start, sweep } => (
+                Seg2::Arc { center, radius, start, sweep: sweep / 2.0 },
+                Seg2::Arc { center, radius, start: start + sweep / 2.0, sweep: sweep / 2.0 },
+            ),
+            Seg2::Cubic { p0, p1, p2, p3 } => {
+                let (a, b, c) = (p0.lerp(p1, 0.5), p1.lerp(p2, 0.5), p2.lerp(p3, 0.5));
+                let (d, e) = (a.lerp(b, 0.5), b.lerp(c, 0.5));
+                let m = d.lerp(e, 0.5);
+                (Seg2::Cubic { p0, p1: a, p2: d, p3: m }, Seg2::Cubic { p0: m, p1: e, p2: c, p3 })
+            }
+            Seg2::Conic { a, apex, b, w } => {
+                // Rational de Casteljau at the middle, weights normalised to 1 at the ends.
+                let m = self.point_at(0.5);
+                let w2 = ((1.0 + w) / 2.0).max(0.0).sqrt();
+                let (l, r) = ((a + apex * w) / (1.0 + w), (apex * w + b) / (1.0 + w));
+                (Seg2::Conic { a, apex: l, b: m, w: w2 }, Seg2::Conic { a: m, apex: r, b, w: w2 })
+            }
+            Seg2::Bezier { .. } => self.split_at(0.5),
+        }
+    }
+    fn area_term(&self) -> f64 {
+        match *self {
+            Seg2::Line { a, b } => 0.5 * a.cross(b),
+            Seg2::Arc { radius, sweep, .. } => {
+                let (a, b) = (self.start(), self.end());
+                // Chord term plus the circular segment between chord and arc.
+                0.5 * a.cross(b) + 0.5 * radius * radius * (sweep - sweep.sin())
+            }
+            Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => integrate(self, |s, t| 0.5 * s.point_at(t).cross(s.derivative(t))),
+        }
+    }
+    fn polyline(&self, tol: f64) -> Vec<Vec2> {
+        match *self {
+            Seg2::Line { a, b } => vec![a, b],
+            Seg2::Arc { radius, sweep, .. } => {
+                let tol = tol.max(radius.abs() * 1e-6).max(1e-9);
+                let step = if tol < radius { 2.0 * (1.0 - tol / radius).clamp(-1.0, 1.0).acos() } else { TAU / 8.0 };
+                let n = ((sweep.abs() / step.max(1e-6)).ceil() as usize).clamp(2, 4096);
+                (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
+            }
+            Seg2::Cubic { p0, p1, p2, p3 } => {
+                // Chord error of n pieces ≈ max second difference / (8 n²).
+                let bow = (p0 - p1 * 2.0 + p2).len().max((p1 - p2 * 2.0 + p3).len()) * 6.0;
+                let n = ((bow / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
+                (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
+            }
+            Seg2::Conic { a, apex, b, w } => {
+                let bow = (a - apex * 2.0 + b).len() * 2.0 * w.max(1.0);
+                let n = ((bow / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
+                (0..=n).map(|i| self.point_at(i as f64 / n as f64)).collect()
+            }
+            Seg2::Bezier { n, ref p } => {
+                // Second derivative ≤ n(n−1) × the largest second difference of the controls.
+                let c = bez(n, p);
+                let d2 = c.windows(3).map(|w| (w[0] - w[1] * 2.0 + w[2]).len()).fold(0.0, f64::max) * (n as f64) * (n as f64 - 1.0);
+                let k = ((d2 / (8.0 * tol.max(1e-9))).sqrt().ceil() as usize).clamp(2, 4096);
+                (0..=k).map(|i| self.point_at(i as f64 / k as f64)).collect()
+            }
+        }
+    }
+}
+
+/// The geometry of a profile loop ([`Loop2`]): area, orientation, containment and polylines.
+pub trait Loop2Geom {
+    /// The radius of the largest circle inside the loop, to about `tol` ([`Region2Geom::inradius`]).
+    fn inradius(&self, tol: f64) -> f64;
+    /// Signed area: positive when counter-clockwise.
+    fn signed_area(&self) -> f64;
+    fn reversed(&self) -> Loop2;
+    /// Whether the loop runs counter-clockwise ([`Loop2::ccw`] keeps it as it is).
+    fn is_ccw(&self) -> bool;
+    /// Counter-clockwise copy.
+    fn ccw(&self) -> Loop2;
+    /// Each segment with the next and the last with the first: the loop's joints, where one
+    /// segment should end on the start of the next.
+    fn joints(&self) -> impl Iterator<Item = (&Seg2, &Seg2)> + Clone;
+    /// The loop as a polyline within `tol`: each segment's points but its last, which the next
+    /// segment starts on.
+    fn polyline(&self, tol: f64) -> Ring<Vec2>;
+    /// Even-odd point containment against the polyline approximation.
+    fn contains(&self, p: Vec2) -> bool;
+    /// Area-weighted centroid (of the polyline approximation).
+    fn centroid(&self) -> Vec2;
+    /// Closed within `tol`?
+    fn is_closed(&self, tol: f64) -> bool;
+}
+
+impl Loop2Geom for Loop2 {
+    fn inradius(&self, tol: f64) -> f64 {
+        max_clearance(&[self.polyline(tol)])
+    }
+    fn signed_area(&self) -> f64 {
+        self.segs.iter().map(Seg2::area_term).sum()
+    }
+    fn reversed(&self) -> Loop2 {
+        Loop2 { segs: self.segs.iter().rev().map(Seg2::reversed).collect() }
+    }
+    fn is_ccw(&self) -> bool {
+        self.signed_area() >= 0.0
+    }
+    fn ccw(&self) -> Loop2 {
+        if self.is_ccw() { self.clone() } else { self.reversed() }
+    }
+    fn joints(&self) -> impl Iterator<Item = (&Seg2, &Seg2)> + Clone {
+        crate::chain::around(&self.segs)
+    }
+    fn polyline(&self, tol: f64) -> Ring<Vec2> {
+        self.segs
+            .iter()
+            .flat_map(|s| {
+                let p = s.polyline(tol);
+                let n = p.len().saturating_sub(1);
+                p.into_iter().take(n)
+            })
+            .collect()
+    }
+    fn contains(&self, p: Vec2) -> bool {
+        self.polyline(1e-3).contains(p)
+    }
+    fn centroid(&self) -> Vec2 {
+        let poly = self.polyline(1e-3);
+        let n = poly.len();
+        let (mut a2, mut c) = (0.0, Vec2::ZERO);
+        for i in 0..n {
+            let (Some(p), Some(q)) = (poly.get(i), poly.get((i + 1) % n)) else { continue };
+            let k = p.cross(*q);
+            a2 += k;
+            c += (*p + *q) * k;
+        }
+        if a2.abs() < 1e-15 { poly.first().copied().unwrap_or_default() } else { c / (3.0 * a2) }
+    }
+    fn is_closed(&self, tol: f64) -> bool {
+        let n = self.segs.len();
+        n > 0
+            && (0..n).all(|i| match (self.segs.get(i), self.segs.get((i + 1) % n)) {
+                (Some(a), Some(b)) => a.end().dist(b.start()) <= tol,
+                _ => false,
+            })
+    }
+}
+
+/// The geometry of a profile region ([`Region2`]): area, containment, inradius and triangles.
+pub trait Region2Geom {
+    fn area(&self) -> f64;
+    /// A point strictly inside the region (for picking and labels).
+    fn interior_point(&self) -> Vec2;
+    fn contains(&self, p: Vec2) -> bool;
+    /// The radius of the largest circle inside the region: how far its sides can move inwards
+    /// before they meet (a taper going in closes it there). Found by a grid search refined
+    /// around the best point, to about `tol`.
+    fn inradius(&self, tol: f64) -> f64;
     /// Triangles covering the region (for filled display), by slabs between the vertex
     /// heights: inside each slab the boundary edges don't cross, so consecutive crossings pair
     /// up into trapezoids.
-    pub fn triangulate(&self, tol: f64) -> Vec<[Vec2; 3]> {
+    fn triangulate(&self, tol: f64) -> Vec<[Vec2; 3]>;
+    fn centroid(&self) -> Vec2;
+}
+
+impl Region2Geom for Region2 {
+    fn area(&self) -> f64 {
+        self.outer.signed_area().abs() - self.holes.iter().map(|h| h.signed_area().abs()).sum::<f64>()
+    }
+    fn interior_point(&self) -> Vec2 {
+        let c = self.centroid();
+        if self.contains(c) {
+            return c;
+        }
+        // Scan a few horizontal lines for the midpoint of the widest inside span.
+        let poly = self.outer.polyline(1e-2);
+        let (mut y0, mut y1) = (f64::INFINITY, f64::NEG_INFINITY);
+        for p in &poly {
+            y0 = y0.min(p.y);
+            y1 = y1.max(p.y);
+        }
+        for k in 1..16 {
+            let y = y0 + (y1 - y0) * k as f64 / 16.0;
+            let mut xs: Vec<f64> = Vec::new();
+            for l in std::iter::once(&self.outer).chain(&self.holes) {
+                let pl = l.polyline(1e-2);
+                let n = pl.len();
+                for i in 0..n {
+                    let (Some(a), Some(b)) = (pl.get(i), pl.get((i + 1) % n)) else { continue };
+                    if (a.y > y) != (b.y > y) {
+                        xs.push(a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x));
+                    }
+                }
+            }
+            xs.sort_by(f64::total_cmp);
+            for w in xs.chunks(2) {
+                if let [a, b] = w {
+                    let p = Vec2::new((a + b) * 0.5, y);
+                    if self.contains(p) {
+                        return p;
+                    }
+                }
+            }
+        }
+        c
+    }
+    fn contains(&self, p: Vec2) -> bool {
+        self.outer.contains(p) && !self.holes.iter().any(|h| h.contains(p))
+    }
+    fn inradius(&self, tol: f64) -> f64 {
+        let loops: Vec<Ring<Vec2>> = std::iter::once(&self.outer).chain(&self.holes).map(|l| l.polyline(tol)).collect();
+        max_clearance(&loops)
+    }
+    fn triangulate(&self, tol: f64) -> Vec<[Vec2; 3]> {
         let mut edges: Vec<(Vec2, Vec2)> = Vec::new();
         for l in std::iter::once(&self.outer).chain(&self.holes) {
             let pl = l.polyline(tol);
@@ -753,7 +911,7 @@ impl Region2 {
         }
         out
     }
-    pub fn centroid(&self) -> Vec2 {
+    fn centroid(&self) -> Vec2 {
         let ao = self.outer.signed_area().abs();
         let mut c = self.outer.centroid() * ao;
         let mut a = ao;
@@ -766,96 +924,45 @@ impl Region2 {
     }
 }
 
-/// Most boundary segment pairs [`regions_apart`] compares before it gives up (and says no).
-const APART_BUDGET: usize = 50_000_000;
-
-/// Whether no two of the regions meet or come within `gap` of each other (their boundaries
-/// are farther apart than `gap` and none lies inside another; one inside another's hole is
-/// apart). Tools made from them alike (extruded over one interval) are then apart too, and
-/// can be cut as one. False when unsure (a degenerate region, too much to compare).
-pub fn regions_apart(regions: &[Region2], gap: f64) -> bool {
-    if !(gap.is_finite() && gap > 0.0) || regions.len() > 10_000 {
-        return false;
-    }
-    // The polylines lie within `tol` of the curves: boundaries this much farther than the gap
-    // apart are apart.
-    let tol = gap / 4.0;
-    let reach = gap + 2.0 * tol;
-    struct Outline {
-        loops: Vec<Vec<Vec2>>,
-        lo: Vec2,
-        hi: Vec2,
-        inside: Vec2,
-    }
-    let mut outlines = Vec::with_capacity(regions.len());
-    for r in regions {
-        let loops: Vec<Vec<Vec2>> = std::iter::once(&r.outer).chain(&r.holes).map(|l| l.polyline(tol)).collect();
-        let Some(outer) = loops.first().filter(|l| l.len() >= 2) else { return false };
-        if outer.iter().any(|p| !p.is_finite()) {
-            return false;
-        }
-        let lo = outer.iter().fold(Vec2::new(f64::MAX, f64::MAX), |m, p| Vec2::new(m.x.min(p.x), m.y.min(p.y)));
-        let hi = outer.iter().fold(Vec2::new(f64::MIN, f64::MIN), |m, p| Vec2::new(m.x.max(p.x), m.y.max(p.y)));
-        let Some(inside) = outer.first().copied() else { return false };
-        outlines.push(Outline { loops, lo, hi, inside });
-    }
-    let mut order: Vec<usize> = (0..outlines.len()).collect();
-    order.sort_by(|&i, &j| {
-        let x = |k: usize| outlines.get(k).map(|o| o.lo.x).unwrap_or(0.0);
-        x(i).total_cmp(&x(j))
-    });
-    let mut work = 0usize;
-    for (k, &i) in order.iter().enumerate() {
-        let Some(a) = outlines.get(i) else { return false };
-        for &j in order.iter().skip(k + 1) {
-            let Some(b) = outlines.get(j) else { return false };
-            if b.lo.x > a.hi.x + reach {
-                break;
-            }
-            if b.lo.y > a.hi.y + reach || a.lo.y > b.hi.y + reach {
-                continue;
-            }
-            // A boundary point of one inside the other: one holds the other (boundaries that do
-            // not come near each other do not cross).
-            let (Some(ra), Some(rb)) = (regions.get(i), regions.get(j)) else { return false };
-            if ra.contains(b.inside) || rb.contains(a.inside) {
-                return false;
-            }
-            for la in &a.loops {
-                for lb in &b.loops {
-                    work = work.saturating_add(la.len().saturating_mul(lb.len()));
-                    if work > APART_BUDGET {
-                        return false;
-                    }
-                    // (Each loop closed: its last point back to its first.)
-                    for (p, q) in la.iter().zip(la.iter().skip(1).chain(la.first())) {
-                        for (r, s) in lb.iter().zip(lb.iter().skip(1).chain(lb.first())) {
-                            if segment_distance(*p, *q, *r, *s) <= reach {
-                                return false;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    true
+// Helpers of Seg2Geom.
+fn bez(n: u8, p: &[Vec2; MAX_BEZIER_CTRL]) -> &[Vec2] {
+    &p[..(n as usize).clamp(1, MAX_BEZIER_DEGREE) + 1]
 }
-
-/// The distance between segments `ab` and `cd` (0 where they cross).
-fn segment_distance(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> f64 {
-    let side = |p: Vec2, q: Vec2, r: Vec2| (q - p).cross(r - p);
-    let (d1, d2, d3, d4) = (side(c, d, a), side(c, d, b), side(a, b, c), side(a, b, d));
-    if ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0)) && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0)) {
-        return 0.0;
+/// Newton's method for the parameter of the point nearest `p`, from `t`, within `[lo, hi]`: the
+/// range closes in on the minimum, and a step that leaves it bisects.
+fn newton_closest(seg: &Seg2, p: Vec2, mut t: f64, mut lo: f64, mut hi: f64) -> f64 {
+    for _ in 0..30 {
+        let (q, d) = (seg.point_at(t), seg.derivative(t));
+        let (d2, h) = ((seg.derivative((t + 1e-6).min(1.0)) - seg.derivative((t - 1e-6).max(0.0))) / 2e-6, q - p);
+        let f = h.dot(d);
+        let df = d.dot(d) + h.dot(d2);
+        if f < 0.0 {
+            lo = t;
+        } else if f > 0.0 {
+            hi = t;
+        } else {
+            break;
+        }
+        let step = t - f / df;
+        // Arrived, even where the step rounds to the end of the range it has just closed.
+        if (step - t).abs() < 1e-14 {
+            break;
+        }
+        t = if step > lo && step < hi { step } else { 0.5 * (lo + hi) };
     }
-    let to = |p: Vec2, s: Vec2, e: Vec2| {
-        let v = e - s;
-        let len2 = v.dot(v);
-        let t = if len2 > 0.0 { ((p - s).dot(v) / len2).clamp(0.0, 1.0) } else { 0.0 };
-        p.dist(s + v * t)
-    };
-    to(a, c, d).min(to(b, c, d)).min(to(c, a, b)).min(to(d, a, b))
+    t
+}
+/// ∫₀¹ f(t) dt by composite Gauss–Legendre (16 pieces of 5 points).
+fn integrate(seg: &Seg2, f: impl Fn(&Seg2, f64) -> f64) -> f64 {
+    let n = 16;
+    let mut sum = 0.0;
+    for k in 0..n {
+        let (t0, h) = (k as f64 / n as f64, 1.0 / n as f64);
+        for (x, w) in GL5 {
+            sum += w * h * f(seg, t0 + x * h);
+        }
+    }
+    sum
 }
 
 #[cfg(test)]
@@ -971,14 +1078,148 @@ mod tests {
                 let p = Vec2::new((k * 17 % 37) as f64 - 18.0, (k * 31 % 29) as f64 - 14.0);
                 let old = sampled_closest(s, p);
                 let new = s.closest_param(p);
-                if i > 0 {
-                    assert_eq!(new.to_bits(), old.to_bits());
+                // Curves other than lines and arcs keep today's answer wherever it was the nearest.
+                if i >= curves.len() - 1 && s.point_at(old).dist(p) <= s.point_at(new).dist(p) + 1e-10 {
+                    assert!((new - old).abs() < 1e-9, "{s:?} {p:?}");
                 }
                 assert!(s.point_at(new).dist(p) <= s.point_at(old).dist(p) + 1e-10);
                 let on_curve = s.point_at(k as f64 / 100.0);
                 assert!(s.point_at(s.closest_param(on_curve)).dist(on_curve) < 1e-9);
             }
         }
+        // A full circle's points just before its start, either way round: nearest just before
+        // its end, not at its start (Newton from the start stays held there).
+        for sweep in [TAU, -TAU] {
+            let circle = Seg2::Arc { center: Vec2::new(1.0, 2.0), radius: 5.0, start: 0.6131, sweep };
+            for delta in [1e-4, 0.01, 0.04] {
+                let before = 0.6131 - delta * sweep.signum();
+                let p = Vec2::new(1.0, 2.0) + Vec2::from_angle(before) * 4.99;
+                assert!((circle.point_at(circle.closest_param(p)).dist(p) - 0.01).abs() < 1e-9, "sweep {sweep}, {delta}");
+            }
+        }
+    }
+
+    #[test]
+    fn closest_param_finds_the_nearest_part_of_the_curve() {
+        use std::f64::consts::{FRAC_1_SQRT_2, TAU};
+        let v = Vec2::new;
+        // The lowest sample is on the wrong part of the curve (#10007).
+        let doubled = Seg2::Cubic { p0: v(0.0, 0.0), p1: v(100.0, 10.0), p2: v(-90.0, 10.0), p3: v(10.0, 0.0) };
+        let p = v(10.0, 1.0);
+        assert!((doubled.closest_param(p) - 0.0372).abs() < 1e-3 && doubled.point_at(doubled.closest_param(p)).dist(p) < 0.08);
+        // The lowest sample is the answer, its end, and Newton must not walk away from it.
+        let s = Seg2::Cubic { p0: v(0.0, 0.0), p1: v(2.0, 7.0), p2: v(6.0, -3.0), p3: v(8.0, 4.0) };
+        assert_eq!(s.closest_param(v(4.75, 13.0)), 1.0);
+        // A closed curve, which has no exact answer to use, is searched from both ends.
+        let closed = Seg2::Cubic { p0: v(0.0, 0.0), p1: v(30.0, 20.0), p2: v(-30.0, 20.0), p3: v(0.0, 0.0) };
+        let (start, end) = (closed.point_at(1e-3), closed.point_at(1.0 - 1e-3));
+        assert!((closed.closest_param(start) - 1e-3).abs() < 1e-9 && (closed.closest_param(end) - (1.0 - 1e-3)).abs() < 1e-9);
+        // A loop tighter than a sample: Newton must stay beside its sample, or it lands far from it.
+        let looped = Seg2::Cubic {
+            p0: v(0.0, 0.0),
+            p1: v(440.96668404407825, 8.394467272561808),
+            p2: v(-444.93401227675724, 8.394467272561808),
+            p3: v(1.5292259603454506, 0.0),
+        };
+        let p = v(126.39305028911927, 4.398065468717801);
+        assert!(looped.point_at(looped.closest_param(p)).dist(p) < 1e-5);
+        // A heavy weight rushes the parameter, but refining still ends at the nearest point.
+        let a = v(0.9110380263611129, -9.82486500633782);
+        let (apex, b) = (v(-78.51917171728384, -76.49370802914093), v(6.049669594010543, 8.821535281358884));
+        let heavy = Seg2::Conic { a, apex, b, w: 7243.232077589842 };
+        let p = v(6.049585703470391, 8.821579216771788);
+        assert!(heavy.point_at(heavy.closest_param(p)).dist(p) < 1e-4);
+        // A point on the curve is found exactly, also when the last step rounds to no step at all.
+        let (a, apex) = (v(19.33004733688409, 2.4328030999200934), v(16.965885683593374, 10.075495012924941));
+        let oval = Seg2::Conic { a, apex, b: v(2.6358383467092836, 5.642691913004848), w: FRAC_1_SQRT_2 };
+        let p = v(4.9066583889092845, 6.2420408748003124);
+        assert!(oval.point_at(oval.closest_param(p)).dist(p) < 1e-12);
+        // An arc outside its sweep answers with its nearer end.
+        let quarter = Seg2::Arc { center: Vec2::ZERO, radius: 2.0, start: 0.0, sweep: TAU / 4.0 };
+        assert_eq!((quarter.closest_param(v(3.0, -0.1)), quarter.closest_param(v(-0.1, 3.0))), (0.0, 1.0));
+        assert_eq!(quarter.reversed().closest_param(v(3.0, -0.1)), 1.0);
+    }
+
+    /// Two parts of a curve the same distance away: the answer stays the one found first, whatever
+    /// the last bit of the two distances says.
+    #[test]
+    fn closest_param_keeps_the_first_of_two_equally_near_parts() {
+        let v = Vec2::new;
+        let arch = Seg2::Cubic { p0: v(0.0, 0.0), p1: v(0.3, 10.0), p2: v(9.7, 10.0), p3: v(10.0, 0.0) };
+        for k in 0..400 {
+            let p = v(5.0, k as f64 * 0.0173 - 3.0);
+            assert!((arch.closest_param(p) - sampled_closest(&arch, p)).abs() < 1e-9, "{p:?}");
+        }
+    }
+
+    /// Random curves, sharp bends and closed ones among them, and points anywhere, near them and
+    /// beside their ends, against a dense search.
+    #[test]
+    fn closest_param_is_never_further_than_a_dense_search() {
+        use std::f64::consts::TAU;
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut unit = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for _ in 0..60 {
+            let mut at = |r: f64| Vec2::new((unit() * 2.0 - 1.0) * r, (unit() * 2.0 - 1.0) * r);
+            let (p0, p3) = (at(10.0), at(10.0));
+            let mut control = [Vec2::ZERO; MAX_BEZIER_CTRL];
+            control.iter_mut().for_each(|q| *q = at(30.0));
+            let (center, radius) = (at(5.0), 0.5 + at(10.0).x.abs());
+            let curves = [
+                Seg2::Cubic { p0, p1: at(10.0), p2: at(10.0), p3 },
+                Seg2::Cubic { p0, p1: at(200.0), p2: at(200.0), p3 },
+                Seg2::Cubic { p0, p1: at(30.0), p2: at(30.0), p3: p0 },
+                Seg2::Conic { a: p0, apex: at(50.0), b: p3, w: 10f64.powf(at(2.0).x) },
+                Seg2::Bezier { n: 9, p: control },
+                Seg2::Arc { center, radius, start: at(20.0).x, sweep: at(TAU).x },
+                Seg2::Arc { center, radius, start: at(20.0).x, sweep: TAU.copysign(at(1.0).x) },
+            ];
+            for s in curves {
+                for p in [at(60.0), s.point_at(at(0.5).x + 0.5) + at(2.0), s.start() + at(0.5), s.end() + at(0.5)] {
+                    let closest = s.point_at(s.closest_param(p)).dist(p);
+                    let dense = (0..=2048).map(|i| s.point_at(i as f64 / 2048.0).dist(p)).fold(f64::INFINITY, f64::min);
+                    assert!(closest <= dense + 1e-9 * (1.0 + dense), "{s:?} {p:?}: {closest} against {dense}");
+                }
+            }
+        }
+    }
+
+    /// Nonsense in, a parameter on the curve out: a caller feeds the answer straight to `point_at`.
+    #[test]
+    fn closest_param_of_hostile_input_stays_in_range() {
+        use std::f64::consts::TAU;
+        let v = Vec2::new;
+        let big = f64::MAX / 4.0;
+        let nan = v(f64::NAN, 1.0);
+        let curves = [
+            Seg2::Arc { center: Vec2::ZERO, radius: 2.0, start: 0.0, sweep: 0.0 },
+            Seg2::Arc { center: Vec2::ZERO, radius: 0.0, start: 0.0, sweep: 1.0 },
+            Seg2::Arc { center: Vec2::ZERO, radius: -2.0, start: 0.0, sweep: 1.0 },
+            Seg2::Arc { center: Vec2::ZERO, radius: 2.0, start: 0.0, sweep: 2.0 * TAU },
+            Seg2::Arc { center: Vec2::ZERO, radius: 2.0, start: big, sweep: 1.0 },
+            Seg2::Arc { center: Vec2::ZERO, radius: f64::INFINITY, start: 0.0, sweep: 1.0 },
+            Seg2::Arc { center: nan, radius: 2.0, start: 0.0, sweep: 1.0 },
+            Seg2::Arc { center: Vec2::ZERO, radius: 2.0, start: f64::NAN, sweep: f64::NAN },
+            Seg2::Cubic { p0: Vec2::ZERO, p1: Vec2::ZERO, p2: Vec2::ZERO, p3: Vec2::ZERO },
+            Seg2::Cubic { p0: nan, p1: Vec2::ZERO, p2: v(1.0, 1.0), p3: v(2.0, 0.0) },
+            Seg2::Cubic { p0: v(big, big), p1: v(-big, big), p2: v(big, -big), p3: v(-big, -big) },
+            Seg2::Conic { a: Vec2::ZERO, apex: v(1.0, 1.0), b: v(2.0, 0.0), w: f64::NAN },
+            Seg2::Conic { a: Vec2::ZERO, apex: v(1.0, 1.0), b: v(2.0, 0.0), w: -1.0 },
+        ];
+        for s in curves {
+            for p in [Vec2::ZERO, v(3.0, -1.0), nan, v(f64::INFINITY, 0.0), v(big, -big)] {
+                let t = s.closest_param(p);
+                assert!((0.0..=1.0).contains(&t), "{s:?} {p:?}: {t}");
+            }
+        }
+        // A negative radius is a point on the far side of the centre, and still gets the nearest.
+        let flipped = Seg2::Arc { center: Vec2::ZERO, radius: -2.0, start: 0.0, sweep: 1.0 };
+        assert!((flipped.closest_param(Vec2::from_angle(0.5) * -3.0) - 0.5).abs() < 1e-6);
     }
 
     /// The sweep visits only the edges crossing each slab; it must give the triangles that

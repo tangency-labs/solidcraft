@@ -1,0 +1,154 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  28.00000000000001,
+                  10.0
+                ],
+                [
+                  60.0,
+                  28.00000000000001,
+                  10.0
+                ]
+              ],
+              "index": 0
+            }
+          ],
+          "points": [
+            [
+              30.0,
+              28.00000000000001,
+              10.0
+            ]
+          ],
+          "tolerance": 3.8314983899448603
+        },
+        "kind": "round",
+        "sizes": [
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-section-round-pipe-on-plate-r2",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "exact": true,
+      "order": "g1"
+    },
+    "method": "plate 60x40x10 (z 0..10) joined to a pipe R10 along x (0..60) whose axis is at (y, z) = (20, 16): the pipe dips 4 into the plate and leaves it along y = 20 +- 8, z = 10, the edges ending on the planar faces x = 0 and 60. V0 = 24000 + 60 (100 pi - (100 acos 0.6 - 48)) = 40165.7846. The concave edge y = 28: in a plane x = const, the point at distance d from both faces is (20 + g, 10 + d), g = sqrt(64 + 32 d); its feet are F1 = (20 + g, 10) on the plate and F2 = (20 + 10 g / (10 + d), 26 - 160 / (10 + d)) on the pipe. The ball r = 2 is centred at (20 + sqrt 128, 12), touching the plate at F1(2) = (31.313708, 10) and the pipe at F2(2) = (29.428090, 12.666667); its arc between them adds 2.250358 (Green's theorem along the plate, the arc and the pipe): V = 40165.7846 + 60 * 2.250358 = 40300.8061. Both seams G1, not G2 (curvature 1/2 against 0 and 1/2 against 1/10).",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 1e-7
+    },
+    "volume_mm3": 40300.8060669181,
+    "what": "the concave edge where a pipe dips into a plate rounded r2: the ball's circle (a cylinder along x), tangent to the plane and the pipe"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16
+    }
+  },
+  "records": "cov-fillet-section-round-pipe-on-plate-r2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8888.772083759108,
+      "body_count": 1,
+      "edges": 21,
+      "faces": 9,
+      "vertices": 14,
+      "volume_mm3": 40300.80606734694
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the concave edge where a pipe dips into a plate rounded r2: the ball's circle (a cylinder along x), tangent to the plane and the pipe",
+  "why_not": []
+}

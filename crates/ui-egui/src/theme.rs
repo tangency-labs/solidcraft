@@ -1,476 +1,618 @@
-//! Colours and widget style: a dark theme (the default, a blue-grey in the spirit of desktop CAD
-//! tools, viewport #2e3440) and a light one, each with colour vision modes, and theme files that
-//! set any of their colours (`theme_files`). Every colour the UI uses comes from [`Tokens`].
+//! The theme system's glue on the token contract (`solidcraft_theme`): a theme file applied for its base with its icon
+//! palette, its per-tab surfaces resolved, faded and published each frame, the blur it offers, and the 3D view's
+//! colours preference. Theme files themselves are `theme_files`, their options `theme_options`.
 
-use std::cell::Cell;
+use std::collections::BTreeMap;
 
-#[path = "../../../assets/styles/ui/palettes.rs"]
-mod palettes;
-
-use egui::{Color32, Stroke};
+use egui::Color32;
 use serde::{Deserialize, Serialize};
+use solidcraft_theme::{
+    AccentRamp, Custom, Environment, Fade, PublishedTab, Surfaces, TabAccent, Tokens, is_dark, set_custom, set_published, viewport_dark, vision,
+};
 
-thread_local! {
-    /// Theme state belongs to the UI thread drawing the frame. Concurrent app/test renderers
-    /// must not change one another's palette while a frame or icon texture is being built.
-    static DARK: Cell<bool> = const { Cell::new(true) };
-    /// The colour vision mode, per thread. Each app
-    /// sets it from its own preferences at the start of every frame (`SolveApp::logic`), on the
-    /// thread that draws it. Tests run many apps side by side on their own threads in one process:
-    /// with one global, a test in a mode changed the colours under another one
-    /// (`hover_stays_off_during_spin_and_animated_views` failed that way). No worker thread reads
-    /// it: the preview thread is handed its colours (`preview::Colors`) and thumbnails are drawn by
-    /// the engine in the model's colours, so a new thread starts Off and stays Off.
-    static VISION: Cell<ColorVision> = const { Cell::new(ColorVision::Off) };
-    /// The palette of a theme file (`theme_files`) in place of the built-in one of its base
-    /// (dark or light), per thread like the rest. `None`: the built-in palettes.
-    static CUSTOM: Cell<Option<Custom>> = const { Cell::new(None) };
+#[derive(Clone)]
+struct PreparedTheme {
+    file: crate::theme_files::ThemeFile,
+    raw: Option<BTreeMap<String, serde_json::Value>>,
+    values: BTreeMap<String, crate::theme_files::OptionValue>,
+    base: FilePalette,
+    enabled: bool,
+    fade_ms: f32,
 }
 
-/// A theme file's palette and whether it is dark.
+#[derive(Clone, Default)]
+struct TabThemeState {
+    blur: BlurIntent,
+    prepared: Option<PreparedTheme>,
+    environment: Option<Environment>,
+    targets: BTreeMap<String, TabTarget>,
+    tab: String,
+    shown: Option<Surfaces>,
+    fade: Option<Fade>,
+    /// Ownership of the two egui fills survives target/theme invalidation until restored.
+    styled_surfaces: bool,
+    #[cfg(test)]
+    resolutions: usize,
+}
+
+#[derive(Clone, Copy)]
+struct TabTarget {
+    tokens: Tokens,
+    view: Tokens,
+    accent: TabAccent,
+}
+
+const TAB_STATE: &str = "sc_tab_theme_state";
+
+/// Only authored/effective intent is cached. Runtime OS/device availability is never stored
+/// here. Reuse prepare_tabs' borrowed full-content/raw comparison, including followed reloads.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct BlurIntent {
+    pub offered: bool,
+    pub radius: f32,
+    pub revision: u64,
+}
+
+pub(crate) fn blur_intent(ctx: &egui::Context) -> BlurIntent {
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE)).blur)
+}
+
+/// Cache the authored theme and raw saved values before any effective-value normalization.
+/// Followed-file reloads use full content equality, including edits that keep the same id/base.
+/// The caller supplies its existing normalization contract only on a cache miss.
+pub(crate) fn prepare_tabs(
+    ctx: &egui::Context,
+    file: Option<&crate::theme_files::ThemeFile>,
+    raw: Option<&BTreeMap<String, serde_json::Value>>,
+    values: impl FnOnce() -> BTreeMap<String, crate::theme_files::OptionValue>,
+) -> Option<FilePalette> {
+    ctx.data_mut(|data| {
+        let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE));
+        let same = match (&state.prepared, file) {
+            (Some(old), Some(file)) => old.file == *file && old.raw.as_ref() == raw,
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            state.blur = BlurIntent { revision: state.blur.revision.wrapping_add(1), ..Default::default() };
+            state.prepared = file.map(|file| {
+                let values = values();
+                state.blur.offered = crate::theme_options::declares_blur(file);
+                if state.blur.offered {
+                    state.blur.radius = crate::theme_options::blur_radius(file, &values, crate::theme_options::Availability::Available);
+                }
+                let (enabled, fade_ms) = crate::theme_options::tab_settings(file, &values);
+                let base = FilePalette {
+                    dark: file.base.is_dark(),
+                    tokens: crate::theme_files::resolve_with(file, &values),
+                    icons: crate::theme_files::resolve_icon_palette(file, &values),
+                };
+                PreparedTheme { file: file.clone(), raw: raw.cloned(), values, base, enabled, fade_ms }
+            });
+            state.environment = None;
+            state.targets.clear();
+            // A theme/option change applies immediately; only tab changes animate.
+            state.shown = None;
+            state.fade = None;
+            set_published(None);
+        }
+        state.prepared.as_ref().map(|p| p.base)
+    })
+}
+
+impl TabThemeState {
+    fn publish(&mut self, tab: &str, now: f64) -> (PublishedTab, TabAccent, bool) {
+        let environment = Environment::current();
+        if self.environment != Some(environment) {
+            self.environment = Some(environment);
+            self.targets.clear();
+            self.shown = None;
+            self.fade = None;
+        }
+        // Bound the cache even if an internal caller supplies an unknown tab name.
+        let tab = if crate::workspace::TAB_ACCENTS.contains(tab) { tab } else { "MODEL" };
+        // Borrow the key on resting frames; own a name only when caching a new target.
+        let target = if let Some(target) = self.targets.get(tab) {
+            *target
+        } else {
+            #[cfg(test)]
+            {
+                self.resolutions += 1;
+            }
+            let window = if let Some(prepared) = &self.prepared {
+                environment.window(crate::theme_files::resolve_for_tab(&prepared.file, &prepared.values, Some(tab)))
+            } else {
+                Tokens::themed(environment.dark, environment.vision)
+            };
+            let accent = crate::workspace::tab_accent(&window, tab);
+            let window = if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), vision())) };
+            let target = TabTarget {
+                tokens: window.with_background(environment.background),
+                view: Tokens::themed(viewport_dark(), vision()).with_background(environment.background),
+                accent,
+            };
+            self.targets.insert(tab.to_owned(), target);
+            target
+        };
+        let destination = Surfaces::of(target.tokens);
+        // Sample the old fade before retargeting, even when two tab changes happen in one frame.
+        if let Some(fade) = self.fade {
+            let (shown, running) = fade.sample(now);
+            let mut current = target.tokens;
+            shown.apply(&mut current);
+            if running {
+                current.protect_tab_panel();
+            }
+            self.shown = Some(Surfaces::of(current));
+            if !running {
+                self.fade = None;
+            }
+        }
+        if self.tab != tab || self.shown.is_none() {
+            let duration = self.prepared.as_ref().filter(|p| p.enabled).map_or(0.0, |p| p.fade_ms);
+            self.fade = self.shown.filter(|from| *from != destination && duration > 0.0 && now.is_finite()).map(|from| Fade {
+                from,
+                to: destination,
+                start: now,
+                seconds: f64::from(duration) / 1000.0,
+            });
+            tab.clone_into(&mut self.tab);
+            if self.fade.is_none() {
+                self.shown = Some(destination);
+            }
+        }
+        let mut tokens = target.tokens;
+        self.shown.unwrap_or(destination).apply(&mut tokens);
+        // Protect interpolated alpha too; opacity's readability floor applies throughout a fade.
+        if self.fade.is_some() {
+            tokens.protect_tab_panel();
+        }
+        self.shown = Some(Surfaces::of(tokens));
+        let mut view = if viewport_dark() == is_dark() { tokens } else { target.view };
+        view.viewport_top = tokens.viewport_top;
+        view.viewport_bottom = tokens.viewport_bottom;
+        let tab_surfaces = self.prepared.as_ref().is_some_and(|p| p.enabled && !p.file.tabs.is_empty());
+        (PublishedTab { environment, tokens, view, tab_surfaces }, target.accent, self.fade.is_some())
+    }
+}
+
+/// A theme file as the theme system applies it: its palette for its base (dark or light), and the icon palette it
+/// gives the icon renderer.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Custom {
+pub struct FilePalette {
     pub dark: bool,
     pub tokens: Tokens,
+    pub icons: Option<crate::icon_svg::Palette>,
 }
 
-/// Use a theme file's palette for its base, or the built-in palettes (`None`). Returns whether
-/// that changed anything (the visuals follow on the next [`apply`]).
-pub fn set_custom(custom: Option<Custom>) -> bool {
-    CUSTOM.with(|c| c.replace(custom) != custom)
+/// Apply a theme file's palettes ([`solidcraft_theme::set_custom`] and the icon renderer's), or the built-in ones (`None`). Returns
+/// whether that changed anything (the visuals follow on the next [`solidcraft_theme::apply`]). The app applies a theme
+/// through this only: `set_custom` alone would keep the previous theme's icon colours.
+pub fn set_file_palette(file: Option<FilePalette>) -> bool {
+    let tokens = set_custom(file.map(|f| Custom { dark: f.dark, tokens: f.tokens }));
+    let icons = crate::icon_svg::set_theme_palette(file.and_then(|f| f.icons.map(|icons| (f.dark, icons))));
+    tokens | icons
 }
 
-/// Is the dark theme on?
-pub fn is_dark() -> bool {
-    DARK.get()
+/// Isolated tests draw with a theme file's palettes, restored even when an assertion fails.
+#[cfg(test)]
+pub(crate) fn scoped_file(file: &crate::theme_files::ThemeFile) -> impl Drop {
+    struct Restore(Option<Custom>, Option<(bool, crate::icon_svg::Palette)>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            set_custom(self.0);
+            crate::icon_svg::set_theme_palette(self.1);
+        }
+    }
+    let restore = Restore(solidcraft_theme::custom(), crate::icon_svg::theme_palette_state());
+    let values = BTreeMap::new();
+    let tokens = crate::theme_files::resolve_with(file, &values);
+    set_file_palette(Some(FilePalette { dark: is_dark(), tokens, icons: crate::theme_files::resolve_icon_palette(file, &values) }));
+    restore
 }
 
-/// The common conversion boundary for compiled icon palette data.
-pub(crate) const fn icon_color(rgb: [u8; 3]) -> Color32 {
-    Color32::from_rgb(rgb[0], rgb[1], rgb[2])
+/// Publish the tab palettes and the accent of `tab` for this frame. `sketch_open` is whether a sketch is being
+/// edited, `tool_active` whether a tool or dialog is open; both only steer focus painting.
+pub fn publish_tab(tab: &str, sketch_open: bool, tool_active: bool, ctx: &egui::Context) {
+    let now = ctx.input(|i| i.time);
+    let (published, accent, fading, style_surfaces) = ctx.data_mut(|data| {
+        let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE));
+        let (published, accent, fading) = state.publish(tab, now);
+        let style_surfaces = published.tab_surfaces || state.styled_surfaces;
+        state.styled_surfaces = published.tab_surfaces;
+        (published, accent, fading, style_surfaces)
+    });
+    set_published(Some(published));
+    if style_surfaces {
+        let fills = {
+            let style = ctx.global_style();
+            (style.visuals.panel_fill, style.visuals.window_fill)
+        };
+        if fills != (published.tokens.panel, published.tokens.panel) {
+            ctx.global_style_mut(|style| {
+                style.visuals.panel_fill = published.tokens.panel;
+                style.visuals.window_fill = published.tokens.panel;
+            });
+        }
+    }
+    if fading {
+        ctx.request_repaint();
+    }
+    accent.set_current(crate::workspace::TAB_ACCENTS.icon_accent(tab), sketch_open.then_some(AccentRamp::Sketch), tool_active, ctx);
 }
 
-/// Colour vision modes (#778): a second set of values for the colours that carry a meaning, for
-/// a weak or missing red (protan), green (deutan) or blue (tritan) sense. Not a filter: Off gives
-/// back the theme's colours unchanged. Protan and Deutan share one red-green table, measured
-/// clear for both (`colour_vision_tests`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize)]
+/// The 3D view's colours (#4146): the theme's own, or the built-in Light or Dark theme's whatever
+/// the window uses, so a dark window can show the model on a light view and the other way round.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ColorVision {
+pub enum ViewportTheme {
     #[default]
-    Off,
-    Protan,
-    Deutan,
-    Tritan,
+    Theme,
+    Light,
+    Dark,
 }
 
-impl ColorVision {
-    pub const ALL: [ColorVision; 4] = [ColorVision::Off, ColorVision::Protan, ColorVision::Deutan, ColorVision::Tritan];
+impl ViewportTheme {
+    pub const ALL: [ViewportTheme; 3] = [ViewportTheme::Theme, ViewportTheme::Light, ViewportTheme::Dark];
 
-    /// The saved value (`ui.prefs` `color_vision`).
+    /// The saved value (`ui.prefs` `viewport_theme`).
     pub fn id(self) -> &'static str {
         match self {
-            ColorVision::Off => "off",
-            ColorVision::Protan => "protan",
-            ColorVision::Deutan => "deutan",
-            ColorVision::Tritan => "tritan",
+            ViewportTheme::Theme => "theme",
+            ViewportTheme::Light => "light",
+            ViewportTheme::Dark => "dark",
         }
     }
 
-    pub fn from_id(id: &str) -> Option<ColorVision> {
-        ColorVision::ALL.into_iter().find(|m| m.id() == id)
+    pub fn from_id(id: &str) -> Option<ViewportTheme> {
+        ViewportTheme::ALL.into_iter().find(|m| m.id() == id)
     }
 
     /// Its name in the Preferences (a message id).
     pub fn label_id(self) -> &'static str {
         match self {
-            ColorVision::Off => "ui.colour_vision_off",
-            ColorVision::Protan => "ui.colour_vision_protan",
-            ColorVision::Deutan => "ui.colour_vision_deutan",
-            ColorVision::Tritan => "ui.colour_vision_tritan",
+            ViewportTheme::Theme => "ui.viewport_theme_follow",
+            ViewportTheme::Light => "ui.light",
+            ViewportTheme::Dark => "ui.dark",
         }
     }
 
-    /// Who it is for, in one line (its tooltip; a message id).
-    pub fn help_id(self) -> &'static str {
+    /// The view's own dark or light, or `None` to draw it as the window ([`solidcraft_theme::set_viewport_dark`]).
+    pub fn dark(self) -> Option<bool> {
         match self {
-            ColorVision::Off => "ui.colour_vision_off_tip",
-            ColorVision::Protan => "ui.colour_vision_protan_tip",
-            ColorVision::Deutan => "ui.colour_vision_deutan_tip",
-            ColorVision::Tritan => "ui.colour_vision_tritan_tip",
+            ViewportTheme::Theme => None,
+            ViewportTheme::Light => Some(false),
+            ViewportTheme::Dark => Some(true),
         }
     }
 }
 
-/// From saved preferences: a value this version doesn't know (a later version's mode, a hand
-/// edit) is Off rather than an error, which would lose every other saved preference with it.
-/// `ui.prefs` refuses such a value before it gets here (`prefs::set`).
-impl<'de> Deserialize<'de> for ColorVision {
+/// From saved preferences: an unknown value is Theme, as [`solidcraft_theme::ColorVision`]'s is Off.
+impl<'de> Deserialize<'de> for ViewportTheme {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v = serde_json::Value::deserialize(d)?;
-        Ok(v.as_str().and_then(ColorVision::from_id).unwrap_or_default())
+        Ok(v.as_str().and_then(ViewportTheme::from_id).unwrap_or_default())
     }
 }
 
-/// The colour vision mode on now (on this thread).
-pub fn vision() -> ColorVision {
-    VISION.with(Cell::get)
-}
-
-/// Switch the colour vision mode (the visuals follow on the next [`apply`]).
-pub fn set_vision(mode: ColorVision) {
-    VISION.with(|v| v.set(mode));
-}
-
-/// An sRGB colour given as 0..1 (the analysis colours), for drawing in the UI.
-pub fn srgb(c: [f32; 3]) -> Color32 {
-    let byte = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
-    Color32::from_rgb(byte(c[0]), byte(c[1]), byte(c[2]))
-}
-
-/// Surface analysis colours, straight sRGB 0..1 as the shader takes them (exact, so they read
-/// the same as when they were literals in the WGSL). The light theme's are the headless default.
-pub use solidcraft_engine::render::AnalysisColors;
-
-/// The colours icons draw of their own (`icons::paint` takes ink, fill and accent from its
-/// caller). Every icon colour is a token so a colour vision mode can reach it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct IconColors {
-    /// Surface sheets: a sheet, a second sheet beside it, a lighter sheet, iso lines and teeth.
-    pub sheet: Color32,
-    pub sheet_2: Color32,
-    pub sheet_light: Color32,
-    pub sheet_line: Color32,
-    /// Highlights (and the white ink of markers and the agent pointer), and the sphere's glint.
-    pub highlight: Color32,
-    pub glint: Color32,
-    pub folder: Color32,
-    pub plane: Color32,
-    pub fold: Color32,
-    /// Zebra stripes, and the environment map's sky and floor.
-    pub stripe: Color32,
-    pub sky: Color32,
-    pub floor: Color32,
-    /// Appearance: red, blue and yellow paint dabs.
-    pub paint: [Color32; 3],
-    /// Origin: X, Y and Z arrows.
-    pub axes: [Color32; 3],
-    /// Accessibility: reachable, blocked. Draft: positive, between. Curvature: flat, middle,
-    /// tight.
-    pub access: [Color32; 2],
-    pub draft: [Color32; 2],
-    pub curvature: [Color32; 3],
-    pub interference: Color32,
-    pub warning: Color32,
-    /// The pointer an AI agent moves.
-    pub agent: Color32,
-    /// The dark halo under viewport markers (snap points).
-    pub marker_halo: Color32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Tokens {
-    pub app_bar: Color32,
-    pub toolbar: Color32,
-    pub panel: Color32,
-    pub panel_header: Color32,
-    pub border: Color32,
-    pub text: Color32,
-    pub text_dim: Color32,
-    pub accent: Color32,
-    pub accent_soft: Color32,
-    pub sketch_accent: Color32,
-    pub error: Color32,
-    pub warning: Color32,
-    pub icon: Color32,
-    pub icon_fill: Color32,
-    pub timeline: Color32,
-    pub hover: Color32,
-    // ---- viewport selection feedback ----
-    /// Selected face (flat fill).
-    pub sel_face: Color32,
-    /// Selected edge core and its lighter rim.
-    pub sel_edge: Color32,
-    pub sel_edge_rim: Color32,
-    /// Hovered edge: dark core with a light halo.
-    pub hover_edge: Color32,
-    pub hover_edge_halo: Color32,
-    /// How much lighter a hovered face is (grey levels).
-    pub hover_face_lift: u8,
-    /// Selected profile fill and outline.
-    pub sel_profile: Color32,
-    pub sel_profile_edge: Color32,
-    /// Hovered profile: faint tint and a bright outline.
-    pub hover_profile: Color32,
-    pub hover_profile_edge: Color32,
-    /// Selected vertex dot.
-    pub sel_vertex: Color32,
-    // ---- origin ----
-    pub origin_plane: Color32,
-    pub origin_plane_edge: Color32,
-    pub origin_plane_hover: Color32,
-    pub origin_point: Color32,
-    pub axis_x: Color32,
-    pub axis_y: Color32,
-    pub axis_z: Color32,
-    /// Construction planes.
-    pub construction_plane: Color32,
-    /// Construction axes and points.
-    pub construction_geom: Color32,
-    // ---- bodies and live previews ----
-    pub body: Color32,
-    pub body_edge: Color32,
-    /// Command manipulators (direction arrows, handles).
-    pub manipulator: Color32,
-    /// New surface in a feature preview.
-    pub preview_add: Color32,
-    /// The surface of a body a feature preview creates (New Body), apart from a join (#1805).
-    pub preview_new: Color32,
-    /// Proposed sketch geometry, distinct from blue selections.
-    pub preview_sketch: Color32,
-    /// Removed material in a feature preview (translucent).
-    pub preview_cut: Color32,
-    /// Navigation cube faces, outline and labels.
-    pub cube_face: Color32,
-    pub cube_border: Color32,
-    pub cube_text: Color32,
-    /// Light blue hover fill, readable on the pale cube in either theme.
-    pub cube_hover: Color32,
-    // ---- viewport ----
-    /// Viewport background (top and bottom of the gradient; equal for a flat fill).
-    pub viewport_top: Color32,
-    pub viewport_bottom: Color32,
-    pub grid: Color32,
-    pub grid_major: Color32,
-    /// A whole selected body.
-    pub body_selected: Color32,
-    /// Sketch curves: under-constrained, fully constrained (and finished sketches).
-    pub sketch: Color32,
-    pub sketch_fixed: Color32,
-    /// Fixed (locked) sketch geometry.
-    pub sketch_locked: Color32,
-    /// Sketch dimensions: driving, driven (reference).
-    pub dimension: Color32,
-    pub dimension_driven: Color32,
-    /// Sketch points: fully constrained, free.
-    pub sketch_point: Color32,
-    pub sketch_point_free: Color32,
-    /// Command dialogs: panel, border, and the filled selection chip.
-    pub dialog_bg: Color32,
-    pub dialog_border: Color32,
-    pub chip: Color32,
-    /// Band behind a panel's heading and, lighter, behind its section headings (both set off
-    /// from `dialog_bg`).
-    pub heading_bg: Color32,
-    pub subheading_bg: Color32,
-    /// Inside of bodies cut by a section.
-    pub section_cap: Color32,
-    /// Closed sketch profiles (translucent fill).
-    pub profile_fill: Color32,
-    /// Constraint glyph boxes.
-    pub glyph_bg: Color32,
-    pub glyph_edge: Color32,
-    pub glyph_text: Color32,
-    /// Chips drawn over the viewport (status, navigation bar, dimension labels).
-    pub overlay: Color32,
-    /// Rubber band of the shape being drawn.
-    pub rubber_band: Color32,
-    /// Light text on the application bar.
-    pub app_bar_text: Color32,
-    /// A hovered tab on the application bar (keeps `app_bar_text` readable).
-    pub app_bar_hover: Color32,
-    /// Timeline items: normal and failed.
-    pub timeline_item: Color32,
-    pub timeline_item_error: Color32,
-    pub timeline_marker: Color32,
-    /// Button and field backgrounds on panels.
-    pub field: Color32,
-    // ---- box selection ----
-    pub box_window: Color32,
-    pub box_crossing: Color32,
-    // ---- colours that came from the engine or were drawn in place ----
-    /// Sketch curves the engine tags (`view::colors`): projected, lost link, construction,
-    /// centerline.
-    pub sketch_projected: Color32,
-    pub sketch_lost: Color32,
-    pub sketch_construction: Color32,
-    pub sketch_centerline: Color32,
-    /// The view triad's X, Y and Z (and the CPU scene's origin axes).
-    pub triad: [Color32; 3],
-    /// The move gizmo's X, Y and Z.
-    pub gizmo: [Color32; 3],
-    /// Sheet metal flat pattern: bend up, bend down.
-    pub bend_up: Color32,
-    pub bend_down: Color32,
-    /// Interference: the clash fill, before its shading.
-    pub interference: Color32,
-    /// Continuity Analysis seams, best to worst as `inspect.continuity` judges them: smooth (G2),
-    /// tangent with a curvature jump (G1), a crease (G0) and a gap. Bluish green, blue, yellow
-    /// and reddish purple stay apart in every colour vision mode, so no mode changes them.
-    pub continuity: [Color32; 4],
-    pub analysis: AnalysisColors,
-    pub icons: IconColors,
-    /// The application bar's buttons: ink, fill and accent of their icons.
-    pub app_bar_icon: [Color32; 3],
-    /// The SolidCraft mark on the application bar: light, mid and dark faces, and its edge.
-    pub logo: [Color32; 4],
-}
-
-impl Tokens {
-    /// The tokens of the current theme and colour vision mode.
-    pub fn get() -> Tokens {
-        Tokens::themed(is_dark(), vision())
-    }
-
-    /// The tokens of a theme and colour vision mode: a theme file's palette when one is on for
-    /// that base ([`set_custom`]), else the built-in one; the colour vision mode on top.
-    pub fn themed(dark: bool, mode: ColorVision) -> Tokens {
-        let custom = CUSTOM.get().filter(|c| c.dark == dark).map(|c| c.tokens);
-        custom.unwrap_or(if dark { Tokens::dark() } else { Tokens::light() }).with_vision(dark, mode)
-    }
-
-    /// These tokens with a colour vision mode's values on top (the tables in `palettes.rs`); Off
-    /// gives them back unchanged.
-    pub fn with_vision(self, dark: bool, mode: ColorVision) -> Tokens {
-        match mode {
-            ColorVision::Off => self,
-            ColorVision::Protan | ColorVision::Deutan => self.red_green(dark),
-            ColorVision::Tritan => self.blue_yellow(dark),
-        }
-    }
-
-    /// Fade idle cube colours into the viewport while retaining opaque facets.
-    pub fn navigation_cube(self, active: bool) -> Tokens {
-        if active {
-            return self;
-        }
-        let mut t = self;
-        t.cube_face = t.cube_face.lerp_to_gamma(t.viewport_top, 0.55);
-        t.cube_border = t.cube_border.lerp_to_gamma(t.viewport_top, 0.55);
-        t.cube_text = t.cube_text.lerp_to_gamma(t.viewport_top, 0.55);
-        t.axis_x = t.axis_x.lerp_to_gamma(t.viewport_top, 0.55);
-        t.axis_y = t.axis_y.lerp_to_gamma(t.viewport_top, 0.55);
-        t.axis_z = t.axis_z.lerp_to_gamma(t.viewport_top, 0.55);
-        t
-    }
-}
-
-/// How a physical material looks (the default appearance follows the material).
-pub fn material_color(name: &str) -> Option<Color32> {
-    solidcraft_engine::doc::material_color(name).map(|[r, g, b]| Color32::from_rgb(r, g, b))
-}
-
-/// Switch themes (the visuals follow on the next [`apply`]).
-pub fn set_dark(dark: bool) {
-    DARK.set(dark);
-}
-
-fn visuals(dark: bool) -> egui::Visuals {
-    let t = Tokens::themed(dark, vision());
-    let mut v = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
-    v.panel_fill = t.panel;
-    v.window_fill = t.panel;
-    v.window_stroke = Stroke::new(1.0, t.border);
-    v.extreme_bg_color = t.field;
-    v.faint_bg_color = t.panel_header;
-    v.override_text_color = Some(t.text);
-    v.widgets.inactive.weak_bg_fill = t.panel_header;
-    v.widgets.inactive.bg_fill = t.panel_header;
-    v.widgets.active.weak_bg_fill = t.accent_soft;
-    v.selection.bg_fill = t.accent_soft;
-    v.selection.stroke = Stroke::new(1.0, t.accent);
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, t.border);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, t.text);
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0, t.text);
-    v.widgets.hovered.weak_bg_fill = t.hover;
-    v.widgets.hovered.bg_fill = t.hover;
-    // egui uses the open-state fill for a movable window's active title bar.
-    v.widgets.open.weak_bg_fill = t.panel_header;
-    v.window_corner_radius = egui::CornerRadius::same(6);
-    v
-}
-
-pub fn apply(ctx: &egui::Context) {
-    let dark = is_dark();
-    ctx.set_theme(if dark { egui::Theme::Dark } else { egui::Theme::Light });
-    ctx.set_visuals(visuals(dark));
-    ctx.global_style_mut(|s| {
-        s.spacing.item_spacing = egui::vec2(6.0, 4.0);
-        s.spacing.button_padding = egui::vec2(6.0, 3.0);
-    });
+/// An sRGB colour carried by model data, including file colours and point-cloud shading.
+pub(crate) const fn model_color(rgb: [u8; 3]) -> Color32 {
+    Color32::from_rgb(rgb[0], rgb[1], rgb[2])
 }
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn concurrent_ui_renderers_keep_their_own_theme_and_vision() {
-        let barrier = std::sync::Barrier::new(2);
-        std::thread::scope(|scope| {
-            for (dark, vision) in [(false, super::ColorVision::Off), (true, super::ColorVision::Protan)] {
-                let barrier = &barrier;
-                scope.spawn(move || {
-                    super::set_dark(dark);
-                    super::set_vision(vision);
-                    barrier.wait();
-                    assert_eq!(super::is_dark(), dark);
-                    assert_eq!(super::vision(), vision);
-                    assert_eq!(super::Tokens::get().sketch_accent, super::Tokens::themed(dark, vision).sketch_accent);
-                });
-            }
-        });
+    use std::cell::Cell;
+
+    use super::*;
+    use solidcraft_theme::{ColorVision, apply, composite, contrast_ratio, set_dark, set_viewport_background, set_viewport_dark, set_vision};
+
+    fn tabs_state(base: &str, overrides: BTreeMap<String, crate::theme_files::OptionValue>) -> TabThemeState {
+        let file = crate::test_support::tab_fixture(base);
+        let values = crate::theme_files::effective_values(&file, &overrides).0;
+        let (enabled, fade_ms) = crate::theme_options::tab_settings(&file, &values);
+        let base = FilePalette {
+            dark: file.base.is_dark(),
+            tokens: crate::theme_files::resolve_with(&file, &values),
+            icons: crate::theme_files::resolve_icon_palette(&file, &values),
+        };
+        set_dark(base.dark);
+        set_file_palette(Some(base));
+        set_vision(ColorVision::Off);
+        set_viewport_dark(None);
+        set_viewport_background(None);
+        TabThemeState { prepared: Some(PreparedTheme { file, values, raw: None, base, enabled, fade_ms }), ..Default::default() }
     }
 
-    /// Title and section bands stand out from a dialog, the title more than its sections.
     #[test]
-    fn heading_bands_are_darker_than_the_dialog_in_order() {
-        let luma = |c: egui::Color32| u32::from(c.r()) * 3 + u32::from(c.g()) * 6 + u32::from(c.b());
-        for t in [super::Tokens::light(), super::Tokens::dark()] {
-            assert!(luma(t.heading_bg) < luma(t.subheading_bg), "{t:?}");
-            assert!(luma(t.subheading_bg) < luma(t.dialog_bg), "{t:?}");
+    fn tabs_fade_retargets_from_displayed_surfaces_and_stops_resolving_at_rest() {
+        crate::test_support::host_data();
+        for opacity in [40.0, 100.0] {
+            let mut state = tabs_state("dark", BTreeMap::from([("opacity".into(), crate::theme_files::OptionValue::Num(opacity))]));
+            let (model, _, repaint) = state.publish("MODEL", 0.0);
+            assert!(!repaint);
+            let (start, _, repaint) = state.publish("SKETCH", 1.0);
+            assert!(repaint);
+            assert_eq!(Surfaces::of(start.tokens), Surfaces::of(model.tokens));
+            let (middle, _, _) = state.publish("SKETCH", 1.12);
+            let (retarget, _, repaint) = state.publish("RENDER", 1.12);
+            assert!(repaint);
+            assert_eq!(Surfaces::of(retarget.tokens), Surfaces::of(middle.tokens));
+            assert_eq!(retarget.view.viewport_top, retarget.tokens.viewport_top);
+            assert_eq!(retarget.view, retarget.tokens);
+            let (end, _, repaint) = state.publish("RENDER", 1.36);
+            assert!(!repaint);
+            assert_eq!(state.resolutions, 3);
+            for frame in 0..20 {
+                let (resting, _, repaint) = state.publish("RENDER", 2.0 + f64::from(frame));
+                assert!(!repaint);
+                assert_eq!(resting.tokens, end.tokens);
+            }
+            assert_eq!(state.resolutions, 3, "resting frames must hit the resolved-token cache");
+            state.publish("MODEL", 30.0);
+            assert_eq!(state.resolutions, 3, "returning to a tab reuses its target");
         }
     }
 
     #[test]
-    fn active_movable_window_header_uses_theme_panel_header() {
-        for dark in [false, true] {
-            let ctx = egui::Context::default();
-            ctx.set_theme(if dark { egui::Theme::Dark } else { egui::Theme::Light });
-            ctx.set_visuals(super::visuals(dark));
-            let mut output = egui::FullOutput::default();
-            for _ in 0..3 {
-                let raw = egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
-                    ..Default::default()
-                };
-                output = ctx.run_ui(raw, |ui| {
-                    crate::frame::window(ui.ctx(), crate::i18n::tr_label("Parameters"), crate::frame::Width::Normal).fade_in(false).show(
-                        ui.ctx(),
-                        |ui| {
-                            ui.label(crate::i18n::tr_label("Parameter values"));
-                        },
-                    );
-                });
-                output.textures_delta.clear();
+    fn tabs_panel_text_contrast_holds_at_five_fade_steps_with_opacity() {
+        crate::test_support::host_data();
+        use crate::theme_files::OptionValue;
+        for base in ["dark", "light"] {
+            for percent in [40.0, 75.0, 100.0] {
+                for mode in ColorVision::ALL {
+                    for destination in ["SKETCH", "RENDER", "MODEL"] {
+                        let mut state = tabs_state(base, BTreeMap::from([("opacity".into(), OptionValue::Num(percent))]));
+                        set_vision(mode);
+                        state.publish(if destination == "MODEL" { "RENDER" } else { "MODEL" }, 0.0);
+                        state.publish(destination, 1.0);
+                        for step in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                            let (frame, _, _) = state.publish(destination, 1.0 + step * 0.24);
+                            let t = frame.tokens;
+                            for behind in [Color32::BLACK, Color32::WHITE] {
+                                let ground = composite(t.panel, behind);
+                                for ink in [t.text, t.text_dim, t.form_ink, t.dialog_label] {
+                                    assert!(
+                                        contrast_ratio(composite(ink, ground), ground) >= 4.5,
+                                        "{base} {mode:?} opacity {percent} tab {destination} step {step}"
+                                    );
+                                }
+                            }
+                            assert_eq!((frame.view.viewport_top, frame.view.viewport_bottom), (t.viewport_top, t.viewport_bottom));
+                        }
+                    }
+                }
             }
-            let title = output
+        }
+    }
+
+    #[test]
+    fn blur_intent_cache_resolves_only_when_theme_or_raw_values_change() {
+        crate::test_support::host_data();
+        let ctx = egui::Context::default();
+        let source: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/theme-blur.json")).unwrap();
+        let mut file = crate::theme_files::from_value(&source).unwrap();
+        let resolutions = Cell::new(0);
+        let prepare = |file: Option<&crate::theme_files::ThemeFile>, raw: Option<&BTreeMap<String, serde_json::Value>>| {
+            prepare_tabs(&ctx, file, raw, || {
+                resolutions.set(resolutions.get() + 1);
+                let saved = raw.into_iter().flatten().map(|(k, v)| (k.clone(), serde_json::from_value(v.clone()).unwrap())).collect();
+                file.map_or_else(BTreeMap::new, |file| crate::theme_files::effective_values(file, &saved).0)
+            });
+        };
+        for _ in 0..100 {
+            prepare(None, None);
+        }
+        assert_eq!(resolutions.get(), 0, "builtins do not normalize option tables");
+        prepare(Some(&file), None);
+        let zero = blur_intent(&ctx);
+        assert!(zero.offered);
+        assert_eq!(zero.radius, 0.0);
+        for _ in 0..100 {
+            prepare(Some(&file), None);
+        }
+        assert_eq!(resolutions.get(), 1, "offered zero is a borrowed cache hit");
+        assert_eq!(blur_intent(&ctx).revision, zero.revision);
+        let raw = BTreeMap::from([("blur".into(), serde_json::json!(18.25))]);
+        prepare(Some(&file), Some(&raw));
+        assert_eq!(blur_intent(&ctx).radius, 18.25);
+        assert_ne!(blur_intent(&ctx).revision, zero.revision);
+        for _ in 0..100 {
+            prepare(Some(&file), Some(&raw));
+        }
+        assert_eq!(resolutions.get(), 2);
+        // Followed reload keeps id/base, but content changes: it must invalidate.
+        file.options.retain(|o| o.id != "blur");
+        prepare(Some(&file), Some(&raw));
+        assert!(!blur_intent(&ctx).offered);
+        assert_eq!(blur_intent(&ctx).radius, 0.0);
+        for _ in 0..100 {
+            prepare(Some(&file), Some(&raw));
+        }
+        assert_eq!(resolutions.get(), 3, "undeclared themes also reuse the borrowed identity");
+    }
+
+    #[test]
+    fn tabs_cache_invalidates_for_theme_values_vision_and_viewport_overrides() {
+        crate::test_support::host_data();
+        let ctx = egui::Context::default();
+        let mut file = crate::test_support::tab_fixture("dark");
+        let normalizations = Cell::new(0);
+        let prepare = |file: &crate::theme_files::ThemeFile, raw: Option<&BTreeMap<String, serde_json::Value>>| {
+            let custom = prepare_tabs(&ctx, Some(file), raw, || {
+                normalizations.set(normalizations.get() + 1);
+                let saved = raw.into_iter().flatten().map(|(k, v)| (k.clone(), serde_json::from_value(v.clone()).unwrap())).collect();
+                crate::theme_files::effective_values(file, &saved).0
+            });
+            set_dark(file.base.is_dark());
+            set_file_palette(custom);
+        };
+        let publish = || ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE)).publish("SKETCH", 1.0));
+        set_vision(ColorVision::Off);
+        set_viewport_dark(None);
+        set_viewport_background(None);
+        prepare(&file, None);
+        let before = publish().0.tokens;
+        prepare(&file, None);
+        assert_eq!(publish().0.tokens, before);
+        assert_eq!(normalizations.get(), 1);
+        // The content changes while identity/base remain the same, as with a followed reload.
+        file.tabs.get_mut("SKETCH").unwrap().insert("viewport_top".into(), serde_json::json!("#1a4232"));
+        prepare(&file, None);
+        assert_ne!(publish().0.tokens.viewport_top, before.viewport_top);
+        assert_eq!(normalizations.get(), 2);
+        set_vision(ColorVision::Tritan);
+        assert_eq!(publish().0.tokens.axis_x, before.with_vision(true, ColorVision::Tritan).axis_x);
+        set_viewport_dark(Some(false));
+        assert_eq!(publish().0.tokens.viewport_top, Tokens::light().viewport_top);
+        set_viewport_background(Some([3, 7, 11]));
+        assert_eq!(publish().0.tokens.viewport_top, Color32::from_rgb(3, 7, 11));
+        set_viewport_background(None);
+        set_viewport_dark(None);
+        let raw = BTreeMap::from([("tab_colours".into(), serde_json::json!(false))]);
+        prepare(&file, Some(&raw));
+        assert_eq!(publish().0.tokens, Tokens::base());
+        assert_eq!(normalizations.get(), 3);
+    }
+
+    #[test]
+    fn tabs_publish_requests_repaints_only_during_fade_and_zero_is_instant() {
+        use crate::theme_files::OptionValue;
+        let ctx = crate::fonts::test_context();
+        let mut state = tabs_state("dark", BTreeMap::new());
+        state.publish("MODEL", 0.0);
+        ctx.data_mut(|d| d.insert_temp(egui::Id::unique(TAB_STATE), state));
+        let frame = |time| {
+            let mut out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
+                publish_tab("SKETCH", false, false, ui.ctx());
+                let t = Tokens::get();
+                solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_bottom);
+            });
+            let colors: Vec<_> = out
                 .shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) if text.galley.text() == "Parameters" => Some(text.pos + text.galley.rect.center().to_vec2()),
+                    egui::Shape::Mesh(mesh) => Some(mesh.vertices.iter().map(|vertex| vertex.color).collect()),
                     _ => None,
                 })
-                .expect("window title must be drawn");
-            let header = output
-                .shapes
-                .iter()
-                .filter_map(|shape| match &shape.shape {
-                    egui::Shape::Rect(rect) if rect.fill.a() > 0 && rect.rect.contains(title) => Some(rect),
-                    _ => None,
-                })
-                .min_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
-                .expect("window header must be drawn behind its title");
-            let expected = if dark { super::Tokens::dark() } else { super::Tokens::light() };
-            assert_eq!(header.fill, expected.panel_header, "active title bar should follow the {dark} palette");
+                .unwrap();
+            let tokens = Tokens::get();
+            assert_eq!(colors, [tokens.viewport_top, tokens.viewport_top, tokens.viewport_bottom, tokens.viewport_bottom]);
+            out.textures_delta.clear();
+            out.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+        };
+        assert!(frame(1.0).is_zero());
+        assert!(frame(1.12).is_zero());
+        // Drain the previously requested pass, then verify the endpoint leaves the loop asleep.
+        for time in [1.24, 1.3, 1.4] {
+            frame(time);
+        }
+        assert_eq!(frame(2.0), std::time::Duration::MAX);
+        let (end, _, _) = ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE)).publish("SKETCH", 2.0));
+        assert_eq!(Tokens::get(), end.tokens);
+        let mut instant = tabs_state("dark", BTreeMap::from([("tab_fade_ms".into(), OptionValue::Num(0.0))]));
+        instant.publish("MODEL", 0.0);
+        let (frame, _, repaint) = instant.publish("SKETCH", 1.0);
+        assert!(!repaint);
+        assert_eq!(
+            frame.tokens,
+            crate::theme_files::resolve_for_tab(&instant.prepared.as_ref().unwrap().file, &instant.prepared.as_ref().unwrap().values, Some("SKETCH"))
+        );
+    }
+
+    #[test]
+    fn built_in_selected_tab_labels_hold_wcag_small_text_contrast() {
+        crate::test_support::host_data();
+        let mut themes = vec![("Dark", super::Tokens::dark()), ("Light", super::Tokens::light())];
+        themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
+        let mut failures = Vec::new();
+        for (name, tokens) in themes {
+            for tab in crate::workspace::TAB_ACCENTS.names() {
+                let accent = crate::workspace::tab_accent(&tokens, tab);
+                let ratio = contrast_ratio(accent.ink, accent.soft);
+                if ratio < 4.5 {
+                    failures.push(format!("{name} {tab}: {ratio:.4}:1 ({:?} on {:?})", accent.ink, accent.soft));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "selected tab contrast below 4.5:1:\n{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn tab_accent_context_is_per_app_and_does_not_change_widget_visuals() {
+        let first = crate::fonts::test_context();
+        let second = crate::fonts::test_context();
+        let before = first.style_of(egui::Theme::Dark).visuals.clone();
+        publish_tab("SURFACE", false, false, &first);
+        assert_eq!(super::TabAccent::current(&first).color, super::Tokens::get().surface_fill);
+        assert_eq!(super::TabAccent::current(&second).color, super::Tokens::get().accent);
+        assert_eq!(super::TabAccent::current_icon_accent(&first), Some("surface"));
+        assert_eq!(super::TabAccent::current_icon_accent(&second), None);
+        assert_eq!(first.style_of(egui::Theme::Dark).visuals, before, "dialog OK, checkboxes and status styles must not inherit the tab");
+        publish_tab("MODEL", false, false, &first);
+        assert_eq!(super::TabAccent::current(&first).soft, super::Tokens::get().accent_soft);
+        assert_eq!(super::TabAccent::current_icon_accent(&first), None);
+    }
+
+    #[test]
+    fn tabs_surface_publication_restores_base_fills_without_restyling_widgets() {
+        use crate::theme_files::{OptionValue, ThemeFile};
+        for base in ["dark", "light"] {
+            let ctx = crate::fonts::test_context();
+            let file = crate::test_support::tab_fixture(base);
+            set_dark(file.base.is_dark());
+            set_vision(ColorVision::Off);
+            set_viewport_dark(None);
+            set_viewport_background(None);
+            set_file_palette(None);
+            let prepare = |file: &ThemeFile, enabled: Option<bool>| {
+                let raw = enabled.map(|enabled| BTreeMap::from([("tab_colours".into(), serde_json::json!(enabled))]));
+                let custom = prepare_tabs(&ctx, Some(file), raw.as_ref(), || {
+                    let saved = enabled.map(|enabled| BTreeMap::from([("tab_colours".into(), OptionValue::Bool(enabled))])).unwrap_or_default();
+                    crate::theme_files::effective_values(file, &saved).0
+                });
+                set_file_palette(custom)
+            };
+            let publish = |tab: &str, time| {
+                ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| publish_tab(tab, false, false, ui.ctx()))
+                    .textures_delta
+                    .clear();
+            };
+            prepare(&file, Some(true));
+            apply(&ctx);
+            let before = ctx.global_style().visuals.clone();
+            let base_custom = solidcraft_theme::custom();
+            publish("MODEL", 0.0);
+            assert_eq!(ctx.global_style().visuals, before);
+            publish("SKETCH", 1.0);
+            publish("SKETCH", 1.12);
+            let panel = Tokens::get().panel;
+            assert_ne!(panel, before.panel_fill, "exercise an actual animated panel fill");
+            let mut animated = before.clone();
+            animated.panel_fill = panel;
+            animated.window_fill = panel;
+            assert_eq!(ctx.global_style().visuals, animated, "all non-surface widget/selection/status visuals stay unchanged");
+            // Repair either owned fill independently, even when the panel already matches.
+            ctx.global_style_mut(|style| style.visuals.window_fill = before.window_fill);
+            publish("SKETCH", 1.12);
+            assert_eq!(ctx.global_style().visuals, animated);
+
+            assert!(!prepare(&file, Some(false)), "toggling surfaces does not change the base Custom tokens");
+            assert_eq!(solidcraft_theme::custom(), base_custom);
+            // Deliberately omit apply(): a full restyle would conceal stale animated fills.
+            publish("SKETCH", 1.13);
+            assert_eq!(ctx.global_style().visuals, before, "turning surfaces off must restore both base fills");
+
+            assert!(!prepare(&file, Some(true)));
+            publish("SKETCH", 2.0);
+            assert_ne!(ctx.global_style().visuals.panel_fill, before.panel_fill);
+            let mut plain = file.clone();
+            plain.tabs.clear();
+            plain.options.clear();
+            assert!(!prepare(&plain, None), "a no-option theme can retain the exact same base tokens");
+            assert_eq!(solidcraft_theme::custom(), base_custom);
+            publish("SKETCH", 2.1);
+            assert_eq!(ctx.global_style().visuals, before, "restoring a no-option theme must release the surface fills");
         }
     }
 }

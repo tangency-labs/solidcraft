@@ -19,10 +19,15 @@ fn close_to(got: f64, want: f64) -> bool {
 /// A round disc (a gear's pitch circle) of radius `r` about a vertical axis through (x, 0), 5 mm
 /// thick, in a component of its own, on a revolute joint to the grounded base.
 fn disc(s: &mut Session, name: &str, x: f64, r: &str) {
-    run(s, "component.activate", json!({"component": "root"}));
-    run(s, "component.create", json!({"name": name}));
-    run(s, "solid.cylinder", json!({"base": [x, 0, 0], "axis": [0, 0, 1], "radius": r, "height": 5}));
+    loose_disc(s, name, x, r);
     pin(s, "revolute", name, "Base", name, Vec3::new(x, 0.0, 0.0), Vec3::Z);
+}
+
+/// The disc alone, on no joint.
+fn loose_disc(s: &mut Session, name: &str, x: f64, r: &str) {
+    run(s, "component.activate", json!({"component": "root"}));
+    run(s, "component.create", json!({"name": name, "grounded": false}));
+    run(s, "solid.cylinder", json!({"base": [x, 0, 0], "axis": [0, 0, 1], "radius": r, "height": 5}));
 }
 
 fn base(s: &mut Session) {
@@ -80,11 +85,13 @@ fn a_gear_train_of_three_turns_by_its_radii() {
     run(&mut s, "motion.study", json!({"name": "Spin", "steps": 10, "keys": [{"joint": "G1", "points": [[0, 0], [10, 30]]}]}));
     run(&mut s, "motion.play", json!({"study": "Spin", "step": 10}));
     assert!(close_to(shown(&mut s, "G3"), 24.0), "{}", shown(&mut s, "G3"));
-    // An internal (ring) gear turns its mate the same way; redefining a link keeps its offset.
+    // An internal (ring) gear turns its mate the same way; the redefined link leaves G3 where it
+    // is (G2 at -18°), and G1 turning on 30° more turns G2 on -18° and G3 on -24°.
     let r = run(&mut s, "joint.gear", json!({"a": "G2", "b": "G3", "ra": 20, "rb": 15, "internal": true, "link": 1}));
     assert_eq!(r["link"], 1, "{r}");
+    assert!(close_to(shown(&mut s, "G3"), 24.0), "{}", run(&mut s, "joint.list", json!({})));
     run(&mut s, "joint.drive", json!({"joint": "G1", "value": 60}));
-    assert!(close_to(shown(&mut s, "G2"), -36.0) && close_to(shown(&mut s, "G3"), -48.0), "{}", run(&mut s, "joint.list", json!({})));
+    assert!(close_to(shown(&mut s, "G2"), -36.0) && close_to(shown(&mut s, "G3"), 0.0), "{}", run(&mut s, "joint.list", json!({})));
     // Undo takes the redefinition back.
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "edit.undo", json!({}));
@@ -116,7 +123,7 @@ fn rack() -> Session {
     disc(&mut s, "Pinion", 0.0, "8 mm");
     for (name, corner, length) in [("Rack", [-20.0, -14.0, 0.0], 40.0), ("Stop", [30.0, -14.0, 0.0], 4.0)] {
         run(&mut s, "component.activate", json!({"component": "root"}));
-        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "component.create", json!({"name": name, "grounded": false}));
         run(&mut s, "solid.box", json!({"length": length, "width": 4, "height": 4, "corner": corner}));
     }
     pin(&mut s, "slider", "Rail", "Base", "Rack", Vec3::new(0.0, -10.0, 0.0), Vec3::X);
@@ -162,10 +169,10 @@ fn a_screw_advances_its_pitch_per_turn() {
     let travel = r["values"][1]["value"].as_f64().unwrap_or(f64::NAN);
     assert!(close_to(travel, 3.0), "{r}");
     assert!(near(place(&s, "Nut", Vec3::new(-1.0, -1.0, 0.0)), Vec3::new(-1.0, -1.0, 3.0)));
-    // A left-hand thread goes the other way.
+    // A left-hand thread goes the other way, from where the nut is.
     run(&mut s, "joint.screw", json!({"joint": "Thread", "pitch": 1.5, "reverse": true, "link": 0}));
-    let r = run(&mut s, "joint.drive", json!({"joint": "Thread", "values": [360]}));
-    assert!(close_to(r["values"][1]["value"].as_f64().unwrap_or(f64::NAN), -1.5), "{r}");
+    let r = run(&mut s, "joint.drive", json!({"joint": "Thread", "values": [1080]}));
+    assert!(close_to(r["values"][1]["value"].as_f64().unwrap_or(f64::NAN), 1.5), "{r}");
     // A revolute joint and a slider, the pitch a parameter: changing it changes the lead.
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "lead", "expression": "2 mm"}));
@@ -179,6 +186,22 @@ fn a_screw_advances_its_pitch_per_turn() {
     assert!(close_to(shown(&mut s, "Lift"), 5.0), "{}", shown(&mut s, "Lift"));
     run(&mut s, "parameters.change", json!({"name": "lead", "expression": "4 mm"}));
     assert!(close_to(shown(&mut s, "Lift"), 10.0), "{}", shown(&mut s, "Lift"));
+}
+
+/// A coupling's length reads a bare number as millimetres in any design, so a parameter defined
+/// in it (`lead = 1.5`) keeps that millimetre, while `parameters.add` without a unit takes the
+/// design's units (#8865): the screw advances 1.5 mm a turn in an inch design too.
+#[test]
+fn a_pitch_defined_in_an_inch_design_reads_as_the_screw_does() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    base(&mut s);
+    part(&mut s, "Nut", [-1.0, -1.0, 0.0]);
+    pin(&mut s, "cylindrical", "Thread", "Base", "Nut", Vec3::ZERO, Vec3::Z);
+    run(&mut s, "joint.screw", json!({"joint": "Thread", "pitch": "lead = 1.5"}));
+    assert_eq!(s.doc.param("lead").map(|p| (p.expr.as_str(), p.unit.as_str())), Some(("1.5", "mm")));
+    let r = run(&mut s, "joint.drive", json!({"joint": "Thread", "values": [720]}));
+    assert!(close_to(r["values"][1]["value"].as_f64().unwrap_or(f64::NAN), 3.0), "{r}");
 }
 
 /// A motor gear turns the four-bar's crank: half as fast, the other way round, and the loop
@@ -252,4 +275,188 @@ fn couplings_refuse_what_they_cannot_couple() {
         assert!(s.execute("joint.gear", &p).is_err(), "{p}");
     }
     assert_eq!(s.doc.assembly, before);
+}
+
+/// Gears of radii 10 and 20 on the grounded base, turned to 30° and 40° before they are coupled.
+fn meshed_at_30_and_40() -> Session {
+    let mut s = Session::default();
+    base(&mut s);
+    disc(&mut s, "GA", 0.0, "10 mm");
+    disc(&mut s, "GB", 30.0, "20 mm");
+    run(&mut s, "joint.drive", json!({"joint": "GA", "value": 30}));
+    run(&mut s, "joint.drive", json!({"joint": "GB", "value": 40}));
+    let r = run(&mut s, "joint.gear", json!({"a": "GA", "b": "GB", "ra": 10, "rb": 20}));
+    assert!(close_to(r["ratio"].as_f64().unwrap_or(f64::NAN), -0.5), "{r}");
+    s
+}
+
+/// The first motion link's offset in degrees, and whether its gear is reversed.
+fn gear_link(s: &Session) -> (f64, Option<bool>) {
+    let l = s.doc.assembly.links.first();
+    let reverse = l.and_then(|l| match &l.coupling {
+        Some(Coupling::Gear { reverse, .. }) => Some(*reverse),
+        _ => None,
+    });
+    (l.map(|l| l.offset.to_degrees()).unwrap_or(f64::NAN), reverse)
+}
+
+/// A gear link redefined in place (turned the other way with `reverse`) leaves the driven gear
+/// where it is, as a new link does, so the gears stay in mesh at the pose they are in: GB stays
+/// at 40° rather than jumping to 70° (the old offset kept, the flip pivoting about GA at 0°).
+/// Undo, redo and saving keep each definition with its pose.
+#[test]
+fn a_redefined_gear_stays_in_mesh_where_it_is() {
+    let mut s = meshed_at_30_and_40();
+    // b = -0.5·a + 55: GB keeps its 40° at GA's 30°.
+    let (offset, reverse) = gear_link(&s);
+    assert!(close_to(offset, 55.0) && reverse == Some(false), "{offset} {reverse:?}");
+    assert!(close_to(shown(&mut s, "GB"), 40.0), "{}", shown(&mut s, "GB"));
+    let r = run(&mut s, "joint.gear", json!({"a": "GA", "b": "GB", "ra": 10, "rb": 20, "reverse": true, "link": 0}));
+    assert!(r["link"] == 0 && close_to(r["ratio"].as_f64().unwrap_or(f64::NAN), 0.5), "{r}");
+    // b = 0.5·a + 25.
+    let (offset, reverse) = gear_link(&s);
+    assert!(close_to(offset, 25.0) && reverse == Some(true), "{offset} {reverse:?}");
+    assert!(close_to(shown(&mut s, "GA"), 30.0) && close_to(shown(&mut s, "GB"), 40.0), "{}", run(&mut s, "joint.list", json!({})));
+    assert!(near(rim(&s, "GB", 30.0, 20.0), turned(30.0, 20.0, 40.0)), "{:?}", rim(&s, "GB", 30.0, 20.0));
+    // It turns from there, now the same way as GA.
+    run(&mut s, "joint.drive", json!({"joint": "GA", "value": 0}));
+    assert!(close_to(shown(&mut s, "GB"), 25.0), "{}", shown(&mut s, "GB"));
+    assert!(near(rim(&s, "GB", 30.0, 20.0), turned(30.0, 20.0, 25.0)), "{:?}", rim(&s, "GB", 30.0, 20.0));
+    // Undo goes back through the drive and the redefinition, redo forward again.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    let (offset, reverse) = gear_link(&s);
+    assert!(close_to(offset, 55.0) && reverse == Some(false), "{offset} {reverse:?}");
+    assert!(close_to(shown(&mut s, "GA"), 30.0) && close_to(shown(&mut s, "GB"), 40.0), "{}", run(&mut s, "joint.list", json!({})));
+    run(&mut s, "edit.redo", json!({}));
+    let (offset, reverse) = gear_link(&s);
+    assert!(close_to(offset, 25.0) && reverse == Some(true), "{offset} {reverse:?}");
+    assert!(close_to(shown(&mut s, "GB"), 40.0), "{}", shown(&mut s, "GB"));
+    run(&mut s, "edit.redo", json!({}));
+    assert!(close_to(shown(&mut s, "GA"), 0.0) && close_to(shown(&mut s, "GB"), 25.0), "{}", run(&mut s, "joint.list", json!({})));
+    // Saved and opened again: the same link, the same pose.
+    let back = solidcraft_doc::format::read(&s.doc.to_json()).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(back.assembly.links, s.doc.assembly.links);
+    let vals = solidcraft_doc::joints::joint_values(&back.assembly);
+    let gb = back.assembly.joints.iter().find(|j| j.name == "GB").map(|j| j.id).unwrap_or(0);
+    assert!(vals.get(&gb).and_then(|q| q.first()).is_some_and(|v| close_to(v.to_degrees(), 25.0)), "{vals:?}");
+}
+
+/// The other couplings redefined in place keep their driven joint where it is too.
+#[test]
+fn a_redefined_rack_keeps_the_rack_where_it_is() {
+    let mut s = rack();
+    run(&mut s, "joint.rack_pinion", json!({"a": "Pinion", "b": "Rail", "radius": 8}));
+    run(&mut s, "joint.drive", json!({"joint": "Pinion", "value": 45}));
+    let travel = 8.0 * std::f64::consts::FRAC_PI_4;
+    run(&mut s, "joint.rack_pinion", json!({"a": "Pinion", "b": "Rail", "radius": 4, "reverse": true, "link": 0}));
+    assert!(close_to(shown(&mut s, "Rail"), travel), "{}", shown(&mut s, "Rail"));
+    run(&mut s, "joint.drive", json!({"joint": "Pinion", "value": 0}));
+    assert!(close_to(shown(&mut s, "Rail"), travel + 4.0 * std::f64::consts::FRAC_PI_4), "{}", shown(&mut s, "Rail"));
+}
+
+/// A joint a motion link drives adds no freedom of its own: gears on a grounded base have one
+/// between them, each turning (and draggable) with it; a part hinged on the driven gear has one
+/// more; a cylindrical joint whose turn drives its travel (a screw) has one, not two.
+#[test]
+fn a_motion_link_takes_its_driven_joints_freedom_on_a_grounded_base() {
+    let mut s = Session::default();
+    base(&mut s);
+    disc(&mut s, "GA", 0.0, "10 mm");
+    disc(&mut s, "GB", 30.0, "20 mm");
+    run(&mut s, "joint.gear", json!({"a": "GA", "b": "GB", "ra": 10, "rb": 20}));
+    for (part, want) in [("Base", 0), ("GA", 1), ("GB", 1)] {
+        assert_eq!(dof_of(&mut s, part), want, "{part}");
+    }
+    part(&mut s, "Arm", [45.0, -1.0, 5.0]);
+    pin(&mut s, "revolute", "Arm", "GB", "Arm", Vec3::new(46.0, 0.0, 5.0), Vec3::Z);
+    assert_eq!(dof_of(&mut s, "Arm"), 2);
+    // The arm's hinge driven by GA too: still the one value.
+    run(&mut s, "joint.motion_link", json!({"a": "GA", "b": "Arm", "ratio": 2}));
+    assert_eq!(dof_of(&mut s, "Arm"), 1);
+    let mut s = Session::default();
+    base(&mut s);
+    part(&mut s, "Nut", [-1.0, -1.0, 0.0]);
+    pin(&mut s, "cylindrical", "Thread", "Base", "Nut", Vec3::ZERO, Vec3::Z);
+    assert_eq!(dof_of(&mut s, "Nut"), 2);
+    run(&mut s, "joint.screw", json!({"joint": "Thread", "pitch": 1.5}));
+    assert_eq!(dof_of(&mut s, "Nut"), 1);
+}
+
+/// With nothing grounded, the first joint's A side stays put. A gear there (its joint to the
+/// housing made from the gear) leaves the housing one turn about it, and the driven gear on the
+/// housing turns with that same value once the gears are coupled: one, not two. With the
+/// housing first, each gear has one.
+#[test]
+fn a_motion_link_takes_its_driven_joints_freedom_with_nothing_grounded() {
+    for gear_first in [true, false] {
+        let mut s = Session::default();
+        part(&mut s, "Housing", [-10.0, -10.0, -20.0]);
+        loose_disc(&mut s, "GA", 0.0, "10 mm");
+        loose_disc(&mut s, "GB", 30.0, "20 mm");
+        let (a, b) = if gear_first { ("GA", "Housing") } else { ("Housing", "GA") };
+        pin(&mut s, "revolute", "JA", a, b, Vec3::ZERO, Vec3::Z);
+        pin(&mut s, "revolute", "JB", "Housing", "GB", Vec3::new(30.0, 0.0, 0.0), Vec3::Z);
+        let (fixed, free) = if gear_first { ("GA", "Housing") } else { ("Housing", "GA") };
+        assert_eq!(dof_of(&mut s, fixed), 0, "gear first: {gear_first}");
+        assert_eq!(dof_of(&mut s, free), 1, "gear first: {gear_first}");
+        // Before the link GB turns on JB, and with the housing about GA when GA stays put.
+        assert_eq!(dof_of(&mut s, "GB"), if gear_first { 2 } else { 1 }, "gear first: {gear_first}");
+        run(&mut s, "joint.gear", json!({"a": "JA", "b": "JB", "ra": 10, "rb": 20}));
+        for (part, want) in [(fixed, 0), (free, 1), ("GB", 1)] {
+            assert_eq!(dof_of(&mut s, part), want, "{part}, gear first: {gear_first}");
+        }
+    }
+}
+
+/// Rolling the marker back works a gear's ratio out from the faces as they were then, so the
+/// editor's pinned model and its source differ in the link's ratio, and the edit still goes
+/// through.
+#[test]
+fn an_editor_accepts_the_ratios_rolling_the_marker_works_out() {
+    let mut s = gear_train();
+    let before = s.doc.features.len();
+    // G1's wall moves out to a radius of 12, so the link's ratio goes from -0.5 to -0.6.
+    run(&mut s, "solid.offset_face", json!({"faces": [[10, 0, 2.5]], "distance": 2}));
+    let ratio = |s: &Session| s.doc.assembly.links.first().map(|l| l.ratio).unwrap_or(f64::NAN);
+    assert!(close_to(ratio(&s), -0.6), "{}", ratio(&s));
+    let original = s.scratch();
+    run(&mut s, "timeline.roll_to", json!({"position": before}));
+    let source = s.scratch();
+    assert!(close_to(ratio(&source), -0.5), "before the offset, the pitch radius is 10: {}", ratio(&source));
+    let prepared = s.scratch().compute_editor_commands(&[], &source, original).unwrap();
+    s.accept_commands(prepared).unwrap();
+    assert_eq!(s.doc.marker, None);
+    assert!(close_to(ratio(&s), -0.6), "{}", ratio(&s));
+}
+
+/// Opening a design saved rolled back before body names were pinned works the later bodies'
+/// names out from the whole timeline (#14008), and keeps nothing else that evaluation reads: a
+/// gear picked on a face after the marker keeps the ratio the file has, and the parts stay
+/// where the file has them.
+#[test]
+fn pinning_the_names_after_the_marker_leaves_a_gear_on_a_later_face_alone() {
+    let s = gear_train();
+    let g1 = s.doc.components.iter().find(|c| c.name == "G1").map(|c| c.id).unwrap_or_else(|| panic!("no G1"));
+    let disc = s.model.state().bodies.iter().find(|b| b.component == g1).map(|b| b.feature).unwrap_or_else(|| panic!("no G1 disc"));
+    let at = s.doc.features.iter().position(|f| f.id == disc).unwrap_or_else(|| panic!("no G1 disc feature"));
+    let mut doc = (*s.doc).clone();
+    for f in &mut doc.features {
+        f.body_names.clear();
+    }
+    doc.reserved_body_names.clear();
+    // Rolled back before G1's disc, so its face is not there, with the ratio the file was saved
+    // with (the whole timeline makes it -0.5).
+    doc.marker = Some(at);
+    if let Some(l) = doc.assembly.links.first_mut() {
+        l.ratio = 0.25;
+    }
+    let text = doc.to_json();
+    let plain = Session::opened(solidcraft_doc::Document::from_json(&text).unwrap(), None);
+    let opened = Session::opened_at(solidcraft_doc::Document::from_json(&text).unwrap(), None, None);
+    assert!(opened.doc.feature(disc).is_some_and(|f| !f.body_names.is_empty()), "the disc after the marker has its name");
+    assert_eq!(opened.doc.marker, Some(at));
+    assert_eq!(opened.doc.assembly.links.first().map(|l| l.ratio), Some(0.25));
+    assert_eq!(opened.doc.assembly, plain.doc.assembly);
+    assert_eq!(opened.doc.occurrences, plain.doc.occurrences);
 }

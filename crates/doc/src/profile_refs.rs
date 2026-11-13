@@ -1,4 +1,5 @@
 //! Exact profile references through analytic offset topology transitions.
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
 use crate::{DocError, ProfileSel, Result, SolvedSketch, WholeProfileBoundary};
@@ -97,6 +98,158 @@ fn reserved_boundaries(ss: &SolvedSketch) -> Result<std::collections::BTreeMap<V
 /// Resolve exact selection identities to the solved sketch's current profile indices.
 /// Complete reserved role sets follow their association; partial sets never expand.
 pub fn profile_selection_indices(ss: &SolvedSketch, selection: &ProfileSel) -> Result<Vec<usize>> {
+    selection_indices(ss, selection, None)
+}
+
+/// [`profile_selection_indices`] for evaluating a feature: an ordinary curve loop that no longer
+/// bounds a profile exactly (a curve now cuts the region, or a side was deleted and drawn again)
+/// falls back to the profiles that best match it (`fallback_loop`) instead of failing, and says
+/// so in the returned notes. Commands still check picks with the exact form.
+pub fn profile_selection_indices_lenient(ss: &SolvedSketch, selection: &ProfileSel) -> Result<(Vec<usize>, Vec<String>)> {
+    let mut notes = Vec::new();
+    let indices = selection_indices(ss, selection, Some(&mut notes))?;
+    Ok((indices, notes))
+}
+
+/// What a feature's profile selection falls back to when evaluated: one note per curve loop that
+/// no longer bounds a profile exactly; empty when everything matched exactly (or nothing did).
+pub fn profile_fallback_notes(ss: &SolvedSketch, selection: &ProfileSel) -> Vec<String> {
+    if !matches!(selection, ProfileSel::Curves { .. }) || profile_selection_indices(ss, selection).is_ok() {
+        return Vec::new();
+    }
+    profile_selection_indices_lenient(ss, selection).map(|(_, notes)| notes).unwrap_or_default()
+}
+
+/// A curve that is a line, an arc or a circle, and not the output of a free-form offset.
+fn is_analytic(sketch: &solidcraft_sketch::Sketch, id: &str) -> bool {
+    sketch.curves.iter().any(|curve| {
+        curve.id == id
+            && matches!(
+                curve.kind,
+                solidcraft_sketch::CurveKind::Line { .. } | solidcraft_sketch::CurveKind::Arc { .. } | solidcraft_sketch::CurveKind::Circle { .. }
+            )
+    }) && !sketch.freeform_offsets.iter().any(|offset| offset.output == id)
+}
+
+/// A loop made only of analytic curves: how many pieces each is cut into does not matter.
+fn is_analytic_loop(sketch: &solidcraft_sketch::Sketch, curves: &[String]) -> bool {
+    !curves.is_empty() && curves.iter().all(|id| is_analytic(sketch, id))
+}
+
+fn quoted(ids: &[String]) -> String {
+    ids.iter().map(|id| format!("`{id}`")).collect::<Vec<_>>().join(", ")
+}
+
+/// The profiles that best stand for an ordinary curve loop `curves` (the outer loop of a profile
+/// when it was picked) that no longer bounds any profile exactly, with a note saying what changed.
+/// `None` when nothing plausibly matches.
+///
+/// 1. All of its curves are still there and still close a loop on their own, but other curves
+///    now cut the region inside: the pieces inside that loop that touch it, whose union is the
+///    region that was picked (islands inside it stay holes, as they were).
+/// 2. Otherwise the profile whose outer loop shares the most of its curves, at least half of
+///    them; a tie goes to the one with the fewest curves the loop did not have, and a tie left
+///    after that is not guessed.
+///
+/// Analytic loops (lines, arcs and circles only) may list a curve more than once, as the pieces a
+/// circle was cut into when the loop was saved; the repeats are one curve here, since a sketch
+/// edit changes how many pieces a curve has but not the region it bounds. The outputs of an
+/// analytic offset (`sketch.offsets`) take step 1 only: their loop closes on its own or the pick
+/// is lost, a partial match by identifiers never stands for it. Loops with free-form offset
+/// outputs, free curves (splines, ellipses, conics) and legacy graph-span multisets keep their
+/// exact meaning and never fall back.
+fn fallback_loop(ss: &SolvedSketch, curves: &[String]) -> Option<(Vec<usize>, String)> {
+    let sketch = &ss.sketch;
+    let analytic_loop = is_analytic_loop(sketch, curves);
+    let deduped: Vec<String> = if analytic_loop {
+        let mut seen = BTreeSet::new();
+        curves.iter().filter(|id| seen.insert(id.as_str())).cloned().collect()
+    } else {
+        curves.to_vec()
+    };
+    let curves = deduped.as_slice();
+    let stored: BTreeSet<&str> = curves.iter().map(String::as_str).collect();
+    if stored.is_empty() || stored.len() != curves.len() || curves.len() > 512 || ss.profiles.len() > 10_000 {
+        return None;
+    }
+    if stored.iter().any(|id| sketch.freeform_offsets.iter().any(|offset| offset.output == *id)) {
+        return None;
+    }
+    let from_offset = stored.iter().any(|id| sketch.offsets.iter().any(|offset| offset.owns_output(id)));
+    if from_offset && !analytic_loop {
+        return None;
+    }
+    let drawn = |id: &str| sketch.curves.iter().any(|curve| curve.id == id && !curve.construction && !curve.centerline);
+    let touches = |profile: &solidcraft_sketch::Profile| profile.outer_curves.iter().any(|id| stored.contains(id.as_str()));
+    // 1. The loop alone still closes: take the pieces of the region it bounds.
+    if stored.iter().all(|id| drawn(id)) {
+        let mut alone = sketch.clone();
+        for curve in &mut alone.curves {
+            if !stored.contains(curve.id.as_str()) {
+                curve.construction = true;
+            }
+        }
+        let loops = solidcraft_sketch::find_profiles(&alone);
+        if let Ok(index) = solidcraft_sketch::profile_by_curves(&loops, curves)
+            && let Some(region) = loops.get(index).map(|profile| &profile.region)
+        {
+            let pieces: Vec<usize> = ss
+                .profiles
+                .iter()
+                .enumerate()
+                .filter(|(_, profile)| touches(profile) && region.outer.contains(profile.region.interior_point()))
+                .map(|(index, _)| index)
+                .collect();
+            if !pieces.is_empty() {
+                let note = format!(
+                    "the profile of {} bounded by {} is cut by another curve now; using the {} pieces inside it",
+                    ss.name,
+                    quoted(curves),
+                    pieces.len()
+                );
+                return Some((pieces, note));
+            }
+        }
+    }
+    if from_offset {
+        return None;
+    }
+    // 2. The closest loop by the curves it shares.
+    let count = |profile: &solidcraft_sketch::Profile, inside: bool| {
+        profile.outer_curves.iter().map(String::as_str).filter(|id| stored.contains(id) == inside).collect::<BTreeSet<_>>().len()
+    };
+    let best = ss.profiles.iter().map(|profile| count(profile, true)).max()?;
+    if best == 0 || best.saturating_mul(2) < stored.len() {
+        return None;
+    }
+    let tied: Vec<&solidcraft_sketch::Profile> = ss.profiles.iter().filter(|profile| count(profile, true) == best).collect();
+    let fewest = tied.iter().map(|profile| count(profile, false)).min()?;
+    let mut chosen = ss.profiles.iter().enumerate().filter(|(_, profile)| count(profile, true) == best && count(profile, false) == fewest);
+    let (index, profile) = chosen.next()?;
+    if chosen.next().is_some() {
+        return None;
+    }
+    let now: BTreeSet<&str> = profile.outer_curves.iter().map(String::as_str).collect();
+    let gone: Vec<String> = curves.iter().filter(|id| !now.contains(id.as_str())).cloned().collect();
+    let new: Vec<String> = solidcraft_sketch::distinct_curves(&profile.outer_curves).into_iter().filter(|id| !stored.contains(id.as_str())).collect();
+    let mut changes = Vec::new();
+    if !gone.is_empty() {
+        changes.push(format!("{} no longer on it", quoted(&gone)));
+    }
+    if !new.is_empty() {
+        changes.push(format!("{} new", quoted(&new)));
+    }
+    let note = format!(
+        "no profile of {} is bounded by exactly {} any more ({}); using the profile that shares {best} of its {} curves",
+        ss.name,
+        quoted(curves),
+        changes.join(", "),
+        curves.len()
+    );
+    Some((vec![index], note))
+}
+
+fn selection_indices(ss: &SolvedSketch, selection: &ProfileSel, mut notes: Option<&mut Vec<String>>) -> Result<Vec<usize>> {
     let indices = match selection {
         ProfileSel::All => (0..ss.profiles.len()).collect(),
         ProfileSel::Indices { indices } => indices.clone(),
@@ -112,17 +265,35 @@ pub fn profile_selection_indices(ss: &SolvedSketch, selection: &ProfileSel) -> R
                     }
                     indices.push(unique_profile(ss, &ss.sketch.offset_boundary(id)?)?);
                 } else {
-                    // Repeated saved IDs identify exact graph spans. Their multiplicity
-                    // must not silently turn into a whole-source certificate on resize.
+                    // Repeated saved IDs of free curves identify exact graph spans. Their
+                    // multiplicity must not silently turn into a whole-source certificate on
+                    // resize. Lines, arcs and circles are exempt: how many pieces such a curve is
+                    // cut into changes with every line drawn across it (#9368).
                     if curves.iter().collect::<BTreeSet<_>>().len() != curves.len()
+                        && !is_analytic_loop(&ss.sketch, curves)
                         && !ss.profiles.iter().any(|profile| same_ids(curves, &profile.outer_curves))
                     {
                         return Err(crate::curve_pick_error(solidcraft_sketch::CurvePick::Missing, curves, &ss.name));
                     }
-                    indices.push(
-                        solidcraft_sketch::profile_by_curves(&ss.profiles, curves)
-                            .map_err(|error| crate::curve_pick_error(error, curves, &ss.name))?,
-                    );
+                    match solidcraft_sketch::profile_by_curves(&ss.profiles, curves) {
+                        Ok(index) => indices.push(index),
+                        Err(error) => {
+                            let fallback = match (&error, notes.as_deref_mut()) {
+                                (solidcraft_sketch::CurvePick::Missing, Some(notes)) => fallback_loop(ss, curves).map(|found| (found, notes)),
+                                _ => None,
+                            };
+                            let Some(((found, note), notes)) = fallback else {
+                                return Err(crate::curve_pick_error(error, curves, &ss.name));
+                            };
+                            notes.push(note);
+                            // Two loops that fell back to one piece take it once.
+                            for index in found {
+                                if !indices.contains(&index) {
+                                    indices.push(index);
+                                }
+                            }
+                        }
+                    }
                 }
             }
             indices
@@ -144,7 +315,7 @@ pub fn profile_selection_indices(ss: &SolvedSketch, selection: &ProfileSel) -> R
                     .profiles
                     .iter()
                     .enumerate()
-                    .filter(|(_, profile)| profile.region.contains(*point))
+                    .filter(|(_, profile)| profile.contains(*point))
                     .min_by(|(_, a), (_, b)| a.area.total_cmp(&b.area))
                     .ok_or_else(|| DocError::Unknown(format!("profile at {:?} in {}", [point.x, point.y], ss.name)))?;
                 indices.push(index);
@@ -230,7 +401,8 @@ pub fn capture_profile_selection(ss: &SolvedSketch, indices: &[usize]) -> Result
 mod tests {
     #![allow(clippy::unwrap_used, clippy::panic)]
     use super::*;
-    use solidcraft_geom::{Plane, Vec2};
+    use serde_json::json;
+    use solidcore_record::{Plane, Vec2};
     use solidcraft_sketch::{Sketch, find_profiles, solve};
 
     fn rounded_source(sketch: &mut Sketch, radius: f64) -> Vec<(String, bool)> {
@@ -318,10 +490,13 @@ mod tests {
                         distance2: None,
                         start_offset: None,
                         through_all: false,
+                        second_follows_first: false,
                         taper: None,
+                        corner: Default::default(),
                         to: None,
                         to_offset: None,
                         from: None,
+                        to_body_apart: false,
                     },
                     operation: crate::Operation::NewBody,
                     targets: vec![],
@@ -370,7 +545,16 @@ mod tests {
         sketch.add_circle(Vec2::new(0., 0.), 3., None, Some("circle")).unwrap();
         let report = solve(&mut sketch);
         let profiles = find_profiles(&sketch);
-        let ss = SolvedSketch { feature: 1, name: "ordinary circle".into(), plane: Plane::XY, sketch, report, profiles, ends: Default::default() };
+        let ss = SolvedSketch {
+            feature: 1,
+            name: "ordinary circle".into(),
+            plane: Plane::XY,
+            sketch,
+            report,
+            profiles,
+            profiles_3d: Vec::new(),
+            ends: Default::default(),
+        };
         assert_eq!(ss.profiles.len(), 1);
         let indices = vec![0; 600];
         let selection = ProfileSel::Indices { indices: indices.clone() };
@@ -383,6 +567,61 @@ mod tests {
         assert_eq!(regions.len(), 600);
         assert!(regions.iter().all(|region| (region.area() - std::f64::consts::PI * 9.).abs() < 1e-9));
         assert!(profile_selection_indices(&ss, &ProfileSel::Indices { indices: vec![1] }).is_err());
+    }
+
+    #[test]
+    fn a_whole_source_selection_loads_in_any_curve_order() {
+        let ss = solved_square(&[]);
+        assert_eq!(ss.profiles.len(), 1);
+        let canonical = ProfileSel::WholeBoundaries {
+            profiles: vec![WholeProfileBoundary { outer: ["a", "b", "c", "d"].map(str::to_string).to_vec(), holes: Vec::new() }],
+        };
+        assert_eq!(profile_selection_indices(&ss, &canonical).unwrap(), vec![0]);
+        // The same loop written from another corner, or the other way round, names the same
+        // region: a design saved that way opens instead of being refused as damaged (#6499).
+        for order in [["b", "c", "d", "a"], ["d", "c", "b", "a"], ["c", "d", "a", "b"]] {
+            let written = json!({"type":"whole_boundaries","profiles":[{"outer":order,"holes":[]}]});
+            let loaded: ProfileSel = serde_json::from_value(written).unwrap();
+            assert_eq!(loaded, canonical, "the loaded identity is canonical");
+            assert_eq!(profile_selection_indices(&ss, &loaded).unwrap(), vec![0]);
+            assert_eq!(crate::select_profiles(&ss, &loaded).unwrap().len(), 1);
+        }
+    }
+
+    fn solved_square(extra: &[(&str, [f64; 4])]) -> SolvedSketch {
+        let mut sketch = Sketch::new();
+        let corners = [Vec2::new(0., 0.), Vec2::new(10., 0.), Vec2::new(10., 10.), Vec2::new(0., 10.)];
+        let points: Vec<_> = corners.iter().map(|corner| sketch.add_point(*corner, None).unwrap()).collect();
+        for (index, id) in ["a", "b", "c", "d"].iter().enumerate() {
+            sketch.add_line_pts(points[index], points[(index + 1) % 4], Some(id)).unwrap();
+        }
+        for (id, [x0, y0, x1, y1]) in extra {
+            let p = sketch.add_point(Vec2::new(*x0, *y0), None).unwrap();
+            let q = sketch.add_point(Vec2::new(*x1, *y1), None).unwrap();
+            sketch.add_line_pts(p, q, Some(id)).unwrap();
+        }
+        let report = solve(&mut sketch);
+        let profiles = find_profiles(&sketch);
+        SolvedSketch { feature: 1, name: "S".into(), plane: Plane::XY, sketch, report, profiles, profiles_3d: Vec::new(), ends: Default::default() }
+    }
+
+    #[test]
+    fn a_split_loop_falls_back_to_its_pieces_only_when_evaluating() {
+        let loops = ProfileSel::Curves { loops: vec![vec!["a".into(), "b".into(), "c".into(), "d".into()]] };
+        let split = solved_square(&[("cut", [4., 0., 4., 10.])]);
+        assert_eq!(split.profiles.len(), 2);
+        assert!(profile_selection_indices(&split, &loops).is_err(), "a command's pick stays exact");
+        let (indices, notes) = profile_selection_indices_lenient(&split, &loops).unwrap();
+        assert_eq!(indices.len(), 2);
+        assert!(notes[0].contains("cut by another curve now"), "{notes:?}");
+        assert_eq!(profile_fallback_notes(&split, &loops), notes);
+        let area: f64 = crate::select_profiles(&split, &loops).unwrap().iter().map(|region| region.area()).sum();
+        assert!((area - 100.).abs() < 1e-9, "{area}");
+        // Exact matches have no note; a loop sharing under half its curves matches nothing.
+        let whole = solved_square(&[]);
+        assert!(profile_fallback_notes(&whole, &loops).is_empty());
+        let few = ProfileSel::Curves { loops: vec![vec!["a".into(), "x".into(), "y".into(), "z".into(), "w".into()]] };
+        assert!(crate::select_profiles(&whole, &few).is_err());
     }
 
     #[test]
@@ -445,10 +684,13 @@ mod tests {
                         distance2: None,
                         start_offset: None,
                         through_all: false,
+                        second_follows_first: false,
                         taper: None,
+                        corner: Default::default(),
                         to: None,
                         to_offset: None,
                         from: None,
+                        to_body_apart: false,
                     },
                     operation: crate::Operation::NewBody,
                     targets: vec![],

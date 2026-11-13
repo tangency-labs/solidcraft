@@ -1,0 +1,211 @@
+{
+ "cases": [
+  {
+   "name": "cov_angle_to_nurb_negative_determinant",
+   "upstream_ref": "source/SMLib/src/SmEllipse.cpp:1352 (coverage: crates/solidcore/src/curve/ellipse/p2.rs:530)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      2,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "angle_to_nurb",
+      "args": [
+       0,
+       1,
+       0,
+       200,
+       180
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "cov_angle_to_nurb_no_root_in_span",
+   "upstream_ref": "source/SMLib/src/SmEllipse.cpp:1362 (coverage: crates/solidcore/src/curve/ellipse/p2.rs:538)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      2,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "angle_to_nurb",
+      "args": [
+       0,
+       1,
+       0,
+       700,
+       210
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "cov_angle_to_nurb_no_root_in_span_reversed",
+   "upstream_ref": "source/SMLib/src/SmEllipse.cpp:1362 (coverage: crates/solidcore/src/curve/ellipse/p2.rs:538)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      2,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "angle_to_nurb",
+      "args": [
+       2,
+       5,
+       700,
+       0,
+       490
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "cov_set_up_knot_at_minus_360",
+   "upstream_ref": "source/SMLib/src/SmEllipse.cpp:395 (coverage: crates/solidcore/src/curve/ellipse/p2.rs:2168)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -450,
+      -270
+     ],
+     "radii": [
+      2,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "set_up"
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "cov_set_up_knot_at_minus_360_circle",
+   "upstream_ref": "source/SMLib/src/SmEllipse.cpp:395 (coverage: crates/solidcore/src/curve/ellipse/p2.rs:2168)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -540,
+      -180
+     ],
+     "radii": [
+      1.5,
+      1.5
+     ]
+    },
+    "ops": [
+     {
+      "op": "set_up"
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  }
+ ]
+}

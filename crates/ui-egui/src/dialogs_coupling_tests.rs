@@ -1,10 +1,59 @@
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
-use solidcraft_engine::geom::Vec3;
 
 use super::*;
 use crate::Services;
 use crate::dialogs::{Kind, apply_commands, preview_commands};
+
+#[test]
+fn missing_joint_messages_are_drawn_in_full() {
+    for language in ["en", "de", "vi"] {
+        let _language = solidcraft_ui_text::scope(language);
+        for (command, message) in [
+            ("joint.screw", "needs a joint that turns and one that slides"),
+            ("joint.gear", "needs two joints that turn"),
+            ("joint.rack_pinion", "needs a joint that turns and one that slides"),
+        ] {
+            let mut app = SolveApp::new(Session::default(), Services::default());
+            app.preferences.language = language.to_owned();
+            app.start(command);
+            let ctx = crate::fonts::test_context();
+            let mut textures = std::collections::HashMap::new();
+            let mut draw = |app: &mut SolveApp| {
+                let input =
+                    egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
+                let mut output = ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx()));
+                crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+                output.textures_delta.clear();
+                output
+            };
+            for _ in 0..3 {
+                draw(&mut app);
+            }
+            let output = draw(&mut app);
+            if let Ok(dir) = std::env::var("SOLIDCRAFT_DIALOG_STATUS_EVIDENCE") {
+                std::fs::create_dir_all(&dir).unwrap();
+                crate::ui_kit::test_raster(
+                    &ctx,
+                    output.shapes.clone(),
+                    output.pixels_per_point,
+                    app.viewport.dialog_rect.expect("dialog bounds").expand(4.0),
+                    &textures,
+                )
+                .save(std::path::Path::new(&dir).join(format!("{command}-{language}.png")))
+                .unwrap();
+            }
+            let message = solidcraft_ui_text::tr_label(message);
+            let text = crate::test_support::text_shapes(&output).find(|text| text.galley.text() == message).expect("missing-joint message");
+            assert!(!text.galley.elided, "{command} ({language}) cuts off: {message}");
+            let bounds = text.galley.rect.translate(text.pos.to_vec2());
+            let clip =
+                output.shapes.iter().find(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == message)).unwrap().clip_rect;
+            assert!(clip.contains_rect(bounds), "{command} ({language}) clips the message: {bounds:?} outside {clip:?}");
+        }
+    }
+}
 
 /// A grounded base with discs G1 (radius 10 at x = 0) and G2 (radius 20 at x = 30) turning on
 /// revolute joints about +Z, and a nut on a cylindrical joint.
@@ -28,7 +77,7 @@ fn discs() -> SolveApp {
 /// A pick of the round wall a point of the exact geometry lies on (the facets of the wall's mesh
 /// cut inside it, so the nearest face of any body).
 fn wall(app: &SolveApp, p: Vec3) -> Sel {
-    let st = app.session.world_state();
+    let st = app.session.world_state().unwrap();
     let mut best: Option<(f64, Sel)> = None;
     for b in &st.bodies {
         let m = b.mesh();
@@ -47,17 +96,6 @@ fn joint(app: &SolveApp, name: &str) -> u64 {
     app.session.doc.assembly.joints.iter().find(|j| j.name == name).map(|j| j.id).unwrap_or(0)
 }
 
-/// The text of every text shape in a frame's output.
-fn texts(out: &egui::FullOutput) -> Vec<String> {
-    out.shapes
-        .iter()
-        .filter_map(|c| match &c.shape {
-            egui::Shape::Text(t) => Some(t.galley.text().to_string()),
-            _ => None,
-        })
-        .collect()
-}
-
 /// Picking a gear's round face chooses the joint it turns on and takes its radius; the ratio
 /// row says what the pair does, and OK makes the coupling.
 #[test]
@@ -65,25 +103,23 @@ fn picked_gear_faces_choose_their_joints_and_radii() {
     let mut app = discs();
     app.start("joint.gear");
     let mut d = app.dialog.take().unwrap();
-    // G2 first, G1 second: the joints follow the picks, whatever the dialog started on.
-    for (i, p) in [Vec3::new(50.0, 0.0, 2.5), Vec3::new(10.0, 0.0, 2.5)].into_iter().enumerate() {
+    // G2 first, G1 second: the joints follow the picks, whatever the dialog started on. The
+    // discs touch at x = 10, on both walls, so G1 is picked on its far side.
+    for (i, p) in [Vec3::new(50.0, 0.0, 2.5), Vec3::new(-10.0, 0.0, 2.5)].into_iter().enumerate() {
         d.active = i;
         let pick = wall(&app, p);
         d.pick(&app.session, pick);
     }
     app.dialog = Some(d);
-    let ctx = egui::Context::default();
+    let ctx = crate::fonts::test_context();
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
     let frame = |app: &mut SolveApp| {
         let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
-        let mut out = ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx()));
-        // Nothing is painted: drop the texture changes (an unapplied delta panics on drop).
-        out.textures_delta.clear();
-        out
+        crate::test_support::frame(&ctx, input, |ui| crate::dialogs::show(app, ui.ctx()))
     };
     frame(&mut app);
     let out = frame(&mut app);
-    let shown = texts(&out);
+    let shown: Vec<_> = crate::test_support::text_shapes(&out).map(|t| t.galley.text().to_string()).collect();
     assert!(shown.iter().any(|t| t == "-2 deg / deg"), "{shown:?}");
     assert!(shown.iter().any(|t| t.starts_with("20 mm")), "{shown:?}");
     let d = app.dialog.as_ref().expect("the dialog stays open");
@@ -134,7 +170,7 @@ fn instances_of_one_gear_are_coupled_as_two() {
         d.pick(&app.session, pick);
     }
     app.dialog = Some(d);
-    let ctx = egui::Context::default();
+    let ctx = crate::fonts::test_context();
     for _ in 0..2 {
         let input =
             egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() };
@@ -184,7 +220,8 @@ fn play_turns_the_angle_of_a_planar_pinion() {
 /// The dialog's rows pass their English text, which the catalogs translate by its key.
 #[test]
 fn the_dialog_labels_translate() {
-    let de = crate::i18n::Locale::for_language("de");
+    crate::i18n::install();
+    let de = solidcraft_ui_text::Locale::for_language("de");
     for (english, german) in [
         ("Gear 1", "Zahnrad 1"),
         ("Radius 2", "Radius 2"),
@@ -194,5 +231,5 @@ fn the_dialog_labels_translate() {
     ] {
         assert_eq!(de.label(english), german);
     }
-    assert_eq!(crate::i18n::Locale::for_language("ja").label("not a round face"), "円筒面ではありません");
+    assert_eq!(solidcraft_ui_text::Locale::for_language("ja").label("not a round face"), "円筒面ではありません");
 }

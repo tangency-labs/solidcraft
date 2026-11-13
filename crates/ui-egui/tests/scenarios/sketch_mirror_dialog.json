@@ -1,5 +1,5 @@
 [
- {"call":"ui.prefs","params":{"look_at_anim":false}},
+ {"call":"ui.prefs","params":{"look_at_anim":false,"sketch_mirror_auto_line":false}},
  {"call":"engine.execute","params":{"command":"sketch.create","params":{"plane":"XY"}}},
  {"call":"engine.execute","params":{"command":"sketch.line","params":{"points":[[-30,10],[-15,10]]}}},
  {"call":"engine.execute","params":{"command":"sketch.line","params":{"points":[[-15,10],[-15,25]]}}},
@@ -7,6 +7,8 @@
  {"call":"ui.view","params":{"view":"top"}},
  {"start":"sketch.mirror"},
  {"expect":{"dialog":"SketchModify(Mirror)","tool":null}},
+ {"note":"Fit after the floating panels are measured so both entity picks remain exposed beside the left dialog."},
+ {"call":"ui.view","params":{"view":"fit"}},
  {"click":{"sketch":[-22.5,10]}},
  {"click":{"sketch":[-15,17.5]}},
  {"click":{"sketch":[-22.5,10]},"ctrl":true},

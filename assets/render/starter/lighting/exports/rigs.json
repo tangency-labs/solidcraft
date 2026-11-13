@@ -1,0 +1,3715 @@
+{
+  "schema": "solidcraft-authored-light-rigs/1",
+  "version": "1.0.0",
+  "generator": "solidcraft-light-author/1.0.0",
+  "generator_sha256": "540120c61226e775b9b18f75c4bec5b44cf57305902e24020a52927cd0491bdf",
+  "recipe_sha256": "ee6f7066a041e9d51da815cda54a49cfc92c6cb6d3581d0eb88764495934048e",
+  "source": {
+    "path": "docs/render-materials/studio-presets.json",
+    "sha256": "175e117fe286da592b982a69472aec7a001d10a707d002b189a745dd2f77cd53",
+    "count": 24
+  },
+  "calibration": {
+    "id": "CAL-LIGHT-001",
+    "extent_mm": 1000.0,
+    "sphere_radius_b": 0.25,
+    "reflectance": 0.18,
+    "sphere_order": 48,
+    "area_order": 12,
+    "check_sphere_order": 72,
+    "check_area_order": 20,
+    "max_relative_error": 0.0015
+  },
+  "license": "MIT OR Apache-2.0",
+  "authoring_method": "original_deterministic_numeric_integration",
+  "radiometric_units": {
+    "radiance": "arbitrary_consistent_scene_referred_linear_RGB_radiance_unit",
+    "irradiance": "integral_of_relative_radiance_times_projected_solid_angle",
+    "physical_photometry": "not_watts_lumens_candela_or_lux",
+    "quantity_distinction": "Area radiance, point intensity and normal irradiance are different quantities; do not reuse gains between them."
+  },
+  "binding": "offline_authoring_resources_unbound_to_application",
+  "runtime_ready": false,
+  "counts_by_state": {
+    "authored_numeric_unbound": 19,
+    "blocked_calibration": 3,
+    "requires_existing_environment_sun": 2
+  },
+  "items": [
+    {
+      "id": "RIG-001",
+      "preset_id": "STU-001",
+      "catalog_id": "LUZ-001",
+      "name": "Single-side product softbox",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1200.0,
+            -1200.0,
+            1000.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.60920769908,
+            0.60920769908,
+            -0.507673082567
+          ],
+          "width_axis": [
+            -0.707106781187,
+            0.707106781187,
+            0.0
+          ],
+          "height_axis": [
+            0.358979079309,
+            0.358979079309,
+            0.861549790341
+          ],
+          "width_mm": 800.0,
+          "height_mm": 1000.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              357.289685146,
+              357.289685146,
+              357.289685146
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.00279884934151,
+            "higher_order_response": 0.00279848669395,
+            "higher_order_relative_difference": 0.000129587023,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "fill_card",
+          "type": "diffuse_card",
+          "role": "reflector",
+          "position_mm": [
+            800.0,
+            -100.0,
+            0.0
+          ],
+          "normal": [
+            -1,
+            0,
+            0
+          ],
+          "width_axis": [
+            0.0,
+            -1.0,
+            0.0
+          ],
+          "height_axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "width_mm": 900.0,
+          "height_mm": 1300.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.75,
+              0.75,
+              0.75
+            ]
+          },
+          "emission": 0,
+          "casts_shadow": true,
+          "two_sided": true
+        }
+      ],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-002",
+      "preset_id": "STU-002",
+      "catalog_id": "LUZ-003",
+      "name": "Three-point product studio",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1200.0,
+            -1200.0,
+            1000.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.60920769908,
+            0.60920769908,
+            -0.507673082567
+          ],
+          "width_axis": [
+            -0.707106781187,
+            0.707106781187,
+            0.0
+          ],
+          "height_axis": [
+            0.358979079309,
+            0.358979079309,
+            0.861549790341
+          ],
+          "width_mm": 800.0,
+          "height_mm": 1000.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              357.289685146,
+              357.289685146,
+              357.289685146
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.00279884934151,
+            "higher_order_response": 0.00279848669395,
+            "higher_order_relative_difference": 0.000129587023,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            1200.0,
+            -1000.0,
+            600.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.717137165601,
+            0.597614304667,
+            -0.3585685828
+          ],
+          "width_axis": [
+            -0.640184399664,
+            -0.768221279597,
+            -2.77555756156e-17
+          ],
+          "height_axis": [
+            -0.275460015502,
+            0.229550012919,
+            0.933503385869
+          ],
+          "width_mm": 1200.0,
+          "height_mm": 1000.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              45.1401839419,
+              45.1401839419,
+              45.1401839419
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -2.0,
+            "target_six_view_mean_luminance": 0.25,
+            "unit_radiance_response": 0.00553830264231,
+            "higher_order_response": 0.00553744213037,
+            "higher_order_relative_difference": 0.000155398815,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "rim",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            700.0,
+            1100.0,
+            1000.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.426006433615,
+            -0.669438681395,
+            -0.60858061945
+          ],
+          "width_axis": [
+            0.843661487732,
+            -0.536875492193,
+            2.77555756156e-17
+          ],
+          "height_axis": [
+            -0.326732019607,
+            -0.51343603081,
+            0.793492047616
+          ],
+          "width_mm": 250.0,
+          "height_mm": 1200.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              475.065381914,
+              475.065381914,
+              475.065381914
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -0.5,
+            "target_six_view_mean_luminance": 0.707106781187,
+            "unit_radiance_response": 0.00148844097698,
+            "higher_order_response": 0.00148824662649,
+            "higher_order_relative_difference": 0.000130590245,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-003",
+      "preset_id": "STU-003",
+      "catalog_id": "LUZ-013",
+      "name": "White product with dark edge cards",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1400.0,
+            -800.0,
+            1100.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.71724172741,
+            0.409852415663,
+            -0.563547071536
+          ],
+          "width_axis": [
+            -0.496138938357,
+            0.868243142124,
+            0.0
+          ],
+          "height_axis": [
+            0.489295880126,
+            0.279597645786,
+            0.826083953459
+          ],
+          "width_mm": 900.0,
+          "height_mm": 1200.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              264.758582617,
+              264.758582617,
+              264.758582617
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.00377702581013,
+            "higher_order_response": 0.00377657855315,
+            "higher_order_relative_difference": 0.000118429148,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            1400.0,
+            -1100.0,
+            700.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.731791722885,
+            0.574979210838,
+            -0.365895861443
+          ],
+          "width_axis": [
+            -0.617821551932,
+            -0.786318338822,
+            2.77555756156e-17
+          ],
+          "height_axis": [
+            -0.287710625951,
+            0.226058348962,
+            0.930655800272
+          ],
+          "width_mm": 1200.0,
+          "height_mm": 1000.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              40.8024149057,
+              40.8024149057,
+              40.8024149057
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -2.5,
+            "target_six_view_mean_luminance": 0.176776695297,
+            "unit_radiance_response": 0.00433250570353,
+            "higher_order_response": 0.00433181211344,
+            "higher_order_relative_difference": 0.000160115459,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "left_flag",
+          "type": "diffuse_card",
+          "role": "flag",
+          "position_mm": [
+            -850.0,
+            0.0,
+            100.0
+          ],
+          "normal": [
+            1,
+            0,
+            0
+          ],
+          "width_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "height_axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "width_mm": 600.0,
+          "height_mm": 1400.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.02,
+              0.02,
+              0.02
+            ]
+          },
+          "emission": 0,
+          "casts_shadow": true,
+          "two_sided": true
+        },
+        {
+          "id": "right_flag",
+          "type": "diffuse_card",
+          "role": "flag",
+          "position_mm": [
+            850.0,
+            0.0,
+            100.0
+          ],
+          "normal": [
+            -1,
+            0,
+            0
+          ],
+          "width_axis": [
+            0.0,
+            -1.0,
+            0.0
+          ],
+          "height_axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "width_mm": 600.0,
+          "height_mm": 1400.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.02,
+              0.02,
+              0.02
+            ]
+          },
+          "emission": 0,
+          "casts_shadow": true,
+          "two_sided": true
+        }
+      ],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-004",
+      "preset_id": "STU-004",
+      "catalog_id": "LUZ-012",
+      "name": "Black housing with broad side reflections",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1500.0,
+            -400.0,
+            700.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.880830329272,
+            0.234888087806,
+            -0.41105415366
+          ],
+          "width_axis": [
+            -0.25766265056,
+            0.966234939601,
+            -1.38777878078e-17
+          ],
+          "height_axis": [
+            0.397174885335,
+            0.105913302756,
+            0.911610927292
+          ],
+          "width_mm": 1500.0,
+          "height_mm": 1500.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              106.904574216,
+              106.904574216,
+              106.904574216
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.00935413668998,
+            "higher_order_response": 0.00935277880038,
+            "higher_order_relative_difference": 0.000145185686,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            1500.0,
+            -400.0,
+            700.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.880830329272,
+            0.234888087806,
+            -0.41105415366
+          ],
+          "width_axis": [
+            -0.25766265056,
+            -0.966234939601,
+            1.38777878078e-17
+          ],
+          "height_axis": [
+            -0.397174885335,
+            0.105913302756,
+            0.911610927292
+          ],
+          "width_mm": 1500.0,
+          "height_mm": 1500.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              75.5929493679,
+              75.5929493679,
+              75.5929493679
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -0.5,
+            "target_six_view_mean_luminance": 0.707106781187,
+            "unit_radiance_response": 0.00935413668998,
+            "higher_order_response": 0.00935277880038,
+            "higher_order_relative_difference": 0.000145185686,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "front_flag",
+          "type": "diffuse_card",
+          "role": "flag",
+          "position_mm": [
+            0.0,
+            -900.0,
+            1150.0
+          ],
+          "normal": [
+            0,
+            1,
+            0
+          ],
+          "width_axis": [
+            -1.0,
+            0.0,
+            0.0
+          ],
+          "height_axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "width_mm": 900.0,
+          "height_mm": 400.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.02,
+              0.02,
+              0.02
+            ]
+          },
+          "emission": 0,
+          "casts_shadow": true,
+          "two_sided": true
+        }
+      ],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-005",
+      "preset_id": "STU-005",
+      "catalog_id": "LUZ-021",
+      "name": "Mirror-metal vertical strips",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "left_strip",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1100.0,
+            -300.0,
+            200.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.950255268139,
+            0.259160527674,
+            -0.172773685116
+          ],
+          "width_axis": [
+            -0.263117405792,
+            0.964763821238,
+            0.0
+          ],
+          "height_axis": [
+            0.166685800662,
+            0.0454597638169,
+            0.984961549367
+          ],
+          "width_mm": 120.0,
+          "height_mm": 1600.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              592.738980244,
+              592.738980244,
+              592.738980244
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.00168708324124,
+            "higher_order_response": 0.00168682684062,
+            "higher_order_relative_difference": 0.000152001742,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "right_strip",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            1100.0,
+            -300.0,
+            200.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.950255268139,
+            0.259160527674,
+            -0.172773685116
+          ],
+          "width_axis": [
+            -0.263117405792,
+            -0.964763821238,
+            0.0
+          ],
+          "height_axis": [
+            -0.166685800662,
+            0.0454597638169,
+            0.984961549367
+          ],
+          "width_mm": 120.0,
+          "height_mm": 1600.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              296.369490122,
+              296.369490122,
+              296.369490122
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -1.0,
+            "target_six_view_mean_luminance": 0.5,
+            "unit_radiance_response": 0.00168708324124,
+            "higher_order_response": 0.00168682684062,
+            "higher_order_relative_difference": 0.000152001742,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "front_fill",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            0.0,
+            -1800.0,
+            800.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.0,
+            0.91381154862,
+            -0.406138466053
+          ],
+          "width_axis": [
+            -1.0,
+            0.0,
+            0.0
+          ],
+          "height_axis": [
+            0.0,
+            0.406138466053,
+            0.91381154862
+          ],
+          "width_mm": 1100.0,
+          "height_mm": 800.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              40.6801806776,
+              40.6801806776,
+              40.6801806776
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -3.0,
+            "target_six_view_mean_luminance": 0.125,
+            "unit_radiance_response": 0.0030727493811,
+            "higher_order_response": 0.00307229794565,
+            "higher_order_relative_difference": 0.000146937392,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-018",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-006",
+      "preset_id": "STU-006",
+      "catalog_id": "LUZ-022",
+      "name": "Brushed-metal grazing strip",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1300.0,
+            -1000.0,
+            450.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.764375341649,
+            0.587981032038,
+            -0.264591464417
+          ],
+          "width_axis": [
+            0.209721542009,
+            0.161324263084,
+            0.96436059488
+          ],
+          "height_axis": [
+            0.60971076085,
+            -0.792623989105,
+            4.51722679794e-17
+          ],
+          "width_mm": 1200.0,
+          "height_mm": 180.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              994.052329239,
+              994.052329239,
+              994.052329239
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.0010059832572,
+            "higher_order_response": 0.00100582236726,
+            "higher_order_relative_difference": 0.000159958603,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            900.0,
+            -1000.0,
+            1000.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.536894987645,
+            0.596549986272,
+            -0.596549986272
+          ],
+          "width_axis": [
+            -0.743294146247,
+            -0.668964731622,
+            0.0
+          ],
+          "height_axis": [
+            -0.399070901466,
+            0.44341211274,
+            0.802575924059
+          ],
+          "width_mm": 1100.0,
+          "height_mm": 1100.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              44.9101851238,
+              44.9101851238,
+              44.9101851238
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -2.0,
+            "target_six_view_mean_luminance": 0.25,
+            "unit_radiance_response": 0.00556666598704,
+            "higher_order_response": 0.00556591276137,
+            "higher_order_relative_difference": 0.000135328329,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-018",
+        "CAP-020",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-007",
+      "preset_id": "STU-007",
+      "catalog_id": "LUZ-031",
+      "name": "Clear-glass bright-field panel",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "rear_panel",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            0.0,
+            1200.0,
+            0.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.0,
+            -1.0,
+            0.0
+          ],
+          "width_axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "height_axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "width_mm": 1500.0,
+          "height_mm": 1800.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              53.8774000787,
+              53.8774000787,
+              53.8774000787
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.0185606580596,
+            "higher_order_response": 0.0185577681599,
+            "higher_order_relative_difference": 0.000155724527,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "left_flag",
+          "type": "diffuse_card",
+          "role": "flag",
+          "position_mm": [
+            -650.0,
+            50.0,
+            0.0
+          ],
+          "normal": [
+            1,
+            0,
+            0
+          ],
+          "width_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "height_axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "width_mm": 500.0,
+          "height_mm": 1500.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.01,
+              0.01,
+              0.01
+            ]
+          },
+          "emission": 0,
+          "casts_shadow": true,
+          "two_sided": true
+        },
+        {
+          "id": "right_flag",
+          "type": "diffuse_card",
+          "role": "flag",
+          "position_mm": [
+            650.0,
+            50.0,
+            0.0
+          ],
+          "normal": [
+            -1,
+            0,
+            0
+          ],
+          "width_axis": [
+            0.0,
+            -1.0,
+            0.0
+          ],
+          "height_axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "width_mm": 500.0,
+          "height_mm": 1500.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.01,
+              0.01,
+              0.01
+            ]
+          },
+          "emission": 0,
+          "casts_shadow": true,
+          "two_sided": true
+        }
+      ],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-025",
+        "CAP-027",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-008",
+      "preset_id": "STU-008",
+      "catalog_id": "LUZ-032",
+      "name": "Clear-glass dark-field strips",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "left_strip",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1050.0,
+            650.0,
+            100.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.847491027885,
+            -0.524637302976,
+            -0.0807134312271
+          ],
+          "width_axis": [
+            0.526354614616,
+            0.850265146688,
+            -1.38777878078e-17
+          ],
+          "height_axis": [
+            0.068627817442,
+            -0.0424838869879,
+            0.996737348563
+          ],
+          "width_mm": 130.0,
+          "height_mm": 1500.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              643.07844831,
+              643.07844831,
+              643.07844831
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.00155502023529,
+            "higher_order_response": 0.00155477181096,
+            "higher_order_relative_difference": 0.000159781857,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "right_strip",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            1050.0,
+            650.0,
+            100.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.847491027885,
+            -0.524637302976,
+            -0.0807134312271
+          ],
+          "width_axis": [
+            0.526354614616,
+            -0.850265146688,
+            1.38777878078e-17
+          ],
+          "height_axis": [
+            -0.068627817442,
+            -0.0424838869879,
+            0.996737348563
+          ],
+          "width_mm": 130.0,
+          "height_mm": 1500.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              454.725131635,
+              454.725131635,
+              454.725131635
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -0.5,
+            "target_six_view_mean_luminance": 0.707106781187,
+            "unit_radiance_response": 0.00155502023529,
+            "higher_order_response": 0.00155477181096,
+            "higher_order_relative_difference": 0.000159781857,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "back_card",
+          "type": "diffuse_card",
+          "role": "background",
+          "position_mm": [
+            0.0,
+            1700.0,
+            0.0
+          ],
+          "normal": [
+            0,
+            -1,
+            0
+          ],
+          "width_axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "height_axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "width_mm": 2000.0,
+          "height_mm": 2000.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.01,
+              0.01,
+              0.01
+            ]
+          },
+          "emission": 0,
+          "casts_shadow": true,
+          "two_sided": true
+        }
+      ],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-025",
+        "CAP-027",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-009",
+      "preset_id": "STU-009",
+      "catalog_id": "LUZ-074",
+      "name": "Powered-display exterior key",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1250.0,
+            -500.0,
+            1200.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.693108716252,
+            0.277243486501,
+            -0.665384367602
+          ],
+          "width_axis": [
+            -0.371390676354,
+            0.928476690885,
+            0.0
+          ],
+          "height_axis": [
+            0.617793875798,
+            0.247117550319,
+            0.746500933255
+          ],
+          "width_mm": 1000.0,
+          "height_mm": 700.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              343.34151444,
+              343.34151444,
+              343.34151444
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.00291255195758,
+            "higher_order_response": 0.00291218916253,
+            "higher_order_relative_difference": 0.000124578119,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-013",
+        "CAP-025",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently.",
+        "Keep existing display emission unchanged and record its material source; do not create an equivalent screen light."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-010",
+      "preset_id": "STU-010",
+      "catalog_id": "LUZ-071",
+      "name": "PCB overview and relief",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -700.0,
+            -500.0,
+            1100.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.501280411828,
+            0.35805743702,
+            -0.787726361443
+          ],
+          "width_axis": [
+            -0.581238193719,
+            0.813733471207,
+            0.0
+          ],
+          "height_axis": [
+            0.640999306458,
+            0.45785664747,
+            0.616025307505
+          ],
+          "width_mm": 1200.0,
+          "height_mm": 800.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              160.326689275,
+              160.326689275,
+              160.326689275
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.00623726470323,
+            "higher_order_response": 0.00623660866478,
+            "higher_order_relative_difference": 0.000105191537,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            700.0,
+            500.0,
+            1200.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.474099823035,
+            -0.338642730739,
+            -0.812742553774
+          ],
+          "width_axis": [
+            0.581238193719,
+            -0.813733471207,
+            -5.55111512313e-17
+          ],
+          "height_axis": [
+            -0.66135581948,
+            -0.472397013914,
+            0.582622983828
+          ],
+          "width_mm": 1000.0,
+          "height_mm": 800.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              103.978674453,
+              103.978674453,
+              103.978674453
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -1.0,
+            "target_six_view_mean_luminance": 0.5,
+            "unit_radiance_response": 0.00480867834323,
+            "higher_order_response": 0.0048082179575,
+            "higher_order_relative_difference": 9.5749762e-05,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "relief",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1200.0,
+            -400.0,
+            100.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            50.0
+          ],
+          "normal": [
+            0.94794300664,
+            0.315981002213,
+            -0.0394976252767
+          ],
+          "width_axis": [
+            -0.316227766017,
+            0.948683298051,
+            0.0
+          ],
+          "height_axis": [
+            0.0374707374126,
+            0.0124902458042,
+            0.999219664337
+          ],
+          "width_mm": 900.0,
+          "height_mm": 120.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              276.360479691,
+              276.360479691,
+              276.360479691
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -2.0,
+            "target_six_view_mean_luminance": 0.25,
+            "unit_radiance_response": 0.000904615595831,
+            "higher_order_response": 0.000904457417644,
+            "higher_order_relative_difference": 0.000174887378,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-035",
+        "CAP-038",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-011",
+      "preset_id": "STU-011",
+      "catalog_id": "LUZ-058",
+      "name": "FDM layer grazing view",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "strip",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1250.0,
+            -100.0,
+            200.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.984374038698,
+            0.0787499230958,
+            -0.157499846192
+          ],
+          "width_axis": [
+            -0.0797452222829,
+            0.996815278536,
+            0.0
+          ],
+          "height_axis": [
+            0.156998253051,
+            0.0125598602441,
+            0.98751901169
+          ],
+          "width_mm": 1200.0,
+          "height_mm": 120.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              864.483458895,
+              864.483458895,
+              864.483458895
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.00115676013197,
+            "higher_order_response": 0.00115656598075,
+            "higher_order_relative_difference": 0.000167868695,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            200.0,
+            -1200.0,
+            800.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.137360563949,
+            0.824163383692,
+            -0.549442255795
+          ],
+          "width_axis": [
+            -0.986393923832,
+            -0.164398987305,
+            0.0
+          ],
+          "height_axis": [
+            -0.0903277504354,
+            0.541966502613,
+            0.835531691528
+          ],
+          "width_mm": 1000.0,
+          "height_mm": 1000.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              29.1978091485,
+              29.1978091485,
+              29.1978091485
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -2.5,
+            "target_six_view_mean_luminance": 0.176776695297,
+            "unit_radiance_response": 0.00605445067463,
+            "higher_order_response": 0.00605363425497,
+            "higher_order_relative_difference": 0.000134864384,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-033",
+        "CAP-035",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-012",
+      "preset_id": "STU-012",
+      "catalog_id": "LUZ-232",
+      "name": "Wood-joint grazing study",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "explicit_region_max_extent",
+        "definition": "B is the maximum positive extent of the explicitly selected joint region, not the full board.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "strip",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1200.0,
+            -350.0,
+            200.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.94794300664,
+            0.276483376937,
+            -0.157990501107
+          ],
+          "width_axis": [
+            -0.28,
+            0.96,
+            0.0
+          ],
+          "height_axis": [
+            0.151670881062,
+            0.0442373403099,
+            0.987440631917
+          ],
+          "width_mm": 1200.0,
+          "height_mm": 120.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              859.942906576,
+              859.942906576,
+              859.942906576
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.0011628678978,
+            "higher_order_response": 0.00116267029872,
+            "higher_order_relative_difference": 0.000169952807,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            0.0,
+            -1500.0,
+            1000.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.0,
+            0.832050294338,
+            -0.554700196225
+          ],
+          "width_axis": [
+            -1.0,
+            0.0,
+            0.0
+          ],
+          "height_axis": [
+            0.0,
+            0.554700196225,
+            0.832050294338
+          ],
+          "width_mm": 1200.0,
+          "height_mm": 1000.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              51.6529401353,
+              51.6529401353,
+              51.6529401353
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -2.0,
+            "target_six_view_mean_luminance": 0.25,
+            "unit_radiance_response": 0.00483999554227,
+            "higher_order_response": 0.00483935699077,
+            "higher_order_relative_difference": 0.000131949658,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-035",
+        "CAP-097",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-013",
+      "preset_id": "STU-013",
+      "catalog_id": "LUZ-233",
+      "name": "Wood-grain comparison area",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1300.0,
+            -1000.0,
+            1000.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.676752968184,
+            0.520579206295,
+            -0.520579206295
+          ],
+          "width_axis": [
+            -0.60971076085,
+            0.792623989105,
+            0.0
+          ],
+          "height_axis": [
+            0.412623567139,
+            0.317402743953,
+            0.853813381233
+          ],
+          "width_mm": 1500.0,
+          "height_mm": 1200.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              160.973055958,
+              160.973055958,
+              160.973055958
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.0062122197659,
+            "higher_order_response": 0.00621136004082,
+            "higher_order_relative_difference": 0.000138411728,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "gray_card",
+          "type": "diffuse_card",
+          "role": "reflector",
+          "position_mm": [
+            900.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -1,
+            0,
+            0
+          ],
+          "width_axis": [
+            0.0,
+            -1.0,
+            0.0
+          ],
+          "height_axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "width_mm": 1000.0,
+          "height_mm": 1200.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.35,
+              0.35,
+              0.35
+            ]
+          },
+          "emission": 0,
+          "casts_shadow": true,
+          "two_sided": true
+        }
+      ],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-033",
+        "CAP-079",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-014",
+      "preset_id": "STU-014",
+      "catalog_id": "LUZ-101",
+      "name": "Automotive roof and side bands",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "roof_left",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -420.0,
+            0.0,
+            1200.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.330350424728,
+            0.0,
+            -0.943858356366
+          ],
+          "width_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "height_axis": [
+            0.943858356366,
+            0.0,
+            0.330350424728
+          ],
+          "width_mm": 350.0,
+          "height_mm": 1500.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              251.523754853,
+              251.523754853,
+              251.523754853
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.00397576761919,
+            "higher_order_response": 0.0039754686758,
+            "higher_order_relative_difference": 7.5197016e-05,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "roof_right",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            420.0,
+            0.0,
+            1200.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.330350424728,
+            0.0,
+            -0.943858356366
+          ],
+          "width_axis": [
+            -0.0,
+            -1.0,
+            0.0
+          ],
+          "height_axis": [
+            -0.943858356366,
+            0.0,
+            0.330350424728
+          ],
+          "width_mm": 350.0,
+          "height_mm": 1500.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              177.854152686,
+              177.854152686,
+              177.854152686
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -0.5,
+            "target_six_view_mean_luminance": 0.707106781187,
+            "unit_radiance_response": 0.00397576761919,
+            "higher_order_response": 0.0039754686758,
+            "higher_order_relative_difference": 7.5197016e-05,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "side_left",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1100.0,
+            0.0,
+            250.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.975132855791,
+            0.0,
+            -0.221621103589
+          ],
+          "width_axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "height_axis": [
+            0.221621103589,
+            0.0,
+            0.975132855791
+          ],
+          "width_mm": 1500.0,
+          "height_mm": 120.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              296.630259671,
+              296.630259671,
+              296.630259671
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -1.0,
+            "target_six_view_mean_luminance": 0.5,
+            "unit_radiance_response": 0.00168560011563,
+            "higher_order_response": 0.00168531800408,
+            "higher_order_relative_difference": 0.000167393657,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "side_right",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            1100.0,
+            0.0,
+            250.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.975132855791,
+            0.0,
+            -0.221621103589
+          ],
+          "width_axis": [
+            -0.0,
+            -1.0,
+            0.0
+          ],
+          "height_axis": [
+            -0.221621103589,
+            0.0,
+            0.975132855791
+          ],
+          "width_mm": 1500.0,
+          "height_mm": 120.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              296.630259671,
+              296.630259671,
+              296.630259671
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -1.0,
+            "target_six_view_mean_luminance": 0.5,
+            "unit_radiance_response": 0.00168560011563,
+            "higher_order_response": 0.00168531800408,
+            "higher_order_relative_difference": 0.000167393657,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-021",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-015",
+      "preset_id": "STU-015",
+      "catalog_id": "LUZ-202",
+      "name": "Brake assembly through wheel opening",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "explicit_region_max_extent",
+        "definition": "B is the maximum positive extent of the selected wheel-well region.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "side_key",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1200.0,
+            -1000.0,
+            400.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.744208407535,
+            0.620173672946,
+            -0.248069469178
+          ],
+          "width_axis": [
+            -0.640184399664,
+            0.768221279597,
+            1.38777878078e-17
+          ],
+          "height_axis": [
+            0.190572245041,
+            0.158810204201,
+            0.968742245627
+          ],
+          "width_mm": 800.0,
+          "height_mm": 700.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              341.921221079,
+              341.921221079,
+              341.921221079
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.00292465029472,
+            "higher_order_response": 0.00292417456643,
+            "higher_order_relative_difference": 0.000162688061,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "opening_fill",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            800.0,
+            -1200.0,
+            100.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.553371571093,
+            0.830057356639,
+            -0.0691714463866
+          ],
+          "width_axis": [
+            -0.832050294338,
+            -0.554700196225,
+            0.0
+          ],
+          "height_axis": [
+            -0.0383694148838,
+            0.0575541223258,
+            0.99760478698
+          ],
+          "width_mm": 350.0,
+          "height_mm": 600.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              252.708128195,
+              252.708128195,
+              252.708128195
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -1.5,
+            "target_six_view_mean_luminance": 0.353553390593,
+            "unit_radiance_response": 0.00139905824604,
+            "higher_order_response": 0.00139881962509,
+            "higher_order_relative_difference": 0.000170587363,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-018",
+        "CAP-006",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-016",
+      "preset_id": "STU-016",
+      "catalog_id": "LUZ-215",
+      "name": "Robot workcell and target tray",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "declared_workspace_max_extent",
+        "definition": "B comes from a fixed declared workcell envelope, not the current arm pose.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1000.0,
+            -600.0,
+            1500.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.526315789474,
+            0.315789473684,
+            -0.789473684211
+          ],
+          "width_axis": [
+            -0.514495755428,
+            0.857492925713,
+            0.0
+          ],
+          "height_axis": [
+            0.676968099247,
+            0.406180859548,
+            0.613784409984
+          ],
+          "width_mm": 1200.0,
+          "height_mm": 1200.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              192.424627604,
+              192.424627604,
+              192.424627604
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.00519683999106,
+            "higher_order_response": 0.00519628803558,
+            "higher_order_relative_difference": 0.00010622111,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            1000.0,
+            500.0,
+            1500.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.534522483825,
+            -0.267261241912,
+            -0.801783725737
+          ],
+          "width_axis": [
+            0.4472135955,
+            -0.894427191,
+            0.0
+          ],
+          "height_axis": [
+            -0.717137165601,
+            -0.3585685828,
+            0.597614304667
+          ],
+          "width_mm": 1200.0,
+          "height_mm": 1200.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              93.5152470649,
+              93.5152470649,
+              93.5152470649
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -1.0,
+            "target_six_view_mean_luminance": 0.5,
+            "unit_radiance_response": 0.00534672169185,
+            "higher_order_response": 0.00534614444244,
+            "higher_order_relative_difference": 0.000107974898,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "tray_fill",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            0.0,
+            -1400.0,
+            350.0
+          ],
+          "target_mm": [
+            0.0,
+            200.0,
+            -300.0
+          ],
+          "normal": [
+            0.0,
+            0.926466577122,
+            -0.376377046956
+          ],
+          "width_axis": [
+            -1.0,
+            0.0,
+            0.0
+          ],
+          "height_axis": [
+            0.0,
+            0.376377046956,
+            0.926466577122
+          ],
+          "width_mm": 900.0,
+          "height_mm": 500.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              122.192890295,
+              122.192890295,
+              122.192890295
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -1.5,
+            "target_six_view_mean_luminance": 0.353553390593,
+            "unit_radiance_response": 0.00289340394307,
+            "higher_order_response": 0.00289294412709,
+            "higher_order_relative_difference": 0.000158943954,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-078",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently.",
+        "Check source clearance against the user-declared robot swept volume; retain the same stage across pose snapshots."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-017",
+      "preset_id": "STU-017",
+      "catalog_id": "LUZ-251",
+      "name": "Spacecraft integration studio",
+      "mode": "studio",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "ceiling",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            100.0,
+            0.0,
+            1800.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.0554700196225,
+            0.0,
+            -0.998460353205
+          ],
+          "width_axis": [
+            -0.0,
+            -1.0,
+            0.0
+          ],
+          "height_axis": [
+            -0.998460353205,
+            0.0,
+            0.0554700196225
+          ],
+          "width_mm": 2000.0,
+          "height_mm": 2000.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              73.2958313997,
+              73.2958313997,
+              73.2958313997
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": 0.0,
+            "target_six_view_mean_luminance": 1.0,
+            "unit_radiance_response": 0.0136433407044,
+            "higher_order_response": 0.0136420822549,
+            "higher_order_relative_difference": 9.2247611e-05,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "left",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1400.0,
+            -700.0,
+            300.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.878438127193,
+            0.439219063597,
+            -0.188236741541
+          ],
+          "width_axis": [
+            -0.4472135955,
+            0.894427191,
+            0.0
+          ],
+          "height_axis": [
+            0.16836405998,
+            0.0841820299899,
+            0.982123683216
+          ],
+          "width_mm": 800.0,
+          "height_mm": 1500.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              84.0171923211,
+              84.0171923211,
+              84.0171923211
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -1.0,
+            "target_six_view_mean_luminance": 0.5,
+            "unit_radiance_response": 0.00595116292495,
+            "higher_order_response": 0.005950209901,
+            "higher_order_relative_difference": 0.000160166442,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        },
+        {
+          "id": "right",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            1400.0,
+            500.0,
+            600.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.873296006173,
+            -0.311891430776,
+            -0.374269716931
+          ],
+          "width_axis": [
+            0.336336396998,
+            -0.941741911595,
+            0.0
+          ],
+          "height_axis": [
+            -0.352465478675,
+            -0.125880528098,
+            0.927319890323
+          ],
+          "width_mm": 800.0,
+          "height_mm": 1500.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              84.8829930821,
+              84.8829930821,
+              84.8829930821
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -1.0,
+            "target_six_view_mean_luminance": 0.5,
+            "unit_radiance_response": 0.00589046146755,
+            "higher_order_response": 0.00588957794658,
+            "higher_order_relative_difference": 0.000150014309,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-043",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently.",
+        "Label output as an integration studio; do not present it as natural space illumination."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-018",
+      "preset_id": "STU-018",
+      "catalog_id": "LUZ-241",
+      "name": "LED diffuser-bar authoring reference",
+      "mode": "studio",
+      "state": "blocked_calibration",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Explicit center of the existing diffuser plane; +Y points into the luminaire, +Z remains up.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "led_strip",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            0.0,
+            25.0,
+            0.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.0,
+            -1.0,
+            0.0
+          ],
+          "width_axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "height_axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "width_mm": 800.0,
+          "height_mm": 25.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "blocked",
+          "emission": null,
+          "blockers": [
+            "emitter_intersects_or_is_inside_CAL-LIGHT-001_sphere",
+            "aperture_specific_calibration_must_be_defined_and_reviewed"
+          ],
+          "requested_reference_ev": 0.0
+        },
+        {
+          "id": "inspection",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            -1000.0,
+            -1200.0,
+            800.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.569802882298,
+            0.683763458758,
+            -0.455842305839
+          ],
+          "width_axis": [
+            -0.768221279597,
+            0.640184399664,
+            -2.77555756156e-17
+          ],
+          "height_axis": [
+            0.291823132905,
+            0.350187759486,
+            0.89006055536
+          ],
+          "width_mm": 800.0,
+          "height_mm": 800.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "authored_numeric",
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              44.250507343,
+              44.250507343,
+              44.250507343
+            ]
+          },
+          "calibration": {
+            "reference_id": "CAL-LIGHT-001",
+            "reference_ev": -3.0,
+            "target_six_view_mean_luminance": 0.125,
+            "unit_radiance_response": 0.00282482636936,
+            "higher_order_response": 0.00282441546609,
+            "higher_order_relative_difference": 0.000145482588,
+            "method": "direct_Lambertian_sphere_and_finite_area_quadrature",
+            "includes_passive_cards": false,
+            "runtime_render_verified": false
+          }
+        }
+      ],
+      "modifiers": [],
+      "blockers": [
+        "aperture_specific_calibration_must_be_defined_and_reviewed",
+        "emitter_intersects_or_is_inside_CAL-LIGHT-001_sphere"
+      ],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-025",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently.",
+        "The analytic led_strip is the sole LED energy owner. Existing diffuser material remains unchanged.",
+        "The source-to-diffuser clearance must be confirmed against actual free space; block an unresolved aperture frame."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-019",
+      "preset_id": "STU-019",
+      "catalog_id": "LUZ-245",
+      "name": "Light-guide entrance source",
+      "mode": "studio",
+      "state": "blocked_calibration",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Explicit center of the guide entrance aperture; +Y points along the entrance optical path, +Z remains up.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "entrance_emitter",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            0.0,
+            -40.0,
+            0.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "width_axis": [
+            -1.0,
+            0.0,
+            0.0
+          ],
+          "height_axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "width_mm": 15.0,
+          "height_mm": 15.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "blocked",
+          "emission": null,
+          "blockers": [
+            "emitter_intersects_or_is_inside_CAL-LIGHT-001_sphere",
+            "aperture_specific_calibration_must_be_defined_and_reviewed"
+          ],
+          "requested_reference_ev": 0.0
+        }
+      ],
+      "modifiers": [],
+      "blockers": [
+        "aperture_specific_calibration_must_be_defined_and_reviewed",
+        "emitter_intersects_or_is_inside_CAL-LIGHT-001_sphere"
+      ],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-025",
+        "CAP-026",
+        "CAP-029",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently.",
+        "No light is added at the guide exit. Guide material, absorption and surface topology remain unchanged."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-020",
+      "preset_id": "STU-020",
+      "catalog_id": "LUZ-261",
+      "name": "Lunar physical single-sun reference",
+      "mode": "lunar_physical",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "sun",
+          "type": "uniform_distant_disk",
+          "energy_owner": "rig_sun",
+          "incoming_photon_direction": [
+            0.450428110154,
+            0.300285406769,
+            -0.840799138953
+          ],
+          "angular_diameter_rad": 0.0093,
+          "emission": {
+            "quantity": "relative_linear_srgb_radiance",
+            "rgb": [
+              14721.3402896,
+              14721.3402896,
+              14721.3402896
+            ]
+          },
+          "reference_normal_irradiance_rgb": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "state": "authored_numeric",
+          "normalization": "authored_relative_solar_irradiance_not_measured",
+          "requires": [
+            "no_other_solar_energy_owner",
+            "finite_angular_emitter",
+            "scene_visibility"
+          ],
+          "spectrum": "neutral_RGB_authoring_reference_not_measured_solar_spectrum"
+        }
+      ],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-011",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "The rig owns the only sun. Block application if the environment already emits an equivalent sun unless ownership is explicitly transferred.",
+        "Require no atmospheric sky illumination, atmospheric haze or unexplained ambient fill. Preserve real terrain-reflected light.",
+        "Solar direction and size are illustrative authoring inputs, not a mission ephemeris or measured irradiance."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-021",
+      "preset_id": "STU-021",
+      "catalog_id": "LUZ-262",
+      "name": "Lunar physical environment-sun passthrough",
+      "mode": "lunar_physical",
+      "state": "requires_existing_environment_sun",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-011",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "Require exactly one resolved environment-owned sun and record its parameters. This preset never creates a second sun.",
+        "Require no atmospheric sky or haze. No studio fill or constant ambient is introduced.",
+        "Low solar elevation is an explicit environment input, not an inferred date or mission condition.",
+        "Exactly one existing environment solar source must be resolved; this record adds no light."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-022",
+      "preset_id": "STU-022",
+      "catalog_id": "LUZ-268",
+      "name": "Lunar zero-source night audit",
+      "mode": "lunar_physical",
+      "state": "authored_numeric_unbound",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "Require explicitly zero incident environment radiance and no enabled local emitters for this diagnostic; black background color alone is insufficient.",
+        "Do not create a sun, Earth source, atmosphere, sky fill or exposure compensation.",
+        "Any visible energy must be traced to a declared source or reported as a diagnostic discrepancy.",
+        "Verify zero emitted energy from all scene and environment sources; a black background is insufficient."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-023",
+      "preset_id": "STU-023",
+      "catalog_id": "LUZ-271",
+      "name": "SELENE physical arm-pose sunlight",
+      "mode": "lunar_physical",
+      "state": "requires_existing_environment_sun",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [],
+      "modifiers": [],
+      "blockers": [],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-011",
+        "CAP-097",
+        "CAP-079",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "Require one resolved environment-owned sun. Rig adds no atmospheric sky, haze or fill.",
+        "Arm pose and sample geometry are supplied externally and do not change when applying this preset.",
+        "Hold environment solar state and manual camera exposure fixed between arm snapshots.",
+        "Exactly one existing environment solar source must be resolved; this record adds no light."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    },
+    {
+      "id": "RIG-024",
+      "preset_id": "STU-024",
+      "catalog_id": "LUZ-277",
+      "name": "SELENE editorial sample-vial fill",
+      "mode": "lunar_editorial",
+      "state": "blocked_calibration",
+      "runtime_ready": false,
+      "source_subject_scale_policy": {
+        "mode": "explicit_region_max_extent",
+        "definition": "B is the maximum positive extent of the explicitly selected vial-and-gripper region.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "fixture_extent_mm": 1000.0,
+      "frame": {
+        "up": "+Z",
+        "front": "-Y",
+        "right": "+X"
+      },
+      "lights": [
+        {
+          "id": "editorial_fill",
+          "type": "rectangular_area",
+          "energy_owner": "analytic_light",
+          "position_mm": [
+            700.0,
+            -1100.0,
+            650.0
+          ],
+          "target_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "normal": [
+            -0.480478756138,
+            0.75503804536,
+            -0.446158844985
+          ],
+          "width_axis": [
+            -0.843661487732,
+            -0.536875492193,
+            0.0
+          ],
+          "height_axis": [
+            -0.239531749498,
+            0.376407034925,
+            0.894953789333
+          ],
+          "width_mm": 500.0,
+          "height_mm": 800.0,
+          "emission_sides": "front_only",
+          "visible_geometry_adds_energy": false,
+          "state": "blocked",
+          "emission": null,
+          "blockers": [
+            "CAL-ENV-SUN-001_requires_measured_existing_environment_sun_response"
+          ],
+          "requested_reference_ev": -2.5
+        }
+      ],
+      "modifiers": [],
+      "blockers": [
+        "CAL-ENV-SUN-001_requires_measured_existing_environment_sun_response"
+      ],
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-011",
+        "CAP-025",
+        "CAP-027",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "scene_preconditions": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "Require exactly one environment-owned sun and do not modify it.",
+        "Calibrate CAL-ENV-SUN-001 from the environment sun alone in the reference scene, then set this fill relative to that signal. Block if the reference is unresolved.",
+        "Mark the result lunar_editorial. The fill is deliberate added energy and must never be labeled unassisted natural lunar illumination.",
+        "No atmospheric sky or haze is introduced; vial material, arm pose and camera parameters remain unchanged."
+      ],
+      "validation_scope": "Isolated analytic reference fixture; no subject visibility, adapter, optics, CAD or runtime rendering verified."
+    }
+  ]
+}

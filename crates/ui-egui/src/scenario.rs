@@ -3,18 +3,21 @@
 //! drags, toolbar starts) the way a person would use it, with checks on the result.
 //!
 //! A scenario is a JSON list of steps:
-//! - `{"start": "solid.extrude"}`: a toolbar click; `{"key": "E", "shift"?, "cmd"?}`; `{"text": "20"}`
+//! - `{"start": "solid.extrude"}`: a toolbar click; `{"key": "E", "shift"?, "cmd"?, "ctrl"?, "alt"?, "pressed"?}`; `{"text": "20"}`
 //! - `{"widget": "Revolute", "near"?: "Type"}`: click a dialog field, choice or button by its
 //!   text (with `near`: the one in that label's row)
 //! - `{"click": AT, "double"?, "shift"?, "ctrl"?, "button"?}`, `{"move": AT, "shift"?, "alt"?, "ctrl"?, "cmd"?}`,
 //!   `{"hold": AT, "frames"?}` (press and hold still: Select Other),
-//!   `{"drag": [AT, AT], "shift"?, "ctrl"?, "steps"?}` where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
+//!   `{"drag": [AT, AT, ...], "shift"?, "ctrl"?, "steps"?}` (through any points between, `steps` moves
+//!   each) where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
 //!   or `{"sketch": [x,y]}` (the sketch being edited)
 //! - `{"queued": "engine.execute", "params": {…}, "min_frames"?: n, "max_frames"?: n}`: a request sent the way an
 //!   agent's arrive (through the app's request queue, answered between frames, so the agent
 //!   cursor can act it out first); fails if the answer came in fewer than `min_frames` frames
 //! - `{"call": "ui.view", "params": {…}}`: any other control request (`fail: true` expects an
 //!   error)
+//! - `{"panel_fixture": {"enabled": true, "preset": "docks"}}`: explicit synthetic content
+//!   in the real workspace panel host; `{}` inspects and `{"enabled": false}` tears it down
 //! - `{"make_image": "pic.png"}`: a picture in the scenario's folder
 //! - `{"choose_file": "part.step"}`: the next Open picker returns that file of the scenario's
 //!   folder (Save pickers save there)
@@ -31,6 +34,7 @@
 //!   "close"}`: the app dies (or closes) and a new one starts on the same folders
 //! - `{"script": "examples/…/x.json"}`: run a command script through the engine; `"$DIR"` in a
 //!   `call` step's string parameters is the scenario's folder
+//! - `{"frames": 20}`: advance up to 600 frames at the harness clock (60 Hz)
 //! - `{"note": "…"}`: a comment; `{"pending": "why"}`: the scenario waits for a fix (its test
 //!   is ignored)
 //! - `{"expect": {…}}`: checks, see [`check`]; `{"until": {…}}` waits (frames) until they pass
@@ -38,6 +42,7 @@
 //!
 //! The same files drive the live app over the control channel for screenshots.
 
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -48,58 +53,15 @@ use solidcraft_engine::Session;
 use crate::control::{ControlRequest, Outcome, handle};
 use crate::{Services, SolveApp};
 
+// The widget registry (handles, rects and counts drawn this frame) lives in its own crate so UI
+// components can publish without depending on the app; re-exported here for the scenario runner.
+pub use solidcraft_ui_registry::{
+    clear_handles, count_of, handle_at, handles, publish_count, publish_handle, publish_rect, publish_target, publish_target_as, rect_of, rects,
+};
+
 thread_local! {
-    /// Drag handles drawn this frame (name, screen point): manipulators publish theirs so
-    /// scenarios (and the control channel's `ui.at {handle}`) can grab them.
-    static HANDLES: RefCell<Vec<(String, egui::Pos2)>> = const { RefCell::new(Vec::new()) };
-    /// Painted parts with no widget of their own (the toolbar, the workspace switcher…): rects
-    /// and counts by name, for checks.
-    static RECTS: RefCell<Vec<(String, egui::Rect)>> = const { RefCell::new(Vec::new()) };
-    static COUNTS: RefCell<Vec<(String, f64)>> = const { RefCell::new(Vec::new()) };
     /// Widths a scenario's `same_width` checks remembered (by rect name).
     static WIDTHS: RefCell<Vec<(String, f32)>> = const { RefCell::new(Vec::new()) };
-}
-
-/// A manipulator's handle drawn this frame at `at` (screen), by name: "arrow" (a dialog's value
-/// arrow), "triad_x"… Call it from the code that draws the handle, every frame it shows.
-pub fn publish_handle(name: &str, at: egui::Pos2) {
-    // The latest wins (lookups search from the end), so publishing is cheap for browser rows.
-    HANDLES.with(|h| h.borrow_mut().push((name.to_string(), at)));
-}
-
-/// Where a handle was drawn last frame.
-pub fn handle_at(name: &str) -> Option<egui::Pos2> {
-    HANDLES.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
-}
-
-/// Every handle drawn last frame whose name starts with `prefix`.
-pub fn handles(prefix: &str) -> Vec<(String, egui::Pos2)> {
-    HANDLES.with(|h| h.borrow().iter().filter(|(n, _)| n.starts_with(prefix)).cloned().collect())
-}
-
-/// A painted part's rect this frame, by name ("toolbar", "workspace_switcher").
-pub fn publish_rect(name: &str, r: egui::Rect) {
-    RECTS.with(|h| h.borrow_mut().push((name.to_string(), r)));
-}
-
-pub fn rect_of(name: &str) -> Option<egui::Rect> {
-    RECTS.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
-}
-
-/// A number about this frame's drawing, by name ("axis_view_highlights": the axis view's highlighted tips).
-pub fn publish_count(name: &str, v: f64) {
-    COUNTS.with(|h| h.borrow_mut().push((name.to_string(), v)));
-}
-
-pub fn count_of(name: &str) -> Option<f64> {
-    COUNTS.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
-}
-
-/// Forget last frame's handles, rects and counts (called as a frame starts).
-pub fn clear_handles() {
-    HANDLES.with(|h| h.borrow_mut().clear());
-    RECTS.with(|h| h.borrow_mut().clear());
-    COUNTS.with(|h| h.borrow_mut().clear());
 }
 
 /// `v` with "$DIR" in its strings replaced by `dir`.
@@ -129,6 +91,8 @@ pub struct Harness {
     /// The last frame's platform output (with its accessibility tree: dialog widgets are found
     /// by their text there).
     pub output: egui::PlatformOutput,
+    /// The last frame's painted shapes.
+    pub shapes: Vec<egui::epaint::ClippedShape>,
     /// Files the scenario saves and opens live here; file pickers answer from it.
     pub dir: PathBuf,
     /// The file the next Open picker returns (a `choose_file` step).
@@ -138,7 +102,7 @@ pub struct Harness {
     time: f64,
     size: egui::Vec2,
     /// The camera as the last `camera` step left it.
-    cam_mark: Option<solidcraft_engine::render::Camera>,
+    cam_mark: Option<solidcraft_viewport::Camera>,
 }
 
 impl Default for Harness {
@@ -158,10 +122,18 @@ impl Drop for Harness {
 
 impl Harness {
     pub fn new() -> Harness {
+        // Test-owned reuse store: never the developer's per-user data folder.
+        solidcraft_engine::use_import_cache_dir(std::env::temp_dir().join(format!("solidcraft-scenario-imports-{}", std::process::id())));
+        solidcraft_ui_text::pin_system_language();
         let mut h = Harness {
             app: SolveApp::new(Session::default(), Services::default()),
-            ctx: egui::Context::default(),
+            ctx: {
+                let ctx = egui::Context::default();
+                crate::fonts::setup_bundled_fonts(&ctx);
+                ctx
+            },
             output: Default::default(),
+            shapes: Vec::new(),
             dir: scratch_dir(),
             next_file: Rc::new(RefCell::new(None)),
             queue: None,
@@ -191,13 +163,26 @@ impl Harness {
         crate::recovery_ui::start(&mut self.app, &self.dir.join("recovery"), std::time::Duration::ZERO);
     }
 
+    /// The next frame's time, 1/60 s on. A frame run without a time (the control channel's) moves
+    /// the context's clock by egui's f32 `predicted_dt`, so follow it: time never goes backwards.
+    fn tick(&mut self) {
+        self.time = self.time.max(self.ctx.input(|i| i.time)) + 1.0 / 60.0;
+    }
+
     /// Lay out and draw one frame (feeding queued pointer and key events).
     pub fn frame(&mut self) {
-        self.time += 1.0 / 60.0;
+        self.frame_with(Vec::new());
+    }
+
+    /// One frame that receives all these events at once (a quick tap, or input queued during a
+    /// slow frame), before any queued ones.
+    pub fn frame_with(&mut self, events: Vec<egui::Event>) {
+        self.tick();
         let mut raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
             time: Some(self.time),
             focused: true,
+            events,
             ..Default::default()
         };
         self.app.raw_input_hook(&mut raw);
@@ -209,6 +194,7 @@ impl Harness {
         // Nothing is painted: drop the frame's texture changes.
         out.textures_delta.clear();
         self.output = out.platform_output;
+        self.shapes = out.shapes;
     }
 
     pub fn frames(&mut self, n: usize) {
@@ -226,7 +212,7 @@ impl Harness {
     /// One frame in which files are dragged over the window (`hovered`) or dropped, the pointer
     /// last seen at `at`.
     pub fn drag_files(&mut self, at: egui::Pos2, hovered: Vec<egui::HoveredFile>, dropped: Vec<egui::DroppedFileHandle>) {
-        self.time += 1.0 / 60.0;
+        self.tick();
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
             time: Some(self.time),
@@ -249,14 +235,17 @@ impl Harness {
     pub fn settle(&mut self) {
         for _ in 0..2000 {
             // Queued input used up and the view no longer moving.
-            if self.app.synthetic.is_empty() && self.app.cam_anim.is_none() && self.app.viewport.orbit_snap.is_none() {
+            if self.app.synthetic.is_empty() && self.app.cam_anim.is_none() {
                 break;
             }
             self.frame();
         }
-        // A file opening or recovering in the background: wait for it (as a person would).
+        // A file opening, recovering or saving in the background, or a window checking what its
+        // material does: wait for it (as a person would).
         let began = std::time::Instant::now();
-        while !self.app.file_load.idle() && began.elapsed() < std::time::Duration::from_secs(120) {
+        while (!self.app.file_load.idle() || self.app.saving.is_some() || crate::open_meshing::active(&self.app) || self.app.op_check.busy())
+            && began.elapsed() < std::time::Duration::from_secs(120)
+        {
             self.frame();
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
@@ -320,8 +309,36 @@ impl Harness {
         })
     }
 
+    /// Accessibility bounds include scrolled-out page content. Reveal that content with
+    /// wheel input before using its coordinates; window actions and navigation stay put.
+    fn reveal_widget(&mut self, text: &str, near: Option<&str>) -> Result<[f64; 2], String> {
+        let find = |h: &Self| match near {
+            Some(label) => h.widget_near(text, label),
+            None => h.widget(text),
+        };
+        for _ in 0..32 {
+            let point = find(self).ok_or_else(|| format!("no widget `{text}` on screen"))?;
+            let at = egui::pos2(point[0] as f32, point[1] as f32);
+            let page = self.app.prefs_window.shell.open.then(|| rect_of("prefs:page_body")).flatten();
+            let chrome = ["prefs:ok", "prefs:apply", "prefs:cancel", "prefs:search"].iter().any(|key| handle_at(key) == Some(at));
+            let Some(page) = page.filter(|page| !chrome && page.x_range().contains(at.x)) else { return Ok(point) };
+            if page.contains(at) {
+                return Ok(point);
+            }
+            self.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":if at.y < page.top() {100} else {-100}}));
+            // Follow the wheel's actual smoothing, rather than clicking its moving content.
+            for _ in 0..120 {
+                if self.ctx.input(|input| !input.is_scrolling()) {
+                    break;
+                }
+                self.frame();
+            }
+        }
+        Err(format!("widget `{text}` could not be revealed in its page"))
+    }
+
     /// Centres of the visible widgets whose label or value is `text`, last drawn first.
-    fn widgets(&self, text: &str) -> Vec<[f64; 2]> {
+    pub fn widgets(&self, text: &str) -> Vec<[f64; 2]> {
         let Some(tree) = self.output.accesskit_update.as_ref() else { return Vec::new() };
         let centre =
             |n: &egui::accesskit::Node| n.bounds().filter(|b| b.x1 > b.x0 && b.y1 > b.y0).map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]);
@@ -360,23 +377,23 @@ impl Harness {
     /// frame may turn the view (its right or back vector) by more than `max_deg`, the last
     /// included, so the move ends without a jump.
     fn view_anim(&mut self, v: &str, max_deg: f64) -> Result<(), String> {
-        let basis = |c: &solidcraft_engine::render::Camera| c.basis();
+        let basis = |c: &solidcraft_viewport::Camera| c.basis();
         let mut prev = basis(&self.app.cam);
         self.app.animate_view(v);
-        if self.app.cam_anim.is_none() && self.app.viewport.orbit_snap.is_none() {
+        if self.app.cam_anim.is_none() {
             return Err(format!("view_anim {v}: no animation started"));
         }
         let mut worst = (0.0f64, 0usize);
         for i in 0..240 {
             self.frame();
             let now = basis(&self.app.cam);
-            let ang = |a: solidcraft_engine::geom::Vec3, b: solidcraft_engine::geom::Vec3| a.dot(b).clamp(-1.0, 1.0).acos().to_degrees();
+            let ang = |a: solidcore_record::Vec3, b: solidcore_record::Vec3| a.dot(b).clamp(-1.0, 1.0).acos().to_degrees();
             let d = ang(prev.0, now.0).max(ang(prev.2, now.2));
             if d > worst.0 {
                 worst = (d, i);
             }
             prev = now;
-            if self.app.cam_anim.is_none() && self.app.viewport.orbit_snap.is_none() {
+            if self.app.cam_anim.is_none() {
                 if worst.0 > max_deg {
                     return Err(format!("view_anim {v}: frame {} of {} turns the view {:.1}° (limit {max_deg}°)", worst.1 + 1, i + 1, worst.0));
                 }
@@ -386,14 +403,44 @@ impl Harness {
         Err(format!("view_anim {v}: still animating after 240 frames"))
     }
 
+    /// A drag step's first and last points, and the screen points it passes through between them
+    /// (a lasso's loop, #4376).
+    fn drag_points(&mut self, d: &Value) -> Result<([f64; 2], [f64; 2], Vec<Value>), String> {
+        let pts = d.as_array().map(Vec::as_slice).unwrap_or_default();
+        let start = self.at(pts.first().unwrap_or(&Value::Null))?;
+        let end = self.at(pts.get(pts.len().saturating_sub(1).max(1)).unwrap_or(&Value::Null))?;
+        let mut via = Vec::new();
+        for q in pts.iter().skip(1).take(pts.len().saturating_sub(2)) {
+            via.push(json!(self.at(q)?));
+        }
+        Ok((start, end, via))
+    }
+
     /// Run one step.
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
         let res =
-            if let Some(id) = s.get("start").and_then(Value::as_str) {
+            if let Some(params) = s.get("panel_fixture") {
+                self.call("ui.panel_fixture", params.clone())
+            } else if let Some(id) = s.get("start").and_then(Value::as_str) {
                 self.call("ui.start", json!({ "command": id }))
             } else if let Some(k) = s.get("key").and_then(Value::as_str) {
-                self.call("ui.key", json!({"key": k, "shift": flag("shift"), "cmd": flag("cmd")}))
+                {
+                    let mut params = json!({"key": k, "shift": flag("shift"), "cmd": flag("cmd"), "alt": flag("alt")});
+                    if let Some(ctrl) = s.get("ctrl") {
+                        params["ctrl"] = ctrl.clone();
+                    }
+                    if let Some(pressed) = s.get("pressed") {
+                        params["pressed"] = pressed.clone();
+                    }
+                    self.call("ui.key", params)
+                }
+            } else if let Some(n) = s.get("frames").and_then(Value::as_u64) {
+                if n > 600 {
+                    return Err("frames must be at most 600".into());
+                }
+                self.frames(n as usize);
+                return Ok(());
             } else if let Some(t) = s.get("text").and_then(Value::as_str) {
                 self.call("ui.text", json!({ "text": t }))
             } else if let Some(at) = s.get("click") {
@@ -407,12 +454,10 @@ impl Harness {
                 self.call("ui.click", p)
             } else if let Some(text) = s.get("widget").and_then(Value::as_str) {
                 // A dialog field, choice or button, found by its text.
-                let found = match s.get("near").and_then(Value::as_str) {
-                    Some(near) => self.widget_near(text, near),
-                    None => self.widget(text),
-                };
-                let [x, y] = found.ok_or_else(|| format!("no widget `{text}` on screen"))?;
+                let near = s.get("near").and_then(Value::as_str);
+                let [x, y] = self.reveal_widget(text, near)?;
                 self.call("ui.move", json!({"x": x, "y": y}));
+                let [x, y] = self.reveal_widget(text, near)?;
                 self.call("ui.click", json!({"x": x, "y": y}))
             } else if let Some(at) = s.get("hold") {
                 // Press and hold still (Select Other): `frames` with the button down (default 40,
@@ -428,13 +473,12 @@ impl Harness {
                 let [x, y] = self.at(at)?;
                 self.call("ui.move", json!({"x": x, "y": y,"shift":flag("shift"),"alt":flag("alt"),"ctrl":flag("ctrl"),"cmd":flag("cmd")}))
             } else if let Some(d) = s.get("drag") {
-                let [x0, y0] = self.at(d.get(0).unwrap_or(&Value::Null))?;
-                let [x1, y1] = self.at(d.get(1).unwrap_or(&Value::Null))?;
+                let ([x0, y0], [x1, y1], via) = self.drag_points(d)?;
                 let steps = s.get("steps").cloned().unwrap_or(json!(8));
-                self.call(
-                    "ui.drag",
-                    json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl"), "alt": flag("alt")}),
-                )
+                let mut p =
+                    json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl"), "alt": flag("alt")});
+                p["via"] = Value::Array(via);
+                self.call("ui.drag", p)
             } else if let Some(m) = s.get("queued").and_then(Value::as_str) {
                 let (v, frames) = self.call_queued(m, s.get("params").cloned().unwrap_or(json!({})));
                 let min = s.get("min_frames").and_then(Value::as_u64).unwrap_or(0);
@@ -474,7 +518,7 @@ impl Harness {
                     #[cfg(not(target_arch = "wasm32"))]
                     if solidcraft_engine::capture::installed().is_none() {
                         solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
-                            let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+                            let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, w, h)?;
                             Ok(solidcraft_engine::capture::Picture { rgba, renderer })
                         }));
                     }
@@ -506,6 +550,20 @@ impl Harness {
             } else if let Some(how) = s.get("restart").and_then(Value::as_str) {
                 // "crash": the app dies (its autosave lock goes with it, the entry stays);
                 // "close": it closes normally. Then a new app starts on the same folders.
+                if how == "crash" {
+                    // The work so far is autosaved before the crash: the write runs on a worker
+                    // thread, which a loaded machine had not finished (#10690). The autosave's
+                    // own ticks write it; a bounded wait, so an autosave that stopped writing
+                    // still fails the recovery that follows.
+                    for _ in 0..600 {
+                        let caught_up = self.app.autosave.as_ref().and_then(|a| a.active.as_ref()).is_none_or(|a| a.caught_up(&self.app.session));
+                        if caught_up {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                        self.frames(1);
+                    }
+                }
                 let mut old = std::mem::replace(&mut self.app, SolveApp::new(Session::default(), Services::default()));
                 if how == "close" {
                     crate::recovery_ui::close(&mut old);
@@ -515,6 +573,7 @@ impl Harness {
                 }
                 drop(old);
                 self.ctx = egui::Context::default();
+                crate::fonts::setup_bundled_fonts(&self.ctx);
                 self.ctx.enable_accesskit();
                 self.install();
                 self.start_autosave();
@@ -555,7 +614,7 @@ impl Harness {
                     eprintln!("widgets: {texts:?}");
                 }
                 if s["debug"] == json!("handles") {
-                    let names: Vec<String> = HANDLES.with(|h| h.borrow().iter().map(|(n, p)| format!("{n} @{:.0},{:.0}", p.x, p.y)).collect());
+                    let names: Vec<String> = handles("").iter().map(|(n, p)| format!("{n} @{:.0},{:.0}", p.x, p.y)).collect();
                     eprintln!("handles: {names:?}");
                 }
                 return Ok(());
@@ -778,7 +837,8 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 if r.width() < lo - 0.5 || r.width() > hi + 0.5 {
                     return Err(format!("dialog width {:.0}, want {lo}..{hi}", r.width()));
                 }
-                if (r.right() - vp.right()).abs() > 2.0 || r.top() < vp.top() || r.bottom() > vp.bottom() + 1.0 {
+                let clearance = if rect_of("dialog:header").is_some() { solidcraft_theme::Tokens::get().space_8 } else { 0.0 };
+                if (r.right() - (vp.right() - clearance)).abs() > 0.5 || r.top() < vp.top() || r.bottom() > vp.bottom() + 1.0 {
                     return Err(format!("dialog {r:?} is not docked right inside the viewport {vp:?}"));
                 }
             }
@@ -794,21 +854,28 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                         .filter_map(|l| m.area_rect(l.id).map(|r| (l.id, r)))
                         .collect()
                 });
+                // Workspace panels (docks and strips) are laid out against the viewport, not sized like dialogs.
+                let panels: Vec<egui::Rect> = h.app.shell.workspace_panels.values().copied().collect();
                 for (id, r) in rects {
+                    if panels.iter().any(|p| (p.min - r.min).abs().max_elem() < 1.0 && (p.max - r.max).abs().max_elem() < 1.0) {
+                        continue;
+                    }
                     if r.width() > max_w || !screen.expand(1.0).contains_rect(r) {
                         return Err(format!("window {id:?} at {r:?} (width {:.0}) does not fit {screen:?} at ≤{max_w}", r.width()));
                     }
                 }
             }
             "dialog" => {
-                let d = &ui["dialog"];
+                // A word of the dialog's state as the code holds it: scenarios check fields that
+                // `ui.inspect` reports only as the command OK runs.
+                let d = h.app.dialog.as_ref().map(|d| format!("{d:?}"));
                 let ok = match v {
-                    Value::Null => d.is_null(),
-                    Value::String(w) => d.as_str().is_some_and(|d| d.contains(w.as_str())),
+                    Value::Null => d.is_none() && ui["dialog"].is_null(),
+                    Value::String(w) => d.as_deref().is_some_and(|d| d.contains(w.as_str())),
                     _ => false,
                 };
                 if !ok {
-                    return Err(format!("dialog: got {d}, want {v}"));
+                    return Err(format!("dialog: got {d:?}, want {v}"));
                 }
             }
             "tool" => {
@@ -1015,6 +1082,16 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                     }
                 }
             }
+            "theme_colors" => {
+                // Read the applied tokens after the scenario frame, not the source theme file.
+                let tokens = solidcraft_theme::Tokens::get();
+                let resolved = crate::theme_files::export("Scenario", crate::theme_files::Base::Dark, &tokens, None);
+                for (key, want) in v.as_object().into_iter().flatten() {
+                    if resolved["colors"][key] != *want {
+                        return Err(format!("theme colour {key}: got {}, want {want}", resolved["colors"][key]));
+                    }
+                }
+            }
             "file_busy" | "quit_requested" | "quitting" => {
                 if ui[k] != *v {
                     return Err(format!("{k}: got {}, want {v}", ui[k]));
@@ -1051,6 +1128,14 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                     return Err(format!("browser selection: {}", r["result"]));
                 }
             }
+            "shortcuts" => {
+                for (id, want) in v.as_object().ok_or("shortcuts takes a command-to-key object")? {
+                    let got = h.call("ui.shortcut", json!({"command": id}));
+                    if got["result"]["key"] != *want {
+                        return Err(format!("shortcut {id}: got {}, want {want}", got["result"]["key"]));
+                    }
+                }
+            }
             "query" => {
                 // {command, params?, path: [keys or indices], value}: a command's result at path.
                 let cmd = v["command"].as_str().ok_or("query needs `command`")?;
@@ -1077,3 +1162,7 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "scenario_publication_tests.rs"]
+mod publication_tests;

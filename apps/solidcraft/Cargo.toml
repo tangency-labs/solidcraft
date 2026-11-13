@@ -7,9 +7,18 @@ license.workspace = true
 publish = false
 default-run = "solidcraft"
 
+[features]
+default = ["raytrace-cpu", "bundled-render-library", "profile"]
+bundled-render-library = ["solidcraft-engine/bundled-render-library"]
+raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
+# The profiler, compiled in so any build can say where its time goes (the Profile operations
+# preference, SOLIDCRAFT_PROFILE=1, diagnostics.profile); it records nothing until asked.
+profile = ["solidcraft-engine/profile"]
+
 # The workspace lints, except unsafe_code: denied, not forbidden, so that src/open_documents.rs
-# (macOS file-open events), src/native_crash.rs (Windows exception filter) and src/native_frame.rs
-# (Windows resize border) can allow it: none has a safe API. Keep the rest in sync with [workspace.lints].
+# (macOS file-open events), src/native_crash.rs (Windows exception filter), src/native_crash_macos.rs
+# (macOS crash signal handler) and src/native_frame.rs (Windows resize border, taskbar icon) can
+# allow it: none has a safe API. Keep the rest in sync with [workspace.lints].
 [lints.rust]
 unsafe_code = "deny"
 
@@ -21,11 +30,23 @@ type_complexity = "allow"
 neg_cmp_op_on_partial_ord = "allow"
 
 [dependencies]
+solidcraft-viewport-gpu = { workspace = true }
+solidcraft-viewport = { workspace = true }
 solidcraft-engine = { workspace = true }
+solidcraft-control = { workspace = true }
+# The D3D12 shader compiler the window starts with (#6756).
+solidcraft-gpu = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
+# SolidCraft's look (icons, glyphs, built-in themes), installed at startup.
+solidcraft-look = { workspace = true }
+solidcraft-ui-text = { workspace = true }
+solidcraft-theme = { workspace = true }
 solidcraft-space-mouse = { workspace = true }
-eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }
+# "clipboard" is not a default here: eframe 0.37 builds egui-winit without it, and then every
+# Copy and Paste on the desktop silently does nothing (see src/clipboard_tests.rs).
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links", "clipboard"] }
 egui = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
 rfd = { workspace = true }
@@ -33,7 +54,6 @@ rfd = { workspace = true }
 ron = "0.12"
 # Waits for wgpu's adapter list when choosing the graphics backend before the window opens.
 pollster = { workspace = true }
-getrandom = "0.3"
 # The update check (docs/updates.md): HTTPS with rustls, certificates from the operating system.
 ureq = { version = "3.4", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
@@ -49,9 +69,15 @@ hidapi = { version = "2.6.7", default-features = false, features = ["windows-nat
 # The main window's handle for src/native_frame.rs (already in the tree through eframe and winit).
 raw-window-handle = "0.6"
 # Native crash capture (src/native_crash.rs): the exception filter, the faulting module, a minidump.
-# The window's resize border and DPI size (src/native_frame.rs): the window procedure, hit test, DPI.
+# The window's resize border, DPI size and class icon (src/native_frame.rs): the window procedure, hit
+# test, DPI, the exe's icon.
+# Finding 3D mice through Plug and Play without asking other devices anything (src/space_mouse/windows_hid.rs).
 windows-sys = { version = "0.61", features = [
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Devices_HumanInterfaceDevice",
+    "Win32_Devices_Properties",
     "Win32_Foundation",
+    "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_Diagnostics_Debug",
@@ -63,21 +89,37 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging",
 ] }
+winreg = "0.56"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+muda = { version = "0.21.2", default-features = false }
 # The 3D mouse through the 3Dconnexion driver, which keeps the device to itself (src/space_mouse.rs).
 solidcraft-3dx-client = { workspace = true }
 # The 3D mouse (src/space_mouse.rs), in the shared-device open mode so that a running 3DxWare
 # driver does not shut the app out.
 hidapi = { version = "2.6.7", default-features = false, features = ["macos-shared-device"] }
-# Files opened from Finder and the Dock (src/open_documents.rs); all already come with eframe and rfd.
+# Files opened from Finder and the Dock (src/open_documents.rs), and the fullscreen title-bar
+# inset (src/main.rs); all already come with eframe and rfd.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSArray", "NSNotification", "NSOperation", "NSString", "NSURL"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAccessibility", "NSApplication", "NSResponder", "NSWindow", "NSWorkspace"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSArray", "NSNotification", "NSOperation", "NSProcessInfo", "NSString", "NSURL"] }
 block2 = "0.6"
+# Native crash capture (src/native_crash_macos.rs): the signal handler, the faulting module
+# (already in the tree through many crates).
+libc = "0.2"
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 winit = { version = "0.30", default-features = false, features = ["x11"] }
+# Bringing the window forward on X11 when a close asks about unsaved designs (src/come_forward.rs):
+# the window's id, and the window manager request winit doesn't send (MIT OR Apache-2.0; both
+# already in the tree through eframe and winit).
+raw-window-handle = "0.6"
+x11rb = { version = "0.13", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The desktop's dark or light preference through the XDG Desktop Portal (src/desktop_theme.rs,
+# #7944); already in the tree through eframe's accessibility support (accesskit_unix).
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 
 [build-dependencies]
 embed-resource = "3.0.11"

@@ -7,10 +7,8 @@
 //! Safari installs web apps too (Add to Home Screen on iPhone and iPad, Add to Dock on a Mac) but
 //! offers no prompt a page can show. There the item opens a window with the steps.
 
-use egui::RichText;
-
 use crate::SolveApp;
-use crate::theme::Tokens;
+use crate::ui_kit;
 
 /// How the browser installs the app.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,31 +84,20 @@ pub fn start(app: &mut SolveApp, offer: Offer) {
     }
 }
 
-/// The window with Safari's steps, while open.
+/// The card with Safari's steps, while open.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(steps) = app.install_steps else { return };
-    let t = Tokens::get();
     let (lines, after) = steps.messages();
-    let mut open = true;
-    let mut done = false;
-    crate::frame::window(ctx, crate::i18n::tr("install.title"), crate::frame::Width::Normal)
-        .id(egui::Id::new("sc_install_steps"))
-        .open(&mut open)
-        .resizable(false)
-        .show(ctx, |ui| {
-            ui.label(crate::i18n::tr("install.steps_intro"));
-            ui.add_space(4.0);
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_install_steps"), "web", solidcraft_ui_text::tr("install.title"))
+        .actions("", solidcraft_ui_text::tr("install.done"), None)
+        .show(ctx, true, |ui| {
+            ui_kit::text(ui, solidcraft_ui_text::tr("install.steps_intro"), ui_kit::Text::Report("intro", false));
             for (i, id) in lines.iter().enumerate() {
-                ui.label(format!("{}. {}", i + 1, crate::i18n::tr(id)));
+                ui_kit::text(ui, &format!("{}. {}", i + 1, solidcraft_ui_text::tr(id)), ui_kit::Text::Report(&format!("step:{i}"), false));
             }
-            ui.add_space(4.0);
-            ui.add(egui::Label::new(RichText::new(crate::i18n::tr(after)).color(t.text_dim)).wrap());
-            ui.add_space(6.0);
-            if ui.button(crate::i18n::tr("install.done")).clicked() {
-                done = true;
-            }
+            ui_kit::text(ui, solidcraft_ui_text::tr(after), ui_kit::Text::Note("after"));
         });
-    if !open || done {
+    if closed || action != ui_kit::Action::None {
         app.install_steps = None;
     }
 }
@@ -134,9 +121,9 @@ mod tests {
 
     /// Open the File menu and look for Install app….
     fn file_menu_item(h: &mut Harness) -> bool {
-        h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_file_menu"), true));
+        h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu"), true));
         h.frames(2);
-        h.widget(crate::i18n::tr(ITEM)).is_some()
+        h.widget(solidcraft_ui_text::tr(ITEM)).is_some()
     }
 
     #[test]
@@ -149,7 +136,7 @@ mod tests {
 
         offer.set(Some(Offer::Prompt));
         assert!(file_menu_item(&mut h), "offered: File has Install app…");
-        assert_eq!(h.step(&json!({ "widget": crate::i18n::tr(ITEM) })), Ok(()));
+        assert_eq!(h.step(&json!({ "widget": solidcraft_ui_text::tr(ITEM) })), Ok(()));
         assert_eq!(prompts.get(), 1, "a click shows the browser's prompt");
         assert_eq!(h.app.install_steps, None, "no steps window for a browser with a prompt");
 
@@ -163,7 +150,7 @@ mod tests {
         host(&mut h, Rc::new(Cell::new(Some(Offer::Prompt))), Rc::new(Cell::new(0)));
         h.frames(2);
         assert!(handle_at("titlebar:install").is_none());
-        assert!(h.widget(crate::i18n::tr(ITEM)).is_none(), "only in the File menu");
+        assert!(h.widget(solidcraft_ui_text::tr(ITEM)).is_none(), "only in the File menu");
     }
 
     #[test]
@@ -172,11 +159,11 @@ mod tests {
         let mut h = Harness::new();
         host(&mut h, Rc::new(Cell::new(Some(Offer::Steps(Steps::Dock)))), prompts.clone());
         assert!(file_menu_item(&mut h));
-        assert_eq!(h.step(&json!({ "widget": crate::i18n::tr(ITEM) })), Ok(()));
+        assert_eq!(h.step(&json!({ "widget": solidcraft_ui_text::tr(ITEM) })), Ok(()));
         assert_eq!(h.app.install_steps, Some(Steps::Dock), "a click opens the steps");
         assert_eq!(prompts.get(), 0, "Safari has no prompt");
         h.frames(2);
-        assert_eq!(h.step(&json!({ "widget": crate::i18n::tr("install.done") })), Ok(()));
+        assert_eq!(h.step(&json!({ "widget": solidcraft_ui_text::tr("install.done") })), Ok(()));
         assert_eq!(h.app.install_steps, None, "Done closes the steps");
     }
 

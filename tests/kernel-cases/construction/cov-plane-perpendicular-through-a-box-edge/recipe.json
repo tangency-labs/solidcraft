@@ -1,0 +1,27 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "construct.plane.perpendicular",
+   "params": {
+    "plane": "XY",
+    "line": {
+     "edge": [
+      20,
+      0,
+      0
+     ]
+    },
+    "name": "P"
+   }
+  }
+ ]
+}

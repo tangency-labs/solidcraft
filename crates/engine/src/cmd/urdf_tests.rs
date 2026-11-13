@@ -1,6 +1,7 @@
 //! URDF export (#719, docs/urdf.md): files, names, limits, mass and forward kinematics against
 //! the joint solver.
 
+use solidcraft_geom::prelude::*;
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
@@ -111,7 +112,7 @@ fn stl_volume(bytes: &[u8]) -> Option<f64> {
         for (k, p) in t.iter().enumerate() {
             let n = mesh.positions.len() as u32;
             tri[k] = *index.entry(p.map(f32::to_bits)).or_insert_with(|| {
-                mesh.positions.push(solidcraft_geom::Vec3::new(p[0] as f64, p[1] as f64, p[2] as f64));
+                mesh.positions.push(solidcore_record::Vec3::new(p[0] as f64, p[1] as f64, p[2] as f64));
                 n
             });
         }
@@ -375,7 +376,7 @@ fn urdf_inertial_is_mass_weighted() {
     }
     assert!(i.inertia[0][1].abs() < 1e-15);
     // The centre of mass is the cube's centre, in the link frame.
-    assert!(i.com.dist(solidcraft_doc::apply_point(&l.mesh_origin, solidcraft_geom::Vec3::new(105.0, 5.0, 5.0))) < 1e-9, "{:?}", i.com);
+    assert!(i.com.dist(solidcraft_doc::apply_point(&l.mesh_origin, solidcore_record::Vec3::new(105.0, 5.0, 5.0))) < 1e-9, "{:?}", i.com);
 }
 
 #[test]
@@ -383,7 +384,7 @@ fn urdf_names_are_unique_across_links_joints_and_files() {
     let mut s = Session::default();
     for name in ["Arm", "base", "Arm_link1"] {
         run(&mut s, "component.activate", json!({"component": "root"}));
-        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "component.create", json!({"name": name, "grounded": false}));
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]}));
     }
     run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [50, 50, 0]}));
@@ -557,7 +558,12 @@ fn urdf_warns_when_placements_are_cut_off() {
     let s = Session::default();
     let mut doc = (*s.doc).clone();
     for k in 1..=66u64 {
-        doc.components.push(solidcraft_doc::Component { id: 1000 + k, name: format!("C{k}"), parent: if k == 1 { 0 } else { 999 + k } });
+        doc.components.push(solidcraft_doc::Component {
+            id: 1000 + k,
+            name: format!("C{k}"),
+            parent: if k == 1 { 0 } else { 999 + k },
+            ..Default::default()
+        });
         doc.occurrences.push(solidcraft_doc::Occurrence {
             id: 2000 + k,
             component: 1000 + k,
@@ -565,15 +571,24 @@ fn urdf_warns_when_placements_are_cut_off() {
             name: format!("C{k}:1"),
             transform: solidcraft_doc::IDENTITY,
             grounded: false,
+            expressed_moves: Vec::new(),
         });
     }
     // A component placed twice with a part nested in it, next to the deep chain: its copy is
     // still there, since only the branch past the limit stops.
-    doc.components.push(solidcraft_doc::Component { id: 3001, name: "Leg".into(), parent: 0 });
-    doc.components.push(solidcraft_doc::Component { id: 3002, name: "Foot".into(), parent: 3001 });
+    doc.components.push(solidcraft_doc::Component { id: 3001, name: "Leg".into(), parent: 0, ..Default::default() });
+    doc.components.push(solidcraft_doc::Component { id: 3002, name: "Foot".into(), parent: 3001, ..Default::default() });
     // Listed first, so the walk (a stack) goes down the chain before reaching them.
     for (id, component, parent, name) in [(4003, 3002, 3001, "Foot:1"), (4002, 3001, 0, "Leg:2"), (4001, 3001, 0, "Leg:1")] {
-        let o = solidcraft_doc::Occurrence { id, component, parent, name: name.into(), transform: solidcraft_doc::IDENTITY, grounded: false };
+        let o = solidcraft_doc::Occurrence {
+            id,
+            component,
+            parent,
+            name: name.into(),
+            transform: solidcraft_doc::IDENTITY,
+            grounded: false,
+            expressed_moves: Vec::new(),
+        };
         doc.occurrences.insert(0, o);
     }
     let p = solidcraft_io::urdf(&doc, &s.model.state(), "t", &UrdfOptions::default()).unwrap();

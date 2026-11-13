@@ -1,0 +1,3200 @@
+{
+  "metadata": {
+    "schema_version": "0.2.0",
+    "language": "en",
+    "status": "specified_unbound",
+    "parameter_policy": "All numeric values are authored initial values; calibration, appearance-role resolution and renderer binding are pending."
+  },
+  "items": [
+    {
+      "id": "ENVSET-001",
+      "name": "Neutral gray product cyclorama",
+      "catalog_id": "ENV-001",
+      "mode": "terrestrial",
+      "description": "Authored initial neutral gray product cyclorama recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043"
+      ],
+      "geometry": {
+        "generator": "cyclorama",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 6000.0,
+          "depth": 7000.0,
+          "height": 4000.0,
+          "transition_radius": 1200.0
+        },
+        "procedural_seed": 620001,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 3000.0
+        },
+        "topography_status": "original_generic_geometry_not_a_facility_scan"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "neutral_gray_matte",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 10.0,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "uniform_environment",
+        "scale": 0.15,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": false,
+        "owner": "environment",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.610865238198,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 0.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "linked_environment",
+        "color_linear_srgb": [
+          0.18,
+          0.18,
+          0.18
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "ambient.scale",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-002",
+      "name": "White enclosed product studio",
+      "catalog_id": "ENV-002",
+      "mode": "terrestrial",
+      "description": "Authored initial white enclosed product studio recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043"
+      ],
+      "geometry": {
+        "generator": "open_front_room",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 6000.0,
+          "depth": 6500.0,
+          "height": 4000.0,
+          "wall_thickness": 100.0
+        },
+        "procedural_seed": 620002,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 3000.0
+        },
+        "topography_status": "original_generic_geometry_not_a_facility_scan"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "white_diffuse",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 10.0,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "uniform_environment",
+        "scale": 0.12,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": false,
+        "owner": "environment",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.610865238198,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 0.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "linked_environment",
+        "color_linear_srgb": [
+          0.18,
+          0.18,
+          0.18
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "ambient.scale",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-003",
+      "name": "Black controlled-reflection studio",
+      "catalog_id": "ENV-003",
+      "mode": "terrestrial",
+      "description": "Authored initial black controlled-reflection studio recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043"
+      ],
+      "geometry": {
+        "generator": "black_reflection_room",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 5000.0,
+          "depth": 6000.0,
+          "height": 3500.0,
+          "wall_thickness": 100.0,
+          "front_opening_width": 2500.0
+        },
+        "procedural_seed": 620003,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 2500.0
+        },
+        "topography_status": "original_generic_geometry_not_a_facility_scan"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "black_matte",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 10.0,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "uniform_environment",
+        "scale": 0.01,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": false,
+        "owner": "environment",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.610865238198,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 0.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "ambient.scale",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-004",
+      "name": "Transparent product contact stage",
+      "catalog_id": "ENV-004",
+      "mode": "editorial",
+      "description": "Authored initial transparent product contact stage recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043",
+        "CAP-045"
+      ],
+      "geometry": {
+        "generator": "contact_plane",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 6000.0,
+          "depth": 6000.0,
+          "thickness": 100.0
+        },
+        "procedural_seed": 620004,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 3000.0
+        },
+        "topography_status": "original_generic_geometry_not_a_facility_scan"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "neutral_gray_matte",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 10.0,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "shadow_catcher"
+      },
+      "ambient": {
+        "source_type": "uniform_environment",
+        "scale": 0.18,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": false,
+        "owner": "environment",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.610865238198,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 0.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "transparent",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 0.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "ambient.scale",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Camera alpha is an explicit compositing choice; reflection and illumination retain the linked environment."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-005",
+      "name": "Neutral overcast exterior ground",
+      "catalog_id": "ENV-005",
+      "mode": "terrestrial",
+      "description": "Authored initial neutral overcast exterior ground recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043",
+        "CAP-042"
+      ],
+      "geometry": {
+        "generator": "flat_ground",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 30000.0,
+          "depth": 30000.0,
+          "thickness": 200.0
+        },
+        "procedural_seed": 620005,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 15000.0
+        },
+        "topography_status": "original_generic_geometry_not_a_facility_scan"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "neutral_gray_matte",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 20.0,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "procedural_overcast_sky",
+        "scale": 1.0,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": false,
+        "owner": "environment",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.610865238198,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 0.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": true,
+        "model": "procedural_sky_only",
+        "density_scale": 1.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "linked_environment",
+        "color_linear_srgb": [
+          0.18,
+          0.18,
+          0.18
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "ambient.scale",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-006",
+      "name": "Three-level product podium",
+      "catalog_id": "ENV-012",
+      "mode": "terrestrial",
+      "description": "Authored initial three-level product podium recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043"
+      ],
+      "geometry": {
+        "generator": "three_step_podium",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 3000.0,
+          "depth": 2200.0,
+          "base_thickness": 100.0,
+          "level_one_height": 250.0,
+          "level_two_height": 500.0,
+          "level_three_height": 750.0,
+          "level_separation": 100.0
+        },
+        "procedural_seed": 620006,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 2500.0
+        },
+        "topography_status": "original_generic_geometry_not_a_facility_scan"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "neutral_gray_matte",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 10.0,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "uniform_environment",
+        "scale": 0.15,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": false,
+        "owner": "environment",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.610865238198,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 0.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "linked_environment",
+        "color_linear_srgb": [
+          0.18,
+          0.18,
+          0.18
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "ambient.scale",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-007",
+      "name": "Light-wood worktable",
+      "catalog_id": "ENV-021",
+      "mode": "terrestrial",
+      "description": "Authored initial light-wood worktable recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043"
+      ],
+      "geometry": {
+        "generator": "tabletop_and_backdrop",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 1800.0,
+          "depth": 800.0,
+          "table_height": 740.0,
+          "top_thickness": 35.0,
+          "backdrop_distance": 2500.0
+        },
+        "procedural_seed": 620007,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 1400.0
+        },
+        "topography_status": "original_generic_geometry_not_a_facility_scan"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "light_wood",
+        "parameters": {
+          "elevation_mm": 740.0,
+          "texture_scale_mm": 50.0,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "uniform_environment",
+        "scale": 0.2,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": false,
+        "owner": "environment",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.610865238198,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 0.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "linked_environment",
+        "color_linear_srgb": [
+          0.18,
+          0.18,
+          0.18
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "ambient.scale",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Use the table top as the support plane; do not place the subject at the floor origin."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-008",
+      "name": "Electronics assembly workbench",
+      "catalog_id": "ENV-211",
+      "mode": "terrestrial",
+      "description": "Authored initial electronics assembly workbench recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043"
+      ],
+      "geometry": {
+        "generator": "electronics_bench",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 1800.0,
+          "depth": 800.0,
+          "table_height": 750.0,
+          "top_thickness": 35.0,
+          "mat_width": 800.0,
+          "mat_depth": 500.0,
+          "service_rail_height": 450.0
+        },
+        "procedural_seed": 620008,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 1000.0
+        },
+        "topography_status": "original_generic_geometry_not_a_facility_scan"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "esd_mat_visual",
+        "parameters": {
+          "elevation_mm": 750.0,
+          "texture_scale_mm": 1.0,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "uniform_environment",
+        "scale": 0.12,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": false,
+        "owner": "environment",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.610865238198,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 0.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "linked_environment",
+        "color_linear_srgb": [
+          0.18,
+          0.18,
+          0.18
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "ambient.scale",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "The mat appearance does not certify ESD performance.",
+        "Bind task lights once in the selected lighting rig."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-009",
+      "name": "Enclosed FDM printer workstation",
+      "catalog_id": "ENV-214",
+      "mode": "terrestrial",
+      "description": "Authored initial enclosed fdm printer workstation recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043"
+      ],
+      "geometry": {
+        "generator": "printer_workstation",
+        "units": "mm",
+        "parameters_mm": {
+          "bench_width": 1600.0,
+          "bench_depth": 800.0,
+          "bench_height": 750.0,
+          "enclosure_width": 650.0,
+          "enclosure_depth": 650.0,
+          "enclosure_height": 750.0,
+          "build_plate_width": 256.0,
+          "build_plate_depth": 256.0,
+          "build_plate_thickness": 5.0
+        },
+        "procedural_seed": 620009,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 256.0
+        },
+        "topography_status": "original_generic_geometry_not_a_facility_scan"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "workbench_laminate",
+        "parameters": {
+          "elevation_mm": 750.0,
+          "texture_scale_mm": 5.0,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "uniform_environment",
+        "scale": 0.12,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": false,
+        "owner": "environment",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.610865238198,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 0.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "linked_environment",
+        "color_linear_srgb": [
+          0.18,
+          0.18,
+          0.18
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "ambient.scale",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Build-volume dimensions are authoring placeholders, not the specification of a real printer.",
+        "Internal LED emission belongs to the printer or a single linked rig."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-010",
+      "name": "Automotive flush turntable hall",
+      "catalog_id": "ENV-201",
+      "mode": "terrestrial",
+      "description": "Authored initial automotive flush turntable hall recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043"
+      ],
+      "geometry": {
+        "generator": "vehicle_turntable_hall",
+        "units": "mm",
+        "parameters_mm": {
+          "room_width": 14000.0,
+          "room_depth": 18000.0,
+          "room_height": 6500.0,
+          "turntable_radius": 4000.0,
+          "turntable_thickness": 120.0,
+          "floor_thickness": 250.0
+        },
+        "procedural_seed": 620010,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 7000.0
+        },
+        "topography_status": "original_generic_geometry_not_a_facility_scan"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "neutral_satin_floor",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 20.0,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "uniform_environment",
+        "scale": 0.1,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": false,
+        "owner": "environment",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.610865238198,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 0.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "linked_environment",
+        "color_linear_srgb": [
+          0.18,
+          0.18,
+          0.18
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "ambient.scale",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Turntable fit is a one-time placement operation and must not resize the vehicle."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-011",
+      "name": "Dark LED rail bench",
+      "catalog_id": "ENV-221",
+      "mode": "terrestrial",
+      "description": "Authored initial dark led rail bench recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043",
+        "CAP-013"
+      ],
+      "geometry": {
+        "generator": "optical_dark_bench",
+        "units": "mm",
+        "parameters_mm": {
+          "bench_width": 1800.0,
+          "bench_depth": 900.0,
+          "bench_height": 850.0,
+          "rail_length": 1200.0,
+          "receiver_width": 600.0,
+          "receiver_height": 600.0,
+          "receiver_distance": 1000.0
+        },
+        "procedural_seed": 620011,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 1000.0
+        },
+        "topography_status": "original_generic_geometry_not_a_facility_scan"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "optical_black_matte",
+        "parameters": {
+          "elevation_mm": 850.0,
+          "texture_scale_mm": 1.0,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "none",
+        "scale": 0.0,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": false,
+        "owner": "environment",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.610865238198,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 0.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "ambient.scale",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "No source is included in the environment: bind the inspected LED exactly once.",
+        "A dark image with the LED off is a valid result."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-012",
+      "name": "Spacecraft clean integration hall",
+      "catalog_id": "ENV-231",
+      "mode": "terrestrial",
+      "description": "Authored initial spacecraft clean integration hall recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043"
+      ],
+      "geometry": {
+        "generator": "clean_integration_hall",
+        "units": "mm",
+        "parameters_mm": {
+          "room_width": 16000.0,
+          "room_depth": 22000.0,
+          "room_height": 11000.0,
+          "floor_thickness": 300.0,
+          "reference_grid_spacing": 1000.0
+        },
+        "procedural_seed": 620012,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 10000.0
+        },
+        "topography_status": "original_generic_geometry_not_a_facility_scan"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "cleanroom_floor_visual",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 20.0,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "uniform_environment",
+        "scale": 0.18,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": false,
+        "owner": "environment",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.610865238198,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 0.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "linked_environment",
+        "color_linear_srgb": [
+          0.18,
+          0.18,
+          0.18
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "ambient.scale",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "The stage does not assert a cleanroom classification or handling certification."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-013",
+      "name": "Sunlit spacecraft in local vacuum",
+      "catalog_id": "ENV-241",
+      "mode": "space_physical",
+      "description": "Authored initial sunlit spacecraft in local vacuum recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-011"
+      ],
+      "geometry": {
+        "generator": "empty_local_space",
+        "units": "mm",
+        "parameters_mm": {
+          "reference_extent_x": 50000.0,
+          "reference_extent_y": 50000.0,
+          "reference_extent_z": 50000.0
+        },
+        "procedural_seed": 620013,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 30000.0
+        },
+        "topography_status": "original_generic_geometry_not_a_facility_scan"
+      },
+      "ground": {
+        "enabled": false,
+        "appearance_role": "neutral_gray_matte",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 1.0,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "none",
+        "scale": 0.0,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": true,
+        "owner": "environment",
+        "azimuth_rad": 0.610865238198,
+        "elevation_rad": 0.436332312999,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 1.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "sun.azimuth_rad",
+        "sun.elevation_rad",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Atmosphere is absent and sky radiance is exactly zero; no terrestrial fog, rain, wind or smoke is permitted.",
+        "Unlit surfaces receive only light traced from actual geometry or bound hardware emitters; do not inject promotional fill.",
+        "Keep Earth and stars off by default; enabling either requires a separately reviewed geometry and exposure decision.",
+        "Reference extents are guides, not enclosing walls or a ground surface.",
+        "No planet, orbit altitude or real trajectory is implied."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-014",
+      "name": "Lunar mare low-sun physical hero",
+      "catalog_id": "ENV-251",
+      "mode": "lunar_physical",
+      "description": "Authored initial lunar mare low-sun physical hero recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043",
+        "CAP-011",
+        "CAP-036",
+        "CAP-084"
+      ],
+      "geometry": {
+        "generator": "lunar_regolith_patch",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 120000.0,
+          "depth": 120000.0,
+          "ground_thickness": 10000.0,
+          "relief_amplitude": 700.0,
+          "relief_wavelength": 14000.0,
+          "rock_min_radius": 30.0,
+          "rock_max_radius": 600.0,
+          "support_patch_radius": 6000.0
+        },
+        "procedural_seed": 620014,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 10000.0
+        },
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "rock_count": 75
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "lunar_mare_regolith",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 0.4,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "none",
+        "scale": 0.0,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": true,
+        "owner": "environment",
+        "azimuth_rad": 0.610865238198,
+        "elevation_rad": 0.13962634016,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 1.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "sun.azimuth_rad",
+        "sun.elevation_rad",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Atmosphere is absent and sky radiance is exactly zero; no terrestrial fog, rain, wind or smoke is permitted.",
+        "Unlit surfaces receive only light traced from actual geometry or bound hardware emitters; do not inject promotional fill.",
+        "Keep Earth and stars off by default; enabling either requires a separately reviewed geometry and exposure decision.",
+        "Terrain is a procedural concept, not an exact landing site or sourced elevation model.",
+        "Any animated dust requires explicit ballistic geometry and documented trajectory assumptions, never an atmospheric volume."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-015",
+      "name": "Lunar mare high-sun physical study",
+      "catalog_id": "ENV-252",
+      "mode": "lunar_physical",
+      "description": "Authored initial lunar mare high-sun physical study recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043",
+        "CAP-011",
+        "CAP-036",
+        "CAP-084"
+      ],
+      "geometry": {
+        "generator": "lunar_regolith_patch",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 120000.0,
+          "depth": 120000.0,
+          "ground_thickness": 10000.0,
+          "relief_amplitude": 350.0,
+          "relief_wavelength": 16000.0,
+          "rock_min_radius": 20.0,
+          "rock_max_radius": 350.0,
+          "support_patch_radius": 6000.0
+        },
+        "procedural_seed": 620015,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 10000.0
+        },
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "rock_count": 45
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "lunar_mare_regolith",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 0.4,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "none",
+        "scale": 0.0,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": true,
+        "owner": "environment",
+        "azimuth_rad": 2.356194490192,
+        "elevation_rad": 1.134464013796,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 1.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "sun.azimuth_rad",
+        "sun.elevation_rad",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Atmosphere is absent and sky radiance is exactly zero; no terrestrial fog, rain, wind or smoke is permitted.",
+        "Unlit surfaces receive only light traced from actual geometry or bound hardware emitters; do not inject promotional fill.",
+        "Keep Earth and stars off by default; enabling either requires a separately reviewed geometry and exposure decision.",
+        "Terrain is a procedural concept, not an exact landing site or sourced elevation model.",
+        "Any animated dust requires explicit ballistic geometry and documented trajectory assumptions, never an atmospheric volume.",
+        "This high-sun state is not presented as a lunar south-pole lighting state."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-016",
+      "name": "SELENE scoop-contact macro in vacuum",
+      "catalog_id": "ENV-271",
+      "mode": "lunar_physical",
+      "description": "Authored initial selene scoop-contact macro in vacuum recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043",
+        "CAP-011",
+        "CAP-036",
+        "CAP-084"
+      ],
+      "geometry": {
+        "generator": "lunar_macro_sample_patch",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 1600.0,
+          "depth": 1600.0,
+          "ground_thickness": 300.0,
+          "relief_amplitude": 12.0,
+          "relief_wavelength": 160.0,
+          "rock_min_radius": 2.0,
+          "rock_max_radius": 45.0,
+          "contact_patch_radius": 180.0
+        },
+        "procedural_seed": 620016,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 1000.0
+        },
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "rock_count": 30,
+        "macro_region_of_interest_mm": {
+          "width": 450.0,
+          "depth": 450.0,
+          "height": 300.0
+        }
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "lunar_mare_regolith",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 0.3,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "none",
+        "scale": 0.0,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": true,
+        "owner": "environment",
+        "azimuth_rad": 1.047197551197,
+        "elevation_rad": 0.349065850399,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 1.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "sun.azimuth_rad",
+        "sun.elevation_rad",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Atmosphere is absent and sky radiance is exactly zero; no terrestrial fog, rain, wind or smoke is permitted.",
+        "Unlit surfaces receive only light traced from actual geometry or bound hardware emitters; do not inject promotional fill.",
+        "Keep Earth and stars off by default; enabling either requires a separately reviewed geometry and exposure decision.",
+        "Terrain is a procedural concept, not an exact landing site or sourced elevation model.",
+        "Any animated dust requires explicit ballistic geometry and documented trajectory assumptions, never an atmospheric volume.",
+        "Macro detail follows a selected contact region; do not rescale the entire rover to fit.",
+        "No dust particles are emitted by this static recipe."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-017",
+      "name": "Lunar crater rim physical traverse",
+      "catalog_id": "ENV-254",
+      "mode": "lunar_physical",
+      "description": "Authored initial lunar crater rim physical traverse recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043",
+        "CAP-011",
+        "CAP-036",
+        "CAP-084"
+      ],
+      "geometry": {
+        "generator": "lunar_crater_rim",
+        "units": "mm",
+        "parameters_mm": {
+          "terrain_width": 360000.0,
+          "terrain_depth": 360000.0,
+          "ground_thickness": 30000.0,
+          "crater_radius": 90000.0,
+          "crater_depth": 18000.0,
+          "rim_height": 6000.0,
+          "rim_width": 14000.0,
+          "track_width": 4000.0,
+          "support_patch_radius": 3000.0
+        },
+        "procedural_seed": 620017,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 8000.0
+        },
+        "topography_status": "conceptual_procedural_not_a_site_DEM"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "lunar_highland_regolith",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 0.5,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "none",
+        "scale": 0.0,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": true,
+        "owner": "environment",
+        "azimuth_rad": 1.919862177194,
+        "elevation_rad": 0.209439510239,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 1.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "sun.azimuth_rad",
+        "sun.elevation_rad",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Atmosphere is absent and sky radiance is exactly zero; no terrestrial fog, rain, wind or smoke is permitted.",
+        "Unlit surfaces receive only light traced from actual geometry or bound hardware emitters; do not inject promotional fill.",
+        "Keep Earth and stars off by default; enabling either requires a separately reviewed geometry and exposure decision.",
+        "Terrain is a procedural concept, not an exact landing site or sourced elevation model.",
+        "Any animated dust requires explicit ballistic geometry and documented trajectory assumptions, never an atmospheric volume.",
+        "The crater is an original procedural shape and has no asserted real-world name or coordinate."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-018",
+      "name": "SELENE LED work patch in terrain shadow",
+      "catalog_id": "ENV-274",
+      "mode": "lunar_physical",
+      "description": "Authored initial selene led work patch in terrain shadow recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043",
+        "CAP-011",
+        "CAP-013",
+        "CAP-036"
+      ],
+      "geometry": {
+        "generator": "lunar_occluded_work_patch",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 80000.0,
+          "depth": 80000.0,
+          "ground_thickness": 12000.0,
+          "relief_amplitude": 250.0,
+          "occluder_center_x": 5000.0,
+          "occluder_center_y": 0.0,
+          "occluder_width": 5000.0,
+          "occluder_depth": 18000.0,
+          "occluder_height": 3500.0,
+          "work_patch_radius": 1800.0
+        },
+        "procedural_seed": 620018,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 5000.0
+        },
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "hardware_light_binding": {
+          "role": "rover_task_led",
+          "enabled": true,
+          "owner": "subject",
+          "calibration_status": "pending"
+        },
+        "direct_sun_expected_at_work_patch": false
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "lunar_highland_regolith",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 0.4,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "none",
+        "scale": 0.0,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": true,
+        "owner": "environment",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.05235987756,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 1.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "sun.azimuth_rad",
+        "sun.elevation_rad",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Atmosphere is absent and sky radiance is exactly zero; no terrestrial fog, rain, wind or smoke is permitted.",
+        "Unlit surfaces receive only light traced from actual geometry or bound hardware emitters; do not inject promotional fill.",
+        "Keep Earth and stars off by default; enabling either requires a separately reviewed geometry and exposure decision.",
+        "Terrain is a procedural concept, not an exact landing site or sourced elevation model.",
+        "Any animated dust requires explicit ballistic geometry and documented trajectory assumptions, never an atmospheric volume.",
+        "Verify by a visibility ray that the terrain occluder blocks the active sun at the sample patch.",
+        "Bind the rover LED to actual supplied hardware; do not create an unseen environment fill.",
+        "The unbound draft remains dark until a compatible LED source is supplied."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-019",
+      "name": "Full-shadow lunar interval with lights off",
+      "catalog_id": "ENV-269",
+      "mode": "lunar_physical",
+      "description": "Authored initial full-shadow lunar interval with lights off recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043",
+        "CAP-011",
+        "CAP-036"
+      ],
+      "geometry": {
+        "generator": "lunar_closed_horizon_worksite",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 400000.0,
+          "depth": 400000.0,
+          "ground_thickness": 60000.0,
+          "horizon_radius": 180000.0,
+          "horizon_height": 12000.0,
+          "work_patch_radius": 3000.0
+        },
+        "procedural_seed": 620019,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 5000.0
+        },
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "hardware_lights_enabled": false,
+        "direct_sun_expected_at_work_patch": false
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "lunar_highland_regolith",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 0.5,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "none",
+        "scale": 0.0,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": true,
+        "owner": "environment",
+        "azimuth_rad": 0.0,
+        "elevation_rad": -0.0872664626,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 1.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "sun.azimuth_rad",
+        "sun.elevation_rad",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Atmosphere is absent and sky radiance is exactly zero; no terrestrial fog, rain, wind or smoke is permitted.",
+        "Unlit surfaces receive only light traced from actual geometry or bound hardware emitters; do not inject promotional fill.",
+        "Keep Earth and stars off by default; enabling either requires a separately reviewed geometry and exposure decision.",
+        "Terrain is a procedural concept, not an exact landing site or sourced elevation model.",
+        "Any animated dust requires explicit ballistic geometry and documented trajectory assumptions, never an atmospheric volume.",
+        "Closed ground and horizon geometry must occlude the below-horizon sun; do not merely dim its energy.",
+        "With Earth, stars and hardware lights off, a nearly black result is expected and must not trigger auto-fill.",
+        "This authored interval does not establish permanent shadow or its duration at a real site."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-020",
+      "name": "Lunar highland block-field study",
+      "catalog_id": "ENV-253",
+      "mode": "lunar_physical",
+      "description": "Authored initial lunar highland block-field study recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043",
+        "CAP-011",
+        "CAP-036",
+        "CAP-084"
+      ],
+      "geometry": {
+        "generator": "lunar_block_field",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 180000.0,
+          "depth": 180000.0,
+          "ground_thickness": 18000.0,
+          "relief_amplitude": 2400.0,
+          "relief_wavelength": 26000.0,
+          "rock_min_radius": 100.0,
+          "rock_max_radius": 1600.0,
+          "support_patch_radius": 5000.0
+        },
+        "procedural_seed": 620020,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 10000.0
+        },
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "rock_count": 120,
+        "rock_appearance_role": "lunar_highland_rock"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "lunar_highland_regolith",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 0.5,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "none",
+        "scale": 0.0,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": true,
+        "owner": "environment",
+        "azimuth_rad": 3.839724354388,
+        "elevation_rad": 0.314159265359,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 1.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "sun.azimuth_rad",
+        "sun.elevation_rad",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Atmosphere is absent and sky radiance is exactly zero; no terrestrial fog, rain, wind or smoke is permitted.",
+        "Unlit surfaces receive only light traced from actual geometry or bound hardware emitters; do not inject promotional fill.",
+        "Keep Earth and stars off by default; enabling either requires a separately reviewed geometry and exposure decision.",
+        "Terrain is a procedural concept, not an exact landing site or sourced elevation model.",
+        "Any animated dust requires explicit ballistic geometry and documented trajectory assumptions, never an atmospheric volume."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-021",
+      "name": "Lunar cross-slope contact stage",
+      "catalog_id": "ENV-259",
+      "mode": "lunar_physical",
+      "description": "Authored initial lunar cross-slope contact stage recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043",
+        "CAP-011",
+        "CAP-036"
+      ],
+      "geometry": {
+        "generator": "lunar_cross_slope_patch",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 50000.0,
+          "depth": 70000.0,
+          "ground_thickness": 15000.0,
+          "relief_amplitude": 180.0,
+          "relief_wavelength": 6000.0,
+          "track_width": 3500.0,
+          "rock_min_radius": 25.0,
+          "rock_max_radius": 220.0
+        },
+        "procedural_seed": 620021,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 6000.0
+        },
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "cross_slope_rad": 0.209439510239,
+        "rock_count": 40
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "lunar_mare_regolith",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 0.4,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "none",
+        "scale": 0.0,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": true,
+        "owner": "environment",
+        "azimuth_rad": 4.712388980385,
+        "elevation_rad": 0.261799387799,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 1.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "sun.azimuth_rad",
+        "sun.elevation_rad",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Atmosphere is absent and sky radiance is exactly zero; no terrestrial fog, rain, wind or smoke is permitted.",
+        "Unlit surfaces receive only light traced from actual geometry or bound hardware emitters; do not inject promotional fill.",
+        "Keep Earth and stars off by default; enabling either requires a separately reviewed geometry and exposure decision.",
+        "Terrain is a procedural concept, not an exact landing site or sourced elevation model.",
+        "Any animated dust requires explicit ballistic geometry and documented trajectory assumptions, never an atmospheric volume.",
+        "The slope is authored for appearance and contact inspection, not a mobility or traction certification."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-022",
+      "name": "South-pole ridge with grazing sun",
+      "catalog_id": "ENV-261",
+      "mode": "lunar_physical",
+      "description": "Authored initial south-pole ridge with grazing sun recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043",
+        "CAP-011",
+        "CAP-036",
+        "CAP-084"
+      ],
+      "geometry": {
+        "generator": "lunar_polar_ridge",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 240000.0,
+          "depth": 240000.0,
+          "ground_thickness": 30000.0,
+          "ridge_height": 18000.0,
+          "crest_width": 10000.0,
+          "ridge_length": 160000.0,
+          "support_patch_radius": 3000.0
+        },
+        "procedural_seed": 620022,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 6000.0
+        },
+        "topography_status": "conceptual_procedural_not_a_site_DEM"
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "lunar_highland_regolith",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 0.5,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "none",
+        "scale": 0.0,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": true,
+        "owner": "environment",
+        "azimuth_rad": 1.570796326795,
+        "elevation_rad": 0.03490658504,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 1.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "sun.azimuth_rad",
+        "sun.elevation_rad",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Atmosphere is absent and sky radiance is exactly zero; no terrestrial fog, rain, wind or smoke is permitted.",
+        "Unlit surfaces receive only light traced from actual geometry or bound hardware emitters; do not inject promotional fill.",
+        "Keep Earth and stars off by default; enabling either requires a separately reviewed geometry and exposure decision.",
+        "Terrain is a procedural concept, not an exact landing site or sourced elevation model.",
+        "Any animated dust requires explicit ballistic geometry and documented trajectory assumptions, never an atmospheric volume.",
+        "A low-sun frame is not evidence of continuous illumination at a polar site.",
+        "Inspect long shadows against explicit ridge geometry rather than a painted ground texture."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-023",
+      "name": "SELENE container-transfer work region",
+      "catalog_id": "ENV-277",
+      "mode": "lunar_physical",
+      "description": "Authored initial selene container-transfer work region recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043",
+        "CAP-011",
+        "CAP-036"
+      ],
+      "geometry": {
+        "generator": "lunar_transfer_work_region",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 30000.0,
+          "depth": 30000.0,
+          "ground_thickness": 6000.0,
+          "relief_amplitude": 120.0,
+          "work_region_width": 5000.0,
+          "work_region_depth": 4000.0,
+          "station_offset_x": 1800.0,
+          "station_offset_y": 0.0
+        },
+        "procedural_seed": 620023,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 5000.0
+        },
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "station_binding": {
+          "role": "selene_container_transfer_station",
+          "owner": "subject",
+          "placement_mode": "explicit_transform"
+        }
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "lunar_mare_regolith",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 0.4,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "none",
+        "scale": 0.0,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": true,
+        "owner": "environment",
+        "azimuth_rad": 2.617993877991,
+        "elevation_rad": 0.174532925199,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 1.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "sun.azimuth_rad",
+        "sun.elevation_rad",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "Atmosphere is absent and sky radiance is exactly zero; no terrestrial fog, rain, wind or smoke is permitted.",
+        "Unlit surfaces receive only light traced from actual geometry or bound hardware emitters; do not inject promotional fill.",
+        "Keep Earth and stars off by default; enabling either requires a separately reviewed geometry and exposure decision.",
+        "Terrain is a procedural concept, not an exact landing site or sourced elevation model.",
+        "Any animated dust requires explicit ballistic geometry and documented trajectory assumptions, never an atmospheric volume.",
+        "Resolve the transfer-station role to actual project CAD; do not invent an interface dimension.",
+        "The environment does not certify reach, collision clearance or sealing performance."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    },
+    {
+      "id": "ENVSET-024",
+      "name": "Lunar promotional stage with declared fill",
+      "catalog_id": "ENV-260",
+      "mode": "editorial",
+      "description": "Authored initial lunar promotional stage with declared fill recipe. All parameters require calibration and engine binding before publication as a usable preset.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-091",
+        "CAP-092",
+        "CAP-043",
+        "CAP-011",
+        "CAP-036"
+      ],
+      "geometry": {
+        "generator": "lunar_presentation_clearing",
+        "units": "mm",
+        "parameters_mm": {
+          "width": 80000.0,
+          "depth": 80000.0,
+          "ground_thickness": 10000.0,
+          "relief_amplitude": 350.0,
+          "clearing_radius": 6000.0,
+          "rock_min_radius": 50.0,
+          "rock_max_radius": 500.0
+        },
+        "procedural_seed": 620024,
+        "reference_frame": {
+          "up_axis": "+Z",
+          "front_axis": "-Y",
+          "right_axis": "+X"
+        },
+        "subject_scale_policy": "preserve_physical_dimensions",
+        "stage_fit": {
+          "mode": "once_on_explicit_request",
+          "subject": "explicit_selection",
+          "scope": "support_placement_and_camera_framing",
+          "scale_subject": false,
+          "resize_room_dimensions": false,
+          "minimum_clearance_mm": 50.0,
+          "maximum_supported_subject_extent_mm": 10000.0
+        },
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "rock_count": 50,
+        "editorial_fill_visible_in_state": true
+      },
+      "ground": {
+        "enabled": true,
+        "appearance_role": "lunar_mare_regolith",
+        "parameters": {
+          "elevation_mm": 0.0,
+          "texture_scale_mm": 0.4,
+          "roughness_multiplier": 1.0
+        },
+        "shadow_mode": "physical_geometry"
+      },
+      "ambient": {
+        "source_type": "editorial_uniform_fill",
+        "scale": 0.06,
+        "color_linear_srgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "normalization": "authored_relative_radiance_not_measured_photometry",
+        "sun_disk_in_environment": false,
+        "auto_exposure": false
+      },
+      "sun": {
+        "enabled": true,
+        "owner": "environment",
+        "azimuth_rad": 0.610865238198,
+        "elevation_rad": 0.12217304764,
+        "angular_diameter_rad": 0.009250245036,
+        "relative_irradiance": 1.0,
+        "direction_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "occlusion": "trace_scene_geometry"
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "participating_volume_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "color_linear_srgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alpha": 1.0,
+        "stars": {
+          "enabled": false,
+          "radiance_scale": 0.0,
+          "exposure_policy": "no_automatic_star_overlay"
+        },
+        "earth": {
+          "enabled": false,
+          "visibility_requirements": [
+            "location_or_trajectory",
+            "line_of_sight",
+            "ephemeris",
+            "exposure_consistency"
+          ],
+          "angular_size_policy": "derive_from_bound_geometry_never_arbitrary"
+        }
+      },
+      "exposed_controls": [
+        "geometry.parameters_mm",
+        "geometry.procedural_seed",
+        "ground.parameters.texture_scale_mm",
+        "ambient.scale",
+        "sun.azimuth_rad",
+        "sun.elevation_rad",
+        "background.kind"
+      ],
+      "validation": [
+        "All numeric values are authored starting values; calibration and renderer binding are pending.",
+        "Preserve the CAD subject scale and saved camera when replacing only the environment.",
+        "Check finite millimeter dimensions, radian angles, seed stability and physical ground contact.",
+        "The environment owns at most one solar emitter; merging a lighting rig must reuse or explicitly replace it.",
+        "The uniform fill is a declared artistic aid and must never be labelled lunar_physical.",
+        "The terrain remains an original concept; the black background contains no automatic stars or Earth."
+      ],
+      "provenance_id": "ORIGINAL-2026-10-CATALOG",
+      "calibration_status": "pending",
+      "status": "specified_unbound"
+    }
+  ]
+}

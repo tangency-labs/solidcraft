@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Keyboard shortcuts</title>
+  <path d="M13 16L51 16A5 5 0 0 1 56 21L56 43A5 5 0 0 1 51 48L13 48A5 5 0 0 1 8 43L8 21A5 5 0 0 1 13 16Z" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="20" cy="27" r="2.8" fill="currentColor"/>
+  <circle cx="32" cy="27" r="2.8" fill="currentColor"/>
+  <circle cx="44" cy="27" r="2.8" fill="currentColor"/>
+  <path d="M20 39L44 39" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

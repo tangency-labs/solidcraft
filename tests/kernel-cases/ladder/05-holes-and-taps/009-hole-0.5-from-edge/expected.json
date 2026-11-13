@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a d10 through hole whose wall is 0.5 mm from the end face",
+ "source": "analytic",
+ "method": "removed pi 5^2 20, a 0.5 mm web left",
+ "body_count": 1,
+ "volume_mm3": 46429.203673205,
+ "faces": 7
+}

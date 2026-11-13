@@ -77,10 +77,7 @@
   }
  },
  {
-  "click": [
-   127,
-   16
-  ]
+  "click": {"handle": "appbar:file"}
  },
  {
   "widget": "Export STEP\u2026"
@@ -95,26 +92,14 @@
   }
  },
  {
-  "click": [
-   127,
-   16
-  ]
+  "click": {"handle": "appbar:file"}
  },
  {
-  "widget": "Save as mesh\u2026"
+  "widget": "Export STL\u2026"
  },
  {
   "expect": {
    "dialog": "SaveMesh"
-  }
- },
- {
-  "click": {
-   "world": [
-    15,
-    10,
-    10
-   ]
   }
  },
  {

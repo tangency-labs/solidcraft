@@ -1,0 +1,11 @@
+#### HANG-22. G2 extension retries enter an arc-length search with NaN
+- **Severity:** Hang
+- **Area:**
+- **Location:** `source/SMLib/src/SmBSplineSurfaceNLib.cpp:4568-4576` (in-place retry); `source/SMLib/src/NL_CrvAdv.cpp:683-760` (`ST_curxcdr`).
+- **What happens:** After failed in-place surface extensions, an intermediate rational iso-curve has zero endpoint weights. `N_CrvArcLength` reports success with a NaN length. `ST_curxcdr` derives NaN parameter increments and its termination comparisons never succeed. The retry is the in-place one of UB-107 (it reads the arrays a failed in-place extension left half-written), so this hang is one outcome of that read; restoring the surface before the retry has not been verified as a fix.
+- **Trigger:** PR #62 original generated `gen5909`: offset of a revolution surface, trim, G2 extension by `0.6075400573597457`. The 60 exact flattened input doubles are retained in `crates/solidcore-ffi/tests/data/offset-gen5909.txt`.
+- **How found:** Extended-seed difftest, then standalone cold C++ reproduction and debugger inspection. A fresh local context also hangs, so earlier cases and context reuse are not necessary.
+- **Confirmed:** yes. Unmodified C++ times out; debugger captured `d1`, `du`, and search parameters as NaN.
+- **Severity:** hang.
+- **Harness:** `surface.offset_surface` refuses every `CreateExtendedSurface` step in process (see HANG-6), so this input stops at its extension step; an FFI test replays the exact input and checks the refusal. These are unsafe-reference exclusions, not passing difftest cases.
+- **Fuzz sweep trigger (2026-10-20):** the NaN arc-length search is also reached directly through `N_CrvExtendByDist`, with no surface retry: fuzz `nlib.crv_adv_p1` fuzz01836, a rational quadratic with 5 control points and weights `[0, 2, 1, 0.5, 1]` (`/crv/cpts/0/3 = 0`), relative `dist = 3.0`, end, `NL_G2`. Rust timed out. The FFI rejects non-positive weights, so this is not confirmed. Rust stops at `MAX_G2_STEPS`.

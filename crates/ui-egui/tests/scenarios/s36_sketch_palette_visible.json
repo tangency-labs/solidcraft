@@ -1,10 +1,10 @@
 [
  {
-  "note": "The Sketch Palette shows docked at the right whenever a sketch is active and no command dialog is open, comes back when the dialog closes, and goes with the sketch."
+  "note": "The sketch card stays at the right while editing, including after closing Parameters, and goes with the sketch. Finish Sketch is reached from the Sketch ribbon."
  },
  {
   "expect": {
-   "not_shown": "SKETCH PALETTE"
+   "hidden_handles": ["sketch_palette:status_header"]
   }
  },
  {
@@ -13,7 +13,7 @@
  {
   "expect": {
    "dialog": "Sketch",
-   "not_shown": "SKETCH PALETTE"
+   "hidden_handles": ["sketch_palette:status_header"]
   }
  },
  {
@@ -25,7 +25,7 @@
   "expect": {
    "sketching": true,
    "dialog": null,
-   "shown": "SKETCH PALETTE"
+   "shown_handles": ["sketch_palette:status_header"]
   }
  },
  {
@@ -38,7 +38,7 @@
  },
  {
   "expect": {
-   "shown": "SKETCH PALETTE"
+   "shown_handles": ["sketch_palette:status_header"]
   }
  },
  {
@@ -64,11 +64,12 @@
   "start": "parameters.change"
  },
  {
-  "widget": "Close window"
+  "click": {"handle": "params:close"}
  },
+ {"click": {"handle": "tab:SKETCH"}},
  {
   "expect": {
-   "shown": "SKETCH PALETTE"
+   "shown_handles": ["sketch_palette:status_header"]
   }
  },
  {
@@ -79,7 +80,7 @@
  },
  {
   "expect": {
-   "shown": "SKETCH PALETTE"
+   "shown_handles": ["sketch_palette:status_header"]
   }
  },
  {
@@ -93,7 +94,7 @@
  {
   "expect": {
    "sketching": false,
-   "not_shown": "SKETCH PALETTE"
+   "hidden_handles": ["sketch_palette:status_header"]
   }
  }
 ]

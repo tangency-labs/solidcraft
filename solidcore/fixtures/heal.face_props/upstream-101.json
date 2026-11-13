@@ -1,0 +1,152 @@
+{
+ "cases": [
+  {
+   "name": "planar_outer_loop_winding_reversed0",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1752 my_test_planar_outer_loop_winding (v1.0.1)",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-07,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      0,
+      10,
+      10
+     ],
+     "loops": {
+      "kind": "edges",
+      "loops": [
+       [
+        [
+         2,
+         2,
+         0
+        ],
+        [
+         8,
+         2,
+         0
+        ],
+        [
+         8,
+         8,
+         0
+        ],
+        [
+         2,
+         8,
+         0
+        ]
+       ]
+      ]
+     }
+    },
+    "ops": [
+     [
+      6,
+      3,
+      26,
+      0,
+      0
+     ],
+     [
+      8,
+      0,
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "planar_outer_loop_winding_reversed1",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1752 my_test_planar_outer_loop_winding (v1.0.1)",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-07,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      0,
+      10,
+      10
+     ],
+     "loops": {
+      "kind": "edges",
+      "loops": [
+       [
+        [
+         2,
+         2,
+         0
+        ],
+        [
+         2,
+         8,
+         0
+        ],
+        [
+         8,
+         8,
+         0
+        ],
+        [
+         8,
+         2,
+         0
+        ]
+       ]
+      ]
+     }
+    },
+    "ops": [
+     [
+      6,
+      3,
+      26,
+      0,
+      0
+     ],
+     [
+      8,
+      0,
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  }
+ ]
+}

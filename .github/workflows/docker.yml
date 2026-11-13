@@ -14,6 +14,11 @@ name: Docker
 on:
   push:
     branches: [main]
+    # The image holds the web app only: documentation, test data and the GitHub bots' scripts can't
+    # change it, so a push touching only those builds nothing (edge stays at the last code change).
+    # ATTRIBUTION.md is the exception among the Markdown files: the app embeds it (Help, About).
+    # The last matching pattern wins.
+    paths: ["**", "!docs/**", "!**/*.md", "ATTRIBUTION.md", "!tests/**", "!scripts/claim/**", "!scripts/triage/**"]
   release:
     types: [published]
   pull_request:
@@ -41,7 +46,7 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2

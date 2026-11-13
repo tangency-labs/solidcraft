@@ -64,6 +64,7 @@
    "sketching": true
   }
  },
+  {"click": {"handle": "sketch_palette:options_fold"}},
  {
   "widget": "3D Sketch"
  },

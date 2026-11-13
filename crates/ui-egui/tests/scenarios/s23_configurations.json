@@ -43,7 +43,14 @@
    ]
   }
  },
- {"click": {"sketch": [20, -8]}},
+ {
+  "click": {
+   "sketch": [
+    20,
+    -8
+   ]
+  }
+ },
  {
   "text": "40"
  },
@@ -74,13 +81,16 @@
   "start": "config.configure"
  },
  {
-  "widget": "Add Column"
+  "click": {"handle":"dialog:menu:Add Column"}
  },
  {
   "widget": "d1"
  },
  {
-  "widget": "Add Row"
+  "click": {"handle":"dialog:table:configuration_table:add"}
+ },
+ {
+  "key": "Enter"
  },
  {
   "widget": "40 mm",
@@ -97,8 +107,9 @@
   "key": "Enter"
  },
  {
-  "widget": "Activate",
-  "near": "Configuration2"
+  "click": {
+   "handle": "config:activate:Configuration2"
+  }
  },
  {
   "expect": {
@@ -110,8 +121,9 @@
   }
  },
  {
-  "widget": "Activate",
-  "near": "Default"
+  "click": {
+   "handle": "config:activate:Default"
+  }
  },
  {
   "expect": {

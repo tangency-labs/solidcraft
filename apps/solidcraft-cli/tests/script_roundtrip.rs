@@ -84,3 +84,81 @@ fn corpus_designs_replay_from_their_scripts() {
     }
     assert!(replayed >= 7, "replayed {replayed} corpus designs");
 }
+
+/// #1990: a sketch and its extrude may share a name, and the design's script still replays,
+/// keeping the names: the replayed design's own script has the same steps.
+#[test]
+fn a_design_naming_a_sketch_and_its_extrude_alike_replays_from_its_script() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-shared-names-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cli = |args: &[&std::ffi::OsStr]| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_solidcraft-cli")).args(args).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}: {}",
+            args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let script = dir.join("mini.json");
+    let saved = dir.join("mini.solidcraft");
+    let exported = dir.join("rt.json");
+    let replayed = dir.join("rt.solidcraft");
+    let again = dir.join("rt2.json");
+    let commands = json!({"commands": [
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Block"}},
+        {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [20, 10]}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"distance": "5", "name": "Block"}},
+    ]});
+    std::fs::write(&script, commands.to_string()).unwrap();
+    cli(&["run".as_ref(), script.as_ref(), "--save".as_ref(), saved.as_ref()]);
+    cli(&["script".as_ref(), saved.as_ref(), "--out".as_ref(), exported.as_ref()]);
+    cli(&["run".as_ref(), exported.as_ref(), "--save".as_ref(), replayed.as_ref()]);
+    cli(&["script".as_ref(), replayed.as_ref(), "--out".as_ref(), again.as_ref()]);
+    let first: Value = serde_json::from_str(&std::fs::read_to_string(&exported).unwrap()).unwrap();
+    let second: Value = serde_json::from_str(&std::fs::read_to_string(&again).unwrap()).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    let names: Vec<&str> = first["commands"].as_array().unwrap().iter().filter_map(|c| c["params"]["feature"]["name"].as_str()).collect();
+    assert_eq!(names, ["Block", "Block"], "{first:#}");
+    assert_eq!(second["commands"], first["commands"], "the replayed design's script has the same steps");
+}
+
+/// #10230: script export must disclose the print-face state that replay leaves out.
+#[test]
+fn script_export_warns_about_omitted_print_faces_on_stderr() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-print-face-script-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let saved = dir.join("block.sc");
+    let exported = dir.join("block.json");
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5, "body_name": "Block"})).unwrap();
+    s.execute("body.print_face", &json!({"body": "Block", "point": [10, 5, 0]})).unwrap();
+    s.execute("file.save", &json!({"path": saved})).unwrap();
+    let native = std::fs::read(&saved).unwrap();
+
+    for to_file in [false, true] {
+        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"));
+        cmd.arg("script").arg(&saved);
+        if to_file {
+            cmd.arg("--out").arg(&exported);
+        }
+        let out = cmd.output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{stderr}");
+        assert!(stderr.contains("note: the script leaves out print-face assignments (body.print_face)"), "{stderr}");
+        let script = if to_file {
+            assert!(out.stdout.is_empty(), "--out must keep stdout empty");
+            std::fs::read(&exported).unwrap()
+        } else {
+            out.stdout
+        };
+        let script: Value = serde_json::from_slice(&script).unwrap();
+        let mut replayed = Session::default();
+        replayed.run_script(&script).unwrap();
+        assert!(replayed.doc.print_faces.is_empty());
+        assert_eq!(replayed.doc.features, s.doc.features);
+        assert_eq!(std::fs::read(&saved).unwrap(), native, "export must not change the source design");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}

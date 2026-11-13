@@ -1,11 +1,10 @@
 //! The Crash Reports window (Help > Crash Reports…): the reports `solidcraft_engine::crash`
 //! keeps on this computer, each with a reviewed issue draft. It opens by itself after a crash.
 
-use egui::{RichText, vec2};
 use solidcraft_engine::crash::{self, Summary};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use crate::ui_kit;
 
 #[derive(Default)]
 pub struct CrashUi {
@@ -18,6 +17,11 @@ pub struct CrashUi {
 }
 
 impl CrashUi {
+    /// Cached report count; rendering preferences never reads the filesystem.
+    pub(crate) fn saved_count(&self) -> usize {
+        self.reports.len()
+    }
+
     /// Read the reports again (when the window opens or changes; never every frame).
     pub fn refresh(&mut self) {
         let dir = self.dir_path();
@@ -33,12 +37,24 @@ impl CrashUi {
 }
 
 fn kind_label(kind: &str) -> &'static str {
-    match kind {
-        "command_panic" => "Internal error in a command",
-        "kernel_panic_recovered" => "Kernel error (recovered)",
-        "unclean_exit" => "Closed unexpectedly",
-        _ => "Internal error",
-    }
+    solidcraft_ui_text::tr(match kind {
+        "command_panic" => "crash.kind_command",
+        "kernel_panic_recovered" => "crash.kind_kernel",
+        "unclean_exit" => "crash.kind_unclean",
+        _ => "crash.kind_internal",
+    })
+}
+
+fn report_time(r: &Summary) -> String {
+    let time = r.time.replace('T', " ");
+    let time = time.trim_end_matches('Z');
+    if r.kind == "unclean_exit" { solidcraft_ui_text::format("crash.detected_time", &[("time", time)]) } else { format!("{time} UTC") }
+}
+
+fn report_heading(r: &Summary) -> String {
+    let time = report_time(r);
+    let times = if r.count > 1 { format!("  ×{}", r.count) } else { String::new() };
+    format!("{time}  {}{times}", kind_label(&r.kind))
 }
 
 /// The host found these new reports at startup: tell the user about real crashes (recovered
@@ -50,80 +66,95 @@ pub fn announce(app: &mut SolveApp, fresh: &[Summary]) {
     }
     app.crashes.open = true;
     app.crashes.refresh();
-    app.set_status("SolidCraft closed unexpectedly or hit an internal error last time. A crash report was saved (Help > Crash Reports…).", true);
+    let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
+    app.set_status(locale.text("crash.previous_session"), true);
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if !app.crashes.open {
         return;
     }
-    let t = Tokens::get();
-    let mut open = true;
     let mut report: Option<String> = None;
     let mut delete: Option<Option<String>> = None;
-    crate::frame::window(ctx, crate::i18n::tr_label("Crash Reports"), crate::frame::Width::Wide)
-        .id(egui::Id::new("sc_crash_reports"))
-        .open(&mut open)
-        .default_size(vec2(620.0, 420.0))
-        .show(ctx, |ui| {
-            ui.label(
-                RichText::new(
-                    "Crash reports stay on this computer and are never sent anywhere. Report… opens a draft you review before anything is shared.",
-                )
-                .color(t.text_dim),
-            );
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_crash_reports"), "bug_report", solidcraft_ui_text::tr_label("Crash Reports"))
+        .cards(2.0)
+        .actions("", solidcraft_ui_text::tr("ui.close"), None)
+        .show(ctx, true, |ui| {
+            ui.spacing_mut().item_spacing.y = solidcraft_theme::Tokens::get().space_10;
+            let intro = ui_kit::text(ui, solidcraft_ui_text::tr("crash.intro"), ui_kit::Text::Hint("intro"));
+            crate::scenario::publish_rect("dialog:note:intro", intro.rect);
             if let Some(d) = app.crashes.dir.clone() {
-                // A long path is cut short (hover shows it all): it must not widen the window
-                // past its title bar.
-                ui.horizontal(|ui| {
-                    if ui.small_button("Copy folder path").clicked() {
+                // A long path is cut short (hover shows it all): it must not widen the card.
+                ui_kit::path_chip(ui, &d, |ui| {
+                    if ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("crash.copy_folder"), "copy", true, false).clicked() {
                         ctx.copy_text(d.clone());
                     }
-                    ui.add(egui::Label::new(RichText::new(&d).monospace().size(11.0)).truncate()).on_hover_text(&d);
                 });
             }
-            ui.separator();
+            // The list/empty-box top border replaces the old divider; retain its geometry alias.
+            crate::scenario::publish_rect(
+                "dialog:divider:reports",
+                egui::Rect::from_min_size(ui.next_widget_position(), egui::vec2(ui.available_width(), 1.0)),
+            );
             if app.crashes.reports.is_empty() {
-                ui.label(crate::i18n::tr_label("No crash reports."));
+                ui_kit::empty_box(ui, "none", solidcraft_ui_text::tr_label("No crash reports."));
             }
-            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                for r in &app.crashes.reports {
-                    ui.horizontal(|ui| {
-                        let times = if r.count > 1 { format!("  ×{}", r.count) } else { String::new() };
-                        ui.label(
-                            RichText::new(format!("{}  {}{times}", r.time.replace('T', " ").trim_end_matches('Z'), kind_label(&r.kind))).strong(),
-                        );
-                        if let Some(c) = &r.command {
-                            ui.label(RichText::new(c).monospace().size(11.0).color(t.text_dim));
+            if !app.crashes.reports.is_empty() {
+                ui_kit::report_list(
+                    ui,
+                    "reports",
+                    solidcraft_theme::Tokens::get().control_height * 10.0 + solidcraft_theme::Tokens::get().space_10 * 4.0,
+                    |ui| {
+                        let last = app.crashes.reports.len().saturating_sub(1);
+                        for (index, r) in app.crashes.reports.iter().enumerate() {
+                            let title = report_heading(r);
+                            ui.push_id(&r.id, |ui| {
+                                ui.spacing_mut().item_spacing.y = solidcraft_theme::Tokens::get().space_6;
+                                ui.add_space(solidcraft_theme::Tokens::get().space_10);
+                                ui_kit::report_header(ui, kind_label(&r.kind), r.count, &report_time(r), &title, |ui| {
+                                    if ui_kit::bin_button(ui, solidcraft_ui_text::tr("ui.delete")).clicked() {
+                                        delete = Some(Some(r.id.clone()));
+                                    }
+                                    ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("crash.copy_path"), "copy", true, false)
+                                        .clicked()
+                                        .then(|| ctx.copy_text(r.path.clone()));
+                                    if ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("crash.report"), "bug_report", true, false).clicked() {
+                                        report = Some(r.id.clone());
+                                    }
+                                });
+                                let mut detail = r.command.clone().unwrap_or_default();
+                                if r.replayable {
+                                    let sep = if detail.is_empty() { "" } else { " · " };
+                                    detail = format!("{detail}{sep}{}", solidcraft_ui_text::tr("crash.replayable"));
+                                }
+                                if !detail.is_empty() {
+                                    ui_kit::text(ui, &detail, ui_kit::Text::MonoNote(&format!("detail:{}", r.id)));
+                                }
+                                ui_kit::text(ui, &r.message, ui_kit::Text::Report(&format!("message:{}", r.id), false));
+                                if r.kind == "unclean_exit" {
+                                    ui_kit::text(
+                                        ui,
+                                        solidcraft_ui_text::tr("crash.unclean_explanation"),
+                                        ui_kit::Text::Note(&format!("unclean:{}", r.id)),
+                                    );
+                                }
+                                ui.add_space(solidcraft_theme::Tokens::get().space_6);
+                                if index != last {
+                                    ui_kit::report_divider(ui, &format!("end:{}", r.id));
+                                }
+                            });
                         }
-                    });
-                    ui.label(RichText::new(&r.message).size(12.0));
-                    ui.horizontal(|ui| {
-                        if ui.small_button("Report…").clicked() {
-                            report = Some(r.id.clone());
-                        }
-                        if ui.small_button("Copy path").clicked() {
-                            ctx.copy_text(r.path.clone());
-                        }
-                        if ui.small_button("Delete").clicked() {
-                            delete = Some(Some(r.id.clone()));
-                        }
-                        if r.replayable {
-                            ui.label(RichText::new("replayable").size(11.0).color(t.text_dim));
-                        }
-                    });
-                    ui.add_space(6.0);
-                }
-            });
+                    },
+                );
+            }
             if !app.crashes.note.is_empty() {
-                ui.label(RichText::new(&app.crashes.note).color(t.text_dim));
+                ui_kit::text(ui, &app.crashes.note, ui_kit::Text::Note("note"));
             }
-            ui.separator();
-            if !app.crashes.reports.is_empty() && ui.button(crate::i18n::tr_label("Delete all")).clicked() {
+            if ui_kit::icon_label_button(ui, solidcraft_ui_text::tr_label("Delete all"), "delete", !app.crashes.reports.is_empty(), true).clicked() {
                 delete = Some(None);
             }
         });
-    app.crashes.open = open;
+    app.crashes.open = !(closed || action == ui_kit::Action::Cancel);
     if let Some(id) = report
         && let Some(dir) = app.crashes.dir_path()
     {
@@ -136,7 +167,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         && let Some(dir) = app.crashes.dir_path()
     {
         let n = crash::clear(&dir, which.as_deref());
-        app.crashes.note = format!("Deleted {n} report(s).");
+        app.crashes.note = solidcraft_ui_text::format("crash.deleted", &[("count", &n.to_string())]);
         app.crashes.refresh();
     }
 }
@@ -172,6 +203,48 @@ mod tests {
     }
 
     #[test]
+    fn an_old_unclean_exit_is_shown_as_detected_on_a_later_launch() {
+        let d = folder("old-session");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.crashes.folder = Some(d.clone());
+        let id = "20261012-162341-bb60791ed6692f1d";
+        let path = d.join(id).join("report.json");
+        let mut report: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        report["message"] = json!("SolidCraft 0.3.2 (started 2026-10-01T10:00:00Z) ended without a clean exit between commands");
+        report["command"] = serde_json::Value::Null;
+        std::fs::write(&path, report.to_string()).unwrap();
+        super::announce(&mut h.app, &solidcraft_engine::crash::list(&d));
+        h.frames(6);
+        assert!(h.app.crashes.open, "unclean exits still alert the user");
+        let status = &h.app.status.as_ref().unwrap().0;
+        assert!(status.contains("earlier SolidCraft session"), "{status}");
+        assert!(status.contains("detected at startup"), "{status}");
+        assert!(h.widget("Detected 2026-10-12 16:23:41 UTC  Closed unexpectedly  ×2").is_some());
+        assert!(h.widget(report["message"].as_str().unwrap()).is_some(), "keep the original session start visible");
+        assert!(h.widget(solidcraft_ui_text::tr("crash.unclean_explanation")).is_some());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_panic_keeps_its_event_time_without_the_unclean_exit_explanation() {
+        let d = folder("panic-time");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.crashes.folder = Some(d.clone());
+        let path = d.join("20261012-162341-bb60791ed6692f1d").join("report.json");
+        let mut report: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        report["kind"] = json!("command_panic");
+        std::fs::write(&path, report.to_string()).unwrap();
+        super::announce(&mut h.app, &solidcraft_engine::crash::list(&d));
+        h.frames(6);
+        assert!(h.app.crashes.open);
+        assert!(h.widget("2026-10-12 16:23:41 UTC  Internal error in a command  ×2").is_some());
+        assert!(h.widget(solidcraft_ui_text::tr("crash.unclean_explanation")).is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
     fn a_crash_report_opens_a_reviewed_issue_draft_and_can_be_deleted() {
         let d = folder("draft");
         let mut h = crate::scenario::Harness::new();
@@ -192,7 +265,7 @@ mod tests {
             "solid.box",
             "solidcraft-cli crashes replay 20261012-162341-bb60791ed6692f1d",
             "Renderer: test",
-            "Happened 2 time(s)",
+            "Recorded 2 time(s)",
         ] {
             assert!(draft.body.contains(want), "missing {want:?} in {}", draft.body);
         }
@@ -212,9 +285,9 @@ mod tests {
         h.app.crashes.folder = Some(d.clone());
         super::open(&mut h.app);
         h.frames(6);
-        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_crash_reports"))).unwrap();
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_crash_reports"))).unwrap();
         // The frame's margins come on top of the content's maximum width.
-        assert!(window.width() <= crate::frame::WINDOW_WIDE_MAX_W + 40.0, "{} wide", window.width());
+        assert!(window.width() <= 760.0 + 40.0, "{} wide", window.width());
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -234,5 +307,87 @@ mod tests {
         };
         super::announce(&mut h.app, &[quiet]);
         assert!(!h.app.crashes.open);
+    }
+
+    #[test]
+    fn inventory_actions_details_empty_state_and_keyboard_remain_reachable() {
+        let d = folder("inventory");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.home.open = false;
+        h.app.crashes.folder = Some(d.clone());
+        let assert_general_count = |h: &mut crate::scenario::Harness, count: usize| {
+            // The fixture folder was assigned after startup; programmatic Preferences uses the cached inventory.
+            h.app.crashes.refresh();
+            for theme in ["light", "dark"] {
+                h.call("ui.prefs", json!({"open":"General", "theme":theme}));
+                crate::prefs::reveal_preference(h, "prefs:crash_count");
+                assert_eq!(h.app.crashes.saved_count(), count);
+                assert!(h.widget(&format!("{count} saved")).is_some());
+                let badge = crate::scenario::rect_of("prefs:crash_count").unwrap();
+                assert!((badge.height() - 18.0).abs() < 0.5);
+                assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains_rect(badge));
+                let t = solidcraft_theme::Tokens::get();
+                let fill = if count == 0 { t.dialog_footer } else { t.pref_note_fill };
+                assert!(
+                    h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == badge && rect.fill == fill)),
+                    "{theme}: count tone reflects reports waiting"
+                );
+                let buttons: Vec<_> = h
+                    .output
+                    .accesskit_update
+                    .as_ref()
+                    .unwrap()
+                    .nodes
+                    .iter()
+                    .filter(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some(h.app.tr("prefs.crash_reports")))
+                    .collect();
+                assert_eq!(buttons.len(), 1);
+                assert!(!buttons[0].1.is_disabled(), "opening reports stays available even at zero");
+                h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+            }
+        };
+        assert_general_count(&mut h, 1);
+        super::open(&mut h.app);
+        h.frames(5);
+        for handle in [
+            "dialog:close",
+            "dialog:cancel",
+            "dialog:Close",
+            "dialog:button::Copy folder path",
+            "dialog:button::Report…",
+            "dialog:button::Copy path",
+            "dialog:button::Delete",
+            "dialog:button::Delete all",
+        ] {
+            assert!(crate::scenario::handle_at(handle).is_some(), "missing {handle}");
+        }
+        for rect in [
+            "dialog:note:intro",
+            "dialog:divider:reports",
+            "dialog:list:reports",
+            "dialog:note:detail:20261012-162341-bb60791ed6692f1d",
+            "dialog:report:message:20261012-162341-bb60791ed6692f1d",
+        ] {
+            assert!(crate::scenario::rect_of(rect).is_some(), "missing {rect}");
+        }
+        let title = "Detected 2026-10-12 16:23:41 UTC  Closed unexpectedly  ×2";
+        assert!(crate::scenario::handle_at(&format!("dialog:cell:{title}")).is_some());
+        assert!(crate::scenario::handle_at(&format!("dialog:cell:{}", d.display())).is_some());
+        h.step(&json!({"click":{"handle":"dialog:button::Copy folder path"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:button::Copy path"}})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.crashes.open, "Enter has no primary action");
+        h.step(&json!({"click":{"handle":"dialog:button::Delete"}})).unwrap();
+        h.frames(3);
+        assert!(h.app.crashes.reports.is_empty());
+        assert!(crate::scenario::rect_of("dialog:note:none").is_some());
+        assert!(crate::scenario::rect_of("dialog:note:note").is_some());
+        h.step(&json!({"click":{"handle":"dialog:button::Delete all"}})).unwrap();
+        assert!(h.app.crashes.reports.is_empty());
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(!h.app.crashes.open);
+        assert_general_count(&mut h, 0);
+        let _ = std::fs::remove_dir_all(d);
     }
 }

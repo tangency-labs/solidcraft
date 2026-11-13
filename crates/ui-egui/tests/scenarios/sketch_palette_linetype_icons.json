@@ -1,17 +1,17 @@
 [
   {
-    "note": "The Sketch Palette's Normal/Construction/Centerline selector (not the toolbar's separate CREATE panel icons) now paints a real drawn icon over each of its three old text glyphs ('--', '- -', '-.-'), in the construction orange for construction and centerline. The glyphs stay as the invisible accessible label and hit target, unchanged. The widgets below are still reached by the glyph, exactly as in s35_construction_mode.json. This exercises the Centerline button's mode switch through this widget. No scenario previously did that: with nothing selected, a click sets the drawing mode until it is switched back, the same way s35 exercises Construction's."
+    "note": "The palette exposes four icon segments named normal, construction, centerline and infinite. Centerline drawing makes no profiles; returning to Normal produces a closed profile."
   },
   {"start": "sketch.create"},
   {"click": {"plane": "XY"}},
   {"expect": {"dialog": null}},
-  {"widget": "-·-"},
+  {"click": {"handle": "dialog:Line Type:centerline"}},
   {"start": "sketch.rectangle.two_point"},
   {"click": {"sketch": [0, 0]}},
   {"click": {"sketch": [30, 20]}},
   {"key": "Escape"},
   {"expect": {"query": {"command": "sketch.inspect", "path": ["profiles"], "value": []}}},
-  {"widget": "—"},
+  {"click": {"handle": "dialog:Line Type:normal"}},
   {"start": "sketch.rectangle.two_point"},
   {"click": {"sketch": [0, 40]}},
   {"click": {"sketch": [30, 60]}},

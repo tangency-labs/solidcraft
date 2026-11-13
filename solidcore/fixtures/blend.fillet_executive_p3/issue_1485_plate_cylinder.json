@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "name": "attributed-issue-1485-plate-cylinder-circular-r2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiCircularFillet)",
+      "note": "tangency-labs/solidcore#1485: the plate 100 x 100 x 10 joined with the cylinder r 20, h 20 at (100, 50, 10), SmApiCircularFillet(2.0): the radius of #1485: both refuse at CreateCornerVertices (1001), the corner vertex at (100, 70, 10) on the cylinder not found.",
+      "inputs": {
+        "attributed": {
+          "api": "circular",
+          "body": {
+            "box_cylinder_union": {
+              "a": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  100,
+                  100,
+                  10
+                ]
+              ],
+              "origin": [
+                100,
+                50,
+                10
+              ],
+              "radius": 20,
+              "height": 20
+            }
+          },
+          "radius": 2.0
+        }
+      }
+    },
+    {
+      "name": "attributed-issue-1485-plate-cylinder-circular-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiCircularFillet)",
+      "note": "tangency-labs/solidcore#1485: the plate 100 x 100 x 10 joined with the cylinder r 20, h 20 at (100, 50, 10), SmApiCircularFillet(1.0): a smaller round of the same body, for compared values where both build.",
+      "inputs": {
+        "attributed": {
+          "api": "circular",
+          "body": {
+            "box_cylinder_union": {
+              "a": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  100,
+                  100,
+                  10
+                ]
+              ],
+              "origin": [
+                100,
+                50,
+                10
+              ],
+              "radius": 20,
+              "height": 20
+            }
+          },
+          "radius": 1.0
+        }
+      }
+    },
+    {
+      "name": "attributed-issue-1485-plate-cylinder-circular-r1_5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiCircularFillet)",
+      "note": "tangency-labs/solidcore#1485: the plate 100 x 100 x 10 joined with the cylinder r 20, h 20 at (100, 50, 10), SmApiCircularFillet(1.5): between the two.",
+      "inputs": {
+        "attributed": {
+          "api": "circular",
+          "body": {
+            "box_cylinder_union": {
+              "a": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  100,
+                  100,
+                  10
+                ]
+              ],
+              "origin": [
+                100,
+                50,
+                10
+              ],
+              "radius": 20,
+              "height": 20
+            }
+          },
+          "radius": 1.5
+        }
+      }
+    }
+  ]
+}

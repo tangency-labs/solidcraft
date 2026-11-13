@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a tangent plane to a cylinder at a point on its axis",
+ "source": "analytic",
+ "method": "cylinder r 5, h 10 on (60,0,0) along +Z: (60,0,5) is on the axis, equally far from every line of the side: refused",
+ "outcome": "refused",
+ "refusal": "the point is on the face's axis"
+}

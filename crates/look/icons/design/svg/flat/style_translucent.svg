@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Translucent</title>
+  <defs>
+    <clipPath id="tr-clip"><path d="M32 8.6 L52.7 20.3 L52.7 43.7 L32 55.4 L11.3 43.7 L11.3 20.3Z"/></clipPath>
+  </defs>
+  <g clip-path="url(#tr-clip)"><path d="M-71 72L9 -8M-60.5 72L19.5 -8M-50 72L30 -8M-39.5 72L40.5 -8M-29 72L51 -8M-18.5 72L61.5 -8M-8 72L72 -8M2.5 72L82.5 -8M13 72L93 -8M23.5 72L103.5 -8M34 72L114 -8M44.5 72L124.5 -8M55 72L135 -8" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/></g>
+  <path d="M32 6 L55 19 L55 45 L32 58 L9 45 L9 19Z" fill="none" stroke="currentColor" stroke-width="5.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 32L11.76 20.56M32 32L52.24 20.56M32 32L32 54.88" fill="none" stroke="#ffffff" stroke-width="6.4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 32L11.3 20.3M32 32L52.7 20.3M32 32L32 55.4" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

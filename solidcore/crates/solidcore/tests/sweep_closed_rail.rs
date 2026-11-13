@@ -1,0 +1,81 @@
+//! The curve sweep (`CreateSweepSurface`, NLib's `N_CreateSweepScale`) carries its section on
+//! the projection-normal frame, close to rotation-minimising. Round a closed rail that is not
+//! planar a rotation-minimising frame comes back turned about the rail (its holonomy); the
+//! kernel's own closed-curve correction (`N_CreateBVectors`: on a closed curve the last frame
+//! vector is reset to the first and the others averaged back from it) brings it back, so the
+//! last section lies on the first and the sheet closes. A regression test of that guarantee.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)] // test helpers
+
+use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::math::{Point3, Vec3};
+use solidcore::nurbs::b_spline_curve::BSplineCurve;
+use solidcore::nurbs::b_spline_surface::BSplineSurface;
+use solidcore::nurbs::crv_fit::p1::ParamMethod;
+
+/// A closed cubic through sixteen points of the twisted loop `(r cos t, r sin t, lift sin 2t)`,
+/// `r = 10 + lift cos 2t` (planar at `lift` 0), smooth at its seam: its radius and height swing a
+/// quarter period apart, so its rotation-minimising frame comes back turned (about 1.58 radians
+/// at lift 3), which a saddle `lift cos 2t` with matching halves does not.
+fn loop_rail(lift: f64) -> BSplineCurve {
+    // the closed fit takes its points closed: the first repeated last (`a[0] == a[n]`)
+    let mut points: Vec<Point3> = (0..16)
+        .map(|i| {
+            let t = std::f64::consts::TAU * f64::from(i) / 16.0;
+            let r = 10.0 + lift * (2.0 * t).cos();
+            Point3::new(r * t.cos(), r * t.sin(), lift * (2.0 * t).sin())
+        })
+        .collect();
+    if let Some(&first) = points.first() {
+        points.push(first);
+    }
+    BSplineCurve::interpolate_points(&points, None, 3, None, None, true, ParamMethod::ChordLength)
+        .expect("closed rail")
+}
+
+/// A vertical segment 2 long: the section.
+fn segment() -> BSplineCurve {
+    BSplineCurve::interpolate_points(
+        &[Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 2.0)],
+        None,
+        1,
+        None,
+        None,
+        false,
+        ParamMethod::ChordLength,
+    )
+    .expect("segment")
+}
+
+fn axes_near(a: &Axis2Placement, b: &Axis2Placement, tol: f64) -> bool {
+    let near = |p: Vec3, q: Vec3| (p - q).length() <= tol;
+    near(a.x_axis(), b.x_axis()) && near(a.y_axis(), b.y_axis()) && near(a.z_axis(), b.z_axis())
+}
+
+#[test]
+fn round_a_closed_twisted_loop_the_last_section_lies_on_the_first() {
+    let (_, placed) = BSplineSurface::create_sweep_surface_with_placements(
+        &segment(),
+        &loop_rail(3.0),
+        None,
+        false,
+        1e-4,
+    )
+    .expect("swept");
+    assert!(
+        (placed[0].origin() - placed[2].origin()).length() <= 1e-9,
+        "{:?} {:?}",
+        placed[0].origin(),
+        placed[2].origin()
+    );
+    assert!(
+        axes_near(&placed[0], &placed[2], 1e-9),
+        "the last section's frame is turned from the first's: {:?} against {:?}",
+        placed[2],
+        placed[0]
+    );
+}

@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use solidcraft_doc::Document;
 use solidcraft_doc::joints::cam::CamProfile;
 use solidcraft_doc::joints::{Assembly, Coupling, JointOrigin, Size};
+use solidcraft_doc::persistent_name::{Base, FaceName, FeatureId, Place};
 
 use crate::{EngineError, Result};
 
@@ -142,16 +143,12 @@ fn unique_name(base: &str, used: &mut BTreeSet<String>) -> Result<String> {
         used.insert(base.to_string());
         return Ok(base.to_string());
     }
-    for index in 1..=MAX_RECORDS {
-        let name = if index == 1 { format!("{base} (copy)") } else { format!("{base} (copy {index})") };
-        if name.len() > MAX_NAME {
-            return Err(invalid("copied assembly name is too long"));
-        }
-        if used.insert(name.clone()) {
-            return Ok(name);
-        }
+    let name = solidcraft_doc::copy_name(base, |n| used.contains(n));
+    if name.len() > MAX_NAME {
+        return Err(invalid("copied assembly name is too long"));
     }
-    Err(invalid("could not allocate a unique assembly name"))
+    used.insert(name.clone());
+    Ok(name)
 }
 
 fn next_id(id: &mut u64) -> Result<u64> {
@@ -182,6 +179,27 @@ fn validate_map<K: Ord, V: Ord>(map: &BTreeMap<K, V>) -> Result<()> {
 /// alter F10). Body-based legacy names are remapped only through an explicit identity map.
 fn face_name(name: &str, features: &BTreeMap<u64, u64>, bodies: &BTreeMap<String, String>) -> Option<String> {
     let body = name.match_indices(':').filter_map(|(end, _)| bodies.get_key_value(name.get(..end)?)).next_back();
+    // A name that reads, on no copied body's prefix (whose name may look like a feature token),
+    // is remapped by its structure: every feature that made a face must map; one around a piece
+    // (`#[…]`) maps when it was copied too.
+    if body.is_none()
+        && let Ok(face) = FaceName::parse(name)
+        && !matches!(face.base, Base::Other(_))
+    {
+        let mut body_mapped = false;
+        let out = face.map(
+            &mut |id, place| match place {
+                Place::Name => features.get(&id.0).map(|n| FeatureId(*n)),
+                Place::Qualifier => Some(features.get(&id.0).map_or(id, |n| FeatureId(*n))),
+            },
+            &mut |b| {
+                let n = bodies.get(b).cloned();
+                body_mapped |= n.is_some();
+                n
+            },
+        )?;
+        return (body_mapped || face.made_by().is_some()).then(|| out.to_string());
+    }
     let mut out = String::new();
     let mut last = 0usize;
     let mut mapped = false;
@@ -226,9 +244,36 @@ fn origin(
     occurrences: &BTreeMap<u64, u64>,
     features: &BTreeMap<u64, u64>,
     bodies: &BTreeMap<String, String>,
+    doc: &Document,
 ) -> Option<JointOrigin> {
+    fn datum_side(snap: &mut solidcraft_doc::joints::Snap, occurrences: &BTreeMap<u64, u64>, doc: &Document) -> Option<()> {
+        let remap = |d: &mut solidcraft_doc::construct::DatumRef| -> Option<()> {
+            // A datum side names an exact placement by its complete occurrence path. A path that
+            // ends inside the copied tree is rewritten to the copy's own walk (the source's
+            // ancestors are not in the map); a path that leaves the copied tree refuses the
+            // origin, like any reference outside it - the caller reports the skipped record.
+            d.path = doc.occurrence_path(*occurrences.get(d.path.last()?)?)?;
+            Some(())
+        };
+        match snap {
+            solidcraft_doc::joints::Snap::Plane { plane, .. } => {
+                if let solidcraft_doc::PlaneRef::Datum { datum } = plane.as_mut() {
+                    remap(datum)?;
+                }
+            }
+            solidcraft_doc::joints::Snap::Axis { axis, .. } => {
+                if let solidcraft_doc::joints::AxisRef::Target(solidcraft_doc::joints::AxisTarget::Datum { datum }) = axis.as_mut() {
+                    remap(datum)?;
+                }
+            }
+            _ => {}
+        }
+        Some(())
+    }
     let mut out = origin.clone();
     out.occurrence = *occurrences.get(&origin.occurrence)?;
+    out.inside = origin.inside.iter().map(|o| occurrences.get(o).copied()).collect::<Option<_>>()?;
+    datum_side(&mut out.snap, occurrences, doc)?;
     for face in out.snap.face_names_mut() {
         *face = face_name(face, features, bodies)?;
     }
@@ -249,6 +294,17 @@ pub(super) fn clone_assembly(
     features: &BTreeMap<u64, u64>,
     bodies: &BTreeMap<String, String>,
 ) -> Result<Vec<String>> {
+    clone_assembly_with_joint_ids(doc, source, occurrences, features, bodies).map(|(messages, _)| messages)
+}
+
+/// The copied joint identity map is also needed when extracting saved timeline folders.
+pub(super) fn clone_assembly_with_joint_ids(
+    doc: &mut Document,
+    source: &Document,
+    occurrences: &BTreeMap<u64, u64>,
+    features: &BTreeMap<u64, u64>,
+    bodies: &BTreeMap<String, String>,
+) -> Result<(Vec<String>, BTreeMap<u64, u64>)> {
     budget(&source.assembly)?;
     budget(&doc.assembly)?;
     validate_map(occurrences)?;
@@ -269,12 +325,14 @@ pub(super) fn clone_assembly(
         return Err(invalid("copy occurrence map points to a missing occurrence"));
     }
     unique_ids(source.assembly.joints.iter().map(|j| j.id))?;
-    let mut joint_id = unique_ids(doc.assembly.joints.iter().map(|j| j.id))?;
+    unique_ids(doc.assembly.joints.iter().map(|j| j.id))?;
     let aux = |a: &Assembly| {
         a.contact_sets.iter().map(|x| x.id).chain(a.studies.iter().map(|x| x.id)).chain(a.exploded.iter().map(|x| x.id)).collect::<Vec<_>>()
     };
     unique_ids(aux(&source.assembly).into_iter())?;
-    let mut auxiliary_id = unique_ids(aux(&doc.assembly).into_iter())?;
+    unique_ids(aux(&doc.assembly).into_iter())?;
+    // Reserve from one persistent counter, committing it only when the entire copy succeeds.
+    let mut item_id = doc.next_item_id()?.saturating_sub(1);
     let mut a = doc.assembly.clone();
     let mut messages = Vec::new();
     let mut origin_names = a.origins.iter().map(|o| o.name.clone()).collect();
@@ -282,7 +340,7 @@ pub(super) fn clone_assembly(
         if !occurrences.contains_key(&old.origin.occurrence) {
             continue;
         }
-        if let Some(new) = origin(&old.origin, occurrences, features, bodies) {
+        if let Some(new) = origin(&old.origin, occurrences, features, bodies, doc) {
             let mut item = old.clone();
             item.name = unique_name(&old.name, &mut origin_names)?;
             item.origin = new;
@@ -299,10 +357,10 @@ pub(super) fn clone_assembly(
             continue;
         }
         touched_joints.insert(old.id);
-        match (origin(&old.a, occurrences, features, bodies), origin(&old.b, occurrences, features, bodies)) {
+        match (origin(&old.a, occurrences, features, bodies, doc), origin(&old.b, occurrences, features, bodies, doc)) {
             (Some(aa), Some(bb)) => {
                 let mut item = old.clone();
-                item.id = next_id(&mut joint_id)?;
+                item.id = next_id(&mut item_id)?;
                 item.name = unique_name(&old.name, &mut joint_names)?;
                 item.a = aa;
                 item.b = bb;
@@ -321,12 +379,12 @@ pub(super) fn clone_assembly(
         // profile and its follower's tip.
         let faces = item.coupling.as_mut().is_none_or(|c| {
             let sizes = c.sizes_mut().into_iter().all(|size| match size {
-                Size::Circle(o) => origin(o, occurrences, features, bodies).map(|new| *o = new).is_some(),
+                Size::Circle(o) => origin(o, occurrences, features, bodies, doc).map(|new| *o = new).is_some(),
                 _ => true,
             });
             let Coupling::Cam(cam) = c else { return sizes };
             let tip = match &mut cam.tip {
-                Some(t) => origin(t, occurrences, features, bodies).map(|new| *t = new).is_some(),
+                Some(t) => origin(t, occurrences, features, bodies, doc).map(|new| *t = new).is_some(),
                 None => true,
             };
             let profile = match &mut cam.profile {
@@ -354,7 +412,7 @@ pub(super) fn clone_assembly(
         }
         if let Some(ids) = old.occurrences.iter().map(|o| occurrences.get(o).copied()).collect::<Option<Vec<_>>>() {
             let mut item = old.clone();
-            item.id = next_id(&mut auxiliary_id)?;
+            item.id = next_id(&mut item_id)?;
             item.name = unique_name(&old.name, &mut contact_names)?;
             item.occurrences = ids;
             a.contact_sets.push(item);
@@ -369,7 +427,7 @@ pub(super) fn clone_assembly(
         }
         if old.keys.iter().all(|k| joints.contains_key(&k.joint)) {
             let mut item = old.clone();
-            item.id = next_id(&mut auxiliary_id)?;
+            item.id = next_id(&mut item_id)?;
             item.name = unique_name(&old.name, &mut study_names)?;
             for key in &mut item.keys {
                 key.joint = *joints.get(&key.joint).ok_or_else(|| invalid("missing copied study joint"))?;
@@ -386,7 +444,7 @@ pub(super) fn clone_assembly(
         }
         if old.moves.iter().all(|(o, _)| occurrences.contains_key(o)) {
             let mut item = old.clone();
-            item.id = next_id(&mut auxiliary_id)?;
+            item.id = next_id(&mut item_id)?;
             item.name = unique_name(&old.name, &mut view_names)?;
             for (o, _) in &mut item.moves {
                 *o = *occurrences.get(o).ok_or_else(|| invalid("missing copied exploded occurrence"))?;
@@ -397,8 +455,9 @@ pub(super) fn clone_assembly(
         }
     }
     budget(&a)?;
+    doc.next_id = item_id.checked_add(1).ok_or_else(|| invalid("assembly identifier space is exhausted"))?;
     doc.assembly = a;
-    Ok(messages)
+    Ok((messages, joints))
 }
 
 #[cfg(test)]

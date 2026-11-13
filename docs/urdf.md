@@ -68,6 +68,8 @@ defaults are written and a warning says so. A value that is not a positive numbe
 | Pin-slot | `prismatic` x, then `revolute` z |
 | Planar | `prismatic` x, `prismatic` y, then `revolute` z |
 | Ball | `revolute` z, `revolute` y, then `revolute` z |
+| Parallel | `prismatic` x, y and z, then `revolute` z |
+| Perpendicular, angle, point on plane, point on line, line on plane | `fixed` where it is, with a warning: their turns follow a fixed tilt or offset, which a URDF chain can't hold |
 
 - **Chains:** a joint with several values becomes one URDF joint per value. Between them sit
   links named `<joint>_link1`, `<joint>_link2`. The steps before the last are named

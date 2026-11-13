@@ -1,7 +1,10 @@
+newer_file_feature
+frame_end_cap
+  remap_refs: ends[0].member.feature, ends[0].plane.base.base.feature
 body_transfer
   remap_bodies: bodies[0]
 sketch
-  remap_refs: plane.base.base.name
+  remap_refs: plane.base.base.feature
 sketch_along_path
 extrude
   sketches: [1]
@@ -29,8 +32,10 @@ chamfer
   remap_bodies: body
 box
 cylinder
+cylinder_references
 sphere
 torus
+cone
 combine
   remap_bodies: target, tools[0]
 pattern_rectangular
@@ -44,7 +49,7 @@ pattern_path
   remap_refs: features[0], pattern.path_sketch
   remap_bodies: bodies[0]
 mirror
-  remap_refs: features[0], plane.base.base.name
+  remap_refs: features[0], plane.base.base.feature
   remap_bodies: bodies[0]
 hole_simple
   sketches: [3]
@@ -58,10 +63,11 @@ hole_counterbore
 hole_countersink
   sketches: [3]
   remap_refs: points.sketch
+hole_references
 thread
 loft
-  sketches: [4, 5]
-  remap_refs: sections[0].sketch, sections[1].sketch
+  sketches: [4, 5, 6]
+  remap_refs: rails[0].sketch, sections[0].sketch, sections[1].sketch
   remap_bodies: targets[0]
 sweep
   sketches: [1, 2]
@@ -74,23 +80,25 @@ sweep_options
 shell
   remap_bodies: body
 draft
-  remap_refs: neutral.base.base.name
+  remap_refs: neutral.base.base.feature
   remap_bodies: body
 construction_plane
-  remap_refs: plane.base.base.name
+  remap_refs: plane.base.base.feature
 split
-  remap_refs: plane.base.base.name
+  remap_refs: plane.base.base.feature
   remap_bodies: body, tool.body
 split_line
   sketches: [6]
-  remap_refs: plane.base.base.name, sketch
+  remap_refs: plane.base.base.feature, sketch
   remap_bodies: body
 construction_axis
+  remap_refs: def.a.plane.base.base.feature, def.b.plane.base.base.feature
 construction_point_planes
+  remap_refs: def.a.plane.base.base.feature, def.b.plane.base.base.feature, def.c.plane.base.base.feature
 construction_point_along
 split_face
   sketches: [6]
-  remap_refs: plane.base.base.name, sketch
+  remap_refs: plane.base.base.feature, sketch
   remap_bodies: body, tool.body
 scale
   remap_bodies: bodies[0]
@@ -104,6 +112,12 @@ pipe
   sketches: [1]
   remap_refs: path_sketch
   remap_bodies: targets[0]
+frame_member
+  sketches: [1]
+  remap_refs: path_sketch
+frame_member_sketch
+  sketches: [1, 2]
+  remap_refs: path_sketch, profile.sketch
 emboss
   sketches: [1]
   remap_refs: sketch
@@ -112,11 +126,18 @@ rib
   sketches: [1]
   remap_refs: sketch
 replace_face
-  remap_refs: target.base.base.name
+  remap_refs: target.base.base.feature
   remap_bodies: body
 align
   remap_bodies: bodies[0]
 coil
+  remap_bodies: targets[0]
+coil_profile
+  sketches: [1]
+  remap_refs: sketch
+cell_grid
+  sketches: [1]
+  remap_refs: sketch
   remap_bodies: targets[0]
 sheet_base
   sketches: [1]
@@ -129,9 +150,15 @@ sheet_flange
 sheet_hem
   remap_bodies: body
 sheet_perforate
+  sketches: [1]
+  remap_refs: sketch
   remap_bodies: body
 sheet_fold
   sketches: [7]
+  remap_refs: sketch
+  remap_bodies: body
+sheet_path
+  sketches: [1]
   remap_refs: sketch
   remap_bodies: body
 sheet_unfold
@@ -171,8 +198,8 @@ surface_sweep_options
   sketches: [1, 2]
   remap_refs: path_sketch, sketch
 surface_loft
-  sketches: [4, 5]
-  remap_refs: sections[0].sketch, sections[1].sketch
+  sketches: [4, 5, 6]
+  remap_refs: rails[0].sketch, sections[0].sketch, sections[1].sketch
 surface_blend
   remap_bodies: from.body
 surface_offset
@@ -199,18 +226,27 @@ surface_untrim
 surface_extend
   remap_bodies: body
 surface_extend_to_plane
-  remap_refs: up_to.plane.base.base.name
+  remap_refs: up_to.plane.base.base.feature
   remap_bodies: body
 surface_extend_to_face
   remap_bodies: body, up_to.face.body
 surface_ruled
   remap_bodies: body
 surface_trim
-  remap_refs: plane.base.base.name
+  remap_refs: plane.base.base.feature
   remap_bodies: body, tool.body
+surface_trim_curves
+  sketches: [1]
+  remap_refs: curves.sketch, plane.base.base.feature
+  remap_bodies: body
+surface_trim_mutual
+  remap_refs: plane.base.base.feature
+  remap_bodies: body, with
 move
   remap_bodies: bodies[0]
 import
 mesh_convert
   remap_bodies: body
 mesh_import
+repair
+  remap_bodies: body

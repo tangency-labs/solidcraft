@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5291"
+ ],
+ "what": "a pin (r2.1 x 11) joined on the side face of a triangular prism that has a blind bore running in from its slanted face: the join ground for ~90 s, then 'boolean Union: no result'",
+ "source": "analytic",
+ "method": "prism: the right triangle (0,0),(-15,0),(-15,20) (x, z) x 13 (y 0..-13): 1950. The bore (y -6.5, z 10, r 2.5) runs from x = -10 out through the slanted face x = -0.75 z: removed Int over its disc of (10 - 0.75 z) = pi 6.25 (10 - 7.5). The pin stands on the face y = 0 (its base wholly on the triangle, 2.96 from the slanted edge) out to y = 11: + pi 2.1^2 11",
+ "body_count": 1,
+ "volume_mm3": 2053.3113
+}
