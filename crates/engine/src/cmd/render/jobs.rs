@@ -1,27 +1,526 @@
+use crate::schema::render_jobs::{
+    ExportFormat, ImageCopied, ImageExported, Job, JobProgressReply, JobState, PreparationCancelled, QueueReply, RenderCancelled, RenderProgress,
+    ResultPinned,
+};
+use crate::schema::render_start::{Checked, Denoising, GpuChecked, IndirectClamp, RenderChecked, RenderStarted, RuntimeChecked};
 use crate::{Result, Session, params::bad, render_jobs::job_error};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use solidcraft_doc::render_settings::RenderSetup;
+use solidcraft_doc::render_resources::{CpuHdrEnvironment, GpuHdrEnvironment};
+use solidcraft_doc::render_settings::{RenderJob, RenderSetup};
 use solidcraft_render::{
     RenderOperation, RenderRequest,
-    job::{ImageRequest, JobId},
+    job::{ImageRequest, Integrator, JobId, RaytraceOptions},
 };
+
+const DENOISE_OUTLIER_POLICY: &str = "suppress isolated high radiance on locally matching guides in display output";
+const DENOISE_OPTICAL_POLICY: &str =
+    "supported sharp reflections and smooth glass use separate reflected and transmitted endpoint geometry and material guides";
+const DENOISE_OPAQUE_ONLY_POLICY: &str = "legacy opaque-only filtering; mirror and glass radiance bypass display filtering";
 
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Start {
+    aging: solidcraft_doc::render_aging::SavedAgingStack,
+    studio_weights: Option<[f64; 3]>,
+    progressive: bool,
+    denoise: bool,
+    clamp_indirect: Option<f64>,
+    samples: Option<u32>,
+    max_depth: Option<u32>,
+    seed: Option<u32>,
+    integrator: Integrator,
+    environment: Option<EnvironmentRequest>,
+    raytrace: Option<RaytraceOptions>,
+    led_strip: Option<solidcraft_render::job::led_strip::LedStripOptions>,
+    led_samples: Option<u32>,
     setup: Option<String>,
     settings: Option<RenderSetup>,
     transparent_background: bool,
     replace: bool,
 }
 
-fn prepare(s: &Session, params: &Value, command: &str) -> Result<(Start, solidcraft_render::ProductScene, ImageRequest, Value)> {
-    let input: Start = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct EnvironmentRequest {
+    path: String,
+    resource: Option<solidcraft_doc::render_resources::HdrId>,
+    expected_sha256: Option<solidcraft_doc::render_resources::HdrId>,
+    rotation_radians: f64,
+    intensity: f64,
+    samples: u32,
+}
+impl Default for EnvironmentRequest {
+    fn default() -> Self {
+        Self { path: String::new(), resource: None, expected_sha256: None, rotation_radians: 0.0, intensity: 1.0, samples: 16 }
+    }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ProgressiveStart {
+    supersampling: Option<u32>,
+    denoise_settings: solidcraft_render::job::DenoiseSettings,
+    denoise_diagnostics: bool,
+    caustics: Option<solidcraft_render::job::CausticOptions>,
+    studio_weights: Option<[f64; 3]>,
+    aging: solidcraft_doc::render_aging::SavedAgingStack,
+    #[serde(default)]
+    nested_media: bool,
+    texture_filtering: bool,
+    metal_energy_compensation: bool,
+    volume: Option<solidcraft_render::job::volume::HomogeneousVolume>,
+    adaptive: Option<solidcraft_render::job::adaptive::AdaptiveSampling>,
+    transmission_samples: Option<u32>,
+    finishing: solidcraft_render::job::finishing::Finishing,
+    backdrop: Option<solidcraft_render::job::finishing::Backdrop>,
+    linear_exr: bool,
+    integrator: Integrator,
+    setup: Option<String>,
+    settings: Option<RenderSetup>,
+    transparent_background: bool,
+    replace: bool,
+    progressive: bool,
+    samples: Option<u32>,
+    max_depth: Option<u32>,
+    seed: Option<u32>,
+    raytrace: super::transmission::Raytrace,
+    lens: Option<solidcraft_render::job::ThinLens>,
+    lighting: Option<solidcraft_render::job::StudioLighting>,
+    tone_map: Option<solidcraft_render::job::ToneMap>,
+    environment: Option<super::environment::Input>,
+    denoise: bool,
+    clamp_indirect: Option<f64>,
+}
+
+pub(crate) struct Prepared {
+    pub(crate) replace: bool,
+    pub(crate) submission: Option<solidcraft_render::job::PreparedSubmission>,
+    pub(crate) reply: RenderChecked,
+}
+
+fn lower_led(input: &mut Start, command: &str) -> Result<()> {
+    if input.led_strip.is_none() && input.led_samples.is_some() {
+        return Err(bad(command, "led_samples requires led_strip"));
+    }
+    if let Some(strip) = input.led_strip {
+        if input.integrator != Integrator::Raytrace {
+            return Err(bad(command, "led_strip requires integrator: raytrace"));
+        }
+        strip.append_to(input.raytrace.get_or_insert_default(), input.led_samples.unwrap_or(16)).map_err(job_error)?;
+        input.led_strip = None;
+        input.led_samples = None;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod union_lowering_tests {
+    use super::*;
+    #[test]
+    fn led_lowering_keeps_hdr_reflection_aa_and_anisotropy_inputs_without_reading_hdr() {
+        let wire = json!({"integrator":"raytrace","environment":{"path":"unopened.hdr","rotation_radians":0.75,"intensity":2,"samples":64},"raytrace":{"primary_samples":4,"reflections":{"bodies":[{"body":"receiver","mode":"rough_specular"}],"samples":16,"max_bounces":3},"anisotropic_faces":[{"body_index":0,"body_name":"receiver","face":0,"tangent":[1,0,0],"orientation":"quarter_turn","roughness_x":0.2,"roughness_y":0.5},null],"punctual_lights":[{"position_mm":[0,0,20],"color":[1,1,1],"intensity":1,"reference_distance_mm":20,"minimum_distance_mm":0.001}]},"led_strip":{"center_mm":[0,0,10],"length_mm":8,"width_mm":0.5,"length_axis":[1,0,0],"width_axis":[0,-1,0],"color":[1,0.5,0.25],"intensity":2},"led_samples":64});
+        let mut input: Start = serde_json::from_value(wire.clone()).unwrap();
+        let before = input.raytrace.clone().unwrap();
+        lower_led(&mut input, "render.preflight").unwrap();
+        let after = input.raytrace.unwrap();
+        assert_eq!(before.primary_samples, after.primary_samples);
+        assert_eq!(before.reflections, after.reflections);
+        assert_eq!(before.anisotropic_faces, after.anisotropic_faces);
+        assert_eq!(before.punctual_lights, after.punctual_lights);
+        assert_eq!(after.area_lights.as_ref().unwrap().len(), 1);
+        assert_eq!(after.area_samples, Some(64));
+        let environment = input.environment.unwrap();
+        assert_eq!(environment.path, "unopened.hdr");
+        assert_eq!(environment.rotation_radians, 0.75);
+        assert_eq!(environment.intensity, 2.0);
+        assert_eq!(environment.samples, 64);
+        assert!(input.led_strip.is_none() && input.led_samples.is_none());
+        assert_eq!(wire["environment"]["path"], json!("unopened.hdr"));
+    }
+}
+
+/// Resolve portable intent before choosing an executor. Legacy requests are left intact;
+/// complete saved jobs cannot be silently overridden by a second set of runtime controls.
+enum SavedHdr {
+    Cpu(CpuHdrEnvironment),
+    Gpu(GpuHdrEnvironment),
+}
+
+struct Normalized {
+    params: Value,
+    hdr: Option<SavedHdr>,
+    surfaces: solidcraft_doc::render_surface::SurfaceBindings,
+    optics: solidcraft_doc::render_optics::OpticalBindings,
+}
+
+/// The runtime key beside a saved job, refused: the job already decides the method and its options.
+fn job_companion_refusal(object: &serde_json::Map<String, Value>) -> Option<String> {
+    let key = object.keys().find(|key| !matches!(key.as_str(), "setup" | "settings" | "replace" | "studio_weights"))?;
+    Some(format!(
+        "saved job already defines the active method and its options; runtime `{key}` cannot override it (use job: null for a runtime request)"
+    ))
+}
+
+/// What `normalize_saved_job` refuses from the JSON alone, in its order: both `setup` and
+/// `settings`, then inline `settings` with a `job` that doesn't parse or has a runtime key beside
+/// it. A named setup's job is in the design, so its companions are checked there. The contract of
+/// `render.start` and `render.preflight` (`schema::render_start`) calls it too.
+pub(crate) fn saved_job_refusal(params: &Value) -> Option<String> {
+    let object = params.as_object()?;
+    let inline = object.get("settings").filter(|value| !value.is_null());
+    if object.get("setup").is_some_and(|value| !value.is_null()) && inline.is_some() {
+        return Some("choose either setup or settings".into());
+    }
+    let inline = inline.filter(|value| value.get("job").is_some_and(|job| !job.is_null()))?;
+    if let Err(e) = serde_json::from_value::<RenderSetup>(inline.clone()) {
+        return Some(e.to_string());
+    }
+    job_companion_refusal(object)
+}
+
+/// What `prepare` and `prepare_progressive` refuse from the JSON alone before parsing: the runtime
+/// form (`progressive` not true) refuses the GPU controls, the GPU form the CPU and LED options.
+/// The contract of `render.start` and `render.preflight` (`schema::render_start`) calls it too.
+pub(crate) fn form_refusal(params: &Value, progressive: bool) -> Option<&'static str> {
+    let raytrace = params.get("raytrace").and_then(Value::as_object);
+    let environment = params.get("environment");
+    if progressive {
+        let cpu_raytrace = raytrace.is_some_and(|o| o.keys().any(|key| !matches!(key.as_str(), "dielectrics" | "clear_coats" | "textures")));
+        let refused = params.get("integrator").is_some_and(|v| v.as_str() != Some("raster"))
+            || cpu_raytrace
+            || params.get("led_strip").is_some()
+            || params.get("led_samples").is_some()
+            || environment.is_some_and(|e| e.is_object() && e.get("kind").is_none());
+        return refused.then_some("progressive rendering does not accept CPU raytrace, environment or LED options");
+    }
+    let refused = raytrace.is_some_and(|o| ["clear_coats", "textures"].iter().any(|key| o.contains_key(*key)))
+        || environment.is_some_and(|e| e.get("kind").is_some())
+        || ["lens", "lighting", "tone_map", "supersampling", "denoise_settings", "denoise_diagnostics"].iter().any(|key| params.get(*key).is_some())
+        || params.get("denoise").is_some_and(|value| value != &json!(false))
+        || params.get("clamp_indirect").is_some_and(|value| !value.is_null());
+    refused.then_some(
+        "runtime GPU transmission, texture, lens, environment, lighting, tone-map, denoise and clamp_indirect controls require progressive rendering",
+    )
+}
+
+fn normalize_saved_job(s: &Session, params: &Value, command: &str) -> Result<Option<Normalized>> {
+    let Some(object) = params.as_object() else {
+        return Ok(None);
+    };
+    if let Some(message) = saved_job_refusal(params) {
+        return Err(bad(command, message));
+    }
+    let named = object.get("setup").filter(|value| !value.is_null());
+    let inline = object.get("settings").filter(|value| !value.is_null());
+    let mut settings = if let Some(value) = inline {
+        if value.get("job").is_none_or(Value::is_null) {
+            return Ok(None);
+        }
+        serde_json::from_value::<RenderSetup>(value.clone()).map_err(|e| bad(command, e.to_string()))?
+    } else if let Some(settings) = named.and_then(Value::as_str).and_then(|name| s.doc.render.setups.get(name)) {
+        if settings.job.is_none() {
+            return Ok(None);
+        }
+        settings.clone()
+    } else {
+        return Ok(None);
+    };
+    if let Some(message) = job_companion_refusal(object) {
+        return Err(bad(command, message));
+    }
+    settings.validate().map_err(|e| bad(command, e.to_string()))?;
+    s.doc.render.validate_resources(&settings).map_err(|e| bad(command, e.to_string()))?;
+    let Some(job) = settings.job.take() else {
+        return Ok(None);
+    };
+    let optics = std::mem::take(&mut settings.optics);
+    let surfaces = std::mem::take(&mut settings.surfaces);
+    let mut hdr = None;
+    let mut lowered = match job {
+        RenderJob::Raster { transparent_background } => json!({"transparent_background":transparent_background}),
+        RenderJob::CpuRaytrace { mut options, transparent_background } => {
+            hdr = options.hdr.map(SavedHdr::Cpu);
+            let aging = std::mem::take(&mut options.aging);
+            let raytrace = options.to_runtime(settings.exposure_ev).map_err(|e| bad(command, e.to_string()))?;
+            // The legacy CPU path reads EV from RaytraceOptions. There is one saved authority.
+            settings.exposure_ev = 0.0;
+            json!({"integrator":"raytrace","raytrace":raytrace,"aging":aging,"transparent_background":transparent_background})
+        }
+        RenderJob::GpuPath { transparent_background, options } => {
+            hdr = options.hdr.map(SavedHdr::Gpu);
+            json!({
+            "progressive":true,
+            "transparent_background":transparent_background,
+            "samples":options.samples,"max_depth":options.max_depth,"seed":options.seed,
+            "lens":options.lens,"lighting":options.lighting,"tone_map":options.tone_map,
+            "denoise":options.denoise,"clamp_indirect":options.clamp_indirect,"environment":options.environment,
+            "supersampling":options.supersampling,"denoise_settings":options.denoise_settings,"denoise_diagnostics":options.denoise_diagnostics,
+            "finishing":options.finishing,"backdrop":options.backdrop,"linear_exr":options.linear_exr,
+            "texture_filtering":options.texture_filtering,"metal_energy_compensation":options.metal_energy_compensation,"caustics":options.caustics,"adaptive":options.adaptive,"transmission_samples":options.transmission_samples,"volume":options.volume,"nested_media":options.nested_media,"aging":options.aging
+            })
+        }
+    };
+    lowered["settings"] = serde_json::to_value(settings).map_err(|e| bad(command, e.to_string()))?;
+    if let Some(weights) = object.get("studio_weights") {
+        lowered["studio_weights"] = weights.clone();
+    }
+    if let Some(replace) = object.get("replace") {
+        lowered["replace"] = replace.clone();
+    }
+    Ok(Some(Normalized { params: lowered, hdr, surfaces, optics }))
+}
+
+pub(crate) fn prepare(s: &Session, params: &Value, command: &str, cancel: &solidcraft_render::job::CancelToken) -> Result<Prepared> {
+    prepare_with_metadata(s, params, command, cancel, None)
+}
+pub(crate) fn prepare_with_metadata(
+    s: &Session,
+    params: &Value,
+    command: &str,
+    cancel: &solidcraft_render::job::CancelToken,
+    retained: Option<&solidcraft_render::job::RetainedMetadata>,
+) -> Result<Prepared> {
+    cancel.check().map_err(job_error)?;
+    let normalized = normalize_saved_job(s, params, command)?;
+    let saved_hdr = normalized.as_ref().and_then(|normalized| normalized.hdr.as_ref());
+    let params = normalized.as_ref().map_or(params, |normalized| &normalized.params);
+    if params.get("progressive").and_then(Value::as_bool) == Some(true) {
+        let hdr = match saved_hdr {
+            Some(SavedHdr::Gpu(hdr)) => Some(*hdr),
+            Some(SavedHdr::Cpu(_)) => {
+                return Err(bad(command, "saved CPU HDR cannot enter a GPU request"));
+            }
+            None => None,
+        };
+        return prepare_progressive(
+            s,
+            params,
+            command,
+            normalized.is_some(),
+            hdr,
+            normalized.as_ref().map(|n| &n.surfaces),
+            normalized.as_ref().map(|n| &n.optics),
+            cancel,
+            retained,
+        );
+    }
+    if let Some(message) = form_refusal(params, false) {
+        return Err(bad(command, message));
+    }
+    let mut input: Start = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let coats = input.settings.as_mut().map_or_else(Default::default, |settings| std::mem::take(&mut settings.coats));
+    // A checked file HDR uses the runtime request lane, but its optical targets
+    // remain stable authored identities. Extract them before validating job:null
+    // settings, just as for stable coats; never discard or turn them into ordinals
+    // in the UI. Exact visible identities are resolved from the captured scene.
+    let inline_optics = input.settings.as_mut().map_or_else(Default::default, |settings| std::mem::take(&mut settings.optics));
+    let normalized_optics = normalized.as_ref().map(|n| &n.optics).filter(|bindings| !bindings.is_empty());
+    if normalized_optics.is_some() && !inline_optics.is_empty() {
+        return Err(bad(command, "choose normalized or inline stable optics, not both"));
+    }
+    let saved_optics = normalized_optics.or((!inline_optics.is_empty()).then_some(&inline_optics));
+    if let Some(bindings) = saved_optics {
+        if input.integrator != Integrator::Raytrace {
+            return Err(bad(command, "stable optics require CPU or GPU ray tracing"));
+        }
+        let options = input.raytrace.get_or_insert_default();
+        bindings.validate_for_cpu_path(options.path.is_some()).map_err(|e| bad(command, e.to_string()))?;
+        if options.volume.is_some_and(|volume| volume.active()) {
+            return Err(bad(command, "CPU Atmosphere cannot combine with saved Glass or subsurface scattering; settings are kept"));
+        }
+        if options.denoise && bindings.iter().any(|binding| binding.optics.subsurface.is_some_and(|scatter| scatter.active())) {
+            return Err(bad(command, "CPU subsurface random walks have no surface-denoiser guides; disable denoising explicitly"));
+        }
+        if !options.dielectrics.is_empty() {
+            return Err(bad(command, "saved optics cannot combine with runtime dielectric overrides"));
+        }
+    }
+    if !coats.is_empty() && input.integrator != Integrator::Raytrace {
+        return Err(bad(command, "stable clear coats require CPU or GPU ray tracing"));
+    }
+    validate_studio_weights(input.studio_weights, command)?;
+    if input.integrator == Integrator::Raytrace && input.studio_weights.is_some() {
+        return Err(bad(command, "studio_weights apply to raster or the implicit GPU studio; use explicit CPU light intensities"));
+    }
+    if input.progressive {
+        return prepare_progressive(s, params, command, false, None, None, None, cancel, retained);
+    }
+    if input.denoise {
+        return Err(bad(command, "denoise requires GPU progressive rendering"));
+    }
+    if input.clamp_indirect.is_some() {
+        return Err(bad(command, "clamp_indirect requires GPU progressive rendering"));
+    }
+    if input.samples.is_some() || input.max_depth.is_some() || input.seed.is_some() {
+        return Err(bad(command, "sampling controls require progressive rendering"));
+    }
     if input.setup.is_some() && input.settings.is_some() {
         return Err(bad(command, "choose either setup or settings"));
     }
-    let scene = crate::product_scene::extract(s)?;
+    // Reject unavailable execution before capturing authoritative product meshes.
+    // Runtime services are independent of the document and can be checked cold.
+    let host = s.render_job_host().ok_or_else(|| bad(command, "no image host is installed"))?;
+    if !host.is_available() {
+        return Err(bad(command, "image host is unavailable"));
+    }
+    host.validate_integrator(input.integrator).map_err(job_error)?;
+    lower_led(&mut input, command)?;
+    if !input.aging.is_empty() {
+        if input.integrator != Integrator::Raytrace {
+            return Err(bad(command, "stable CPU aging requires the CPU raytrace integrator"));
+        }
+        input.aging.validate().map_err(|e| bad(command, e.to_string()))?;
+        input.raytrace.get_or_insert_with(RaytraceOptions::default);
+    }
+    let saved_surfaces = normalized.as_ref().map(|n| &n.surfaces).filter(|bindings| !bindings.is_empty());
+    if saved_surfaces.is_some() {
+        if input.integrator != Integrator::Raytrace {
+            return Err(bad(command, "saved opaque surfaces require CPU or GPU ray tracing"));
+        }
+        solidcraft_render::job::textures::validate_cpu_options(input.raytrace.as_ref().unwrap_or(&RaytraceOptions::default())).map_err(job_error)?;
+        if normalized.as_ref().is_some_and(|n| !n.optics.is_empty()) && input.raytrace.as_ref().is_none_or(|options| options.path.is_none()) {
+            return Err(bad(command, "CPU maps with Glass require Indirect lighting and separate targets"));
+        }
+    }
+    if input.integrator == Integrator::Raster && input.raytrace.is_some() {
+        return Err(bad(command, "raytrace options require integrator: raytrace"));
+    }
+    if let Some(options) = &input.raytrace {
+        options.retained_bytes().map_err(job_error)?;
+        if !input.aging.is_empty() {
+            if options.aging.as_ref().is_some_and(|stack| !stack.is_empty()) {
+                return Err(bad(command, "choose stable authored aging or captured runtime aging, not both"));
+            }
+            if input.aging.iter().any(|layer| layer.active()) && options.anisotropic_faces.iter().any(Option::is_some) {
+                return Err(bad(command, "CPU aging cannot replace independently authored anisotropic roughness axes"));
+            }
+        }
+        options.budget.validate_execution().map_err(job_error)?;
+        // Check the complete image envelope before any source file is read.
+        let dimensions = if let Some(name) = &input.setup {
+            let settings = s.doc.render.setups.get(name).ok_or_else(|| bad(command, "no saved render setup with that name"))?;
+            (settings.width, settings.height)
+        } else if let Some(settings) = &input.settings {
+            (settings.width, settings.height)
+        } else {
+            let defaults = RenderSetup::default();
+            (defaults.width, defaults.height)
+        };
+        let trace_dimensions = if options.supersampling == 1 && !options.denoise && !options.denoise_diagnostics {
+            dimensions
+        } else {
+            solidcraft_render::job::supersampled_dimensions(dimensions.0, dimensions.1, options.supersampling).map_err(job_error)?
+        };
+        options.budget.validate_image(trace_dimensions.0, trace_dimensions.1, options.camera_sampling().map_err(job_error)?).map_err(job_error)?;
+        if options.denoise || options.denoise_diagnostics {
+            solidcraft_render::job::validate_cpu_denoise_image(trace_dimensions.0, trace_dimensions.1).map_err(job_error)?;
+        }
+        if let Some(lens) = options.lens {
+            let camera = input
+                .setup
+                .as_ref()
+                .and_then(|name| s.doc.render.setups.get(name))
+                .map(|setup| setup.camera)
+                .or_else(|| input.settings.as_ref().map(|setup| setup.camera))
+                .or(s.camera)
+                .unwrap_or_default();
+            lens.validate_camera(&camera).map_err(job_error)?;
+        }
+        if let Some(output) = &options.output {
+            output.validate_image(dimensions.0, dimensions.1).map_err(job_error)?;
+            output.presentation(options.exposure_ev, [0; 3], input.transparent_background).validate().map_err(job_error)?;
+        }
+    }
+    // Refuse conflicting sources before VFS/resource access. Sky is a direct
+    // radiance consumer and never a substitute for unread HDR bytes.
+    if (saved_hdr.is_some() || input.environment.is_some())
+        && input.raytrace.as_ref().is_some_and(|options| options.sky.is_some() || options.environment.is_some())
+    {
+        return Err(bad(command, "choose either CPU HDR input, gradient Sky or constant environment"));
+    }
+    let environment = if let Some(saved_hdr) = saved_hdr {
+        let SavedHdr::Cpu(hdr) = saved_hdr else {
+            return Err(bad(command, "saved GPU HDR cannot enter a CPU request"));
+        };
+        if input.integrator != Integrator::Raytrace || input.environment.is_some() {
+            return Err(bad(command, "saved CPU HDR requires raytrace without a runtime environment override"));
+        }
+        let resource = s.doc.render.resources.required(&hdr.resource).map_err(|e| bad(command, e.to_string()))?;
+        Some(
+            solidcraft_render::lighting::environment_input::EnvironmentInput::new(resource.source(), hdr.rotation_rad, hdr.intensity, hdr.samples)
+                .map_err(|e| bad(command, e.to_string()))?,
+        )
+    } else if let Some(environment) = &input.environment {
+        if input.integrator != Integrator::Raytrace {
+            return Err(bad(command, "environment requires raytrace"));
+        }
+        let source = if let Some(id) = environment.resource {
+            if !environment.path.is_empty() || environment.expected_sha256.is_some() {
+                return Err(bad(command, "choose an embedded HDR resource or a file path with optional expected_sha256"));
+            }
+            s.doc.render.resources.required(&id).map_err(|e| bad(command, e.to_string()))?.source()
+        } else {
+            if environment.path.is_empty()
+                || environment.path.len() > 4096
+                || environment.path.capacity() > 4096
+                || environment.path.chars().any(char::is_control)
+            {
+                return Err(bad(command, "environment requires a bounded HDR input path"));
+            }
+            let bytes =
+                solidcraft_io::vfs::read(&environment.path, solidcraft_render::lighting::MAX_HDR_BYTES).map_err(|e| bad(command, e.to_string()))?;
+            if environment.expected_sha256.is_some_and(|id| id != solidcraft_doc::render_resources::HdrId::of(&bytes)) {
+                return Err(bad(command, "HDR file changed since selection; inspect and select it again"));
+            }
+            solidcraft_render::lighting::HdrSource::new(bytes).map_err(|e| bad(command, e.to_string()))?
+        };
+        Some(
+            solidcraft_render::lighting::environment_input::EnvironmentInput::new(
+                source,
+                environment.rotation_radians,
+                environment.intensity,
+                environment.samples,
+            )
+            .map_err(|e| bad(command, e.to_string()))?,
+        )
+    } else {
+        None
+    };
+    let mut scene = crate::product_scene::extract(s)?;
+    if let Some(bindings) = saved_optics {
+        let options = input.raytrace.as_mut().ok_or_else(|| bad(command, "saved CPU optics require a CPU raytrace request"))?;
+        if !options.dielectrics.is_empty() {
+            return Err(bad(command, "saved optics cannot combine with runtime dielectric overrides"));
+        }
+        options.dielectrics = super::optical_bindings::resolve_cpu_path(s, &scene, bindings, options.path.is_some(), command)?;
+        options.validate().map_err(job_error)?;
+        // An explicit optical binding owns transmission. Viewport opacity is
+        // only a display proxy and must not enter CPU transport.
+        for optical in &options.dielectrics {
+            let body = scene
+                .meshes
+                .get_mut(optical.body_index)
+                .filter(|body| body.name == optical.body_name)
+                .ok_or_else(|| bad(command, "saved optical target changed during capture"))?;
+            body.opacity = 1.0;
+            for face in &mut body.faces {
+                face.opacity = 1.0;
+            }
+        }
+    }
+    super::coat_bindings::apply(s, &mut scene, &coats, input.raytrace.as_ref(), command)?;
+    if !input.aging.is_empty() {
+        let options = input.raytrace.as_mut().ok_or_else(|| bad(command, "CPU aging requires a CPU raytrace request"))?;
+        if options.aging.as_ref().is_some_and(|stack| !stack.is_empty()) {
+            return Err(bad(command, "choose stable authored aging or captured runtime aging, not both"));
+        }
+        options.aging = Some(Box::new(super::effects::resolve_aging(s, &scene, &input.aging, command)?));
+        options.validate().map_err(job_error)?;
+    }
+    if environment.is_some() {
+        input.raytrace.as_ref().unwrap_or(&RaytraceOptions::default()).validate_environment_reflections(&scene).map_err(job_error)?;
+    }
     let settings = if let Some(name) = &input.setup {
         s.doc.render.setups.get(name).cloned().ok_or_else(|| bad(command, "no saved render setup with that name"))?
     } else if let Some(settings) = &input.settings {
@@ -31,20 +530,56 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<(Start, solidcr
         if let Some(camera) = s.camera {
             settings.camera = camera;
         } else {
-            settings.camera.fit(&scene.bounds);
+            settings.camera.fit(&solidcraft_render::view_bounds(&scene.bounds));
         }
         settings
     };
-    settings.validate().map_err(|e| bad(command, e.to_string()))?;
-    if settings.exposure_ev != 0.0 || settings.environment_rotation != 0.0 || settings.environment_intensity != 1.0 {
+    if input.integrator == Integrator::Raster && !settings.stage.is_empty() {
+        return Err(bad(command, "passive stages require a raytrace executor"));
+    }
+    super::staging::apply(&mut scene, &settings, command)?;
+    let budget = input.raytrace.as_ref().map_or(solidcraft_render::job::CpuBudget::Compact, |o| o.budget);
+    if input.integrator == Integrator::Raytrace {
+        settings.validate_for_cpu(budget).map_err(|e| bad(command, e.to_string()))?;
+        budget.validate_execution().map_err(job_error)?;
+        budget
+            .validate_image(
+                settings.width,
+                settings.height,
+                input.raytrace.as_ref().map(|o| o.camera_sampling()).transpose().map_err(job_error)?.flatten(),
+            )
+            .map_err(job_error)?;
+    } else {
+        settings.validate().map_err(|e| bad(command, e.to_string()))?;
+    }
+    // The raster image executor has no exposure or environment controls. A setup saved with them
+    // (the render workspace and the other executors use them) still renders here, and the reply
+    // names what this render leaves out (#5089). The raytrace path takes them only through a
+    // saved job, so a raytrace request with them is still refused.
+    let ignored = if input.integrator == Integrator::Raster { ignored_controls(&settings) } else { Vec::new() };
+    if input.integrator != Integrator::Raster
+        && (settings.exposure_ev != 0.0 || settings.environment_rotation != 0.0 || settings.environment_intensity != 1.0)
+    {
         return Err(bad(command, "exposure and environment controls are not supported by the R4a CPU image executor"));
     }
-    let host = s.render_job_host().ok_or_else(|| bad(command, "no image host is installed"))?;
-    if !host.is_available() {
-        return Err(bad(command, "image host is unavailable"));
+    let mut descriptor = host.descriptor_for(input.integrator).map_err(job_error)?;
+    if input.integrator == Integrator::Raytrace {
+        descriptor.limits = budget.image_limits(input.raytrace.as_ref().is_some_and(|o| o.progressive.is_some()));
     }
+    let expected_executor = descriptor.id.clone();
+    let mut backend = s.render_backend();
+    backend.executors = vec![descriptor];
+    let mut features = scene.required_features();
+    if environment.is_some() {
+        features.push(solidcraft_render::RenderFeature::Hdri);
+    }
+    let refraction = input.raytrace.as_ref().is_some_and(|options| !options.dielectrics.is_empty());
+    if refraction && !features.contains(&solidcraft_render::RenderFeature::Refraction) {
+        features.push(solidcraft_render::RenderFeature::Refraction);
+    }
+    let environment_info = environment.as_ref().map(|e| e.metadata());
     let resolved = solidcraft_render::resolve_request(
-        &[s.render_backend()],
+        &[backend],
         &RenderRequest {
             backend: Some(settings.backend.clone()),
             mode: settings.mode,
@@ -52,60 +587,560 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<(Start, solidcr
             width: u64::from(settings.width),
             height: u64::from(settings.height),
             format: Some(settings.format),
-            features: scene.required_features(),
+            features,
             policy: Default::default(),
         },
     )
     .map_err(|e| bad(command, e.to_string()))?;
-    if resolved.executor.as_str() != "cpu-product" {
+    if resolved.executor != expected_executor {
         return Err(bad(command, "resolved executor is not installed as an image job host"));
     }
+    let textures = if let Some(bindings) = saved_surfaces {
+        let overrides = super::surface_bindings::resolve(s, &scene, bindings, command)?;
+        super::textures::capture_with_resources_and_filtering(
+            &scene,
+            &overrides,
+            Some(&s.doc.render.texture_resources),
+            command,
+            input.raytrace.as_ref().is_some_and(|options| options.texture_filtering),
+        )?
+    } else {
+        None
+    };
     let request = ImageRequest {
+        studio_weights: validate_studio_weights(input.studio_weights, command)?,
+        environment: None,
+        textures,
+        integrator: input.integrator,
+        raytrace: input.raytrace.take(),
         camera: settings.camera,
         width: settings.width,
         height: settings.height,
         background: settings.background,
         transparent_background: input.transparent_background,
     };
-    let admission = solidcraft_render::job::admit(&scene, &request).map_err(job_error)?;
-    let reply = json!({"resolved":resolved,"admission":admission,"request":request,"scene_generation":s.revision,"host":host.kind(),"transparency":"sorted_alpha_approximation","refraction":false});
-    Ok((input, scene, request, reply))
+    let environment_bytes = environment
+        .as_ref()
+        .map_or(Ok(0), |e| e.required_bytes_with_importance(request.raytrace.as_ref().is_some_and(|options| options.environment_importance_sampling)))
+        .map_err(|e| bad(command, e.to_string()))?;
+    let mut submission =
+        host.prepare_submission_with_metadata(scene, request, Default::default(), environment, cancel.clone(), retained).map_err(job_error)?;
+    submission.select_image_mode(settings.mode).map_err(job_error)?;
+    let request = submission.request();
+    let mut admission = submission.admission();
+    let retained_lights = request.raytrace.as_ref().map_or(Ok(0), |o| o.retained_bytes()).map_err(job_error)?;
+    let retained_environment =
+        if environment_info.is_some() { std::mem::size_of::<solidcraft_render::lighting::environment_input::EnvironmentInfo>() as u64 } else { 0 };
+    let retained_request_bytes = retained_lights
+        .checked_add(retained_environment)
+        .and_then(|bytes| bytes.checked_add(request.retained_resource_metadata_bytes()))
+        .ok_or_else(|| bad(command, "request metadata overflow"))?;
+
+    admission.estimated_total_bytes = admission
+        .estimated_total_bytes
+        .checked_add(environment_bytes)
+        .and_then(|v| v.checked_add(retained_request_bytes))
+        .filter(|v| *v <= budget.limits().max_job_bytes)
+        .ok_or_else(|| bad(command, "environment job exceeds per-job memory limit"))?;
+    admission.preparation_bytes =
+        admission.preparation_bytes.checked_add(environment_bytes).ok_or_else(|| bad(command, "environment admission overflow"))?;
+    let transparency = match input.integrator {
+        Integrator::Raster => "sorted_alpha_approximation",
+        Integrator::Raytrace if refraction => "physical_transmission",
+        Integrator::Raytrace if input.transparent_background => "coverage_alpha",
+        Integrator::Raytrace => "opaque_only",
+    };
+    let path = request.raytrace.as_ref().is_some_and(|options| options.path.is_some());
+    let stage_transport = if path && refraction {
+        "CPU finite-depth diffuse/specular and dielectric path lighting"
+    } else if path {
+        "CPU finite-depth opaque diffuse/specular path lighting"
+    } else {
+        "CPU direct/specular only; no diffuse interreflection"
+    };
+    let dielectric_boundaries = match (refraction, path) {
+        (true, true) => vec!["thin_sheet", "closed_box", "closed_mesh"],
+        (true, false) => vec!["thin_sheet", "closed_box"],
+        (false, _) => Vec::new(),
+    };
+    let denoising = request.raytrace.as_ref().filter(|options| options.denoise);
+    let checked = Checked {
+        resolved: retyped(command, &resolved)?,
+        admission: retyped(command, &admission)?,
+        request: retyped(command, request)?,
+        scene_generation: s.revision,
+        host: retyped(command, &host.kind())?,
+        stage_panels: settings.stage.len(),
+        environment: environment_info.as_ref().map(|info| retyped(command, info)).transpose()?,
+        textures: request.textures.as_ref().map(|maps| retyped(command, &maps.summary())).transpose()?,
+        transparency,
+        refraction,
+        dielectric_boundaries,
+        coats: (!coats.is_empty()).then(|| retyped(command, &coats)).transpose()?,
+        denoising: denoising.map(|options| denoising_reply(command, &options.denoise_settings, options.denoise_diagnostics, true)).transpose()?,
+        param_warnings: Vec::new(),
+    };
+    let reply = RenderChecked::Runtime(RuntimeChecked {
+        checked,
+        ignored_controls: ignored,
+        stage_transport,
+        cpu_budget: retyped(command, &budget)?,
+        cpu_limits: retyped(command, &budget.limits())?,
+        retained_request_bytes,
+    });
+    Ok(Prepared { replace: input.replace, submission: Some(submission), reply })
+}
+
+fn prepare_progressive(
+    s: &Session,
+    params: &Value,
+    command: &str,
+    require_gpu_path: bool,
+    saved_hdr: Option<GpuHdrEnvironment>,
+    saved_surfaces: Option<&solidcraft_doc::render_surface::SurfaceBindings>,
+    saved_optics: Option<&solidcraft_doc::render_optics::OpticalBindings>,
+    cancel: &solidcraft_render::job::CancelToken,
+    retained: Option<&solidcraft_render::job::RetainedMetadata>,
+) -> Result<Prepared> {
+    if let Some(message) = form_refusal(params, true) {
+        return Err(bad(command, message));
+    }
+    let mut input: ProgressiveStart = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let coats = input.settings.as_mut().map_or_else(Default::default, |settings| std::mem::take(&mut settings.coats));
+    let inline_optics = input.settings.as_mut().map_or_else(Default::default, |settings| std::mem::take(&mut settings.optics));
+    let normalized_optics = saved_optics.filter(|bindings| !bindings.is_empty());
+    if normalized_optics.is_some() && !inline_optics.is_empty() {
+        return Err(bad(command, "choose normalized or inline stable optics, not both"));
+    }
+    let saved_optics = normalized_optics.or((!inline_optics.is_empty()).then_some(&inline_optics));
+    if let Some(bindings) = saved_optics {
+        bindings.validate().map_err(|e| bad(command, e.to_string()))?;
+        if !input.raytrace.dielectrics.is_empty() || !input.raytrace.clear_coats.is_empty() {
+            return Err(bad(command, "saved optical bindings cannot be mixed with transient optical overrides"));
+        }
+    }
+    validate_studio_weights(input.studio_weights, command)?;
+    if input.studio_weights.is_some() && (input.lighting.is_some() || input.environment.is_some() || saved_hdr.is_some()) {
+        return Err(bad(command, "studio_weights require the implicit GPU studio without environment lighting"));
+    }
+    if input.integrator != Integrator::Raster || !input.progressive {
+        return Err(bad(command, "progressive rendering requires the registered GPU request method"));
+    }
+    if input.setup.is_some() && input.settings.is_some() {
+        return Err(bad(command, "choose either setup or settings"));
+    }
+    let mut scene = crate::product_scene::extract(s)?;
+    if !input.progressive
+        && (!input.raytrace.dielectrics.is_empty()
+            || !input.raytrace.clear_coats.is_empty()
+            || !input.raytrace.textures.is_empty()
+            || input.lens.is_some()
+            || input.lighting.is_some()
+            || input.tone_map.is_some()
+            || input.environment.is_some()
+            || input.denoise
+            || input.clamp_indirect.is_some())
+    {
+        return Err(bad(
+            command,
+            "runtime transmission, clear-coat, texture, lens, environment, lighting, tone-map, denoise and clamp_indirect controls require progressive rendering",
+        ));
+    }
+    if let Some(bindings) = saved_surfaces.filter(|bindings| !bindings.is_empty()) {
+        if !input.raytrace.textures.is_empty() {
+            return Err(bad(command, "saved surfaces cannot be combined with runtime texture overrides"));
+        }
+        input.raytrace.textures = super::surface_bindings::resolve(s, &scene, bindings, command)?;
+    }
+    if let Some(bindings) = saved_optics.filter(|b| !b.is_empty()) {
+        if !input.raytrace.dielectrics.is_empty() || !input.raytrace.clear_coats.is_empty() {
+            return Err(bad(command, "saved optical bindings cannot be mixed with transient optical overrides"));
+        }
+        input.raytrace.dielectrics = super::optical_bindings::resolve(s, &scene, bindings, command)?;
+    }
+    if !coats.is_empty() && !input.raytrace.clear_coats.is_empty() {
+        return Err(bad(command, "stable clear coats cannot combine with runtime clear-coat overrides"));
+    }
+    super::transmission::apply(&mut scene, &input.raytrace.dielectrics, command)?;
+    super::coat_bindings::apply(s, &mut scene, &coats, None, command)?;
+    super::clear_coat::apply(&mut scene, &input.raytrace.clear_coats, command)?;
+    let settings = if let Some(name) = &input.setup {
+        s.doc.render.setups.get(name).cloned().ok_or_else(|| bad(command, "no saved render setup with that name"))?
+    } else if let Some(settings) = &input.settings {
+        settings.clone()
+    } else {
+        let mut settings = RenderSetup::default();
+        if let Some(camera) = s.camera {
+            settings.camera = camera;
+        } else {
+            settings.camera.fit(&solidcraft_render::view_bounds(&scene.bounds));
+        }
+        settings
+    };
+    settings.validate_for_gpu().map_err(|e| bad(command, e.to_string()))?;
+    if settings.environment_rotation != 0.0 || settings.environment_intensity != 1.0 {
+        return Err(bad(command, "environment controls are not supported by the installed image executors"));
+    }
+    if !input.progressive && (input.samples.is_some() || input.max_depth.is_some() || input.seed.is_some() || settings.exposure_ev != 0.0) {
+        return Err(bad(command, "sampling and exposure controls require progressive rendering"));
+    }
+    super::staging::apply(&mut scene, &settings, command)?;
+    let mut options = solidcraft_render::job::JobOptions::default();
+    if let Some(samples) = input.samples {
+        options.samples = samples;
+    }
+    if let Some(depth) = input.max_depth {
+        options.max_depth = depth;
+    }
+    if let Some(seed) = input.seed {
+        options.seed = seed;
+    }
+    options.exposure_ev = settings.exposure_ev;
+    options.lens = input.lens;
+    options.lighting = input.lighting;
+    options.tone_map = input.tone_map.unwrap_or_default();
+    options.denoise = input.denoise;
+    options.clamp_indirect = input.clamp_indirect;
+    options.denoise_settings = input.denoise_settings;
+    options.denoise_diagnostics = input.denoise_diagnostics;
+    options.supersampling = input.supersampling.unwrap_or(1);
+    options.finishing = input.finishing;
+    options.backdrop = input.backdrop;
+    options.linear_exr = input.linear_exr;
+    options.aging = super::effects::resolve_aging(s, &scene, &input.aging, command)?;
+    options.nested_media = input.nested_media;
+    options.texture_filtering = input.texture_filtering;
+    options.metal_energy_compensation = input.metal_energy_compensation;
+    options.volume = input.volume;
+    options.caustics = input.caustics;
+    options.adaptive = input.adaptive;
+    options.transmission_samples = input.transmission_samples.unwrap_or(1);
+    options.validate().map_err(job_error)?;
+    solidcraft_render::job::supersampled_dimensions(settings.width, settings.height, options.supersampling).map_err(job_error)?;
+    if let Some(super::environment::Input::BuiltinHdr { id, .. }) = &input.environment
+        && options.lighting.as_ref().is_some_and(|lighting| lighting.sun.is_some())
+        && super::library::owns_sun(id, command)?
+    {
+        return Err(bad(command, "built-in HDR and analytic lighting cannot both own the sun"));
+    }
+    let environment = if let Some(hdr) = saved_hdr {
+        if input.environment.is_some() {
+            return Err(bad(command, "saved GPU HDR cannot have a runtime environment override"));
+        }
+        let resource = s.doc.render.resources.required(&hdr.resource).map_err(|e| bad(command, e.to_string()))?;
+        Some(std::sync::Arc::new(
+            solidcraft_render::lighting::environment::EnvironmentSource::from_hdr(
+                resource.source(),
+                hdr.rotation_rad,
+                hdr.intensity,
+                hdr.assume_linear_srgb,
+            )
+            .map_err(|e| bad(command, e.to_string()))?,
+        ))
+    } else {
+        input.environment.as_ref().map(|source| source.capture(&s.doc.render.resources, command)).transpose()?
+    };
+    let mut features = scene.required_features();
+    if environment.is_some() {
+        features.push(solidcraft_render::RenderFeature::Hdri);
+    }
+    if input.progressive {
+        features.push(solidcraft_render::RenderFeature::Progressive);
+        if scene.has_transmission() {
+            features.push(solidcraft_render::RenderFeature::Refraction);
+        }
+    }
+    let mut backend = s.render_backend();
+    if require_gpu_path {
+        backend.executors.retain(|executor| executor.id.as_str() == "gpu-path");
+        if backend.executors.is_empty() {
+            return Err(bad(command, "saved gpu_path method requires an installed gpu-path executor"));
+        }
+    }
+    let resolved = solidcraft_render::resolve_request(
+        &[backend],
+        &RenderRequest {
+            backend: Some(settings.backend.clone()),
+            mode: settings.mode,
+            operation: RenderOperation::Image,
+            width: u64::from(settings.width),
+            height: u64::from(settings.height),
+            format: Some(settings.format),
+            features,
+            policy: Default::default(),
+        },
+    )
+    .map_err(|e| bad(command, e.to_string()))?;
+    if require_gpu_path && resolved.executor.as_str() != "gpu-path" {
+        return Err(bad(command, "saved gpu_path method requires the gpu-path executor; another progressive executor cannot substitute for it"));
+    }
+    if options.denoise && resolved.executor.as_str() != "gpu-path" {
+        return Err(bad(command, "denoise requires the native gpu-path executor"));
+    }
+    if options.clamp_indirect.is_some() && resolved.executor.as_str() != "gpu-path" {
+        return Err(bad(command, "clamp_indirect requires the native gpu-path executor"));
+    }
+    let host = s.render_jobs.host_for(&resolved.executor).ok_or_else(|| bad(command, "resolved executor is not installed as an image job host"))?;
+    if !host.is_available() {
+        return Err(bad(command, "image host is unavailable"));
+    }
+    let request = ImageRequest {
+        studio_weights: validate_studio_weights(input.studio_weights, command)?,
+        integrator: Default::default(),
+        raytrace: None,
+        environment,
+        camera: settings.camera,
+        width: settings.width,
+        height: settings.height,
+        background: settings.background,
+        transparent_background: input.transparent_background,
+        textures: super::textures::capture_with_resources_and_filtering(
+            &scene,
+            &input.raytrace.textures,
+            Some(&s.doc.render.texture_resources),
+            command,
+            input.texture_filtering,
+        )?,
+    };
+    let refraction = input.progressive && scene.has_transmission();
+    let mut submission = host.prepare_submission_with_metadata(scene, request, options, None, cancel.clone(), retained).map_err(job_error)?;
+    submission.select_image_mode(settings.mode).map_err(job_error)?;
+    let request = submission.request();
+    let mut admission = submission.admission();
+    let retained_options_bytes = options.retained_bytes().map_err(job_error)?;
+    admission.estimated_total_bytes = admission
+        .estimated_total_bytes
+        .checked_add(request.retained_resource_metadata_bytes())
+        .and_then(|bytes| bytes.checked_add(retained_options_bytes))
+        .filter(|bytes| *bytes <= host.job_limit_bytes())
+        .ok_or_else(|| bad(command, "GPU work and retained metadata exceed the per-job limit"))?;
+    let transparency = if refraction {
+        "physical_transmission"
+    } else if input.transparent_background {
+        "coverage_alpha"
+    } else if input.progressive {
+        "opaque_only"
+    } else {
+        "sorted_alpha_approximation"
+    };
+    let dielectric_boundaries = if resolved.executor.as_str() == "gpu-path" { vec!["thin_sheet", "closed_box", "closed_mesh"] } else { Vec::new() };
+    let checked = Checked {
+        resolved: retyped(command, &resolved)?,
+        admission: retyped(command, &admission)?,
+        request: retyped(command, request)?,
+        scene_generation: s.revision,
+        host: retyped(command, &host.kind())?,
+        stage_panels: settings.stage.len(),
+        environment: request.environment.as_ref().map(|source| retyped(command, source.info())).transpose()?,
+        textures: request.textures.as_ref().map(|resources| retyped(command, &resources.summary())).transpose()?,
+        transparency,
+        refraction,
+        dielectric_boundaries,
+        coats: (!coats.is_empty()).then(|| retyped(command, &coats)).transpose()?,
+        denoising: options.denoise.then(|| denoising_reply(command, &options.denoise_settings, options.denoise_diagnostics, false)).transpose()?,
+        param_warnings: Vec::new(),
+    };
+    let indirect_clamp = options.clamp_indirect.map(|limit| IndirectClamp {
+        limit,
+        from_bounce: 1,
+        keeps_hue: true,
+        biased: true,
+        limitation: "dims real caustics and glints; the raw linear EXR master is clamped too; optical glass light connections resolved after the path are not clamped",
+    });
+    let reply = RenderChecked::Gpu(GpuChecked { checked, options: retyped(command, &options)?, retained_options_bytes, indirect_clamp });
+    Ok(Prepared { replace: input.replace, submission: Some(submission), reply })
+}
+
+/// The setup's controls the raster image executor doesn't apply: those not at their neutral value.
+fn ignored_controls(settings: &RenderSetup) -> Vec<&'static str> {
+    let mut ignored = Vec::new();
+    if settings.exposure_ev != 0.0 {
+        ignored.push("exposure_ev");
+    }
+    if settings.environment_rotation != 0.0 {
+        ignored.push("environment_rotation");
+    }
+    if settings.environment_intensity != 1.0 {
+        ignored.push("environment_intensity");
+    }
+    ignored
+}
+
+/// How the denoising filter of a CPU ray tracing or GPU request works, for its preflight reply.
+fn denoising_reply(command: &str, settings: &solidcraft_render::job::DenoiseSettings, diagnostics: bool, cpu: bool) -> Result<Denoising> {
+    Ok(Denoising {
+        method: "edge_aware_atrous",
+        backend: cpu.then_some("native_cpu"),
+        passes: settings.passes,
+        steps: denoise_steps(settings.passes),
+        settings: retyped(command, settings)?,
+        diagnostics_requested: diagnostics,
+        outlier_policy: if settings.firefly_suppression { DENOISE_OUTLIER_POLICY } else { "disabled" },
+        optical_policy: if settings.optical_filter { DENOISE_OPTICAL_POLICY } else { DENOISE_OPAQUE_ONLY_POLICY },
+        guides: if cpu {
+            "deterministic_center_ray_albedo_normal_camera_relative_position_depth"
+        } else {
+            "deterministic_center_ray_albedo_normal_position_depth"
+        },
+        bypass: if settings.optical_filter {
+            "unsupported or ambiguous optical paths, emitter, background and partial coverage"
+        } else {
+            "all optical paths, emitter, background and partial coverage"
+        },
+        limitation: if cpu {
+            "biased spatial filter; optical guides do not decompose reflected and transmitted radiance or reconstruct depth-of-field correspondences"
+        } else {
+            "optical guides do not decompose reflected and transmitted radiance or reconstruct depth-of-field correspondences"
+        },
+        raw_linear_accumulator_preserved: true,
+        raw_linear_exr_preserved: cpu.then_some(true),
+        output_stage: "linear_before_tone_map",
+        work_units: cpu.then_some("one pixel visit per pass, each with at most 25 taps"),
+        checkpoints: cpu.then_some("every complete published pass uses the same filter"),
+    })
 }
 
 pub(super) fn preflight(s: &mut Session, params: &Value) -> Result<Value> {
-    prepare(s, params, "render.preflight").map(|(_, _, _, reply)| reply)
+    let cmd = "render.preflight";
+    super::typed_reply(cmd, prepare(s, params, cmd, &solidcraft_render::job::CancelToken::default())?.reply)
 }
 
 pub(super) fn start(s: &mut Session, params: &Value) -> Result<Value> {
-    let (input, scene, request, _) = prepare(s, params, "render.start")?;
-    let status = s.render_jobs.start(s.revision, scene, request, input.replace).map_err(job_error)?;
-    Ok(json!(status))
+    let p = prepare(s, params, "render.start", &solidcraft_render::job::CancelToken::default())?;
+    let status = s
+        .render_jobs
+        .start_prepared(
+            s.revision,
+            p.submission.ok_or_else(|| bad("render.start", "missing prepared submission"))?,
+            p.replace,
+            params.get("setup").and_then(Value::as_str).map(str::to_owned),
+        )
+        .map_err(job_error)?;
+    Ok(started("render.start", &status, &p.reply))
+}
+
+/// What Render Image returns once its job is queued: the job's `status`, and for a runtime
+/// request the ignored controls of its preflight reply `checked`. The window's own preparation
+/// (`render_preparation`) returns it too.
+pub(crate) fn started(command: &str, status: &solidcraft_render::job::JobStatus, checked: &RenderChecked) -> Value {
+    let ignored_controls = match checked {
+        RenderChecked::Runtime(runtime) => Some(runtime.ignored_controls.clone()),
+        RenderChecked::Gpu(_) => None,
+    };
+    // The job is queued already, so this never fails: should the status ever not read as a
+    // `JobState`, the reply is the status as the render crate gives it, as before the reply type.
+    let typed =
+        retyped(command, status).and_then(|state| super::typed_reply(command, RenderStarted { state, ignored_controls: ignored_controls.clone() }));
+    typed.unwrap_or_else(|_| {
+        let mut reply = json!(status);
+        if let (Some(out), Some(ignored)) = (reply.as_object_mut(), ignored_controls) {
+            out.insert("ignored_controls".into(), json!(ignored));
+        }
+        reply
+    })
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Job {
-    job: JobId,
+struct Regrade {
+    job: Option<JobId>,
+    presentation: solidcraft_render::job::presentation::Presentation,
+}
+pub(super) fn regrade(s: &mut Session, params: &Value) -> Result<Value> {
+    let cmd = "render.result.regrade";
+    let input: Regrade = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    input.presentation.validate().map_err(job_error)?;
+    let job = result_source(s, input.job, cmd)?;
+    let status = s.render_jobs.regrade(job, input.presentation).map_err(job_error)?;
+    super::typed_reply(cmd, retyped::<JobState>(cmd, &status)?)
+}
+
+/// `value`, a render crate type without a schema, as the reply type `T` that describes the same
+/// JSON (`schema::render_jobs`). The JSON doesn't change; a value `T` can't read back is refused
+/// rather than sent out unlike its schema.
+fn retyped<T: serde::de::DeserializeOwned>(cmd: &str, value: &impl serde::Serialize) -> Result<T> {
+    serde_json::to_value(value).and_then(serde_json::from_value).map_err(|e| bad(cmd, e.to_string()))
+}
+
+fn result_source(s: &mut Session, job: Option<JobId>, command: &str) -> Result<JobId> {
+    s.render_jobs.collect().map_err(job_error)?;
+    job.or_else(|| s.render_selected_result()).ok_or_else(|| bad(command, "no completed result is selected"))
 }
 
 pub(super) fn status(s: &mut Session, params: &Value) -> Result<Value> {
-    let input: Job = serde_json::from_value(params.clone()).map_err(|e| bad("render.status", e.to_string()))?;
-    Ok(json!(s.render_jobs.status(input.job).map_err(job_error)?))
+    let cmd = "render.status";
+    let input: ResultJob = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    s.advance_render_batch()?;
+    let Some(job) = input.job else {
+        return super::typed_reply(cmd, RenderProgress::Queue(QueueReply { queue: s.render_queue_state(), param_warnings: Vec::new() }));
+    };
+    // The job's status first: reading it collects finished jobs, which the queue then counts.
+    let state = retyped(cmd, &s.render_jobs.status(job).map_err(job_error)?)?;
+    super::typed_reply(cmd, RenderProgress::Job(Box::new(JobProgressReply { state, queue: s.render_queue_state() })))
 }
 
-pub(super) fn cancel(s: &mut Session, params: &Value) -> Result<Value> {
-    let input: Job = serde_json::from_value(params.clone()).map_err(|e| bad("render.cancel", e.to_string()))?;
-    let status = s.render_jobs.status(input.job).map_err(job_error)?;
-    if status.progress.phase.terminal() {
-        return Ok(json!(status));
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Pin {
+    job: Option<JobId>,
+}
+pub(super) fn pin(s: &mut Session, params: &Value) -> Result<Value> {
+    let cmd = "render.result.pin";
+    let input: Pin = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    let job = if params.get("job").is_some_and(Value::is_null) { None } else { Some(result_source(s, input.job, cmd)?) };
+    let frame = s.render_jobs.pin(job).map_err(job_error)?.map(|info| retyped(cmd, &info)).transpose()?;
+    super::typed_reply(cmd, ResultPinned { frame, param_warnings: Vec::new() })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResultJob {
+    job: Option<JobId>,
+}
+
+pub(super) fn copy(s: &mut Session, params: &Value) -> Result<Value> {
+    let input: ResultJob = serde_json::from_value(params.clone()).map_err(|e| bad("render.result.copy", e.to_string()))?;
+    let job = result_source(s, input.job, "render.result.copy")?;
+    let frame = s
+        .render_jobs
+        .handle(job)
+        .map_err(job_error)?
+        .frame()
+        .map_err(job_error)?
+        .ok_or_else(|| bad("render.result.copy", "render has no completed image"))?;
+    let size = (u64::from(frame.info.width), u64::from(frame.info.height));
+    if solidcraft_render::RenderLimits::default().fit(size.0, size.1, None) != Some(size) {
+        return Err(bad("render.result.copy", "clipboard image exceeds 4096 per side or 4194304 pixels; export the PNG instead"));
     }
-    Ok(json!(s.render_jobs.handle(input.job).map_err(job_error)?.cancel().map_err(job_error)?))
+    super::typed_reply("render.result.copy", ImageCopied { frame: retyped("render.result.copy", &frame.info)?, param_warnings: Vec::new() })
+}
+
+pub(crate) fn cancel_params(params: &Value) -> Result<Option<JobId>> {
+    let empty = Value::Object(Default::default());
+    let params = if params.is_null() { &empty } else { params };
+    let input: ResultJob = serde_json::from_value(params.clone()).map_err(|e| bad("render.cancel", e.to_string()))?;
+    Ok(input.job)
+}
+pub(super) fn cancel(s: &mut Session, params: &Value) -> Result<Value> {
+    let cmd = "render.cancel";
+    let requested = cancel_params(params)?;
+    if requested.is_none() && s.cancel_native_preparation() {
+        let stopped = PreparationCancelled { preparing: true, cancel_requested: true, queue: s.render_queue_state(), param_warnings: Vec::new() };
+        return super::typed_reply(cmd, RenderCancelled::Preparation(stopped));
+    }
+    let job = requested.or(s.render_queue_state().job).ok_or_else(|| bad(cmd, "job is required without an active shot queue"))?;
+    let status = s.render_jobs.status(job).map_err(job_error)?;
+    s.cancel_render_batch(job);
+    let status = if status.progress.phase.terminal() { status } else { s.render_jobs.handle(job).map_err(job_error)?.cancel().map_err(job_error)? };
+    super::typed_reply(cmd, RenderCancelled::Job(Box::new(retyped(cmd, &status)?)))
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Export {
-    job: JobId,
+    #[serde(default)]
+    format: ExportFormat,
+    job: Option<JobId>,
     path: String,
     #[serde(default)]
     overwrite: bool,
@@ -114,20 +1149,74 @@ struct Export {
 pub(super) fn export(s: &mut Session, params: &Value) -> Result<Value> {
     let input: Export = serde_json::from_value(params.clone()).map_err(|e| bad("render.export", e.to_string()))?;
     let path = std::path::Path::new(&input.path);
-    if input.path.len() > 4096 || input.path.chars().any(char::is_control) || !path.extension().is_some_and(|x| x.eq_ignore_ascii_case("png")) {
-        return Err(bad("render.export", "a bounded PNG destination path is required"));
+    if input.path.len() > 4096
+        || input.path.chars().any(char::is_control)
+        || !path.extension().is_some_and(|x| x.eq_ignore_ascii_case(input.format.extension()))
+    {
+        return Err(bad("render.export", "a bounded destination with the explicitly selected png/exr extension is required"));
     }
     // Atomic native writers are also used for the app's own files and do not
     // apply a request's path scope. Check the caller's destination explicitly.
     solidcraft_io::vfs::check(&input.path).map_err(|e| bad("render.export", e.to_string()))?;
-    let frame = s.render_jobs.frame(input.job).map_err(job_error)?;
+    let job = result_source(s, input.job, "render.export")?;
+    let frame = s.render_jobs.frame(job).map_err(job_error)?;
+    let bytes = match input.format {
+        ExportFormat::Png => frame.png(),
+        ExportFormat::DenoiseMask => frame
+            .denoise_mask_png()
+            .ok_or_else(|| bad("render.export", "this completed job has no guide mask; enable denoising diagnostics before rendering"))?,
+        ExportFormat::Exr => frame
+            .linear_exr()
+            .ok_or_else(|| bad("render.export", "this completed job has no raw linear master; enable retention before rendering"))?,
+    };
+    // Typed before the write: a conversion that fails then leaves no file behind.
+    let frame_info = retyped("render.export", &frame.info)?;
+    let linear_master = frame.linear_master_info().map(|info| retyped("render.export", info)).transpose()?;
+    let presentation = frame.presentation().map(|info| retyped("render.export", info)).transpose()?;
+    let denoise_mask = frame.denoise_mask_info().map(|info| retyped("render.export", info)).transpose()?;
     // Replace atomically without reading an arbitrarily large previous target into memory.
     // Design saves retain their independent backup policy.
-    let result = if input.overwrite {
-        solidcraft_io::write_atomic(path, frame.png(), false)
-    } else {
-        solidcraft_io::safe_write::create_atomic(path, frame.png())
+    let result =
+        if input.overwrite { solidcraft_io::write_atomic(path, bytes, false) } else { solidcraft_io::safe_write::create_atomic(path, bytes) };
+    result.map_err(|e| bad("render.export", format!("could not export completed {}: {e}", input.format.extension())))?;
+    let reply = ImageExported {
+        job: Job(job),
+        bytes: bytes.len(),
+        path: input.path,
+        format: input.format,
+        encoding: match input.format {
+            ExportFormat::Png => "srgb",
+            ExportFormat::Exr => "scene_linear_srgb_d65",
+            ExportFormat::DenoiseMask => "categorical_srgb",
+        },
+        alpha: match input.format {
+            ExportFormat::Png => "straight",
+            ExportFormat::Exr => "coverage_premultiplied",
+            ExportFormat::DenoiseMask => "opaque",
+        },
+        frame: frame_info,
+        linear_master,
+        presentation,
+        denoise_mask,
+        param_warnings: Vec::new(),
     };
-    result.map_err(|e| bad("render.export", format!("could not export PNG: {e}")))?;
-    Ok(json!({"job":input.job,"path":input.path,"bytes":frame.png().len(),"frame":frame.info}))
+    super::typed_reply("render.export", reply)
+}
+
+fn denoise_steps(passes: u32) -> Vec<u32> {
+    (0..passes.min(3)).map(|pass| 1 << pass).collect()
+}
+
+fn validate_studio_weights(weights: Option<[f64; 3]>, command: &str) -> Result<Option<[f64; 3]>> {
+    if weights.is_some_and(|weights| weights.iter().any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))) {
+        return Err(bad(command, "studio visibility weights must be finite in 0..1"));
+    }
+    Ok(weights)
+}
+
+/// Read `params` as `prepare` reads a request: as a `ProgressiveStart` when `progressive`, else as
+/// a `Start`, with serde's message. The contract of `render.start` and `render.preflight`
+/// (`schema::render_start`) calls it, so it accepts what these readers accept.
+pub(crate) fn read_request(params: Value, progressive: bool) -> serde_json::Result<()> {
+    if progressive { serde_json::from_value::<ProgressiveStart>(params).map(drop) } else { serde_json::from_value::<Start>(params).map(drop) }
 }

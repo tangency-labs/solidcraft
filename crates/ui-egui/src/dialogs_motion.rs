@@ -3,6 +3,7 @@
 //! show while open (a study's pose, an explosion) is display only: pending occurrence moves,
 //! computed on a scratch copy of the design and put back when the dialog closes.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{choice_row, expr_row, text_row};
 use std::collections::BTreeMap;
 
@@ -15,7 +16,7 @@ use solidcraft_engine::doc::joints::JointKind;
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, form_row};
 use crate::selection::{BODIES, SelInput};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 #[path = "configurations_ui.rs"]
 mod configurations_ui;
@@ -147,14 +148,16 @@ pub const SPEEDS: [f64; 5] = [0.25, 0.5, 1.0, 2.0, 4.0];
 const STEPS_PER_S: f64 = 24.0;
 
 /// The next playback step: `by` steps on; at the end it starts over (looping) or stops there.
-/// Returns the step and whether it still plays.
+/// Returns the step and whether it still plays. The dialog shows the nearest whole step, so the
+/// end is passed once that would be after the last step.
 pub fn advance(step: f64, by: f64, total: u32, looping: bool) -> (f64, bool) {
     let last = f64::from(total);
     let next = step + by.max(0.0);
-    if next <= last {
+    if next.round() <= last {
         (next, true)
     } else if looping && last > 0.0 {
-        (next % (last + 1.0), true)
+        // Past the last whole step it starts over from step 0, keeping what is left of `by`.
+        (((next + 0.5) % (last + 1.0) - 0.5).max(0.0), true)
     } else {
         (last, false)
     }
@@ -175,7 +178,7 @@ fn transport(ui: &mut egui::Ui, what: Transport, tip: &str) -> egui::Response {
     let t = Tokens::get();
     let (r, resp) = ui.allocate_exact_size(vec2(26.0, 22.0), Sense::click());
     let fill = if resp.hovered() { t.hover } else { t.field };
-    ui.painter().rect(r, 3.0, fill, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    ui.painter().rect(r, t.radius_sm.saturating_sub(1), fill, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     let c = r.center();
     let ink = if matches!(what, Transport::Play | Transport::Stop) { t.accent } else { t.icon };
     let p = ui.painter();
@@ -205,7 +208,7 @@ fn transport(ui: &mut egui::Ui, what: Transport, tip: &str) -> egui::Response {
             p.add(bar(c.x + 6.0));
         }
     }
-    resp.on_hover_text(crate::i18n::tr_label(tip))
+    resp.backing_on_hover_text(solidcraft_ui_text::tr_label(tip))
 }
 
 /// Study `key` as the Motion Study dialog edits it: (id, name, steps, keys as tracks with values
@@ -227,7 +230,10 @@ pub fn study_tracks(s: &Session, key: &str, id_first: bool) -> Result<(u64, Stri
             let joint = s.doc.assembly.joints.iter().position(|j| j.id == k.joint)?;
             let angle = s.doc.assembly.joints.get(joint)?.kind.is_angle(k.index);
             let value = |v: f64| {
-                let (x, unit) = if angle { (v.to_degrees(), "deg") } else { (v, "mm") };
+                if !angle {
+                    return crate::length_input::model(&s.doc, v);
+                }
+                let (x, unit) = (v.to_degrees(), "deg");
                 // Short where that keeps the value; else all its digits, so OK keeps the key.
                 let short = crate::dialogs_assembly::num(x, unit);
                 let kept = short.split(' ').next().and_then(|n| n.parse::<f64>().ok()).is_some_and(|y| (y - x).abs() <= 1e-9 * x.abs().max(1.0));
@@ -267,7 +273,9 @@ pub fn study_params(s: &Session, name: &str, study: Option<&str>, steps: &str, t
         .filter(|t| !t.points.is_empty())
         .map(|t| {
             let j = s.doc.assembly.joints.get(t.joint).ok_or("no such joint")?;
-            Ok(json!({"joint": j.id, "index": t.index, "points": t.points.iter().map(|(st, v)| json!([st, v])).collect::<Vec<_>>()}))
+            let kind = if j.kind.is_angle(t.index) { solidcraft_engine::doc::expr::Kind::Angle } else { solidcraft_engine::doc::expr::Kind::Length };
+            let points: Vec<_> = t.points.iter().map(|(st, v)| json!([st, crate::length_input::expression(&s.doc, v, kind)])).collect();
+            Ok(json!({"joint": j.id, "index": t.index, "points": points}))
         })
         .collect::<Result<_, &str>>()?;
     if keys.is_empty() {
@@ -282,6 +290,7 @@ pub fn study_params(s: &Session, name: &str, study: Option<&str>, steps: &str, t
 }
 
 /// The configurations table: columns and rows (name, value per column).
+#[derive(Debug)]
 pub struct Table {
     pub columns: Vec<String>,
     pub rows: Vec<(String, Vec<String>)>,
@@ -372,9 +381,11 @@ pub fn closed(app: &mut SolveApp, d: &mut Dialog, applied: bool) {
     }
 }
 
-/// The occurrence placements of `after` that differ from `before` (as pending moves).
-fn moved(before: &Session, after: &Session) -> BTreeMap<u64, Mat> {
-    let mut out = before.pending_moves.clone();
+/// The occurrence placements of `after` that differ from `before`, as pending moves over `base`:
+/// the moves shown before the dialog showed a pose of its own. Not over the pose it showed last:
+/// a part this pose puts back where the design has it would stay where that pose left it (#13511).
+fn moved(base: &BTreeMap<u64, Mat>, before: &Session, after: &Session) -> BTreeMap<u64, Mat> {
+    let mut out = base.clone();
     for o in &after.doc.occurrences {
         let was = before.doc.occurrences.iter().find(|b| b.id == o.id).map(|b| b.transform);
         if was != Some(o.transform) {
@@ -384,12 +395,12 @@ fn moved(before: &Session, after: &Session) -> BTreeMap<u64, Mat> {
     out
 }
 
-/// The study's pose at `step`, computed on a scratch copy.
-fn study_pose(app: &SolveApp, params: &Value, step: u32) -> Result<BTreeMap<u64, Mat>, String> {
+/// The study's pose at `step`, computed on a scratch copy, over `base` ([`moved`]).
+fn study_pose(app: &SolveApp, params: &Value, step: u32, base: &BTreeMap<u64, Mat>) -> Result<BTreeMap<u64, Mat>, String> {
     let mut sc = app.session.scratch();
     let id = scratch_study(&mut sc, params)?;
     sc.execute("motion.play", &json!({"study": id, "step": step})).map_err(|e| e.to_string())?;
-    Ok(moved(&app.session, &sc))
+    Ok(moved(base, &app.session, &sc))
 }
 
 /// Save the study being edited as an animated GIF, seen from the viewport's camera. Drawn on a
@@ -414,7 +425,7 @@ fn export_animation(app: &mut SolveApp, params: Value, name: &str) {
             )
         });
         match made {
-            Ok(_) => app.set_status(crate::i18n::format("ui.saved_to", &[("path", &path)]), false),
+            Ok(_) => app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &path)]), false),
             Err(e) => app.set_status(e.to_string(), true),
         }
     });
@@ -450,7 +461,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
             let list = app.session.execute("contact.list", &json!({})).unwrap_or(Value::Null);
             form_row(ui, "Contact", |ui| {
                 let mut on = list.get("enabled").and_then(Value::as_bool).unwrap_or(false);
-                if crate::ui_kit::checkbox(ui, "enabled", &mut on).changed() {
+                if crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Enabled"), &mut on).changed() {
                     let _ = app.run("contact.enable_sets", json!({ "enabled": on }));
                 }
             });
@@ -460,14 +471,20 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 crate::ui_kit::section(ui, format!("contact:{n}"), &n, true, |ui| {
                     ui.horizontal(|ui| {
                         let count = s.get("occurrences").and_then(Value::as_array).map_or(0, Vec::len);
-                        ui.label(RichText::new(crate::i18n::format("contact.components_count", &[("count", &count.to_string())])).color(t.text_dim));
-                        if crate::ui_kit::button(ui, crate::i18n::tr_label(if off { "Unsuppress" } else { "Suppress" }), crate::ui_kit::Button::Small)
-                            .clicked()
+                        ui.label(
+                            RichText::new(solidcraft_ui_text::format("contact.components_count", &[("count", &count.to_string())])).color(t.text_dim),
+                        );
+                        if crate::ui_kit::button(
+                            ui,
+                            solidcraft_ui_text::tr_label(if off { "Unsuppress" } else { "Suppress" }),
+                            crate::ui_kit::Button::Small,
+                        )
+                        .clicked()
                         {
                             let _ = app.run("contact.edit", json!({"set": n, "suppressed": !off}));
                         }
-                        if crate::ui_kit::button(ui, crate::i18n::tr_label("×"), crate::ui_kit::Button::Small)
-                            .on_hover_text(crate::i18n::tr_label("Delete the set"))
+                        if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("×"), crate::ui_kit::Button::Small)
+                            .backing_on_hover_text(solidcraft_ui_text::tr_label("Delete the set"))
                             .clicked()
                         {
                             let _ = app.run("contact.edit", json!({"set": n, "delete": true}));
@@ -476,7 +493,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 });
             }
             ui.vertical(|ui| {
-                if crate::ui_kit::button(ui, crate::i18n::tr_label("Check collisions"), crate::ui_kit::Button::Normal).clicked() {
+                if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Check collisions"), crate::ui_kit::Button::Normal).clicked() {
                     *check = Some(app.session.execute("contact.check", &json!({})).unwrap_or_else(|e| json!({"error": e.to_string()})));
                 }
             });
@@ -484,9 +501,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 let hits = c.get("collisions").and_then(Value::as_array).cloned().unwrap_or_default();
                 crate::ui_kit::section(ui, "contact_collisions", "Collisions", true, |ui| {
                     if let Some(e) = c.get("error").and_then(Value::as_str) {
-                        ui.label(RichText::new(e).color(t.error));
+                        ui.label(RichText::new(solidcraft_ui_text::tr_label(e)).color(t.error));
                     } else if hits.is_empty() {
-                        ui.label(RichText::new("none").color(t.text_dim));
+                        ui.label(RichText::new(solidcraft_ui_text::tr_label("none")).color(t.text_dim));
                     } else {
                         ui.vertical(|ui| {
                             for h in hits {
@@ -524,7 +541,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
             }
             if let Some(e) = error {
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(e.as_str()).color(t.error));
+                    ui.label(RichText::new(solidcraft_ui_text::tr_label(e)).color(t.error));
                 });
             }
         }
@@ -560,7 +577,7 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
     let moving = joints_moving(app);
     if moving.is_empty() {
         ui.vertical(|ui| {
-            ui.label(RichText::new(crate::i18n::tr_label("no joint that moves yet")).color(t.text_dim));
+            ui.label(RichText::new(solidcraft_ui_text::tr_label("no joint that moves yet")).color(t.text_dim));
         });
         return enter;
     }
@@ -593,7 +610,7 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
                 *playing = false;
             }
             ui.add_space(t.space_6);
-            crate::ui_kit::checkbox(ui, "Loop", looping);
+            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Loop"), looping);
             let names: Vec<String> = SPEEDS.iter().map(|x| format!("{x}×")).collect();
             let refs: Vec<&str> = names.iter().map(String::as_str).collect();
             ui.allocate_ui(vec2(t.form_label_width, t.control_height), |ui| combo(ui, "ms_speed", &refs, speed));
@@ -601,14 +618,19 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
     });
     form_row(ui, "Step", |ui| {
         ui.horizontal(|ui| {
-            if crate::ui_kit::slider(
+            // The slider shows whole steps. It gets a rounded copy: an integer slider rounds its
+            // value every frame, which would drop the part of a step that playback has gained.
+            let mut whole = step.round().min(f64::from(total));
+            let slid = crate::ui_kit::slider(
                 ui,
-                step,
+                &mut whole,
                 0.0..=f64::from(total),
                 crate::ui_kit::Slider { show_value: false, integer: true, ..Default::default() },
-            )
-            .dragged()
-            {
+            );
+            if slid.changed() {
+                *step = whole;
+            }
+            if slid.dragged() {
                 *playing = false;
             }
         });
@@ -630,12 +652,12 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
         let labels: Vec<String> = moving.iter().map(|(_, n, _)| n.clone()).collect();
         let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
         let mut pos = moving.iter().position(|(i, _, _)| *i == tr.joint).unwrap_or(0);
-        form_row(ui, &crate::i18n::format("motion.track_name", &[("number", &(ti + 1).to_string())]), |ui| {
+        form_row(ui, &solidcraft_ui_text::format("motion.track_name", &[("number", &(ti + 1).to_string())]), |ui| {
             ui.horizontal(|ui| {
                 let width = (ui.available_width() - t.control_height - t.space_8).max(0.0);
                 ui.allocate_ui(vec2(width, t.control_height), |ui| combo(ui, &format!("ms_joint{ti}"), &refs, &mut pos));
-                if crate::ui_kit::button(ui, crate::i18n::tr_label("×"), crate::ui_kit::Button::Small)
-                    .on_hover_text(crate::i18n::tr_label("Remove the track"))
+                if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("×"), crate::ui_kit::Button::Small)
+                    .backing_on_hover_text(solidcraft_ui_text::tr_label("Remove the track"))
                     .clicked()
                 {
                     remove = Some(ti);
@@ -664,17 +686,23 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
         }
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
-                if crate::ui_kit::button(ui, crate::i18n::tr_label("Key here"), crate::ui_kit::Button::Small)
-                    .on_hover_text(crate::i18n::tr_label("Add a key at this step with the joint's value now"))
+                if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Key here"), crate::ui_kit::Button::Small)
+                    .backing_on_hover_text(solidcraft_ui_text::tr_label("Add a key at this step with the joint's value now"))
                     .clicked()
                     && !tr.points.iter().any(|(s, _)| *s == now)
                 {
-                    let unit =
-                        app.session.doc.assembly.joints.get(tr.joint).map(|j| if j.kind.is_angle(tr.index) { "deg" } else { "mm" }).unwrap_or("mm");
+                    let unit = app
+                        .session
+                        .doc
+                        .assembly
+                        .joints
+                        .get(tr.joint)
+                        .map(|j| if j.kind.is_angle(tr.index) { "deg" } else { crate::length_input::unit(&app.session.doc) })
+                        .unwrap_or(crate::length_input::unit(&app.session.doc));
                     tr.points.push((now, format!("0 {unit}")));
                     tr.points.sort_by_key(|p| p.0);
                 }
-                if crate::ui_kit::button(ui, crate::i18n::tr_label("Delete key"), crate::ui_kit::Button::Small).clicked() {
+                if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Delete key"), crate::ui_kit::Button::Small).clicked() {
                     tr.points.retain(|(s, _)| *s != now);
                 }
             });
@@ -686,16 +714,16 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
     let mut export = false;
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
-            if crate::ui_kit::button(ui, crate::i18n::tr_label("Add Key"), crate::ui_kit::Button::Normal)
-                .on_hover_text(crate::i18n::tr_label("Key a joint's value at this step"))
+            if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Add Key"), crate::ui_kit::Button::Normal)
+                .backing_on_hover_text(solidcraft_ui_text::tr_label("Key a joint's value at this step"))
                 .clicked()
                 && let Some((ji, _, kind)) = moving.first()
             {
-                let unit = if kind.is_angle(0) { "deg" } else { "mm" };
+                let unit = if kind.is_angle(0) { "deg" } else { crate::length_input::unit(&app.session.doc) };
                 tracks.push(Track { joint: *ji, index: 0, points: vec![(now, format!("0 {unit}"))] });
             }
-            export = crate::ui_kit::button(ui, crate::i18n::tr_label("Export Animation…"), crate::ui_kit::Button::Normal)
-                .on_hover_text(crate::i18n::tr_label("Save the study as an animated GIF, seen as the viewport shows it"))
+            export = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export Animation…"), crate::ui_kit::Button::Normal)
+                .backing_on_hover_text(solidcraft_ui_text::tr_label("Save the study as an animated GIF, seen as the viewport shows it"))
                 .clicked();
         });
     });
@@ -714,7 +742,9 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
         h.finish()
     };
     if *shown != Some((u64::from(now), key)) {
-        match params.and_then(|p| study_pose(app, &p, now)) {
+        // The moves from before the dialog showed anything (it keeps them in `saved`).
+        let base = saved.as_ref().unwrap_or(&app.session.pending_moves);
+        match params.and_then(|p| study_pose(app, &p, now, base)) {
             Ok(m) => {
                 display(app, saved, m);
                 *error = None;
@@ -725,7 +755,7 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
     }
     if let Some(e) = error {
         ui.vertical(|ui| {
-            ui.label(RichText::new(e.as_str()).color(t.text_dim));
+            ui.label(RichText::new(solidcraft_ui_text::tr_label(e)).color(t.text_dim));
         });
     }
     enter
@@ -740,7 +770,7 @@ fn name_of(v: &Value) -> String {
 fn key_strip(ui: &mut egui::Ui, tr: &Track, total: u32, now: u32, t: &Tokens) {
     let (r, _) = ui.allocate_exact_size(vec2(240.0, 16.0), Sense::hover());
     let p = ui.painter();
-    p.rect_filled(r, 3.0, t.field);
+    p.rect_filled(r, t.radius_sm.saturating_sub(1), t.field);
     let x = |s: u32| r.left() + 6.0 + (r.width() - 12.0) * s as f32 / total.max(1) as f32;
     // Keys joined by a line (the motion between them).
     let pts: Vec<Pos2> = tr.points.iter().map(|(s, _)| pos2(x(*s), r.center().y)).collect();
@@ -765,7 +795,7 @@ pub fn commands(app: &SolveApp, k: &Mo, inputs: &[SelInput]) -> Result<Vec<(Stri
             let mut occs: Vec<u64> = Vec::new();
             for x in inputs.first().map(|i| i.items.as_slice()).unwrap_or(&[]) {
                 if let solidcraft_engine::Sel::Body { name } = x
-                    && let Some(b) = app.session.world_state().body(name)
+                    && let Some(b) = crate::open_meshing::session_world(&app.session).body(name)
                 {
                     let comp = app.session.doc.model_body_component(b);
                     if let Some(o) = app.session.doc.occurrence_of(comp).map(|o| o.id)
@@ -802,6 +832,104 @@ mod tests {
         assert_eq!(advance(9.5, 2.0, 10, true), (0.5, true));
         assert_eq!(advance(9.5, 2.0, 10, false), (10.0, false));
         assert_eq!(advance(4.0, -3.0, 10, false), (4.0, true));
+    }
+
+    /// Play runs on by itself at every speed, with no input: a frame's part of a step is kept
+    /// until it makes a whole one (the Step slider showed whole steps by rounding the playhead,
+    /// so at 1× and 60 frames a second it never left step 0, #12620).
+    #[test]
+    fn play_advances_without_input_at_every_speed() {
+        let mut h = crate::scenario::Harness::new();
+        for (name, x) in [("A", 0), ("B", 30)] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({ "name": name })).unwrap();
+            h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+        }
+        let a = json!({"occurrence": "A:1", "face": [10, 10, 10]});
+        h.app.run("joint.create", json!({"type": "revolute", "a": a, "b": {"occurrence": "B:1", "face": [40, 10, 0]}})).unwrap();
+        h.app.start("motion.study");
+        h.frames(3);
+        for (index, speed) in SPEEDS.iter().enumerate() {
+            let Some(Kind::Motion(Mo::MotionStudy { steps, tracks, step, playing, looping, speed: chosen, .. })) =
+                h.app.dialog.as_mut().map(|d| &mut d.kind)
+            else {
+                panic!("no Motion Study dialog");
+            };
+            *steps = "1000".into();
+            *tracks = vec![Track { joint: 0, index: 0, points: vec![(0, "0 deg".into()), (1000, "90 deg".into())] }];
+            (*step, *playing, *looping, *chosen) = (0.0, true, false, index);
+            // One second at 60 frames a second, nothing touched.
+            h.frames(60);
+            let (_, at) = match h.app.dialog.as_ref().map(|d| &d.kind) {
+                Some(Kind::Motion(Mo::MotionStudy { step, playing, .. })) => (*playing, *step),
+                _ => panic!("no Motion Study dialog"),
+            };
+            let nominal = STEPS_PER_S * speed;
+            assert!((at - nominal).abs() <= 2.0, "{speed}×: at step {at} after 1 s, not about {nominal}");
+        }
+        // With Loop on, a 10-step study at 1× goes round about 2.2 times in a second and plays on.
+        if let Some(Kind::Motion(Mo::MotionStudy { steps, step, playing, looping, speed, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *steps = "10".into();
+            (*step, *playing, *looping, *speed) = (0.0, true, true, 2);
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..60 {
+            h.frame();
+            if let Some(Kind::Motion(Mo::MotionStudy { step, playing, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) {
+                assert!(*playing, "the loop stopped at step {step}");
+                seen.insert(step.round() as u32);
+            }
+        }
+        assert_eq!(seen.len(), 11, "every step 0..=10 is shown: {seen:?}");
+    }
+
+    /// How many parts the dialog shows away from where the design has them.
+    fn displaced(h: &crate::scenario::Harness) -> usize {
+        let off = |a: &Mat, b: &Mat| a.iter().flatten().zip(b.iter().flatten()).any(|(x, y)| (x - y).abs() > 1e-9);
+        let doc = &h.app.session.doc;
+        h.app
+            .session
+            .pending_moves
+            .iter()
+            .filter(|(id, m)| doc.occurrences.iter().find(|o| o.id == **id).is_some_and(|o| off(&o.transform, m)))
+            .count()
+    }
+
+    /// Show step `to` of a 10-step study that turns the hinge from 90° back to 0°.
+    fn show_step(h: &mut crate::scenario::Harness, to: f64) {
+        if let Some(Kind::Motion(Mo::MotionStudy { steps, tracks, step, playing, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *steps = "10".into();
+            *tracks = vec![Track { joint: 0, index: 0, points: vec![(0, "90 deg".into()), (10, "0 deg".into())] }];
+            (*step, *playing) = (to, false);
+        }
+        h.frames(3);
+    }
+
+    /// A step that puts a part back where the design has it shows the part there, after Go to
+    /// Start and after the step before it: the pose is shown over the moves from before the
+    /// dialog, not over the pose it showed last (#13511).
+    #[test]
+    fn a_step_that_puts_a_part_back_shows_it_there() {
+        let mut h = crate::scenario::Harness::new();
+        for (name, x) in [("A", 0), ("B", 30)] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({ "name": name })).unwrap();
+            h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+        }
+        let a = json!({"occurrence": "A:1", "face": [10, 10, 10]});
+        h.app.run("joint.create", json!({"type": "revolute", "name": "Hinge", "a": a, "b": {"occurrence": "B:1", "face": [40, 10, 0]}})).unwrap();
+        // The design has the hinge at 0°, where the study's last step puts it.
+        h.app.run("joint.drive", json!({"joint": "Hinge", "value": 0})).unwrap();
+        h.app.start("motion.study");
+        h.frames(3);
+        show_step(&mut h, 0.0);
+        assert_ne!(displaced(&h), 0, "step 0 turns the hinge to 90°");
+        show_step(&mut h, 10.0);
+        assert_eq!(displaced(&h), 0, "Go to End puts it back where the design has it");
+        show_step(&mut h, 9.0);
+        assert_ne!(displaced(&h), 0, "the step before turns it again");
+        show_step(&mut h, 10.0);
+        assert_eq!(displaced(&h), 0, "and the last step puts it back again");
     }
 
     /// What a dialog shows goes away when it closes; an exploded view applied with OK stays.
@@ -883,11 +1011,19 @@ mod tests {
 
     // Kit rows publish identities independently of translated text. Long forms scroll through
     // the same wheel events as a person; assertions still verify the saved rules and geometry.
+    // A table row scrolled out of view is not built, so its handle is missing until the form
+    // scrolls back up to the table above the rules.
     fn reveal_config_handle(h: &mut crate::scenario::Harness, handle: &str) {
         for _ in 0..24 {
-            let at = crate::scenario::handle_at(handle).unwrap_or_else(|| panic!("missing {handle}: {:?}", h.app.dialog));
             let header = crate::scenario::rect_of("dialog:header").unwrap();
             let footer = crate::scenario::rect_of("dialog:footer").unwrap();
+            let at = crate::scenario::handle_at(handle);
+            if handle.starts_with("config:activate:") && at.is_none() {
+                h.call("ui.scroll", json!({"x":header.left()+Tokens::get().space_6,"y":(header.bottom()+footer.top())*0.5,"delta":160.0}));
+                h.frames(6);
+                continue;
+            }
+            let at = at.unwrap_or_else(|| panic!("missing {handle}: {:?}", h.app.dialog));
             if at.y > header.bottom() + 8.0 && at.y < footer.top() - 8.0 {
                 return;
             }
@@ -967,7 +1103,7 @@ mod tests {
         click_config_handle(&mut h, "config:preview_row");
         assert_eq!(h.app.session.doc.configs.rules[0].id, "last");
         reveal_config_handle(&mut h, "config:preview:param:length");
-        assert!(h.widget("length = 10 mm").is_some());
+        assert!(h.widget("length = 10").is_some());
         assert_eq!(h.app.session.doc.param("length").unwrap().expr, "40 mm");
     }
 
@@ -1001,7 +1137,8 @@ mod tests {
         configuration_steps(&mut h, &json!([{"widget":"Preview Row"}])).unwrap();
         assert_eq!(h.app.session.doc, before);
         configuration_steps(&mut h, &json!([{"widget":"Apply"}])).unwrap();
-        assert_eq!(h.app.session.doc.param("length").unwrap().expr, "10 mm");
+        assert_eq!(h.app.session.doc.param("length").unwrap().expr, "10");
+        assert_eq!(h.app.session.doc.eval("length", solidcraft_engine::doc::expr::Kind::Length).unwrap(), 10.0);
         assert!(h.app.session.doc.configuration_matches());
         configuration_steps(
             &mut h,
@@ -1090,10 +1227,11 @@ mod tests {
         assert!(matches!(&target.certificate, Some(solidcraft_engine::doc::config::FaceCertificate::ExtrudeSide { curve, .. }) if curve == "outer"));
         let state = h.app.session.model.state();
         let body = state.body("Ring").unwrap();
+        // The outer circle, one closed curve, is one wall face.
         let indices = h.app.session.doc.configuration_face_indices(body, target).unwrap();
-        assert_eq!(indices.len(), 2);
+        assert_eq!(indices.len(), 1);
         let painted = h.app.session.doc.face_colors(body);
-        assert_eq!(painted.len(), 2);
+        assert_eq!(painted.len(), 1);
         assert!(painted.iter().all(|(index, _)| indices.contains(index)));
     }
 
@@ -1185,7 +1323,7 @@ mod tests {
         #[cfg(not(target_arch = "wasm32"))]
         if solidcraft_engine::capture::installed().is_none() {
             solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
-                let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+                let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, w, h)?;
                 Ok(solidcraft_engine::capture::Picture { rgba, renderer })
             }));
         }

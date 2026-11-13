@@ -1,0 +1,15 @@
+{
+ "sources": [],
+ "what": "where a box's vertical edge crosses a slanted plane",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): the edge x 0, y 0 along Z meets x + z = 15 at (0,0,15)",
+ "construction": {
+  "P": {
+   "point": [
+    0,
+    0,
+    15
+   ]
+  }
+ }
+}

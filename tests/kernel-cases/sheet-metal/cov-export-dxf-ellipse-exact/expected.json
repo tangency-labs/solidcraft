@@ -1,0 +1,25 @@
+{
+ "sources": [],
+ "what": "sheet.export_dxf of a 100 x 60 x 2 plate with a 20 x 12 elliptical cut-out, curves exact (the default): the cut-out is one ELLIPSE",
+ "source": "analytic",
+ "method": "the cut-out is an ellipse, semi-axes 10 and 6: written exactly, one ELLIPSE on layer CUT, no arcs or splines; its perimeter (Ramanujan's second formula, exact to 1e-9 here) 51.053998. OUTLINE: 4 lines, 320 long",
+ "body_count": 1,
+ "volume_mm3": 11623.008881569225,
+ "files": [
+  {
+   "path": "flat.dxf",
+   "dxf": {
+    "CUT": {
+     "ELLIPSE": 1,
+     "ARC": 0,
+     "SPLINE": 0,
+     "length_mm": 51.053997725577524
+    },
+    "OUTLINE": {
+     "LINE": 4,
+     "length_mm": 320.0
+    }
+   }
+  }
+ ]
+}

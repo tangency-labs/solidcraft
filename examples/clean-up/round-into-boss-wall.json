@@ -1,0 +1,12 @@
+{
+ "description": "A round along a plate's edge running into a boss wall: an 80 x 60 x 10 plate with an R12 boss through its back edge, the left part of the back edge rounded R2, then the boss's foot rounded R2 (a tangent chain up the wall and round the foot). Where the two rounds meet, the rolling ball leaves one small face between them against the wall. It is taken off (face.delete with heal false leaves the hole open, the plate a surface) and the hole patched twice from its four edges: with Curvature (g2) and, beside it, with Curvature change (g3). Both meet the rounds and the wall in tangent plane and curvature; the g3 patch also meets the curvature's rate of change in the middle of each seam (within 1e-4 /mm^2 against 1.4 to 9.6 for g2). Near the hole's corners, where the rounds themselves meet only tangent, no patch can do better than tangent. The g3 patch needs surface.patch to take g3.",
+ "commands": [
+  {"command": "solid.box", "params": {"corner": [-40, -30, 0], "length": 80, "width": 60, "height": 10, "body_name": "Plate"}},
+  {"command": "solid.cylinder", "params": {"base": [0, 26, 0], "radius": 12, "height": 30, "operation": "join", "targets": ["Plate"]}},
+  {"command": "solid.fillet", "params": {"body": "Plate", "edges": [[-25, 30, 10]], "radius": 2}},
+  {"command": "solid.fillet", "params": {"body": "Plate", "edges": [[-11.313708498984761, 30, 5]], "radius": 2}},
+  {"command": "face.delete", "params": {"body": "Plate", "faces": [[-11.009162323954376, 30.87189136872293, 8.21538797128807]], "heal": false}},
+  {"command": "surface.patch", "params": {"body": "Plate", "edges": [[-11.239, 30.199, 10.718], [-12.457, 27.798, 10.586], [-13.159, 29.381, 9.431], [-11.58, 30.31, 8.0]], "continuity": "g2", "body_name": "Patch G2"}},
+  {"command": "surface.patch", "params": {"body": "Plate", "edges": [[-11.239, 30.199, 10.718], [-12.457, 27.798, 10.586], [-13.159, 29.381, 9.431], [-11.58, 30.31, 8.0]], "continuity": "g3", "body_name": "Patch G3"}}
+ ]
+}

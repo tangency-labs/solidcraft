@@ -1,0 +1,1 @@
+#2572: a path with a span that is neither a line nor a circular arc (a fitted spline) has a rotation-minimizing frame with no closed form; its certified enclosure is a follow-up, so its wall keeps no sweep definition yet (never a definition that depends on how the sweep sampled the path).

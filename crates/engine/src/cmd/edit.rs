@@ -1,85 +1,262 @@
 //! Undo/redo, the timeline, deletion and selection.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 use solidcraft_doc::{Feature, FeatureKind};
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, num, str_, string_list};
+use crate::params::{bad, bool_, name_or_id_values, num, str_};
+use crate::schema::edit::{
+    BrokenFeature, FailingFeature, FeatureInfo, FeatureInput, Inspected, OmittedField, SuppressChanged, TimelineComputeAllParams,
+    TimelineComputeAllResult, TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams, TimelineDependentsResult, TimelineEditParams,
+    TimelineEditResult, TimelineGroupMade, TimelineGroupParams, TimelineGroupRenamed, TimelineInspectParams, TimelineInspectResult,
+    TimelineMarkerResult, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved, TimelineMovedToGroup, TimelineRedefineParams,
+    TimelineRedefined, TimelineRenameGroupParams, TimelineRenameParams, TimelineRenameResult, TimelineReorderManyParams, TimelineReorderParams,
+    TimelineReordered, TimelineReorderedMany, TimelineRollToParams, TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult,
+    TimelineUngroupParams, TimelineUngrouped,
+};
+use crate::schema::select::{PartialPick, SelectClearParams, SelectClearResult, SelectItem, SelectSetParams, SelectSetResult, read_item};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo().doc_only(),
-    CommandSpec::new("edit.redo", "Redo", redo).icon("redo").key("Ctrl+Y").noundo().doc_only(),
-    CommandSpec::new("edit.checkpoint", "Checkpoint", checkpoint).icon("checkpoint")
+    CommandSpec::new("ui.assistant", "Toggle Assistant", crate::checked!("ui.assistant", assistant))
+        .icon("assistant")
+        .key("Ctrl+Shift+A")
         .noundo()
         .doc_only()
-        .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint)"),
-    CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", restore_checkpoint).icon("restore")
+        .contract(&ASSISTANT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::AssistantResult>)
+        .params("Show or hide Assistant in the app. Headless calls are refused without changing the design"),
+    CommandSpec::new("ui.palette", "Search Commands", crate::checked!("ui.palette", palette))
+        .icon("zoom")
+        .key("S")
         .noundo()
         .doc_only()
-        .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included"),
-    CommandSpec::new("timeline.compute_all", "Compute All", compute_all).at("SOLID", "MODIFY").icon("compute").noundo(),
-    CommandSpec::new("timeline.delete", "Delete", delete)
+        .contract(&PALETTE_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::PaletteResult>)
+        .params("Open command search in the app. Headless calls are refused without changing the design"),
+    CommandSpec::new("ui.toggle_visibility", "Show/Hide Selection", crate::checked!("ui.toggle_visibility", toggle_visibility))
+        .icon("eye")
+        .key("V")
+        .noundo()
+        .doc_only()
+        .contract(&TOGGLE_VISIBILITY_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::ToggleVisibilityResult>)
+        .params("Show or hide what is selected in the app. Headless calls are refused without changing the design; browser.visibility takes explicit items"),
+    CommandSpec::new("edit.undo", "Undo", crate::checked!("edit.undo", undo))
+        .icon("undo")
+        .key("Ctrl+Z")
+        .noundo()
+        .doc_only()
+        .contract(&UNDO_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::UndoResult>),
+    CommandSpec::new("edit.redo", "Redo", crate::checked!("edit.redo", redo))
+        .icon("redo")
+        .key("Ctrl+Y")
+        .noundo()
+        .doc_only()
+        .contract(&REDO_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::RedoResult>),
+    CommandSpec::new("edit.repeat", "Repeat Last Command", crate::checked!("edit.repeat", repeat))
+        .icon("redo")
+        .key("Shift+R")
+        .noundo()
+        .doc_only()
+        .contract(&REPEAT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::RepeatResult>)
+        .params("Starts the last tool or dialog started in the app again, with its defaults (a toolbar click, not a replay of its values). Only the app has a tool to start: called here it is refused, and changes nothing"),
+    CommandSpec::new("edit.checkpoint", "Checkpoint", crate::checked!("edit.checkpoint", checkpoint)).icon("checkpoint")
+        .noundo()
+        .doc_only()
+        .contract(&CHECKPOINT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::CheckpointResult>)
+        .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint; the last 16 are kept, the oldest dropped first)"),
+    CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", crate::checked!("edit.restore_checkpoint", restore_checkpoint)).icon("restore")
+        .noundo()
+        .doc_only()
+        .contract(&RESTORE_CHECKPOINT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::CheckpointResult>)
+        .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included. Restoring uses it and every later checkpoint up: take a new one to go back again. Forgetting drops only it"),
+    CommandSpec::new("timeline.compute_all", "Compute All", crate::checked!("timeline.compute_all", compute_all))
+        .at("SOLID", "MODIFY")
+        .icon("compute")
+        .noundo()
+        .contract(&COMPUTE_ALL_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineComputeAllResult>),
+    CommandSpec::new("timeline.play", "Play History", crate::checked!("timeline.play", play))
+        .at("INSPECT", "HISTORY")
+        .icon("timeline_play")
+        .noundo()
+        .doc_only()
+        .enabled(super::not_in_sketch)
+        .contract(&PLAY_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::TimelinePlayResult>)
+        .params("action?: toggle|play|stop (default toggle) → action: validated display request; the connected UI plays from the marker to the end with a half-second pause per rebuilt step. Headless callers only validate the request; no dialog, document edit or animation clock is created"),
+    CommandSpec::new("timeline.delete", "Delete", crate::checked!("timeline.delete", delete))
         .at("SOLID", "MODIFY")
         .icon("delete")
         .key("Delete")
-        .params("feature: id|name | features: [id|name] (one undo step; a sketch takes its dependent features with it) → deleted: [ids]; failing?: [{feature, error}] (later features that worked and now fail)"),
-    CommandSpec::new("timeline.rename", "Rename", rename).icon("rename").params("feature: id|name, name (references to it follow)"),
-    CommandSpec::new("timeline.group", "New Feature Folder", group)
+        .contract(&DELETE_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineDeleteResult>)
+        .params("feature: id|name | features: [id|name] | groups: [timeline folder ids] (a folder goes with all its features, joints and nested folders; one undo step; a sketch takes its dependent features with it) → deleted: [feature ids]; joints?: [joint ids]; groups?: [folder ids deleted]; failing?: [{feature, error}] (later features that worked and now fail)"),
+    CommandSpec::new("timeline.rename", "Rename", crate::checked!("timeline.rename", rename))
+        .icon("rename")
+        .contract(&RENAME_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineRenameResult>)
+        .params("feature: id|name, name (references to it follow)"),
+    CommandSpec::new("timeline.group", "New Feature Folder", crate::checked!("timeline.group", group))
         .icon("folder")
         .doc_only()
-        .params("name?; features?: [id|name]; parent?: folder id (features leave any other timeline folder)"),
-    CommandSpec::new("timeline.ungroup", "Remove Feature Folders", ungroup).icon("folder")
+        .contract(&GROUP_CONTRACT)
+        .output(output_schema_for::<TimelineGroupMade>)
+        .params("name?; features?: [id|name]; joints?: [id|name]; groups?: [folder ids]; parent?: folder id (features and joints leave any other timeline folder)"),
+    CommandSpec::new("timeline.ungroup", "Remove Feature Folders", crate::checked!("timeline.ungroup", ungroup))
+        .icon("folder")
         .doc_only()
-        .params("group: id | groups: [ids] (features remain in the timeline)"),
-    CommandSpec::new("timeline.rename_group", "Rename Feature Folder", rename_group).icon("rename").doc_only().params("group: id, name"),
-    CommandSpec::new("timeline.move_to_group", "Move Features to Folder", move_to_group).icon("folder")
+        .contract(&UNGROUP_CONTRACT)
+        .output(output_schema_for::<TimelineUngrouped>)
+        .params("group: id | groups: [ids] (features and joints remain in the timeline)"),
+    CommandSpec::new("timeline.rename_group", "Rename Feature Folder", crate::checked!("timeline.rename_group", rename_group))
+        .icon("rename")
         .doc_only()
-        .params("features?: [id|name], groups?: [ids], group?: id (omit or null to move to the timeline root)"),
-    CommandSpec::new("timeline.move_many", "Move Timeline Items", move_many).icon("reorder").params(
-        "features?: [id|name], groups?: [folder ids], group?: folder id, position: insertion slot; atomically changes folder membership and moves all selected contents as one block",
+        .contract(&RENAME_GROUP_CONTRACT)
+        .output(output_schema_for::<TimelineGroupRenamed>)
+        .params("group: id, name (renames the folder holding features and joints)"),
+    CommandSpec::new("timeline.move_to_group", "Move Features to Folder", crate::checked!("timeline.move_to_group", move_to_group))
+        .icon("folder")
+        .doc_only()
+        .contract(&MOVE_TO_GROUP_CONTRACT)
+        .output(output_schema_for::<TimelineMovedToGroup>)
+        .params("features?: [id|name], joints?: [id|name], groups?: [ids], group?: id (omit or null to move to the timeline root)"),
+    CommandSpec::new("timeline.move_many", "Move Timeline Items", crate::checked!("timeline.move_many", move_many))
+        .icon("reorder")
+        .contract(&MOVE_MANY_CONTRACT)
+        .output(output_schema_for::<TimelineMoved>)
+        .params(
+        "features?: [id|name], groups?: [folder ids], group?: folder id, position: insertion slot, active?: bool (true = the moved contents end up before the history marker, false = behind it; other features keep their state); atomically changes folder membership and moves all selected contents as one block",
     ),
-    CommandSpec::new("timeline.rollback", "Move Timeline Marker", rollback).icon("rollback").params("position: number of features to keep active, or \"end\" (omit = end)"),
-    CommandSpec::new("timeline.roll_to", "Roll History Marker", rollback).icon("rollback")
+    CommandSpec::new("timeline.rollback", "Move Timeline Marker", crate::checked!("timeline.rollback", rollback))
+        .icon("rollback")
+        .contract(&ROLLBACK_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
+        .params("position: number of features to keep active, or \"end\" (omit = end)"),
+    CommandSpec::new("timeline.roll_to", "Roll History Marker", crate::checked!("timeline.roll_to", roll_to))
+        .icon("rollback")
+        .contract(&ROLL_TO_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
         .params("position: number of features to keep active, or \"end\" (omit = end) | feature: id|name (the marker goes right after it)"),
-    CommandSpec::new("timeline.reorder", "Reorder Feature", reorder).icon("reorder")
-        .params("feature: id|name, position: its new index; refused when a feature that worked would fail"),
-    CommandSpec::new("timeline.reorder_many", "Reorder Features", reorder_many).icon("reorder").params(
-        "features: [id|name], position: insertion slot in the current history; selected features keep their relative order; refused when a feature that worked would fail",
+    CommandSpec::new("timeline.reorder", "Reorder Feature", crate::checked!("timeline.reorder", reorder))
+        .icon("reorder")
+        .contract(&REORDER_CONTRACT)
+        .output(output_schema_for::<TimelineReordered>)
+        .params("feature: id|name, position: its new index, active?: bool (true = it ends up before the history marker, false = behind it; other features keep their state); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke → feature, position: its index now, from: its index before, moved: bool, note?: why nothing moved, or that a position past the end meant the last slot"),
+    CommandSpec::new("timeline.reorder_many", "Reorder Features", crate::checked!("timeline.reorder_many", reorder_many))
+        .icon("reorder")
+        .contract(&REORDER_MANY_CONTRACT)
+        .output(output_schema_for::<TimelineReorderedMany>)
+        .params(
+        "features: [id|name], position: insertion slot in the current history; selected features keep their relative order; active?: bool (as timeline.reorder's); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke",
     ),
-    CommandSpec::new("timeline.redefine", "Edit Feature", redefine).icon("edit")
-        .params("feature: id|name, command: the feature's command id, params: its parameters (the feature is rebuilt in place)"),
-    CommandSpec::new("timeline.dependents", "Feature Dependents", dependents).icon("graph")
+    CommandSpec::new("timeline.redefine", "Edit Feature", crate::checked!("timeline.redefine", redefine))
+        .icon("edit")
+        .contract(&REDEFINE_CONTRACT)
+        .output(output_schema_for::<TimelineRedefined>)
+        .params("feature: id|name, command: the feature's command id, params: its parameters (the feature is rebuilt in place) → feature, recomputed, restored, rolled_back: bool (the feature is after the history marker, so the edit is not built yet; `note` then says so), warning?"),
+    CommandSpec::new("timeline.dependents", "Feature Dependents", crate::checked!("timeline.dependents", dependents))
+        .icon("graph")
         .noundo()
+        .contract(&DEPENDENTS_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineDependentsResult>)
         .params("feature: id|name → features deleted with it, and features that would fail without it"),
-    CommandSpec::new("timeline.suppress", "Suppress Feature", suppress).icon("suppress").params(
-        "feature: id|name | features: [id|name] (one undo step), suppressed?: bool (default toggles: several features are all \
-         suppressed unless all of them already are, then all are unsuppressed) → feature: id (or features: [ids]), suppressed",
+    CommandSpec::new("timeline.suppress", "Suppress Feature", crate::checked!("timeline.suppress", suppress))
+        .icon("suppress")
+        .contract(&SUPPRESS_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineSuppressResult>)
+        .params(
+        "feature: id|name | features: [id|name] | groups: [timeline folder ids] (every feature and joint in those folders and their nested \
+         folders; one undo step), suppressed?: bool (default toggles: features and joints are all \
+         suppressed unless all of them already are, then all are unsuppressed) → feature: id (or features: [ids]; groups: [ids] and joints: [ids] when groups are given), suppressed",
     ),
-    CommandSpec::new("timeline.edit", "Edit Feature", edit_feature).icon("edit").params(
+    CommandSpec::new("timeline.edit", "Edit Feature", crate::checked!("timeline.edit", edit_feature))
+        .icon("edit")
+        .contract(&EDIT_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineEditResult>)
+        .params(
         "feature: id|name, set: {fields to change, merged into the feature's definition as timeline.inspect returns it, \
          e.g. {\"extent\": {\"distance\": \"30\"}} (extrude), {\"angle\": \"90 deg\"} (revolve); \
          a dotted key names a nested field ({\"plane.distance\": \"8 mm\"} = {\"plane\": {\"distance\": \"8 mm\"}}); \
          expressions are text, or a number in mm or degrees} → recomputed: features rebuilt, restored: features whose earlier result for the same inputs was reused",
     ),
-    CommandSpec::new("timeline.inspect", "Inspect Feature", inspect_feature).icon("inspect").noundo().params(
-        "feature: id|name → type, definition (the fields timeline.edit's set changes, with their current values), \
+    CommandSpec::new("timeline.inspect", "Inspect Feature", crate::checked!("timeline.inspect", inspect_feature))
+        .icon("inspect")
+        .noundo().read_only()
+        .contract(&INSPECT_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineInspectResult>)
+        .params(
+        "group: folder id → group, name, parent, features, joints; or feature: id|name → type, definition (the fields timeline.edit's set changes, with their current values), \
          inputs: [{label, param, expression, unit}] (named inputs parameters.change can also set), error, warning",
     ),
-    CommandSpec::new("select.set", "Select", select_set).icon("select")
+    CommandSpec::new("select.set", "Select", crate::checked!("select.set", select_set)).icon("select")
         .noundo()
-        .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool"),
-    CommandSpec::new("select.clear", "Clear Selection", select_clear).icon("select").noundo(),
+        .contract(&SELECT_SET_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>)
+        .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool; face/edge: body plus point [x,y,z] in world mm or index (both also accepted); a point uses Measure's pick tolerance, an index supplies a point on the item; invalid partial picks leave the selection unchanged"),
+    CommandSpec::new("select.filter", "Selection filter", select_filter).icon("select").noundo().doc_only()
+        .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
+    CommandSpec::new("select.clear", "Clear Selection", crate::checked!("select.clear", select_clear))
+        .icon("select")
+        .noundo()
+        .contract(&SELECT_CLEAR_CONTRACT)
+        .output(output_schema_for::<SelectClearResult>),
+    CommandSpec::new("select.same_look", "Select Same Look", select_same_look).icon("select").noundo().doc_only()
+        .params("body?: world body name, face?: face index; defaults to the current body/face selection → selects objects using the resolved appearance"),
 ];
+
+const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
+const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
+const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
+const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
+const RENAME_CONTRACT: TypedContract<TimelineRenameParams> = TypedContract::new();
+const ROLLBACK_CONTRACT: TypedContract<TimelineRollbackParams> = TypedContract::new();
+const ROLL_TO_CONTRACT: TypedContract<TimelineRollToParams> = TypedContract::new();
+const DEPENDENTS_CONTRACT: TypedContract<TimelineDependentsParams> = TypedContract::new();
+const SUPPRESS_CONTRACT: TypedContract<TimelineSuppressParams> = TypedContract::new();
+const EDIT_CONTRACT: TypedContract<TimelineEditParams> = TypedContract::new();
+const INSPECT_CONTRACT: TypedContract<TimelineInspectParams> = TypedContract::new();
+const GROUP_CONTRACT: TypedContract<TimelineGroupParams> = TypedContract::new();
+const UNGROUP_CONTRACT: TypedContract<TimelineUngroupParams> = TypedContract::new();
+const RENAME_GROUP_CONTRACT: TypedContract<TimelineRenameGroupParams> = TypedContract::new();
+const MOVE_TO_GROUP_CONTRACT: TypedContract<TimelineMoveToGroupParams> = TypedContract::new();
+const MOVE_MANY_CONTRACT: TypedContract<TimelineMoveManyParams> = TypedContract::new();
+const REORDER_CONTRACT: TypedContract<TimelineReorderParams> = TypedContract::new();
+const REORDER_MANY_CONTRACT: TypedContract<TimelineReorderManyParams> = TypedContract::new();
+const REDEFINE_CONTRACT: TypedContract<TimelineRedefineParams> = TypedContract::new();
+const PLAY_CONTRACT: crate::schema::TypedContract<crate::schema::edit::TimelinePlayParams> = crate::schema::TypedContract::new();
+
+fn play(_s: &mut Session, p: &Value) -> Result<Value> {
+    let request: crate::schema::edit::TimelinePlayParams = serde_json::from_value(p.clone()).map_err(|e| bad("timeline.play", e.to_string()))?;
+    serde_json::to_value(crate::schema::edit::TimelinePlayResult { action: request.action }).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+const UNDO_CONTRACT: crate::schema::TypedContract<crate::schema::edit::UndoParams> = crate::schema::TypedContract::new();
+const REDO_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RedoParams> = crate::schema::TypedContract::new();
+const CHECKPOINT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::CheckpointParams> = crate::schema::TypedContract::new();
+const RESTORE_CHECKPOINT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RestoreCheckpointParams> = crate::schema::TypedContract::new();
+
+/// A reply built from its schema's type, so the two can't drift apart.
+fn reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))
+}
 
 fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
     let Some(prev) = s.undo.pop() else { return Err(EngineError::Other("nothing to undo".into())) };
     let now = go_to(s, prev);
     let label = now.label.clone();
     s.redo.push(now);
-    Ok(json!({"undone": label}))
+    reply("edit.undo", crate::schema::edit::UndoResult { undone: label, param_warnings: Vec::new() })
 }
 
 fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -87,100 +264,155 @@ fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
     let now = go_to(s, next);
     let label = now.label.clone();
     s.undo.push(now);
-    Ok(json!({"redone": label}))
+    reply("edit.redo", crate::schema::edit::RedoResult { redone: label, param_warnings: Vec::new() })
+}
+
+const ASSISTANT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::AssistantParams> = crate::schema::TypedContract::new();
+
+fn assistant(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other("ui.assistant shows or hides Assistant in the app; no assistant panel exists in a headless session".into()))
+}
+
+const PALETTE_CONTRACT: crate::schema::TypedContract<crate::schema::edit::PaletteParams> = crate::schema::TypedContract::new();
+
+/// Command search (#12190) is the app's: it opens in `SolveApp::start`, and its key can be moved
+/// in Preferences › Shortcuts like any other command's.
+fn palette(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other("ui.palette opens command search in the app; there is no search box in a headless session".into()))
+}
+
+const TOGGLE_VISIBILITY_CONTRACT: crate::schema::TypedContract<crate::schema::edit::ToggleVisibilityParams> = crate::schema::TypedContract::new();
+
+/// Show/Hide of the selection (#13241) is the app's, which knows what is picked in the Browser:
+/// it runs in `SolveApp::start`, and its key can be moved in Preferences › Shortcuts.
+fn toggle_visibility(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other("ui.toggle_visibility acts on the app's selection; use browser.visibility in a headless session".into()))
+}
+
+const REPEAT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RepeatParams> = crate::schema::TypedContract::new();
+
+/// Repeat Last Command (#7077) starts a tool, which only the app has: it starts the last one in
+/// `SolveApp::start` and never reaches this. A script runs the command it wants itself.
+fn repeat(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other(
+        "edit.repeat starts the last tool or dialog again in the app (its key, the canvas menu or command search); there is no tool to start here: run that command itself".into(),
+    ))
 }
 
 /// Put the session at `snap`; returns where it was, under the same label.
 fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
-    let was = Snapshot { label: snap.label, doc: s.doc.clone(), active_sketch: s.active_sketch, pending_moves: s.pending_moves.clone() };
+    let was = Snapshot {
+        label: snap.label,
+        doc: s.doc.clone(),
+        active_sketch: s.active_sketch,
+        pending_moves: s.pending_moves.clone(),
+        visibility: s.visibility.clone(),
+    };
     let same = std::sync::Arc::ptr_eq(&s.doc, &snap.doc);
+    // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating.
+    let display_only = same && s.visibility != snap.visibility;
     s.doc = snap.doc;
     s.active_sketch = snap.active_sketch;
     s.pending_moves = snap.pending_moves;
+    s.visibility = snap.visibility;
     s.selection.clear();
     // A new document is evaluated by `execute`.
     if same {
-        s.refresh();
+        if display_only {
+            s.refresh_display();
+        } else {
+            s.refresh();
+        }
     }
     was
 }
 
 fn checkpoint(s: &mut Session, _p: &Value) -> Result<Value> {
-    Ok(json!({"checkpoint": s.checkpoint()}))
+    let checkpoint = s.checkpoint();
+    reply("edit.checkpoint", crate::schema::edit::CheckpointResult { checkpoint, restored: None, param_warnings: Vec::new() })
 }
 
 fn restore_checkpoint(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "edit.restore_checkpoint";
     let id = p.get("checkpoint").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`checkpoint` must be an id from edit.checkpoint"))?;
+    let done =
+        |restored: bool| reply(cmd, crate::schema::edit::CheckpointResult { checkpoint: id, restored: Some(restored), param_warnings: Vec::new() });
     if bool_(p, "forget") == Some(true) {
         s.drop_checkpoint(id);
-        return Ok(json!({"checkpoint": id, "restored": false}));
+        return done(false);
     }
     s.restore_checkpoint(id)?;
-    Ok(json!({"checkpoint": id, "restored": true}))
+    done(true)
 }
 
 fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
+    let validation = s.validation();
     s.model = solidcraft_doc::Model::new();
+    s.set_validation(validation);
     s.refresh();
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
-    Ok(json!({"features": s.model.results.len(), "errors": errors}))
+    reply("timeline.compute_all", TimelineComputeAllResult { features: s.model.results.len(), errors, param_warnings: Vec::new() })
 }
 
-fn feature_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
-    let key = match v {
-        Some(Value::Number(n)) => n.to_string(),
-        Some(Value::String(x)) => x.clone(),
-        _ => return Err(bad(cmd, "`feature` must be an id or name")),
-    };
-    s.doc.find_feature(&key).map(|f| f.id).ok_or_else(|| bad(cmd, format!("no feature `{key}`")))
+pub(super) fn feature_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
+    match v {
+        Some(Value::Number(n)) => n.as_u64().and_then(|id| s.doc.feature(id)).map(|f| f.id).ok_or_else(|| bad(cmd, format!("no feature `{n}`"))),
+        Some(Value::String(name)) => s.doc.resolve_feature_name(name).map(|f| f.id).map_err(|e| bad(cmd, e.to_string())),
+        _ => Err(bad(cmd, "`feature` must be an id or name")),
+    }
 }
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.delete";
-    let mut keys = string_list(p, "features");
-    if let Some(Value::Array(a)) = p.get("features") {
-        keys.extend(a.iter().filter_map(Value::as_u64).map(|n| n.to_string()));
+    // Resolve every key against the same timeline. A cascade or a repeated key must never
+    // redirect a later delete to another feature that happens to match after the first one.
+    let keys = name_or_id_values(cmd, p, "features")?;
+    let mut ids = keys.iter().chain(p.get("feature")).map(|v| feature_id(s, Some(v), cmd)).collect::<Result<Vec<_>>>()?;
+    let groups = group_ids(s, p, false, cmd)?;
+    if ids.is_empty() && groups.is_empty() {
+        return Err(bad(cmd, "`features` must list features, or `groups` timeline folders"));
     }
-    if let Some(f) = p.get("feature") {
-        keys.push(match f {
-            Value::Number(n) => n.to_string(),
-            Value::String(x) => x.clone(),
-            _ => String::new(),
-        });
-    }
-    if keys.is_empty() {
-        return Err(bad(cmd, "`features` must list features"));
-    }
+    // A folder goes with its features and nested folders, its features in timeline order.
+    let (folders, contents) = group_tree(&s.doc, &groups);
+    let joints = group_joint_ids(&s.doc, &groups);
+    ids.extend(s.doc.features.iter().filter(|f| contents.contains(&f.id)).map(|f| f.id));
     // Features that work now; any of them failing after the delete is reported (a later
     // feature that names a deleted body, #267).
     let worked: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_none() && !r.skipped).map(|r| r.id).collect();
+    super::joints::delete_joints(s.doc_mut(), &joints);
     let mut gone = Vec::new();
-    for k in keys {
-        let Some(id) = s.doc.find_feature(&k).map(|f| f.id) else {
-            if gone.is_empty() {
-                return Err(bad(cmd, format!("no feature `{k}`")));
-            }
-            continue;
-        };
-        gone.extend(s.doc_mut().delete_feature(id)?);
+    for id in ids {
+        if s.doc.feature(id).is_some() {
+            gone.extend(s.doc_mut().delete_feature(id)?);
+        }
+    }
+    if !folders.is_empty() {
+        s.doc_mut().timeline_groups.retain(|group| !folders.contains(&group.id));
     }
     if s.active_sketch.is_some_and(|a| gone.contains(&a)) {
         s.active_sketch = None;
     }
+    // An inserted file's feature takes its components with it.
+    if s.active_component != 0 && !s.doc.components.iter().any(|c| c.id == s.active_component) {
+        s.active_component = 0;
+    }
     s.selection.clear();
     s.refresh();
-    let failing: Vec<Value> = s
+    let failing: Vec<FailingFeature> = s
         .model
         .results
         .iter()
         .filter(|r| worked.contains(&r.id))
-        .filter_map(|r| r.error.as_ref().map(|e| json!({"feature": r.name, "error": e})))
+        .filter_map(|r| r.error.as_ref().map(|e| FailingFeature { feature: r.name.clone(), error: e.clone() }))
         .collect();
-    if failing.is_empty() {
-        return Ok(json!({"deleted": gone}));
-    }
-    Ok(json!({"deleted": gone, "failing": failing}))
+    let out = TimelineDeleteResult {
+        deleted: gone,
+        joints: (!joints.is_empty()).then_some(joints),
+        groups: (!folders.is_empty()).then(|| folders.into_iter().collect()),
+        failing: (!failing.is_empty()).then_some(failing),
+        param_warnings: Vec::new(),
+    };
+    reply(cmd, out)
 }
 
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
@@ -196,7 +428,7 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
         super::features::check_plane_name(name, cmd)?;
     }
     if name == old {
-        return Ok(json!({"feature": id, "name": name}));
+        return reply(cmd, TimelineRenameResult { feature: id, name: name.to_string(), param_warnings: Vec::new() });
     }
     let names = BTreeMap::from([(old.clone(), name.to_string())]);
     let sketches = BTreeMap::new();
@@ -207,7 +439,16 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     for f in doc.features.iter_mut() {
         f.kind.remap_refs(&sketches, &names);
     }
-    Ok(json!({"feature": id, "name": name}))
+    doc.rename_feature_keys(&old, name);
+    // The hidden list follows in `Session::refresh_from` (undo and redo too).
+    for sel in &mut s.selection {
+        if let Sel::Plane { name: n } = sel
+            && *n == old
+        {
+            *n = name.to_string();
+        }
+    }
+    reply(cmd, TimelineRenameResult { feature: id, name: name.to_string(), param_warnings: Vec::new() })
 }
 
 fn timeline_group_id(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
@@ -239,6 +480,26 @@ fn group_features(s: &Session, p: &Value, required: bool, cmd: &str) -> Result<V
         }
     }
     Ok(ids)
+}
+
+fn group_joints(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
+    let values = match p.get("joints") {
+        None => return Ok(Vec::new()),
+        Some(Value::Array(values)) if values.len() <= 10_000 => values,
+        _ => return Err(bad(cmd, "`joints` must list at most 10000 joint ids or names")),
+    };
+    let mut ids = std::collections::BTreeSet::new();
+    for value in values {
+        ids.insert(super::joints::joint_id(s, Some(value), cmd)?);
+    }
+    Ok(ids.into_iter().collect())
+}
+
+fn group_joint_ids(doc: &solidcraft_doc::Document, roots: &[u64]) -> Vec<u64> {
+    let folders = group_tree(doc, roots).0;
+    let ids: std::collections::BTreeSet<u64> =
+        doc.timeline_groups.iter().filter(|group| folders.contains(&group.id)).flat_map(|group| group.joints.iter().copied()).collect();
+    doc.assembly.joints.iter().filter(|joint| ids.contains(&joint.id)).map(|joint| joint.id).collect()
 }
 
 fn group_ids(s: &Session, p: &Value, required: bool, cmd: &str) -> Result<Vec<u64>> {
@@ -286,6 +547,11 @@ fn group_move_would_cycle(s: &Session, target: u64, sources: &[u64]) -> bool {
 }
 
 fn group_feature_ids(doc: &solidcraft_doc::Document, roots: &[u64]) -> std::collections::BTreeSet<u64> {
+    group_tree(doc, roots).1
+}
+
+/// The timeline folders `roots` and every folder nested in them, and the features they hold.
+fn group_tree(doc: &solidcraft_doc::Document, roots: &[u64]) -> (std::collections::BTreeSet<u64>, std::collections::BTreeSet<u64>) {
     let by_id: std::collections::BTreeMap<u64, &solidcraft_doc::TimelineGroup> = doc.timeline_groups.iter().map(|group| (group.id, group)).collect();
     let mut children = std::collections::BTreeMap::<u64, Vec<u64>>::new();
     for group in &doc.timeline_groups {
@@ -305,40 +571,107 @@ fn group_feature_ids(doc: &solidcraft_doc::Document, roots: &[u64]) -> std::coll
             pending.extend(children.get(&id).into_iter().flatten().copied());
         }
     }
-    features
+    (visited, features)
 }
 
 fn sort_group_features(doc: &mut solidcraft_doc::Document) {
-    let positions: std::collections::BTreeMap<u64, usize> = doc.features.iter().enumerate().map(|(index, feature)| (feature.id, index)).collect();
-    for group in &mut doc.timeline_groups {
+    sort_folder_features(&doc.features, &mut doc.timeline_groups);
+}
+
+fn sort_folder_features(features: &[Feature], folders: &mut [solidcraft_doc::TimelineGroup]) {
+    let positions: std::collections::BTreeMap<u64, usize> = features.iter().enumerate().map(|(index, feature)| (feature.id, index)).collect();
+    for group in folders {
         group.features.sort_by_key(|feature| positions.get(feature).copied().unwrap_or(usize::MAX));
     }
 }
 
 fn require_contiguous_groups(doc: &solidcraft_doc::Document, cmd: &str) -> Result<()> {
     let Some(id) = solidcraft_doc::non_contiguous_timeline_group(&doc.features, &doc.timeline_groups) else { return Ok(()) };
-    let name = doc.timeline_groups.iter().find(|group| group.id == id).map(|group| group.name.as_str()).unwrap_or("unknown");
-    Err(bad(cmd, format!("timeline folder `{name}` must contain one contiguous run of features")))
+    Err(not_contiguous(&doc.timeline_groups, id, cmd))
+}
+
+fn not_contiguous(folders: &[solidcraft_doc::TimelineGroup], id: u64, cmd: &str) -> EngineError {
+    let name = folders.iter().find(|group| group.id == id).map(|group| group.name.as_str()).unwrap_or("unknown");
+    bad(cmd, format!("timeline folder `{name}` must contain one contiguous run of features"))
+}
+
+/// The design's folders once `folder` is added, taking its features and joints out of any other
+/// folder and becoming the parent of the folders `groups` (whose features and joints it then holds
+/// through them), and the first folder that would no longer be one run of features, if any.
+fn folders_with(
+    doc: &solidcraft_doc::Document,
+    mut folder: solidcraft_doc::TimelineGroup,
+    groups: &[u64],
+) -> (Vec<solidcraft_doc::TimelineGroup>, Option<u64>) {
+    let nested = group_feature_ids(doc, groups);
+    folder.features.retain(|feature| !nested.contains(feature));
+    let nested_joints = group_joint_ids(doc, groups);
+    folder.joints.retain(|joint| !nested_joints.contains(joint));
+    let mut next = doc.timeline_groups.clone();
+    for group in &mut next {
+        group.joints.retain(|joint| !folder.joints.contains(joint));
+        group.features.retain(|feature| !folder.features.contains(feature));
+        if groups.contains(&group.id) {
+            group.parent = Some(folder.id);
+        }
+    }
+    next.push(folder);
+    sort_folder_features(&doc.features, &mut next);
+    let broken = solidcraft_doc::non_contiguous_timeline_group(&doc.features, &next);
+    (next, broken)
+}
+
+/// A new folder named `name` holding `features` and `joints`, inside the folder `parent` (`None`:
+/// at the history's root), as `timeline.group` makes it. Returns its id.
+pub(crate) fn new_folder(s: &mut Session, name: &str, features: Vec<u64>, joints: Vec<u64>, parent: Option<u64>, cmd: &str) -> Result<u64> {
+    // Folder names are 1…128 bytes, as `timeline.rename_group` takes them.
+    let mut name = name.trim().to_string();
+    while name.len() > 128 {
+        name.pop();
+    }
+    let name = if name.is_empty() { format!("Folder{}", s.doc.timeline_groups.len() + 1) } else { name };
+    let id = s.doc_mut().allocate_id()?;
+    let (folders, broken) = folders_with(&s.doc, solidcraft_doc::TimelineGroup { id, name, parent, features, joints }, &[]);
+    if let Some(broken) = broken {
+        return Err(not_contiguous(&folders, broken, cmd));
+    }
+    s.doc_mut().timeline_groups = folders;
+    Ok(id)
+}
+
+/// The id a folder that is only being tried out goes by.
+const TRIAL_FOLDER: u64 = u64::MAX;
+
+impl Session {
+    /// Why `timeline.group` would refuse a new folder holding `features` inside the folder
+    /// `parent` (`None` at the history's root), in words for a menu's tooltip; `None` when it
+    /// would make it.
+    pub fn group_refusal(&self, features: &[u64], parent: Option<u64>) -> Option<String> {
+        if features.is_empty() {
+            return Some("No features are selected".into());
+        }
+        let trial = solidcraft_doc::TimelineGroup { id: TRIAL_FOLDER, name: String::new(), parent, features: features.to_vec(), joints: Vec::new() };
+        let (folders, broken) = folders_with(&self.doc, trial, &[]);
+        let broken = broken?;
+        if broken == TRIAL_FOLDER {
+            return Some("The features aren't next to each other in the history".into());
+        }
+        let name = folders.iter().find(|folder| folder.id == broken).map_or("", |folder| folder.name.as_str());
+        Some(format!("Folder {name} would no longer hold one run of features"))
+    }
 }
 
 fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.group";
-    let mut features = group_features(s, p, false, cmd)?;
+    let features = group_features(s, p, false, cmd)?;
+    let joints = group_joints(s, p, cmd)?;
     let groups = group_ids(s, p, false, cmd)?;
     let name = match str_(p, "name").map(str::trim).filter(|name| !name.is_empty()) {
         Some(name) if name.len() <= 128 => name.to_string(),
         Some(_) => return Err(bad(cmd, "`name` must be 1…128 characters")),
         None => format!("Folder{}", s.doc.timeline_groups.len() + 1),
     };
-    let id = s
-        .doc
-        .timeline_groups
-        .iter()
-        .map(|group| group.id)
-        .max()
-        .unwrap_or(0)
-        .checked_add(1)
-        .ok_or_else(|| bad(cmd, "no more timeline folder ids are available"))?;
+    let id = s.doc_mut().allocate_id()?;
     let parent = match p.get("parent") {
         Some(Value::Null) | None => None,
         Some(_) => Some(timeline_group_id_field(s, p, "parent", cmd)?),
@@ -348,20 +681,13 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, "a new folder cannot contain an ancestor of its parent"));
     }
-    let nested = group_feature_ids(&s.doc, &groups);
-    features.retain(|feature| !nested.contains(feature));
-    let mut next = (*s.doc).clone();
-    for group in &mut next.timeline_groups {
-        group.features.retain(|feature| !features.contains(feature));
-        if groups.contains(&group.id) {
-            group.parent = Some(id);
-        }
+    let folder = solidcraft_doc::TimelineGroup { id, name: name.clone(), parent, features, joints };
+    let (folders, broken) = folders_with(&s.doc, folder, &groups);
+    if let Some(broken) = broken {
+        return Err(not_contiguous(&folders, broken, cmd));
     }
-    next.timeline_groups.push(solidcraft_doc::TimelineGroup { id, name: name.clone(), parent, features });
-    sort_group_features(&mut next);
-    require_contiguous_groups(&next, cmd)?;
-    *s.doc_mut() = next;
-    Ok(json!({"group": id, "name": name, "parent": parent, "groups": groups}))
+    s.doc_mut().timeline_groups = folders;
+    reply(cmd, TimelineGroupMade { group: id, name, parent, groups, param_warnings: Vec::new() })
 }
 
 fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
@@ -398,18 +724,19 @@ fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
         parent
     };
     let mut next = (*s.doc).clone();
-    let moved_features: Vec<(Option<u64>, Vec<u64>)> = next
+    let moved_features: Vec<(Option<u64>, Vec<u64>, Vec<u64>)> = next
         .timeline_groups
         .iter()
         .filter(|group| ids.contains(&group.id))
-        .map(|group| (surviving_parent(group.parent), group.features.clone()))
+        .map(|group| (surviving_parent(group.parent), group.features.clone(), group.joints.clone()))
         .collect();
     for group in &mut next.timeline_groups {
         if ids.contains(&group.id) {
             continue;
         }
         group.parent = surviving_parent(group.parent);
-        for (_, features) in moved_features.iter().filter(|(parent, _)| *parent == Some(group.id)) {
+        for (_, features, joints) in moved_features.iter().filter(|(parent, _, _)| *parent == Some(group.id)) {
+            group.joints.extend(joints.iter().copied());
             group.features.extend(features.iter().copied());
         }
     }
@@ -417,7 +744,7 @@ fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
     *s.doc_mut() = next;
-    Ok(json!({"groups": ids}))
+    reply(cmd, TimelineUngrouped { groups: ids, param_warnings: Vec::new() })
 }
 
 fn rename_group(s: &mut Session, p: &Value) -> Result<Value> {
@@ -430,15 +757,16 @@ fn rename_group(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(group) = s.doc_mut().timeline_groups.iter_mut().find(|group| group.id == id) {
         group.name = name.to_string();
     }
-    Ok(json!({"group": id, "name": name}))
+    reply(cmd, TimelineGroupRenamed { group: id, name: name.to_string(), param_warnings: Vec::new() })
 }
 
 fn move_to_group(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.move_to_group";
     let features = group_features(s, p, false, cmd)?;
+    let joints = group_joints(s, p, cmd)?;
     let groups = group_ids(s, p, false, cmd)?;
-    if features.is_empty() && groups.is_empty() {
-        return Err(bad(cmd, "list at least one feature or folder"));
+    if features.is_empty() && joints.is_empty() && groups.is_empty() {
+        return Err(bad(cmd, "list at least one feature, joint or folder"));
     }
     let target = match p.get("group") {
         Some(Value::Null) | None => None,
@@ -451,8 +779,10 @@ fn move_to_group(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut next = (*s.doc).clone();
     for group in &mut next.timeline_groups {
+        group.joints.retain(|joint| !joints.contains(joint));
         group.features.retain(|feature| !features.contains(feature));
         if Some(group.id) == target {
+            group.joints.extend(joints.iter().copied());
             group.features.extend(features.iter().copied());
         }
     }
@@ -464,7 +794,7 @@ fn move_to_group(s: &mut Session, p: &Value) -> Result<Value> {
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
     *s.doc_mut() = next;
-    Ok(json!({"features": features, "groups": groups, "group": target}))
+    reply(cmd, TimelineMovedToGroup { features, joints, groups, group: target, param_warnings: Vec::new() })
 }
 
 fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
@@ -499,18 +829,34 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
     }
     sort_group_features(&mut next);
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
-    let (next, ordered) = reorder_features(s, next, &moving, slot, cmd)?;
+    let active = active_param(p, cmd)?;
+    let (mut next, ordered, _, checked) = reorder_features(s, next, &moving, slot, false, cmd)?;
+    let marker = next.marker;
+    place_marker(s, &mut next, &moving, active, cmd)?;
+    let checked = checked.filter(|_| next.marker == marker);
     if next != *s.doc {
+        if let Some(model) = checked {
+            s.model = model;
+        }
         *s.doc_mut() = next;
     }
-    Ok(json!({"features": ordered, "groups": groups, "group": target, "position": slot}))
+    reply(cmd, TimelineMoved { features: ordered, groups, group: target, position: slot, param_warnings: Vec::new() })
 }
 
 fn rollback(s: &mut Session, p: &Value) -> Result<Value> {
+    move_marker(s, p, "timeline.rollback")
+}
+
+fn roll_to(s: &mut Session, p: &Value) -> Result<Value> {
+    move_marker(s, p, "timeline.roll_to")
+}
+
+/// `timeline.rollback` and `timeline.roll_to`, refusing in the name of the one asked for (#4712).
+fn move_marker(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let n = s.doc.features.len();
     let pos = match p.get("feature") {
         Some(f) => {
-            let id = feature_id(s, Some(f), "timeline.roll_to")?;
+            let id = feature_id(s, Some(f), cmd)?;
             s.doc.feature_index(id).map(|i| i + 1)
         }
         // A number of features, or "end" (as omitting it); anything else is refused rather than
@@ -521,7 +867,13 @@ fn rollback(s: &mut Session, p: &Value) -> Result<Value> {
             Some(v) => {
                 let x = v.as_f64().or_else(|| v.as_str().and_then(|t| t.trim().parse::<f64>().ok())).and_then(crate::params::finite);
                 let why = "`position` must be a number of features to keep active, or \"end\"";
-                Some(x.map(|x| x.max(0.0) as usize).ok_or_else(|| bad("timeline.roll_to", why))?)
+                let x = x.ok_or_else(|| bad(cmd, why))?;
+                // A negative position was taken as 0, rolling the whole timeline back: an agent
+                // meaning "one step back" by -1 lost every body without a word (#4712).
+                if x < 0.0 {
+                    return Err(bad(cmd, format!("`position` {x} is negative: it counts the features to keep active, 0 to {n} (or \"end\")")));
+                }
+                Some(x as usize)
             }
         },
     };
@@ -530,7 +882,7 @@ fn rollback(s: &mut Session, p: &Value) -> Result<Value> {
         _ => None,
     };
     s.selection.clear();
-    Ok(json!({"marker": s.doc.marker.unwrap_or(n), "features": n}))
+    reply(cmd, TimelineMarkerResult { marker: s.doc.marker.unwrap_or(n), features: n, param_warnings: Vec::new() })
 }
 
 /// The features named by `feature: id|name` and/or `features: [id|name]` (or one id|name), in
@@ -560,25 +912,64 @@ fn feature_ids(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
     Ok(ids)
 }
 
+/// The names the features from the first of `ids` to be suppressed on made, for those that made a
+/// body numbered by the counter (`BodyN`). Counted bodies take the next free number each time the
+/// design is computed, so once a feature that made one is suppressed, every counted body after it
+/// would move down one (`Body2` becoming `Body1`) and break what names it, such as a Move of
+/// `Body2` (#4302). Stored as their names, they stay as they were, as when a counted body is
+/// renamed (#1109). The suppressed feature keeps its own too: the counter passes the names of
+/// suppressed features by, so a body made meanwhile does not take `Body1` and lose it again when
+/// the feature is back.
+fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>)> {
+    let made = |f: &Feature| -> Vec<String> {
+        s.model.result(f.id).map(|r| r.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect()).unwrap_or_default()
+    };
+    let makes_counted = |f: &Feature| (0..made(f).len()).any(|i| super::browser::counted(f, i));
+    let first = s.doc.features.iter().position(|f| ids.contains(&f.id) && !f.suppressed && makes_counted(f));
+    let Some(at) = first else { return Vec::new() };
+    s.doc.features.iter().skip(at).filter(|f| makes_counted(f)).map(|f| (f.id, made(f))).collect()
+}
+
 fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.suppress";
-    let ids = feature_ids(s, p, cmd)?;
+    let groups = group_ids(s, p, false, cmd)?;
+    let named = |key: &str| p.get(key).is_some_and(|v| !v.is_null());
+    let mut ids = if groups.is_empty() || named("feature") || named("features") { feature_ids(s, p, cmd)? } else { Vec::new() };
+    let contents = group_feature_ids(&s.doc, &groups);
+    let more: Vec<u64> = s.doc.features.iter().map(|f| f.id).filter(|id| contents.contains(id) && !ids.contains(id)).collect();
+    ids.extend(more);
+    let joints = group_joint_ids(&s.doc, &groups);
+    if ids.is_empty() && joints.is_empty() {
+        return Err(bad(cmd, "the timeline folders hold no features or joints"));
+    }
     let want = match bool_(p, "suppressed") {
         Some(b) => b,
         None if p.get("suppressed").is_some_and(|v| !v.is_null()) => return Err(bad(cmd, "`suppressed` must be true or false")),
         // Toggle: one feature flips; several are all suppressed unless all already are.
-        None => !ids.iter().all(|id| s.doc.feature(*id).is_some_and(|f| f.suppressed)),
+        None => {
+            !(ids.iter().all(|id| s.doc.feature(*id).is_some_and(|f| f.suppressed))
+                && joints.iter().all(|id| s.doc.assembly.joints.iter().any(|joint| joint.id == *id && joint.suppressed)))
+        }
     };
+    let keep = if want { counted_names_from(s, &ids) } else { Vec::new() };
     // One command, so one undo step however many features it changes.
     let doc = s.doc_mut();
+    for (id, made) in &keep {
+        if let Some(f) = doc.feature_mut(*id) {
+            f.pin_body_names(made);
+        }
+    }
     for id in &ids {
         let f = doc.feature_mut(*id).ok_or_else(|| bad(cmd, format!("no feature {id}")))?;
         f.suppressed = want;
     }
-    match ids.as_slice() {
-        [id] if p.get("features").is_none_or(Value::is_null) => Ok(json!({"feature": id, "suppressed": want})),
-        _ => Ok(json!({"features": ids, "suppressed": want})),
-    }
+    super::joints::suppress_joints(s.doc_mut(), &joints, want);
+    let changed = match ids.as_slice() {
+        [id] if groups.is_empty() && p.get("features").is_none_or(Value::is_null) => SuppressChanged::One { feature: *id, suppressed: want },
+        _ if groups.is_empty() => SuppressChanged::Features { features: ids, suppressed: want },
+        _ => SuppressChanged::Folders { features: ids, joints, groups, suppressed: want },
+    };
+    reply(cmd, TimelineSuppressResult { changed, param_warnings: Vec::new() })
 }
 
 fn merge(dst: &mut Value, src: &Value, depth: usize) {
@@ -888,6 +1279,42 @@ fn command_profiles(set: &Value, cmd: &str) -> Result<Value> {
 /// the name and suppression, which timeline.rename and timeline.suppress change.
 const NOT_EDITABLE: &[&str] = &["id", "type", "name", "suppressed", "param_names", "edge_refs", "edge_names", "face_names"];
 
+/// timeline.edit keeps accepting names for pattern and mirror seeds and for construction planes
+/// (#1134): each name in the merged definition resolves to the feature's id, refused when it
+/// finds no feature, as the commands that take names refuse it.
+fn resolve_feature_names(v: &mut Value, doc: &solidcraft_doc::Document, cmd: &str) -> Result<()> {
+    match v {
+        Value::Object(o) => {
+            if o.get("type").and_then(Value::as_str) == Some("construction") {
+                // Only a construction plane's name becomes an id: a revolve axis with the same
+                // shape names a construction axis, which is still keyed by name.
+                if let Some(name) = o.get("name").and_then(Value::as_str)
+                    && let Some(f) = doc.find_feature(name).filter(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. }))
+                {
+                    o.remove("name");
+                    o.insert("feature".into(), json!(f.id));
+                }
+                return Ok(());
+            }
+            for (_, x) in o.iter_mut() {
+                resolve_feature_names(x, doc, cmd)?;
+            }
+            if let Some(Value::Array(seeds)) = o.get_mut("features") {
+                for s in seeds.iter_mut() {
+                    if let Value::String(name) = s {
+                        let name = name.clone();
+                        let id = doc.seed_feature(&name).ok_or_else(|| bad(cmd, format!("no feature `{name}`")))?;
+                        *s = json!(id.id);
+                    }
+                }
+            }
+            Ok(())
+        }
+        Value::Array(a) => a.iter_mut().try_for_each(|x| resolve_feature_names(x, doc, cmd)),
+        _ => Ok(()),
+    }
+}
+
 /// Large payloads that timeline.edit cannot change, left out of a feature's definition: (field,
 /// what it holds).
 fn heavy_fields(kind: &FeatureKind) -> &'static [(&'static str, &'static str)] {
@@ -901,6 +1328,18 @@ fn heavy_fields(kind: &FeatureKind) -> &'static [(&'static str, &'static str)] {
 
 fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.inspect";
+    if p.get("group").is_some() {
+        let id = timeline_group_id(s, p, cmd)?;
+        let group = s.doc.timeline_groups.iter().find(|group| group.id == id).ok_or_else(|| bad(cmd, "folder"))?;
+        let inspected = Inspected::Group {
+            group: id,
+            name: group.name.clone(),
+            parent: group.parent,
+            features: group.features.clone(),
+            joints: group.joints.clone(),
+        };
+        return reply(cmd, TimelineInspectResult { inspected, param_warnings: Vec::new() });
+    }
     let id = feature_id(s, p.get("feature"), cmd)?;
     let f = s.doc.feature(id).ok_or_else(|| bad(cmd, "feature"))?;
     let mut def = serde_json::to_value(f).map_err(|e| EngineError::Other(e.to_string()))?;
@@ -911,28 +1350,39 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
         }
         for (k, why) in heavy_fields(&f.kind) {
             if o.remove(*k).is_some() {
-                omitted.push(json!({"field": k, "what": why}));
+                omitted.push(OmittedField { field: k.to_string(), what: why.to_string() });
             }
         }
     }
-    let inputs: Vec<Value> = f
+    let inputs: Vec<FeatureInput> = f
         .kind
         .inputs()
         .into_iter()
         .enumerate()
-        .map(|(i, (label, e, k))| {
-            json!({"label": label, "param": f.param_names.get(i).filter(|n| !n.is_empty()), "expression": e, "unit": k.default_unit()})
+        .map(|(i, (label, e, k))| FeatureInput {
+            label: label.to_string(),
+            param: f.param_names.get(i).filter(|n| !n.is_empty()).cloned(),
+            expression: e,
+            unit: k.default_unit().to_string(),
         })
         .collect();
     let marker = s.doc.marker.unwrap_or(usize::MAX);
     let rolled_back = s.doc.features.iter().position(|x| x.id == id).is_some_and(|i| i >= marker);
     let r = s.model.result(id);
-    Ok(json!({
-        "id": f.id, "name": f.name, "type": f.kind.type_name(), "suppressed": f.suppressed, "rolled_back": rolled_back,
-        "definition": def, "omitted": omitted, "inputs": inputs,
-        "error": r.and_then(|r| r.error.clone()), "warning": r.and_then(|r| r.warning.clone()),
-        "boolean_diagnostics": r.map(|r| &r.boolean_diagnostics),
-    }))
+    let info = FeatureInfo {
+        id: f.id,
+        name: f.name.clone(),
+        kind: f.kind.kind_key().to_string(),
+        type_name: f.kind.type_name().to_string(),
+        suppressed: f.suppressed,
+        rolled_back,
+        definition: def,
+        omitted,
+        inputs,
+        error: r.and_then(|r| r.error.clone()),
+        warning: r.and_then(|r| r.warning.clone()),
+    };
+    reply(cmd, TimelineInspectResult { inspected: Inspected::Feature(Box::new(info)), param_warnings: Vec::new() })
 }
 
 fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
@@ -945,9 +1395,13 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let set = &numbers_as_expressions(command_profiles(&set, cmd)?, &before);
     let mut v = before.clone();
     merge(&mut v, set, 0);
+    resolve_feature_names(&mut v, &s.doc, cmd)?;
     let mut nf: Feature = serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("invalid feature: {e}")))?;
     nf.id = f.id;
-    if let (FeatureKind::Extrude { extent: old, .. }, FeatureKind::Extrude { extent: new, .. }) = (&f.kind, &mut nf.kind)
+    // A one-sided extrude made symmetric takes the convention a new one would: its old marker
+    // never read a symmetric distance.
+    if let (FeatureKind::Extrude { extent: old, .. }, FeatureKind::Extrude { extent: new, .. })
+    | (FeatureKind::SurfaceExtrude { extent: old, .. }, FeatureKind::SurfaceExtrude { extent: new, .. }) = (&f.kind, &mut nf.kind)
         && old.direction != solidcraft_doc::Direction::Symmetric
         && new.direction == solidcraft_doc::Direction::Symmetric
         && set.get("extent").and_then(|e| e.get("convention")).is_none()
@@ -991,6 +1445,20 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
             nf.edge_names = solidcraft_doc::sheet::sheet_edge_names(&s.model.state_before(id), &solidcraft_doc::plain(&points(a)));
         }
     }
+    // New reference edges for a hole (#37): the names of the edges there now.
+    if let (FeatureKind::Hole { references: a, position, .. }, FeatureKind::Hole { references: b, .. }) = (&nf.kind, &f.kind) {
+        let edges = |r: &[solidcraft_doc::HoleReference]| r.iter().map(|x| x.edge.0).collect::<Vec<_>>();
+        if edges(a) != edges(b) {
+            nf.edge_names = solidcraft_doc::hole_reference::reference_edge_names(&s.model.state_before(id), position.0, &edges(a));
+        }
+    }
+    // New reference edges for a cylinder (#6380): likewise.
+    if let (FeatureKind::Cylinder { references: a, base, .. }, FeatureKind::Cylinder { references: b, .. }) = (&nf.kind, &f.kind) {
+        let edges = |r: &[solidcraft_doc::HoleReference]| r.iter().map(|x| x.edge.0).collect::<Vec<_>>();
+        if edges(a) != edges(b) {
+            nf.edge_names = solidcraft_doc::hole_reference::cylinder_edge_names(&s.model.state_before(id), base, a);
+        }
+    }
     // New bend edges for a conversion: the names of the body's edges there now.
     if let (FeatureKind::SheetConvert { bends: a, body, .. }, FeatureKind::SheetConvert { bends: b, body: was, .. }) = (&nf.kind, &f.kind)
         && (a != b || body != was)
@@ -999,11 +1467,11 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Profiles picked by index or point are kept by their curves, as when the feature was made.
     if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
-        super::features::stable_profiles(s, &mut nf.kind)?;
+        super::features::stable_profiles(s, &mut nf.kind, false)?;
     }
     // New face points: their faces' names now.
     if nf.kind.face_points() != f.kind.face_points() {
-        nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component);
+        nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component)?;
     }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
@@ -1012,7 +1480,56 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
-    Ok(json!({"feature": id, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored}))
+    reply(cmd, TimelineEditResult { feature: id, recomputed: s.model.last_recomputed, restored: s.model.last_restored, param_warnings: Vec::new() })
+}
+
+/// Complete a partial script pick without changing the stored selection type or reinterpreting
+/// an existing index-and-point pair. Unlike Measure, selection keeps the exact face/edge index:
+/// it must not merge a cylinder's patches or a circular rim's arcs into a different item.
+fn selection_item(s: &Session, value: Value) -> Result<Sel> {
+    let (face, PartialPick { body, index, point }) = match read_item(value).map_err(|e| bad("select.set", e))? {
+        SelectItem::Exact(sel) => return Ok(sel),
+        SelectItem::Pick { face, pick } => (face, pick),
+    };
+    let state = s.world_state()?;
+    let b = state.body(&body).ok_or_else(|| bad("select.set", format!("no body `{body}`")))?;
+    let missing = || bad("select.set", format!("no {} of `{body}` at the given index or point", if face { "face" } else { "edge" }));
+    let (index, point) = match (index, point) {
+        (Some(index), None) => {
+            let point = if face {
+                solidcraft_doc::naming::face_spot(b, index).map(|spot| spot.point)
+            } else {
+                let mesh = b.mesh();
+                mesh.edges.get(index).and_then(|edge| match edge.as_slice() {
+                    [a, b] => Some(a.lerp(*b, 0.5)),
+                    // Use a sample on the curve, not the midpoint of a chord inside it.
+                    points if points.len() > 2 => points.get(points.len() / 2).copied(),
+                    _ => None,
+                })
+            };
+            (index, point.filter(|p| p.is_finite()).ok_or_else(missing)?)
+        }
+        (None, Some(point)) if point.is_finite() => {
+            let index = if face {
+                solidcraft_doc::appearance::face_index_at(b, point)
+            } else {
+                let mesh = b.mesh();
+                mesh.edges
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, edge)| {
+                        let distance =
+                            edge.windows(2).filter_map(|w| Some(point.dist_to_segment(*w.first()?, *w.get(1)?))).fold(f64::INFINITY, f64::min);
+                        (distance <= solidcraft_doc::appearance::pick_tolerance(b)).then_some((index, distance))
+                    })
+                    .min_by(|(_, a), (_, b)| a.total_cmp(b))
+                    .map(|(index, _)| index)
+            };
+            (index.ok_or_else(missing)?, point)
+        }
+        _ => return Err(bad("select.set", "a face or edge needs an index or a finite point")),
+    };
+    Ok(if face { Sel::Face { body, index, point } } else { Sel::Edge { body, index, point } })
 }
 
 fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1022,9 +1539,20 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut sel: Vec<Sel> = Vec::new();
     for it in items {
-        let one: Sel = serde_json::from_value(it).map_err(|e| bad("select.set", e.to_string()))?;
-        if let Sel::Occurrence { path } = &one {
-            s.occurrence_bodies(path, true).map_err(|e| bad("select.set", e.to_string()))?;
+        let one = selection_item(s, it)?;
+        match &one {
+            Sel::Occurrence { path } => {
+                s.occurrence_bodies(path, true).map_err(|e| bad("select.set", e.to_string()))?;
+            }
+            // A selection may not name a body that isn't there: left selected it would delete
+            // nothing, or the next body to take that name (#9737).
+            other => {
+                if let Some(name) = other.body_name()
+                    && s.world_state()?.body(name).is_none()
+                {
+                    return Err(bad("select.set", format!("no body `{name}`")));
+                }
+            }
         }
         sel.push(one);
     }
@@ -1036,14 +1564,65 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
             s.selection.push(x);
         }
     }
-    s.revision += 1;
-    Ok(json!({"selected": s.selection.len()}))
+    s.refresh_display();
+    reply("select.set", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
+}
+
+fn select_filter(_s: &mut Session, p: &Value) -> Result<Value> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        mode: String,
+    }
+    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("select.filter", e.to_string()))?;
+    if !matches!(request.mode.as_str(), "body" | "face" | "component") {
+        return Err(bad("select.filter", "mode must be body, face or component"));
+    }
+    Ok(json!({"mode": request.mode}))
+}
+
+fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        body: Option<String>,
+        face: Option<usize>,
+    }
+    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("select.same_look", e.to_string()))?;
+    let selected = s.selection.last();
+    let name = request
+        .body
+        .as_deref()
+        .or(match selected {
+            Some(Sel::Body { name }) => Some(name.as_str()),
+            Some(Sel::Face { body, .. }) => Some(body.as_str()),
+            _ => None,
+        })
+        .ok_or_else(|| bad("select.same_look", "select an object or face"))?;
+    let state = s.world_state()?;
+    let body = state.body(name).ok_or_else(|| bad("select.same_look", "unknown object"))?;
+    let face = request.face.or(match selected {
+        Some(Sel::Face { body, index, .. }) if request.body.is_none() && body == name => Some(*index),
+        _ => None,
+    });
+    if let Some(face) = face
+        && face >= body.body.face_count()
+    {
+        return Err(bad("select.same_look", "unknown face"));
+    }
+    let look = face.map_or_else(|| s.doc.model_display_look(body), |face| s.doc.model_face_look(body, face));
+    let items: Vec<_> =
+        state.bodies.iter().filter(|b| s.doc.model_used_looks(b).contains(&look)).take(10_001).map(|b| Sel::Body { name: b.name.clone() }).collect();
+    if items.len() > 10_000 {
+        return Err(bad("select.same_look", "too many objects"));
+    }
+    select_set(s, &json!({"items":items}))
 }
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
-    s.revision += 1;
-    Ok(json!({"selected": 0}))
+    s.refresh_display();
+    reply("select.clear", SelectClearResult { selected: 0, param_warnings: Vec::new() })
 }
 
 /// Features that worked in `before` and fail in `after`: (name, error).
@@ -1059,14 +1638,99 @@ fn newly_broken(before: &solidcraft_doc::Model, after: &solidcraft_doc::Model) -
         .collect()
 }
 
+/// [`newly_broken`] over the whole history, from `before` (the model of `before_doc`) to `after`
+/// (the model of `after_doc`). With the history rolled back, the features after the marker are
+/// evaluated too, on copies of the models (which share their cache): a delete made in the
+/// rolled-back history that breaks them says so before it is made, rather than leaving error marks
+/// that only show at the end of the timeline (#3471). A change that leaves them the same inputs
+/// needs no such evaluation ([`only_constraints_changed`]).
+pub(super) fn newly_broken_in_history(
+    before_doc: &solidcraft_doc::Document,
+    before: &solidcraft_doc::Model,
+    after_doc: &solidcraft_doc::Document,
+    after: &solidcraft_doc::Model,
+) -> Vec<(String, String)> {
+    if (before_doc.marker.is_none() && after_doc.marker.is_none()) || only_constraints_changed(before_doc, before, after_doc, after) {
+        return newly_broken(before, after);
+    }
+    let whole = |doc: &solidcraft_doc::Document, model: &solidcraft_doc::Model| {
+        let mut doc = doc.clone();
+        doc.marker = None;
+        // A copy keeps nothing on its own: it keeps what the model keeps, so a delete checked
+        // ahead finds this build there when it runs (#9917).
+        let mut copy = model.clone();
+        copy.keep(model.kept());
+        copy.evaluate(&doc);
+        copy
+    };
+    // Only a feature that fails after the change can be newly broken: when none does, the
+    // history before it needn't be built again (#9917: each build ran every boolean after the
+    // marker, half a minute on a large design).
+    let after = whole(after_doc, after);
+    if after.results.iter().all(|r| r.error.is_none()) {
+        return Vec::new();
+    }
+    newly_broken(&whole(before_doc, before), &after)
+}
+
+/// Whether `after_doc` differs from `before_doc` only in sketch constraints and dimensions (and
+/// model parameters nothing uses any more), every sketch whose constraints changed solving to
+/// the same geometry, profiles and ends as before. The features after the marker are then built
+/// from the same inputs, so evaluating the whole history twice would find nothing new (#7253):
+/// deleting one dimension of a sketch with a long rolled-back history after it took minutes.
+fn only_constraints_changed(
+    before_doc: &solidcraft_doc::Document,
+    before: &solidcraft_doc::Model,
+    after_doc: &solidcraft_doc::Document,
+    after: &solidcraft_doc::Model,
+) -> bool {
+    let without_constraints = |doc: &solidcraft_doc::Document| {
+        let mut doc = doc.clone();
+        for f in &mut doc.features {
+            if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
+                sketch.constraints.clear();
+            }
+        }
+        doc
+    };
+    let (mut b, a) = (without_constraints(before_doc), without_constraints(after_doc));
+    if b.params.iter().any(|p| !a.params.contains(p) && (!p.model || !after_doc.param_users(&p.name).is_empty())) {
+        return false;
+    }
+    b.params.retain(|p| a.params.contains(p));
+    if b != a {
+        return false;
+    }
+    // What a later feature reads of a sketch: the solved geometry, its plane, profiles and ends.
+    let solved = |model: &solidcraft_doc::Model, id: u64| {
+        let r = model.result(id).filter(|r| !r.skipped && r.error.is_none())?;
+        let s = r.state.sketch(id)?;
+        let mut sketch = s.sketch.clone();
+        sketch.constraints.clear();
+        Some((s.plane, sketch, serde_json::to_value(&s.profiles).ok()?, s.ends.clone(), s.report.ok()))
+    };
+    before_doc.features.iter().zip(&after_doc.features).all(|(fb, fa)| match (&fb.kind, &fa.kind) {
+        (FeatureKind::Sketch { sketch: sb, .. }, FeatureKind::Sketch { sketch: sa, .. }) if sb.constraints != sa.constraints => {
+            solved(before, fb.id).is_some_and(|x| solved(after, fa.id).is_some_and(|y| x == y))
+        }
+        _ => true,
+    })
+}
+
 fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.reorder";
     let id = feature_id(s, p.get("feature"), cmd)?;
     let n = s.doc.features.len();
-    let to = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?.min(n.saturating_sub(1));
+    let asked = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
+    // A position past the end means the last slot; the reply says so (#12140).
+    let to = asked.min(n.saturating_sub(1));
+    let capped = (asked != to).then(|| format!("position {asked} is past the end, so the last slot, {to}, was used"));
     let from = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "feature"))?;
-    if from == to {
-        return Ok(json!({"feature": id, "position": to}));
+    let active = active_param(p, cmd)?;
+    if from == to && active.is_none() {
+        let why = capped.map_or_else(|| format!("it is already at position {to}"), |c| format!("{c}, where it already is"));
+        let note = Some(format!("nothing moved: {why}"));
+        return reply(cmd, TimelineReordered { feature: id, position: to, from, moved: false, note, broken: None, param_warnings: Vec::new() });
     }
     let mut next = (*s.doc).clone();
     let f = next.features.remove(from);
@@ -1078,32 +1742,128 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     let mut after = s.model.clone();
     after.evaluate(&next);
     let broken = newly_broken(&s.model, &after);
-    if !broken.is_empty() {
+    // `allow_errors`: made anyway, with what it broke said (#5962).
+    let allow = allow_errors(p, cmd)?;
+    if !broken.is_empty() && !allow {
+        // The moved feature itself failing: say why, and only when it moved earlier suggest that
+        // it now comes before something it uses, such as an extrude ahead of its sketch (#12140).
+        // Moved later, it fails for another reason, such as a feature that removed its body.
+        if let Some((_, error)) = broken.iter().find(|(n, _)| *n == name) {
+            let hint = if to < from {
+                "; if it uses a feature that would now come after it, move that feature earlier first"
+            } else {
+                "; a feature it would now come after changes what it works on"
+            };
+            return Err(bad(cmd, format!("moving {name} to position {to} breaks {name} ({error}){hint}")));
+        }
         let list: Vec<String> = broken.iter().map(|(n, e)| format!("{n} ({e})")).collect();
         return Err(bad(cmd, format!("moving {name} there breaks {}", list.join("; "))));
     }
-    *s.doc_mut() = next;
-    Ok(json!({"feature": id, "position": to}))
+    let marker = next.marker;
+    place_marker(s, &mut next, &[id], active, cmd)?;
+    // Never report a move that didn't happen (#12140): the reply gives where the feature is now.
+    let now = next.feature_index(id).ok_or_else(|| bad(cmd, "feature"))?;
+    if now != to {
+        return Err(bad(cmd, format!("{name} would stay at position {now}, not {to}")));
+    }
+    if next != *s.doc {
+        // The check evaluated the new order: keep its results, so setting the design doesn't
+        // evaluate the moved part of the timeline a second time (#6186). Placing the marker
+        // elsewhere makes them stale.
+        if next.marker == marker {
+            s.model = after;
+        }
+        *s.doc_mut() = next;
+    }
+    // With `active`, a feature left in place may still cross the history marker: say which.
+    let stayed = (now == from).then(|| {
+        let what = if s.doc.marker == marker { "nothing moved" } else { "only the history marker moved" };
+        format!("{what}: {name} is already at position {now}")
+    });
+    let note: Vec<String> = [capped, stayed].into_iter().flatten().collect();
+    let out = TimelineReordered {
+        feature: id,
+        position: now,
+        from,
+        moved: now != from,
+        note: (!note.is_empty()).then(|| note.join("; ")),
+        broken: allow.then(|| broken_features(&broken)),
+        param_warnings: Vec::new(),
+    };
+    reply(cmd, out)
+}
+
+/// The optional `allow_errors` of a move: make it even when it breaks features that worked.
+fn allow_errors(p: &Value, cmd: &str) -> Result<bool> {
+    match p.get("allow_errors") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(allow)) => Ok(*allow),
+        Some(_) => Err(bad(cmd, "`allow_errors` must be true or false")),
+    }
+}
+
+/// The features a move broke, as `[{feature, error}]`.
+fn broken_features(broken: &[(String, String)]) -> Vec<BrokenFeature> {
+    broken.iter().map(|(feature, error)| BrokenFeature { feature: feature.clone(), error: error.clone() }).collect()
+}
+
+/// The optional `active` of a move: whether the moved features end up before the history marker.
+fn active_param(p: &Value, cmd: &str) -> Result<Option<bool>> {
+    match p.get("active") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(active)) => Ok(Some(*active)),
+        Some(_) => Err(bad(cmd, "`active` must be true or false")),
+    }
+}
+
+/// With `active` given, put the history marker of the reordered `next` so the `moving` features
+/// are active (before it) or rolled back (behind it) while every other feature keeps its state, in
+/// the same step as the move. Refused when `position` puts them on the other side of it.
+fn place_marker(s: &Session, next: &mut solidcraft_doc::Document, moving: &[u64], active: Option<bool>, cmd: &str) -> Result<()> {
+    let Some(active) = active else { return Ok(()) };
+    let n = s.doc.features.len();
+    let was_active: std::collections::BTreeSet<u64> = s.doc.features.iter().take(s.doc.marker.unwrap_or(n)).map(|feature| feature.id).collect();
+    let stays_active = |id: u64| if moving.contains(&id) { active } else { was_active.contains(&id) };
+    let count = next.features.iter().filter(|feature| stays_active(feature.id)).count();
+    if !next.features.iter().take(count).all(|feature| stays_active(feature.id)) {
+        let side = if active { "before" } else { "behind" };
+        return Err(bad(cmd, format!("`position` is not {side} the history marker, as `active: {active}` asks")));
+    }
+    next.marker = (count < next.features.len()).then_some(count);
+    Ok(())
 }
 
 fn reorder_many(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.reorder_many";
     let ids = group_features(s, p, true, cmd)?;
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
-    let (next, ordered) = reorder_features(s, (*s.doc).clone(), &ids, slot, cmd)?;
+    let active = active_param(p, cmd)?;
+    let allow = allow_errors(p, cmd)?;
+    let (mut next, ordered, broken, checked) = reorder_features(s, (*s.doc).clone(), &ids, slot, allow, cmd)?;
+    let marker = next.marker;
+    place_marker(s, &mut next, &ordered, active, cmd)?;
+    // The checked results stand only when placing the marker left the design as they were made for.
+    let checked = checked.filter(|_| next.marker == marker);
     if next != *s.doc {
+        if let Some(model) = checked {
+            s.model = model;
+        }
         *s.doc_mut() = next;
     }
-    Ok(json!({"features": ordered, "position": slot.min(s.doc.features.len())}))
+    let position = slot.min(s.doc.features.len());
+    reply(cmd, TimelineReorderedMany { features: ordered, position, broken: allow.then(|| broken_features(&broken)), param_warnings: Vec::new() })
 }
 
+/// The reordered design, the moved features in order, and the model the move was checked on
+/// (none when the order didn't change), for the caller to keep (#6186).
 fn reorder_features(
     s: &Session,
     mut next: solidcraft_doc::Document,
     ids: &[u64],
     slot: usize,
+    allow_errors: bool,
     cmd: &str,
-) -> Result<(solidcraft_doc::Document, Vec<u64>)> {
+) -> Result<(solidcraft_doc::Document, Vec<u64>, Vec<(String, String)>, Option<solidcraft_doc::Model>)> {
     let n = next.features.len();
     let slot = slot.min(n);
     let selected: std::collections::BTreeSet<u64> = ids.iter().copied().collect();
@@ -1128,16 +1888,101 @@ fn reorder_features(
     next.features.splice(insert_at..insert_at, moving);
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
-    if !unchanged {
-        let mut after = solidcraft_doc::Model::new();
-        after.evaluate(&next);
-        let broken = newly_broken(&s.model, &after);
-        if !broken.is_empty() {
-            let list: Vec<String> = broken.iter().map(|(name, error)| format!("{name} ({error})")).collect();
-            return Err(bad(cmd, format!("moving the selected features there breaks {}", list.join("; "))));
-        }
+    if unchanged {
+        return Ok((next, ordered, Vec::new(), None));
     }
-    Ok((next, ordered))
+    // From the session's own results: the features before the first one moved are kept, not
+    // evaluated again from an empty model (#6186).
+    let mut after = s.model.clone();
+    after.evaluate(&next);
+    let broken = newly_broken(&s.model, &after);
+    if !broken.is_empty() && !allow_errors {
+        let list: Vec<String> = broken.iter().map(|(name, error)| format!("{name} ({error})")).collect();
+        return Err(bad(cmd, format!("moving the selected features there breaks {}", list.join("; "))));
+    }
+    Ok((next, ordered, broken, Some(after)))
+}
+
+/// The edge and stretch (`from`, `to`) a `sheet.flange` segment input's key names:
+/// `sheet.flange.edge<x bits>,<y bits>,<z bits>.stretch<from bits>.<to bits>.<field>`. The edge is
+/// the point the flange was made on, the physical edge itself, so reordering the `edges` list moves
+/// no name onto another edge's stretch.
+fn segment_span(key: &str) -> Option<([u64; 3], f64, f64)> {
+    let rest = key.strip_prefix("sheet.flange.edge")?;
+    let mut parts = rest.split('.');
+    let point: Vec<u64> = parts.next()?.split(',').map(|bits| bits.parse().ok()).collect::<Option<_>>()?;
+    let point: [u64; 3] = point.try_into().ok()?;
+    let from = f64::from_bits(parts.next()?.strip_prefix("stretch")?.parse::<u64>().ok()?);
+    let to = f64::from_bits(parts.next()?.parse::<u64>().ok()?);
+    Some((point, from, to))
+}
+
+/// The edge a `sheet.flange` edge-level input belongs to: the pick point its key carries, for the
+/// edge's own `angle` and `height`. A segment input carries its stretch as well, so `segment_span`
+/// reads those; this reads only the keys that name the edge itself.
+fn edge_point(key: &str) -> Option<[u64; 3]> {
+    let rest = key.strip_prefix("sheet.flange.edge")?;
+    let mut parts = rest.split('.');
+    let point: Vec<u64> = parts.next()?.split(',').map(|bits| bits.parse().ok()).collect::<Option<_>>()?;
+    let point: [u64; 3] = point.try_into().ok()?;
+    if !matches!(parts.next()?, "angle" | "height") || parts.next().is_some() {
+        return None;
+    }
+    Some(point)
+}
+
+/// The pick point a `sheet.flange` key carries, decoded from the bits it stores, and what the key
+/// names after that point: its field, and for a segment its stretch.
+fn key_point(key: &str) -> Option<([f64; 3], &str)> {
+    let rest = key.strip_prefix("sheet.flange.edge")?;
+    let (point, named) = rest.split_once('.')?;
+    let point: Vec<f64> = point.split(',').map(|bits| bits.parse::<u64>().ok().map(f64::from_bits)).collect::<Option<_>>()?;
+    let point: [f64; 3] = point.try_into().ok()?;
+    Some((point, named))
+}
+
+/// How far apart two pick points are.
+fn point_distance(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+}
+
+/// Whether two pick points, as the bits a key stores, are within `tol` of each other.
+fn points_within(a: [u64; 3], b: [u64; 3], tol: f64) -> bool {
+    point_distance(a.map(f64::from_bits), b.map(f64::from_bits)) <= tol
+}
+
+/// The tolerance within which two pick points name the same edge: the distance the document lets a
+/// pick miss an edge by and still select it (`appearance::pick_tolerance` of the sheet body the
+/// feature is on), or 1e-6 mm when the model does not hold that body yet. A pick point that moves
+/// by a hair is the same edge, so the names on it stay (#5927, #5928).
+fn edge_pick_tolerance(s: &Session, kind: &FeatureKind) -> f64 {
+    const NONE: f64 = 1e-6;
+    let FeatureKind::SheetFlange { body, edges, .. } = kind else { return NONE };
+    let state = s.model.state();
+    // The body named, else the sheet the first pick point lands on: the one evaluation takes the
+    // feature's body from (`sheet_for`).
+    let sheet = match body {
+        Some(name) => state.sheets.iter().find(|sh| sh.body == name.0),
+        None => edges.first().and_then(|e| {
+            state.sheets.iter().filter_map(|sh| sh.edge_at(e.point.0).map(|at| (sh, at.4))).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(sh, _)| sh)
+        }),
+    };
+    sheet.and_then(|sh| state.body(&sh.body)).map_or(NONE, solidcraft_doc::appearance::pick_tolerance)
+}
+
+/// Whether an old key and a new key name the same input: the same key, or the same field (and, for
+/// a segment, the same stretch) on pick points within `tol` of each other. The keys keep the bits
+/// of their point, so a point that moved by a hair no longer matches as a string; it is the same
+/// edge all the same (#5927, #5928).
+fn keys_match(old_key: &str, key: &str, tol: f64) -> bool {
+    if old_key == key {
+        return true;
+    }
+    match (key_point(old_key), key_point(key)) {
+        (Some((a, named)), Some((b, named_too))) => named == named_too && point_distance(a, b) <= tol,
+        _ => false,
+    }
 }
 
 fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
@@ -1160,6 +2005,53 @@ fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
             solidcraft_doc::FilletStyle::Constant | solidcraft_doc::FilletStyle::Chord | solidcraft_doc::FilletStyle::Curvature => {}
         }
     }
+    // Every segment's angle and height has the same label ("Segment angle", "Segment height"), so
+    // a name could only be matched by position: inserting, deleting or reordering stretches or
+    // edges moved a named height onto another stretch (#5927, #5928). Each segment input is keyed
+    // by the edge it is on (the point the flange was made on, the physical edge) and by the stretch
+    // it describes (its `from` and `to`, exactly), so a name stays on its own stretch however the
+    // list is reordered. An edge's own angle and height are keyed by the edge's point for the same
+    // reason: reordering the edges moves no name onto another edge. The order is the walk's: an
+    // edge's angle before its height before its segments, edges in order, and only the expressions
+    // that carry a value.
+    if let FeatureKind::SheetFlange { edges, .. } = kind {
+        let mut edge_keys = Vec::new();
+        let mut segment_keys = Vec::new();
+        for e in edges {
+            let point = format!("{},{},{}", e.point.0.x.to_bits(), e.point.0.y.to_bits(), e.point.0.z.to_bits());
+            if e.angle.is_some() {
+                edge_keys.push(format!("sheet.flange.edge{point}.angle"));
+            }
+            if e.height.is_some() {
+                edge_keys.push(format!("sheet.flange.edge{point}.height"));
+            }
+            for s in &e.segments {
+                let stretch = format!("sheet.flange.edge{point}.stretch{}.{}", s.from.to_bits(), s.to.to_bits());
+                if s.angle.is_some() {
+                    segment_keys.push(format!("{stretch}.angle"));
+                }
+                if s.height.is_some() {
+                    segment_keys.push(format!("{stretch}.height"));
+                }
+            }
+        }
+        let mut next = edge_keys.into_iter();
+        for (key, _) in keys.iter_mut() {
+            if (key == "Edge angle" || key == "Edge height")
+                && let Some(unique) = next.next()
+            {
+                *key = unique;
+            }
+        }
+        let mut next = segment_keys.into_iter();
+        for (key, _) in keys.iter_mut() {
+            if (key == "Segment angle" || key == "Segment height")
+                && let Some(unique) = next.next()
+            {
+                *key = unique;
+            }
+        }
+    }
     keys
 }
 
@@ -1173,6 +2065,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let constructor = super::features::COMMANDS
         .iter()
         .chain(super::features_more::COMMANDS)
+        .chain(super::cell_grid::COMMANDS)
         .chain(super::construct::COMMANDS)
         .chain(super::surface::COMMANDS)
         .chain(super::surface_boundary::COMMANDS)
@@ -1183,6 +2076,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "sheet.hem"
                 | "sheet.perforate"
                 | "sheet.fold"
+                | "sheet.path_flange"
                 | "sheet.unfold"
                 | "sheet.refold"
                 | "sheet.convert"
@@ -1190,6 +2084,8 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "plastic.lip"
                 | "plastic.snap_fit"
                 | "plastic.rest"
+                | "frame.end_cap"
+                | "frame.member"
         );
     if !constructor {
         return Err(bad(cmd, format!("`{cid}` does not make a feature")));
@@ -1201,7 +2097,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && matches!(cid, "solid.extrude" | "surface.extrude")
         && let Some(parameters) = params.as_object_mut()
     {
-        let convention = if cid == "surface.extrude" || extent.direction == solidcraft_doc::Direction::Symmetric {
+        let convention = if extent.direction == solidcraft_doc::Direction::Symmetric {
             extent.convention
         } else {
             solidcraft_doc::ExtrudeConvention::TotalDistance
@@ -1214,6 +2110,37 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("convention").or_insert_with(|| json!(convention));
     }
+    if let FeatureKind::Thread { continuous_flanks, .. } = &old.kind
+        && cid == "solid.thread"
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("continuous_flanks").or_insert_with(|| json!(continuous_flanks));
+    }
+    // A thread saved before holes were sized by their nominal diameter keeps the size it had
+    // when it is edited without naming one.
+    if let FeatureKind::Thread { old_auto_size: true, .. } = &old.kind
+        && cid == "solid.thread"
+        && let Some(parameters) = params.as_object_mut()
+        && parameters.get("designation").is_none_or(|d| d.is_null() || d.as_str().is_some_and(|d| d.trim().is_empty()))
+    {
+        parameters.entry("old_auto_size").or_insert_with(|| json!(true));
+    }
+    // A hole saved before a sketch on a derived plane started its holes at that plane keeps
+    // starting at the surface when it is edited (#11538).
+    if let FeatureKind::Hole { old_surface_start: true, .. } = &old.kind
+        && cid == "solid.hole"
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("old_surface_start").or_insert_with(|| json!(true));
+    }
+    // Members keep their names through an edit, unless it gives them another name.
+    if let FeatureKind::FrameMember { names, body_name, .. } = &old.kind
+        && cid == "frame.member"
+        && let Some(parameters) = params.as_object_mut()
+        && parameters.get("body_name").and_then(Value::as_str) == body_name.as_deref()
+    {
+        parameters.entry("names").or_insert_with(|| json!(names));
+    }
     if !old.participants.is_empty()
         && let Some(parameters) = params.as_object_mut()
     {
@@ -1222,7 +2149,17 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // Run the constructor on a scratch session: failed edits must not disturb sketch mode,
     // selections, component authoring state or the original feature's definition.
     let mut trial = s.scratch();
+    // What the trial computes is kept for the session's own evaluation at the end: the cache may
+    // hold only the last few states of a large design, which would be computed twice.
+    let kept = s.model.kept();
+    let shared = kept.clone().unwrap_or_default();
+    trial.model.keep(Some(shared.clone()));
     trial.active_component = old.component;
+    if let FeatureKind::FrameEndCap { ends, .. } = &old.kind
+        && let Some(anchor) = ends.first().and_then(|e| super::sketch::face::anchor(&e.plane))
+    {
+        trial.active_occurrence_path = (!anchor.author_path.is_empty()).then(|| anchor.author_path.clone());
+    }
     if let FeatureKind::Emboss { face: Some(face), .. } = &old.kind {
         trial.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
     }
@@ -1236,6 +2173,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     trial.doc_mut().marker = Some(idx + 1);
     trial.refresh();
+    // The edited feature keeps its name. Its temporary replacement needs a fresh one while
+    // the original remains in the trial as a placeholder (including construction planes).
+    if let Some(parameters) = params.as_object_mut() {
+        parameters.remove("name");
+    }
     let r = spec.run_nested(&mut trial, &params)?;
     let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
@@ -1247,35 +2189,196 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         *after = before.clone();
     }
+    // A perforation keeps its outline through an edit that names no sketch (the Perforate dialog has no outline).
+    if let (FeatureKind::SheetPerforate { sketch: Some(before), profiles: picked, .. }, FeatureKind::SheetPerforate { sketch, profiles, .. }) =
+        (&old.kind, &mut new.kind)
+        && sketch.is_none()
+        && params.get("sketch").is_none()
+    {
+        *sketch = Some(*before);
+        *profiles = picked.clone();
+    }
+    // An old design's Join To Object keeps the body it runs to apart through an edit (#8151).
+    if let (FeatureKind::Extrude { extent: before, .. }, FeatureKind::Extrude { extent: after, .. }) = (&old.kind, &mut new.kind)
+        && after.to.is_some()
+    {
+        after.to_body_apart = before.to_body_apart;
+    }
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });
     if std::mem::discriminant(&new.kind) != std::mem::discriminant(&old.kind) && !(boundary(&new.kind) && boundary(&old.kind)) {
         return Err(bad(cmd, format!("{} is not a {} feature", old.name, cid)));
     }
+    // The trial still holds the old feature, so a plane offset from its own name was made there,
+    // and once swapped in it would be built on itself (#3567).
+    if new.kind.names_feature(old.id, &old.name) {
+        return Err(bad(cmd, format!("{} can't be built on itself: pick another plane or face", old.name)));
+    }
     // Optional inputs can move other inputs' positions (e.g. Distance 2 goes before Taper).
     // Keep each existing model parameter attached to its semantic input, rather than its
     // old index. Constructor-assigned names for new inputs cannot reuse the old dimensions.
-    let mut old_inputs: Vec<_> = input_keys(&old.kind).into_iter().zip(&old.param_names).collect();
-    let param_names: Vec<String> = input_keys(&new.kind)
-        .iter()
-        .enumerate()
-        .map(|(i, (label, kind))| {
-            if let Some(k) = old_inputs.iter().position(|((old_label, old_kind), _)| old_label == label && old_kind == kind) {
-                old_inputs.remove(k).1.clone()
-            } else {
-                new.param_names.get(i).cloned().unwrap_or_default()
-            }
-        })
+    // A key names the input itself where its label doesn't (a segment's stretch, a fillet's
+    // control); it is matched first, so inserting or reordering stretches moves no name onto
+    // another stretch. An input whose key changed (a stretch's fractions edited) is matched to the
+    // material it still is, below: the value it still has first, then the span it still covers.
+    let new_inputs = new.kind.inputs();
+    let new_labels: Vec<String> = new_inputs.iter().map(|(label, _, _)| label.to_string()).collect();
+    let mut old_inputs: Vec<(String, String, solidcraft_doc::expr::Kind, String, String)> = input_keys(&old.kind)
+        .into_iter()
+        .zip(old.kind.inputs())
+        .zip(&old.param_names)
+        .map(|(((key, kind), (label, expression, _)), name)| (key, label.to_string(), kind, name.clone(), expression))
         .collect();
+    let keys = input_keys(&new.kind);
+    // Two pick points within the document's own pick tolerance name the same edge: a pick that
+    // moved by a hair keeps the names on its edge and on its stretches, and the expressions that
+    // read them (#5927, #5928). A feature whose body the model does not hold yet falls back to
+    // 1e-6 mm.
+    let tol = edge_pick_tolerance(s, &old.kind);
+    let mut param_names: Vec<String> = vec![String::new(); keys.len()];
+    for (i, (key, kind)) in keys.iter().enumerate() {
+        // The old input naming the same input with the nearest point: the exact key, or the same
+        // field (and stretch) on a point within the tolerance.
+        let mut best: Option<(usize, f64)> = None;
+        for (k, (old_key, _, old_kind, _, _)) in old_inputs.iter().enumerate() {
+            if old_kind != kind || !keys_match(old_key, key, tol) {
+                continue;
+            }
+            let distance = match (key_point(old_key), key_point(key)) {
+                (Some((a, _)), Some((b, _))) => point_distance(a, b),
+                _ => 0.0,
+            };
+            if best.is_none_or(|(_, nearest)| distance < nearest) {
+                best = Some((k, distance));
+            }
+        }
+        if let Some((k, _)) = best {
+            param_names[i] = old_inputs.remove(k).3.clone();
+        }
+    }
+    // A name follows the material it was given to, not the order of the list. When a segment input's
+    // key misses (a stretch deleted or merged, so the survivor's fractions are new), it is matched to
+    // the old input of the same label and kind that carries the same expression first: the survivor
+    // still has the value it had. Only then does the greatest span overlap on the same edge carry a
+    // name. A deleted stretch's name never lands on a stretch whose value came from elsewhere
+    // (#5927, #5928). An edge's own angle or height is keyed by its pick point and matched by that
+    // point within the tolerance, so an edge deleted and another inserted in one redefine move no
+    // name across.
+    for (i, (key, kind)) in keys.iter().enumerate() {
+        if !param_names[i].is_empty() {
+            continue;
+        }
+        if let Some((point, from, to)) = segment_span(key) {
+            let mut best: Option<(usize, bool, f64)> = None;
+            for (k, (old_key, old_label, old_kind, _, old_expression)) in old_inputs.iter().enumerate() {
+                if *old_label != new_labels[i] || old_kind != kind {
+                    continue;
+                }
+                let Some((old_point, old_from, old_to)) = segment_span(old_key) else { continue };
+                // The stretch's edge is its pick point, within the same tolerance: a pick that moved
+                // by a hair keeps the stretch's name (#5927, #5928).
+                if !points_within(old_point, point, tol) {
+                    continue;
+                }
+                let same_value = *old_expression == new_inputs[i].1;
+                let overlap = (old_to.min(to) - old_from.max(from)).max(0.0);
+                if !same_value && overlap <= 1e-9 {
+                    continue;
+                }
+                let better = match best {
+                    None => true,
+                    Some((_, best_value, best_overlap)) => (same_value && !best_value) || (same_value == best_value && overlap > best_overlap),
+                };
+                if better {
+                    best = Some((k, same_value, overlap));
+                }
+            }
+            if let Some((k, _, _)) = best {
+                param_names[i] = old_inputs.remove(k).3.clone();
+            }
+            // No old input of this edge carries the stretch's value or overlaps it: the
+            // constructor's own name stays, rather than another stretch's.
+            continue;
+        }
+        if let Some(point) = edge_point(key) {
+            // An edge's own angle or height is keyed by the edge's pick point, and the key match
+            // above took a point within the pick tolerance. When no old point was that close, the
+            // nearest edge point on this feature still names the edge the pick moved to, within a
+            // sane bound: twice the tolerance, and a hundredth of a millimetre at least, for a
+            // feature whose body the model does not hold yet. Beyond that bound the nearest point is
+            // not the edge that was picked, and a newly inserted edge keeps the constructor's name:
+            // a deleted edge's name never lands on it (#5927, #5928).
+            let bound = (tol * 2.0).max(1e-2);
+            let mut best: Option<(usize, f64)> = None;
+            for (k, (old_key, old_label, old_kind, _, _)) in old_inputs.iter().enumerate() {
+                if *old_label != new_labels[i] || old_kind != kind || segment_span(old_key).is_some() {
+                    continue;
+                }
+                let Some(old_point) = edge_point(old_key) else { continue };
+                let distance = point_distance(old_point.map(f64::from_bits), point.map(f64::from_bits));
+                if distance > bound || best.is_some_and(|(_, nearest)| distance >= nearest) {
+                    continue;
+                }
+                best = Some((k, distance));
+            }
+            if let Some((k, _)) = best {
+                param_names[i] = old_inputs.remove(k).3.clone();
+            }
+            continue;
+        }
+        // Only inputs whose key names no point are left: a label and a kind are all they carry, so
+        // one of them is matched by those alone.
+        if let Some(k) = old_inputs.iter().position(|(old_key, old_label, old_kind, _, _)| {
+            *old_label == new_labels[i] && old_kind == kind && segment_span(old_key).is_none() && edge_point(old_key).is_none()
+        }) {
+            param_names[i] = old_inputs.remove(k).3.clone();
+        }
+    }
+    for (i, name) in param_names.iter_mut().enumerate() {
+        if name.is_empty() {
+            *name = new.param_names.get(i).cloned().unwrap_or_default();
+        }
+    }
     trial.doc_mut().features.retain(|f| f.id != made);
+    // Made right after the edited feature, the trial joined the timeline folder holding both:
+    // it leaves it too, or its id stays there, and is given out again below (#9373).
+    for group in &mut trial.doc_mut().timeline_groups {
+        group.features.retain(|f| *f != made);
+    }
     let added = trial.doc.features.len().saturating_sub(s.doc.features.len());
     trial.doc_mut().marker = s.doc.marker.map(|marker| if marker > idx { marker.saturating_add(added) } else { marker });
     if made == s.doc.next_id && trial.doc.next_id == made.saturating_add(1) {
         trial.doc_mut().next_id = s.doc.next_id;
     }
+    // A cap's stored names go by end: each end kept keeps its own (the same member line and the
+    // same face), a new end has none yet, and a removed end's name is kept back as a renamed
+    // body's is (#4957), so no other cap is given it and what was set on it stays behind.
+    let cap_names = match (&old.kind, &new.kind) {
+        (FeatureKind::FrameEndCap { ends: before, .. }, FeatureKind::FrameEndCap { ends: after, .. }) => {
+            let key = |e: &solidcraft_doc::end_cap::End| (e.member.clone(), super::sketch::face::anchor(&e.plane).map(|a| a.target.key()));
+            let names = after
+                .iter()
+                .map(|e| before.iter().position(|b| key(b) == key(e)).and_then(|i| old.body_names.get(i)).cloned().unwrap_or_default())
+                .collect::<Vec<_>>();
+            let removed = before
+                .iter()
+                .zip(&old.body_names)
+                .filter(|(b, n)| !n.is_empty() && !after.iter().any(|e| key(e) == key(b)))
+                .map(|(_, n)| n.clone())
+                .collect::<Vec<_>>();
+            Some((names, removed))
+        }
+        _ => None,
+    };
+    if let Some((_, removed)) = &cap_names {
+        trial.doc_mut().reserved_body_names.extend(removed.iter().cloned());
+    }
     if let Some(slot) = trial.doc_mut().feature_mut(id) {
         slot.suppressed = old.suppressed;
+        if let Some((names, _)) = cap_names {
+            slot.body_names = names;
+        }
         slot.kind = new.kind;
         slot.edge_refs = new.edge_refs;
         slot.edge_names = new.edge_names;
@@ -1291,6 +2394,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(e) = trial.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
+    // What this edit rebuilt: the trial computed the edited feature and the features after it. The
+    // session's evaluation below only takes those results from what the trial kept, so its own
+    // counters read as "nothing was rebuilt" (#5694).
+    let rebuilt = trial.model.last_recomputed;
+    let reused = trial.model.last_restored;
     let original_ids: std::collections::BTreeSet<u64> = s.doc.features.iter().map(|feature| feature.id).collect();
     let added_ids: std::collections::BTreeSet<u64> =
         trial.doc.features.iter().filter(|feature| !original_ids.contains(&feature.id)).map(|feature| feature.id).collect();
@@ -1326,11 +2434,34 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.pending_moves = trial.pending_moves;
     s.doc = trial.doc;
+    s.model.keep(Some(shared));
     s.refresh();
+    s.model.keep(kept);
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
-    Ok(json!({"feature": id, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored}))
+    // A feature behind the history marker is not built, so the edit changes nothing in the model
+    // yet: the reply says so, or the edit would look as if it had silently failed (#8100). Its
+    // warning is the one the constructor met building it in the trial, at its place.
+    let rolled_back = s.doc.marker.is_some_and(|marker| s.doc.feature_index(id).is_some_and(|index| index >= marker));
+    let warning =
+        if rolled_back { r.get("warning").and_then(Value::as_str).map(str::to_string) } else { s.model.result(id).and_then(|r| r.warning.clone()) };
+    // Report the trial's rebuild, plus anything the session still had to compute itself (a kept
+    // result its budget dropped); `s.model`'s own counters would only report the reuse (#5694).
+    let note = rolled_back.then(|| {
+        let name = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+        format!("{name} is after the history marker, so it is not built: move the marker past it to build it")
+    });
+    let out = TimelineRedefined {
+        feature: id,
+        recomputed: rebuilt + s.model.last_recomputed,
+        restored: reused,
+        rolled_back,
+        warning,
+        note,
+        param_warnings: Vec::new(),
+    };
+    reply(cmd, out)
 }
 
 fn dependents(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1344,8 +2475,8 @@ fn dependents(s: &mut Session, p: &Value) -> Result<Value> {
     let mut after = s.model.clone();
     after.evaluate(&next);
     let names = |ids: &[u64]| -> Vec<String> { ids.iter().filter(|x| **x != id).filter_map(|x| s.doc.feature(*x).map(|f| f.name.clone())).collect() };
-    let broken: Vec<String> = newly_broken(&s.model, &after).into_iter().map(|(n, _)| n).collect();
-    Ok(json!({"deleted_with_it": names(&gone), "would_fail": broken}))
+    let broken: Vec<String> = newly_broken_in_history(&s.doc, &s.model, &next, &after).into_iter().map(|(n, _)| n).collect();
+    reply(cmd, TimelineDependentsResult { deleted_with_it: names(&gone), would_fail: broken, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

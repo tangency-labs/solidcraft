@@ -1,6 +1,7 @@
 use crate::Session;
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::MeshGeom;
 
 fn run(s: &mut Session, command: &str, p: Value) -> Value {
     s.execute(command, &p).unwrap()
@@ -27,6 +28,24 @@ fn rail_value(s: &Session) -> f64 {
 }
 
 #[test]
+fn joint_pose_contact_reuses_reference_geometry_across_new_placements() {
+    let mut s = slider();
+    // Measure the swept-contact geometry factory, separately from other joint work.
+    super::ContactGeometry::new(&s).unwrap();
+    for value in [11., 12., 13., 14.] {
+        let result = run(&mut s, "joint.drive", json!({"joint":"Rail","value":value}));
+        let (_, work) = crate::kernel::profile::capture(|| super::ContactGeometry::new(&s).unwrap());
+        assert!(result["stopped_by_contact"].is_null(), "{result}");
+        assert!((rail_value(&s) - value).abs() < 1e-8);
+        assert_eq!(work.tessellate_ms, 0., "unchanged contact bodies were tessellated for slider value {value}");
+    }
+    // Reusing geometry must still stop a genuine collision, including an endpoint beyond it.
+    let result = run(&mut s, "joint.drive", json!({"joint":"Rail","value":-30}));
+    assert!(result["stopped_by_contact"].is_object(), "{result}");
+    assert!(rail_value(&s).abs() < 2e-3);
+}
+
+#[test]
 fn slider_cannot_tunnel_to_a_collision_free_endpoint() {
     let mut s = slider();
     let result = run(&mut s, "joint.drive", json!({"joint": "Rail", "value": -30}));
@@ -39,12 +58,34 @@ fn slider_cannot_tunnel_to_a_collision_free_endpoint() {
     assert!((rail_value(&s) + 100000.0).abs() < 1e-6, "disabled contact skips sweep budget");
 }
 
+/// Each drive with contact on meshed every body in a contact set again: a body that did not
+/// change keeps its contact mesh across drives (and scratch copies), a changed one is meshed anew.
+#[test]
+fn contact_meshes_are_made_once_per_body() {
+    let mut s = slider();
+    let meshes = |s: &Session| super::ContactGeometry::new(s).unwrap().bodies.iter().map(|b| b.mesh.clone()).collect::<Vec<_>>();
+    let first = meshes(&s);
+    assert_eq!(first.len(), 2);
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 5}));
+    let scratch = s.scratch();
+    for again in [meshes(&s), meshes(&scratch)] {
+        assert!(first.iter().zip(&again).all(|(a, b)| std::sync::Arc::ptr_eq(a, b)), "the same meshes, not tessellated again");
+    }
+    // A body that changed is meshed for what it is now.
+    run(&mut s, "component.activate", json!({"component": "B"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [24, 4, 10], "operation": "join"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let changed = meshes(&s);
+    assert!(changed.iter().zip(&first).any(|(a, b)| !std::sync::Arc::ptr_eq(a, b)));
+    assert!(changed.iter().map(|m| m.bounds().max.z).fold(0.0, f64::max) > 11.0, "the joined box is in the contact mesh");
+}
+
 #[test]
 fn revolute_cannot_cross_a_blocker_between_clear_endpoints() {
     let mut s = Session::default();
     for (name, corner) in [("Arm", [20, -2, -2]), ("Blocker", [-2, 20, -2])] {
         run(&mut s, "component.activate", json!({"component": 0}));
-        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "component.create", json!({"name": name, "grounded": false}));
         run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": corner}));
     }
     run(
@@ -127,8 +168,11 @@ fn thin_tilted_plates_cannot_cross_between_axis_bound_samples() {
     assert!(value > -2.0 && value < -1.9, "{value}");
 }
 
+/// A slider carrying a sphere or a box with a rounded edge stops where it meets a block 5 mm
+/// away (the sphere's and the box's near sides at x = 15, the block's at 10): ordinary curved
+/// bodies sweep within the contact sampling budget, however their faces are meshed.
 #[test]
-fn ordinary_curved_bodies_keep_a_practical_sampling_step() {
+fn ordinary_curved_bodies_stop_at_their_contact_within_the_sampling_budget() {
     for curved in ["sphere", "fillet"] {
         let mut s = Session::default();
         run(&mut s, "component.create", json!({"name": "Blocker"}));
@@ -147,8 +191,6 @@ fn ordinary_curved_bodies_keep_a_practical_sampling_step() {
             json!({"type": "slider", "a": 0, "b": "Curved", "at": {"occurrence": 0, "point": [0,0,0], "z": [1,0,0]}, "name": "Slide"}),
         );
         run(&mut s, "contact.create", json!({"occurrences": ["Blocker", "Curved"]}));
-        let geometry = super::ContactGeometry::new(&s).unwrap();
-        assert!(geometry.step > 1.0, "{curved}: tessellation must not force tiny steps: {}", geometry.step);
         let result = run(&mut s, "joint.drive", json!({"joint": "Slide", "value": -30}));
         assert!(result["stopped_by_contact"].is_object(), "{curved}: {result}");
         let value = s.doc.assembly.joints.iter().find(|j| j.name == "Slide").unwrap().values[0];

@@ -1,8 +1,10 @@
 # Export the current view as DXF
 
 Choose **File → Export Current View as DXF…**, choose whether to omit hidden edges or
-export them as dashed lines, set **Curve tolerance**, then choose **Export DXF…** and a
-destination. Both settings are remembered. The Japanese menu is
+export them as dashed lines, choose the drawing's **Zero point** — **Camera target** (the
+point the camera looks at) or **Model origin** (the model's origin as seen from the camera,
+for machining from a part corner) — set **Curve tolerance**, then choose **Export DXF…** and
+a destination. All three settings are remembered. The Japanese menu is
 **ファイル → 現在の表示をDXFでエクスポート…**.
 
 On desktop, the export runs on a background worker while the window continues repainting
@@ -21,9 +23,18 @@ that atomic write starts, it finishes; a late Cancel reports the completed save.
 The drawing uses the camera when Export is pressed, including roll, the world's up axis
 and perspective. Only shown bodies are exported, at their current component/occurrence
 placements. Hidden bodies neither draw nor hide other bodies. The complete projected
-geometry is exported, including geometry beyond the viewport's edges. Grid, sketches,
-dimensions, selection highlights and other overlays are excluded. Turn off section analysis
+geometry is exported, including geometry beyond the viewport's edges. Grid, dimensions,
+constraints, selection highlights and other overlays are excluded. Turn off section analysis
 before exporting.
+
+Sketches the viewport shows are exported too, so a design with only a sketch can be
+exported. Only profile curves are included: drawn curves, text outlines and drawn 3D-sketch
+curves; construction geometry, centerlines, projected references and points are not. Sketch
+curves go on their own `SKETCH` layer, each curve as one `LINE` or `LWPOLYLINE` (arcs,
+circles and splines as straight segments at the curve tolerance). Finished sketches are
+hidden behind bodies like body edges (dashed on `HIDDEN` when hidden edges are exported); the
+sketch being edited is drawn on top, as in the viewport. The export is refused only when
+there is neither a shown body nor a shown sketch curve.
 
 Coordinates are 2D, Z=0, in millimetres. Orthographic views retain 1:1 dimensions in the
 view plane. Perspective views retain foreshortening, projected onto the plane through the
@@ -33,8 +44,8 @@ model-space chord tolerance of 0.01 mm. The setting accepts 0.0001–1 mm; small
 produce finer curves and generally need more time and memory. This is not an exact analytic
 curve export or a tolerance guarantee for the original imported surfaces.
 
-The AutoCAD 2000 ASCII DXF contains `VISIBLE` (continuous) and, when requested, `HIDDEN`
-(2 mm dashes / 1 mm gaps) layers. Hidden curves use connected `LWPOLYLINE` entities with
+The AutoCAD 2000 ASCII DXF contains `VISIBLE` (continuous), `SKETCH` (when a sketch is
+shown) and, when requested, `HIDDEN` (2 mm dashes / 1 mm gaps) layers. Hidden curves use connected `LWPOLYLINE` entities with
 continuous linetype generation so the pattern does not restart on each chord. The pattern
 is embedded in the file. The polyline flags follow the
 [Autodesk DXF reference](https://help.autodesk.com/cloudhelp/2017/ENU/AutoCAD-DXF/files/GUID-748FC305-F3F2-4F74-825A-61F04D757A50.htm).
@@ -54,8 +65,19 @@ the browser runs serially. Export memory, candidate lines, output lines and tota
 work remain bounded, and exceeding a budget returns an error without writing a partial drawing.
 
 Programmatic callers use `file.export_view_dxf` with `camera: Camera`, `hidden: "omit"` or
-`"dashed"`, optional `tolerance` (0.0001–1 mm) and optional `path`. Without `path`, the
+`"dashed"`, optional `tolerance` (0.0001–1 mm), optional `zero`, optional `curves` and optional `path`. The drawing's
+0,0 is the point the camera looks at (`zero: "target"`, the default); with `zero: "origin"` it
+is the model's origin as seen from the camera, for machining from a part corner. Without `path`, the
 command returns the DXF text. The command does not modify the design or its undo history.
+
+The view's curved edges are built from short straight lines, so by default a round hole is written
+as a ring of `LINE` entities. With `curves: "arcs"`, each ring of visible lines that lies on one
+circle is written as a single `CIRCLE`, and each run of lines that lies on one circle is written as
+an `ARC`, so a milling or CAD program can pick them as circles. A ring only counts as a circle when
+its lines sag from the circle by no more than the `tolerance` (twice, for rounding); a polygon with
+few sides, such as a hexagon, stays as lines. Points closer than a hundredth of the `tolerance` are
+treated as one point, so the top and bottom edges of a hole are written once. Dashed hidden lines
+and every other line stay as they are. The default is `curves: "lines"`.
 The result also includes `stats`: placed body and shared mesh counts, source triangle count,
 retained mesh bytes, worker limit, candidate segment count, occlusion work, and preparation,
 projection and occlusion times in milliseconds. These timings exclude STEP import and DXF

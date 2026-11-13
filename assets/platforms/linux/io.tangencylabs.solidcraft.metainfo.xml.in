@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata (software centres, Flathub). Template: package.sh substitutes @VERSION@
+     and @DATE@ from Cargo.toml and the build date. -->
+<component type="desktop-application">
+  <id>io.tangencylabs.solidcraft</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <name>SolidCraft</name>
+  <summary>Independent parametric 3D CAD</summary>
+  <developer id="io.github.bherbruck">
+    <name>SolidCraft contributors</name>
+  </developer>
+  <description>
+    <p>
+      SolidCraft is an open-source parametric 3D CAD application written in Rust. Sketch on a
+      plane, constrain and dimension the sketch, turn profiles into solids on a feature
+      timeline, and change a parameter to watch the timeline rebuild.
+    </p>
+    <ul>
+      <li>Sketches with a constraint solver and parameter-driven dimensions</li>
+      <li>Extrude, revolve, sweep, loft, fillet, chamfer, shell, holes and patterns</li>
+      <li>Components and joints, sheet metal, and a plastic-enclosure subset</li>
+      <li>STEP and IGES import and export; 3MF, STL and OBJ</li>
+      <li>Every action is a command, scriptable from a CLI, a JSON control channel and an MCP server</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.tangencylabs.solidcraft.desktop</launchable>
+  <icon type="stock">io.tangencylabs.solidcraft</icon>
+  <url type="homepage">https://docs.solidcraft.io/</url>
+  <url type="bugtracker">https://github.com/bherbruck/solidcraft/issues</url>
+  <url type="help">https://docs.solidcraft.io/</url>
+  <categories>
+    <category>Graphics</category>
+    <category>3DGraphics</category>
+    <category>Engineering</category>
+  </categories>
+  <keywords>
+    <keyword>cad</keyword>
+    <keyword>parametric</keyword>
+    <keyword>step</keyword>
+  </keywords>
+  <screenshots>
+    <screenshot type="default">
+      <caption>A sample part with its sketches and feature timeline</caption>
+      <image>https://raw.githubusercontent.com/bherbruck/solidcraft/main/docs/screenshots/sample-plate.png</image>
+    </screenshot>
+  </screenshots>
+  <requires>
+    <display_length compare="ge">760</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <provides>
+    <binary>solidcraft</binary>
+    <binary>solidcraft-cli</binary>
+    <mediatype>application/x-solidcraft</mediatype>
+    <!-- The app and desktop ids of earlier releases (docs/compatibility.md). -->
+    <id>ai.storyteller.solidcraft</id>
+    <id>ai.storyteller.solidcraft.desktop</id>
+    <id>ai.storyteller.solvecraft.desktop</id>
+  </provides>
+  <!-- Earlier app ids (docs/compatibility.md): ai.storyteller.solidcraft from 0.8 until the move
+       to Tangency Labs, ai.storyteller.solvecraft before 0.8. -->
+  <replaces>
+    <id>ai.storyteller.solidcraft</id>
+    <id>ai.storyteller.solvecraft</id>
+  </replaces>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

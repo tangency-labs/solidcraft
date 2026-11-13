@@ -1,56 +1,108 @@
 //! Rib, Web, Emboss, Replace Face, Align and Remove.
 
 use serde_json::Value;
-use solidcraft_doc::FeatureKind;
+use solidcore_record::Vec3;
 use solidcraft_doc::expr::Kind;
+use solidcraft_doc::{AlignFrame, FeatureKind};
 use solidcraft_doc::{BodyName, SketchId};
 use solidcraft_doc::{Dir, FacePick, Position};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use super::features::{
     add_feature, axis_dir_param, check_expr, feature_sketch, length_operands, plane_param, point_param, profiles, typed_length_unit,
 };
 use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
+use crate::schema::align::AlignParams;
+use crate::schema::features::FeatureResult;
+use crate::schema::features_more::{BoundaryFillParams, CoilParams, EmbossParams, RemoveParams, ReplaceFaceParams, RibParams};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
+/// Rib and Web take the same keys.
+const RIB_CONTRACT: TypedContract<RibParams> = TypedContract::new();
+const ALIGN_CONTRACT: TypedContract<AlignParams> = TypedContract::new();
+const REMOVE_CONTRACT: TypedContract<RemoveParams> = TypedContract::new();
+const BOUNDARY_FILL_CONTRACT: TypedContract<BoundaryFillParams> = TypedContract::new();
+const COIL_CONTRACT: TypedContract<CoilParams> = TypedContract::new();
+const EMBOSS_CONTRACT: TypedContract<EmbossParams> = TypedContract::new();
+const REPLACE_FACE_CONTRACT: TypedContract<ReplaceFaceParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("solid.boundary_fill", "Boundary Fill", boundary_fill).at("SOLID", "CREATE").icon("boundary_fill").params(
-        "tools: [bodies]; cells: [[x,y,z] a point inside each cell to fill (a cell: inside some tools, outside the rest)]; operation?: new|join|cut|intersect; remove_tools?: bool",
-    ),
-    CommandSpec::new("solid.coil", "Coil", coil).at("SOLID", "CREATE").icon("coil").params(
+    CommandSpec::new("solid.boundary_fill", "Boundary Fill", crate::checked!("solid.boundary_fill", boundary_fill))
+        .at("SOLID", "CREATE")
+        .icon("boundary_fill")
+        .contract(&BOUNDARY_FILL_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "tools: [bodies]; cells: [[x,y,z] a point inside each cell to fill (a cell: inside some tools, outside the rest)]; operation?: new|join|cut|intersect; remove_tools?: bool",
+        ),
+    CommandSpec::new("solid.coil", "Coil", crate::checked!("solid.coil", coil)).at("SOLID", "CREATE").icon("coil").contract(&COIL_CONTRACT).output(output_schema_for::<FeatureResult>).params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
-         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; operation?, targets?, name?, body_name?",
+         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; \
+         sketch? (a sketch; its plane is the section plane, so its placement sets the radius and start phase), profiles? (default: all; one closed profile without holes); \
+         operation?, targets?, name?, body_name?",
     ),
-    CommandSpec::new("solid.rib", "Rib", rib)
+    CommandSpec::new("solid.rib", "Rib", crate::checked!("solid.rib", rib))
         .at("SOLID", "CREATE")
         .icon("rib")
+        .contract(&RIB_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sketch, curves: [open curve ids, in order]; thickness (across the sketch plane, or across the curves when normal); depth? (default: to the next face); flip?: bool (fill to the other side); direction?: in_plane|normal (grow across the sketch plane, the default, or along its normal)"),
-    CommandSpec::new("solid.web", "Web", web)
+    CommandSpec::new("solid.web", "Web", crate::checked!("solid.web", web))
         .at("SOLID", "CREATE")
         .icon("web")
+        .contract(&RIB_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sketch, curves: [open curve ids] (one wall each); thickness; depth? (default: to the next face); flip?: bool; direction?: in_plane|normal"),
-    CommandSpec::new("solid.emboss", "Emboss", emboss)
+    CommandSpec::new("solid.emboss", "Emboss", crate::checked!("solid.emboss", emboss))
         .at("SOLID", "CREATE")
         .icon("emboss")
+        .contract(&EMBOSS_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] selecting a planar or complete exterior cylindrical wall (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
-    CommandSpec::new("solid.replace_face", "Replace Face", replace_face)
+    CommandSpec::new("solid.replace_face", "Replace Face", crate::checked!("solid.replace_face", replace_face))
+        .contract(&REPLACE_FACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .at("SOLID", "MODIFY")
         .icon("replace_face")
         .params("faces: [[x,y,z] points on planar faces, or face names from model.faces]; target: plane (XY|XZ|YZ|construction plane|{origin, normal}) | target_face: [x,y,z] on a parallel planar face; body?"),
-    CommandSpec::new("solid.align", "Align", align)
+    CommandSpec::new("solid.align", "Align", crate::checked!("solid.align", align))
         .at("SOLID", "MODIFY")
         .icon("align")
-        .params("bodies: [names]; from: [x,y,z] | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z]; to: (the same) | to_face: [x,y,z] (faces also turn to meet); flip?: bool"),
-    CommandSpec::new("solid.remove", "Remove", remove).at("SOLID", "MODIFY").icon("delete").params("bodies: [names] (removed from here on in the timeline)"),
+        .contract(&ALIGN_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("bodies: [names]; from: [x,y,z] | \"origin\" | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z] | from_plane: XY|XZ|YZ|construction or offset plane name or id|{origin, normal}; to: (the same) | to_face: [x,y,z] | to_plane: (a plane as from_plane; the point or face goes onto it along its normal, and the plane may move later: the bodies follow); from_frame / to_frame: a frame found again whenever the design changes, so the bodies follow it, in place of that side's point, face or plane: a joint origin as joint.create takes one ({face|circle|edge|point: [x,y,z]}, a face's name, a named joint origin) or {sketch, point|curve} (a sketch point, or a circle's, arc's or ellipse's centre, z along the sketch's normal), on the bodies' own component; faces, planes and frames also turn to meet; flip?: bool; axes?: [x, y, z] (point-to-point only: which world axes the offset moves along; default all three, at least one true); angle?: expr (a turn about the target's direction after the move)"),
+    CommandSpec::new("solid.remove", "Remove", crate::checked!("solid.remove", remove))
+        .at("SOLID", "MODIFY")
+        .icon("delete")
+        .contract(&REMOVE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("bodies: [names] (removed from here on in the timeline)"),
 ];
 
 fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.coil";
+    let given = |k: &str| p.get(k).is_some_and(|v| !v.is_null());
+    let profile_mode = given("sketch");
+    if profile_mode {
+        if let Some(k) = ["diameter", "section_size", "section", "section_position", "start_angle"].into_iter().find(|k| given(k)) {
+            return Err(bad(cmd, format!("`{k}` does not apply with `sketch`: the section comes from the sketch")));
+        }
+    } else if given("profiles") {
+        return Err(bad(cmd, "`profiles` needs `sketch`"));
+    }
+    let sketch = if profile_mode { Some(solidcraft_doc::SketchId(super::features::sketch_id(s, p.get("sketch"), cmd, "sketch")?)) } else { None };
+    let profiles = if profile_mode { super::features::profiles(p, cmd)? } else { solidcraft_doc::ProfileSel::All };
     let base = point_param(s, p, "base", cmd)?.unwrap_or_else(|| solidcraft_doc::point_expr(Vec3::ZERO));
     let axis = axis_dir_param(p, cmd)?;
-    let diameter = req_expr(cmd, p, "diameter")?;
-    check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
+    let diameter = if profile_mode {
+        None
+    } else {
+        let d = req_expr(cmd, p, "diameter")?;
+        check_expr(s, &d, Kind::Length, cmd, "diameter")?;
+        Some(d)
+    };
     let turns = expr(p, "revolutions").or_else(|| expr(p, "turns"));
     let (height, pitch) = (expr(p, "height"), expr(p, "pitch"));
     // The pitch or the revolutions from the height keep the units the lengths were given in.
@@ -69,8 +121,13 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     };
     check_expr(s, &turns, Kind::Unitless, cmd, "revolutions")?;
     check_expr(s, &pitch, Kind::Length, cmd, "pitch")?;
-    let section_size = req_expr(cmd, p, "section_size")?;
-    check_expr(s, &section_size, Kind::Length, cmd, "section_size")?;
+    let section_size = if profile_mode {
+        None
+    } else {
+        let size = req_expr(cmd, p, "section_size")?;
+        check_expr(s, &size, Kind::Length, cmd, "section_size")?;
+        Some(size)
+    };
     let section = match str_(p, "section").map(str::to_ascii_lowercase).as_deref() {
         None | Some("circular" | "circle") => solidcraft_doc::CoilSection::Circular,
         Some("square") => solidcraft_doc::CoilSection::Square,
@@ -94,6 +151,8 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
         FeatureKind::Coil {
             base,
             axis: Dir(axis),
+            sketch,
+            profiles,
             diameter,
             pitch,
             turns,
@@ -103,13 +162,13 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
             start_angle,
             clockwise,
             operation,
-            targets: string_list(p, "targets").into_iter().map(BodyName).collect(),
+            targets: string_list(cmd, p, "targets")?.into_iter().map(BodyName).collect(),
         },
     )
 }
 
 fn curves_param(p: &Value, cmd: &str) -> Result<Vec<String>> {
-    let c = string_list(p, "curves");
+    let c = string_list(cmd, p, "curves")?;
     if c.is_empty() || c.len() > 1000 {
         return Err(bad(cmd, "`curves` must list 1…1000 sketch curve ids"));
     }
@@ -160,11 +219,11 @@ fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
         Some("deboss") => true,
         Some(m) => return Err(bad(cmd, format!("unknown mode `{m}` (emboss or deboss)"))),
     };
-    let mut targets = string_list(p, "targets");
+    let mut targets = string_list(cmd, p, "targets")?;
     let face = if let Some(value) = p.get("face") {
         let local = vec3(value).ok_or_else(|| bad(cmd, "`face` must be a finite point [x,y,z]"))?;
         let at = solidcraft_doc::apply_point(&s.active_component_frame(), local);
-        let state = s.world_state();
+        let state = s.world_state()?;
         let mut candidates = Vec::new();
         // The nearest face off the point: (distance, body), for the error when none holds it.
         let mut nearest: Option<(f64, &str)> = None;
@@ -303,7 +362,7 @@ fn infer_emboss_selection(
     let regions = solidcraft_doc::select_profiles(ss, profiles).map_err(|e| bad(cmd, e.to_string()))?;
     let sketch_owner = s.doc.feature(sketch).map(|f| f.component).ok_or_else(|| bad(cmd, "profile sketch no longer exists"))?;
     let d = s.doc.eval(&s.doc.with_design_unit(depth, Kind::Length), Kind::Length).map_err(|e| bad(cmd, e.to_string()))?;
-    let world = s.world_state();
+    let world = s.world_state()?;
     let placed = s.placed_document();
     let mut chosen = None;
     let mut faces = 0usize;
@@ -324,7 +383,7 @@ fn infer_emboss_selection(
         let body_frame = face.body_frame(&placed, raw).map_err(|e| bad(cmd, e.to_string()))?;
         let inverse = solidcraft_doc::mat_inverse(&body_frame).ok_or_else(|| bad(cmd, "invalid cylinder body frame"))?;
         let displayed = world.sketch(sketch).ok_or_else(|| bad(cmd, "the profile sketch is not displayed"))?;
-        let plane = solidcraft_geom::Plane::new(
+        let plane = solidcore_record::Plane::new(
             solidcraft_doc::apply_point(&inverse, displayed.plane.origin),
             solidcraft_doc::apply_vector(&inverse, displayed.plane.x),
             solidcraft_doc::apply_vector(&inverse, displayed.plane.y),
@@ -356,26 +415,81 @@ fn face_points(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<Vec<Vec3>> 
 fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.replace_face";
     let faces = face_points(s, p, "faces", cmd)?;
+    let refs = p.get("faces").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    // The body first: a face flush with another body's is looked up on that body alone.
+    let picked = super::face::faces_body(s, p, refs, &faces);
     for f in &faces {
-        if super::face::face_normal(s, *f).is_none() {
+        if super::face::face_normal_in(s, *f, picked.lookup()).is_none() {
             return Err(bad(cmd, "not supported yet: replacing a face that is not planar"));
         }
     }
     let target = match p.get("target_face").and_then(vec3) {
         Some(tp) => {
             let n = super::face::face_normal(s, tp).ok_or_else(|| bad(cmd, "the target face must be planar"))?;
-            let plane = solidcraft_geom::Plane::from_normal(tp, n).ok_or_else(|| bad(cmd, "the target face's plane"))?;
+            let plane = solidcore_record::Plane::from_normal(tp, n).ok_or_else(|| bad(cmd, "the target face's plane"))?;
             solidcraft_doc::PlaneRef::Custom { plane }
         }
         None => plane_param(s, p.get("target"), cmd)?,
     };
-    let body = str_(p, "body").map(str::to_string);
-    add_feature(s, p, FeatureKind::ReplaceFace { faces: faces.into_iter().map(FacePick).collect(), target, body: body.map(BodyName) })
+    let body = picked.body.clone().map(BodyName);
+    super::features::add_face_feature(&picked, s, p, FeatureKind::ReplaceFace { faces: faces.into_iter().map(FacePick).collect(), target, body })
+}
+
+/// What `solid.align` says when `axes` is not three booleans, or when none is true.
+pub(crate) const AXES_SHAPE: &str = "`axes` must be [x, y, z] booleans";
+pub(crate) const AXES_NONE: &str = "`axes` must enable at least one of X, Y and Z";
+
+/// `axes` as `solid.align` reads it: three booleans, one per world axis, at least one of them
+/// true; the message is the handler's.
+pub(crate) fn axes_mask(v: &Value) -> std::result::Result<[bool; 3], &'static str> {
+    let a = v.as_array().filter(|a| a.len() == 3).ok_or(AXES_SHAPE)?;
+    let mut mask = [false; 3];
+    for (slot, v) in mask.iter_mut().zip(a) {
+        *slot = v.as_bool().ok_or(AXES_SHAPE)?;
+    }
+    if !mask.iter().any(|on| *on) {
+        return Err(AXES_NONE);
+    }
+    Ok(mask)
+}
+
+/// `axes`: three booleans, one per world axis, for a point-to-point Align.
+/// `None` when the call does not restrict the move.
+fn axes_param(p: &Value, cmd: &str) -> Result<Option<[bool; 3]>> {
+    let Some(v) = p.get("axes").filter(|v| !v.is_null()) else { return Ok(None) };
+    let mask = axes_mask(v).map_err(|why| bad(cmd, why))?;
+    Ok((mask != [true; 3]).then_some(mask))
+}
+
+/// An Align side given as a point (`from` or `to`), as the handler reads it.
+pub(crate) enum SidePoint {
+    /// The text `origin` (any case): the world origin.
+    Origin,
+    /// `{snap?, at}`: the nearest `snap` (vertex unless the object says another) to `at`.
+    Snap { at: Vec3, kind: String },
+    /// `[x, y, z]`.
+    Point(Vec3),
+}
+
+/// The side `pk` (`from` or `to`) as a point, with the handler's message when it is none of the
+/// forms; `fk` is the face key beside it (`from_face`).
+pub(crate) fn side_point(v: Option<&Value>, pk: &str, fk: &str) -> std::result::Result<SidePoint, String> {
+    // The origin point.
+    if v.and_then(Value::as_str).is_some_and(|o| o.eq_ignore_ascii_case("origin")) {
+        return Ok(SidePoint::Origin);
+    }
+    // A snap point: {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]}.
+    if let Some(o) = v.filter(|v| v.is_object()) {
+        let at = o.get("at").and_then(vec3).ok_or_else(|| format!("`{pk}.at` must be [x, y, z]"))?;
+        let kind = o.get("snap").and_then(Value::as_str).unwrap_or("vertex").to_string();
+        return Ok(SidePoint::Snap { at, kind });
+    }
+    v.and_then(vec3).map(SidePoint::Point).ok_or_else(|| format!("give `{pk}`, `{fk}` or `{pk}_plane` ([x, y, z], \"origin\", or a plane)"))
 }
 
 fn align(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.align";
-    let bodies = string_list(p, "bodies");
+    let bodies = string_list(cmd, p, "bodies")?;
     if bodies.is_empty() {
         return Err(bad(cmd, "`bodies` must list the bodies to move"));
     }
@@ -385,25 +499,97 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, format!("no body `{b}`")));
         }
     }
-    let pick = |s: &Session, pk: &str, fk: &str| -> Result<(Vec3, Option<Vec3>)> {
+    // Picks and snaps are where the view shows them (the world); the feature moves the bodies
+    // in their component's frame, so both ends go into the first moved body's frame. A body
+    // picked in another placed component (aligning two imported parts) is found where it
+    // is shown, not where its own frame has it.
+    let frame = s
+        .placed_document()
+        .body_frames_with_source(&s.model.state())
+        .into_iter()
+        .find(|(world, own, ..)| *world == bodies[0] || *own == bodies[0])
+        .map(|(.., m)| m);
+    let inverse = frame.and_then(|m| solidcraft_doc::mat_inverse(&m)).unwrap_or(solidcraft_doc::IDENTITY);
+    // A side is a plane (`from_plane`/`to_plane`: XY|XZ|YZ, a construction or offset plane, or
+    // {origin, normal}), kept as a plane so the bodies follow it when it moves; or a point and, for
+    // a face, its normal.
+    let plane = |s: &Session, key: &str| -> Result<Option<solidcraft_doc::PlaneRef>> {
+        p.get(key).map(|_| super::features::plane_param(s, p.get(key), cmd)).transpose()
+    };
+    let (from_plane, to_plane) = (plane(s, "from_plane")?, plane(s, "to_plane")?);
+    // Or a frame (#6257), found again when the feature is evaluated.
+    let (from_frame, to_frame) = (align_frame(s, p, "from", &bodies)?, align_frame(s, p, "to", &bodies)?);
+    // A target on the bodies that move would move away with them: it must be found the same
+    // without them.
+    if let Some(fr @ AlignFrame::Origin { .. }) = &to_frame {
+        let st = s.model.state();
+        let mut rest = (*st).clone();
+        rest.bodies.retain(|b| !bodies.contains(&b.name));
+        let same = |(a, n): (Vec3, Vec3), (b, m): (Vec3, Vec3)| a.dist(b) <= 1e-9 * (1.0 + a.len()) && n.dot(m) > 1.0 - 1e-12;
+        if !matches!((fr.resolve(&s.doc, &st), fr.resolve(&s.doc, &rest)), (Ok(a), Ok(b)) if same(a, b)) {
+            return Err(bad(cmd, "`to_frame` is on a body that moves: pick the target on another body or on a sketch"));
+        }
+    }
+    // Worked out from the plane or the frame when the feature is evaluated.
+    let held = |plane: &Option<solidcraft_doc::PlaneRef>, frame: &Option<AlignFrame>| plane.is_some() || frame.is_some();
+    let world_pick = |s: &Session, pk: &str, fk: &str, held: bool| -> Result<(Vec3, Option<Vec3>)> {
+        if held {
+            if p.get(pk).is_some() || p.get(fk).is_some() {
+                return Err(bad(cmd, format!("give `{pk}_plane` or `{pk}`/`{fk}`, not both")));
+            }
+            return Ok((Vec3::ZERO, None));
+        }
         if let Some(fp) = p.get(fk).and_then(vec3) {
-            let n = super::face::face_normal(s, fp).ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face")))?;
+            let n = super::face::face_normal_world(s, fp).ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face")))?;
             return Ok((fp, Some(n)));
         }
-        // A snap point: {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]}.
-        if let Some(o) = p.get(pk).filter(|v| v.is_object()) {
-            let at = o.get("at").and_then(vec3).ok_or_else(|| bad(cmd, format!("`{pk}.at` must be [x, y, z]")))?;
-            let kind = o.get("snap").and_then(Value::as_str).unwrap_or("vertex");
-            return snap_point(s, kind, at).map(|q| (q, None)).ok_or_else(|| bad(cmd, format!("no {kind} to snap to near `{pk}`")));
+        match side_point(p.get(pk), pk, fk).map_err(|why| bad(cmd, why))? {
+            SidePoint::Origin => Ok((Vec3::ZERO, None)),
+            SidePoint::Snap { at, kind } => {
+                snap_point(&*s.world_state()?, &kind, at).map(|q| (q, None)).ok_or_else(|| bad(cmd, format!("no {kind} to snap to near `{pk}`")))
+            }
+            SidePoint::Point(v) => Ok((v, None)),
         }
-        p.get(pk).and_then(vec3).map(|v| (v, None)).ok_or_else(|| bad(cmd, format!("give `{pk}` or `{fk}` as [x, y, z]")))
     };
-    let (from, from_normal) = pick(s, "from", "from_face")?;
-    let (to, to_normal) = pick(s, "to", "to_face")?;
+    let pick = |s: &Session, pk: &str, fk: &str, held: bool| -> Result<(Vec3, Option<Vec3>)> {
+        let (at, n) = world_pick(s, pk, fk, held)?;
+        if held {
+            return Ok((at, n));
+        }
+        Ok((solidcraft_doc::apply_point(&inverse, at), n.and_then(|n| solidcraft_doc::apply_vector(&inverse, n).normalized())))
+    };
+    let (from, from_normal) = pick(s, "from", "from_face", held(&from_plane, &from_frame))?;
+    let (to, to_normal) = pick(s, "to", "to_face", held(&to_plane, &to_frame))?;
+    // A turn about the target's direction after the move.
+    let angle = expr(p, "angle");
+    if let Some(a) = &angle {
+        check_expr(s, a, Kind::Angle, cmd, "angle")?;
+        if to_normal.is_none() && !held(&to_plane, &to_frame) {
+            return Err(bad(cmd, "`angle` turns about the target's direction: give `to_frame`, `to_face` or `to_plane`"));
+        }
+    }
+    // Faces turn only to meet another face, a plane or a frame; a plane's normal and a frame's z
+    // are read when evaluated. A target face's normal is also the axis of an `angle`.
     let (from_normal, to_normal) = match (from_normal, to_normal) {
         (Some(a), Some(b)) => (Some(a), Some(b)),
+        (a, b) if held(&from_plane, &from_frame) || held(&to_plane, &to_frame) || angle.is_some() => (a, b),
         _ => (None, None),
     };
+    let axes = axes_param(p, cmd)?;
+    if axes.is_some() && (held(&from_plane, &from_frame) || held(&to_plane, &to_frame) || from_normal.is_some() || to_normal.is_some()) {
+        return Err(bad(
+            cmd,
+            "`axes` applies to point-to-point alignment: leave out `from_face`, `to_face`, `from_plane`, `to_plane`, `from_frame` and `to_frame`",
+        ));
+    }
+    // The directions are stored in the same frame as `from`/`to` (the first moved body's frame).
+    let axes = axes.map(|mask| {
+        mask.into_iter()
+            .zip([Vec3::X, Vec3::Y, Vec3::Z])
+            .filter(|&(on, _)| on)
+            .map(|(_, world)| Dir(solidcraft_doc::apply_vector(&inverse, world).normalized().unwrap_or(world)))
+            .collect::<Vec<_>>()
+    });
     let flip = bool_(p, "flip").unwrap_or(false);
     add_feature(
         s,
@@ -415,13 +601,82 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             from_normal: from_normal.map(Dir),
             to_normal: to_normal.map(Dir),
             flip,
+            from_plane,
+            to_plane,
+            axes,
+            from_frame,
+            to_frame,
+            angle,
         },
     )
 }
 
+/// The longest sketch point or curve id an Align frame takes.
+pub(crate) const MAX_SKETCH_ID: usize = 256;
+
+/// The point or curve of an Align `{sketch, point|curve}` frame: an id of 1 to
+/// [`MAX_SKETCH_ID`] characters. `None` when the frame gives both, neither or an id that is not
+/// one.
+pub(crate) enum SketchFrameId {
+    Point(String),
+    Curve(String),
+}
+
+pub(crate) fn sketch_frame_id(v: &Value) -> Option<SketchFrameId> {
+    let id = |k: &str| str_(v, k).filter(|n| !n.is_empty() && n.chars().count() <= MAX_SKETCH_ID).map(str::to_string);
+    match (id("point"), id("curve")) {
+        (Some(point), None) => Some(SketchFrameId::Point(point)),
+        (None, Some(curve)) => Some(SketchFrameId::Curve(curve)),
+        _ => None,
+    }
+}
+
+/// An Align side's frame (#6257), `<key>_frame`: a joint origin as `joint.create` takes one, or a
+/// sketch point or the centre of a sketch circle, arc or ellipse (`{sketch, point|curve}`), on the
+/// moved bodies' component (all of them on one, placed once). It takes the place of `<key>`,
+/// `<key>_face` and `<key>_plane`, and is checked to resolve now.
+fn align_frame(s: &Session, p: &Value, key: &str, bodies: &[String]) -> Result<Option<AlignFrame>> {
+    let cmd = "solid.align";
+    let fk = format!("{key}_frame");
+    let Some(v) = p.get(&fk).filter(|v| !v.is_null()) else { return Ok(None) };
+    if let Some(other) = [key.to_string(), format!("{key}_face"), format!("{key}_plane")].into_iter().find(|k| p.get(k).is_some()) {
+        return Err(bad(cmd, format!("give `{fk}` or `{other}`, not both")));
+    }
+    let st = s.model.state();
+    let (frame, on) = match v.get("sketch") {
+        Some(sk) => {
+            let sketch = super::features::sketch_id(s, Some(sk), cmd, &fk)?;
+            let frame = match sketch_frame_id(v) {
+                Some(SketchFrameId::Point(point)) => AlignFrame::SketchPoint { sketch: SketchId(sketch), point },
+                Some(SketchFrameId::Curve(curve)) => AlignFrame::SketchCurve { sketch: SketchId(sketch), curve },
+                None => return Err(bad(cmd, format!("`{fk}`: a sketch frame takes `point` or `curve` (an id of 1 to {MAX_SKETCH_ID} characters)"))),
+            };
+            (frame, s.doc.feature(sketch).map_or(0, |f| f.component))
+        }
+        None => {
+            // On its part, in the part's own coordinates: the same in every copy of a
+            // sub-assembly the part is in, wherever it was picked.
+            let picked = super::joints::origin_param(s, Some(v), cmd)?;
+            let origin = solidcraft_doc::joints::JointOrigin::new(picked.part(), picked.snap);
+            let on = super::joints::component_of(s, origin.occurrence);
+            (AlignFrame::Origin { origin: Box::new(origin) }, on)
+        }
+    };
+    // The move is worked out in that component's coordinates: every body must be in it, and a
+    // component placed twice would not say which placement the picks were made in.
+    if bodies.iter().any(|b| st.body(b).map_or(0, |b| s.doc.model_body_component(b)) != on) {
+        return Err(bad(cmd, format!("not supported yet: `{fk}` on another component than the bodies")));
+    }
+    if on != 0 && s.doc.occurrences.iter().filter(|o| o.component == on).count() != 1 {
+        return Err(bad(cmd, format!("not supported yet: `{fk}` on a component placed more than once")));
+    }
+    frame.resolve(&s.doc, &st).map_err(|e| bad(cmd, format!("`{fk}`: {e}")))?;
+    Ok(Some(frame))
+}
+
 fn remove(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.remove";
-    let bodies = string_list(p, "bodies");
+    let bodies = string_list(cmd, p, "bodies")?;
     if bodies.is_empty() {
         return Err(bad(cmd, "`bodies` must list bodies"));
     }
@@ -437,9 +692,8 @@ fn remove(s: &mut Session, p: &Value) -> Result<Value> {
 mod tests;
 
 /// A snap point near `at` on the model: the nearest vertex, edge midpoint, planar face's centre
-/// or circular edge's centre (the end of a cylindrical face).
-pub(super) fn snap_point(s: &Session, kind: &str, at: Vec3) -> Option<Vec3> {
-    let st = s.world_state();
+/// or circular edge's centre (the end of a cylindrical face) of the placed model `st`.
+pub(crate) fn snap_point(st: &solidcraft_doc::ModelState, kind: &str, at: Vec3) -> Option<Vec3> {
     let near = |pts: Vec<Vec3>| pts.into_iter().min_by(|a, b| a.dist(at).total_cmp(&b.dist(at)));
     match kind {
         "vertex" => near(
@@ -473,7 +727,7 @@ pub(super) fn snap_point(s: &Session, kind: &str, at: Vec3) -> Option<Vec3> {
 
 fn boundary_fill(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.boundary_fill";
-    let tools = string_list(p, "tools");
+    let tools = string_list(cmd, p, "tools")?;
     let st = s.model.state();
     if tools.is_empty() || tools.len() > 64 || tools.iter().any(|t| st.body(t).is_none()) {
         return Err(bad(cmd, "`tools` must list 1…64 bodies"));

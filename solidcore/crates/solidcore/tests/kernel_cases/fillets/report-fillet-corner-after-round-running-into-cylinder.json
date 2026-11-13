@@ -1,0 +1,190 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  8.0
+                ]
+              ],
+              "index": 7
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  16.0,
+                  10.0
+                ],
+                [
+                  0.0,
+                  2.0,
+                  10.0
+                ]
+              ],
+              "index": 3
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  2.0,
+                  10.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  8.0
+                ]
+              ],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              0.0,
+              0.0,
+              4.0
+            ],
+            [
+              0.0,
+              9.0,
+              10.0
+            ],
+            [
+              0.0,
+              0.5857864376269049,
+              9.414213562373096
+            ]
+          ],
+          "tolerance": 2.721294101747089
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "report-fillet-corner-after-round-running-into-cylinder",
+  "expected": {
+    "body_count": 1,
+    "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's sides run tangent into the cylinder, V0 = 6400 + 960 pi; the three r2 rounds at the bar's other top corner (0, 0, 10): the front round's spandrel from x = 2 to the wall (30.5896671706), the vertical edge's and the left top edge's (1 - pi/4) r^2 over 8 and 14, the corner cube of side 2 less the rolling ball's eighth, 8 - 4 pi/3: removed 53.2858385868",
+    "source": "analytic",
+    "volume_mm3": 9362.643108859389,
+    "what": "after the round of a bar's top edge running into a cylinder, r2 rounds of the three edges at the bar's other top corner (the vertical edge, the left top edge and the round's end arc): 'one of its freeform faces can't be used'; reported from the app (2026-10-30, test-peg part)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 11,
+      "vertices": 15
+    }
+  },
+  "records": "report-fillet-corner-after-round-running-into-cylinder.bodies.json.gz",
+  "result": [
+    {
+      "body": "Peg",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3138.75474487899,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 11,
+      "vertices": 15,
+      "volume_mm3": 9362.643115532695
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": null,
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "after the round of a bar's top edge running into a cylinder, r2 rounds of the three edges at the bar's other top corner (the vertical edge, the left top edge and the round's end arc): 'one of its freeform faces can't be used'; reported from the app (2026-10-30, test-peg part)",
+  "why_not": []
+}

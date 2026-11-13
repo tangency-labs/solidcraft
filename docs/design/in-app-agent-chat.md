@@ -26,17 +26,27 @@ What the prototype uses:
 | Direction | Message | Use |
 |---|---|---|
 | → agent | `initialize {protocolVersion: 1, clientCapabilities, clientInfo}` | We declare no file system and no terminal (`fs.readTextFile/writeTextFile: false`, `terminal: false`), and terminal login (`auth.terminal: true`, plus the older `_meta["terminal-auth"]`). The reply carries `agentInfo` and `authMethods`. |
-| → agent | `session/new {cwd, mcpServers}` | `mcpServers` holds one stdio server: `solidcraft-cli mcp --connect 127.0.0.1:PORT`. `cwd` is the open design's folder (else SolidCraft's own `agent` folder). |
+| → agent | `session/new {cwd, mcpServers}` | `mcpServers` holds one stdio server: `solidcraft-cli mcp --connect 127.0.0.1:PORT`. `cwd` is the open design's folder (else SolidCraft's own `agent` folder). The system note goes in the standard `systemPrompt` field when the agent offers `sessionCapabilities.systemPrompt`, in `_meta.antigravity.systemPrompt.append` when Antigravity offers that, and always in `_meta.systemPrompt.append` for the Claude adapter. An agent with none of these doesn't get it. |
+| → agent | `session/set_config_option {sessionId, configId, value}` | Set an advertised select option, including a model, reasoning effort or mode. The complete returned `configOptions` snapshot confirms the state; rejection leaves the previous confirmed snapshot intact. |
 | → agent | `session/prompt {sessionId, prompt: [content]}` | One text block. The reply comes at the end of the turn with `stopReason` (`end_turn`, `cancelled`, `refusal`, …). |
 | → agent | `session/cancel {sessionId}` (notification) | Cancel button. Open permission prompts are answered `cancelled` first, as the spec asks. |
 | → agent | `authenticate {methodId}` | Only for an "agent" login method the user clicks (the agent then opens the browser itself). |
-| ← agent | `session/update` | `agent_message_chunk`, `agent_thought_chunk` (streamed text), `tool_call` / `tool_call_update` (`toolCallId`, `title`, `kind`, `status`: pending, in_progress, completed, failed, `content`), `plan` (entries with status). Mode, command and usage updates are ignored for now. |
+| ← agent | `session/update` | `agent_message_chunk`, `agent_thought_chunk` (streamed text), `tool_call` / `tool_call_update` (`toolCallId`, `title`, `kind`, `status`: pending, in_progress, completed, failed, `content`), `plan` (entries with status), and session-scoped `config_option_update` (a complete replacement snapshot). Legacy current-model/mode updates apply only when modern options are absent. Command and usage updates are ignored. |
 | ← agent | `session/request_permission {toolCall, options: [{optionId, name, kind}]}` | Shown as a prompt in the conversation; the answer is `{outcome: {outcome: "selected", optionId}}` or `{outcome: "cancelled"}`. `kind` is `allow_once`, `allow_always`, `reject_once` or `reject_always`. |
 | ← agent | `fs/*`, `terminal/*` | Not offered, answered "method not found". |
 | ← agent | `_auth/status_update` | An extension both current adapters send ("Not logged in"); shown next to the agent's name. |
 
 Errors: an agent that is not signed in answers `session/new` (Codex) or the first
 `session/prompt` (Claude) with JSON-RPC error `-32000 "Authentication required"`.
+
+Current ACP agents, including OpenCode V2, can return ordered `configOptions` in the session
+response instead of legacy model/mode lists. SolidCraft prefers these options, preserves arbitrary
+IDs and optional categories, and supports flat or grouped select choices. Only one configuration
+change waits for acknowledgement at a time; an unsolicited snapshot does not acknowledge it.
+New chats invalidate outstanding configuration requests, and updates from older sessions are
+ignored. No boolean capability is advertised. See the
+[ACP configuration contract](https://agentclientprotocol.com/protocol/session-config-options)
+and [OpenCode V2 ACP reference](https://opencode.ai/v2/docs/cli/acp).
 
 ## The agents
 
@@ -51,6 +61,7 @@ with SolidCraft, the user installs the agent.
 | Google Antigravity | a separate server, `agy_acp_server.par` (`.exe` on Windows), from the ACP registry's zip (`agy-acp-server-1.4.0-…`, with `localharness_external` beside it, ~330 MB). The `agy` command (1.4.0) rejects `--acp`; its `--input-format stream-json` print mode is not ACP. Started without arguments (the registry's Linux entry passes an empty `--uid=`, not needed here). | proprietary (Google's terms) | none: `--version` prints a build date and takes about two seconds, so it is not asked | Agent methods `oauth-personal`, `oauth-business`, `gemini-api-key` (`GEMINI_API_KEY`), `agent-platform`; `session/new` answers "Authentication required" until one is chosen. Settings in `~/.gemini/antigravity-acp/settings.json`. |
 | Gemini CLI (retired) | `gemini --acp` | `@google/gemini-cli` 0.64, Apache-2.0 | `--version` | Google ended it for consumer accounts on 2026-06-18 in favour of Antigravity. Still found when installed (enterprise licences may keep it working) but no longer offered for install. Its own login `~/.gemini/oauth_creds.json` or a key in the environment. |
 | OpenCode | built in: `opencode acp` | `opencode-ai` 1.19, MIT | `--version` | Its own providers' logins (`~/.local/share/opencode/auth.json`) or keys in the environment. |
+| Mistral Vibe | `uv tool install mistral-vibe`, then `vibe-acp` over stdio | Apache-2.0 | `vibe-acp --version` | Vibe's ACP sign-in or `vibe --setup`. Vibe keeps credentials in its keyring or `~/.vibe/.env` and accepts `MISTRAL_API_KEY`. |
 | XAI Grok | built in: `grok agent stdio` | [Grok Build](https://github.com/xai-org/grok-build), Apache-2.0; installed separately | `grok --version` prints `grok 1.0.58 (…) [alpha]` (checked 2026-10-15; in-app connection also checked with 1.0.60) | Its own `~/.grok/auth.json` or `XAI_API_KEY`. `grok login` signs in in the browser; ACP advertises `cached_token` and `grok.com` authentication methods. |
 | Others in the ACP registry | `copilot --acp`, `qwen --acp`, `opencode acp`, `goose acp`, `cline --acp`, `kimi acp`, … | mixed; several are proprietary, one is GPL and one AGPL (we only start them as programs, never link them) | `--version` | each its own |
 
@@ -92,7 +103,7 @@ Code: `crates/ui-egui/src/agent_chat/`.
 |---|---|
 | `backend.rs` | The `ChatBackend` trait and its `Event`s: the only thing the panel talks to. |
 | `acp.rs`, `acp_client.rs` | The protocol messages, and `AcpBackend`, the first backend. |
-| `api_client.rs` | `ApiBackend`: an OpenAI-compatible endpoint, with SolidCraft running the tool loop. |
+| `api_client.rs` | `ApiBackend`: an OpenAI-compatible or Anthropic-compatible endpoint, with SolidCraft running the tool loop. |
 | `agents.rs` | The agents (found and added), permission modes, "always allow" answers. |
 | `settings.rs` | Preferences → AI and the Add agent dialog. |
 | `process.rs` | The agent as a child process in a process group of its own; stopping it ends the group. |
@@ -112,13 +123,19 @@ requests, for a backend that runs tools in process). Two backends exist:
 - `AcpBackend` drives a coding agent the user already has (the default, and the point of the
   feature: the user's own account, no keys).
 - `ApiBackend` talks to an OpenAI-compatible chat completions endpoint (Ollama, LM Studio,
-  OpenAI, a custom URL) and runs the tool loop itself: it starts the same `solidcraft-cli mcp
-  --connect` server an ACP agent would get and is its MCP client (`tools/list` becomes the
-  function tools, `crash_reports` left out), so its calls pass the same gate, limits, questions
-  and undo as an ACP agent's. At most 24 model requests per message. The HTTP request is the
-  desktop host's (`Services::agent_http`, ureq with no redirects); the key comes from the system
-  keychain (`Services::secrets`, the keyring crate) for the connection only and is refused over
-  plain HTTP to another computer.
+  OpenAI, a custom URL) or an Anthropic-compatible Messages endpoint (Anthropic, or a provider
+  that speaks the Messages API), and runs the tool loop itself: it starts the same
+  `solidcraft-cli mcp --connect` server an ACP agent would get and is its MCP client
+  (`tools/list` becomes the endpoint's tools, `crash_reports` left out), so its calls pass the
+  same gate, limits, questions and undo as an ACP agent's. There is no cap on model requests
+  per message; Stop ends it. It lists the endpoint's models at each connection (`Event::Models`),
+  and when it can't, `Event::ModelsNote` says why and only the configured model is offered. The
+  HTTP request is the desktop host's (`Services::agent_http`, ureq with no
+  redirects); the key comes from the system keychain (`Services::secrets`, the keyring crate)
+  for the connection only and is refused over plain HTTP to another computer. The two protocols
+  differ only in their wire shape: OpenAI sends the system note as a message, function tools
+  and one `tool` message per result; Anthropic sends it as `system`, `input_schema` tools and
+  all of a round's `tool_result` blocks in one user message.
 
 Another kind of backend slots in the same way without reshaping the panel.
 
@@ -165,6 +182,45 @@ design from before the turn), relabelled "Agent chat: <message>". If the history
 the meantime the start is found by the design it holds; if it's gone, nothing is merged. The
 conversation shows the merged step with an Undo button while it's still the latest thing done.
 
+### Document ownership
+
+Each open design tab owns an `AgentChat`, including its transcript, backend session, agent
+selection, sign-in retry, draft, attachments, pending messages and approval state. `DocSlot`
+parks that state alongside its `Session`; switching restores both together. Panel visibility,
+placement, agent discovery, the latest sign-in evidence per agent, endpoint model cache,
+settings dialogs and the desktop endpoint starter remain window state. A new tab gets a fresh conversation. Closing a tab drops its
+backend; closing the last tab or replacing its design (including programmatic New, Open and
+Recover commands or scripts from external callers) clears its conversation.
+Conversation state is in memory only and does not change the design file format.
+
+An admitted request from the current chat carries its turn's validity flag through direct
+dispatch, cursor animation and asynchronous file loading. Only while that request applies,
+`with_tool_request` marks its document changes as agent-initiated. New/Recover replacements
+retain the chat and reset its undo boundary to the new design. Opening a new tab groups the
+old design's completed changes, moves the conversation and its endpoint into the new tab,
+and starts a new undo segment without resetting the turn's limits. A failed batch that
+restores its original design also restores its original turn boundary. Opening an already
+active file is unchanged; opening a file owned by another tab is refused, preserving both
+conversations. The marker is never taken from JSON and does not persist between requests.
+
+Leaving a tab cancels its running turn, declines outstanding approvals, and merges completed
+changes into that design's undo history before swapping sessions. Its backend conversation
+remains available when the tab is selected again. Pending messages stay with that tab and wait
+for Send. Hidden backends are not polled and their tool endpoints never feed the active tab's
+gate. Prompts waiting for startup or sign-in also move to the explicit Send queue on leaving.
+Late events are received only when their owning tab is selected again; requests without a
+running turn are refused, and late permission questions from a stopped turn are cancelled.
+Turning off AI or quitting stops hidden backends as well.
+
+Every admitted tool request also carries a shared turn validity flag. Ending the turn or
+leaving the tab invalidates it. The app checks it before dispatch, after deferred computation,
+before an animated command applies, and before returning or saving a window screenshot. A
+cancelled computation or export releases its UI waiting slot without waiting for its worker;
+already started file writes are not rolled back. Requests already past the gate cannot apply
+commands to or return inspection or screenshot data from the next tab, even if tab indices
+change through closing. Ordinary external control requests retain their existing active-design
+behavior.
+
 ### The agent's own tools
 
 ACP lets the client offer a file system and a terminal; the chat offers neither, and starts the
@@ -210,8 +266,8 @@ returns the whole state, for tests and screenshots.
 
 | Area | Work |
 |---|---|
-| Conversation | Diffs, history per design, resume (`session/load`) |
-| Session controls | Model and mode pickers from `configOptions` / `modes`, slash commands |
+| Conversation | Diffs, persisted conversation history, resume (`session/load`) |
+| Session controls | Slash commands |
 | Auth | An embedded terminal or "open a terminal here" for terminal logins on each OS; logout |
 | Discovery | Read the ACP registry; keychain-aware login check on macOS |
 | Packaging | Make sure every desktop package ships `solidcraft-cli` next to `solidcraft` (Flatpak, AppImage, macOS bundle, Windows zip), or serve MCP from the app binary itself |

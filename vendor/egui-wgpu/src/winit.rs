@@ -4,12 +4,9 @@
 #![expect(unsafe_code)]
 
 use crate::{RenderState, SurfaceConfig, SurfaceErrorAction, WgpuConfiguration, renderer};
-use crate::{
-    RendererOptions,
-    capture::{CaptureReceiver, CaptureSender, CaptureState, capture_channel},
-};
+use crate::{RendererOptions, capture::CaptureState};
 use core::num::NonZeroU32;
-use egui::{Context, Event, UserData, ViewportId, ViewportIdMap, ViewportIdSet};
+use egui::{Context, ViewportId, ViewportIdMap, ViewportIdSet};
 use std::sync::Arc;
 
 struct SurfaceState {
@@ -52,8 +49,6 @@ pub struct Painter {
     depth_texture_view: ViewportIdMap<wgpu::TextureView>,
     msaa_texture_view: ViewportIdMap<wgpu::TextureView>,
     surfaces: ViewportIdMap<SurfaceState>,
-    capture_tx: CaptureSender,
-    capture_rx: CaptureReceiver,
 }
 
 impl Painter {
@@ -75,7 +70,6 @@ impl Painter {
         support_transparent_backbuffer: bool,
         options: RendererOptions,
     ) -> Self {
-        let (capture_tx, capture_rx) = capture_channel();
         crate::startup_step(crate::STEP_INSTANCE, ""); // SolidCraft
         let instance = config.wgpu_setup.new_instance().await;
 
@@ -92,9 +86,6 @@ impl Painter {
             depth_texture_view: Default::default(),
             surfaces: Default::default(),
             msaa_texture_view: Default::default(),
-
-            capture_tx,
-            capture_rx,
         }
     }
 
@@ -105,15 +96,40 @@ impl Painter {
         self.render_state.clone()
     }
 
+    /// The surface configuration (present mode, frame latency) the surfaces are configured with.
+    pub fn surface_config(&self) -> SurfaceConfig {
+        self.config.surface
+    }
+
+    /// Change the surface configuration (present mode, frame latency) at runtime.
+    ///
+    /// All surfaces are reconfigured before the next paint.
+    ///
+    /// This is cheap to call every frame.
+    pub fn set_surface_config(&mut self, surface_config: SurfaceConfig) {
+        if self.config.surface == surface_config {
+            return;
+        }
+
+        self.config.surface = surface_config;
+
+        #[expect(clippy::iter_over_hash_type)]
+        for surface in self.surfaces.values_mut() {
+            surface.needs_reconfigure = true;
+        }
+    }
+
     /// SolidCraft: a configuration the device refuses (D3D12: "Failed to wait for GPU to come
     /// idle before reconfiguring the Surface", #1935) comes back as the error instead of reaching
-    /// the device's uncaptured-error handler, which panics. Called only through
-    /// [`Self::try_configure`], which says what follows.
+    /// the device's uncaptured-error handler, which panics; so does a configure that met a lost
+    /// device, or a surface the adapter doesn't support, neither of which configured it (#7007).
+    /// Called only through [`Self::try_configure`], which says what follows.
     fn configure_surface(
+        viewport_id: ViewportId,
         surface_state: &SurfaceState,
         render_state: &RenderState,
         config: &SurfaceConfig,
-    ) -> Result<(), wgpu::Error> {
+    ) -> Result<(), crate::ConfigureError> {
         profiling::function_scope!();
 
         let SurfaceConfig {
@@ -133,14 +149,24 @@ impl Painter {
         let width = surface_state.width;
         let height = surface_state.height;
 
-        // SolidCraft: an unsupported surface is logged, not a panic.
+        // SolidCraft: an unsupported surface is a refused configure, not a panic.
         let Some(default_config) = surface_state
             .surface
             .get_default_config(&render_state.adapter, width, height)
         else {
-            log::error!("The surface isn't supported by this adapter");
-            return Ok(());
+            return Err(crate::ConfigureError::Unsupported);
         };
+        // SolidCraft: a window other than the main one presents without waiting for the display
+        // where its surface can (`crate::viewport_present_mode`).
+        let supported = surface_state
+            .surface
+            .get_capabilities(&render_state.adapter)
+            .present_modes;
+        let present_mode = crate::viewport_present_mode(
+            viewport_id == ViewportId::ROOT,
+            present_mode,
+            &supported,
+        );
         let mut surf_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: render_state.target_format,
@@ -155,10 +181,9 @@ impl Painter {
         }
 
         let device = &render_state.device;
-        let ((), failed) = crate::capture_errors(device, || {
-            surface_state.surface.configure(device, &surf_config)
-        });
-        failed.map_or(Ok(()), Err)
+        crate::configure_captured(device, &render_state.device_lost, || {
+            surface_state.surface.configure(device, &surf_config);
+        })
     }
 
     /// SolidCraft: configures the surface at `now` unless a refused configure's retry isn't due
@@ -178,7 +203,9 @@ impl Painter {
     ) -> bool {
         // A copy, as the configure borrows the whole surface state.
         let mut retry = state.retry;
-        let attempt = retry.attempt(now, || Self::configure_surface(state, render_state, config));
+        let attempt = retry.attempt(now, || {
+            Self::configure_surface(viewport_id, state, render_state, config)
+        });
         state.retry = retry;
         match attempt {
             crate::Attempt::Took(refusals) => {
@@ -611,7 +638,53 @@ impl Painter {
         clear_color: [f32; 4],
         clipped_primitives: &[epaint::ClippedPrimitive],
         textures_delta: &mut epaint::textures::TexturesDelta,
-        capture_data: Vec<UserData>,
+        capture_data: Vec<egui::ScreenshotCallback>,
+        window: &Arc<winit::window::Window>,
+    ) -> f32 {
+        // SolidCraft: a device lost while the frame is drawn, after its probe, panics inside wgpu
+        // at the first queue write to meet it (#10240). That panic is survived like a loss the
+        // probe meets: the painter draws nothing more and the app restarts.
+        let watch = self.render_state.as_ref().map(|rs| {
+            (
+                rs.device_lost.clone(),
+                rs.device.clone(),
+                rs.queue.clone(),
+            )
+        });
+        let context = self.context.clone();
+        let paint = || {
+            self.paint_frame(
+                viewport_id,
+                pixels_per_point,
+                clear_color,
+                clipped_primitives,
+                textures_delta,
+                capture_data,
+                window,
+            )
+        };
+        let Some((lost, device, queue)) = watch else {
+            return paint();
+        };
+        lost.survive(&device, &queue, paint).unwrap_or_else(|| {
+            log::error!(
+                "The graphics device was lost during a frame: {}",
+                lost.reason().unwrap_or_default()
+            );
+            context.request_repaint_of(viewport_id);
+            0.0
+        })
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    fn paint_frame(
+        &mut self,
+        viewport_id: ViewportId,
+        pixels_per_point: f32,
+        clear_color: [f32; 4],
+        clipped_primitives: &[epaint::ClippedPrimitive],
+        textures_delta: &mut epaint::textures::TexturesDelta,
+        capture_data: Vec<egui::ScreenshotCallback>,
         window: &Arc<winit::window::Window>,
     ) -> f32 {
         profiling::function_scope!();
@@ -643,6 +716,24 @@ impl Painter {
         // SolidCraft: one clock reading for this frame's surface retries (#1935).
         let now = web_time::Instant::now();
 
+        // SolidCraft: a lost device draws nothing more; the app sees `RenderState::device_lost`
+        // and restarts (#4172).
+        if self
+            .render_state
+            .as_ref()
+            .is_some_and(|rs| rs.device_lost.is_lost())
+        {
+            if let Some(rs) = &self.render_state
+                && let Some(effect) = &rs.renderer.read().frame_compositor
+            {
+                effect.suspend();
+            }
+            // The app's frame (not this paint) acts on it: keep its frames coming.
+            self.context
+                .request_repaint_after_for(std::time::Duration::from_millis(250), viewport_id);
+            return vsync_sec;
+        }
+
         // If the previous frame produced `CurrentSurfaceTexture::Lost`, the action match
         // below set `needs_recreate`. Recreate the surface now, before re-borrowing
         // `self.render_state` / `self.surfaces` for the rest of the paint.
@@ -659,28 +750,25 @@ impl Painter {
             return vsync_sec;
         }
 
-        // Apply any runtime changes requested via `RenderState::surface_config`.
-        // We diff against the already-applied values in `self.config.surface`
-        // and, if anything differs, mark every surface as needing reconfiguration so
-        // the existing `needs_reconfigure` pathway below picks them up.
-        if let Some(render_state) = self.render_state.as_ref()
-            && render_state.surface_config != self.config.surface
-        {
-            self.config.surface = render_state.surface_config;
-            #[expect(clippy::iter_over_hash_type)]
-            for surface in self.surfaces.values_mut() {
-                surface.needs_reconfigure = true;
-            }
-        }
-
         let Some(render_state) = self.render_state.as_mut() else {
             return vsync_sec;
         };
+        if let Some(effect) = &render_state.renderer.read().frame_compositor {
+            effect.begin_viewport(viewport_id.0.value());
+        }
 
         let mut render_queue_guard = RendererQueueGuard {
             queue: &render_state.queue,
             commands_submitted: false,
         };
+        // SolidCraft: a minimized native window may retain a clamped 1x1 surface.
+        if let Some(effect) = &render_state.renderer.read().frame_compositor {
+            let extent = window.inner_size();
+            if extent.width == 0 || extent.height == 0 {
+                effect.suspend();
+                return vsync_sec;
+            }
+        }
 
         let Some(surface_state) = self.surfaces.get_mut(&viewport_id) else {
             return vsync_sec;
@@ -710,16 +798,27 @@ impl Painter {
             if !FIRST_PRESENT.swap(true, std::sync::atomic::Ordering::Relaxed) {
                 crate::startup_step(crate::STEP_FIRST_PRESENT, "");
             }
-            let output_frame = surface_state.surface.get_current_texture();
+            // SolidCraft: an acquire wgpu refuses (a surface left without its configuration,
+            // #7007) comes back as `CurrentSurfaceTexture::Validation` instead of reaching the
+            // device's uncaptured-error handler, which panics by default.
+            let (output_frame, failed) = crate::capture_errors(&render_state.device, || {
+                surface_state.surface.get_current_texture()
+            });
+            if let Some(error) = failed {
+                log::warn!("The surface gave no frame: {error}");
+            }
             vsync_sec += start.elapsed().as_secs_f32();
             output_frame
         };
 
-        let output_frame = match output_frame {
-            wgpu::CurrentSurfaceTexture::Success(frame) => frame,
+        // `None` when there is no frame to present to. A capture is rendered to its own
+        // texture and copied back to the cpu, so it is served even then — that is how a hidden
+        // window, which the compositor gives no surface texture, is screenshotted at all.
+        let frame = match output_frame {
+            wgpu::CurrentSurfaceTexture::Success(frame) => Some(frame),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                 surface_state.needs_reconfigure = true;
-                frame
+                Some(frame)
             }
             other => {
                 match (*self.config.on_surface_status)(&other) {
@@ -747,9 +846,38 @@ impl Painter {
                     }
                     SurfaceErrorAction::SkipFrame => {}
                 }
-                return vsync_sec;
+                if !capture {
+                    return vsync_sec;
+                }
+                None
             }
         };
+        // SolidCraft: however this frame ends (presented, dropped by an early return below, or
+        // dropped while a panic unwinds), the surface gets its image back, also on a lost device,
+        // where wgpu's present and discard keep it and the surface's drop then panicked (#7148).
+        let output_frame = frame.map(|frame| {
+            let texture = frame.texture.clone();
+            crate::AcquiredFrame::new(frame, texture)
+        });
+
+        // SolidCraft: before the uploads, a probe asks the driver whether the device is still
+        // there. The first queue write to meet a lost device panics inside wgpu (#4172, #6528);
+        // the probe meets it instead, marks it lost, and the frame is dropped unpresented.
+        if render_state
+            .device_lost
+            .probe(&render_state.device, &render_state.queue)
+        {
+            if let Some(effect) = &render_state.renderer.read().frame_compositor {
+                effect.suspend();
+            }
+            render_queue_guard.commands_submitted = true;
+            log::error!(
+                "The graphics device was lost: {}",
+                render_state.device_lost.reason().unwrap_or_default()
+            );
+            self.context.request_repaint_of(viewport_id);
+            return vsync_sec;
+        }
 
         // SolidCraft: acquire the drawable before preparing callbacks. Preparation can
         // cache GPU resources whose initialization is recorded into `encoder` (such as
@@ -797,14 +925,39 @@ impl Painter {
             let renderer = render_state.renderer.read();
 
             let target_texture = if capture {
-                let capture_state = self.screen_capture_state.get_or_insert_with(|| {
-                    CaptureState::new(&render_state.device, &output_frame.texture)
-                });
-                capture_state.update(&render_state.device, &output_frame.texture);
+                // The frame we would have presented decides the capture, when there is one.
+                // Without it we have only the surface we configured, which is the same thing
+                // as long as no resize is in flight.
+                let (size, format) = match &output_frame {
+                    Some(output_frame) => {
+                        (output_frame.frame.texture.size(), output_frame.frame.texture.format())
+                    }
+                    None => (
+                        wgpu::Extent3d {
+                            width: surface_state.width,
+                            height: surface_state.height,
+                            depth_or_array_layers: 1,
+                        },
+                        render_state.target_format,
+                    ),
+                };
+                if size.width == 0 || size.height == 0 {
+                    log::warn!("Cannot capture a screenshot of a zero-sized surface");
+                    return vsync_sec;
+                }
+
+                let capture_state = self
+                    .screen_capture_state
+                    .get_or_insert_with(|| CaptureState::new(&render_state.device, size, format));
+                capture_state.update(&render_state.device, size);
 
                 &capture_state.texture
+            } else if let Some(output_frame) = &output_frame {
+                &output_frame.frame.texture
             } else {
-                &output_frame.texture
+                // Unreachable: without a frame to present to, and with nothing to capture,
+                // we returned above.
+                return vsync_sec;
             };
             let target_view = target_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -815,67 +968,84 @@ impl Painter {
                     (texture_view, Some(&target_view))
                 });
 
-            let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("egui_render"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: clear_color[0] as f64,
-                            g: clear_color[1] as f64,
-                            b: clear_color[2] as f64,
-                            a: clear_color[3] as f64,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: self.depth_texture_view.get(&viewport_id).map(|view| {
-                    wgpu::RenderPassDepthStencilAttachment {
+            // SolidCraft: the pass owner selects offscreen composition once, never in render's loop.
+            let composed = self.options.msaa_samples == 1
+                && self.options.depth_stencil_format.is_none()
+                && renderer.frame_compositor.as_ref().is_some_and(|effect| {
+                    effect.render(
+                        &renderer,
+                        &mut encoder,
+                        &target_view,
+                        clipped_primitives,
+                        &screen_descriptor,
+                        clear_color,
+                    )
+                });
+            if !composed {
+                let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("egui_render"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view,
-                        depth_ops: self
-                            .options
-                            .depth_stencil_format
-                            .is_some_and(|depth_stencil_format| {
-                                depth_stencil_format.has_depth_aspect()
-                            })
-                            .then_some(wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(1.0),
-                                // It is very unlikely that the depth buffer is needed after egui finished rendering
-                                // so no need to store it. (this can improve performance on tiling GPUs like mobile chips or Apple Silicon)
-                                store: wgpu::StoreOp::Discard,
+                        resolve_target,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: clear_color[0] as f64,
+                                g: clear_color[1] as f64,
+                                b: clear_color[2] as f64,
+                                a: clear_color[3] as f64,
                             }),
-                        stencil_ops: self
-                            .options
-                            .depth_stencil_format
-                            .is_some_and(|depth_stencil_format| {
-                                depth_stencil_format.has_stencil_aspect()
-                            })
-                            .then_some(wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(0),
-                                store: wgpu::StoreOp::Discard,
-                            }),
-                    }
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: self.depth_texture_view.get(&viewport_id).map(
+                        |view| {
+                            wgpu::RenderPassDepthStencilAttachment {
+                                view,
+                                depth_ops: self
+                                    .options
+                                    .depth_stencil_format
+                                    .is_some_and(|depth_stencil_format| {
+                                        depth_stencil_format.has_depth_aspect()
+                                    })
+                                    .then_some(wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(1.0),
+                                        // It is very unlikely that the depth buffer is needed after egui finished rendering
+                                        // so no need to store it. (this can improve performance on tiling GPUs like mobile chips or Apple Silicon)
+                                        store: wgpu::StoreOp::Discard,
+                                    }),
+                                stencil_ops: self
+                                    .options
+                                    .depth_stencil_format
+                                    .is_some_and(|depth_stencil_format| {
+                                        depth_stencil_format.has_stencil_aspect()
+                                    })
+                                    .then_some(wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(0),
+                                        store: wgpu::StoreOp::Discard,
+                                    }),
+                            }
+                        },
+                    ),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
 
-            // Forgetting the pass' lifetime means that we are no longer compile-time protected from
-            // runtime errors caused by accessing the parent encoder before the render pass is dropped.
-            // Since we don't pass it on to the renderer, we should be perfectly safe against this mistake here!
-            renderer.render(
-                &mut render_pass.forget_lifetime(),
-                clipped_primitives,
-                &screen_descriptor,
-            );
+                // Forgetting the pass' lifetime means that we are no longer compile-time protected from
+                // runtime errors caused by accessing the parent encoder before the render pass is dropped.
+                // Since we don't pass it on to the renderer, we should be perfectly safe against this mistake here!
+                renderer.render(
+                    &mut render_pass.forget_lifetime(),
+                    clipped_primitives,
+                    &screen_descriptor,
+                );
+            }
 
             if capture && let Some(capture_state) = &mut self.screen_capture_state {
                 capture_buffer = Some(capture_state.copy_textures(
                     &render_state.device,
-                    &output_frame,
+                    output_frame.as_ref().map(|output_frame| &output_frame.frame),
                     &mut encoder,
                 ));
             }
@@ -899,6 +1069,10 @@ impl Painter {
 
         // Ensure that the queue guard does not do unnecessary work when dropped
         render_queue_guard.commands_submitted = true;
+        // SolidCraft: caches become valid only after the producer encoder was submitted.
+        if let Some(effect) = &render_state.renderer.read().frame_compositor {
+            effect.submitted();
+        }
 
         // Free textures marked for destruction **after** queue submit since they might still be used in the current frame.
         // Calling `wgpu::Texture::destroy` on a texture that is still in use would invalidate the command buffer(s) it is used in.
@@ -914,40 +1088,20 @@ impl Painter {
         if let Some(capture_buffer) = capture_buffer
             && let Some(screen_capture_state) = &mut self.screen_capture_state
         {
-            screen_capture_state.read_screen_rgba(
-                self.context.clone(),
-                capture_buffer,
-                capture_data,
-                self.capture_tx.clone(),
-                viewport_id,
-            );
+            screen_capture_state.read_screen_rgba(capture_buffer, capture_data);
         }
 
-        window.pre_present_notify();
+        if let Some(output_frame) = output_frame {
+            window.pre_present_notify();
 
-        {
             profiling::scope!("present");
             // wgpu doesn't document where vsync can happen. Maybe here?
             let start = web_time::Instant::now();
-            render_state.queue.present(output_frame);
+            output_frame.present(|frame| render_state.queue.present(frame));
             vsync_sec += start.elapsed().as_secs_f32();
         }
 
         vsync_sec
-    }
-
-    /// Call this at the beginning of each frame to receive the requested screenshots.
-    pub fn handle_screenshots(&self, events: &mut Vec<Event>) {
-        for (viewport_id, user_data, screenshot) in self.capture_rx.try_iter() {
-            let screenshot = Arc::new(screenshot);
-            for data in user_data {
-                events.push(Event::Screenshot {
-                    viewport_id,
-                    user_data: data,
-                    image: Arc::clone(&screenshot),
-                });
-            }
-        }
     }
 
     pub fn gc_viewports(&mut self, active_viewports: &ViewportIdSet) {
@@ -963,4 +1117,3 @@ impl Painter {
         // TODO(emilk): something here?
     }
 }
-

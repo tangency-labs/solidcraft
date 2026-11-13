@@ -1,0 +1,467 @@
+{
+ "cases": [
+  {
+   "name": "issue2110_tangent_cylinders_union_a135_b225",
+   "note": "#2110: the union of a cylinder R 10 along x through (y, z) = (0, -10), x -20..20, and one R 5 along y through (x, z) = (0, -5), y -20..20, which touch inside at the origin; each SmApiCreateCylinder turned about Z for its seam (A 135 deg, B 225 deg), onto its axis and moved, as crates/solidcore/tests/issue_2110_tangent_cylinders_union.rs builds them. At the default fixes (upstream behaviour, the SSI marcher steps through the node without splitting its curves, WR-77) the result fails SMLib's check (SmFace #29 Face crosses Seam, SmEdgeuse #7 Bad UVTrimCurve), as #2110 reports. Compares the union's status and its result's counts only: the pinned C++ crashes (SIGSEGV) checking this result, so it is not a `checked` case; the Rust check's #29 / #7 failures are pinned by the regression test.",
+   "inputs": {
+    "api": "union",
+    "a": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 135.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         -20.0,
+         0.0,
+         -10.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 10.0,
+      "height": 40.0
+     }
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 225.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": -90.0
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         0.0,
+         -20.0,
+         -5.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 5.0,
+      "height": 40.0
+     }
+    }
+   }
+  },
+  {
+   "name": "issue2110_tangent_cylinders_union_checked_a0_b90",
+   "note": "#2110: the union of a cylinder R 10 along x through (y, z) = (0, -10), x -20..20, and one R 5 along y through (x, z) = (0, -5), y -20..20, which touch inside at the origin; each SmApiCreateCylinder turned about Z for its seam (A 0 deg, B 90 deg), onto its axis and moved, as crates/solidcore/tests/issue_2110_tangent_cylinders_union.rs builds them. At the default fixes (upstream behaviour, the SSI marcher steps through the node without splitting its curves, WR-77) the union checks clean but loses B (volume 4000 pi). Compares the union's status and SMLib's capi check (level 2) of the result.",
+   "inputs": {
+    "api": "checked",
+    "operation": 1,
+    "a": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 0.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         -20.0,
+         0.0,
+         -10.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 10.0,
+      "height": 40.0
+     }
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 90.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": -90.0
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         0.0,
+         -20.0,
+         -5.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 5.0,
+      "height": 40.0
+     }
+    }
+   }
+  },
+  {
+   "name": "issue2110_tangent_cylinders_union_checked_a0_b0",
+   "note": "#2110: the union of a cylinder R 10 along x through (y, z) = (0, -10), x -20..20, and one R 5 along y through (x, z) = (0, -5), y -20..20, which touch inside at the origin; each SmApiCreateCylinder turned about Z for its seam (A 0 deg, B 0 deg), onto its axis and moved, as crates/solidcore/tests/issue_2110_tangent_cylinders_union.rs builds them. At the default fixes (upstream behaviour, the SSI marcher steps through the node without splitting its curves, WR-77) MakeFaceuse fails 1001. Compares the union's status and SMLib's capi check (level 2) of the result.",
+   "inputs": {
+    "api": "checked",
+    "operation": 1,
+    "a": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 0.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         -20.0,
+         0.0,
+         -10.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 10.0,
+      "height": 40.0
+     }
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 0.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": -90.0
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         0.0,
+         -20.0,
+         -5.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 5.0,
+      "height": 40.0
+     }
+    }
+   }
+  },
+  {
+   "name": "issue2110_tangent_cylinders_union_checked_a180_b270",
+   "note": "#2110: the union of a cylinder R 10 along x through (y, z) = (0, -10), x -20..20, and one R 5 along y through (x, z) = (0, -5), y -20..20, which touch inside at the origin; each SmApiCreateCylinder turned about Z for its seam (A 180 deg, B 270 deg), onto its axis and moved, as crates/solidcore/tests/issue_2110_tangent_cylinders_union.rs builds them. At the default fixes (upstream behaviour, the SSI marcher steps through the node without splitting its curves, WR-77) both seams pass through the touching point, and the union is sound. Compares the union's status and SMLib's capi check (level 2) of the result.",
+   "inputs": {
+    "api": "checked",
+    "operation": 1,
+    "a": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 180.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         -20.0,
+         0.0,
+         -10.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 10.0,
+      "height": 40.0
+     }
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 270.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": -90.0
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         0.0,
+         -20.0,
+         -5.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 5.0,
+      "height": 40.0
+     }
+    }
+   }
+  }
+ ]
+}

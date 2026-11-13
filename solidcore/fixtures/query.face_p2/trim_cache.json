@@ -1,0 +1,3517 @@
+{
+  "cases": [
+    {
+      "name": "trim_cache_plane_absent_inside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_absent_corner",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_absent_edge",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0.5
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_absent_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 1.2,
+          "b": 0.5
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_absent_trimmed_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.03,
+          "b": 0.03
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_absent_target_loops",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": true
+      }
+    },
+    {
+      "name": "trim_cache_plane_valid_inside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_valid_corner",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_valid_edge",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0.5
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_valid_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 1.2,
+          "b": 0.5
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_valid_trimmed_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.03,
+          "b": 0.03
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_valid_target_loops",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": true
+      }
+    },
+    {
+      "name": "trim_cache_plane_modified_inside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_modified_corner",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_modified_edge",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0.5
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_modified_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 1.2,
+          "b": 0.5
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_modified_trimmed_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.03,
+          "b": 0.03
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_plane_modified_target_loops",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                2,
+                -3,
+                5
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -5,
+            -3,
+            5,
+            3
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": true
+      }
+    },
+    {
+      "name": "trim_cache_bspline_absent_inside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_absent_corner",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_absent_edge",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0.5
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_absent_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 1.2,
+          "b": 0.5
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_absent_trimmed_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.03,
+          "b": 0.03
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_absent_target_loops",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": true
+      }
+    },
+    {
+      "name": "trim_cache_bspline_valid_inside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_valid_corner",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_valid_edge",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0.5
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_valid_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 1.2,
+          "b": 0.5
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_valid_trimmed_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.03,
+          "b": 0.03
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_valid_target_loops",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": true
+      }
+    },
+    {
+      "name": "trim_cache_bspline_modified_inside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_modified_corner",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_modified_edge",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0.5
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_modified_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 1.2,
+          "b": 0.5
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_modified_trimmed_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.03,
+          "b": 0.03
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_bspline_modified_target_loops",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": true
+      }
+    },
+    {
+      "name": "trim_cache_circle_absent_inside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_absent_corner",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_absent_edge",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0.5
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_absent_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 1.2,
+          "b": 0.5
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_absent_trimmed_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.03,
+          "b": 0.03
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_absent_target_loops",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": true
+      }
+    },
+    {
+      "name": "trim_cache_circle_valid_inside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_valid_corner",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_valid_edge",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0.5
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_valid_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 1.2,
+          "b": 0.5
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_valid_trimmed_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.03,
+          "b": 0.03
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_valid_target_loops",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": true
+      }
+    },
+    {
+      "name": "trim_cache_circle_modified_inside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_modified_corner",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_modified_edge",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0,
+          "b": 0.5
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_modified_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 1.2,
+          "b": 0.5
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_modified_trimmed_outside",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.03,
+          "b": 0.03
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": false
+      }
+    },
+    {
+      "name": "trim_cache_circle_modified_target_loops",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify trimmed cache path)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb",
+          "rebuild": true
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 2,
+            "sel": 0,
+            "value": 0.0005
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.5,
+          "b": 0.5
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "src_tol": 7e-05,
+        "pc_tol": 0.0002,
+        "do_bnd": true,
+        "use_uv": true,
+        "tgt_only": true
+      }
+    },
+    {
+      "name": "trim_cache_fast_interior_distinct_tol_absent",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify interior trimmed-cache leaf)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0.001,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 0,
+            "sel": 0,
+            "value": 0.001
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.37,
+          "b": 0.41
+        },
+        "cache_mode": "absent",
+        "repeats": 2,
+        "pc_tol": 0.0002
+      }
+    },
+    {
+      "name": "trim_cache_fast_interior_distinct_tol_valid",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify interior trimmed-cache leaf)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0.001,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 0,
+            "sel": 0,
+            "value": 0.001
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.37,
+          "b": 0.41
+        },
+        "cache_mode": "valid",
+        "repeats": 2,
+        "pc_tol": 0.0002
+      }
+    },
+    {
+      "name": "trim_cache_fast_interior_distinct_tol_modified",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp (PointClassify interior trimmed-cache leaf)",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    3,
+                    0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    5,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    5,
+                    3,
+                    0.001,
+                    1
+                  ]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "edits": [
+          {
+            "kind": 3,
+            "sel": 0,
+            "value": 0
+          },
+          {
+            "kind": 0,
+            "sel": 0,
+            "value": 0.001
+          }
+        ],
+        "op": "point_classify",
+        "face": 0,
+        "at": {
+          "mode": "frac",
+          "a": 0.37,
+          "b": 0.41
+        },
+        "cache_mode": "modified",
+        "repeats": 2,
+        "pc_tol": 0.0002
+      }
+    }
+  ]
+}

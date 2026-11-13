@@ -1,0 +1,4 @@
+# The authored resource packs pin these catalog/specification bytes by SHA-256.
+*.json text eol=lf
+*.py text eol=lf
+*.md text eol=lf

@@ -246,11 +246,11 @@ mod tests {
         let axis =
             |source, rest, full| solidcraft_ui_egui::space_mouse::AxisCalibration { source, reversed: false, rest, dead_zone: 0, full: [full; 2] };
         // A short-range device: 15 of its 50 is under the raw dead zone, but 105 of 350 calibrated.
-        let short = Calibration { dead_zone_share: 0.0, axes: std::array::from_fn(|r| axis(r, 0, 50)) };
+        let short = Calibration { dead_zone_share: 0.0, kind: Default::default(), axes: std::array::from_fn(|r| axis(r, 0, 50)) };
         let push = Axes { translation: [15, 0, 0], rotation: [0; 3] };
         assert!(!push.moving() && moving(push, Some(short)));
         // A device resting at 100 on every axis: past the raw dead zone, but at rest calibrated.
-        let offset = Calibration { dead_zone_share: 0.0, axes: std::array::from_fn(|r| axis(r, 100, 350)) };
+        let offset = Calibration { dead_zone_share: 0.0, kind: Default::default(), axes: std::array::from_fn(|r| axis(r, 100, 350)) };
         let resting = Axes { translation: [100; 3], rotation: [100; 3] };
         assert!(resting.moving() && !moving(resting, Some(offset)));
         // Without a calibration, as read.

@@ -7,7 +7,8 @@
   "params": {
    "command": "component.create",
    "params": {
-    "name": "C"
+    "name": "C",
+    "grounded": false
    }
   }
  },

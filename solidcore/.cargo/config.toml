@@ -1,0 +1,13 @@
+[build]
+target-dir = "bin"
+
+[alias]
+# Repository chores; see crates/xtask. `cargo xtask rm <path>` replaces `rm -rf`.
+xtask = "run --quiet --package xtask --"
+
+[env]
+# Threads that take Rust's default stack, the test harness's among them, get 8 MiB, the stack
+# the kernel asks of its callers (README, "WebAssembly stack size"). The default 2 MiB is too
+# little for the fillet certification in an unoptimised build: its interval and Taylor-model
+# frames run past 1 MiB each there. An explicit RUST_MIN_STACK still wins.
+RUST_MIN_STACK = "8388608"

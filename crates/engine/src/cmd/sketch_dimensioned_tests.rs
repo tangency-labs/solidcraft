@@ -1,5 +1,6 @@
 use crate::Session;
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::ConstraintKind;
 
 fn run(s: &mut Session, command: &str, params: Value) -> Value {
@@ -45,8 +46,23 @@ fn typed_line_angle_survives_quadrants_move_reopen_and_one_undo() {
     let mut reopened = Session { doc: std::sync::Arc::new(doc), active_sketch: s.active_sketch, ..Session::default() };
     reopened.refresh();
     close(measure(&reopened, |k| matches!(k, ConstraintKind::LineAngle { .. })), 90f64.to_radians());
-    run(&mut reopened, "sketch.move", json!({"entities":out["curves"],"translate":[4,3],"angle":20}));
-    close(measure(&reopened, |k| matches!(k, ConstraintKind::LineAngle { .. })), 90f64.to_radians());
+    let before_move = reopened.doc.clone();
+    for rotate_constraints in [false, true] {
+        reopened.doc = before_move.clone();
+        reopened.refresh();
+        let result =
+            run(&mut reopened, "sketch.move", json!({"entities":out["curves"],"translate":[4,3],"angle":20,"rotate_constraints":rotate_constraints}));
+        assert_eq!(result["sketch"]["solved"], true);
+        let expected = if rotate_constraints { 110.0_f64 } else { 90.0 };
+        close(measure(&reopened, |k| matches!(k, ConstraintKind::LineAngle { .. })), expected.to_radians());
+        close(measure(&reopened, |k| matches!(k, ConstraintKind::Length { .. })), 10.0);
+        assert_eq!(reopened.doc.param("heading").unwrap().expr, "90 deg");
+        let sk = sketch(&reopened);
+        let c = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::LineAngle { .. })).unwrap();
+        assert_eq!(reopened.doc.param(c.param.as_deref().unwrap()).unwrap().expr, if rotate_constraints { "(heading) + 20 deg" } else { "heading" });
+        run(&mut reopened, "edit.undo", json!({}));
+        close(measure(&reopened, |k| matches!(k, ConstraintKind::LineAngle { .. })), 90f64.to_radians());
+    }
     let mut atomic = session();
     draw(&mut atomic, "sketch.line", json!({"points":[[0,0],[5,5]]}), json!({"length":10,"angle":45}));
     run(&mut atomic, "edit.undo", json!({}));
@@ -72,11 +88,51 @@ fn signed_arc_sweep_retains_radius_and_logical_endpoint_identity() {
     }
 }
 
+/// #6645: a clicked end with `clockwise` sweeps from the start the other way round, keeps the
+/// start's radius and its `.start`/`.end` names, with and without a typed radius.
+#[test]
+fn a_clockwise_centre_arc_runs_from_its_start_to_its_end_the_other_way_round() {
+    for dimensions in [None, Some(json!({"radius": 10}))] {
+        let mut s = session();
+        // The end is off the radius, as a cursor is: it is pulled onto the start's circle.
+        let params = json!({"center":[0,0],"start":[10,0],"end":[0,4],"clockwise":true,"id":"a1","connect":false});
+        match &dimensions {
+            Some(d) => draw(&mut s, "sketch.arc.center_point", params, d.clone()),
+            None => run(&mut s, "sketch.arc.center_point", params),
+        };
+        let sk = sketch(&s);
+        let arc = &sk.curves[sk.curve_index("a1").unwrap()];
+        assert!(arc.reversed, "{dimensions:?}");
+        let at = |r: &str| sk.points[sk.resolve_point(r).unwrap()].pos;
+        let (start, end) = (at("a1.start"), at("a1.end"));
+        close(start.x, 10.0);
+        close(start.y, 0.0);
+        close(end.x, 0.0);
+        close(end.y, 10.0);
+        // Clockwise from 0° to 90° is 270° of arc through the bottom (-90°), not the top.
+        let solidcraft_sketch::CurveKind::Arc { c, a, b } = arc.kind else { panic!("not an arc") };
+        let (c, a, b) = (sk.points[c].pos, sk.points[a].pos, sk.points[b].pos);
+        close(((b - c).angle() - (a - c).angle()).rem_euclid(std::f64::consts::TAU).to_degrees(), 270.0);
+        if dimensions.is_some() {
+            close(measure(&s, |k| matches!(k, ConstraintKind::Radius { .. })), 10.0);
+        }
+    }
+    // Without the flag the same clicks keep the counter-clockwise quarter.
+    let mut s = session();
+    run(&mut s, "sketch.arc.center_point", json!({"center":[0,0],"start":[10,0],"end":[0,4],"id":"a1"}));
+    assert!(!sketch(&s).curves[sketch(&s).curve_index("a1").unwrap()].reversed);
+}
+
 #[test]
 fn slots_and_polygon_keep_permanent_typed_dimensions() {
-    for command in ["sketch.slot.center_to_center", "sketch.slot.overall"] {
+    for command in ["sketch.slot.center_to_center", "sketch.slot.overall", "sketch.slot.center_point"] {
         let mut s = session();
-        let out = draw(&mut s, command, json!({"p0":[2,3],"p1":[22,3],"width":4,"connect":false}), json!({"length":20,"width":4}));
+        let out = draw(
+            &mut s,
+            command,
+            json!({"p0":[2,3],"p1":[22,3],"center":[12,3],"end":[22,3],"width":4,"connect":false}),
+            json!({"length":20,"width":4}),
+        );
         let length = out["dimensions"]["length"]["param"].as_str().unwrap();
         let result = run(&mut s, "parameters.change", json!({"name":length,"expression":30}));
         assert_eq!(result["errors"], json!([]));
@@ -96,6 +152,174 @@ fn slots_and_polygon_keep_permanent_typed_dimensions() {
         let result = run(&mut s, "parameters.change", json!({"name":radius,"expression":15}));
         assert_eq!(result["errors"], json!([]));
         close(measure(&s, |k| matches!(k, ConstraintKind::Radius { .. })), 15.0);
+    }
+    // A polygon drawn by a side takes that side's length in place of its radius (#11271), and
+    // every side follows it.
+    let mut s = session();
+    let undo = s.undo.len();
+    let out = draw(&mut s, "sketch.polygon.edge", json!({"p0":[0,0],"p1":[10,0],"sides":5,"connect":false}), json!({"length":"12 mm"}));
+    assert_eq!(s.undo.len(), undo + 1);
+    let length = out["dimensions"]["length"]["param"].as_str().unwrap();
+    let result = run(&mut s, "parameters.change", json!({"name":length,"expression":20}));
+    assert_eq!(result["errors"], json!([]));
+    let sk = sketch(&s);
+    let sides: Vec<f64> = sk
+        .curves
+        .iter()
+        .filter(|c| !c.construction)
+        .filter_map(|c| match c.kind {
+            solidcraft_sketch::CurveKind::Line { a, b } => Some(sk.points[a].pos.dist(sk.points[b].pos)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sides.len(), 5);
+    sides.iter().for_each(|l| close(*l, 20.0));
+    // As drawn, a typed length leaves out the radius; both given are refused.
+    let mut s = session();
+    let out = run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command":"sketch.polygon.edge","params":{"p0":[0,0],"p1":[10,0],"sides":5},"dimensions":{"length":10},"as_drawn":true}),
+    );
+    assert!(out["dimensions"].get("radius").is_none(), "{out}");
+    let error = s
+        .execute(
+            "sketch.draw.dimensioned",
+            &json!({"command":"sketch.polygon.edge","params":{"p0":[0,0],"p1":[10,0]},"dimensions":{"length":10,"radius":9}}),
+        )
+        .expect_err("both sizes")
+        .to_string();
+    assert!(error.contains("choose radius or length, not both"), "{error}");
+}
+
+#[test]
+fn arc_slot_dimensions_survive_parameter_edits_and_reopening() {
+    let mut s = session();
+    let out = draw(
+        &mut s,
+        "sketch.slot.arc_center",
+        json!({"center":[0,0],"start":[20,0],"end":[0,20],"width":6}),
+        json!({"radius":20,"sweep":90,"width":6}),
+    );
+    for (role, value) in [("radius", 25), ("sweep", 120), ("width", 8)] {
+        let name = out["dimensions"][role]["param"].as_str().unwrap();
+        let result = run(&mut s, "parameters.change", json!({"name":name,"expression":value}));
+        assert_eq!(result["errors"], json!([]), "{role}: {result}");
+    }
+    let doc = serde_json::from_value(serde_json::to_value(s.design()).unwrap()).unwrap();
+    let mut reopened = Session::new(doc);
+    reopened.active_sketch = s.active_sketch;
+    close(measure(&reopened, |k| matches!(k, ConstraintKind::Radius { .. })), 25.0);
+    close(measure(&reopened, |k| matches!(k, ConstraintKind::ArcSweep { .. })), 120f64.to_radians());
+    close(measure(&reopened, |k| matches!(k, ConstraintKind::Diameter { .. })), 8.0);
+}
+
+/// Where point `id` of the active sketch is.
+fn point_at(s: &Session, id: &Value) -> solidcore_record::Vec2 {
+    let sk = sketch(s);
+    sk.point(sk.resolve_point(id.as_str().unwrap()).unwrap()).unwrap()
+}
+
+/// The solve of the active sketch: no conflict, nothing redundant.
+fn clean_solve(s: &Session) -> solidcraft_sketch::SolveReport {
+    let mut sk = sketch(s);
+    let rep = solidcraft_sketch::solve(&mut sk);
+    assert!(rep.ok() && rep.redundant.is_empty(), "{rep:?} {:?}", sk.constraints);
+    rep
+}
+
+/// The arc slot `out`'s middle is on its centre arc (radius `r`, sweep `sweep`), halfway along it.
+fn halfway(s: &Session, out: &Value, r: f64, sweep: f64) {
+    let sk = sketch(s);
+    let centre = sk.curve_index(out["centre_arc"].as_str().unwrap()).unwrap();
+    let solidcraft_sketch::CurveKind::Arc { c, a, b } = sk.curves[centre].kind else { panic!("an arc") };
+    let (o, a, b) = (sk.point(c).unwrap(), sk.point(a).unwrap(), sk.point(b).unwrap());
+    let m = point_at(s, &out["middle"]);
+    close(o.dist(a), r);
+    close(o.dist(m), r);
+    // Equal turns from each end, the two together the whole sweep.
+    let turn = |p: solidcore_record::Vec2, q: solidcore_record::Vec2| ((q - o).angle() - (p - o).angle()).rem_euclid(std::f64::consts::TAU);
+    close(turn(a, b), sweep);
+    close(turn(a, m), sweep / 2.0);
+    close(turn(m, b), sweep / 2.0);
+}
+
+/// Every slot makes its middle point, held in the middle when the slot changes, and the
+/// middle takes no freedom away nor adds any (#7908).
+#[test]
+fn every_slot_keeps_a_middle_point_in_the_middle() {
+    use solidcore_record::Vec2;
+    for command in ["sketch.slot.center_to_center", "sketch.slot.overall", "sketch.slot.center_point"] {
+        let mut s = session();
+        let out = draw(
+            &mut s,
+            command,
+            json!({"p0":[2,3],"p1":[22,3],"center":[12,3],"end":[22,3],"width":4,"connect":false}),
+            json!({"length":20,"width":4}),
+        );
+        let middle = &out["middle"];
+        assert!(middle.is_string(), "{command}: {out}");
+        let sk = sketch(&s);
+        let axis = sk.curve_index(out["centre_line"].as_str().unwrap()).unwrap();
+        assert!(sk.curves[axis].construction, "{command}");
+        let solidcraft_sketch::CurveKind::Line { a, b } = sk.curves[axis].kind else { panic!("{command}: a line") };
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { l, .. } if l == axis)), "{command}");
+        // Length and width set: only the slot's place and turn are free.
+        assert_eq!(clean_solve(&s).dof, 3, "{command}");
+        let length = out["dimensions"]["length"]["param"].as_str().unwrap();
+        assert_eq!(run(&mut s, "parameters.change", json!({"name":length,"expression":40}))["errors"], json!([]));
+        let sk = sketch(&s);
+        let (pa, pb) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+        let m = point_at(&s, middle);
+        assert!(m.dist((pa + pb) * 0.5) < 1e-6, "{command}: {m:?} between {pa:?} and {pb:?}");
+        assert!(pa.dist(pb) > 20.0, "{command}: the slot grew");
+        // Pinning the middle and the turn leaves the slot fully defined.
+        run(&mut s, "sketch.constraint.fix", json!({"entity":middle,"fixed":true}));
+        run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line":out["centre_line"]}));
+        assert_eq!(clean_solve(&s).dof, 0, "{command}");
+    }
+
+    // Arc slots: the middle is halfway along the centre arc.
+    let mut s = session();
+    let out = draw(
+        &mut s,
+        "sketch.slot.arc_center",
+        json!({"center":[0,0],"start":[20,0],"end":[0,20],"width":6}),
+        json!({"radius":20,"sweep":90,"width":6}),
+    );
+    close(point_at(&s, &out["middle"]).dist(Vec2::from_angle(45f64.to_radians()) * 20.0), 0.0);
+    halfway(&s, &out, 20.0, 90f64.to_radians());
+    // The centre and the start angle are free.
+    assert_eq!(clean_solve(&s).dof, 3);
+    for (role, value) in [("radius", 25), ("sweep", 120)] {
+        let name = out["dimensions"][role]["param"].as_str().unwrap();
+        assert_eq!(run(&mut s, "parameters.change", json!({"name":name,"expression":value}))["errors"], json!([]));
+    }
+    halfway(&s, &out, 25.0, 120f64.to_radians());
+    assert_eq!(clean_solve(&s).dof, 3);
+
+    let mut s = session();
+    let out = run(&mut s, "sketch.slot.arc_three_point", json!({"start":[0,0],"through":[10,5],"end":[20,0],"width":3}));
+    let m = point_at(&s, &out["middle"]);
+    close(m.x, 10.0);
+    let sk = sketch(&s);
+    let centre = sk.curve_index(out["centre_arc"].as_str().unwrap()).unwrap();
+    assert!(m.y > sk.center(centre).unwrap().y, "on the drawn side of the arc: {m:?}");
+    let solidcraft_sketch::CurveKind::Arc { c, a, b } = sk.curves[centre].kind else { panic!("an arc") };
+    let (o, a, b) = (sk.point(c).unwrap(), sk.point(a).unwrap(), sk.point(b).unwrap());
+    halfway(&s, &out, o.dist(a), ((b - o).angle() - (a - o).angle()).rem_euclid(std::f64::consts::TAU));
+    // The centre, radius, start and sweep of the centre arc, and the width.
+    assert_eq!(clean_solve(&s).dof, 6);
+    // A radius takes one of them away whatever it is: the middle never takes another.
+    let d = run(&mut s, "sketch.dimension", json!({"entities":[out["centre_arc"]],"type":"radius","value":22}));
+    for radius in [22, 8, 12, 40] {
+        assert_eq!(run(&mut s, "parameters.change", json!({"name":d["param"],"expression":radius}))["errors"], json!([]));
+        assert_eq!(clean_solve(&s).dof, 5, "radius {radius}");
+        let sk = sketch(&s);
+        let centre = sk.curve_index(out["centre_arc"].as_str().unwrap()).unwrap();
+        let solidcraft_sketch::CurveKind::Arc { c, a, b } = sk.curves[centre].kind else { panic!("an arc") };
+        let (o, a, b) = (sk.point(c).unwrap(), sk.point(a).unwrap(), sk.point(b).unwrap());
+        halfway(&s, &out, f64::from(radius), ((b - o).angle() - (a - o).angle()).rem_euclid(std::f64::consts::TAU));
     }
 }
 
@@ -141,6 +365,26 @@ fn invalid_dimensioned_shapes_are_atomic_including_late_constraint_failure() {
 }
 
 #[test]
+fn a_dimensioned_midpoint_line_carries_its_length_and_angle() {
+    let mut s = session();
+    let out = draw(&mut s, "sketch.line.midpoint", json!({"mid":[0,0],"end":[10,0]}), json!({"length":20,"angle":0}));
+    assert_eq!(out["curves"].as_array().map(|c| c.len()), Some(1), "{out}");
+    close(measure(&s, |k| matches!(k, ConstraintKind::Length { .. })), 20.0);
+    close(measure(&s, |k| matches!(k, ConstraintKind::LineAngle { .. })), 0.0);
+    let sk = sketch(&s);
+    let line = sk.curve_index(out["curves"][0].as_str().unwrap()).unwrap();
+    let solidcraft_sketch::CurveKind::Line { a, b } = sk.curves[line].kind else { panic!("a line") };
+    // The clicked middle is the line's middle.
+    close((sk.points[a].pos.x + sk.points[b].pos.x) * 0.5, 0.0);
+    close((sk.points[a].pos.y + sk.points[b].pos.y) * 0.5, 0.0);
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { l, .. } if l == line)),
+        "the middle is constrained: {:?}",
+        sk.constraints
+    );
+}
+
+#[test]
 fn dimensioned_authoring_uses_selected_occurrence_and_keeps_local_geometry() {
     let mut s = Session::default();
     let component = run(&mut s, "component.create", json!({"name":"Shared"}))["component"].as_u64().unwrap();
@@ -154,7 +398,7 @@ fn dimensioned_authoring_uses_selected_occurrence_and_keeps_local_geometry() {
     let local = model.sketch(s.active_sketch.unwrap()).unwrap();
     close(local.plane.origin.x, 0.0);
     close(local.plane.origin.z, 2.0);
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let displayed = world.sketch(s.active_sketch.unwrap()).unwrap();
     close(displayed.plane.origin.x, 20.0);
     close(displayed.plane.origin.z, 2.0);
@@ -164,4 +408,345 @@ fn dimensioned_authoring_uses_selected_occurrence_and_keeps_local_geometry() {
     let solidcraft_sketch::CurveKind::Line { a, b } = sk.curves[line].kind else { panic!("line") };
     close(sk.points[a].pos.x, 0.0);
     close(sk.points[b].pos.x, 5.0 / std::f64::consts::SQRT_2);
+}
+
+/// The expression of the parameter driving the first dimension `kind` matches.
+fn driving(s: &Session, kind: fn(&ConstraintKind) -> bool) -> String {
+    let sk = sketch(s);
+    let c = sk.constraints.iter().find(|c| kind(&c.kind)).unwrap();
+    s.doc.param(c.param.as_deref().unwrap()).unwrap().expr.clone()
+}
+
+/// A typed box value `name = expression` defines the user parameter `name`, which drives the
+/// dimension, as the Dimension tool's value does (#7567).
+#[test]
+fn a_typed_definition_defines_the_parameter_that_drives_the_dimension() {
+    let is_diameter = |k: &ConstraintKind| matches!(k, ConstraintKind::Diameter { .. });
+    let mut s = session();
+    let undo = s.undo.len();
+    let out = draw(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":3}), json!({"diameter":"width = 20"}));
+    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(out["defined"], json!(["width"]), "{out}");
+    close(measure(&s, is_diameter), 20.0);
+    let width = s.doc.param("width").unwrap();
+    assert_eq!((width.expr.as_str(), width.unit.as_str(), width.model), ("20", "mm", false));
+    assert_eq!(driving(&s, is_diameter), "width");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(sketch(&s).curves.is_empty() && s.doc.param("width").is_none());
+
+    // A bare number is in the design's unit, in the size checks too.
+    let mut s = session();
+    run(&mut s, "document.units", json!({"units":"in"}));
+    draw(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":3}), json!({"diameter":"#w = 2"}));
+    close(measure(&s, is_diameter), 50.8);
+    assert_eq!(s.doc.param("w").unwrap().unit, "in");
+    let mut s = session();
+    run(&mut s, "document.units", json!({"units":"in"}));
+    let slot = json!({"p0":[0,0],"p1":[60,0],"width":10,"connect":false});
+    draw(&mut s, "sketch.slot.overall", slot.clone(), json!({"length":"len = 2","width":"0.5"}));
+    close(measure(&s, |k| matches!(k, ConstraintKind::SlotOverallLength { .. })), 50.8);
+
+    // Both boxes of a rectangle may define a name.
+    let mut s = session();
+    let out = draw(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[5,5]}), json!({"width":"w = 30","height":"h=10"}));
+    assert_eq!(out["defined"], json!(["h", "w"]), "{out}");
+    let is_length = |k: &ConstraintKind| matches!(k, ConstraintKind::Length { .. });
+    let sk = sketch(&s);
+    let mut lengths: Vec<_> =
+        sk.constraints.iter().filter(|c| is_length(&c.kind)).map(|c| solidcraft_sketch::measure_dimension(&sk, &c.kind).unwrap()).collect();
+    lengths.sort_by(f64::total_cmp);
+    assert_eq!(lengths.len(), 2);
+    close(lengths[0], 10.0);
+    close(lengths[1], 30.0);
+}
+
+#[test]
+fn a_refused_typed_definition_changes_nothing() {
+    let mut s = session();
+    run(&mut s, "parameters.add", json!({"name":"taken","expression":"5","unit":"mm"}));
+    let circle = |value: &str| json!({"command":"sketch.circle.center","params":{"center":[0,0],"radius":3},"dimensions":{"diameter":value}});
+    let rect =
+        |w: &str, h: &str| json!({"command":"sketch.rectangle.two_point","params":{"p0":[0,0],"p1":[5,5]},"dimensions":{"width":w,"height":h}});
+    for (params, says) in [
+        (circle("taken = 20"), "already a parameter"),
+        (circle("w ="), "needs a value"),
+        (circle("2 = 3"), ""),
+        (circle("w == 3"), ""),
+        (circle("w = -4"), "invalid diameter"),
+        (circle(&format!("w = {}", "1".repeat(4096))), "bounded"),
+        // The same name twice: the second box finds it taken.
+        (rect("w = 30", "w = 10"), "already a parameter"),
+        // A box's value can't use a name the other box defines: neither exists yet.
+        (rect("w = 30", "h = w / 2"), ""),
+    ] {
+        let snapshot = serde_json::to_value(&*s.doc).unwrap();
+        let undo = s.undo.len();
+        let error = s.execute("sketch.draw.dimensioned", &params).expect_err(&params.to_string()).to_string();
+        assert!(error.contains(says), "{params}: {error}");
+        assert_eq!(serde_json::to_value(&*s.doc).unwrap(), snapshot, "{params}");
+        assert_eq!(s.undo.len(), undo);
+    }
+}
+
+/// A drawing for each creator `dimension_roles` accepts. A creator added there needs one here,
+/// or `as_drawn_dimensions_every_size_of_every_creator_where_it_was_drawn` fails.
+fn sample(creator: &str) -> Option<Value> {
+    Some(match creator {
+        "sketch.line" => json!({"points":[[0,0],[6,8]]}),
+        "sketch.line.midpoint" => json!({"mid":[3,4],"end":[9,12]}),
+        "sketch.rectangle.two_point" => json!({"p0":[0,0],"p1":[30,20]}),
+        "sketch.rectangle.center" => json!({"center":[0,0],"corner":[15,10]}),
+        "sketch.rectangle.three_point" => json!({"p0":[0,0],"p1":[30,10],"p2":[25,25]}),
+        "sketch.rectangle.rounded" => json!({"p0":[0,0],"p1":[30,20],"radius":3}),
+        "sketch.circle.center" => json!({"center":[0,0],"radius":5}),
+        "sketch.circle.two_point" => json!({"p0":[0,0],"p1":[10,0]}),
+        "sketch.circle.three_point" => json!({"p0":[0,0],"p1":[10,0],"p2":[5,5]}),
+        "sketch.arc.center_point" => json!({"center":[0,0],"start":[10,0],"end":[0,10]}),
+        "sketch.ellipse" => json!({"center":[0,0],"major":[10,6],"minor_radius":4}),
+        "sketch.slot.center_to_center" | "sketch.slot.overall" => json!({"p0":[2,3],"p1":[22,3],"width":4}),
+        "sketch.slot.center_point" => json!({"center":[12,3],"end":[22,3],"width":4}),
+        "sketch.slot.arc_center" => json!({"center":[0,0],"start":[20,0],"end":[0,20],"width":6}),
+        "sketch.slot.arc_three_point" => json!({"start":[20,0],"through":[14.142136,14.142136],"end":[0,20],"width":6}),
+        "sketch.polygon.inscribed" | "sketch.polygon.circumscribed" => json!({"center":[4,5],"radius":10,"sides":6}),
+        "sketch.polygon.edge" => json!({"p0":[0,0],"p1":[10,0],"sides":6}),
+        _ => return None,
+    })
+}
+
+fn points(s: &Session) -> Vec<(f64, f64)> {
+    sketch(s).points.iter().map(|p| (p.pos.x, p.pos.y)).collect()
+}
+
+/// With `as_drawn`, every creator gets every size it has (one of radius and diameter) as driving
+/// dimensions, in one undo step, and the shape stays exactly where it was drawn.
+#[test]
+fn as_drawn_dimensions_every_size_of_every_creator_where_it_was_drawn() {
+    let creators: Vec<&str> = crate::command_specs().iter().map(|c| c.id).filter(|id| super::dimension_roles(id).is_some()).collect();
+    assert!(creators.len() >= 17, "{creators:?}");
+    for creator in creators {
+        let params = sample(creator).unwrap_or_else(|| panic!("{creator}: add a sample drawing for it"));
+        let mut plain = session();
+        run(&mut plain, creator, params.clone());
+        let mut s = session();
+        let undo = s.undo.len();
+        let out = run(&mut s, "sketch.draw.dimensioned", json!({"command":creator,"params":params,"as_drawn":true}));
+        assert_eq!(s.undo.len(), undo + 1, "{creator}: one undo step");
+        let placed = out["dimensions"].as_object().unwrap();
+        for role in super::dimension_roles(creator).unwrap() {
+            let alternative = super::ALTERNATIVES.iter().find(|pair| pair.contains(role)).and_then(|pair| pair.iter().find(|r| r != &role));
+            assert!(
+                placed.contains_key(*role) || alternative.is_some_and(|other| placed.contains_key(*other)),
+                "{creator}: no {role} dimension in {placed:?}"
+            );
+            if let Some(other) = alternative {
+                assert!(!(placed.contains_key(*role) && placed.contains_key(*other)), "{creator}: both {role} and {other}");
+            }
+        }
+        for (role, result) in placed {
+            assert_ne!(result["driven"], json!(true), "{creator}: {role} is driven");
+        }
+        for ((x, y), (px, py)) in points(&s).into_iter().zip(points(&plain)) {
+            assert!((x - px).abs() < 1e-5 && (y - py).abs() < 1e-5, "{creator}: moved from ({px}, {py}) to ({x}, {y})");
+        }
+        run(&mut s, "edit.undo", json!({}));
+        assert!(sketch(&s).curves.is_empty(), "{creator}: undo left geometry");
+        assert!(s.doc.params.iter().all(|p| !p.model), "{creator}: undo left a dimension parameter");
+    }
+}
+
+/// Typed values win over the size as drawn; a typed radius stands in for the diameter; a size the
+/// sketch already determines (a line inferred horizontal has no angle to give) is left out.
+#[test]
+fn as_drawn_keeps_typed_values_alternatives_and_leaves_out_determined_sizes() {
+    let mut s = session();
+    let out = run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command":"sketch.rectangle.two_point","params":{"p0":[0,0],"p1":[30,20]},"dimensions":{"width":40},"as_drawn":true}),
+    );
+    let mut placed: Vec<&String> = out["dimensions"].as_object().unwrap().keys().collect();
+    placed.sort();
+    assert_eq!(placed, ["height", "width"]);
+    let lengths: Vec<f64> = sketch(&s)
+        .constraints
+        .iter()
+        .filter(|c| matches!(c.kind, ConstraintKind::Length { .. }))
+        .map(|c| solidcraft_sketch::measure_dimension(&sketch(&s), &c.kind).unwrap())
+        .collect();
+    assert_eq!(lengths.len(), 2);
+    assert!(lengths.iter().any(|l| (l - 40.0).abs() < 1e-6) && lengths.iter().any(|l| (l - 20.0).abs() < 1e-6), "{lengths:?}");
+
+    let mut s = session();
+    let out = run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command":"sketch.circle.center","params":{"center":[0,0],"radius":5},"dimensions":{"radius":"4 mm"},"as_drawn":true}),
+    );
+    assert_eq!(out["dimensions"].as_object().unwrap().keys().collect::<Vec<_>>(), ["radius"]);
+    close(measure(&s, |k| matches!(k, ConstraintKind::Radius { .. })), 4.0);
+
+    let mut s = session();
+    let out =
+        run(&mut s, "sketch.draw.dimensioned", json!({"command":"sketch.line","params":{"points":[[0,0],[10,0]],"infer":true},"as_drawn":true}));
+    assert_eq!(out["dimensions"].as_object().unwrap().keys().collect::<Vec<_>>(), ["length"]);
+    assert!(sketch(&s).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Horizontal { .. })), "the inferred horizontal stays");
+    close(measure(&s, |k| matches!(k, ConstraintKind::Length { .. })), 10.0);
+
+    // Without as_drawn the call is unchanged: only what is typed.
+    let mut s = session();
+    let out = draw(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[30,20]}), json!({"width":40}));
+    assert_eq!(out["dimensions"].as_object().unwrap().keys().collect::<Vec<_>>(), ["width"]);
+}
+
+/// An ellipse takes its major and minor radius (#10279): typed values drive it.
+#[test]
+fn an_ellipse_takes_a_typed_major_and_minor_radius() {
+    let mut s = session();
+    let out =
+        draw(&mut s, "sketch.ellipse", json!({"center":[0,0],"major":[10,0],"minor_radius":4}), json!({"major_radius":"12 mm","minor_radius":5}));
+    let mut placed: Vec<&String> = out["dimensions"].as_object().unwrap().keys().collect();
+    placed.sort();
+    assert_eq!(placed, ["major_radius", "minor_radius"]);
+    close(measure(&s, |k| matches!(k, ConstraintKind::Distance { .. })), 12.0);
+    close(measure(&s, |k| matches!(k, ConstraintKind::Radius { .. })), 5.0);
+}
+
+/// Every `[x, y]` point of a sample moved by `(dx, dy)`; sizes and counts stay.
+fn shifted(v: &Value, dx: f64, dy: f64) -> Value {
+    match v {
+        Value::Array(xy) if xy.len() == 2 && xy.iter().all(Value::is_number) => {
+            json!([xy[0].as_f64().unwrap() + dx, xy[1].as_f64().unwrap() + dy])
+        }
+        Value::Array(items) => Value::Array(items.iter().map(|item| shifted(item, dx, dy)).collect()),
+        Value::Object(fields) => Value::Object(fields.iter().map(|(k, item)| (k.clone(), shifted(item, dx, dy))).collect()),
+        other => other.clone(),
+    }
+}
+
+fn dof(s: &mut Session) -> u64 {
+    run(s, "sketch.solve", json!({}))["dof"].as_u64().unwrap()
+}
+
+/// With `as_drawn` and `locate`, every creator ends fully constrained wherever it is drawn: at its
+/// sample place (several touch the origin, which anchors them) and moved away from the origin.
+/// Nothing moves, and it is one undo step.
+#[test]
+fn locate_fully_constrains_every_creator_where_it_was_drawn() {
+    let creators: Vec<&str> = crate::command_specs().iter().map(|c| c.id).filter(|id| super::dimension_roles(id).is_some()).collect();
+    for creator in creators {
+        let sample = sample(creator).unwrap_or_else(|| panic!("{creator}: add a sample drawing for it"));
+        for params in [sample.clone(), shifted(&sample, 13.0, 7.0)] {
+            let mut plain = session();
+            run(&mut plain, creator, params.clone());
+            let mut s = session();
+            let undo = s.undo.len();
+            let out = run(&mut s, "sketch.draw.dimensioned", json!({"command":creator,"params":params,"as_drawn":true,"locate":true}));
+            assert_eq!(dof(&mut s), 0, "{creator} {params}: not fully constrained; located {}", out["located"]);
+            assert_eq!(s.undo.len(), undo + 1, "{creator}: one undo step");
+            for ((x, y), (px, py)) in points(&s).into_iter().zip(points(&plain)) {
+                assert!((x - px).abs() < 1e-5 && (y - py).abs() < 1e-5, "{creator} {params}: moved from ({px}, {py}) to ({x}, {y})");
+            }
+            for placed in out["located"].as_array().unwrap() {
+                assert_ne!(placed["driven"], json!(true), "{creator}: a driven position {placed}");
+            }
+            run(&mut s, "edit.undo", json!({}));
+            assert!(sketch(&s).curves.is_empty() && sketch(&s).constraints.is_empty(), "{creator}: undo left something");
+        }
+    }
+}
+
+/// A shape anchored to the origin gets no position; a point on an axis goes onto the axis rather
+/// than taking a 0 distance; one off both axes gets a horizontal and a vertical distance.
+#[test]
+fn locate_adds_only_what_the_shape_lacks() {
+    let located = |center: [f64; 2]| -> (Value, Session) {
+        let mut s = session();
+        let out = run(
+            &mut s,
+            "sketch.draw.dimensioned",
+            json!({"command":"sketch.circle.center","params":{"center":center,"radius":5},"as_drawn":true,"locate":true}),
+        );
+        (out["located"].clone(), s)
+    };
+    let (anchored, mut s) = located([0.0, 0.0]);
+    assert_eq!(anchored, json!([]), "a circle on the origin is already placed");
+    assert_eq!(dof(&mut s), 0);
+
+    let (on_axis, mut s) = located([20.0, 0.0]);
+    assert_eq!(on_axis.as_array().unwrap().len(), 2, "{on_axis}");
+    assert_eq!(dof(&mut s), 0);
+    let zero_distance = sketch(&s).constraints.iter().any(|c| match &c.kind {
+        ConstraintKind::DistanceX { value, .. } | ConstraintKind::DistanceY { value, .. } => value.abs() < 1e-9,
+        _ => false,
+    });
+    assert!(!zero_distance, "a 0 distance was placed instead of the axis");
+
+    let (free, mut s) = located([20.0, 12.0]);
+    assert_eq!(free.as_array().unwrap().len(), 2, "{free}");
+    assert_eq!(dof(&mut s), 0);
+    close(measure(&s, |k| matches!(k, ConstraintKind::DistanceX { .. })), 20.0);
+    close(measure(&s, |k| matches!(k, ConstraintKind::DistanceY { .. })), 12.0);
+}
+
+/// The reply's own `sketch` is the sketch after everything the command did, not the creator's solve
+/// from before the dimensions: a rectangle centred on the origin with both sizes has no freedom
+/// left, as the dimensions' replies add up and `sketch.solve` finds.
+#[test]
+fn the_reply_sketch_is_the_solve_after_the_dimensions() {
+    let mut s = session();
+    let out = draw(&mut s, "sketch.rectangle.center", json!({"center":[0,0],"corner":[10,5]}), json!({"width":20,"height":10}));
+    assert_eq!(out["sketch"], json!({"solved":true,"dof":0}), "{out}");
+    assert_eq!(out["sketch"]["dof"], json!(dof(&mut s)));
+}
+
+/// `dimensions` is a map by role, so its order is not the order the sizes were placed in: a typed
+/// width then the height as drawn is placed width first, though `height` sorts before `width`. The
+/// reply's `sketch` is still the sketch's own solve, for every creator and with `locate` too.
+#[test]
+fn the_reply_sketch_matches_the_sketch_whatever_order_the_dimensions_went_in() {
+    let mut s = session();
+    let out = run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command":"sketch.rectangle.center","params":{"center":[3,4],"corner":[13,9]},"dimensions":{"width":20},"as_drawn":true}),
+    );
+    let last_placed = out["dimensions"]["height"]["sketch"]["dof"].as_u64().unwrap();
+    assert!(last_placed < out["dimensions"]["width"]["sketch"]["dof"].as_u64().unwrap(), "height is placed after width: {out}");
+    assert_eq!(out["sketch"]["dof"], json!(last_placed), "{out}");
+    assert_eq!(out["sketch"]["dof"], json!(dof(&mut s)));
+
+    let creators: Vec<&str> = crate::command_specs().iter().map(|c| c.id).filter(|id| super::dimension_roles(id).is_some()).collect();
+    for creator in creators {
+        let params = sample(creator).unwrap_or_else(|| panic!("{creator}: add a sample drawing for it"));
+        for locate in [false, true] {
+            let mut s = session();
+            let out = run(&mut s, "sketch.draw.dimensioned", json!({"command":creator,"params":params,"as_drawn":true,"locate":locate}));
+            assert_eq!(out["sketch"]["dof"], json!(dof(&mut s)), "{creator} locate {locate}: {}", out["sketch"]);
+            assert_eq!(out["sketch"]["solved"], json!(true), "{creator} locate {locate}");
+        }
+    }
+}
+
+/// With `locate` the reply's `sketch` counts the placement too: a rectangle that was free to move
+/// ends with nothing left free, and the reply says so.
+#[test]
+fn the_reply_sketch_counts_what_locate_placed() {
+    let mut s = session();
+    let out = run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command":"sketch.rectangle.center","params":{"center":[3,4],"corner":[13,9]},"dimensions":{"width":20,"height":10},"locate":true}),
+    );
+    assert_eq!(out["located"].as_array().unwrap().len(), 2, "{out}");
+    assert_eq!(out["sketch"], json!({"solved":true,"dof":0}), "{out}");
+    assert_eq!(dof(&mut s), 0);
+    // A placement that takes nothing away (a circle on the origin) leaves the sizes' freedom as is.
+    let mut s = session();
+    let out = run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command":"sketch.circle.center","params":{"center":[0,0],"radius":5},"dimensions":{"radius":5},"locate":true}),
+    );
+    assert_eq!(out["located"], json!([]), "{out}");
+    assert_eq!(out["sketch"]["dof"], json!(dof(&mut s)));
 }

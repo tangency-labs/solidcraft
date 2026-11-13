@@ -1,0 +1,12 @@
+id = "curve.conic"
+upstream = ["source/SMLib/inc/SmConic.h", "source/SMLib/src/SmConic.cpp"]
+rust_module = "curve::conic"
+depends_on = ["curve.curve_p2", "geom.extent1d", "geom.solution_array", "geom.vector2d", "geom.vector3d", "topology.database_io"]
+soft_depends_on = ["geom.polynomial", "geom.tol"]
+est_lines = 859
+layer = 14
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-curve.conic-a1"
+claimed_at = "2026-10-13T01:00:34Z"
+notes = "difftest green: 3240 cases (240 fixture incl. all 15 smCurveTest.cpp IntersectConic asserts + 3000 generated), 0 deferred; wired SmCurve::ReadFromDB(SmConic_TYPE) and CurveKind::Conic into curve.curve_p2 (still partial: curve_p5, curve.line). 19 fns; largest: SmConic::Evaluate, SmConic::InvertPointOnConic, SmConic::IntersectConic, SmConic::IntersectImplicitConic; cycle back-edges (call into later units; stub or co-port): curve.curve_p5(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"

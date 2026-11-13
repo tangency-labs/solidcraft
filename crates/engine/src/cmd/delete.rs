@@ -1,20 +1,28 @@
 //! Delete for everything that can be selected, in one undo step: sketch entities (while
 //! sketching), timeline features and sketches (with the features that depend on them),
-//! construction planes, bodies (a Remove feature from here on in the timeline), occurrences and
-//! components, canvases and joints. `dry_run` reports what would go and what would fail without
+//! construction planes and axes, bodies (a Remove feature from here on in the timeline), occurrences and
+//! components, canvases, point clouds and joints. `dry_run` reports what would go and what would fail without
 //! changing anything, so the UI can ask first.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::FeatureKind;
-use solidcraft_geom::Vec3;
 
-use super::CommandSpec;
+use super::{CommandSpec, sketch_store};
 use crate::params::{bad, bool_};
+use crate::schema::delete::{SelectionDeleteParams, SelectionDeleteResult};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "Delete", delete).icon("delete").params(
-    "items?: [selection items]; components?, occurrences?, canvases?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step)",
-)];
+const DELETE_CONTRACT: TypedContract<SelectionDeleteParams> = TypedContract::new();
+
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "Delete", crate::checked!("selection.delete", delete))
+    .icon("delete")
+    .contract(&DELETE_CONTRACT)
+    .output(output_schema_for::<SelectionDeleteResult>)
+    .params(
+        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step)",
+    )];
 
 /// Run another command's body inside this one (so the whole delete is one undo step).
 fn sub(s: &mut Session, id: &str, p: Value) -> Result<Value> {
@@ -36,6 +44,9 @@ fn keys(p: &Value, k: &str) -> Vec<String> {
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_(p, "dry_run").unwrap_or(false) {
         let mut t = s.scratch();
+        // What the check computes is kept where this session keeps it (a check run ahead, off a
+        // front end's window thread), so the delete itself finds it there (#9917).
+        t.model.keep(s.model.kept());
         return apply(&mut t, p);
     }
     let r = apply(s, p)?;
@@ -61,6 +72,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let before = s.model.clone();
+    let before_doc = s.doc.clone();
     let mut joints = p
         .get("joints")
         .and_then(Value::as_array)
@@ -87,7 +99,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             Sel::Occurrence { path } => {
                 selected_occurrences.push(s.occurrence_placement(path)?.occurrence.to_string());
             }
-            Sel::SketchCurve { id } | Sel::SketchPoint { id } | Sel::SketchConstraint { id } => entities.push(id.clone()),
+            Sel::SketchCurve { id, .. } | Sel::SketchPoint { id } | Sel::SketchConstraint { id } => entities.push(id.clone()),
             Sel::Feature { id } => {
                 if s.doc.feature(*id).is_none() {
                     return Err(bad(cmd, format!("no feature {id}")));
@@ -98,13 +110,43 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 Some(f) if matches!(f.kind, FeatureKind::ConstructionPlane { .. }) => features.push(f.id),
                 _ => skip("the origin planes can't be deleted".into()),
             },
-            Sel::Axis { .. } => skip("the origin axes can't be deleted".into()),
+            Sel::Axis { name } => match s.doc.find_feature(name) {
+                Some(f) if matches!(f.kind, FeatureKind::ConstructionAxis { .. }) => features.push(f.id),
+                _ => skip("the origin axes can't be deleted".into()),
+            },
+            Sel::SketchMidpoint { .. } => skip("a midpoint belongs to its sketch edge".into()),
+            Sel::ConstructionPoint { name } => match s.doc.find_feature(name) {
+                Some(f) if matches!(f.kind, FeatureKind::ConstructionPoint { .. }) => features.push(f.id),
+                _ => skip(format!("no construction point named \"{name}\"")),
+            },
             Sel::Body { name } => bodies.push(name.clone()),
             Sel::Face { body, point, .. } => match faces.iter_mut().find(|(b, _)| b == body) {
                 Some((_, ps)) => ps.push(*point),
                 None => faces.push((body.clone(), vec![*point])),
             },
             Sel::Edge { .. } | Sel::Vertex { .. } => skip("edges and vertices are deleted with their body or face".into()),
+            // In the sketch being edited, a profile stands for the curves around it (#7107);
+            // its holes are shapes of their own and stay. A letter's outline stands for its
+            // whole text, so no counters are left behind.
+            Sel::Profile { sketch, index } if s.active_sketch == Some(*sketch) => {
+                let st = s.model.state();
+                let (Some(ss), Ok(sk)) = (st.sketch(*sketch), sketch_store::read(&s.doc, *sketch)) else {
+                    skip("nothing around that profile can be deleted".into());
+                    continue;
+                };
+                let outer = ss.profiles.get(*index).map(|pr| solidcraft_sketch::distinct_curves(&pr.outer_curves)).unwrap_or_default();
+                let before = entities.len();
+                for c in outer.iter().filter_map(|id| sk.curves.iter().find(|c| &c.id == id)) {
+                    let text = c.link.as_ref().filter(|l| sk.link(l).is_some_and(|l| l.kind == solidcraft_sketch::LinkKind::Text));
+                    let id = text.unwrap_or(&c.id);
+                    if !entities.contains(id) {
+                        entities.push(id.clone());
+                    }
+                }
+                if entities.len() == before {
+                    skip("nothing around that profile can be deleted".into());
+                }
+            }
             Sel::Profile { .. } => skip("a profile goes with its sketch".into()),
             Sel::ExternalSketchCurve { .. } | Sel::ExternalSketchPoint { .. } => skip("edit the source sketch to delete its geometry".into()),
         }
@@ -129,8 +171,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         done = true;
     }
     if !features.is_empty() {
-        let ids: Vec<String> = features.iter().map(u64::to_string).collect();
-        sub(s, "timeline.delete", json!({ "features": ids }))?;
+        sub(s, "timeline.delete", json!({ "features": features }))?;
         done = true;
     }
     // Bodies still there (not made by a feature deleted above) get a Remove feature.
@@ -151,7 +192,11 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, format!("no occurrence `{k}`")));
         };
         if s.doc.occurrences.iter().filter(|x| x.component == o.component).count() > 1 {
-            s.doc_mut().occurrences.retain(|x| x.id != o.id);
+            // The joints on it and the other assembly records naming it go with it: left behind,
+            // a joint stays in the Browser joined to nothing (#7749).
+            let gone = s.doc_mut().remove_occurrences(&std::collections::BTreeSet::from([o.id]));
+            s.visibility.hidden_joints.retain(|h| !gone.contains(h));
+            joints.extend(gone);
             s.pending_moves.remove(&o.id);
             done = true;
         } else {
@@ -159,7 +204,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     for k in keys(p, "components") {
-        let id = s.doc.find_component(&k).ok_or_else(|| bad(cmd, format!("no component `{k}`")))?;
+        let id = s.doc.resolve_component(&k).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{k}`")))?;
         if id == 0 {
             return Err(bad(cmd, "the design itself can't be deleted"));
         }
@@ -174,22 +219,28 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     for k in keys(p, "canvases") {
+        // A locked canvas stays (#12310), as a locked body does.
+        if let Some(c) = s.doc.canvases.iter().find(|c| c.id.to_string() == k || c.name == k).filter(|c| c.locked) {
+            skip(super::sketch_canvas::locked_reason(c));
+            continue;
+        }
         sub(s, "canvas.delete", json!({ "canvas": k }))?;
+        done = true;
+    }
+    for k in keys(p, "point_clouds") {
+        sub(s, "pointcloud.delete", json!({ "cloud": k }))?;
         done = true;
     }
     if !done {
         return Err(bad(cmd, skipped.first().cloned().unwrap_or_else(|| "nothing to delete".into())));
     }
     s.refresh();
-    let deleted: Vec<&String> = features_before.iter().filter(|(id, _)| s.doc.feature(*id).is_none()).map(|(_, n)| n).collect();
-    let would_fail: Vec<String> = s
-        .model
-        .results
-        .iter()
-        .filter(|r| r.error.is_some() && before.result(r.id).is_some_and(|b| b.error.is_none() && !b.skipped))
-        .map(|r| r.name.clone())
-        .collect();
-    Ok(json!({ "deleted": deleted, "deleted_joints": joints, "bodies": bodies, "would_fail": would_fail, "skipped": skipped }))
+    let deleted: Vec<String> = features_before.iter().filter(|(id, _)| s.doc.feature(*id).is_none()).map(|(_, n)| n.clone()).collect();
+    // Features after a rolled-back marker count too (#3471).
+    let would_fail: Vec<String> =
+        super::edit::newly_broken_in_history(&before_doc, &before, &s.doc, &s.model).into_iter().map(|(name, _)| name).collect();
+    let reply = SelectionDeleteResult { deleted, deleted_joints: joints, bodies, would_fail, skipped, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 #[cfg(test)]
@@ -235,6 +286,136 @@ mod tests {
         assert_eq!(bodies(&s), 2);
     }
 
+    /// With the history rolled back, the checks before a delete look past the marker too (#3471):
+    /// deleting the plate (or its extrude) there breaks the hole cut after the marker, and the
+    /// confirmation must say so instead of the hole's error mark turning up only at the end.
+    #[test]
+    fn the_checks_before_a_delete_in_a_rolled_back_history_see_the_features_after_the_marker() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5, "name": "Plate"}));
+        run(&mut s, "solid.cylinder", json!({"base": [20, 10, -1], "radius": 2, "height": 10, "operation": "cut", "name": "Hole"}));
+        let body = s.model.state().bodies[0].name.clone();
+        let plate = s.doc.find_feature("Plate").unwrap().id;
+        for marker in [None, Some(2)] {
+            run(&mut s, "timeline.roll_to", marker.map_or(json!({}), |m| json!({"position": m})));
+            let doc = s.doc.clone();
+            let dry = run(&mut s, "selection.delete", json!({"items": [{"type": "body", "name": body}], "dry_run": true}));
+            // At the end the plate's Remove goes after the hole; rolled back, before it.
+            let breaks = if marker.is_some() { json!(["Hole"]) } else { json!([]) };
+            assert_eq!(dry["would_fail"], breaks, "marker {marker:?}: {dry}");
+            let deps = run(&mut s, "timeline.dependents", json!({"feature": plate}));
+            assert_eq!(deps["would_fail"], json!(["Hole"]), "marker {marker:?}: {deps}");
+            assert_eq!(*s.doc, *doc, "the checks change nothing");
+            assert!(s.model.result(s.doc.find_feature("Hole").unwrap().id).is_some_and(|r| r.skipped == marker.is_some() && r.error.is_none()));
+        }
+        // Deleting anyway (rolled back) still reports what it broke.
+        let done = run(&mut s, "selection.delete", json!({"items": [{"type": "body", "name": body}]}));
+        assert_eq!(done["would_fail"], json!(["Hole"]), "{done}");
+    }
+
+    /// Deleting a dimension of a sketch with a rolled-back history after it (#7253): the sketch
+    /// keeps its geometry, so the check before the delete does not build the features after the
+    /// marker again (that took minutes on a long history). A deleted line still breaks them, and
+    /// the check still says so.
+    #[test]
+    fn deleting_a_dimension_in_a_rolled_back_history_builds_nothing_after_the_marker() {
+        let mut s = Session::default();
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [30, 20], [10, 20]], "closed": true}));
+        let lines: Vec<String> = s.model.state().sketch(sk).unwrap().sketch.curves.iter().map(|c| c.id.clone()).collect();
+        let param = run(&mut s, "sketch.dimension", json!({"entities": [lines[0], lines[1]], "type": "angle"}))["param"].as_str().map(str::to_string);
+        let angle = s.model.state().sketch(sk).unwrap().sketch.constraints.iter().find(|c| param.is_some() && c.param == param).unwrap().id.clone();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5, "name": "Plate"}));
+        let later = 6;
+        for i in 0..later {
+            run(&mut s, "solid.cylinder", json!({"base": [12 + 3 * i, 8, -1], "radius": 1, "height": 10, "operation": "cut"}));
+        }
+        run(&mut s, "timeline.roll_to", json!({"position": 1}));
+        run(&mut s, "sketch.edit", json!({"sketch": sk}));
+        let cached = |s: &Session| s.model.cache.lock().map(|c| c.len()).unwrap_or(0);
+        let before = cached(&s);
+        let doc = s.doc.clone();
+        let items = json!([{"type": "sketch_constraint", "id": angle}]);
+        let dry = run(&mut s, "selection.delete", json!({"items": items, "dry_run": true}));
+        assert_eq!((&dry["deleted"], &dry["would_fail"]), (&json!([]), &json!([])), "{dry}");
+        assert_eq!(*s.doc, *doc, "the check changes nothing");
+        // The sketch itself is solved again; Plate and the cuts are not built.
+        let built = cached(&s).saturating_sub(before);
+        assert!(built < later, "{built} results built for the check");
+        let line = json!([{"type": "sketch_curve", "id": lines[1]}]);
+        let dry = run(&mut s, "selection.delete", json!({"items": line, "dry_run": true}));
+        assert!(dry["would_fail"].as_array().unwrap().contains(&json!("Plate")), "{dry}");
+        run(&mut s, "selection.delete", json!({"items": items}));
+        assert!(s.model.state().sketch(sk).unwrap().sketch.constraints.iter().all(|c| c.id != angle));
+    }
+
+    /// #9917: the check before a delete in a sketch with a rolled-back history after it builds the
+    /// history before the delete only when a feature fails after it. Deleting a hole in the plate
+    /// changes the plate and every cut after it and breaks none of them: the check reports
+    /// nothing. Deleting a side of the plate's outline breaks the plate, and the check still says
+    /// so, with the cache too small to keep a state (as on a large design).
+    #[test]
+    fn a_delete_in_a_rolled_back_history_reports_what_breaks_after_the_marker_and_nothing_else() {
+        let mut s = Session::default();
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        let outline = run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [30, 20], [10, 20]], "closed": true}))["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let hole = run(&mut s, "sketch.circle.center", json!({"center": [30, 15], "radius": 2}))["curves"][0].as_str().unwrap().to_string();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5, "name": "Plate"}));
+        for i in 0..6 {
+            run(&mut s, "solid.cylinder", json!({"base": [12 + 3 * i, 8, -1], "radius": 1, "height": 10, "operation": "cut"}));
+        }
+        run(&mut s, "timeline.roll_to", json!({"position": 1}));
+        run(&mut s, "sketch.edit", json!({"sketch": sk}));
+        *s.model.cache.lock().unwrap() = solidcraft_doc::EvalCache::with_budget(1);
+        let doc = s.doc.clone();
+        let dry = run(&mut s, "selection.delete", json!({"items": [{"type": "sketch_curve", "id": hole}], "dry_run": true}));
+        assert_eq!(dry["would_fail"], json!([]), "{dry}");
+        let dry = run(&mut s, "selection.delete", json!({"items": [{"type": "sketch_curve", "id": outline}], "dry_run": true}));
+        assert!(dry["would_fail"].as_array().unwrap().contains(&json!("Plate")), "{dry}");
+        assert_eq!(*s.doc, *doc, "the checks change nothing");
+    }
+
+    /// #9917: a delete checked ahead (off a front end's window thread) keeps what its dry run
+    /// builds of the history after the marker, and the delete run with that finds all of it:
+    /// nothing is built again on the window thread, where it took half a minute.
+    #[test]
+    fn a_delete_checked_ahead_keeps_the_history_it_builds_for_the_delete() {
+        let mut s = Session::default();
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [30, 20], [10, 20]], "closed": true}));
+        let hole = run(&mut s, "sketch.circle.center", json!({"center": [30, 15], "radius": 2}))["curves"][0].as_str().unwrap().to_string();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5, "name": "Plate"}));
+        let later = 6;
+        for i in 0..later {
+            run(&mut s, "solid.cylinder", json!({"base": [12 + 3 * i, 8, -1], "radius": 1, "height": 10, "operation": "cut"}));
+        }
+        run(&mut s, "timeline.roll_to", json!({"position": 1}));
+        run(&mut s, "sketch.edit", json!({"sketch": sk}));
+        // A cache too small to keep a state, as on a large design: only what is kept carries over.
+        *s.model.cache.lock().unwrap() = solidcraft_doc::EvalCache::with_budget(1);
+        let items = json!([{"type": "sketch_curve", "id": hole}]);
+        let ahead = s.ahead();
+        let kept = ahead.kept();
+        let replies = ahead.replies(&[("selection.delete".to_string(), json!({"items": items, "dry_run": true}))]);
+        assert!(replies.iter().all(Result::is_ok), "{replies:?}");
+        let built = kept.len();
+        assert!(built > later, "the check kept the history after the marker: {built} results");
+        s.model.keep(Some(kept.clone()));
+        run(&mut s, "selection.delete", json!({"items": items}));
+        s.model.keep(None);
+        assert_eq!(kept.len(), built, "the delete found everything it builds among what the check kept");
+        assert!(s.model.state().sketch(sk).unwrap().sketch.curves.iter().all(|c| c.id != hole));
+    }
+
     #[test]
     fn mixed_selection_is_one_undo_step() {
         let (mut s, _) = part();
@@ -252,6 +433,31 @@ mod tests {
         assert_eq!(s.undo.len(), depth + 1);
         run(&mut s, "edit.undo", json!({}));
         assert_eq!((bodies(&s), s.doc.features.len()), (2, n));
+    }
+
+    #[test]
+    fn construction_axis_deletes_with_dry_run_and_undo_but_origin_axes_are_refused() {
+        let mut s = Session::default();
+        run(&mut s, "construct.axis.two_points", json!({"a": {"point": [0, 0, 0]}, "b": {"point": [1, 2, 3]}, "name": "CustomAxis"}));
+        let axis = s.doc.find_feature("CustomAxis").unwrap().id;
+        let depth = s.undo.len();
+        let items = json!([{"type": "axis", "name": "CustomAxis"}, {"type": "axis", "name": "X"}]);
+        let dry = run(&mut s, "selection.delete", json!({"items": items, "dry_run": true}));
+        assert_eq!(dry["deleted"], json!(["CustomAxis"]));
+        assert_eq!(dry["skipped"], json!(["the origin axes can't be deleted"]));
+        assert!(s.doc.feature(axis).is_some());
+        assert_eq!(s.undo.len(), depth);
+        let deleted = run(&mut s, "selection.delete", json!({"items": items}));
+        assert_eq!(deleted, dry);
+        assert!(s.doc.feature(axis).is_none());
+        assert_eq!(s.undo.len(), depth + 1);
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.doc.feature(axis).is_some());
+        for name in ["X", "Y", "Z"] {
+            let error = s.execute("selection.delete", &json!({"items": [{"type": "axis", "name": name}]})).unwrap_err();
+            assert!(error.to_string().contains("the origin axes can't be deleted"), "{error}");
+            assert!(s.doc.feature(axis).is_some());
+        }
     }
 
     #[test]
@@ -346,6 +552,30 @@ mod tests {
         }
     }
 
+    /// An instance deleted while its component has others goes alone, and the joints on it go
+    /// with it, with their motion links (#7749): left behind, a joint names an occurrence that is
+    /// gone, and every solve reports it.
+    #[test]
+    fn an_instance_deleted_alone_takes_its_joints_with_it() {
+        let mut s = joint_assembly();
+        let b1 = s.doc.occurrences.iter().find(|o| o.name == "B:1").unwrap().id;
+        let b2 = run(&mut s, "occurrence.copy", json!({"occurrence": "B:1", "translate": [0, 40, 0]}))["occurrence"].as_u64().unwrap();
+        let dry = run(&mut s, "selection.delete", json!({"occurrences": [b1], "dry_run": true}));
+        assert_eq!(s.doc.assembly.joints.len(), 2, "a dry run changes nothing");
+        let deleted = run(&mut s, "selection.delete", json!({"occurrences": [b1]}));
+        assert_eq!(deleted, dry);
+        let left: Vec<&str> = s.doc.assembly.joints.iter().map(|j| j.name.as_str()).collect();
+        assert_eq!(left, ["Glue"], "the joint on the deleted instance goes with it");
+        assert!(s.doc.assembly.links.is_empty(), "and so does its motion link");
+        assert_eq!(deleted["deleted_joints"].as_array().map(Vec::len), Some(1), "the reply names it: {deleted}");
+        assert!(s.doc.occurrences.iter().any(|o| o.id == b2), "the other instance stays");
+        let solved = run(&mut s, "joint.solve", json!({}));
+        assert_eq!(solved["errors"], json!([]), "no joint is left pointing at the deleted instance");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.assembly.joints.len(), 2);
+        assert_eq!(s.doc.assembly.links.len(), 1);
+    }
+
     #[test]
     fn occurrences_components_and_sketch_entities() {
         let (mut s, _) = part();
@@ -368,5 +598,56 @@ mod tests {
         let id = s.model.state().sketch(sk).unwrap().sketch.curves[0].id.clone();
         run(&mut s, "selection.delete", json!({"items": [{"type": "sketch_curve", "id": id}]}));
         assert!(s.model.state().sketch(sk).unwrap().sketch.curves.is_empty());
+    }
+
+    /// A rectangle picked by clicking inside it (a profile) goes with Delete while sketching
+    /// (#7107): its four lines go, the circle inside it (its hole) stays, and undo brings them
+    /// back. Outside the sketch a profile still goes only with its sketch.
+    #[test]
+    fn a_profile_deletes_the_curves_around_it_while_sketching() {
+        let mut s = Session::default();
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+        run(&mut s, "sketch.circle.center", json!({"center": [10, 10], "radius": 3, "id": "hole"}));
+        let index = {
+            let st = s.model.state();
+            solidcraft_sketch::profile_at_point(&st.sketch(sk).unwrap().profiles, solidcore_record::Vec2::new(30.0, 10.0)).unwrap()
+        };
+        let before = curves(&s, sk);
+        assert_eq!(before.len(), 5, "four lines and a circle: {before:?}");
+        let item = json!({"items": [{"type": "profile", "sketch": sk, "index": index}]});
+        run(&mut s, "selection.delete", item.clone());
+        assert_eq!(curves(&s, sk), vec!["hole".to_string()], "only the rectangle goes");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(curves(&s, sk), before);
+        run(&mut s, "sketch.finish", json!({}));
+        let err = s.execute("selection.delete", &item).unwrap_err().to_string();
+        assert!(err.contains("a profile goes with its sketch"), "{err}");
+        assert_eq!(curves(&s, sk), before);
+    }
+
+    /// A picked letter goes with its whole text, counters too (an O's inside is a profile of
+    /// its own), and the rectangle beside it stays.
+    #[test]
+    fn a_letter_profile_deletes_its_whole_text_while_sketching() {
+        let mut s = Session::default();
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+        run(&mut s, "sketch.text", json!({"text": "OB", "at": [60, 0], "height": 10}));
+        let (index, rect) = {
+            let st = s.model.state();
+            let ss = st.sketch(sk).unwrap();
+            let text = |id: &String| ss.sketch.curves.iter().any(|c| &c.id == id && c.link.is_some());
+            let index = ss.profiles.iter().position(|p| p.outer_curves.iter().all(text)).unwrap();
+            (index, ss.sketch.curves.iter().filter(|c| c.link.is_none()).map(|c| c.id.clone()).collect::<Vec<_>>())
+        };
+        assert_eq!(rect.len(), 4, "{rect:?}");
+        assert!(curves(&s, sk).len() > 4, "the text has outlines");
+        run(&mut s, "selection.delete", json!({"items": [{"type": "profile", "sketch": sk, "index": index}]}));
+        assert_eq!(curves(&s, sk), rect, "the whole text goes, the rectangle stays");
+    }
+
+    fn curves(s: &Session, sk: u64) -> Vec<String> {
+        s.model.state().sketch(sk).unwrap().sketch.curves.iter().map(|c| c.id.clone()).collect()
     }
 }

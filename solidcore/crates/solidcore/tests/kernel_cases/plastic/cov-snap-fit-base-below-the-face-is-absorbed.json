@@ -1,0 +1,159 @@
+{
+  "area": "plastic",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "cov-snap-fit-base-below-the-face-is-absorbed",
+  "expected": {
+    "bbox": {
+      "max": [
+        40,
+        40,
+        19
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "the arm's side profile is t x (l + base_height) plus the catch's triangle cd*cl/2; joined, the 2 mm below the face lies inside the box and adds nothing: V = 40*40*4 + (2*15 + 1*3/2)*6 = 6589.0. The arm stands from x 20 - 2 to the catch at 20 + 1 (hook +x), its top at z 4 + 15",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 6589.0,
+    "what": "plastic.snap_fit 15 long, 2 thick, 6 wide with a 1 x 3 catch and its base reaching 2 below the face, joined to a 40 x 40 x 4 box"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 30,
+      "faces": 13,
+      "vertices": 20
+    }
+  },
+  "records": "cov-snap-fit-base-below-the-face-is-absorbed.bodies.json.gz",
+  "result": [
+    {
+      "body": "Box",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4089.97366596101,
+      "body_count": 1,
+      "edges": 30,
+      "faces": 13,
+      "vertices": 20,
+      "volume_mm3": 6589.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "plastic.snap_fit 15 long, 2 thick, 6 wide with a 1 x 3 catch and its base reaching 2 below the face, joined to a 40 x 40 x 4 box",
+  "why_not": []
+}

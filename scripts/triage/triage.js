@@ -15,6 +15,7 @@ const MAX_TEXT = 20000;
 const PATH_AREAS = [
   [/^crates\/sketch\//, 'area:sketch'],
   [/^crates\/(kernel|geom)\//, 'area:kernel'],
+  [/^solidcore\//, 'area:kernel'],
   [/^crates\/doc\//, 'area:doc'],
   [/^crates\/io\//, 'area:io'],
   [/^crates\/(render|gpu)\//, 'area:render'],
@@ -59,7 +60,8 @@ const WORD_AREAS = [
 
 const CRASH = /^\s*crash\b|\bpanic(ked)?\b|\bcaught panic\b/i;
 const FEATURE = /^\s*\[?feature( request)?\]?\b/i;
-// The in-app reports: `<COMMAND>: operation failed` / `Modeling: unexpected result`.
+// The in-app reports of a failed command: `<COMMAND>: operation failed` (older ones also
+// `Modeling: unexpected result`). Other in-app reports carry an `## Actual behavior` section.
 const IN_APP_FAILURE = /:\s*(operation failed|unexpected result)\b/i;
 
 function repoArgs(context) {

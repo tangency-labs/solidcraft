@@ -1,0 +1,114 @@
+{
+  "cases": [
+    {
+      "name": "prog_drop_trim_ps10_1_sub_piece_natural_boundary",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:2144 my_test_drop_curve: drop curve to sub-piece of surface natural boundary; pSurface->DropAndTrimCurve(ctx, GetNaturalUVDomain(), *pCurveToDrop, GetNaturalInterval(), 1.0e-2, dMaxDistToSurf, dDeviation, sProjCurves) (defaults: bKeepAllDropCurves TRUE, bOptCurveIsOnSurface FALSE, pOptDropCurveFail NULL)",
+      "inputs": {
+        "op": "trim",
+        "surface": {
+          "kind": "file",
+          "file": {
+            "$upstream_file": "Drop/PS10_drp_Srf1.dat"
+          }
+        },
+        "curve": {
+          "kind": "file",
+          "file": {
+            "$upstream_file": "Drop/PS10_drp_Crv1.dat"
+          }
+        },
+        "tol": 0.01,
+        "keep_all": true,
+        "on_surface": false
+      }
+    },
+    {
+      "name": "prog_drop_trim_ps10_2_non_iso_large_aspect",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:2182 my_test_drop_curve: nonIsoCurve drop to large aspect ratio surface (large radius, long slender circular face); pSurface->DropAndTrimCurve(ctx, GetNaturalUVDomain(), *pCurveToDrop, GetNaturalInterval(), 1.0e-2, dMaxDistToSurf, dDeviation, sProjCurves) (defaults: bKeepAllDropCurves TRUE, bOptCurveIsOnSurface FALSE, pOptDropCurveFail NULL)",
+      "inputs": {
+        "op": "trim",
+        "surface": {
+          "kind": "file",
+          "file": {
+            "$upstream_file": "Drop/PS10_drp_Srf2.dat"
+          }
+        },
+        "curve": {
+          "kind": "file",
+          "file": {
+            "$upstream_file": "Drop/PS10_drp_Crv2.dat"
+          }
+        },
+        "tol": 0.01,
+        "keep_all": true,
+        "on_surface": false
+      }
+    },
+    {
+      "name": "prog_drop_trim_ps10_3_small_cylinder_end_on_boundary",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:2227 my_test_drop_curve: small cylinder with curve ending on natural boundary; pSurface->DropAndTrimCurve(ctx, GetNaturalUVDomain(), *pCurveToDrop, GetNaturalInterval(), 1.0e-2, dMaxDistToSurf, dDeviation, sProjCurves) (defaults: bKeepAllDropCurves TRUE, bOptCurveIsOnSurface FALSE, pOptDropCurveFail NULL)",
+      "inputs": {
+        "op": "trim",
+        "surface": {
+          "kind": "file",
+          "file": {
+            "$upstream_file": "Drop/PS10_drp_Srf3.dat"
+          }
+        },
+        "curve": {
+          "kind": "file",
+          "file": {
+            "$upstream_file": "Drop/PS10_drp_Crv3.dat"
+          }
+        },
+        "tol": 0.01,
+        "keep_all": true,
+        "on_surface": false
+      }
+    },
+    {
+      "name": "prog_drop_trim_ps10_4_short_curve_not_over_surface",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:2266 my_test_drop_curve: very large aspect ratio surface, very short curve not over the surface - no drop result; pSurface->DropAndTrimCurve(ctx, GetNaturalUVDomain(), *pCurveToDrop, GetNaturalInterval(), 1.0e-2, dMaxDistToSurf, dDeviation, sProjCurves) (defaults: bKeepAllDropCurves TRUE, bOptCurveIsOnSurface FALSE, pOptDropCurveFail NULL)",
+      "inputs": {
+        "op": "trim",
+        "surface": {
+          "kind": "file",
+          "file": {
+            "$upstream_file": "Drop/PS10_drp_Srf4.dat"
+          }
+        },
+        "curve": {
+          "kind": "file",
+          "file": {
+            "$upstream_file": "Drop/PS10_drp_Crv4.dat"
+          }
+        },
+        "tol": 0.01,
+        "keep_all": true,
+        "on_surface": false
+      }
+    },
+    {
+      "name": "prog_drop_trim_ps10_5_long_natural_boundary_large_aspect",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:2304 my_test_drop_curve: long natural boundary drop to very large aspect surface; pSurface->DropAndTrimCurve(ctx, GetNaturalUVDomain(), *pCurveToDrop, GetNaturalInterval(), 1.0e-2, dMaxDistToSurf, dDeviation, sProjCurves) (defaults: bKeepAllDropCurves TRUE, bOptCurveIsOnSurface FALSE, pOptDropCurveFail NULL)",
+      "inputs": {
+        "op": "trim",
+        "surface": {
+          "kind": "file",
+          "file": {
+            "$upstream_file": "Drop/PS10_drp_Srf5.dat"
+          }
+        },
+        "curve": {
+          "kind": "file",
+          "file": {
+            "$upstream_file": "Drop/PS10_drp_Crv5.dat"
+          }
+        },
+        "tol": 0.01,
+        "keep_all": true,
+        "on_surface": false
+      }
+    }
+  ]
+}

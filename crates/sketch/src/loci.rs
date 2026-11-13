@@ -32,7 +32,8 @@
 //! Tolerances are relative to the loci's own size plus the rounding of the coordinates they
 //! are computed from, so a construction far from the origin behaves like the same one near it.
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 use crate::model::{ConstraintKind, CurveKind, MAX_COORD, Sketch, in_range, radius_in_range};
 use crate::union_find::{find, union};
@@ -829,7 +830,7 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
     let rounds: Vec<Option<Round>> = (0..m).map(|k| round_of(sk, k)).collect();
     let line = |l: usize| lines.get(l).copied().flatten();
     let round = |k: usize| rounds.get(k).copied().flatten();
-    let cons: Vec<&ConstraintKind> = sk.constraints.iter().filter(|c| !c.driven).map(|c| &c.kind).collect();
+    let cons: Vec<&ConstraintKind> = sk.constraints.iter().filter(|c| !c.driven && !sk.follows_its_source(&c.kind)).map(|c| &c.kind).collect();
     let dim = |v: f64| (v.is_finite() && (0.0..=MAX_COORD).contains(&v)).then_some(v);
 
     // Radii and lengths the dimensions set, also through equal curves.
@@ -893,6 +894,23 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
                     && let Some(d) = dim(if inside { r - value } else { r + value })
                 {
                     ties.push(Tie::Offset { p: rd.c, l, len: Len::Value(d) });
+                }
+            }
+            // The point lies radius ± the gap from the centre.
+            PointCircleDistance { p, c, value, inside } => {
+                if let (Some(rd), Some(r)) = (round(c), r_of(c))
+                    && let Some(d) = dim(if inside { r - value } else { r + value })
+                {
+                    rel(rd.c, p, Rel::Dist(d));
+                }
+            }
+            // The centres lie the radii and the gap apart, as the circles lie.
+            CircleCircleDistance { a, b, value, circles } => {
+                if let (Some(ra), Some(rb)) = (round(a), round(b))
+                    && let (Some(r_a), Some(r_b)) = (r_of(a), r_of(b))
+                    && let Some(d) = dim(circles.centres_apart(value, r_a, r_b))
+                {
+                    rel(ra.c, rb.c, Rel::Dist(d));
                 }
             }
             Tangent { a, b } => {
@@ -971,6 +989,10 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
     }
     for (k, rd) in rounds.iter().enumerate() {
         let Some(Round { c, ends: Some((a, b)) }) = *rd else { continue };
+        // An offset's arc follows its source's centre; its held ends don't place it (#6569).
+        if sk.offset_arc_follows_source(k) {
+            continue;
+        }
         match r_of(k) {
             Some(r) => {
                 rel(c, a, Rel::Dist(r));

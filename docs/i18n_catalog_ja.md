@@ -474,7 +474,7 @@
 | Move | 移動 | `ui.move` |
 | MOVE | 移動 | `ui.heading_move` |
 | Move 3D Point | 3D 点を移動 | `cmd.sketch_move3d` |
-| Move and rotate the view together; sketches use pan and zoom only. | 視点の移動と回転を同時に行います（スケッチ中はパンとズームのみ） | `ui.space_mouse_hint` |
+| Move and rotate the view together; sketches use pan and zoom only. | 視点の移動と回転を同時に行います（スケッチ中はパンとズームのみ） | `ui.3d_mouse_hint` |
 | Move Bodies to Component | ボディをコンポーネントに移動 | `cmd.component_move_bodies` |
 | Move Browser Items | ブラウザ項目を移動 | `cmd.browser_move` |
 | Move Dimension Text | 寸法テキストを移動 | `cmd.sketch_dimension_text` |
@@ -490,7 +490,7 @@
 | Name | 名前 | `Name` |
 | Named Views | 名前付きビュー | `ui.named_views` |
 | Navigate View | ビューナビゲーション | `cmd.view_navigate` |
-| Navigate with SpaceNavigator / SpaceMouse | SpaceNavigator / SpaceMouseで視点を操作 | `ui.space_mouse_navigate` |
+| Navigate with the 3D mouse | 3Dマウスで視点を操作 | `ui.3d_mouse_navigate` |
 | Navigation | ナビゲーション | `ui.navigation` |
 | needs two joints | 2つのジョイントが必要 | `needs two joints` |
 | New Body | 新規ボディ | `ui.new_body` |

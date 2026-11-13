@@ -2,6 +2,7 @@
 use super::{cell_value, column_parts, configuration_rules_ui, table, unit_of};
 use crate::{SolveApp, ui_kit};
 use serde_json::{Value, json};
+use solidcraft_engine::doc::DEFAULT_MATERIAL;
 /// The Configurations table, its rules and errors.
 pub(super) fn configurations_rows(
     app: &mut SolveApp,
@@ -12,36 +13,20 @@ pub(super) fn configurations_rows(
 ) {
     // Physical materials for the configuration table's Library: the library's, then the design's own.
     let material_names = app.session.doc.material_names();
+    // The table and its cells are made once per design revision: a table of hundreds of rows
+    // costs too much to rebuild every frame.
     let revision = app.session.revision;
-    let v = rule_editor.table.as_ref().filter(|(r, _)| *r == revision).map(|(_, v)| v.clone()).unwrap_or_else(|| {
+    if rule_editor.table.as_ref().is_none_or(|shown| shown.0 != revision) {
         let value = app.session.execute("config.table", &json!({})).unwrap_or(Value::Null);
-        rule_editor.table = Some((revision, value.clone()));
-        value
-    });
-    let mut tb = table(&v);
-    // Bare numbers show with their parameter's unit ("40" is 40 mm), as Fusion shows them.
-    let kinds = app.session.doc.all_param_exprs();
-    for (_, vals) in &mut tb.rows {
-        for (c, val) in tb.columns.iter().zip(vals.iter_mut()) {
-            let (kind, n) = column_parts(c);
-            if kind == "param"
-                && val.trim().parse::<f64>().is_ok()
-                && let Some(unit) = app.session.doc.param(n).map(|parameter| parameter.unit.clone()).or_else(|| {
-                    kinds.iter().find(|x| x.0 == n).and_then(|x| {
-                        unit_of(x.2).map(|unit| {
-                            if x.2 == solidcraft_engine::doc::expr::Kind::Length { app.session.doc.units.clone() } else { unit.to_string() }
-                        })
-                    })
-                })
-            {
-                *val = format!("{} {unit}", val.trim());
-            }
-        }
+        let tb = with_units(app, table(&value));
+        rule_editor.table = Some(std::sync::Arc::new((revision, value, tb)));
     }
+    let Some(shown) = rule_editor.table.clone() else { return };
+    let (_, v, tb) = &*shown;
     let run = |app: &mut SolveApp, error: &mut Option<String>, id: &str, p: Value| {
         *error = app.run(id, p).err();
     };
-    let labels: Vec<_> = std::iter::once(crate::i18n::tr_label("Configuration").to_owned())
+    let labels: Vec<_> = std::iter::once(solidcraft_ui_text::tr_label("Configuration").to_owned())
         .chain(tb.columns.iter().map(|c| {
             let (kind, name) = column_parts(c);
             v["targets"]
@@ -51,13 +36,13 @@ pub(super) fn configurations_rows(
                 .filter(|_| matches!(kind, "component_appearance" | "face_appearance"))
                 .map(str::to_string)
                 .unwrap_or_else(|| match kind {
-                    "material" => format!("{}: {name}", crate::i18n::tr_label("Material")),
-                    "appearance" => format!("{}: {name}", crate::i18n::tr_label("Appearance")),
-                    "suppress" => format!("{}: {name}", crate::i18n::tr_label("Suppress")),
+                    "material" => format!("{}: {name}", solidcraft_ui_text::tr_label("Material")),
+                    "appearance" => format!("{}: {name}", solidcraft_ui_text::tr_label("Appearance")),
+                    "suppress" => format!("{}: {name}", solidcraft_ui_text::tr_label("Suppress")),
                     _ => name.to_owned(),
                 })
         }))
-        .chain(std::iter::once(crate::i18n::tr_label("Actions").to_owned()))
+        .chain(std::iter::once(solidcraft_ui_text::tr_label("Actions").to_owned()))
         .collect();
     let gap = ui.spacing().item_spacing.x;
     let name_width = tb.rows.iter().map(|(name, _)| ui_kit::ContentWidth::name(ui, name)).fold(0.0, f32::max);
@@ -68,14 +53,14 @@ pub(super) fn configurations_rows(
         .enumerate()
         .map(|(index, label)| {
             let min_width = if index == 0 {
-                name_width + gap + status_width + crate::theme::Tokens::get().space_24
+                name_width + gap + status_width + solidcraft_theme::Tokens::get().space_24
             } else {
-                ui_kit::row_height() * 2.0 + crate::theme::Tokens::get().space_24
+                ui_kit::row_height() * 2.0 + solidcraft_theme::Tokens::get().space_24
             };
             if index == labels.len() - 1 {
                 ui_kit::Column::new(label, 0.0)
                     .icon_only()
-                    .min_content_width(crate::theme::Tokens::get().control_height + crate::theme::Tokens::get().space_12)
+                    .min_content_width(solidcraft_theme::Tokens::get().control_height + solidcraft_theme::Tokens::get().space_12)
             } else {
                 let weight = if index == 0 {
                     1.6
@@ -91,10 +76,26 @@ pub(super) fn configurations_rows(
             }
         })
         .collect();
-    ui_kit::table_custom(ui, "configuration_table", &columns, crate::i18n::tr("manage.empty"), |ui, table| {
+    // Keyboard moves between the value cells: Enter down the column, Shift+Enter up, Tab and
+    // Shift+Tab along the row and on to the next or previous row.
+    let cells = egui::Id::unique("configuration_cells");
+    let names: Vec<&str> = tb.rows.iter().map(|(name, _)| name.as_str()).collect();
+    let target = |row: usize, column: usize, key: ui_kit::CellKey| -> Option<(String, String)> {
+        let width = tb.columns.len();
+        let at = |r: usize, c: usize| Some((names.get(r)?.to_string(), tb.columns.get(c)?.clone()));
+        match key {
+            ui_kit::CellKey::Down => at(row + 1, column),
+            ui_kit::CellKey::Up => at(row.checked_sub(1)?, column),
+            ui_kit::CellKey::Next if column + 1 < width => at(row, column + 1),
+            ui_kit::CellKey::Next => at(row + 1, 0),
+            ui_kit::CellKey::Previous if column > 0 => at(row, column - 1),
+            ui_kit::CellKey::Previous => at(row.checked_sub(1)?, width.checked_sub(1)?),
+        }
+    };
+    ui_kit::table_custom(ui, "configuration_table", &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
         table.headers(ui, |ui, index| {
             if index == labels.len() - 1 {
-                column_menu(app, ui, error, &tb.columns);
+                column_menu(app, ui, error, &tb.columns, rule_editor);
                 true
             } else if index > 0 {
                 if let (Some(column), Some(label)) = (tb.columns.get(index - 1), labels.get(index))
@@ -109,9 +110,12 @@ pub(super) fn configurations_rows(
                 false
             }
         });
-        for (name, values) in &tb.rows {
+        for (row_index, (name, values)) in tb.rows.iter().enumerate() {
             let active = tb.active.as_deref() == Some(name.as_str());
-            table.row(ui, name, active, |row| {
+            // Rows off screen keep their space without building their cells; one with an edit
+            // in progress stays live, so leaving its cell still commits the edit.
+            let editing = rule_editor.drafts.keys().any(|(row, _)| row == name) || ui_kit::landing_in_row(ui.ctx(), cells, name);
+            table.row_visible(ui, name, active, editing, |row| {
                 row.cell(|ui| {
                     // A measured name slot keeps status/actions inside the Configuration column.
                     ui.allocate_ui_with_layout(
@@ -124,21 +128,21 @@ pub(super) fn configurations_rows(
                     if active {
                         ui_kit::active_pill(ui);
                         if v.get("matches").and_then(Value::as_bool) == Some(false) {
-                            let apply = ui_kit::button(ui, crate::i18n::tr_label("Apply"), ui_kit::Button::Small);
+                            let apply = ui_kit::button(ui, solidcraft_ui_text::tr_label("Apply"), ui_kit::Button::Small);
                             crate::scenario::publish_handle(&format!("config:activate:{name}"), apply.rect.center());
                             if apply.clicked() {
                                 run(app, error, "config.activate", json!({"row":name}));
                             }
                         }
                     } else {
-                        let activate = ui_kit::button(ui, crate::i18n::tr_label("Activate"), ui_kit::Button::Small);
+                        let activate = ui_kit::button(ui, solidcraft_ui_text::tr_label("Activate"), ui_kit::Button::Small);
                         crate::scenario::publish_handle(&format!("config:activate:{name}"), activate.rect.center());
                         if activate.clicked() {
                             run(app, error, "config.activate", json!({"row":name}));
                         }
                     }
                 });
-                for (column, value) in tb.columns.iter().zip(values) {
+                for (column_index, (column, value)) in tb.columns.iter().zip(values).enumerate() {
                     row.cell(|ui| {
                         let (kind, _) = column_parts(column);
                         let shown = display_cell(kind, value);
@@ -150,16 +154,31 @@ pub(super) fn configurations_rows(
                             run(app, error, "config.row", json!({"name":name,"values":{column:choice}}));
                         }
                         crate::scenario::publish_handle(&format!("config:cell:{name}:{column}"), response.rect.center());
-                        let focused = response.has_focus();
+                        // A cell the keyboard has just landed in leaves this pass's key to the cell it came from.
+                        let landed = ui_kit::landing(ui, cells, name, column, &response, &text);
+                        let focused = response.has_focus() && !landed;
                         let completed = crate::params_dialog::complete(ui, &response, &mut text);
                         if response.changed() || completed {
                             rule_editor.drafts.insert(key.clone(), text.clone());
                         }
+                        let moved = if completed { None } else { ui_kit::cell_key(ui, focused || (response.lost_focus() && !landed)) };
+                        let goes = moved.and_then(|key| target(row_index, column_index, key));
+                        // Tab stays inside the table while there is a cell to go to; at either
+                        // end it leaves the table in egui's order.
+                        let tab_target =
+                            [ui_kit::CellKey::Next, ui_kit::CellKey::Previous].into_iter().any(|key| target(row_index, column_index, key).is_some());
+                        if tab_target {
+                            ui_kit::keep_tab_in_cell(ui, &response);
+                        }
                         let enter = !completed && focused && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-                        if response.lost_focus() || enter {
+                        let tabbed = focused && matches!(moved, Some(ui_kit::CellKey::Next | ui_kit::CellKey::Previous)) && goes.is_some();
+                        if response.lost_focus() || enter || tabbed {
                             rule_editor.drafts.remove(&key);
                             if text != shown {
                                 run(app, error, "config.row", json!({"name":name,"values":{column:cell_value(column,&text)}}));
+                            }
+                            if let Some((row, column)) = goes {
+                                ui_kit::land_in_cell(ui.ctx(), cells, &row, &column);
                             }
                         }
                     });
@@ -202,7 +221,7 @@ pub(super) fn configurations_rows(
                                         .unwrap_or_default()
                                 });
                                 let (kind, _) = column_parts(column);
-                                let (response, choice) = value_control(ui, ui.id().with(column), &mut value, kind, &material_names);
+                                let (response, choice) = value_control(ui, ui.scope_id().with(column), &mut value, kind, &material_names);
                                 let picked = choice.is_some();
                                 if let Some(choice) = choice {
                                     value = choice;
@@ -280,7 +299,46 @@ pub(super) fn configurations_rows(
     ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
 }
 
-fn column_menu(app: &mut SolveApp, ui: &mut egui::Ui, error: &mut Option<String>, columns: &[String]) {
+/// Bare numbers show with their parameter's unit ("40" is 40 mm), as Fusion shows them. The
+/// unit is looked up once per column, not once per cell.
+fn with_units(app: &SolveApp, mut tb: super::Table) -> super::Table {
+    let kinds = app.session.doc.all_param_exprs();
+    let units: Vec<Option<String>> =
+        tb.columns
+            .iter()
+            .map(|c| {
+                let (kind, n) = column_parts(c);
+                if kind != "param" {
+                    return None;
+                }
+                app.session.doc.param(n).map(|parameter| parameter.unit.clone()).or_else(|| {
+                    kinds.iter().find(|x| x.0 == n).and_then(|x| {
+                        unit_of(x.2).map(|unit| {
+                            if x.2 == solidcraft_engine::doc::expr::Kind::Length { app.session.doc.units.clone() } else { unit.to_string() }
+                        })
+                    })
+                })
+            })
+            .collect();
+    for (_, vals) in &mut tb.rows {
+        for (unit, val) in units.iter().zip(vals.iter_mut()) {
+            if let Some(unit) = unit
+                && val.trim().parse::<f64>().is_ok()
+            {
+                *val = format!("{} {unit}", val.trim());
+            }
+        }
+    }
+    tb
+}
+
+fn column_menu(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    error: &mut Option<String>,
+    columns: &[String],
+    rule_editor: &mut configuration_rules_ui::Editor,
+) {
     let run = |app: &mut SolveApp, error: &mut Option<String>, id: &str, params: Value| {
         *error = app.run(id, params).err();
     };
@@ -314,18 +372,45 @@ fn column_menu(app: &mut SolveApp, ui: &mut egui::Ui, error: &mut Option<String>
         }
     }
     let mut pick: Option<Value> = None;
-    ui_kit::plus_header(ui, |ui| {
-        egui::ScrollArea::vertical().max_height(crate::theme::Tokens::get().space_24 * 12.0).show(ui, |ui| {
-            for (label, p) in &options {
+    let filter = &mut rule_editor.column_filter;
+    let was_open = rule_editor.column_menu_open;
+    let face_appearance = solidcraft_ui_text::tr_label("Face Appearance");
+    let shown = ui_kit::plus_header(ui, |ui| {
+        // A design has many parameters, features and bodies: a filter narrows the list as the
+        // Parameters dialog's does. It takes focus as the menu opens, so typing filters at once.
+        let search = ui_kit::menu_filter(ui, ui.make_persistent_id("config_column_filter"), filter, "Filter");
+        if !was_open {
+            search.request_focus();
+        }
+        crate::scenario::publish_handle("dialog:menu:Add Column:filter", search.rect.center());
+        let query = filter.trim().to_lowercase();
+        let matching: Vec<&(String, Value)> = options.iter().filter(|(label, _)| query.is_empty() || label.to_lowercase().contains(&query)).collect();
+        // Enter with one match left picks it, as in the command search.
+        if matching.len() == 1 && search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            pick = matching.first().map(|(_, p)| p.clone());
+            ui.close();
+        }
+        let faces = query.is_empty() || face_appearance.to_lowercase().contains(&query);
+        if matching.is_empty() && !faces {
+            ui_kit::text(ui, solidcraft_ui_text::tr("config.column_filter_empty"), ui_kit::Text::Note("column_filter_empty"));
+        }
+        // The popup remembers its size: once the filter has emptied the list, a list that fills
+        // again would be clipped to that small height, so a list that scrolls takes the full one.
+        let list_height = solidcraft_theme::Tokens::get().space_24 * 12.0;
+        egui::ScrollArea::vertical().max_height(list_height).min_scrolled_height(list_height).show(ui, |ui| {
+            for (label, p) in &matching {
                 if ui_kit::button(ui, label.as_str(), ui_kit::Button::Normal).clicked() {
                     pick = Some(p.clone());
                     ui.close();
                 }
             }
+            if !faces {
+                return;
+            }
             ui_kit::action_menu(ui, "Face Appearance", |ui| {
                 ui_kit::text(
                     ui,
-                    crate::i18n::tr_label("Semantic faces share their appearance across instances."),
+                    solidcraft_ui_text::tr_label("Semantic faces share their appearance across instances."),
                     ui_kit::Text::Note("semantic_faces"),
                 );
                 let state = app.session.model.state();
@@ -360,7 +445,7 @@ fn column_menu(app: &mut SolveApp, ui: &mut egui::Ui, error: &mut Option<String>
                                 if !supported || !seen.insert(target.name.clone()) {
                                     continue;
                                 }
-                                let Some((_, role)) = target.name.split_once(':') else { continue };
+                                let Some((_, role)) = solidcraft_engine::doc::persistent_name::split_feature(&target.name) else { continue };
                                 if ui_kit::button(ui, role, ui_kit::Button::Normal).clicked() {
                                     pick = Some(json!({"face_appearance":{"target":target}}));
                                     ui.close();
@@ -372,6 +457,10 @@ fn column_menu(app: &mut SolveApp, ui: &mut egui::Ui, error: &mut Option<String>
             });
         });
     });
+    rule_editor.column_menu_open = shown.is_some();
+    if shown.is_none() {
+        rule_editor.column_filter.clear();
+    }
     if let Some(p) = pick {
         // The first column starts the table (with a Default row of the current values).
         let (id, p) = if columns.is_empty() {
@@ -399,10 +488,12 @@ fn column_menu(app: &mut SolveApp, ui: &mut egui::Ui, error: &mut Option<String>
 }
 
 fn display_cell(kind: &str, value: &str) -> String {
-    if (kind == "material" || matches!(kind, "appearance" | "component_appearance" | "face_appearance")) && value.eq_ignore_ascii_case("Default") {
+    let appearance = matches!(kind, "appearance" | "component_appearance" | "face_appearance");
+    // Empty cells: the default material, and an appearance's own "Default" keyword (it follows).
+    if (kind == "material" && value.eq_ignore_ascii_case(DEFAULT_MATERIAL)) || (appearance && value.eq_ignore_ascii_case("Default")) {
         return String::new();
     }
-    if matches!(kind, "appearance" | "component_appearance" | "face_appearance") {
+    if appearance {
         solidcraft_engine::doc::config::appearance_cell(value)
             .ok()
             .flatten()
@@ -426,12 +517,14 @@ fn value_control(ui: &mut egui::Ui, id: egui::Id, text: &mut String, kind: &str,
             "Default material"
         };
         ui_kit::library_cell(ui, id, text, follow, |ui| {
-            if ui_kit::button(ui, crate::i18n::tr_label(follow), ui_kit::Button::Normal).clicked() {
-                choice = Some("Default".to_owned());
+            if ui_kit::button(ui, solidcraft_ui_text::tr_label(follow), ui_kit::Button::Normal).clicked() {
+                // An appearance's "Default" keyword follows; a material's is the default material.
+                let follow_value = if appearance { "Default" } else { DEFAULT_MATERIAL };
+                choice = Some(follow_value.to_owned());
                 ui.close();
             }
             let choices: Vec<_> = if kind == "material" {
-                material_names.iter().filter(|n| *n != "Default").map(String::as_str).collect()
+                material_names.iter().filter(|n| *n != DEFAULT_MATERIAL).map(String::as_str).collect()
             } else {
                 solidcraft_engine::doc::appearance::LIBRARY.iter().map(|(name, _, _)| *name).collect()
             };
