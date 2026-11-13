@@ -701,6 +701,7 @@ fn a_curve_from_intersect_is_labelled_intersected_and_one_from_project_projected
     assert!(label(&h, LinkKind::Intersect).ends_with("(intersected)"));
     h.app.run("sketch.finish", json!({})).unwrap();
     h.app.run("sketch.create", json!({"plane":"XY","offset":20,"project_edges":false})).unwrap();
+    h.app.session.project_body_silhouette = true;
     h.app.run("sketch.project", json!({"refs":[{"body":"Block"}]})).unwrap();
     assert!(label(&h, LinkKind::Project).ends_with("(projected)"));
 }
