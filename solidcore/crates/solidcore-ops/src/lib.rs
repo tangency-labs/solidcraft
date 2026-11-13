@@ -66,8 +66,8 @@ pub use check::{CheckLevel, CheckReport};
 pub use contact::Gap;
 pub use error::{Error, FitKind, Result, RoomReason, Unblendable};
 pub use measure::{
-    point_distance, Distance, EdgePoint, FaceCentroid, GapSample, MassPropertiesEstimate, Normal,
-    PointClass,
+    point_displacement, point_distance, point_set_summary, Distance, EdgePoint, FaceCentroid,
+    GapSample, MassPropertiesEstimate, Normal, PointClass, PointSetSummary,
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;

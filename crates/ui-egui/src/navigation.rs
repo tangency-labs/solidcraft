@@ -12,6 +12,7 @@
 
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
+use solidcore_ops::{point_displacement, point_distance, point_set_summary};
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_viewport::Camera;
@@ -1444,6 +1445,20 @@ struct TouchMotion {
     centre: Option<Pos2>,
 }
 
+fn screen_point(point: Pos2) -> [f64; 2] {
+    [f64::from(point.x), f64::from(point.y)]
+}
+
+fn finite_screen_point(point: [f64; 2]) -> Option<Pos2> {
+    let narrowed = pos2(point[0] as f32, point[1] as f32);
+    (point.iter().all(|coordinate| coordinate.is_finite()) && narrowed.is_finite()).then_some(narrowed)
+}
+
+fn finite_screen_vector(vector: [f64; 2]) -> Option<egui::Vec2> {
+    let narrowed = vec2(vector[0] as f32, vector[1] as f32);
+    (vector.iter().all(|coordinate| coordinate.is_finite()) && narrowed.is_finite()).then_some(narrowed)
+}
+
 impl TouchNavigation {
     fn frame(&mut self, ui: &egui::Ui, rect: Rect, excluded: &[Rect], can_start: bool, enabled: bool, orbit: bool) -> TouchMotion {
         if !enabled || !ui.input(|i| i.focused) {
@@ -1485,7 +1500,8 @@ impl TouchNavigation {
                         if pos.is_finite() {
                             *old = *pos;
                         } else {
-                            self.owned = false;
+                            *self = Self::default();
+                            return TouchMotion::default();
                         }
                     }
                 }
@@ -1509,16 +1525,36 @@ impl TouchNavigation {
         if !self.owned {
             return TouchMotion::default();
         }
-        let centre = |points: &[(egui::TouchDeviceId, egui::TouchId, Pos2)]| {
-            points.iter().fold(egui::Vec2::ZERO, |sum, (_, _, p)| sum + p.to_vec2()) / points.len().max(1) as f32
+        let current_points: Vec<_> = self.contacts.iter().map(|(_, _, point)| screen_point(*point)).collect();
+        let current_summary = match point_set_summary(&current_points) {
+            Ok(summary) => summary,
+            Err(_) => {
+                *self = Self::default();
+                return TouchMotion::default();
+            }
         };
-        let current = centre(&self.contacts).to_pos2();
-        let prior = centre(&before).to_pos2();
+        let Some(current) = finite_screen_point(current_summary.centroid) else {
+            *self = Self::default();
+            return TouchMotion::default();
+        };
         if self.contacts.len() >= 2 {
             self.multiple = true;
             self.mode = Some(NavMode::Pan);
-        } else if !self.multiple && self.origin.is_some_and(|p| p.distance(current) > 6.0) {
-            self.mode = Some(if orbit { NavMode::Orbit } else { NavMode::Pan });
+        } else if !self.multiple {
+            if let Some(origin) = self.origin {
+                let distance =
+                    point_distance([f64::from(origin.x), f64::from(origin.y), 0.0], [current_summary.centroid[0], current_summary.centroid[1], 0.0]);
+                match distance {
+                    Ok(distance) if distance.value > 6.0 => {
+                        self.mode = Some(if orbit { NavMode::Orbit } else { NavMode::Pan });
+                    }
+                    Ok(_) => {}
+                    Err(_) => {
+                        *self = Self::default();
+                        return TouchMotion::default();
+                    }
+                }
+            }
         }
         let mut out = TouchMotion { active: true, mode: self.mode, zoom: 1.0, centre: Some(current), ..Default::default() };
         // Fingers that start on a panel cannot take the view. An owned gesture pauses over a
@@ -1530,17 +1566,46 @@ impl TouchNavigation {
         if self.multiple && self.contacts.len() == 1 {
             return out;
         }
+        let needs_prior = out.mode.is_some() || self.contacts.len() >= 2;
+        let prior_summary = if needs_prior {
+            let prior_points: Vec<_> = before.iter().map(|(_, _, point)| screen_point(*point)).collect();
+            match point_set_summary(&prior_points) {
+                Ok(summary) => Some(summary),
+                Err(_) => {
+                    *self = Self::default();
+                    return TouchMotion::default();
+                }
+            }
+        } else {
+            None
+        };
         if out.mode.is_some() {
-            out.delta = current - prior;
+            let Some(prior) = prior_summary else {
+                *self = Self::default();
+                return TouchMotion::default();
+            };
+            match point_displacement(prior.centroid, current_summary.centroid).ok().and_then(|delta| finite_screen_vector(delta)) {
+                Some(delta) => out.delta = delta,
+                None => {
+                    *self = Self::default();
+                    return TouchMotion::default();
+                }
+            }
         }
         if self.contacts.len() >= 2 {
-            let spread = |points: &[(egui::TouchDeviceId, egui::TouchId, Pos2)], c: Pos2| {
-                points.iter().map(|(_, _, p)| p.distance(c)).sum::<f32>() / points.len() as f32
+            let Some(old) = prior_summary else {
+                *self = Self::default();
+                return TouchMotion::default();
             };
-            let old = spread(&before, prior);
-            let new = spread(&self.contacts, current);
+            let old = old.mean_distance;
+            let new = current_summary.mean_distance;
             if old > 1.0 && new > 1.0 {
-                out.zoom = (new / old).clamp(0.05, 20.0);
+                let zoom = (new / old).clamp(0.05, 20.0) as f32;
+                if !zoom.is_finite() {
+                    *self = Self::default();
+                    return TouchMotion::default();
+                }
+                out.zoom = zoom;
             }
         }
         out
@@ -3221,6 +3286,37 @@ mod tests {
         inside
     }
 
+    fn touch_motion_frame(
+        touch: &mut super::TouchNavigation,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        time: &mut f64,
+        rect: egui::Rect,
+    ) -> super::TouchMotion {
+        *time += 1.0 / 60.0;
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
+            time: Some(*time),
+            focused: true,
+            events,
+            ..Default::default()
+        };
+        let mut motion = super::TouchMotion::default();
+        let mut out = ctx.run_ui(raw, |ui| {
+            motion = touch.frame(ui, rect, &[], true, true, false);
+        });
+        out.textures_delta.clear();
+        motion
+    }
+
+    fn assert_unstable_motion(motion: &super::TouchMotion, mode: Option<super::NavMode>, centre: egui::Pos2) {
+        assert!(motion.active);
+        assert_eq!(motion.mode, mode);
+        assert_eq!(motion.centre, Some(centre));
+        assert_eq!(motion.delta, egui::Vec2::ZERO);
+        assert_eq!(motion.zoom, 1.0);
+    }
+
     #[test]
     fn touchscreen_release_uses_full_input_bounds_for_framed_camera() {
         use egui::TouchPhase::{End, Move, Start};
@@ -3293,6 +3389,168 @@ mod tests {
             assert_eq!(app.cam, end, "release does not add another move");
             assert!(app.viewport.touch.contacts.is_empty());
         }
+    }
+
+    #[test]
+    fn touchscreen_six_point_threshold_uses_the_kernel_distance() {
+        use egui::TouchPhase::{Move, Start};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false);
+        let before = app.cam;
+        let mut events = pointer(300.0, 300.0, Some(true));
+        events.push(finger(1, Start, 300.0, 300.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, false);
+        let mut events = pointer(306.0, 300.0, None);
+        events.push(finger(1, Move, 306.0, 300.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, false);
+        assert_eq!(app.cam, before, "six points does not cross the strict threshold");
+        let mut events = pointer(307.0, 300.0, None);
+        events.push(finger(1, Move, 307.0, 300.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, false);
+        assert_ne!(app.cam.target, before.target, "more than six points starts panning");
+    }
+
+    #[test]
+    fn touchscreen_three_contact_pinch_uses_mean_radius_for_nonuniform_motion() {
+        use egui::TouchPhase::{Move, Start};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.preferences.zoom_to_cursor = false;
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false);
+        let before = app.cam;
+        let mut events = pointer(300.0, 300.0, Some(true));
+        events.extend([finger(1, Start, 300.0, 300.0), finger(2, Start, 306.0, 300.0), finger(3, Start, 300.0, 306.0)]);
+        touchscreen_frame(&mut app, &ctx, events, &mut time, false);
+        assert_eq!(app.cam, before, "the contact-start frame is unstable and only establishes state");
+
+        let mut events = pointer(300.0, 300.0, None);
+        events.extend([finger(1, Move, 300.0, 300.0), finger(2, Move, 306.0, 300.0), finger(3, Move, 300.0, 312.0)]);
+        touchscreen_frame(&mut app, &ctx, events, &mut time, false);
+
+        let mean_radius_ratio = (5.0_f64.sqrt() + 2.0 * 2.0_f64.sqrt() + 17.0_f64.sqrt()) / (2.0_f64.sqrt() + 2.0 * 5.0_f64.sqrt());
+        let narrowed_zoom = mean_radius_ratio as f32;
+        let expected_distance = before.distance / f64::from(narrowed_zoom);
+        assert!(
+            (app.cam.distance - expected_distance).abs() <= 2.0 * f64::EPSILON * expected_distance.abs().max(1.0),
+            "mean-radius ratio {mean_radius_ratio}, narrowed once to {narrowed_zoom}: {} vs {expected_distance}",
+            app.cam.distance,
+        );
+        assert_ne!(app.cam.target, before.target, "centroid displacement also pans");
+        assert_ne!(mean_radius_ratio, 2.5_f64.sqrt(), "RMS gives a different zoom ratio");
+    }
+
+    #[test]
+    fn touchscreen_geometry_narrowing_rejects_non_finite_f32_results() {
+        assert_eq!(super::finite_screen_point([3.0, 4.0]), Some(egui::pos2(3.0, 4.0)));
+        assert_eq!(super::finite_screen_vector([3.0, 4.0]), Some(egui::vec2(3.0, 4.0)));
+        assert!(super::finite_screen_point([f64::MAX, 0.0]).is_none());
+        assert!(super::finite_screen_vector([0.0, f64::MAX]).is_none());
+    }
+
+    #[test]
+    fn touchscreen_unstable_start_add_and_lift_preserve_partial_motion() {
+        use egui::TouchPhase::{End, Start};
+        let mut touch = super::TouchNavigation::default();
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        let rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+
+        let start = touch_motion_frame(&mut touch, &ctx, vec![finger(1, Start, 300.0, 300.0)], &mut time, rect);
+        assert_unstable_motion(&start, None, egui::pos2(300.0, 300.0));
+
+        let add = touch_motion_frame(&mut touch, &ctx, vec![finger(2, Start, 306.0, 300.0)], &mut time, rect);
+        assert_unstable_motion(&add, Some(super::NavMode::Pan), egui::pos2(303.0, 300.0));
+
+        let lift = touch_motion_frame(&mut touch, &ctx, vec![finger(2, End, 306.0, 300.0)], &mut time, rect);
+        assert_unstable_motion(&lift, Some(super::NavMode::Pan), egui::pos2(300.0, 300.0));
+    }
+
+    #[test]
+    fn touchscreen_stable_nonuniform_motion_reports_exact_centroid_delta() {
+        use egui::TouchPhase::{Move, Start};
+        let mut touch = super::TouchNavigation::default();
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        let rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+        let start = touch_motion_frame(
+            &mut touch,
+            &ctx,
+            vec![finger(1, Start, 300.0, 300.0), finger(2, Start, 306.0, 300.0), finger(3, Start, 300.0, 306.0)],
+            &mut time,
+            rect,
+        );
+        assert_unstable_motion(&start, Some(super::NavMode::Pan), egui::pos2(302.0, 302.0));
+        let motion = touch_motion_frame(
+            &mut touch,
+            &ctx,
+            vec![finger(1, Move, 300.0, 300.0), finger(2, Move, 306.0, 300.0), finger(3, Move, 300.0, 312.0)],
+            &mut time,
+            rect,
+        );
+        assert_eq!(motion.delta, egui::vec2(0.0, 2.0));
+        assert_eq!(motion.centre, Some(egui::pos2(302.0, 304.0)));
+        let expected = (5.0_f64.sqrt() + 2.0 * 2.0_f64.sqrt() + 17.0_f64.sqrt()) / (2.0_f64.sqrt() + 2.0 * 5.0_f64.sqrt());
+        assert_eq!(motion.zoom, expected as f32);
+    }
+
+    #[test]
+    fn touchscreen_non_finite_event_and_f32_narrowing_cancel_owned_gesture() {
+        use egui::TouchPhase::{Move, Start};
+        let ctx = crate::fonts::test_context();
+        let rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+        let mut time = 0.0;
+        let mut touch = super::TouchNavigation::default();
+        let start = touch_motion_frame(&mut touch, &ctx, vec![finger(1, Start, 300.0, 300.0)], &mut time, rect);
+        assert!(start.active);
+        let invalid = touch_motion_frame(&mut touch, &ctx, vec![finger(1, Move, f32::NAN, 300.0)], &mut time, rect);
+        assert!(!invalid.active);
+        assert!(touch.contacts.is_empty());
+        assert!(!touch.owned);
+        let resumed = touch_motion_frame(&mut touch, &ctx, vec![finger(1, Move, 320.0, 300.0)], &mut time, rect);
+        assert!(!resumed.active, "a malformed contact cannot resume without a new Start");
+        assert!(touch.contacts.is_empty());
+        assert!(!touch.owned);
+
+        let limit = f32::MAX;
+        let huge_rect = egui::Rect::from_min_max(egui::pos2(-limit, -limit), egui::pos2(limit, limit));
+        let mut touch = super::TouchNavigation::default();
+        let start = touch_motion_frame(&mut touch, &ctx, vec![finger(2, Start, -limit, 0.0)], &mut time, huge_rect);
+        assert!(start.active);
+        let overflow = touch_motion_frame(&mut touch, &ctx, vec![finger(2, Move, limit, 0.0)], &mut time, huge_rect);
+        assert!(!overflow.active, "an f64 displacement that overflows f32 cancels safely");
+        assert!(touch.contacts.is_empty());
+        assert!(!touch.owned);
+    }
+
+    #[test]
+    fn touchscreen_pinch_zoom_stays_within_documented_clamps() {
+        use egui::TouchPhase::{Move, Start};
+        let ctx = crate::fonts::test_context();
+        let rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(20_000.0, 10_000.0));
+        for (old_first, old_second, new_first, new_second, expected) in [(100.0, 200.0, 100.0, 10_200.0, 20.0), (100.0, 200.0, 100.0, 104.0, 0.05)] {
+            let mut time = 0.0;
+            let mut touch = super::TouchNavigation::default();
+            touch_motion_frame(&mut touch, &ctx, vec![finger(1, Start, old_first, 200.0), finger(2, Start, old_second, 200.0)], &mut time, rect);
+            let motion =
+                touch_motion_frame(&mut touch, &ctx, vec![finger(1, Move, new_first, 200.0), finger(2, Move, new_second, 200.0)], &mut time, rect);
+            assert_eq!(motion.zoom, expected);
+        }
+    }
+
+    #[test]
+    fn touchscreen_mean_radius_matches_legacy_f32_with_rounding_tolerance() {
+        let points = [egui::pos2(300.0, 300.0), egui::pos2(306.0, 300.0), egui::pos2(300.0, 306.0)];
+        let legacy_centre = points.iter().fold(egui::Vec2::ZERO, |sum, point| sum + point.to_vec2()) / points.len() as f32;
+        let legacy_mean = points.iter().map(|point| point.distance(legacy_centre.to_pos2())).sum::<f32>() / points.len() as f32;
+        let kernel_points: Vec<_> = points.iter().map(|point| super::screen_point(*point)).collect();
+        let kernel_mean = solidcore_ops::point_set_summary(&kernel_points).unwrap().mean_distance;
+        assert!(
+            (f64::from(legacy_mean) - kernel_mean).abs() <= f64::from(f32::EPSILON) * kernel_mean.max(1.0),
+            "legacy f32 {legacy_mean} vs f64 query {kernel_mean}"
+        );
     }
 
     #[test]
