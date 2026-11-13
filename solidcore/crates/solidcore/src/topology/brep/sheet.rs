@@ -3,15 +3,17 @@
 //! ([`face_on`]), a sheet with its faces merged where they are one face ([`merged_faces`]),
 //! a sheet turned over ([`turn_over_shell`], [`turn_over_sheet`]), a sheet of several faces
 //! taken as the pieces of one surface and made again from it ([`one_surface`], [`sheet_of`]),
-//! and a planar face rebuilt as the Coons spline of its edges ([`face_spline_sheet`]).
+//! a planar face rebuilt as the Coons spline of its edges ([`face_spline_sheet`]), and any face
+//! made a sheet with a control net ([`editable_sheet`]: an analytic face as its exact NURBS form).
 //!
 //! Not upstream: the composition an operation that rebuilds a face on a new surface (a sheet
 //! extended past a side) makes of `new_brep` and `SmBrep::CreateFaceFromSurface`, kept in the
 //! kernel so the modelling layer holds no notification plumbing; the turn-over of every
 //! face of an open shell ([`crate::topology::face::p1::turn_over`]); the pieces a split
 //! leaves joined back into their surface, so an operation on the surface (an extension past a
-//! side) can make the pieces again, cut where they were; and a planar face's spline sheet, so
-//! the control-net edits of the modelling layer have a net on a flat face.
+//! side) can make the pieces again, cut where they were; a planar face's spline sheet, so the
+//! control-net edits of the modelling layer have a net on a flat face; and an analytic face's
+//! exact-form sheet, so they have one on a cylinder, a sphere or a torus.
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
@@ -452,6 +454,90 @@ pub fn face_spline_sheet(k: &mut Kernel, b: &Brep, f: FaceId) -> Result<Option<B
     }
     let (sheet, _) = sheet_on(k, patch, b.tolerance())?;
     Ok(Some(sheet))
+}
+
+const OP_EDITABLE: &str = "topology::brep::sheet::editable_sheet";
+
+/// Face `f` of `b` as a one-face sheet whose surface has a control net to edit, its whole box
+/// the face; `None` for a face on a B-spline surface (it has one already).
+/// - A plane: [`face_spline_sheet`], the Coons spline of its edges.
+/// - A cone (a cylinder too), a sphere, a torus, a surface of revolution or of extrusion: its
+///   surface's exact NURBS form, the B-spline the kernel keeps for it (its circles rational
+///   quadratics), on a sheet over its whole box. Only for a face that is its surface's whole box,
+///   bounded by the box's sides (the natural trim of
+///   [`crate::topology::face::p1::trim_boundary_rectangle`], a pole a point or an edge): a face
+///   trimmed inside it would lose its trims to a whole-box sheet. A closed surface's two seam
+///   sides are one edge used twice and a pole is a point (`CreateFaceFromSurface` shares
+///   coincident sides and drops degenerate ones).
+///
+/// `b` is unchanged.
+///
+/// # Errors
+///
+/// `Unsupported` for a surface of another kind (an offset, a blend, a ball patch: no exact
+/// NURBS form here) and for a face that is not its surface's whole box; those of
+/// [`face_spline_sheet`], the copy, the trim query and the sheet.
+pub fn editable_sheet(k: &mut Kernel, b: &Brep, f: FaceId) -> Result<Option<Brep>> {
+    let surface = b
+        .face(f)?
+        .surface
+        .as_ref()
+        .ok_or_else(|| SolidError::invalid_input(OP_EDITABLE, "a face without a surface"))?;
+    match surface.kind() {
+        SurfaceKind::BSpline(_) => Ok(None),
+        SurfaceKind::Plane(_) => face_spline_sheet(k, b, f),
+        SurfaceKind::Cone(_)
+        | SurfaceKind::Sphere(_)
+        | SurfaceKind::Torus(_)
+        | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::SurfOfExtrusion(_) => exact_form_sheet(k, b, f, surface).map(Some),
+        _ => Err(SolidError::Unsupported {
+            operation: OP_EDITABLE,
+            reason: "a face with no exact NURBS form",
+        }),
+    }
+}
+
+/// The sheet on `surface`'s exact NURBS form over its whole box, when face `f` of `b` is that
+/// whole box ([`editable_sheet`]).
+fn exact_form_sheet(k: &mut Kernel, b: &Brep, f: FaceId, surface: &Surface) -> Result<Brep> {
+    use crate::geom::attribute::ObjectKey;
+    use crate::geom::object::ObjectRef;
+    use crate::topology::brep::p3::{brep_copy_mapped, with_nurb};
+    use crate::topology::face::p1::trim_boundary_rectangle;
+
+    // the trim query builds the face's trim boundary: on a copy, so `b` is only read
+    let (mut c, map) = brep_copy_mapped(k, b)?;
+    let Some(EntityRef::Face(cf)) = map.get_at(Some(EntityRef::Face(f)))? else {
+        return Err(SolidError::invalid_input(
+            OP_EDITABLE,
+            "a face without its copy",
+        ));
+    };
+    let key_of = |e: EntityRef| ObjectRef {
+        type_code: 0,
+        key: ObjectKey(match e {
+            EntityRef::Edgeuse(eu) => u64::from(eu.index()),
+            _ => 0,
+        }),
+    };
+    if !trim_boundary_rectangle(k, &mut c, cf, &key_of)?.natural {
+        return Err(SolidError::Unsupported {
+            operation: OP_EDITABLE,
+            reason: "a face that is not its surface's whole box",
+        });
+    }
+    let form = with_nurb(k, surface)?
+        .ok_or_else(|| SolidError::invalid_input(OP_EDITABLE, "a surface with no NURBS form"))?;
+    let nurb = form
+        .gw_nurb()
+        .ok_or_else(|| SolidError::invalid_input(OP_EDITABLE, "a surface with no NURBS form"))?;
+    let (sheet, _) = sheet_on(
+        k,
+        Surface::from(BSplineSurface::from_gw_nurb(nurb)),
+        b.tolerance(),
+    )?;
+    Ok(sheet)
 }
 
 const OP_PIECES: &str = "topology::brep::sheet::one_surface";
