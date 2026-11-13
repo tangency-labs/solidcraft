@@ -440,6 +440,41 @@ pub(crate) fn cylinder_tool(body: Body) -> Traced {
     Traced::made(body, roles)
 }
 
+/// A pipe swept from its circle (and, when hollow, the hole inside it), whose first
+/// `outer_segments` profile segments are the circle: its end faces `start` and `end`, as a
+/// sweep's caps are, its outside wall `side`, as a cylinder's is, and a hollow pipe's inside wall
+/// `inner` (#14897).
+pub(crate) fn pipe_tool(body: Body, outer_segments: usize) -> Traced {
+    let roles = body.history().filter(|h| h.operands == 0).map(|h| {
+        h.faces
+            .iter()
+            .map(|f| {
+                let mut roles: Vec<String> = Vec::new();
+                for origin in &f.origins {
+                    let role = match *origin {
+                        FaceOrigin::Cap { end } => {
+                            if end {
+                                "end"
+                            } else {
+                                "start"
+                            }
+                        }
+                        FaceOrigin::Profile { segment } if segment < outer_segments => "side",
+                        FaceOrigin::Profile { .. } => "inner",
+                        // One unknown origin leaves the face unknown: never a partial guess.
+                        _ => return Vec::new(),
+                    };
+                    if !roles.iter().any(|r| r == role) {
+                        roles.push(role.to_string());
+                    }
+                }
+                roles
+            })
+            .collect()
+    });
+    Traced::made(body, roles)
+}
+
 /// The roles of a cone primitive's faces, from the body revolved from its half section (base
 /// side first, then the sloped side, then the top side of a cut-off cone; the side on the axis
 /// makes no face): `bottom`, `side` and `top`, as a cylinder's are (#7476). `None` when the body

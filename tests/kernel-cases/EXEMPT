@@ -83,6 +83,7 @@ engine.describe                   the command registry itself
 explode.delete                    exploded views: display offsets
 explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
+file.gpg_keys                     GnuPG key listing: tested in crates/engine/src/gpg.rs tests
 file.import_cache_clear           clears a cache of imported files
 file.open_in_easyprint            hands the file to another program
 file.save                         saving the design
@@ -90,6 +91,7 @@ file.save_as                      saving the design
 file.save_mesh                    saving a display mesh
 file.send_to_slicer               hands the file to a slicer
 file.slicers                      a listing of slicers
+file.verify                       signature checks: tested in crates/io/src/design/provenance.rs and the engine/UI signature tests
 form.blend.export                  Forms interchange: blender_surface_export_evaluates_refinement_matching_profiles_and_staged_forms_without_finishing in crates/engine/src/cmd/forms_prototype.rs
 form.blend.import                  Forms interchange: blender_import_stages_independent_forms_and_export_retains_saved_source_and_world_frame in crates/engine/src/cmd/forms_prototype.rs
 form.edit                          Forms editing: hierarchical_face_drag_keeps_one_undo_step_and_reopens_from_design in crates/engine/src/cmd/forms_prototype.rs
@@ -380,6 +382,7 @@ sketch.toggle_driven              2D sketch only (the sketch solver and engine t
 sketch.transform                  2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.trim                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.trim.path                  2D sketch only (the sketch solver and engine tests); no kernel operation
+solid.cell_grid                   crates/engine/src/cmd/cell_grid_tests.rs (volumes against hand-derived values) and the planner tests in solidcore/crates/solidcore/src/cell_grid/tests.rs
 timeline.dependents               a listing of dependents
 timeline.export_script            writes the history as a script
 timeline.inspect                  a listing of the timeline

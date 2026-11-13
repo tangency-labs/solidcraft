@@ -137,6 +137,10 @@ coil
 coil_profile
   sketches: [1]
   remap_refs: sketch
+cell_grid
+  sketches: [1]
+  remap_refs: sketch
+  remap_bodies: targets[0]
 sheet_base
   sketches: [1]
   remap_refs: sketch

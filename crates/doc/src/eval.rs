@@ -7555,24 +7555,22 @@ fn feature_tools_with_constructor(
             if !(r > 1e-6) {
                 return Err(DocError::Invalid("pipe diameter must be positive".into()));
             }
+            let region = pipe_region(vals, r, wall)?;
+            // Its faces are named as a sweep's caps and a cylinder's wall are (#14897).
+            let tool = |body: Body| crate::lineage::pipe_tool(body, region.outer.segs.len());
             if let Some(along) = path_points(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
                 let pts = along.points();
                 let (Some(a), Some(b)) = (pts.first().copied(), pts.get(1).copied()) else { return Err(DocError::Invalid("empty path".into())) };
                 let t = (b - a).normalized().ok_or_else(|| DocError::Invalid("path direction".into()))?;
                 let plane = Plane::from_normal(a, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
-                return Ok(unnamed(vec![kernel::sweep_point_path_with(
-                    &plane,
-                    &pipe_region(vals, r, wall)?,
-                    &along,
-                    &kernel::SweepControl::default(),
-                )?]));
+                return Ok(vec![tool(kernel::sweep_point_path_with(&plane, &region, &along, &kernel::SweepControl::default())?)]);
             }
             let segs = path_segments(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?;
             let first = segs.first().ok_or_else(|| DocError::Invalid("empty path".into()))?;
             let start = first.start();
             let (t, _) = first.tangents().ok_or_else(|| DocError::Invalid("path direction".into()))?;
             let plane = Plane::from_normal(start, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
-            Ok(unnamed(vec![kernel::sweep(&plane, &pipe_region(vals, r, wall)?, &segs)?]))
+            Ok(vec![tool(kernel::sweep(&plane, &region, &segs)?)])
         }
         FeatureKind::Box { corner, length, width, height, centred, .. } => {
             let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
@@ -8174,6 +8172,7 @@ fn feature_op(f: &Feature) -> (Operation, Vec<String>) {
         FeatureKind::Pipe { operation, targets, .. } => (*operation, crate::plain(targets)),
         FeatureKind::Loft { operation, targets, .. } | FeatureKind::Sweep { operation, targets, .. } => (*operation, crate::plain(targets)),
         FeatureKind::Coil { operation, targets, .. } => (*operation, crate::plain(targets)),
+        FeatureKind::CellGrid { targets, .. } => (Operation::Cut, crate::plain(targets)),
         FeatureKind::Rib { .. } => (Operation::Join, Vec::new()),
         _ => (Operation::NewBody, Vec::new()),
     }
@@ -8907,11 +8906,13 @@ fn replay(
             continue;
         }
         // A moved copy is copied again as a body: each instance is the copy the Move made,
-        // placed by the pattern (#5931).
-        if let FeatureKind::Move { copy: true, .. } = &src.kind {
+        // placed by the pattern (#5931). Frame members are too: each instance is every member
+        // the feature made, as it is here, placed by the pattern.
+        if matches!(src.kind, FeatureKind::Move { copy: true, .. } | FeatureKind::FrameMember { .. }) {
             let made: Vec<ModelBody> = st.bodies.iter().filter(|b| b.feature == src.id).cloned().collect();
             if made.is_empty() {
-                return Err(DocError::Invalid(format!("{} made no copy to repeat", src.name)));
+                let what = if matches!(src.kind, FeatureKind::FrameMember { .. }) { "member" } else { "copy" };
+                return Err(DocError::Invalid(format!("{} made no {what} to repeat", src.name)));
             }
             let mut output = 0;
             for (k, m) in mats.iter().enumerate() {
@@ -9108,6 +9109,8 @@ mod model_cache;
 #[path = "eval_more.rs"]
 mod more;
 pub use model_cache::SavedModel;
+#[path = "eval_cell_grid.rs"]
+pub mod cell_grid;
 #[path = "eval_frame.rs"]
 pub(crate) mod frame_member;
 #[path = "eval_surface.rs"]
@@ -9641,6 +9644,16 @@ fn eval_feature(
             let extra: Vec<String> = if *operation == Operation::Join { to_body.into_iter().collect() } else { Vec::new() };
             apply_traced_with(doc, st, f, tools, *operation, &crate::plain(targets), &extra)?;
             unchanged(st, warning);
+            Ok(())
+        }
+        FeatureKind::CellGrid { targets, .. } => {
+            let tools = cell_grid::tools(doc, vals, f, st, warning)?;
+            // A grid beside the body, or cut the wrong way, changes nothing: say so, as a cut does.
+            let before: Vec<Body> = st.bodies.iter().map(|b| b.body.clone()).collect();
+            apply_traced(doc, st, f, tools, Operation::Cut, &crate::plain(targets))?;
+            if !before.is_empty() && st.bodies.len() == before.len() && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body)) {
+                append_warning(warning, "the cut removes no material; check where its profile lies, the direction and the depth".into());
+            }
             Ok(())
         }
         FeatureKind::Hole { thread, thread_depth, diameter, hand, modeled, ease_out, depth, to, .. } => {
@@ -10792,6 +10805,7 @@ fn drawn_tools_change_bodies(kind: &FeatureKind) -> bool {
         | FeatureKind::Sweep { operation, .. }
         | FeatureKind::Pipe { operation, .. }
         | FeatureKind::Coil { operation, .. } => *operation != Operation::NewBody,
+        FeatureKind::CellGrid { .. } => true,
         _ => false,
     }
 }

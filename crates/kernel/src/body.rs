@@ -1307,15 +1307,26 @@ impl Body {
 
     /// Edges with polylines (index = the record's edge index).
     pub fn edges(&self, tol: f64) -> Result<Vec<EdgeInfo>> {
-        let m = self.mesh(&MeshTolerance::chord(tol))?;
-        Ok(m.edges
-            .into_iter()
-            .enumerate()
-            .map(|(index, points)| {
-                let (mid, length) = polyline_mid(&points);
-                EdgeInfo { index, points, mid, length }
-            })
-            .collect())
+        if let Some(mb) = &self.mesh {
+            let m = mb.to_mesh();
+            return Ok(m
+                .edges
+                .into_iter()
+                .enumerate()
+                .map(|(index, points)| {
+                    let (mid, length) = polyline_mid(&points);
+                    EdgeInfo { index, points, mid, length }
+                })
+                .collect());
+        }
+        let rec = self.record();
+        let mut out = Vec::with_capacity(rec.edges.len());
+        for (index, edge) in rec.edges.iter().enumerate() {
+            let points = edge_points(edge, tol)?;
+            let (mid, length) = polyline_mid(&points);
+            out.push(EdgeInfo { index, points, mid, length });
+        }
+        Ok(out)
     }
 
     /// How far [`Body::planar_edges`] lets a piece it reads as a line or an arc lie from the

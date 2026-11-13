@@ -22,7 +22,8 @@
 //!
 //! The families: [`measure`] (mass properties, area, box, point class, gap samples, the picks'
 //! distances and normals), [`contact`] (whether bodies meet, their boundary distance),
-//! [`boolean`], [`stitch`], [`prism`] (planar region booleans and extrusion, prism sections).
+//! [`boolean`], [`stitch`], [`prism`] (planar region booleans and extrusion, prism sections),
+//! [`cell_grid`] (the cells of a grid over a profile).
 //!
 //! Operations change the body they are given, as the kernel does. An application that keeps
 //! its input copies it first ([`Body::copy`]).
@@ -33,9 +34,11 @@
 pub mod affine;
 pub mod blend;
 pub mod blend_definition;
+pub mod blend_surface;
 pub mod body;
 pub mod boolean;
 pub mod cancel;
+pub mod cell_grid;
 pub mod check;
 pub mod contact;
 pub mod continuity;
@@ -87,7 +90,7 @@ pub use blend::{
     fillet_variable_ordered, tangent_chain, BandRoom, Blend, BlendOptions, Blended, CarriedFace,
     ChamferCorner, ChamferSecond, Corners, EndRoom, Hole, HoleEdge, Room, SetBack, Turn,
 };
-pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body};
+pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body, TurnedOver};
 pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
 pub use contact::Gap;

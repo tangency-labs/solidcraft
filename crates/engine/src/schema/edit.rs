@@ -145,13 +145,14 @@ impl JsonSchema for CheckpointId {
 }
 
 /// Go back to a checkpoint, undo history included; or, with `forget`, drop it without going
-/// back. Either uses it up and every later checkpoint with it: take a new one to go back again.
+/// back. Going back uses it up and every later checkpoint with it: take a new one to go back
+/// again. Forgetting drops only this one.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct RestoreCheckpointParams {
     /// The checkpoint, by the id `edit.checkpoint` returned.
     pub checkpoint: CheckpointId,
-    /// True to drop the checkpoint (and every later one) without going back. Default: false.
+    /// True to drop the checkpoint without going back; later checkpoints stay. Default: false.
     #[serde(default)]
     pub forget: Option<bool>,
 }

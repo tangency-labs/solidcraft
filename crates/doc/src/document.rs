@@ -232,6 +232,33 @@ impl Touching {
     }
 }
 
+/// What a cell grid does with its cells. Only `cut` is built so far.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CellGridMode {
+    /// Cut the cells out of the targets.
+    #[default]
+    Cut,
+}
+
+/// The smallest cell size and web of a cell grid, in mm.
+pub const CELL_GRID_MIN_SIZE: f64 = solidcore_ops::cell_grid::MIN_SIZE;
+
+/// The most sides of a polygon cell.
+pub const CELL_GRID_MAX_SIDES: u32 = solidcore_ops::cell_grid::MAX_SIDES;
+
+fn default_cell_shape() -> solidcore_record::cell_grid::CellShape {
+    solidcore_record::cell_grid::CellShape::Hexagon
+}
+
+fn default_cell_dot_grid() -> solidcore_record::cell_grid::DotGrid {
+    solidcore_record::cell_grid::DotGrid::Hexagonal
+}
+
+fn default_cell_clip() -> solidcore_record::cell_grid::Clip {
+    solidcore_record::cell_grid::Clip::Snap
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
@@ -1400,6 +1427,57 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Angle")]
         angle: Option<Expr>,
+    },
+    /// A cell grid (#14044): the cells of one shape that fill the closed profiles of a sketch (an
+    /// outer loop is the field, a loop inside it a keep-out), cut from the targets `depth` deep
+    /// (or through all) along the sketch normal. The cells are planned by solidcore
+    /// (`solidcore_ops::cell_grid`) and cut in one boolean.
+    CellGrid {
+        /// Feature id of the sketch.
+        sketch: SketchId,
+        /// Which of the sketch's profiles hold the field and its keep-outs.
+        #[walk(profiles_of = sketch)]
+        profiles: ProfileSel,
+        #[serde(default)]
+        mode: CellGridMode,
+        #[serde(default = "default_cell_shape")]
+        shape: solidcore_record::cell_grid::CellShape,
+        /// Sides of a polygon cell.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Sides")]
+        sides: Option<Expr>,
+        /// The centres' grid for circles and polygons.
+        #[serde(default = "default_cell_dot_grid")]
+        dot_grid: solidcore_record::cell_grid::DotGrid,
+        /// A cell's inscribed diameter.
+        #[walk(length = "Cell size")]
+        size: Expr,
+        /// The wall between neighbouring cells.
+        #[walk(length = "Web")]
+        web: Expr,
+        /// The grid's rotation about the anchor.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
+        /// A cell centre sits at this point, projected onto the sketch plane (default: the sketch's
+        /// origin).
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
+        #[walk(placement)]
+        anchor: Option<PointExpr>,
+        /// What happens to a cell the field's edge crosses.
+        #[serde(default = "default_cell_clip")]
+        clip: solidcore_record::cell_grid::Clip,
+        /// How deep the cells go. Unused with `through_all`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Depth")]
+        depth: Option<Expr>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        through_all: bool,
+        #[serde(default)]
+        direction: Direction,
+        /// Target body names (empty = the feature's participants, else all bodies of its component).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        targets: Vec<BodyName>,
     },
     /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
     /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
@@ -2878,6 +2956,7 @@ impl FeatureKind {
             FeatureKind::SheetUnfold { .. } => "RefoldFeature",
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetalFeature",
             FeatureKind::Coil { .. } => "CoilFeature",
+            FeatureKind::CellGrid { .. } => "CellGridFeature",
             FeatureKind::Rib { web: false, .. } => "RibFeature",
             FeatureKind::Rib { .. } => "WebFeature",
             FeatureKind::ReplaceFace { .. } => "ReplaceFaceFeature",
@@ -2949,6 +3028,7 @@ impl FeatureKind {
             FeatureKind::ReplaceFace { .. } => "replace_face",
             FeatureKind::Align { .. } => "align",
             FeatureKind::Coil { .. } => "coil",
+            FeatureKind::CellGrid { .. } => "cell_grid",
             FeatureKind::SheetBase { .. } => "sheet_base",
             FeatureKind::SheetContour { .. } => "sheet_contour",
             FeatureKind::SheetFlange { .. } => "sheet_flange",
@@ -3046,6 +3126,7 @@ impl FeatureKind {
             "UnfoldFeature" | "RefoldFeature" => "sheet_unfold",
             "ConvertToSheetMetalFeature" => "sheet_convert",
             "CoilFeature" => "coil",
+            "CellGridFeature" => "cell_grid",
             "RibFeature" | "WebFeature" => "rib",
             "ReplaceFaceFeature" => "replace_face",
             "AlignFeature" => "align",
@@ -3132,6 +3213,7 @@ impl FeatureKind {
             FeatureKind::SheetUnfold { .. } => "Refold",
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetal",
             FeatureKind::Coil { .. } => "Coil",
+            FeatureKind::CellGrid { .. } => "CellGrid",
             FeatureKind::Rib { web: false, .. } => "Rib",
             FeatureKind::Rib { .. } => "Web",
             FeatureKind::ReplaceFace { .. } => "ReplaceFace",

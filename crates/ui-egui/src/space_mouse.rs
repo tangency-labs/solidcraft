@@ -1426,11 +1426,12 @@ mod tests {
     #[test]
     fn navigation_off_the_start_page_and_a_hostile_speed_leave_the_view_alone() {
         let ctx = window(true);
-        let mut off = app();
+        // The app is large: kept on the heap, three at once do not overflow a test thread's stack.
+        let mut off = Box::new(app());
         off.preferences.space_mouse_enabled = false;
-        let mut home = app();
+        let mut home = Box::new(app());
         home.home.open = true;
-        let mut nan = app();
+        let mut nan = Box::new(app());
         nan.preferences.space_mouse_speed = f32::NAN;
         for mut app in [off, home, nan] {
             let before = app.cam;
@@ -1442,7 +1443,7 @@ mod tests {
         let distances: Vec<f64> = speeds
             .iter()
             .map(|&speed| {
-                let mut app = app();
+                let mut app = Box::new(app());
                 app.preferences.space_mouse_speed = speed;
                 frame(&mut app, &ctx, DriverMapping::default(), PUSH, 0.02);
                 assert!(app.cam.is_valid(), "{speed}");

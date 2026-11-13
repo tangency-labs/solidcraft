@@ -3,7 +3,7 @@
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{self, Container, Edge, Surface};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::ribbon::{self, BUTTON_MIN_WIDTH, ButtonSize, GROUP_HEIGHT, ICON_GROUP_HEIGHT};
 use crate::{SolveApp, app_bar, icons};
@@ -348,6 +348,8 @@ pub enum FileAction {
     Redo,
     /// Save a JSON design using the existing save-as flow.
     SaveJson,
+    /// Check the signatures of the active design's saved file.
+    VerifySignature,
     /// Export through the format-specific export command.
     Export(&'static str),
     /// Open the mesh export dialog with the selected format.
@@ -371,8 +373,9 @@ pub enum FileAction {
 impl FileAction {
     /// Whether this action is available in the current document, picker and report state.
     pub fn enabled(&self, app: &SolveApp) -> bool {
-        let needs_design = matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_))
-            || matches!(self, Self::Export(extension) if *extension != "json");
+        let needs_design =
+            matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_) | Self::VerifySignature)
+                || matches!(self, Self::Export(extension) if *extension != "json");
         // An open bug report describes the designs as they are, and a window opened behind it
         // covers it (#7188). Quit too, as behind any modal window: it would switch to a design
         // with unsaved changes under the report, and ask about it where it can't be answered.
@@ -381,6 +384,7 @@ impl FileAction {
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
+            Self::VerifySignature => app.session.path.is_some() && app.verifying.is_none(),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
             Self::Command("document.metadata") => app.session.forms_prototype.is_none(),
             _ => true,
@@ -411,6 +415,9 @@ impl FileAction {
             Self::Undo => drop(app.run("edit.undo", json!({}))),
             Self::Redo => drop(app.run("edit.redo", json!({}))),
             Self::SaveJson => save_as_with_extension(app, "json"),
+            Self::VerifySignature => {
+                crate::verify_job::start(app);
+            }
             Self::Export(extension) => export(app, extension),
             Self::ExportMesh(format) => crate::dialogs_save_mesh::start_with_format(app, format),
             Self::Command(command) => app.start(command),
@@ -483,6 +490,7 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
     rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown));
     rows.push(row("save_json", app.tr_label("Save As JSON…"), "", "save", true));
+    rows.push(row("file.verify", app.tr("cmd.file.verify"), "", "shield", shown && app.session.path.is_some()));
     // The browser build: a copy as a downloaded file, whatever Save does.
     if app.services.download_design.is_some() {
         rows.push(row("download", app.tr_label("Download design"), "", "export", shown));
@@ -550,6 +558,7 @@ fn run_file_row(app: &mut SolveApp, id: &str) {
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),
         "save_json" => FileAction::SaveJson.run(app),
+        "file.verify" => FileAction::VerifySignature.run(app),
         "download" => download_design(app),
         "browser_files" => {
             if let Some(show) = &app.services.browser_files {
@@ -576,6 +585,20 @@ pub fn design_shown(app: &SolveApp) -> bool {
     !app.home.open
 }
 
+/// The parameters a save takes from Preferences. Signing is off by default; a signing key left
+/// empty asks GnuPG for its default key.
+pub(crate) fn provenance_params(app: &SolveApp) -> Value {
+    let mut params = json!({});
+    if app.preferences.sign_saved_designs {
+        params["sign"] = json!(true);
+        let key = app.preferences.signing_key.trim();
+        if !key.is_empty() {
+            params["signing_key"] = json!(key);
+        }
+    }
+    params
+}
+
 pub fn save(app: &mut SolveApp) {
     if app.session.forms_prototype.is_some() {
         app.set_status(app.tr("forms.prototype.finish_before_save").to_owned(), true);
@@ -588,7 +611,7 @@ pub fn save(app: &mut SolveApp) {
     if app.session.path.is_some() {
         // Read-only, or changed on disk since it was opened: Save As, or a question, instead.
         if crate::open_elsewhere::check_save(app) {
-            crate::save_job::start(app, "file.save", json!({}));
+            crate::save_job::start(app, "file.save", provenance_params(app));
         }
     } else {
         save_as(app);
@@ -626,7 +649,18 @@ pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
     app.pick_save(&name, &[solidcraft_engine::io::DESIGN_EXT, "json"], |app, path| {
         // A save under way answers a closing tab when it ends.
         if let Some(path) = path
-            && crate::save_job::start(app, "file.save_as", json!({"path": path}))
+            && {
+                let mut params = provenance_params(app);
+                // A JSON design has no container to sign; asking would make this save fail.
+                if std::path::Path::new(&path).extension().is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+                    && let Some(params) = params.as_object_mut()
+                {
+                    params.remove("sign");
+                    params.remove("signing_key");
+                }
+                params["path"] = json!(path);
+                crate::save_job::start(app, "file.save_as", params)
+            }
         {
             return;
         }
@@ -1621,11 +1655,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             // an earlier, shorter list (#874); they still shrink to fit their content.
                             let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(ROW_H * 3.0);
                             egui::ScrollArea::vertical().id_salt("panel_menu_rows").max_height(room).min_scrolled_height(room).show(ui, |ui| {
-                                for (index, (heading, c)) in grouped.iter().enumerate() {
+                                for (heading, c) in &grouped {
                                     if let Some(heading) = heading {
-                                        if *panel == "CONSTRUCT" && index > 0 {
-                                            ui.separator();
-                                        }
                                         ribbon::section_heading(ui, &group_heading_text(heading), row_w);
                                     }
                                     let pinned = crate::toolbar_custom::pinned_on(app, &tab, c.id).is_some();
@@ -3552,14 +3583,19 @@ mod dropdown_tests {
         }
     }
 
-    /// Both layouts keep the original order by default and expose every tool with grouping on.
+    /// Both layouts group Construct under Planes, Axes and Points by default, and keep the
+    /// original ungrouped order when `construct_menu_groups` is turned off.
     #[test]
     fn construct_dropdown_groups_are_visible_in_list_and_grid() {
-        for (grid, grouped) in [(false, false), (true, false), (false, true), (true, true)] {
+        for (grid, grouped) in [(false, true), (true, true), (false, false), (true, false)] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.app.preferences.ribbon_icon_grid = grid;
-            h.app.preferences.construct_menu_groups = grouped;
+            if !grouped {
+                h.app.preferences.construct_menu_groups = false;
+            } else {
+                assert!(h.app.preferences.construct_menu_groups);
+            }
             h.call("ui.resize", json!({"width":1600,"height":1200}));
             h.app.ui.tab = "MODEL".into();
             h.frames(4);

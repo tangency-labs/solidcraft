@@ -1127,10 +1127,125 @@ fn tab_paths(app: &SolveApp) -> Vec<Option<String>> {
 
 /// Where a tab's design is saved (home shortened to `~`), or that it isn't yet; below, that a
 /// saved design has changes not saved yet (`dirty`), which the bullet after a cut name no longer
-/// shows (#11408). The tab puts its full name above when it cuts it short (#5868).
-fn tab_place(path: Option<&str>, dirty: bool) -> String {
-    let place = path.map_or_else(|| solidcraft_ui_text::tr_label("Not saved yet").to_string(), crate::home::friendly_path);
-    if dirty && path.is_some() { format!("{place}\n{}", solidcraft_ui_text::tr("document.tab_unsaved_changes")) } else { place }
+/// shows (#11408), and what its signature says. The tab puts its full name above when it cuts it
+/// short (#5868).
+fn tab_place(path: Option<&str>, dirty: bool, security: Option<&str>) -> String {
+    let mut place = path.map_or_else(|| solidcraft_ui_text::tr_label("Not saved yet").to_string(), crate::home::friendly_path);
+    if dirty && path.is_some() {
+        place.push('\n');
+        place.push_str(solidcraft_ui_text::tr("document.tab_unsaved_changes"));
+    }
+    if let Some(security) = security {
+        place.push('\n');
+        place.push_str(security);
+    }
+    place
+}
+
+/// What a design's signature says, for its tab's tooltip: the last verification when one ran, or
+/// that the file carries records that have not been checked in this session.
+fn tab_security(app: &SolveApp) -> Vec<Option<String>> {
+    open_sessions(app)
+        .into_iter()
+        .map(|session| {
+            if let Some(report) = &session.provenance {
+                if session.is_dirty() {
+                    return Some(solidcraft_ui_text::tr("ui.open_signature_changed").to_string());
+                }
+                let trusted = report.newest().is_some_and(|record| signer_trusted(app, record));
+                return Some(signature_line(report, trusted));
+            }
+            let signed = session.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty());
+            signed.then(|| solidcraft_ui_text::tr("ui.open_signature_unverified").to_string())
+        })
+        .collect()
+}
+
+/// Whether a record's key is in the user's trusted-fingerprint list. The embedded user id is not
+/// proof of anything; this is the app's one trust decision.
+pub(crate) fn signer_trusted(app: &SolveApp, record: &solidcraft_engine::io::ProvenanceRecord) -> bool {
+    trusted_fingerprint(&app.preferences.trusted_signing_keys, &record.signer.fingerprint())
+}
+
+/// Whether `fingerprint` is one of the comma/space separated fingerprints in `trusted`.
+pub(crate) fn trusted_fingerprint(trusted: &str, fingerprint: &str) -> bool {
+    let fingerprint = fingerprint.trim();
+    if fingerprint.is_empty() {
+        return false;
+    }
+    // Commas/newlines separate entries; spaces inside an entry are ignored, because
+    // `gpg --fingerprint` prints a single fingerprint in groups of four.
+    trusted
+        .split([',', ';', '\n'])
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| entry.chars().filter(|c| !c.is_whitespace()).collect::<String>())
+        .any(|entry| entry.eq_ignore_ascii_case(fingerprint))
+}
+
+/// The shield each design tab shows, from the same last check as its tooltip.
+fn tab_badges(app: &SolveApp) -> Vec<Option<crate::app_bar::TabBadge>> {
+    use crate::app_bar::TabBadge;
+    open_sessions(app)
+        .into_iter()
+        .map(|session| {
+            if let Some(report) = &session.provenance {
+                if session.is_dirty() {
+                    return Some(TabBadge::Signed);
+                }
+                return Some(match &report.status {
+                    solidcraft_engine::io::ProvenanceStatus::Valid => {
+                        if report.newest().is_some_and(|record| signer_trusted(app, record)) {
+                            TabBadge::Verified
+                        } else {
+                            TabBadge::Signed
+                        }
+                    }
+                    solidcraft_engine::io::ProvenanceStatus::NotCovered => TabBadge::NotCovered,
+                    solidcraft_engine::io::ProvenanceStatus::Invalid(_) => TabBadge::Invalid,
+                    solidcraft_engine::io::ProvenanceStatus::Unsupported(_) => TabBadge::Unsupported,
+                });
+            }
+            let signed = session.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty());
+            signed.then_some(TabBadge::Signed)
+        })
+        .collect()
+}
+
+/// A verification report as one line for a tab tooltip.
+pub(crate) fn signature_line(report: &solidcraft_engine::io::ProvenanceReport, trusted: bool) -> String {
+    match &report.status {
+        solidcraft_engine::io::ProvenanceStatus::Valid => match (trusted, report.newest()) {
+            (true, Some(record)) => {
+                let key = signer_name(record);
+                solidcraft_ui_text::format("ui.open_signature_valid", &[("key", &key)])
+            }
+            (_, Some(record)) => {
+                let fingerprint = record.signer.fingerprint();
+                solidcraft_ui_text::format("ui.open_signature_valid_untrusted", &[("key", &fingerprint)])
+            }
+            _ => solidcraft_ui_text::tr("ui.open_signature_unverified").to_string(),
+        },
+        solidcraft_engine::io::ProvenanceStatus::NotCovered => solidcraft_ui_text::tr("ui.open_signature_not_covered").to_string(),
+        solidcraft_engine::io::ProvenanceStatus::Invalid(why) => solidcraft_ui_text::format("ui.open_signature_invalid", &[("reason", why)]),
+        solidcraft_engine::io::ProvenanceStatus::Unsupported(_) => solidcraft_ui_text::tr("ui.open_signature_unsupported").to_string(),
+    }
+}
+
+/// The name to show for the key that signed a record.
+fn signer_name(record: &solidcraft_engine::io::ProvenanceRecord) -> String {
+    match &record.signer {
+        solidcraft_engine::io::ProvenanceSigner::Ed25519 { key_id, .. } => {
+            use std::fmt::Write as _;
+            let mut hex = String::with_capacity(16);
+            for byte in &key_id[..8] {
+                // Writing to a `String` cannot fail.
+                let _ = write!(&mut hex, "{byte:02x}");
+            }
+            hex
+        }
+        solidcraft_engine::io::ProvenanceSigner::OpenPgp { fingerprint, user_id } => user_id.clone().unwrap_or_else(|| fingerprint.clone()),
+    }
 }
 
 /// The designs a launch with no file to open reopens: those open at the last quit that still
@@ -1285,7 +1400,14 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let n = info.len();
     let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
     let names: Vec<String> = info.iter().map(|(name, _)| locale.given_name(name)).collect();
-    let places: Vec<String> = info.iter().zip(&paths).map(|((_, dirty), path)| tab_place(path.as_deref(), *dirty)).collect();
+    let security = tab_security(app);
+    let badges = tab_badges(app);
+    let places: Vec<String> = info
+        .iter()
+        .zip(&paths)
+        .zip(&security)
+        .map(|(((_, dirty), path), security)| tab_place(path.as_deref(), *dirty, security.as_deref()))
+        .collect();
     let selected = if app.docs.slots.is_empty() { 0 } else { app.docs.active };
     let mut rename = app.menu.rename.take();
     let renaming = renaming_tab_state(rename.as_ref());
@@ -1296,7 +1418,14 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 .iter()
                 .zip(&names)
                 .zip(&places)
-                .map(|(((list_name, dirty), name), place)| crate::app_bar::DocTab { name, list_name, dirty: *dirty, place })
+                .zip(&badges)
+                .map(|((((list_name, dirty), name), place), security)| crate::app_bar::DocTab {
+                    name,
+                    list_name,
+                    dirty: *dirty,
+                    place,
+                    security: *security,
+                })
                 .collect(),
             selected,
             shown_selected: (!app.home.open).then_some(selected),
@@ -1665,7 +1794,7 @@ pub fn tab_list_open(ctx: &egui::Context) -> bool {
 /// A tab's tooltip ([`crate::app_bar::tab_tip`] over [`tab_place`]).
 #[cfg(test)]
 fn tab_tooltip(name: &str, path: Option<&str>, cut: bool, dirty: bool) -> String {
-    crate::app_bar::tab_tip(name, &tab_place(path, dirty), cut)
+    crate::app_bar::tab_tip(name, &tab_place(path, dirty, None), cut)
 }
 
 #[cfg(test)]
@@ -1697,6 +1826,90 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn only_a_listed_fingerprint_is_trusted() {
+        assert!(trusted_fingerprint("0123456789ABCDEF, fedcba9876543210", "0123456789abcdef"));
+        assert!(trusted_fingerprint("0123456789ABCDEF; fedcba9876543210", "FEDCBA9876543210"));
+        // `gpg --fingerprint` prints a fingerprint in groups of four.
+        assert!(trusted_fingerprint("0123 4567 89AB CDEF", "0123456789ABCDEF"));
+        assert!(!trusted_fingerprint("", "0123456789ABCDEF"));
+        assert!(!trusted_fingerprint("1111111111111111", "0123456789ABCDEF"));
+        assert!(!trusted_fingerprint("0123456789ABCDEF", ""));
+        // Two fingerprints must be separated by a comma; a run of spaces is one grouped fingerprint.
+        assert!(!trusted_fingerprint("0123456789ABCDEF 1111111111111111", "0123456789ABCDEF"));
+    }
+
+    #[test]
+    fn an_untrusted_user_id_is_not_shown_for_a_valid_signature() {
+        let record = solidcraft_engine::io::ProvenanceRecord {
+            signer: solidcraft_engine::io::ProvenanceSigner::OpenPgp {
+                fingerprint: "0123456789ABCDEF".into(),
+                user_id: Some("Alice <alice@example.invalid>".into()),
+            },
+            author: Some("Alice".into()),
+            tool: None,
+            note: None,
+            created: None,
+            app: "test".into(),
+            format: "solidcraft/55".into(),
+            pending: Vec::new(),
+            document: [0; 32],
+            container: [0; 32],
+            parts: 0,
+            signature_valid: true,
+            covered: true,
+        };
+        let report = solidcraft_engine::io::ProvenanceReport {
+            chain: Default::default(),
+            records: vec![record],
+            status: solidcraft_engine::io::ProvenanceStatus::Valid,
+        };
+        let record = report.newest().unwrap();
+        assert_eq!(record.signer.fingerprint(), "0123456789ABCDEF");
+        assert_eq!(signer_name(record), "Alice <alice@example.invalid>");
+        assert!(!trusted_fingerprint("", &record.signer.fingerprint()));
+        assert!(trusted_fingerprint("0123 4567 89AB CDEF", &record.signer.fingerprint()));
+    }
+
+    #[test]
+    fn tab_badges_show_the_last_check_or_that_the_file_is_signed() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let record = solidcraft_engine::io::ProvenanceRecord {
+            signer: solidcraft_engine::io::ProvenanceSigner::OpenPgp { fingerprint: "0123456789ABCDEF".into(), user_id: None },
+            author: None,
+            tool: None,
+            note: None,
+            created: None,
+            app: "test".into(),
+            format: "solidcraft/55".into(),
+            pending: Vec::new(),
+            document: [0; 32],
+            container: [0; 32],
+            parts: 0,
+            signature_valid: true,
+            covered: true,
+        };
+        h.app.session.provenance = Some(solidcraft_engine::io::ProvenanceReport {
+            chain: Default::default(),
+            records: vec![record],
+            status: solidcraft_engine::io::ProvenanceStatus::Valid,
+        });
+        h.app.session.mark_saved();
+        h.app.preferences.trusted_signing_keys = "0123456789ABCDEF".into();
+        assert_eq!(tab_badges(&h.app), vec![Some(crate::app_bar::TabBadge::Verified)]);
+        h.app.session.provenance = Some(solidcraft_engine::io::ProvenanceReport {
+            chain: Default::default(),
+            records: vec![],
+            status: solidcraft_engine::io::ProvenanceStatus::Valid,
+        });
+        h.app.preferences.trusted_signing_keys.clear();
+        assert_eq!(tab_badges(&h.app), vec![Some(crate::app_bar::TabBadge::Signed)]);
+        h.app.session.provenance = None;
+        h.app.session.provenance_chain = Some(solidcraft_engine::io::ProvenanceChain { records: vec![vec![1]], truncated: false });
+        assert_eq!(tab_badges(&h.app), vec![Some(crate::app_bar::TabBadge::Signed)]);
     }
 
     #[test]

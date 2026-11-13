@@ -20,6 +20,8 @@ pub mod easyprint;
 pub mod forms_prototype;
 pub mod frames;
 pub mod fuzz;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod gpg;
 pub mod licences;
 mod mesh_lines;
 pub mod occurrences;
@@ -538,6 +540,14 @@ pub struct Session {
     /// Opened read-only (`doc.open {read_only}`, the "open elsewhere" notice): saving to its own
     /// file is refused; Save As to another file is how its changes are kept.
     pub read_only: bool,
+    /// The provenance records the open file carries; a signed save appends one to them.
+    pub provenance_chain: Option<solidcraft_io::ProvenanceChain>,
+    /// The last provenance verification of this design, when one was asked for.
+    pub provenance: Option<solidcraft_io::ProvenanceReport>,
+    /// Set only by the app's own Save, after the user chose the key in Preferences: a script,
+    /// agent or control-channel caller cannot make the engine sign with a keyring key on its own.
+    /// Not saved and not copied by [`Session::scratch`].
+    pub signing_allowed: bool,
     /// Whether the design's name is one its user chose for it (`file.new {name}`) rather than
     /// one it borrowed — from a file's name, a sample's name, or a file that stored another
     /// design's name. A borrowed name follows Save As to the new file's name (#4907); a name
@@ -805,7 +815,8 @@ impl SurfaceAnalysis {
     pub fn mode(self) -> solidcraft_viewport::AnalysisMode {
         use solidcraft_viewport::AnalysisMode as M;
         match self {
-            SurfaceAnalysis::Zebra { stripes } => M::Zebra { stripes },
+            // Bars standing upright around the viewer, half white: the picture as it always was.
+            SurfaceAnalysis::Zebra { stripes } => M::Zebra { stripes, direction: Vec3::new(0.0, 0.0, 1.0), width: 0.5 },
             SurfaceAnalysis::Draft { pull, angle } => M::Draft { pull, angle },
             SurfaceAnalysis::Curvature { radius } => M::Curvature { radius },
             SurfaceAnalysis::Environment => M::Environment,
@@ -890,6 +901,9 @@ impl Session {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             disk: None,
             read_only: false,
+            provenance_chain: None,
+            provenance: None,
+            signing_allowed: false,
             user_named: false,
             open_preview: None,
             log: Vec::new(),
@@ -2059,7 +2073,7 @@ impl Session {
     pub(crate) fn restore_checkpoint_with_form(&mut self, id: u64) -> Result<bool> {
         let missing = || {
             EngineError::Other(format!(
-                "no checkpoint {id} (used up by restoring or forgetting it or an earlier one, or dropped: only the last {MAX_CHECKPOINTS} are kept)"
+                "no checkpoint {id} (used up by restoring it or an earlier one, or by forgetting it, or dropped: only the last {MAX_CHECKPOINTS} are kept)"
             ))
         };
         let i = self.checkpoints.iter().position(|c| c.id == id).ok_or_else(missing)?;
@@ -2095,11 +2109,10 @@ impl Session {
         Ok(restored_form)
     }
 
-    /// Forget checkpoint `id` (and later ones) without going back.
+    /// Forget checkpoint `id` without going back. Later checkpoints stay: a batch forgets the
+    /// checkpoint it took before its first step, and one a step of it took outlives the batch.
     pub fn drop_checkpoint(&mut self, id: u64) {
-        if let Some(i) = self.checkpoints.iter().position(|c| c.id == id) {
-            self.checkpoints.truncate(i);
-        }
+        self.checkpoints.retain(|c| c.id != id);
     }
 
     /// A scratch copy of the session (same design and model, no history or log) to try
@@ -2121,6 +2134,9 @@ impl Session {
             uid: self.uid,
             disk: self.disk,
             read_only: self.read_only,
+            provenance_chain: self.provenance_chain.clone(),
+            provenance: self.provenance.clone(),
+            signing_allowed: false,
             user_named: self.user_named,
             open_preview: None,
             saved: self.saved.clone(),
