@@ -48,9 +48,10 @@ fn fixtures(root: &std::path::Path) -> Vec<String> {
     out
 }
 
-/// (fixture, digest of its export) as written before the move.
+/// (fixture, digest of its export) as written before the move, plus new fixtures.
 #[rustfmt::skip]
 const DIGESTS: &[(&str, &str)] = &[
+    ("solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step", "197c80fea864545e"),
     ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "5545d4ee93431803"),
     ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "8432fa140e74c146"),
     ("tests/kernel-cases/import/1721-closed-bspline-tube-face/input.step", "c5176ac4d067ab52"),

@@ -2095,8 +2095,13 @@ fn an_edge_to_a_vertex_a_hair_off_a_closed_splines_seam_ends_at_the_seam() {
     let m = open_or_closed(square(), off, mid, false, false, tol).unwrap();
     assert!((m.interval[0] - 1.5).abs() < 1e-9 && m.interval[1] == 4.0, "{:?}", m.interval);
     // Farther off than the tolerance it is a vertex of the curve like any other: the edge from
-    // the middle to it, the curve's way, crosses the seam.
-    assert!(open_or_closed(square(), mid, [5e-3, 0.0, 0.0], true, false, tol).is_err());
+    // the middle to it, the curve's way, crosses the seam, so the curve restarts at the middle
+    // and the edge runs from there round to that vertex.
+    let far = [5e-3, 0.0, 0.0];
+    let m = open_or_closed(square(), mid, far, true, false, tol).unwrap();
+    let eval = CurveEval::new(&m.curve).unwrap();
+    let at = |t: f64, q: [f64; 3]| eval.point(t).unwrap().dist(v3(q)) < 1e-9;
+    assert!(at(m.interval[0], mid) && at(m.interval[1], far), "{:?}", m.interval);
 }
 
 /// A spline surface whose first and last control columns lie within the tolerance of each other
