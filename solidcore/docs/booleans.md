@@ -222,9 +222,12 @@ default (its flag, `boolean_coincident_strip_drops_crossing`, was retired).
 **One point per proto vertex.** Each body classifies a curve end within its own band, so a point
 1.4e-5 from a vertex of each body classifies onto both even when the two vertices are 2.8e-5 apart,
 beyond the 2e-5 they may differ by. `find_or_create_proto_vertex_pcs` (`proto_topology/p3.rs`)
-makes no proto vertex for two classifications whose objects lie farther apart than the two
-objects' intersection tolerance; upstream made one with that distance as its tolerance and merged
-the two vertices.
+makes no proto vertex for two classifications onto vertices farther apart than the two vertices'
+intersection tolerance; upstream made one with that distance as its tolerance and merged the two
+vertices. The rule is for vertices only: an edge's or a face's classified point follows parameters
+that may not be settled yet (`ResolveOverlappingProtoEdges` re-parametrises overlapping edges, whose
+first points can lie 18 mm apart in an outset of `Boolean/extrudeHoles1.smb`), so their distance
+proves no separation.
 
 This is the problem Segal's tolerant modeller and Jackson's local tolerances address [9, 10]: two
 entities within tolerance are one, and a decision across that band has to be made once and kept by

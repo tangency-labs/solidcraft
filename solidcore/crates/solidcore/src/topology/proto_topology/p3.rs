@@ -76,9 +76,9 @@
 //!   failing paths are not reachable from the callers ported so far).
 //! - The `SM_DEBUG_CODE` blocks are not ported.
 //! - **Vertex identity** (not upstream): `FindOrCreateProtoVertex(PC, PC)` makes no proto
-//!   vertex for two classifications whose objects lie farther apart than the intersection
-//!   tolerance of the two (`sm_FindPositionFromPCs`' deviation, which upstream only reports
-//!   and then covers by the new proto vertex's tolerance).
+//!   vertex for two classifications onto vertices farther apart than the intersection
+//!   tolerance of the two (a distance upstream's `sm_FindPositionFromPCs` only reports and
+//!   then covers by the new proto vertex's tolerance).
 //! - **Recursion.** None.
 //! - **Upper split child's interval** (WR-101, opt-in
 //!   `Kernel::fixes.proto_edge_split_upper_keeps_the_old_max`): `SmProtoEdge::Split` sets
@@ -107,7 +107,7 @@ use crate::geom::tol::{xsect_tol3d, xsect_tol_3d_from_zones, zone_tol3d, USE_DEF
 use crate::intersect::curve_class::p5::ExtractOptions;
 use crate::intersect::curve_class::{ClassificationInit, CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
-    ClassGeometry, ClassObject, ClassObjectKind, PointClassification,
+    ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
 };
 use crate::kernel::Kernel;
 use crate::math::{Vec3, BIG_DOUBLE, EFF_ZERO};
@@ -299,13 +299,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// `SmProtoTopologyManager::FindOrCreateProtoVertex(rPC1, rPC2, rpNewPV,
     /// pbWasCreated)`: the proto vertex for a point two classifications agree on
     /// (found within the tolerance, else created) and whether it was created. `None`
-    /// when either classification cannot be imprinted, and (not upstream) when their
-    /// objects lie farther apart than the two objects' intersection tolerance.
+    /// when either classification cannot be imprinted, and (not upstream) when both
+    /// classify onto vertices farther apart than the two vertices' intersection
+    /// tolerance.
     ///
     /// # Errors
     ///
-    /// Those of `FindProtoVertex`, `CreateProtoVertex` and the objects' zone
-    /// tolerances; [`SolidError::Unported`]
+    /// Those of `FindProtoVertex`, `CreateProtoVertex` and the vertices' points and
+    /// zone tolerances; [`SolidError::Unported`]
     /// for the callees listed in the module header.
     pub fn find_or_create_proto_vertex_pcs(
         &mut self,
@@ -330,19 +331,36 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             pass,
         )?)?;
         // Not upstream: a proto vertex stands for one point, so it never relates two
-        // objects farther apart than their intersection tolerance (the bound upstream
+        // vertices farther apart than their intersection tolerance (the bound upstream
         // only reports). Each classification lies within its own band of the curve's end,
         // so a crossing midway between two corners 2.8e-5 apart classifies onto both with
         // a band of 2e-5; relating them would merge two vertices that are not one. The
         // pair is not a common point: no proto vertex, as for a pair that cannot be
-        // imprinted, and each body keeps its own vertex.
-        if let Some(fp) = &found_pos {
+        // imprinted, and each body keeps its own vertex. Only vertices: their points are
+        // fixed, so their distance is measured here whatever parameters the
+        // classifications carry (`sm_FindPositionFromPCs`' deviation is 0 when one had
+        // none at the start; it keeps upstream's meaning for the tolerances it feeds).
+        // An edge's or a face's point is that of its parameters, which need not be
+        // settled yet (overlapping edges are re-parametrised later by
+        // `ResolveOverlappingProtoEdges`: a pair 18 mm apart there is one point), so
+        // their distance proves no separation.
+        if pc1.point_class() == PointClassType::Vertex
+            && pc2.point_class() == PointClassType::Vertex
+        {
             let tol = xsect_tol_3d_from_zones(
                 k,
                 pc1.obj_zone_tol_3d(k, geometry)?,
                 pc2.obj_zone_tol_3d(k, geometry)?,
             );
-            if fp.deviation.is_nan() || fp.deviation > tol {
+            // (a vertex's point needs no parameters: copies marked as set read it even
+            // when a caller unset them)
+            let vertex_point = |pc: &PointClassification<O>| {
+                let mut v = *pc;
+                v.set_class_object(PointClassType::Vertex, pc.object());
+                v.find_obj_point_3d(k, geometry)
+            };
+            let apart = vertex_point(pc1)?.distance(vertex_point(pc2)?);
+            if apart.is_nan() || apart > tol {
                 return Ok((None, false));
             }
         }
@@ -477,8 +495,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         // quit - SrcFaces intersect at a single Vertex
-        if ci1.mid.point_class() == crate::intersect::point_class::PointClassType::Vertex
-            || ci2.mid.point_class() == crate::intersect::point_class::PointClassType::Vertex
+        if ci1.mid.point_class() == PointClassType::Vertex
+            || ci2.mid.point_class() == PointClassType::Vertex
         {
             return Ok((None, false));
         }
@@ -2452,6 +2470,40 @@ mod tests {
         assert!(m.proto_vertices().is_empty());
         let (pv, created) = m
             .find_or_create_proto_vertex_pcs(&k, &pool, &mut on(4), &mut on(5))
+            .unwrap();
+        assert!(pv.is_some() && created);
+    }
+
+    /// The vertices' distance is measured even when a classification starts without
+    /// parameters, where `sm_FindPositionFromPCs` reports a deviation of 0: vertices
+    /// 2.8e-5 apart (past the 2e-5 band) still make no proto vertex, either way round.
+    #[test]
+    fn vertices_without_parameters_are_measured_before_they_are_related() {
+        let k = Kernel::default();
+        let pool = Pool::new();
+        let b = H(100, ClassObjectKind::Other);
+        let e = Brep::new();
+        let mut m = ProtoTopologyManager::new(&k, (b, &e), (b, &e), b, 1e-5, 1e-3, -1.0).unwrap();
+        let on = |v: usize, set: bool| {
+            let mut pc = PointClassification::new(1e-5);
+            pc.set_class_object(PointClassType::Vertex, Some(vtx(v)));
+            if !set {
+                pc.unset_parameters();
+            }
+            pc
+        };
+        let (mut unset, mut set) = (on(6, false), on(4, true));
+        let found = find_position_from_pcs(&k, &pool, &mut unset, &mut set).unwrap();
+        assert_eq!(found.deviation, 0.0);
+        for (a, c) in [(false, true), (true, false)] {
+            let (pv, created) = m
+                .find_or_create_proto_vertex_pcs(&k, &pool, &mut on(4, a), &mut on(6, c))
+                .unwrap();
+            assert_eq!((pv, created), (None, false), "{a} {c}");
+        }
+        assert!(m.proto_vertices().is_empty());
+        let (pv, created) = m
+            .find_or_create_proto_vertex_pcs(&k, &pool, &mut on(4, false), &mut on(5, true))
             .unwrap();
         assert!(pv.is_some() && created);
     }
