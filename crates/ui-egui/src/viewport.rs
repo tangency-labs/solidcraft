@@ -11406,7 +11406,7 @@ mod tests {
         h.frame_with(vec![rotate(egui::TouchPhase::Start, egui::vec2(40.0, 0.0))]);
         let mut picked = Vec::new();
         for step in 1..=12 {
-            h.frame_with(vec![rotate(egui::TouchPhase::Move, egui::vec2(80.0, 0.0))]);
+            h.frame_with(vec![rotate(egui::TouchPhase::Move, egui::vec2(80.0, 160.0))]);
             assert_eq!(
                 face_of(&h.app.viewport.hover),
                 lit,
