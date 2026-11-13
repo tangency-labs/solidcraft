@@ -539,6 +539,66 @@ fn a_chosen_line_type_without_a_length_draws_a_segment_to_the_pointer() {
     assert!((a.dist(b) - 12.0).abs() < 1e-6 && (a.y - b.y).abs() < 1e-9, "a horizontal segment to the pointer: {a:?} {b:?}");
 }
 
+/// Infinite chosen after a segment's first click drops that start: the next click places the
+/// infinite line, rather than one through the abandoned start.
+#[test]
+fn infinite_chosen_after_a_segment_start_places_the_line_at_the_next_click() {
+    let mut h = sketch();
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    click_line_type(&mut h, "normal");
+    h.step(&json!({"move":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 1, "the segment started");
+    click_line_type(&mut h, "infinite");
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty(), "Infinite drops the start");
+    h.step(&json!({"move":{"sketch":[17,13]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"sketch":[17,13]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(curve.infinite && curve.construction, "{curve:?}");
+    let CurveKind::Line { a, .. } = curve.kind else { panic!("a line") };
+    assert!((sk.point(a).unwrap().y - 13.0).abs() < 1e-6, "through the click, not the old start");
+}
+
+/// An angle segment with its Angle typed and no length: the Length box shows the length the click
+/// draws, and the click draws it. The click puts the end on the typed angle at the pointer's
+/// distance, so the box measures that end rather than the raw pointer.
+#[test]
+fn a_typed_angle_without_a_length_draws_the_segment_its_length_box_shows() {
+    let mut h = sketch();
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.angle", &[[5., 10.]]);
+    let mut tool = h.app.tool.take().unwrap();
+    tool.line_type = 0;
+    tool.dims = crate::sketch_dims::boxes_for(tool.cmd, 1);
+    let angle = tool.dims.iter_mut().find(|b| b.label == "Angle").unwrap();
+    angle.locked = true;
+    angle.value = "30 deg".into();
+    // 5 from the start, off the typed angle.
+    let pointer = (solidcore_record::Vec2::new(8., 14.), None);
+    let shown = super::pointer_segment_length(&h.app, &tool, &pointer).expect("a length to show");
+    assert!((shown - 5.0).abs() < 1e-6, "the Length box shows the length drawn: {shown}");
+    super::place_point(&mut h.app, &mut tool, pointer);
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "the click draws the segment: {:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(!curve.construction && !curve.infinite, "{curve:?}");
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    let d = sk.point(b).unwrap() - sk.point(a).unwrap();
+    assert!((d.len() - 5.0).abs() < 1e-6 && (d.angle().to_degrees() - 30.0).abs() < 1e-6, "{d:?}");
+}
+
 #[test]
 fn perpendicular_click_on_reference_endpoint_places_line() {
     // #10600: after picking the reference line, a click exactly on that line's own endpoint
