@@ -11,7 +11,7 @@ Run a round tube or rod along a path of sketch curves: bent tubing, a coolant or
 | Choice in the dialog | Meaning | Example or reason to choose it |
 | --- | --- | --- |
 | Path | The sketch curves the tube follows. | A line, an arc and a line for a 90° bend. |
-| Diameter | The outside diameter of the tube or rod. It starts at 5 mm. | 0.375 in for 3/8 tube. |
+| Diameter | The outside diameter of the tube or rod. It starts at 5 in the design's unit. | 0.375 in for 3/8 tube. |
 | Wall | The wall thickness, measured in from the OD. Empty means solid. | 0.035 in. |
 | Operation | New Body makes a separate body. Join adds it to a body it touches. Cut takes it out. Intersect keeps only the material inside both. | New Body for a tube. Cut for a round channel through a part. |
 
