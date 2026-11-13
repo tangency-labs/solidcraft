@@ -11,9 +11,12 @@ Updates: WR-212
   during the fillet stays `Cancelled`. The executive's error info no longer records it
   (the wrappers drop their session). Upstream returns success with the open body.
   `circular_fillet` and `chamfer_fillet` never had the check and still do not.
-- **Where the check runs.** On the body after `StitchAndOrient`, no longer at the end of
-  `DoFillet`. Before the stitch it refused `Fillet/box_diff_cyl_big_rad.smb` edge 12 at
-  r 28, which the stitch closes (2026-10-26 addendum). `FilletSession::do_fillet` and the
+- **Where the check runs.** On the body after `StitchAndOrient`, the body the caller gets,
+  no longer at the end of `DoFillet`. `Fillet/box_diff_cyl_big_rad.smb` edge 12 at r 28,
+  where the C++ returns success after `StitchAndOrient` (2026-10-26 addendum), stays open
+  after the stitch (three faces left, mass properties fail with 1007): it is refused now,
+  with the body put back (goldens `blend.fillet_executive_p3`,
+  `big-radius-box_diff_cyl_big_rad-r28-edge12`, blessed). `FilletSession::do_fillet` and the
   generic `FilletExecutive::do_fillet` return the filleting's status, as upstream; a caller
   that drives a session checks its own result, as the ops layer's result contract does.
   The offset's put-back of its blends (`OffsetFacesExecutive::reblend` in
