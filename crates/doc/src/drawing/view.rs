@@ -5,7 +5,8 @@
 //! only its place along the free axis, as the other comes from the parent ([`Drawing::view_centre`]).
 //! A **section view** (#13046) is cut along a [`CuttingLine`] drawn in its parent's plane, and looks
 //! the line's arrows' way ([`CuttingLine::basis`]); it is always placed at a point, and named by its
-//! letter.
+//! letter. The views lined up with a view go where it goes: across its sheet
+//! ([`Drawing::move_view`]), or beside it on another ([`Drawing::places_beside`]).
 //!
 //! A **pictorial view** sits on one of its parent's four diagonals ([`Diagonal`]) and looks at it
 //! isometric from that corner, or from the opposite one in first angle ([`pictorial_basis`]); it is
@@ -590,15 +591,28 @@ impl Drawing {
         self.view_index(id).and_then(|i| self.views.get(i)).map(|v| &**v)
     }
 
-    /// `views` and every view projected or cut from them, directly or through others. A parent can sort
-    /// after its child, so each pass over the views finds at least one more level of a chain, which
-    /// is at most [`MAX_VIEW_DEPTH`] views.
+    /// `views` and every view projected or cut from them, directly or through others.
     pub fn with_projected(&self, views: &BTreeSet<u64>) -> BTreeSet<u64> {
+        self.down_chains(views, |_| true)
+    }
+
+    /// The views lined up with view `id`, directly or through others, in id order: the views that go
+    /// where it goes. A view placed apart ends the line.
+    pub fn lined_up_with(&self, id: u64) -> Vec<u64> {
+        let mut lined = self.down_chains(&BTreeSet::from([id]), |view| matches!(view.place, ViewPlace::Aligned(_)));
+        lined.remove(&id);
+        lined.into_iter().collect()
+    }
+
+    /// `views` and every view projected or cut from them that `follows` takes, directly or through others it
+    /// takes. A parent can sort after its child, so each pass over the views finds at least one more
+    /// level of a chain, which is at most [`MAX_VIEW_DEPTH`] views.
+    fn down_chains(&self, views: &BTreeSet<u64>, follows: impl Fn(&View) -> bool) -> BTreeSet<u64> {
         let mut all = views.clone();
         for _ in 0..MAX_VIEW_DEPTH {
             let before = all.len();
             for view in &self.views {
-                if view.kind.parent().is_some_and(|parent| all.contains(&parent)) {
+                if view.kind.parent().is_some_and(|parent| all.contains(&parent)) && follows(view) {
                     all.insert(view.id);
                 }
             }
@@ -790,16 +804,39 @@ impl Drawing {
         Ok(centre)
     }
 
-    /// Where view `id` goes dragged to `to` on its sheet, one rule for a drag and its preview. A view
-    /// lined up with its parent takes only its free axis, and with `break_alignment` is placed
-    /// apart there; a view placed at a point goes there. The views lined up with it follow by
-    /// [`Self::view_centre`]'s rule, with no change to their records.
-    pub fn place_moved_to(&self, id: u64, to: Vec2, break_alignment: bool) -> Result<ViewPlace> {
-        let view = self.view(id).ok_or_else(|| DocError::Unknown(format!("view {}", ids::encode(id))))?;
-        Ok(match (view.place, &view.kind) {
+    /// Moves view `id` across its sheet to `to`, one rule for a drag and its preview (which runs it on
+    /// a copy of the drawing). A view lined up with its parent takes only its free axis, and with
+    /// `break_alignment` is placed apart there, with its letter ([`Self::give_letter`]); a view placed
+    /// at a point goes there. The views lined up with it follow by [`Self::view_centre`]'s rule, with
+    /// no change to their records. Answers the views that moved: it, then those lined up with it whose
+    /// centres changed, in id order.
+    pub fn move_view(&mut self, id: u64, to: Vec2, break_alignment: bool) -> Result<Vec<u64>> {
+        let unknown = || DocError::Unknown(format!("view {}", ids::encode(id)));
+        let at = self.view_index(id).ok_or_else(unknown)?;
+        let lined = self.lined_up_with(id);
+        let centres = |d: &Drawing| lined.iter().map(|v| d.view_centre(*v).ok()).collect::<Vec<_>>();
+        let before = centres(self);
+        let view = Arc::make_mut(self.views.get_mut(at).ok_or_else(unknown)?);
+        view.place = match (view.place, &view.kind) {
             (ViewPlace::Aligned(_), ViewKind::Projected { side, .. }) if !break_alignment => ViewPlace::Aligned(side.along(to)),
             _ => ViewPlace::At([to.x, to.y]),
-        })
+        };
+        // Placed apart, it needs a letter: the drag and its preview show the same label.
+        self.give_letter(id)?;
+        let went = lined.iter().zip(before.into_iter().zip(centres(self))).filter(|(_, (b, a))| b != a).map(|(v, _)| *v);
+        Ok(std::iter::once(id).chain(went).collect())
+    }
+
+    /// View `id` placed apart at `to`, and the views lined up with it where they keep their places
+    /// beside it, each moved along its free axis as `id` moved: it first, then them in id order. The
+    /// places for a view and its line-up put on another sheet, or copied there.
+    pub fn places_beside(&self, id: u64, to: Vec2) -> Result<Vec<(u64, ViewPlace)>> {
+        let by = to - self.view_centre(id)?;
+        let lined = self.lined_up_with(id).into_iter().filter_map(|v| match self.view(v).map(|view| (view.place, &view.kind)) {
+            Some((ViewPlace::Aligned(along), ViewKind::Projected { side, .. })) => Some((v, ViewPlace::Aligned(along + side.along(by)))),
+            _ => None,
+        });
+        Ok(std::iter::once((id, ViewPlace::At([to.x, to.y]))).chain(lined).collect())
     }
 
     /// The views from `id` up to its base view, nearest first ([`chain`]).
