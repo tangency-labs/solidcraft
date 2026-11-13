@@ -40,6 +40,7 @@
 //! it proves holds a root of whichever is built. At most
 //! [`crate::geom::krawczyk::KRAWCZYK_STEPS`] steps run ([`crate::geom::krawczyk::krawczyk`]).
 
+use super::quadric::value_and_gradient as quadric_value_and_gradient;
 use std::cell::Cell;
 
 use crate::blend::fillet_section::certificate::{
@@ -936,39 +937,6 @@ pub(super) fn plane_and_nets_meet(
         return Ok(None);
     };
     Ok(a.jet(ua, va)?.map(|jet| length_bound(sub(jet.p, point(p)))))
-}
-
-/// The implicit function `F` of a cone (a cylinder) or sphere at `x`, and its gradient,
-/// enclosed: a cone's `|P v|² − (r + t z)²` (`v = x − origin`, `z = v·a`, `P` the projection
-/// off the axis), gradient `2 P v − 2 (r + t z) t a`; a sphere's `|v|² − r²`, gradient `2 v`.
-/// `None` for any other kind.
-fn quadric_value_and_gradient(q: &Implicit, x: I3) -> Option<(Ivl, I3)> {
-    let two = Ivl::from(2.0);
-    match *q {
-        Implicit::Cone {
-            origin,
-            axis,
-            radius,
-            tan_angle,
-        } => {
-            let a = point(axis);
-            let v = sub(x, point(origin));
-            let z = dot(v, a);
-            let pv = sub(v, scale(a, z));
-            let t = Ivl::from(tan_angle);
-            let r = Ivl::from(radius) + t * z;
-            Some((
-                dot(pv, pv) - r * r,
-                sub(scale(pv, two), scale(a, two * r * t)),
-            ))
-        }
-        Implicit::Sphere { centre, radius } => {
-            let v = sub(x, point(centre));
-            let r = Ivl::from(radius);
-            Some((dot(v, v) - r * r, scale(v, two)))
-        }
-        _ => None,
-    }
 }
 
 /// Where the plane `(origin, normal)`, the quadric `q` and the net meet, near the vertex

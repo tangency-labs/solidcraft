@@ -59,6 +59,7 @@ use crate::topology::{edge, loopuse, Brep, EdgeuseId, FaceId, FaceuseId};
 use std::collections::BTreeMap;
 
 mod net;
+mod quadric;
 
 const OP: &str = "offset::offset_executive::reach::extension_reach";
 const LOCAL_OP: &str = "offset::offset_executive::reach::local_extension_reach";
@@ -1319,6 +1320,32 @@ fn plane_net_piece(
     }
 }
 
+/// Two quadrics met in every normal section of an edge piece, proved by the shared
+/// three-equation certificate. The midpoint's root only guides refinement; an unproved
+/// section stays unknown and is subdivided, never classified as apart.
+fn quadric_pair_piece(
+    k: &Kernel,
+    over: (Dv, Dv),
+    mid: (Dv, Dv),
+    dt: Ivl,
+    a: &Implicit,
+    b: &Implicit,
+) -> PieceBound {
+    let (over, mid) = (quadric::Section::edge(over), quadric::Section::edge(mid));
+    let Ok(Some(meeting)) = quadric::meet(k, a, b, over, mid, dt) else {
+        return PieceBound::Unknown;
+    };
+    let lower = quadric::meet(k, a, b, mid, mid, Ivl::from(0.0))
+        .ok()
+        .flatten()
+        .map_or(0.0, |m| m.distance.lo.max(0.0));
+    PieceBound::Value {
+        upper: meeting.distance.hi,
+        lower,
+        crosses: meeting.transverse,
+    }
+}
+
 /// The reach at one edge point (a piece's middle, whose `line` and `q` are point
 /// enclosures): the distance of the meeting nearest the point, from the plan decided there
 /// ([`plan_of`]), the low end of its enclosure: a value the reach takes, so at most its
@@ -1449,7 +1476,7 @@ fn point_and_tangent(cn: &NurbsCurve, s: Ivl) -> Result<Option<(Dv, Dv)>> {
 }
 
 /// What an edge's bound in [`local_extension_reach`] is of: a moved face's surface's distance
-/// from the edge (the shift), or how far past the edge a plane and a quadric beside it meet
+/// from the edge (the shift), or how far past the edge its two new surfaces meet
 /// (the reach), by the faces whose surfaces they are, the pair in id order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum EdgeQuantity {
@@ -1945,8 +1972,9 @@ fn line_meets_plane(
 /// ([`straight_edge_meets_plane`]), whether the two kept surfaces are one (a round drawn
 /// as two faces, split along a ruling: their meeting with the plane is no one point) or
 /// two that cross along the line. Each such edge is taken, the largest meeting kept;
-/// nowhere near where every line runs past the plane; not decided where no kept pair
-/// shares a straight edge, the third is no plane, or a meeting is not decided.
+/// nowhere near where every line runs past the plane. `None` means no kept pair
+/// shares a straight edge: a different topology event. `Some(Uncertified)` means
+/// such an edge exists but its third surface or meeting is not certified.
 ///
 /// # Errors
 ///
@@ -1958,7 +1986,7 @@ fn kept_straight_edge_corner(
     is_moved: &dyn Fn(Option<FaceId>) -> bool,
     faces: [Option<FaceId>; 3],
     three: [&Exact; 3],
-) -> Result<CornerMeeting> {
+) -> Result<Option<CornerMeeting>> {
     let mut reach: Option<f64> = None;
     let mut any = false;
     let [fa, fc, fd] = faces;
@@ -1981,21 +2009,21 @@ fn kept_straight_edge_corner(
             continue;
         }
         let Exact::Plane(plane) = *z else {
-            return Ok(CornerMeeting::Uncertified);
+            return Ok(Some(CornerMeeting::Uncertified));
         };
         for line in lines {
             any = true;
             match straight_edge_meets_plane(p, line, plane, at.tangent_sine) {
                 CornerMeeting::Within(r) => reach = Some(reach.map_or(r, |m| m.max(r))),
                 CornerMeeting::Nowhere => {}
-                CornerMeeting::Uncertified => return Ok(CornerMeeting::Uncertified),
+                CornerMeeting::Uncertified => return Ok(Some(CornerMeeting::Uncertified)),
             }
         }
     }
     Ok(match (any, reach) {
-        (false, _) => CornerMeeting::Uncertified,
-        (true, Some(r)) => CornerMeeting::Within(r),
-        (true, None) => CornerMeeting::Nowhere,
+        (false, _) => None,
+        (true, Some(r)) => Some(CornerMeeting::Within(r)),
+        (true, None) => Some(CornerMeeting::Nowhere),
     })
 }
 
@@ -2012,8 +2040,8 @@ fn kept_straight_edge_corner(
 ///
 /// Each is a certified upper bound, found on exact geometry, on control points or in
 /// rounded interval arithmetic, never at samples. Where a surface beside an edge moves, the
-/// edge's two new surfaces must be of the classes [`exact_class`] names, one of them a
-/// plane. The new edge crosses the edge's normal section at each point `p` (the plane
+/// edge's two new surfaces must be of the classes [`exact_class`] names: two quadrics,
+/// or a plane and another supported class. The new edge crosses the edge's normal section at each point `p` (the plane
 /// through `p` across the edge's tangent: of the outward binormal and the face normal) where
 /// the traces of the two new surfaces there meet, the meeting nearest `p`; the reach is the
 /// largest distance from `p` of those meetings (a meeting farther than the nearest bounds
@@ -2046,6 +2074,13 @@ fn kept_straight_edge_corner(
 /// the edge, even where its faces
 /// were tangent in the input, and the edge is listed in [`LocalReach::crossing`].
 ///
+/// Two quadrics: [`quadric_pair_piece`] proves a root of both implicit equations and
+/// the normal-section plane, uniformly over each edge piece, with a displacement box
+/// certified by Krawczyk's operator ([`quadric::meet`]). Both cones' positive-radius
+/// sides are checked on the root box. Only a section Jacobian whose determinant excludes
+/// zero marks a crossing. An unproved meeting, including an unresolved tangent or
+/// separated pair, remains unknown and is subdivided or refused, never marked apart.
+///
 /// The move is the largest distance of an edge point from a moved surface beside it,
 /// bounded the same way (a plane's on control points, a quadric's by the mean-value form of
 /// [`quadric_distance_piece`]). At each vertex of the face where a face moves, the reach is
@@ -2056,7 +2091,8 @@ fn kept_straight_edge_corner(
 /// meetings. Every pair is taken, so the reach bounds the split points from above. Three
 /// planes meet at [`corner_of`]; two planes and a quadric where the planes' line meets it
 /// ([`corner_with_quadric`]); where they meet in no one point, the edges' meetings stand.
-/// Where two curved quadrics are among the three, two of them kept and sharing a straight
+/// A plane and two quadrics meet by the same three-equation certificate, on the
+/// plane at the vertex ([`quadric::meet`]). Where two quadrics are kept and share a straight
 /// edge at the vertex (a round drawn as two faces split along a ruling, or two surfaces
 /// crossing along a line), and the third's new surface a plane: faces that keep their
 /// surfaces keep their edges, so the three meet where that edge's line crosses the plane
@@ -2075,7 +2111,7 @@ fn kept_straight_edge_corner(
 /// point proved the same way.
 ///
 /// Anything else beside an edge or at a vertex where something moves (two curved
-/// quadrics but along a kept straight edge with a plane, a quadric or net beside a net, any
+/// quadrics without a certified meeting, a quadric or net beside a net, any
 /// three faces at the vertex but those above, even three that all stay, a net
 /// [`net::Net::of`] turns away, a torus, a blend or sweep, a plane not proved on its label,
 /// an edge curve with no NURBS form), a meeting with a net that is not proved, and a piece
@@ -2164,7 +2200,15 @@ pub fn local_extension_reach(
                     tangent_sine,
                     tolerance,
                 };
-                corner(b, &at, &is_moved, &mut class_of, &uncertified, &mut found)?;
+                corner(
+                    k,
+                    b,
+                    &at,
+                    &is_moved,
+                    &mut class_of,
+                    &uncertified,
+                    &mut found,
+                )?;
             }
             let radial = match eu::radial(b, edgeuse)? {
                 Some(r) if r != edgeuse && eu::face(b, r)? != own_face => Some(r),
@@ -2188,8 +2232,9 @@ pub fn local_extension_reach(
                           of: EdgeQuantity,
                           surfaces: Option<&[u64]>|
              -> Result<(f64, bool, bool)> {
-                edge_interval_maximum(b, e, f, tolerance, bounds, of, surfaces)?
-                    .ok_or_else(uncertified)
+                let found = edge_interval_maximum(b, e, f, tolerance, bounds, of, surfaces)?;
+                k.check_cancelled(LOCAL_OP)?;
+                found.ok_or_else(uncertified)
             };
             // a moved net's move is bounded by the meetings on it, below
             let shift_of =
@@ -2265,6 +2310,21 @@ pub fn local_extension_reach(
                         EdgeQuantity::Meeting(own_face.min(other_face), own_face.max(other_face));
                     pieces(&piece, bounds, pair, None)?
                 }
+                (Exact::Quadric(a), Exact::Quadric(c)) => {
+                    let piece = |over, mid, dt| quadric_pair_piece(k, over, mid, dt, a, c);
+                    let pair =
+                        EdgeQuantity::Meeting(own_face.min(other_face), own_face.max(other_face));
+                    let (first, second) = if own_face <= other_face {
+                        (&own, &other)
+                    } else {
+                        (&other, &own)
+                    };
+                    let surfaces = exact_bits(first).zip(exact_bits(second)).map(|(mut a, c)| {
+                        a.extend(c);
+                        a
+                    });
+                    pieces(&piece, bounds, pair, surfaces.as_deref())?
+                }
                 (Exact::Quadric(_) | Exact::Net(_), Exact::Quadric(_) | Exact::Net(_)) => {
                     return Err(uncertified())
                 }
@@ -2297,12 +2357,13 @@ struct Corner {
 /// The reach and the move at a vertex of the face ([`local_extension_reach`]): where a face
 /// there moves, every face there must be of a class (`class_of`), and the meetings of the
 /// face's surface with every two others (three planes; two planes and a quadric or a net; a
-/// plane, a quadric and a net; a plane and two nets; any more quadrics only where two kept
-/// faces share a straight edge there and the third is a plane, [`kept_straight_edge_corner`];
+/// plane, a quadric and a net; a plane and two nets; a plane and two quadrics, on a kept
+/// straight edge where present, otherwise by [`quadric::meet`];
 /// anything else, or a meeting with a net not proved, is `refuse`d), and each moved
 /// surface's distance from the vertex (a moved net's: the farthest meeting found on it
 /// there), are taken into `found`.
 fn corner(
+    k: &Kernel,
     b: &Brep,
     at: &Corner,
     is_moved: &dyn Fn(Option<FaceId>) -> bool,
@@ -2389,9 +2450,18 @@ fn corner(
                 (_, [_, _, ..], []) => {
                     let faces = [at.own, Some(*fc), Some(*fd)];
                     match kept_straight_edge_corner(b, at, p, is_moved, faces, three)? {
-                        CornerMeeting::Within(reach) => Some(reach),
-                        CornerMeeting::Nowhere => None,
-                        CornerMeeting::Uncertified => return Err(refuse()),
+                        Some(CornerMeeting::Within(reach)) => Some(reach),
+                        Some(CornerMeeting::Nowhere) => None,
+                        Some(CornerMeeting::Uncertified) => return Err(refuse()),
+                        None => match (planes.as_slice(), quadrics.as_slice()) {
+                            (&[plane], [a, c]) => {
+                                let section = quadric::Section::corner(p, plane.point, plane.raw);
+                                let meeting =
+                                    quadric::meet(k, a, c, section, section, Ivl::from(0.0))?;
+                                Some(meeting.ok_or_else(refuse)?.distance.hi)
+                            }
+                            _ => return Err(refuse()),
+                        },
                     }
                 }
                 _ => return Err(refuse()),
@@ -3697,5 +3767,227 @@ mod tests {
                 "{dev}: {reach} {exact}"
             );
         }
+    }
+
+    /// A synthetic slab cut to a sphere of radius 3, then bored along z with radius 1.
+    /// With `half`, the y = 0 side cuts the circular bore/sphere meetings at corners.
+    /// Without it the bore's circular edges have only two incident surfaces, so its
+    /// reach exercises the curved-edge bound independently of the corner bound.
+    fn spherical_bored_slab(k: &mut Kernel, half: bool) -> (Brep, FaceId) {
+        use crate::boolean::api_brep::boolean_with_options;
+        use crate::boolean::merge::MergeOptions;
+        use crate::geom::a_object::BooleanOperation;
+        use crate::primitive::api_primitives as ap;
+        let slab = ap::create_box(
+            k,
+            Point3::new(-2.0, if half { 0.0 } else { -2.0 }, -4.0),
+            4.0,
+            if half { 2.0 } else { 4.0 },
+            8.0,
+        )
+        .unwrap();
+        let ball = ap::create_sphere(k, Point3::ZERO, 3.0).unwrap();
+        let slab = boolean_with_options(
+            k,
+            slab,
+            ball,
+            BooleanOperation::Intersection,
+            MergeOptions::default(),
+        )
+        .unwrap()
+        .result;
+        let bore = ap::create_cylinder(k, Point3::new(0.0, 0.0, -5.0), 1.0, 10.0).unwrap();
+        let b = boolean_with_options(
+            k,
+            slab,
+            bore,
+            BooleanOperation::Difference,
+            MergeOptions::default(),
+        )
+        .unwrap()
+        .result;
+        assert!(crate::topology::brep::p2::is_manifold_solid(&b).unwrap());
+        let bore = bp1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                matches!(exact_class(k, b.face(f).unwrap().surface.as_ref().unwrap()).unwrap(),
+                Some(Exact::Quadric(Implicit::Cone { radius, tan_angle, .. }))
+                    if (radius - 1.0).abs() < 1e-10 && tan_angle.abs() < 1e-10)
+            })
+            .unwrap();
+        (b, bore)
+    }
+
+    /// On the sphere, the new bore r(z) = 1 + t z meets z² + r(z)² = 9.
+    /// The two meridian displacements from the old circles z = ±√8 are closed form.
+    fn spherical_bore_reach(slope: f64) -> f64 {
+        [-1.0, 1.0]
+            .into_iter()
+            .map(|sign| {
+                let z = (-slope + sign * sqrt(8.0 + 9.0 * slope * slope)) / (1.0 + slope * slope);
+                let dr = slope * z;
+                let dz = z - sign * sqrt(8.0);
+                sqrt(dr * dr + dz * dz)
+            })
+            .fold(0.0, f64::max)
+    }
+
+    fn drafted_bore(k: &Kernel) -> Surface {
+        Surface::from(
+            crate::primitive::api_primitives::create_cone_surface(
+                k,
+                Point3::new(0.0, 0.0, -4.0),
+                0.8,
+                1.2,
+                8.0,
+            )
+            .unwrap(),
+        )
+    }
+
+    #[test]
+    fn a_drafted_bore_meets_spherical_ends_along_certified_curved_edges() {
+        let mut k = Kernel::default();
+        let (b, bore) = spherical_bored_slab(&mut k, false);
+        let cone = drafted_bore(&k);
+        let found = reach_of(&k, &b, bore, &[(bore, &cone)]);
+        let expected = spherical_bore_reach(0.05);
+        // The capped interval refinement may leave a conservative excess; the reach
+        // must enclose the exact meeting, and remain below twice that displacement.
+        assert!(found.reach >= expected - 1e-10, "{found:?}, {expected}");
+        assert!(found.reach < 2.0 * expected, "{found:?}, {expected}");
+        assert!(found.apart.is_empty());
+        let spherical_edges: Vec<_> = crate::topology::face::p4::edges(&b, bore, None, false, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&e| {
+                edge::edgeuses(&b, e, None, None)
+                    .unwrap()
+                    .into_iter()
+                    .any(|u| {
+                        eu::face(&b, u).unwrap().is_some_and(|f| {
+                            matches!(
+                                exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap())
+                                    .unwrap(),
+                                Some(Exact::Quadric(Implicit::Sphere { .. }))
+                            )
+                        })
+                    })
+            })
+            .collect();
+        assert!(spherical_edges.len() >= 2);
+        assert!(
+            spherical_edges.iter().all(|e| found.crossing.contains(e)),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn a_drafted_bore_meets_a_plane_and_sphere_at_certified_curved_corners() {
+        let mut k = Kernel::default();
+        let (b, bore) = spherical_bored_slab(&mut k, true);
+        let cone = drafted_bore(&k);
+        let expected = spherical_bore_reach(0.05);
+        let mut saw_corner = false;
+        for f in bp1::faces(&b, None).unwrap() {
+            if let Some(Exact::Plane(plane)) =
+                exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap()).unwrap()
+            {
+                if plane.normal.y.abs() > 0.99 && plane.point.y.abs() < 1e-10 {
+                    let found = reach_of(&k, &b, f, &[(bore, &cone)]);
+                    assert!(bounds(&b, found.reach, expected), "{found:?}, {expected}");
+                    saw_corner = true;
+                }
+            }
+        }
+        assert!(saw_corner);
+    }
+
+    #[test]
+    fn a_bore_tangent_to_or_past_its_spherical_end_remains_uncertified() {
+        let mut k = Kernel::default();
+        for half in [false, true] {
+            let (b, bore) = spherical_bored_slab(&mut k, half);
+            for radius in [3.0, 3.1] {
+                let tangent = Surface::from(
+                    crate::primitive::api_primitives::create_cylinder_surface(
+                        &k,
+                        Point3::new(0.0, 0.0, -4.0),
+                        radius,
+                        8.0,
+                    )
+                    .unwrap(),
+                );
+                assert_eq!(
+                    refusal(&k, &b, bore, &[(bore, &tangent)], &[]),
+                    Some(OffsetFailure::ReachUncertified { face: bore })
+                );
+                if half {
+                    let side = bp1::faces(&b, None).unwrap().into_iter().find(|&f| {
+                        matches!(exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap()).unwrap(),
+                            Some(Exact::Plane(plane)) if plane.normal.y.abs() > 0.99 && plane.point.y.abs() < 1e-10)
+                    }).unwrap();
+                    assert_eq!(
+                        refusal(&k, &b, side, &[(bore, &tangent)], &[]),
+                        Some(OffsetFailure::ReachUncertified { face: side })
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_quadric_meeting_on_the_wrong_cone_nappe_is_not_certified() {
+        let k = Kernel::default();
+        let cone = Implicit::Cone {
+            origin: Vec3::ZERO,
+            axis: Vec3::Z,
+            radius: -1.0,
+            tan_angle: 0.0,
+        };
+        let sphere = Implicit::Sphere {
+            centre: Vec3::ZERO,
+            radius: 3.0,
+        };
+        let section = quadric::Section::corner(Vec3::new(1.0, 0.0, sqrt(8.0)), Vec3::ZERO, Vec3::Y);
+        assert!(
+            quadric::meet(&k, &cone, &sphere, section, section, Ivl::from(0.0))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_rotated_quadric_corner_far_from_the_origin_keeps_its_distance_enclosure() {
+        let k = Kernel::default();
+        let axis = Vec3::new(1.0, 2.0, 3.0).unitize().unwrap();
+        let radial = axis.cross(Vec3::X).unitize().unwrap();
+        let normal = axis.cross(radial);
+        let centre = Vec3::new(10000.0, -20000.0, 30000.0);
+        let p = centre + radial + axis * sqrt(8.0);
+        let cone = Implicit::Cone {
+            origin: centre,
+            axis,
+            radius: 1.0,
+            tan_angle: 0.05,
+        };
+        let sphere = Implicit::Sphere {
+            centre,
+            radius: 3.0,
+        };
+        let section = quadric::Section::corner(p, centre, normal);
+        let meeting = quadric::meet(&k, &cone, &sphere, section, section, Ivl::from(0.0))
+            .unwrap()
+            .unwrap();
+        let z = (-0.05 + sqrt(8.0 + 9.0 * 0.05 * 0.05)) / (1.0 + 0.05 * 0.05);
+        let dr = 0.05 * z;
+        let dz = z - sqrt(8.0);
+        let expected = sqrt(dr * dr + dz * dz);
+        // The translated input point and rotated frame carry rounding at 30,000 units.
+        assert!(meeting.distance.lo <= expected + 1e-8);
+        assert!(meeting.distance.hi >= expected - 1e-8);
+        assert!(meeting.distance.hi - meeting.distance.lo < 1e-8);
+        assert!(meeting.transverse);
     }
 }
