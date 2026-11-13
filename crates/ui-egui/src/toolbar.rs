@@ -258,6 +258,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 handles: APP_BAR_HANDLES,
             };
             let out = app_bar::show(ui, &bar, r, content);
+            app.plugin_menu.in_file_menu = out.plugins_in_file;
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
             for action in &out.actions {
                 match action {
@@ -269,6 +270,9 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app_bar::BarAction::File { .. } => {
                         app.ui.palette_open = false;
                         app.plugin_menu.open = false;
+                        if app.plugin_menu.in_file_menu {
+                            crate::plugin_menu::refresh(app);
+                        }
                         let ctx = ui.ctx().clone();
                         let open = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
                         let pass = ctx.cumulative_pass_nr();
@@ -500,6 +504,11 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
     rows.push(FileRow::Separator);
+    // A narrow app bar has no room for the Plugins button: its menu is here instead.
+    if app.plugin_menu.in_file_menu {
+        rows.push(crate::plugin_menu::file_submenu(app));
+        rows.push(FileRow::Separator);
+    }
     // The browser can install SolidCraft as an app (`install`): only while it offers to.
     if crate::install::offered(app).is_some() {
         rows.push(button("install", solidcraft_ui_text::tr("install.menu"), "new", Some(solidcraft_ui_text::tr("install.button_tip"))));
@@ -512,6 +521,10 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
 
 /// Runs the File menu's row `id` ([`file_rows`]).
 fn run_file_row(app: &mut SolveApp, id: &str) {
+    if let Some(id) = id.strip_prefix("plugins:") {
+        crate::plugin_menu::choose(app, id);
+        return;
+    }
     if let Some(i) = id.strip_prefix("recent:").and_then(|i| i.parse::<usize>().ok()) {
         if let Some(path) = app.home.recent.get(i).cloned() {
             FileAction::OpenRecent(path).run(app);

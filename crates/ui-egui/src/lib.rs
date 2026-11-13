@@ -3768,6 +3768,11 @@ impl SolveApp {
             if req.refuse_cancelled_chat() {
                 continue;
             }
+            // A Plugins-menu run is for the design its dialog was opened on (`plugin_menu`).
+            if let Err(error) = plugin_menu::check_dispatch(self, &req) {
+                let _ = req.reply.send(json!({"ok":false,"error":error}));
+                continue;
+            }
             if let Err(error) = plugins::normalize_request(&self.session, &req.method, &mut req.params) {
                 let _ = req.reply.send(json!({"ok":false,"error":error}));
                 continue;
