@@ -236,6 +236,71 @@ fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
     }
 }
 
+/// The hue of an opaque colour, in degrees.
+fn hue_degrees(color: egui::Color32) -> f32 {
+    let [r, g, b, _] = color.to_srgba_unmultiplied();
+    let (r, g, b) = (f32::from(r), f32::from(g), f32::from(b));
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    if delta == 0.0 {
+        return 0.0;
+    }
+    let hue = if max == r {
+        ((g - b) / delta).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / delta + 2.0
+    } else {
+        (r - g) / delta + 4.0
+    };
+    hue * 60.0
+}
+
+#[test]
+fn panel_surface_fallback_keeps_a_theme_tint_and_moves_the_ink_that_cannot_read() {
+    crate::test_support::host_data();
+    let ctx = egui::Context::default();
+    {
+        // The amber phosphor theme's muted ink cannot reach 4.5:1 on its own panel.
+        let amber = crate::theme_files::resolve(crate::theme_files::find("amber-phosphor", &[]).unwrap());
+        let panel = amber.panel;
+        let dim = amber.text_dim;
+        assert!(
+            solidcraft_theme::contrast_ratio(dim, panel) < 4.5,
+            "the amber muted ink is the one that misses the 4.5:1 floor on the theme's own panel"
+        );
+        let _scope = solidcraft_theme::scoped_panel_tokens(amber);
+        // The opaque panel surface resolves through the fallback even with no
+        // explicit opacity, so this is the panel a user sees.
+        let style = HostSurfaceStyle::capture(&ctx, false, None, None);
+        let appearance = style.appearance(PanelSurface::Opaque, false);
+        let palette = style.palette(appearance);
+        assert_eq!(appearance.fill, panel, "a fallback keeps the theme's own surface instead of the built-in grey");
+        assert!(solidcraft_theme::panel_surface_readable(appearance.fill, palette), "the fallback palette reads on the surface it paints");
+        assert_ne!(palette.text_dim, dim, "the ink that cannot read on the surface is moved");
+        assert!((hue_degrees(palette.text_dim) - hue_degrees(dim)).abs() < 1.0, "the moved ink keeps the theme's hue");
+        assert!(solidcraft_theme::contrast_ratio(palette.text_dim, panel) >= 4.5, "the moved ink reads at 4.5:1 on the surface it paints");
+        assert!(
+            matches!(appearance.contrast, Some(ContrastOutcome::RetainReadableFallback { reason: ContrastFailure::UnreadableAtFullOpacity })),
+            "the renderer still reports the authored pair's failure instead of claiming compliance"
+        );
+    }
+    {
+        // The green phosphor theme reads on its own surface and keeps it.
+        let green = crate::theme_files::resolve(crate::theme_files::find("green-phosphor", &[]).unwrap());
+        let panel = green.panel;
+        assert!(solidcraft_theme::contrast_ratio(green.text_dim, panel) >= 4.5, "the green muted ink reads on the theme's own panel");
+        let _scope = solidcraft_theme::scoped_panel_tokens(green);
+        let style = HostSurfaceStyle::capture(&ctx, false, None, None);
+        let appearance = style.appearance(PanelSurface::Opaque, false);
+        assert_eq!(appearance.fill, panel);
+        assert!(
+            matches!(appearance.contrast, Some(ContrastOutcome::Readable { .. })),
+            "a theme whose inks read on their own surface is not reported as a failure"
+        );
+    }
+}
+
 #[test]
 fn panel_surface_capture_matches_shared_frames_and_respects_accessibility() {
     let ctx = egui::Context::default();
