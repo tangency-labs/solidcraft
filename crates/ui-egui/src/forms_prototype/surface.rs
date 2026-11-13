@@ -70,17 +70,21 @@ pub(super) fn nearest_with(app: &SolveApp, proj: &Proj, pos: Pos2, mode: Pick) -
                 return Some(Element::Edge(edge));
             }
         } else if !retained_collapse {
+            let projection = curves::projection(proj);
             let mut best: Option<(f32, [usize; 2])> = None;
             for (i, (edge, initial)) in form.surface.boundaries.iter().enumerate() {
                 let curve = boundary_curve(app, i, initial);
                 for segment in curve.windows(2) {
-                    let (Some(a), Some(b)) = (proj.to_screen(segment[0]), proj.to_screen(segment[1])) else { continue };
-                    let ab = b - a;
-                    let t = if ab.length_sq() > 1e-6 { ((pos - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) } else { 0.0 };
-                    let distance = pos.distance(a + ab * t);
-                    let point = segment[0] + (segment[1] - segment[0]) * f64::from(t);
-                    if distance < 9.0 && best.as_ref().is_none_or(|(d, _)| distance < *d) && visible(app, proj, point) {
-                        best = Some((distance, *edge));
+                    let Some((distance2, point)) =
+                        solidcore_ops::forms_view_queries::segment_hit(projection, [pos.x, pos.y], [segment[0], segment[1]])
+                    else {
+                        continue;
+                    };
+                    if distance2 < curves::HIT_PIXELS * curves::HIT_PIXELS
+                        && best.as_ref().is_none_or(|(d, _)| distance2 < *d)
+                        && visible(app, proj, point)
+                    {
+                        best = Some((distance2, *edge));
                     }
                 }
             }

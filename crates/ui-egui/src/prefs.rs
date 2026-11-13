@@ -1033,7 +1033,7 @@ preference_settings! {
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
     /// Focus the Form editor on sculpting controls and the active insertion tool.
-    forms_compact_editor: bool = true, PAGE_DESIGN => check_tr("prefs.forms_compact_editor");
+    forms_compact_editor: bool = false, PAGE_DESIGN => check_tr("prefs.forms_compact_editor");
     /// Show submitted Form transforms and their request status beside the viewport.
     forms_drag_feedback: bool = true, PAGE_DESIGN => check_tr("prefs.forms_drag_feedback");
     /// Use qualified native CAD faces for Form clicks on desktop.
@@ -4162,6 +4162,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::dimension_text_scale(&p) {
         p.dimension_text_scale = Prefs::default().dimension_text_scale;
     }
+    if !accepted::forms_cad_tolerance(&p) {
+        p.forms_cad_tolerance = Prefs::default().forms_cad_tolerance;
+    }
     if p.orbit_cursor {
         p.orbit_around = OrbitAround::Cursor;
         p.orbit_cursor = false;
@@ -4802,13 +4805,13 @@ mod tests {
     }
 
     #[test]
-    fn compact_form_editor_defaults_on_preserves_legacy_and_resets_with_design() {
-        assert!(super::Prefs::default().forms_compact_editor);
-        let mut prefs = serde_json::from_value::<super::Prefs>(serde_json::json!({"forms_compact_editor":false})).unwrap();
-        assert!(!prefs.forms_compact_editor);
-        assert_eq!(serde_json::to_value(&prefs).unwrap()["forms_compact_editor"], false);
-        super::reset_preferences(&mut prefs, super::PAGE_DESIGN);
+    fn compact_form_editor_is_opt_in_and_resets_with_design() {
+        assert!(!super::Prefs::default().forms_compact_editor);
+        let mut prefs = serde_json::from_value::<super::Prefs>(serde_json::json!({"forms_compact_editor":true})).unwrap();
         assert!(prefs.forms_compact_editor);
+        assert_eq!(serde_json::to_value(&prefs).unwrap()["forms_compact_editor"], true);
+        super::reset_preferences(&mut prefs, super::PAGE_DESIGN);
+        assert!(!prefs.forms_compact_editor);
     }
     #[test]
     fn form_drag_feedback_defaults_on_preserves_legacy_and_resets_with_design() {
@@ -7479,6 +7482,23 @@ mod tests {
         }
         let read = lenient(&json!({"dimension_text_scale":9.0,"dimension_colour":[256,0,0]}));
         assert_eq!((read.dimension_text_scale, read.dimension_colour), (1.0, None), "bad values cost only their settings");
+    }
+
+    #[test]
+    fn saved_form_tolerance_migrates_before_unrelated_preference_updates() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        let default = Prefs::default().forms_cad_tolerance;
+        for invalid in [0.0, 1.01] {
+            h.app.preferences = lenient(&json!({"forms_cad_tolerance":invalid,"dimension_text_scale":1.5}));
+            assert_eq!(h.app.preferences.forms_cad_tolerance, default);
+            assert_eq!(h.app.preferences.dimension_text_scale, 1.5);
+            let out = h.call("ui.prefs", json!({"dimension_text_scale":1.2}));
+            assert!(out["error"].is_null(), "{out}");
+            assert_eq!(h.app.preferences.dimension_text_scale, 1.2);
+        }
+        let valid = lenient(&json!({"forms_cad_tolerance":0.01}));
+        assert_eq!(valid.forms_cad_tolerance, 0.01);
     }
 
     /// The theme strip's Import… reads the theme file through `vfs`, like the other imports: in the

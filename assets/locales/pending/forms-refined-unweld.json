@@ -35,6 +35,12 @@
     "forms.unweld.refined_help": "حدّد درزًا فاصلًا كاملًا في شكل مغلق. يحتفظ الجزءان بتنقيحهما ويُحفظان كشكلين مستقلين.",
     "forms.unweld.refined_unavailable": "حدّد شكلًا مستقلًا مغلقًا ومُنقَّحًا بلا تناظر أو رقع إغلاق أو عناصر أخرى قيد الإعداد."
   },
+  "fr": {
+    "forms.unweld.bridge_unavailable": "La création d’un pont est indisponible sur une source conservée après séparation.",
+    "forms.unweld.refined_desktop_required": "La séparation d’une forme raffinée nécessite l’application de bureau.",
+    "forms.unweld.refined_help": "Sélectionnez une ligne de séparation complète sur une forme fermée. Les deux parties conservent leur raffinement et sont enregistrées comme deux formes distinctes.",
+    "forms.unweld.refined_unavailable": "Sélectionnez une forme raffinée fermée et indépendante, sans symétrie, sans surfaces de fermeture et sans autres objets en attente."
+  },
   "he": {
     "forms.unweld.bridge_unavailable": "גישור אינו זמין במקור שנשמר לצורך הפרדה.",
     "forms.unweld.refined_desktop_required": "הפרדת צורה חופשית שעברה עידון דורשת את יישום שולחן העבודה.",

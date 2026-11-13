@@ -35,6 +35,12 @@
     "forms.fill.restore_material": "يستعيد السطح الذي أُزيل بحذف الأوجه، بما في ذلك شكله المنحوت.",
     "forms.fill.select_rim": "حدّد حافة أو نقطة على محيط فتحة."
   },
+  "fr": {
+    "forms.fill.desktop_required": "Le remplissage des trous sur les formes raffinées nécessite l’application de bureau.",
+    "forms.fill.refined_unavailable": "Le remplissage d’un trou sur une forme raffinée requiert une forme sans raccordement, extrusion ni paroi de découpe.",
+    "forms.fill.restore_material": "Rétablit la surface supprimée, en conservant la géométrie sculptée.",
+    "forms.fill.select_rim": "Sélectionnez une arête ou un point du contour d’une ouverture."
+  },
   "he": {
     "forms.fill.desktop_required": "מילוי חורים בצורות חופשיות שעברו עידון דורש את יישום שולחן העבודה.",
     "forms.fill.refined_unavailable": "מילוי חור בצורה שעברה עידון דורש צורה חופשית ללא התאמת גבול, שליפה או דופן גזומה.",

@@ -4,6 +4,8 @@ use solidcore::geom::form_cage as kernel;
 use solidcore_convert::{record_vec3, vec3};
 use solidcore_record::Vec3;
 
+pub use kernel::extrusion::{Selection as ExtrusionSelection, Wall as ExtrusionWall};
+pub use kernel::projection::Projection;
 pub use kernel::{Primitive, MAX_FACES, MAX_POINTS};
 pub use solidcore::geom::regularized_fit::solve as fit_displacements;
 use solidcore::geom::spline_interpolation;
@@ -15,6 +17,67 @@ pub struct CageGeometry {
     pub points: Vec<Vec3>,
     /// Faces indexing the controls, in source order.
     pub faces: Vec<Vec<usize>>,
+}
+
+/// The translated cage and the identity of its generated controls and faces.
+pub struct CageExtrusion {
+    /// New controls and face cycles.
+    pub cage: CageGeometry,
+    /// Selected source controls mapped to their cap controls.
+    pub cap: std::collections::BTreeMap<usize, usize>,
+    /// Appended side faces in result order.
+    pub walls: Vec<ExtrusionWall>,
+}
+
+/// Construct the stable-ID extrusion of selected quad faces or free edges.
+pub fn extrude(
+    points: &[Vec3],
+    faces: &[Vec<usize>],
+    selection: ExtrusionSelection<'_>,
+    delta: Vec3,
+    influence: bool,
+) -> solidcore::Result<CageExtrusion> {
+    let points = checked_controls(points)?;
+    let result = kernel::extrusion::extrude(&points, faces, selection, vec3(delta), influence)?;
+    Ok(CageExtrusion {
+        cage: record_cage(result.cage),
+        cap: result.cap,
+        walls: result.walls,
+    })
+}
+
+/// Translate one control without exceeding the editable coordinate budget.
+pub fn displaced(point: Vec3, delta: Vec3) -> solidcore::Result<Vec3> {
+    kernel::extrusion::displaced(vec3(point), vec3(delta)).map(record_vec3)
+}
+
+/// Project selected controls onto a specified or best-fit line or plane.
+pub fn project(
+    points: &[Vec3],
+    projection: Projection,
+    direction: Option<Vec3>,
+    origin: Option<Vec3>,
+) -> solidcore::Result<Vec<Vec3>> {
+    let points = checked_controls(points)?;
+    kernel::projection::project(&points, projection, direction.map(vec3), origin.map(vec3))
+        .map(|points| points.into_iter().map(record_vec3).collect())
+}
+
+fn checked_controls(points: &[Vec3]) -> solidcore::Result<Vec<solidcore::Vec3>> {
+    if points.len() > MAX_POINTS {
+        return Err(solidcore::SolidError::InvalidInput {
+            operation: "form cage",
+            reason: "editable cage budget exceeded",
+        });
+    }
+    Ok(points.iter().copied().map(vec3).collect())
+}
+
+pub(crate) fn record_cage(cage: kernel::CageGeometry) -> CageGeometry {
+    CageGeometry {
+        points: cage.points.into_iter().map(record_vec3).collect(),
+        faces: cage.faces,
+    }
 }
 
 /// Check authored cage dimensions and sampling metadata before construction.
@@ -37,11 +100,7 @@ pub fn build(
     path: &[Vec3],
 ) -> solidcore::Result<CageGeometry> {
     let path = checked_path(path)?;
-    let cage = kernel::build(kind, dimensions, segments, radii, &path)?;
-    Ok(CageGeometry {
-        points: cage.points.into_iter().map(record_vec3).collect(),
-        faces: cage.faces,
-    })
+    kernel::build(kind, dimensions, segments, radii, &path).map(record_cage)
 }
 
 /// Offset existing cage controls along their incident face normals.

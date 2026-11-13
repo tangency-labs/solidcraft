@@ -1775,6 +1775,25 @@ mod tests {
             assert!(changed.rest[id].dist(crate::apply_point(&motion, profile.rest[id])) < 1e-9);
             assert!(cage.points[id].dist(crate::apply_point(&motion, definition.cage.points[id])) < 1e-9);
         }
+
+        let bottom_center = crate::apply_point(&motion, Vec3::ZERO);
+        doc.add_feature(
+            crate::FeatureKind::DeleteFace {
+                faces: vec![crate::FacePick(bottom_center)],
+                body: Some(crate::BodyName("Support".into())),
+                heal: false,
+            },
+            None,
+        )
+        .unwrap();
+        model.evaluate(&doc);
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+        let modified = model.state();
+        assert!(modified.bodies[0].is_surface());
+        assert_eq!(modified.bodies[0].source_transform, state.bodies[0].source_transform);
+        let (after, after_cage) = profile.recompute(&definition, &modified).unwrap();
+        assert_eq!(after.rest, changed.rest);
+        assert_eq!(after_cage, cage);
     }
     #[test]
     fn adjacent_matching_follows_neighboring_wall_jets_and_sews_the_same_conditions() {

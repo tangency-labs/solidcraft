@@ -7,6 +7,9 @@ use std::sync::Arc;
 pub struct Part {
     pub name: String,
     pub definition: Arc<crate::doc::forms::Definition>,
+    /// Imported subdivision level. Older staged records inherit the active level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub levels: Option<usize>,
 }
 impl Part {
     pub(super) fn valid_name(name: &str) -> bool {
@@ -22,13 +25,16 @@ impl Form {
         let (_, definition, levels) = definitions.next().ok_or_else(|| error("no imported Form"))?;
         let levels = definition.cage.preview_level(levels).map_err(error)?;
         let mut form = Self::from_definition(definition, levels, None)?;
-        for (name, definition, _) in definitions {
+        for (name, definition, levels) in definitions {
             if !Part::valid_name(&name) {
                 return Err(error("invalid imported Form object name"));
             }
+            if levels > crate::geom::subdivision::MAX_LEVELS {
+                return Err(error("invalid imported Form subdivision level"));
+            }
             let id = form.next_part;
             form.next_part += 1;
-            form.parts.insert(id, Part { name, definition: Arc::new(definition) });
+            form.parts.insert(id, Part { name, definition: Arc::new(definition), levels: Some(levels) });
         }
         Ok(form)
     }
@@ -109,7 +115,7 @@ impl Form {
         let id = self.next_part;
         let next = id.checked_add(1).ok_or_else(|| error("Form part identity budget exceeded"))?;
         self.adopt_definition(definition, true)?;
-        self.parts.insert(id, Part { name: name.to_owned(), definition: Arc::new(other) });
+        self.parts.insert(id, Part { name: name.to_owned(), definition: Arc::new(other), levels: None });
         self.next_part = next;
         Ok(Some(id))
     }

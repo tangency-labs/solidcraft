@@ -6930,7 +6930,6 @@ fn evaluate_form_surface(doc: &Document, vals: &BTreeMap<String, Value>, f: &Fea
     let mut changed = original.remade(combined);
     changed.transferred = original.transferred;
     changed.source_name = original.source_name.clone();
-    changed.source_transform = original.source_transform;
     if let Some(slot) = st.bodies.iter_mut().find(|b| b.name == name) {
         *slot = changed;
     }
@@ -9515,7 +9514,6 @@ fn eval_feature(
                         let mut changed = base.remade(result);
                         changed.transferred = base.transferred;
                         changed.source_name = base.source_name.clone();
-                        changed.source_transform = base.source_transform;
                         if let Some(slot) = st.bodies.iter_mut().find(|b| b.name == source) {
                             *slot = changed;
                             return Ok(());

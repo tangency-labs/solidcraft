@@ -565,7 +565,7 @@ mod tests {
             .as_mut()
             .unwrap()
             .parts
-            .insert(17, solidcraft_engine::forms_prototype::Part { name: "Staged".into(), definition: definition.clone() });
+            .insert(17, solidcraft_engine::forms_prototype::Part { name: "Staged".into(), definition: definition.clone(), levels: None });
         assert!(Source::current(&app) != current);
         let staged = Source::current(&app);
         app.session.forms_prototype.as_mut().unwrap().parts.get_mut(&17).unwrap().definition = std::sync::Arc::new((*definition).clone());

@@ -35,6 +35,12 @@
     "forms.fill.new_cap": "رقعة إغلاق جديدة",
     "forms.fill.new_cap_help": "ينشئ سطحًا جديدًا على فتحة واحدة ذات أربعة أضلاع. عدّل حواف الفتحة أو نقاطها لتغيير شكل رقعة الإغلاق."
   },
+  "fr": {
+    "forms.fill.cap_rim_editing": "Modifiez les arêtes ou les points du contour pour remodeler la surface de fermeture.",
+    "forms.fill.cap_topology_unavailable": "Cette opération est indisponible sur une forme munie d’une surface de fermeture dérivée.",
+    "forms.fill.new_cap": "Nouvelle surface de fermeture",
+    "forms.fill.new_cap_help": "Construit une surface sur une ouverture à quatre côtés. Modifiez les arêtes ou les points du contour pour la remodeler."
+  },
   "he": {
     "forms.fill.cap_rim_editing": "יש לערוך את הקצוות או הנקודות בשפה כדי לשנות את צורת המכסה.",
     "forms.fill.cap_topology_unavailable": "פעולה זו אינה זמינה לצורה חופשית עם מכסה נגזר.",

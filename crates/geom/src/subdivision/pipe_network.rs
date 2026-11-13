@@ -10,7 +10,7 @@ mod sweep;
 pub use build::{BuiltPipe, PipeSettings, SegmentGeometry, SegmentOverride};
 pub use sweep::swept_path;
 
-const JOIN_TOLERANCE: f64 = 1e-7;
+use solidcore_ops::form_pipe::JOIN_TOLERANCE;
 
 /// An already evaluated source curve. Keys are persistent CAD/sketch identities;
 /// polyline samples describe its arc length, rather than editable cage vertices.

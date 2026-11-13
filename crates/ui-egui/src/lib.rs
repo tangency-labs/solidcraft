@@ -1584,7 +1584,8 @@ impl SolveApp {
                         tool.point_picks.clear();
                     }
                 }
-                "view.fit" | "view.home" if self.session.forms_prototype.is_some() => forms_prototype::fit(self),
+                "view.fit" if self.session.forms_prototype.is_some() => forms_prototype::fit(self),
+                "view.home" if self.session.forms_prototype.is_some() => forms_prototype::home(self),
                 "view.fit" | "view.home" => self.frame_view(id == "view.home"),
                 "view.tool" => {
                     self.viewport.nav = match v.get("tool").and_then(Value::as_str) {

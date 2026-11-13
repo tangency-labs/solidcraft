@@ -49,6 +49,16 @@ pub fn curve_hits(
     .map(|hit| (hit.distance2, hit.fraction, record_vec3(hit.point)))
 }
 
+/// Squared screen distance and the world witness for the projected segment's nearest point.
+pub fn segment_hit(
+    projection: Projection,
+    pixel: [f32; 2],
+    segment: [Vec3; 2],
+) -> Option<(f32, Vec3)> {
+    kernel::segment_hit(projection, pixel, segment.map(vec3))
+        .map(|hit| (hit.distance2, record_vec3(hit.point)))
+}
+
 /// Depth and ray geometry for occlusion of an exact source point.
 pub struct Visibility(kernel::Visibility);
 

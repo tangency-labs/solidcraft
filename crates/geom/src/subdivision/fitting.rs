@@ -3,6 +3,7 @@
 use super::{Cage, Result, bad};
 use crate::bspline::NurbsSurface;
 use crate::prelude::*;
+use solidcore_ops::form_subdivision::{converged_limit, crease_limit, smooth_limit};
 use solidcore_record::Vec3;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -180,7 +181,7 @@ impl Cage {
         for (v, &p) in self.points.iter().enumerate() {
             let edges = topology.incident.get(v).ok_or_else(|| bad("invalid vertex"))?;
             let mut boundary = Vec::new();
-            let mut neighbors = Vec3::ZERO;
+            let mut neighbors = Vec::with_capacity(edges.len());
             let mut faces = BTreeSet::new();
             let mut sharp_neighbors = Vec::new();
             let mut has_finite = vertex_values.get(&v).is_some_and(|s| *s > 0.0 && *s < 10.0);
@@ -195,7 +196,7 @@ impl Cage {
                         has_finite = true;
                     }
                 }
-                neighbors += q;
+                neighbors.push(q);
                 faces.extend(edge.faces.iter().copied());
                 if edge.faces.len() == 1 {
                     boundary.push(q);
@@ -212,22 +213,21 @@ impl Cage {
                 out.push(p);
                 continue;
             }
-            if sharp_neighbors.len() == 2 {
-                out.push((p * 4.0 + sharp_neighbors[0] + sharp_neighbors[1]) / 6.0);
+            if let [a, b] = sharp_neighbors.as_slice() {
+                out.push(crease_limit(p, [*a, *b]));
                 continue;
             }
-            if boundary.len() == 2 {
-                out.push((p * 4.0 + boundary[0] + boundary[1]) / 6.0);
+            if let [a, b] = boundary.as_slice() {
+                out.push(crease_limit(p, [*a, *b]));
                 continue;
             }
-            let mut diagonals = Vec3::ZERO;
+            let mut diagonals = Vec::with_capacity(faces.len());
             for f in faces {
                 let face = self.faces.get(f).ok_or_else(|| bad("invalid face"))?;
                 let corner = face.iter().position(|&i| i == v).ok_or_else(|| bad("vertex is not on its face"))?;
-                diagonals += self.point(face[(corner + 2) % 4])?;
+                diagonals.push(self.point(face[(corner + 2) % 4])?);
             }
-            let n = edges.len() as f64;
-            out.push((p * (n * n) + neighbors * 4.0 + diagonals) / (n * (n + 5.0)));
+            out.push(smooth_limit(p, neighbors, diagonals, edges.len()));
         }
         Ok(out)
     }
@@ -265,7 +265,7 @@ impl Cage {
         for step in 0..96 {
             let next = fan.step()?;
             let point = next.point(index)?;
-            if step > 12 && point.dist(previous) < 1e-12 * point.len().max(1.0) {
+            if step > 12 && converged_limit(point, previous) {
                 return Ok(point);
             }
             (fan, index) = next.corner_fan(index)?;

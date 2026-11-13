@@ -138,21 +138,11 @@ pub(super) fn patches(cage: &Cage) -> Result<Vec<Option<NurbsSurface>>> {
             out.push(None);
             continue;
         }
-        let net = net.iter().map(|&v| cage.point(v.ok_or_else(|| bad("incomplete regular patch"))?)).collect::<Result<Vec<_>>>()?;
-        // Uniform cubic B-spline span to cubic Bezier, applied in each direction.
-        let weights = [[1.0, 4.0, 1.0, 0.0], [0.0, 4.0, 2.0, 0.0], [0.0, 2.0, 4.0, 0.0], [0.0, 1.0, 4.0, 1.0]];
-        let mut points = Vec::with_capacity(16);
-        for v in weights {
-            for u in weights {
-                let mut point = Vec3::ZERO;
-                for j in 0..4 {
-                    for i in 0..4 {
-                        point += net[j * 4 + i] * (u[i] * v[j] / 36.0);
-                    }
-                }
-                points.push(point);
-            }
+        let mut controls = [Vec3::ZERO; 16];
+        for (point, index) in controls.iter_mut().zip(net) {
+            *point = cage.point(index.ok_or_else(|| bad("incomplete regular patch"))?)?;
         }
+        let points = solidcore_ops::form_subdivision::regular_bezier(controls);
         out.push(Some(
             NurbsSurface::new([3, 3], [vec![0., 0., 0., 0., 1., 1., 1., 1.], vec![0., 0., 0., 0., 1., 1., 1., 1.]], &points, &[1.0; 16])
                 .map_err(|e| bad(&e.to_string()))?,

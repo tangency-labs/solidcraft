@@ -565,7 +565,7 @@ mod tests {
             assert!(h.app.design_properties.is_none());
         }
         assert!(h.app.run("document.metadata", json!({})).unwrap()["metadata"].is_object());
-        h.app.run("form.prototype.cancel", json!({})).unwrap();
+        h.app.run("form.prototype.close", json!({})).unwrap();
         assert!(h.app.design_properties.is_none());
         h.app.start("document.metadata");
         assert!(h.app.design_properties.is_some());

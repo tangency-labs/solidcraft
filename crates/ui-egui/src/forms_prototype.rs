@@ -279,7 +279,7 @@ pub(crate) fn opened(app: &mut SolveApp) {
         panel::sync(app);
         controls::load(app);
         app.home.open = false;
-        fit(app);
+        home(app);
     }
 }
 pub fn inspect(app: &SolveApp) -> serde_json::Value {
@@ -366,13 +366,21 @@ pub(crate) fn command_completed(app: &mut SolveApp, id: &str) {
     }
 }
 pub(crate) fn fit(app: &mut SolveApp) {
+    frame(app, app.cam);
+}
+
+pub(crate) fn home(app: &mut SolveApp) {
+    frame(app, Camera::default());
+}
+
+fn frame(app: &mut SolveApp, camera: Camera) {
     if let Some(f) = &app.session.forms_prototype {
         let points = f.control_positions();
         let center = points.iter().copied().fold(Vec3::ZERO, |a, p| a + p) / points.len().max(1) as f64;
         let bounds: f64 = points.iter().map(|p| (*p - center).len()).fold(0.01, f64::max);
         app.cancel_view_animation();
         app.pending_fit = None;
-        app.cam = Camera { target: center, distance: bounds * 4.0, ..Default::default() };
+        app.cam = Camera { target: center, distance: bounds * 4.0, ..camera };
         // An explicit Form fit also fulfils the initial application fit. Otherwise
         // an import completed before first layout is replaced by the empty model's view.
         app.fitted = true;
@@ -951,10 +959,6 @@ pub(crate) fn owns_key(app: &SolveApp, key: egui::Key) -> bool {
             _ => false,
         }
 }
-pub(crate) fn shift_dragging(app: &SolveApp) -> bool {
-    app.session.forms_prototype.is_some()
-        && (app.forms_prototype.drag.as_ref().is_some_and(|d| d.extrude) || app.forms_prototype.gizmo_drag.as_ref().is_some_and(|d| d.extrude))
-}
 fn transform_drag_id(app: &SolveApp, ui: &egui::Ui) -> egui::Id {
     ui.scope_id().with("forms_transform_drag").with(app.session.uid)
 }
@@ -1450,6 +1454,21 @@ fn fallback(ui: &egui::Ui, proj: &Proj, mesh: &Mesh, color: egui::Color32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn form_fit_keeps_orbit_and_home_resets_it() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.run("form.prototype.create", json!({"primitive":"box"})).unwrap();
+        app.cam = Camera { target: Vec3::new(100.0, 0.0, 0.0), distance: 600.0, yaw: -0.4, pitch: 0.7, roll: 0.3, fov: 0.5, ..Camera::default() };
+        let orbit = app.cam;
+        app.run("view.fit", json!({})).unwrap();
+        assert_ne!(app.cam.target, orbit.target);
+        assert_ne!(app.cam.distance, orbit.distance);
+        let framed = Camera { target: app.cam.target, distance: app.cam.distance, ..orbit };
+        assert_eq!(app.cam, framed);
+        app.run("view.home", json!({})).unwrap();
+        assert_eq!(app.cam, Camera { target: framed.target, distance: framed.distance, ..Camera::default() });
+    }
 
     #[test]
     fn editing_a_component_form_keeps_its_occurrence_active_until_the_editor_closes() {
@@ -2556,6 +2575,7 @@ mod tests {
     #[test]
     fn compact_editor_keeps_insertion_controls_focused_and_legacy_layout_available() {
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.forms_compact_editor = true;
         h.app.run("form.prototype.create", json!({"primitive":"face","segments":[1,1,1],"levels":0})).unwrap();
         h.frames(3);
         let before = h.app.session.forms_prototype.as_ref().unwrap().inspect();

@@ -35,6 +35,12 @@
     "forms.weld.sources": "الأشكال الحرة",
     "help.form.refined_weld": "يدمج محيطي فتحتين متطابقتين في شكلين مُنقَّحين محفوظين، مع إبقاء الشكلين الأصليين قابلين للتحرير."
   },
+  "fr": {
+    "forms.weld.pick_help": "Sélectionnez deux formes raffinées enregistrées dont les ouvertures coïncident. La première forme donne son nom au corps assemblé.",
+    "forms.weld.select_two": "Sélectionnez deux surfaces de formes raffinées distinctes et enregistrées dans le composant actif.",
+    "forms.weld.sources": "Formes",
+    "help.form.refined_weld": "Joint les contours coïncidents de deux formes raffinées enregistrées et conserve les deux sources modifiables."
+  },
   "he": {
     "forms.weld.pick_help": "יש לבחור שתי צורות חופשיות שמורות שעברו עידון ושפתחיהן חופפים. שם הגוף המאוחה יילקח מהצורה הראשונה.",
     "forms.weld.select_two": "יש לבחור ברכיב הפעיל שני משטחים שונים של צורות חופשיות שמורות שעברו עידון.",

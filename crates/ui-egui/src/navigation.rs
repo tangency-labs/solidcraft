@@ -868,9 +868,20 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     }
     let zoom_drag = app.viewport.zoom_shortcut_drag;
 
+    if primary_pressed {
+        app.viewport.form_shift_press = inside
+            && mods.shift
+            && !mods.alt
+            && !mods.ctrl
+            && !mods.command
+            && hover.is_some_and(|p| crate::forms_prototype::owns_pointer(app, &projection(app, rect), p));
+    } else if !primary_down && !primary_released {
+        app.viewport.form_shift_press = false;
+    }
+
     // A left press with the preset's keys (Alias: Shift+Alt) navigates until the button is let
     // go (kept through the release frame, so the end of the drag doesn't select either).
-    if primary_pressed && inside && !zoom_drag {
+    if primary_pressed && inside && !zoom_drag && !app.viewport.form_shift_press {
         let empty_space = |app: &SolveApp| {
             if hover.is_some_and(|p| crate::forms_prototype::owns_pointer(app, &projection(app, rect), p)) {
                 return false;
@@ -899,7 +910,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         // still selects, and Ctrl on geometry still drags it without snapping.
         let ctrl_orbit = (mods.ctrl || mods.command) && !mods.shift && !mods.alt && empty_space(app);
         app.viewport.primary_nav = preset.or(ctrl_orbit.then_some(NavMode::Orbit));
-    } else if zoom_drag || (!primary_down && !primary_released) {
+    } else if primary_pressed || zoom_drag || (!primary_down && !primary_released) {
         app.viewport.primary_nav = None;
     }
     // Hold Space for a momentary pan: the hand tool of design apps. It overrides whatever the
@@ -925,17 +936,11 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         _ => delta,
     };
     app.viewport.right_drag = right_drag;
-    let forms_shift = mods.shift
-        && !mods.alt
-        && !mods.ctrl
-        && !mods.command
-        && (crate::forms_prototype::shift_dragging(app)
-            || hover.is_some_and(|p| crate::forms_prototype::owns_pointer(app, &projection(app, rect), p)));
     let primary_nav = if zoom_drag {
         zoom_held.then_some(NavMode::Zoom)
     } else if space_pan {
         Some(NavMode::Pan)
-    } else if forms_shift {
+    } else if app.viewport.form_shift_press {
         None
     } else {
         app.viewport.nav.or(app.viewport.primary_nav)
@@ -2853,11 +2858,13 @@ mod tests {
             events: vec![
                 egui::Event::ModifiersChanged(modifiers),
                 egui::Event::PointerMoved(rect.center()),
+                egui::Event::PointerButton { pos: rect.center(), button: egui::PointerButton::Primary, pressed: true, modifiers },
                 egui::Event::Key { key: egui::Key::Space, physical_key: None, pressed: true, repeat: false, modifiers },
             ],
             ..Default::default()
         };
         let mut out = ctx.run_ui(raw, |ui| {
+            assert!(ui.input(|i| i.key_down(egui::Key::Space) && i.pointer.primary_down() && i.modifiers.shift));
             let rect = ui.max_rect();
             app.viewport.rect = Some(rect);
             assert!(crate::forms_prototype::owns_pointer(&app, &super::projection(&app, rect), rect.center()));
@@ -2866,6 +2873,43 @@ mod tests {
             assert_eq!(input.primary_nav, Some(super::NavMode::Pan));
         });
         out.textures_delta.clear();
+    }
+
+    #[test]
+    fn openscad_orbit_keeps_ownership_when_shift_moves_over_a_form() {
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.run("form.prototype.create", serde_json::json!({"primitive":"box","segments":[1,1,1],"levels":0})).unwrap();
+        app.preferences.nav = crate::prefs::OPENSCAD_NAV.into();
+        app.preferences.forms_exact_face_picking = true;
+        let ctx = crate::fonts::test_context();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let empty = egui::pos2(85.0, 70.0);
+        let mut frame = |events, expect_form, expected_nav| {
+            let raw = egui::RawInput { screen_rect: Some(rect), focused: true, events, ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                let rect = ui.max_rect();
+                app.viewport.rect = Some(rect);
+                let response = ui.interact(rect, ui.scope_id().with("forms_orbit"), egui::Sense::click_and_drag());
+                if let Some(expect_form) = expect_form {
+                    let point = ui.input(|i| i.pointer.hover_pos()).unwrap();
+                    assert_eq!(crate::forms_prototype::owns_pointer(&app, &super::projection(&app, rect), point), expect_form);
+                }
+                let input = super::handle(&mut app, ui, rect, &response, super::NavCaps::MODEL);
+                assert_eq!(input.primary_nav, expected_nav);
+            });
+            out.textures_delta.clear();
+        };
+        frame(vec![egui::Event::PointerMoved(empty)], None, None);
+        frame(
+            vec![egui::Event::PointerButton { pos: empty, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }],
+            Some(false),
+            Some(super::NavMode::Orbit),
+        );
+        frame(
+            vec![egui::Event::ModifiersChanged(egui::Modifiers::SHIFT), egui::Event::PointerMoved(rect.center())],
+            Some(true),
+            Some(super::NavMode::Orbit),
+        );
     }
 
     /// The pinch factor reads native Ctrl+wheel pinches in every wheel unit, scaled the way egui

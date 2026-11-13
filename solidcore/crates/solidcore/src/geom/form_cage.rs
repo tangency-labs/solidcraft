@@ -6,6 +6,9 @@ use crate::{Result, SolidError, Vec3};
 use std::collections::BTreeMap;
 use std::f64::consts::{PI, TAU};
 
+pub mod extrusion;
+pub mod projection;
+
 /// Maximum number of authored path points accepted by a primitive cage.
 pub const MAX_PATH_POINTS: usize = 128;
 /// Maximum number of controls accepted by cage operations.
@@ -386,6 +389,12 @@ fn pipe(
     if layers > 256 {
         return Err(bad("pipe path sample budget exceeded"));
     }
+    // The capped cylinder has two square quad grids and four side grids.
+    let side = 2 * sides;
+    let face_count = 2 * side * side + 4 * side * layers;
+    if face_count > MAX_FACES {
+        return Err(bad("pipe cage exceeds the editable face budget"));
+    }
     let mut frames = Vec::new();
     let mut u = perpendicular(*directions.first().ok_or_else(|| bad("empty pipe path"))?)?;
     for i in 0..path.len() {
@@ -533,6 +542,20 @@ mod tests {
             assert!(axes[0].cross(a[0] * (1.0 - t) + b[0] * t).length() < 1e-12);
         }
         assert!(pipe_section(a, [-a[0], -a[1]], 0.5).is_err());
+    }
+
+    #[test]
+    fn pipe_face_budget_counts_the_end_caps_and_side_grids() {
+        let path: Vec<_> = (0..17).map(|i| Vec3::Z * f64::from(i)).collect();
+        assert!(matches!(
+            build(Primitive::Pipe, [8.0; 3], [16, 16, 1], [0.0; 2], &path),
+            Err(SolidError::InvalidInput {
+                reason: "pipe cage exceeds the editable face budget",
+                ..
+            })
+        ));
+        let valid = build(Primitive::Pipe, [8.0; 3], [16, 13, 1], [0.0; 2], &path).unwrap();
+        assert_eq!(valid.faces.len(), 2 * 32 * 32 + 4 * 32 * 13 * 16);
     }
 
     #[test]

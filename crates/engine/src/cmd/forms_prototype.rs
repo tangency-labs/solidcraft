@@ -1442,7 +1442,10 @@ mod tests {
             session.execute("form.prototype.create", &json!({"primitive":primitive,"segments":[2,2,2],"levels":0})).unwrap();
             let form = session.forms_prototype.as_mut().unwrap();
             form.placement.origin = Vec3::new(4.0, -1.5, 2.25);
-            form.parts.insert(42, crate::forms_prototype::Part { name: "Other Form".into(), definition: std::sync::Arc::new(form.definition()) });
+            form.parts.insert(
+                42,
+                crate::forms_prototype::Part { name: "Other Form".into(), definition: std::sync::Arc::new(form.definition()), levels: None },
+            );
             let before = crate::recovery::capture_bytes(&session).unwrap();
             let report = session.execute("form.prototype.validate", &json!({"tolerance":0.05})).unwrap();
             let request = BrowserCheck::capture(&session, 0.05).unwrap().encode().unwrap();
@@ -1794,6 +1797,11 @@ mod tests {
         assert!(export["bytes"].as_u64().unwrap() > 1000);
         let round = solidcraft_io::blend::read(&std::fs::read(&destination).unwrap()).unwrap();
         assert_eq!(round.objects.len(), 2);
+        assert_eq!(round.objects.iter().map(|o| o.levels).collect::<Vec<_>>(), [2, 1]);
+        let mut recovered = crate::recovery::restore_bytes(&crate::recovery::capture_bytes(&s).unwrap(), None).unwrap();
+        let export = recovered.execute("form.blend.export", &json!({"path":destination})).unwrap();
+        assert_eq!(export["objects"][0]["levels"], 2);
+        assert_eq!(export["objects"][1]["levels"], 1);
         assert_eq!(round.objects[0].cage.faces, cage.faces);
         let finish = s.execute("form.prototype.commit", &json!({"tolerance":0.05})).unwrap();
         assert_eq!(finish["parts"].as_array().unwrap().len(), 1);
@@ -2635,10 +2643,10 @@ mod tests {
     #[test]
     fn a_closed_form_can_cut_multiple_solid_targets() {
         let mut session = Session::default();
-        for (name, x) in [("Left", -6.0), ("Right", 4.0)] {
-            session.execute("solid.box", &json!({"corner":[x,-2,-8],"length":2,"width":4,"height":8,"body_name":name})).unwrap();
+        for (name, x) in [("Left", -3.0), ("Right", 2.0)] {
+            session.execute("solid.box", &json!({"corner":[x,0.6,-12],"length":1,"width":1,"height":10,"body_name":name})).unwrap();
         }
-        session.execute("form.prototype.create", &json!({"primitive":"box","size":12,"segments":[2,2,2]})).unwrap();
+        session.execute("form.prototype.create", &json!({"primitive":"box","size":12,"segments":[2,2,2],"levels":2})).unwrap();
         let reply = session.execute("form.prototype.commit", &json!({"operation":"cut","targets":["Left","Right"],"tolerance":0.05})).unwrap();
         let result = session.model.result(reply["feature"].as_u64().unwrap()).unwrap();
         assert!(result.error.is_none() && result.warning.is_none(), "{:?}", result.warning);
@@ -2646,7 +2654,7 @@ mod tests {
         for name in ["Left", "Right"] {
             let body = result.state.body(name).unwrap();
             let volume = crate::kernel::measure(&body.body).unwrap().volume;
-            assert!(body.is_closed() && (0.0..64.0).contains(&volume), "{name}: {volume}");
+            assert!(body.is_closed() && (0.0..10.0).contains(&volume), "{name}: {volume}");
         }
     }
 

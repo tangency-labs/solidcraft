@@ -15,9 +15,8 @@ pub struct Projection {
 }
 
 impl Projection {
-    fn screen(self, point: Vec3) -> Option<[f32; 2]> {
-        let [x, y, _, w] = self
-            .matrix
+    fn clip(self, point: Vec3) -> [f64; 4] {
+        self.matrix
             .into_iter()
             .zip([point.x, point.y, point.z, 1.0])
             .fold([0.0; 4], |mut out, (col, v)| {
@@ -25,7 +24,14 @@ impl Projection {
                     *result += value * v;
                 }
                 out
-            });
+            })
+    }
+
+    fn screen(self, point: Vec3) -> Option<[f32; 2]> {
+        self.clip_to_screen(self.clip(point))
+    }
+
+    fn clip_to_screen(self, [x, y, _, w]: [f64; 4]) -> Option<[f32; 2]> {
         if !w.is_finite() || w <= 1e-9 {
             return None;
         }
@@ -215,6 +221,37 @@ pub struct CurveHit {
     pub point: Vec3,
 }
 
+/// Nearest projected point of a visible-to-the-camera segment, with its world witness.
+pub fn segment_hit(
+    projection: Projection,
+    pixel: [f32; 2],
+    [start, end]: [Vec3; 2],
+) -> Option<CurveHit> {
+    let start_clip = projection.clip(start);
+    let end_clip = projection.clip(end);
+    let [x, y] = projection.clip_to_screen(start_clip)?;
+    let [end_x, end_y] = projection.clip_to_screen(end_clip)?;
+    let [dx, dy] = [end_x - x, end_y - y];
+    let size2 = dx * dx + dy * dy;
+    let t = if size2 > 1e-6 {
+        (((pixel[0] - x) * dx + (pixel[1] - y) * dy) / size2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let [ox, oy] = [x + dx * t - pixel[0], y + dy * t - pixel[1]];
+    let distance2 = ox * ox + oy * oy;
+    let t = f64::from(t);
+    // Interpolating in screen space mixes clip points weighted by inverse w.
+    let end_weight = t * start_clip[3];
+    let fraction = end_weight / ((1.0 - t) * end_clip[3] + end_weight);
+    let point = start * (1.0 - fraction) + end * fraction;
+    (distance2.is_finite() && point.is_finite()).then_some(CurveHit {
+        distance2,
+        fraction,
+        point,
+    })
+}
+
 /// Find projected local minima of the supplied curve, sorted by distance.
 pub fn curve_hits(
     projection: Projection,
@@ -373,6 +410,24 @@ mod tests {
             0.0
         )))
         .is_empty());
+    }
+
+    #[test]
+    fn projected_segment_witness_uses_clip_weights() {
+        let mut perspective = ORTHO;
+        perspective.matrix[2][3] = 1.0;
+        perspective.matrix[3][3] = 0.0;
+        let [start, end] = [Vec3::new(-1.0, 0.0, 2.0), Vec3::new(5.0, 0.0, 10.0)];
+        let screen_midpoint = [410.0, 320.0];
+        let hit = segment_hit(perspective, screen_midpoint, [start, end]).unwrap();
+        assert_eq!(hit.distance2, 0.0);
+        assert!((hit.fraction - 1.0 / 6.0).abs() < 1e-12);
+        assert_eq!(perspective.screen(hit.point), Some(screen_midpoint));
+        let reverse = segment_hit(perspective, screen_midpoint, [end, start]).unwrap();
+        assert!(reverse.point.dist(hit.point) < 1e-12);
+        let orthographic = segment_hit(ORTHO, [1_210.0, 320.0], [start, end]).unwrap();
+        assert_eq!(orthographic.fraction, 0.5);
+        assert_eq!(orthographic.point, Vec3::new(2.0, 0.0, 6.0));
     }
 
     #[test]

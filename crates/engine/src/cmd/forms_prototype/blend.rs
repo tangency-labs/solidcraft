@@ -127,7 +127,7 @@ fn cages(s: &Session, args: &params::BlendExport) -> Result<Vec<Object>> {
             .unwrap_or_else(|| "Form".into());
         objects.push(object(name, &f.definition(), f.levels)?);
         for part in f.parts.values() {
-            objects.push(object(part.name.clone(), &part.definition, f.levels)?);
+            objects.push(object(part.name.clone(), &part.definition, part.levels.unwrap_or(f.levels))?);
         }
     } else {
         let ids: BTreeSet<_> = args.features.iter().copied().collect();

@@ -2,10 +2,22 @@
 
 use crate::{Result, SolidError, Vec3};
 
+pub mod junction;
+pub mod sweep;
+pub use sweep::JOIN_TOLERANCE;
+
 /// Maximum number of source samples in a pipe network.
 pub const MAX_PATH_SAMPLES: usize = 32_768;
 /// Maximum number of named source paths in a pipe network.
 pub const MAX_PATHS: usize = 128;
+
+/// Check the junction branching limit before converting or constructing geometry.
+pub fn validate_branch_count(count: usize) -> Result<()> {
+    if count > 6 {
+        return Err(bad("pipe junction supports at most six branches"));
+    }
+    Ok(())
+}
 
 fn bad(reason: &'static str) -> SolidError {
     SolidError::InvalidInput {
@@ -128,9 +140,7 @@ pub fn sample(paths: &[(&[Vec3], bool)], average: usize, minimum: usize) -> Resu
 
 /// Clearance for one junction, from each outward branch chord and diameter.
 pub fn clearance(chords: &[([Vec3; 2], f64)]) -> Result<f64> {
-    if chords.len() > 6 {
-        return Err(bad("pipe junction supports at most six branches"));
-    }
+    validate_branch_count(chords.len())?;
     let mut clearance = 0.0_f64;
     let mut directions = Vec::new();
     for &([start, next], diameter) in chords {

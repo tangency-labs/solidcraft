@@ -3,7 +3,7 @@ use super::*;
 use solidcore_ops::forms_view_queries::{self, BoundsIndex, MAX_CURVES, Projection};
 
 type Curve = solidcraft_engine::doc::forms::EdgeCurve;
-const HIT_PIXELS: f32 = 9.0;
+pub(super) const HIT_PIXELS: f32 = 9.0;
 const MAX_CANDIDATES: usize = 256;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -188,7 +188,7 @@ pub(super) fn prepare_explicit(app: &mut SolveApp, ctx: &egui::Context) {
 pub(super) fn exact_picking(app: &SolveApp) -> bool {
     source(app).is_some() && (cfg!(not(target_arch = "wasm32")) || current(app)) && live_cad::mesh(app).is_some()
 }
-fn projection(proj: &Proj) -> Projection {
+pub(super) fn projection(proj: &Proj) -> Projection {
     Projection { matrix: proj.vp.0, origin: [proj.rect.left(), proj.rect.top()], size: [proj.rect.width(), proj.rect.height()] }
 }
 fn projections(curve: &Curve, projection: Projection, position: Pos2) -> impl Iterator<Item = (f32, f64, Vec3)> {

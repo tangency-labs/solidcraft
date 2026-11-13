@@ -328,10 +328,15 @@ fn stable_normal(a: vec3<f32>, b: vec3<f32>) -> vec4<f32> {
     let ua = a / sa;
     let ub = b / sb;
     let n = cross(ua, ub);
-    let size = length(n);
-    let sine = size / (length(ua) * length(ub));
-    if (!(sine > 1e-6)) { return vec4<f32>(0.0); }
-    return vec4<f32>(n / size, sine);
+    let sn = max(max(abs(n.x), abs(n.y)), abs(n.z));
+    if (!(sn > 0.0)) { return vec4<f32>(0.0); }
+    // Scale again before squaring components so a small angle does not
+    // underflow the normal's length. A regular patch can have nearly parallel tangents.
+    let scaled = n / sn;
+    let size = length(scaled);
+    if (!(size > 0.0)) { return vec4<f32>(0.0); }
+    let sine = sn * size / (length(ua) * length(ub));
+    return vec4<f32>(scaled / size, sine);
 }
 
 fn available_step(s: Surface, uv: vec2<f32>, positive: vec2<bool>, nominal: f32) -> f32 {

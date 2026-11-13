@@ -35,6 +35,12 @@
     "forms.fill.erase_refined_help": "يستبدل منطقة داخلية واحدة ذات أربعة أضلاع برقعة إغلاق جديدة.",
     "forms.fill.erase_refined_unavailable": "تتطلب أداة «المحو والملء» في شكل مُنقَّح شكلًا بلا مطابقة حدود أو تناظر أو بثق أو جدار قصّ."
   },
+  "fr": {
+    "forms.fill.erase_desktop_required": "Le remplacement d’une région sur une forme raffinée nécessite l’application de bureau.",
+    "forms.fill.erase_faces_only": "Sélectionnez uniquement les faces d’une région intérieure à quatre côtés.",
+    "forms.fill.erase_refined_help": "Remplace une région intérieure à quatre côtés par une surface de fermeture.",
+    "forms.fill.erase_refined_unavailable": "Le remplacement d’une région sur une forme raffinée requiert une forme sans raccordement, symétrie, extrusion ni paroi de découpe."
+  },
   "he": {
     "forms.fill.erase_desktop_required": "מחיקה ומילוי בצורה חופשית שעברה עידון דורשים את יישום שולחן העבודה.",
     "forms.fill.erase_faces_only": "יש לבחור רק את הפאות של אזור פנימי אחד בעל ארבעה צדדים.",

@@ -15,10 +15,11 @@ for a sketch/edge path, or **Form Surface** for an existing CAD face. The
 primitive selector offers Box, Cylinder, Quadball, Sphere, Pipe, Plane, Torus
 and Tube.
 
-The Edit Form panel keeps selection and transforms at the top. Open **Primitive**
+The Edit Form panel opens with the primitive controls expanded. Enable
+**Compact Form editor** in Design preferences to put selection and transforms
+first and focus the panel on the active tool. In that layout, open **Primitive**
 to replace the starting shape, **Primitive dimensions** to set its dimensions
-and segments, or **CAD diagnostics** to run a CAD check. Turn off
-**Compact Form editor** in Design preferences to restore the original layout.
+and segments, or **CAD diagnostics** to run a CAD check.
 
 1. Choose the primitive's dimensions and segment counts before sculpting.
    Primitive settings lock after sculpting; the transform tools remain available.

@@ -23,6 +23,10 @@
     "cmd.form.refined_weld": "دمج الأشكال المُنقَّحة",
     "cmd.form.refined_weld.remove": "إزالة دمج الأشكال المُنقَّحة"
   },
+  "fr": {
+    "cmd.form.refined_weld": "Joindre des formes raffinées",
+    "cmd.form.refined_weld.remove": "Supprimer la jonction des formes raffinées"
+  },
   "he": {
     "cmd.form.refined_weld": "איחוי צורות חופשיות שעברו עידון",
     "cmd.form.refined_weld.remove": "הסרת איחוי של צורות חופשיות שעברו עידון"
