@@ -18,7 +18,9 @@
 //!   hands its arguments on to one, has the strings it is called with read as docs, under any name
 //!   it is imported as. So does a macro or attribute this cannot read: one from outside the
 //!   workspace (other than the standard library's), a procedural one, or one an unread macro is
-//!   handed to;
+//!   handed to. A macro is told from another of its name by the path it is called by (`std::`,
+//!   `crate::`, a dependency's) and by the `use` items of its file, so `dependency::println!`, or
+//!   `println!` after `use dependency::println`, is not the standard library's;
 //! - code a build script writes (`include!(concat!(env!("OUT_DIR"), ..))`) is judged by what
 //!   writes it, the build script and the workspace crates it builds with: a `///` line they write
 //!   whole is read as a doc; one they leave open or start with a `{}` placeholder, a block doc
@@ -32,7 +34,9 @@
 //!   blocks of another text file it names, the `///` comments of any other file.
 //!
 //! It runs no code, so it cannot see doc text a build script copies from a file it reads (a
-//! template), or Rust that a build dependency writes without one of those four crates.
+//! template), or Rust that a build dependency writes without one of those four crates. Nor does it
+//! follow a glob import or `#[macro_use]` that brings in a dependency's macro under the name of a
+//! standard or workspace one.
 //!
 //! Library means what `cargo test --doc` tests: a `lib` or `proc-macro` target, whatever its
 //! `doctest` setting (an explicit `--doc` ignores it).
@@ -136,7 +140,7 @@ pub fn command(only: Option<&[&str]>, cargo_args: &[&str], test_args: &[&str]) -
             .map(|(library, thread)| (library, thread.join().unwrap_or_else(|_| vec![FileDocs { test: true, ..FileDocs::default() }])))
             .collect()
     });
-    let macros = macros(read.iter().flat_map(|(_, files)| files));
+    let macros = macros(read.iter().flat_map(|(_, files)| files), libraries.iter().map(|library| library.crate_name.clone()).collect());
     let mut code_writers = None;
     let mut considered = 0;
     let mut chosen = Vec::new();
@@ -183,6 +187,8 @@ fn doc_command(libraries: &[&str], chosen: &[&str], cargo_args: &[&str], test_ar
 /// A workspace library rustdoc tests, and where its docs come from.
 struct Library {
     name: String,
+    /// The name paths give its crate (`solidcraft_doc`).
+    crate_name: String,
     /// Its package directory, whose .rs files are all read.
     dir: PathBuf,
     /// Its root file (`[lib] path`), whose directory is read too when it lies outside `dir`.
@@ -206,7 +212,9 @@ fn libraries(meta: &serde_json::Value) -> Result<Vec<Library>, String> {
         let (Some(name), Some(manifest)) = (p["name"].as_str(), p["manifest_path"].as_str()) else { continue };
         let Some(dir) = Path::new(manifest).parent() else { continue };
         let targets = p["targets"].as_array().map(Vec::as_slice).unwrap_or_default();
-        let Some(root) = targets.iter().find(doc_tested).and_then(|t| t["src_path"].as_str()) else { continue };
+        let Some(target) = targets.iter().find(doc_tested) else { continue };
+        let Some(root) = target["src_path"].as_str() else { continue };
+        let crate_name = target["name"].as_str().unwrap_or(name).replace('-', "_");
         let mut writers: Vec<PathBuf> = targets
             .iter()
             .filter(|t| t["kind"].as_array().is_some_and(|kinds| kinds.iter().any(|k| k == "custom-build")))
@@ -223,7 +231,7 @@ fn libraries(meta: &serde_json::Value) -> Result<Vec<Library>, String> {
                 (None, None) => {}
             }
         }
-        out.push(Library { name: name.to_string(), dir: dir.to_path_buf(), root: PathBuf::from(root), writers, external_writers });
+        out.push(Library { name: name.to_string(), crate_name, dir: dir.to_path_buf(), root: PathBuf::from(root), writers, external_writers });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
@@ -238,12 +246,14 @@ struct FileDocs {
     macros: Vec<String>,
     /// The `macro_rules!` macros it defines that write a doc from an argument (`#[doc = $text]`).
     doc_macros: Vec<String>,
-    /// (macro, other): a `macro_rules!` macro it defines hands an argument on to another macro.
+    /// (macro, other): a `macro_rules!` macro it defines hands an argument on to another macro,
+    /// named by the path it is called by (`dependency::documented`).
     forwards: Vec<(String, String)>,
-    /// (name, other name): `name as other name`, as in an import.
-    aliases: Vec<(String, String)>,
-    /// The string literals it passes to macros or attributes that could hold a code block, with
-    /// each macro's name (`IN_ATTRIBUTE` for an attribute): docs, if that macro may write them.
+    /// (path, name): what its `use` items bring in (`dependency::println`), and under which name.
+    imports: Vec<(String, String)>,
+    /// The string literals it passes to macros or attributes that could hold a code block, with the
+    /// path each macro is called by (`println`, `std::println`; `IN_ATTRIBUTE` for an attribute):
+    /// docs, if that macro may write them.
     macro_literals: Vec<(String, String)>,
     /// The files its `#[path = "..."]` attributes and `include!("...")` calls name.
     paths: Vec<String>,
@@ -265,7 +275,9 @@ fn has_doc_test(
     include_ignored: bool,
 ) -> Result<bool, String> {
     if files.iter().any(|f| f.test)
-        || files.iter().flat_map(|f| &f.macro_literals).any(|(name, text)| macros.may_write_docs(name) && literal_has_doc_test(text, include_ignored))
+        || files
+            .iter()
+            .any(|f| f.macro_literals.iter().any(|(path, text)| macros.may_write_docs(path, f) && literal_has_doc_test(text, include_ignored)))
     {
         return Ok(true);
     }
@@ -285,39 +297,95 @@ fn literal_has_doc_test(text: &str, include_ignored: bool) -> bool {
     compiles_code(&markdown(&[(text, false)]), include_ignored) || compiles_code(&format!("{text}\n"), include_ignored)
 }
 
-/// What the macros the workspace calls do with the strings they are given, by name.
+/// What the macros the workspace calls do with the strings they are given.
 struct Macros {
-    /// The macros known to write docs from their arguments.
+    /// The macros known to write docs from their arguments, by name.
     docs: BTreeSet<String>,
-    /// The macros whose definitions are read: the standard library's and the workspace's
-    /// `macro_rules!` ones, under any name they are imported as.
+    /// The workspace's `macro_rules!` macros, by name.
+    defined: BTreeSet<String>,
+    /// The names a macro called without a path is known by: the standard library's and the
+    /// workspace's macros, and the names `use` brings either in as.
     known: BTreeSet<String>,
+    /// The workspace's library crates, by the name a path gives them.
+    crates: BTreeSet<String>,
+}
+
+/// Where a path leads, by its first segment.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Origin {
+    Std,
+    Workspace,
+    Dependency,
 }
 
 impl Macros {
-    /// Whether the strings a macro (or an attribute, `IN_ATTRIBUTE`) is given may become docs: it
-    /// writes docs from them, or what it does is not read.
-    fn may_write_docs(&self, name: &str) -> bool {
-        self.docs.contains(name) || !self.known.contains(name)
+    /// Whether the strings a macro (or an attribute, `IN_ATTRIBUTE`) is called with in `file` may
+    /// become docs: it writes docs from them, or what it does is not read. A macro called by a
+    /// path is the one the path leads to; one called by its name alone is a dependency's when the
+    /// file imports that name from one.
+    fn may_write_docs(&self, path: &str, file: &FileDocs) -> bool {
+        match path.rsplit_once("::") {
+            None => {
+                self.docs.contains(path)
+                    || !self.known.contains(path)
+                    || file.imports.iter().any(|(from, name)| name == path && self.origin(from) == Origin::Dependency)
+            }
+            Some((qualifier, name)) => match self.origin(qualifier) {
+                Origin::Std => !STD_MACROS.contains(&name),
+                Origin::Workspace => self.docs.contains(name) || !self.defined.contains(name),
+                Origin::Dependency => true,
+            },
+        }
+    }
+
+    /// Where a path leads: `std::`, `core::` and `alloc::` to the standard library; `crate::`,
+    /// `self::`, `super::`, `$crate::` and a workspace crate to the workspace; anything else to a
+    /// dependency.
+    fn origin(&self, path: &str) -> Origin {
+        match path.split("::").next().unwrap_or_default() {
+            "std" | "core" | "alloc" => Origin::Std,
+            "crate" | "self" | "super" | "$crate" => Origin::Workspace,
+            first if self.crates.contains(first) => Origin::Workspace,
+            _ => Origin::Dependency,
+        }
     }
 }
 
 /// The workspace's macros, read: those that write docs from their arguments themselves, those
-/// that hand their arguments on to one or to a macro not read, and the names they are imported as.
-fn macros<'a>(files: impl Iterator<Item = &'a FileDocs> + Clone) -> Macros {
-    let mut known: BTreeSet<String> = STD_MACROS.iter().map(|name| name.to_string()).collect();
-    known.extend(files.clone().flat_map(|f| f.macros.iter().cloned()));
-    fixed_point(&mut known, |known| {
-        files.clone().flat_map(|f| &f.aliases).filter(|(name, _)| known.contains(name)).map(|(_, alias)| alias.clone()).collect()
-    });
-    let mut docs: BTreeSet<String> = files.clone().flat_map(|f| f.doc_macros.iter().cloned()).collect();
-    fixed_point(&mut docs, |docs| {
-        let writes = |name: &String| docs.contains(name) || !known.contains(name);
-        let callers = files.clone().flat_map(|f| &f.forwards).filter(|(_, callee)| writes(callee)).map(|(caller, _)| caller.clone());
-        let aliases = files.clone().flat_map(|f| &f.aliases).filter(|(name, _)| docs.contains(name)).map(|(_, alias)| alias.clone());
-        callers.chain(aliases).collect()
-    });
-    Macros { docs, known }
+/// that hand their arguments on to one or to a macro not read, and the names `use` brings them in
+/// as. `crates` are the workspace's library crates.
+fn macros<'a>(files: impl Iterator<Item = &'a FileDocs> + Clone, crates: BTreeSet<String>) -> Macros {
+    let defined: BTreeSet<String> = files.clone().flat_map(|f| f.macros.iter().cloned()).collect();
+    let mut macros = Macros { docs: BTreeSet::new(), known: BTreeSet::new(), defined, crates };
+    let leaf = |path: &str| path.rsplit("::").next().unwrap_or_default().to_string();
+    let mut known: BTreeSet<String> = STD_MACROS.iter().map(|name| name.to_string()).chain(macros.defined.iter().cloned()).collect();
+    for (from, name) in files.clone().flat_map(|f| &f.imports) {
+        let resolves = match macros.origin(from) {
+            Origin::Std => STD_MACROS.contains(&leaf(from).as_str()),
+            Origin::Workspace => macros.defined.contains(&leaf(from)),
+            Origin::Dependency => false,
+        };
+        if resolves {
+            known.insert(name.clone());
+        }
+    }
+    macros.known = known;
+    macros.docs = files.clone().flat_map(|f| f.doc_macros.iter().cloned()).collect();
+    loop {
+        let found: Vec<String> = files
+            .clone()
+            .flat_map(|f| {
+                let callers = f.forwards.iter().filter(|(_, callee)| macros.may_write_docs(callee, f)).map(|(caller, _)| caller.clone());
+                let imported = f.imports.iter().filter(|(from, _)| macros.docs.contains(&leaf(from))).map(|(_, name)| name.clone());
+                callers.chain(imported).collect::<Vec<_>>()
+            })
+            .collect();
+        let before = macros.docs.len();
+        macros.docs.extend(found);
+        if macros.docs.len() == before {
+            return macros;
+        }
+    }
 }
 
 /// Grow `set` by what `more` finds from it until nothing new is found.
@@ -671,16 +739,22 @@ fn walk(tokens: TokenStream, lines: &[&str], include_ignored: bool, out: &mut Fi
             }
             (TokenTree::Ident(name), Some(TokenTree::Punct(bang)), Some(TokenTree::Group(args)), _) if bang.as_char() == '!' => {
                 let name = name.to_string();
-                if name == "include" {
+                let path = macro_path(&trees, i);
+                // The standard library's macro, called by its name or a `std::` path.
+                let from_std =
+                    STD_MACROS.contains(&name.as_str()) && (path == name || matches!(path.split("::").next(), Some("std" | "core" | "alloc")));
+                if name == "include" && from_std {
                     include(args.stream(), out);
-                } else if !STD_MACROS.contains(&name.as_str()) {
+                } else if !from_std {
                     referenced(args.stream(), &mut out.referenced);
                 }
-                collect_literals(args.stream(), &name, &mut out.macro_literals);
+                collect_literals(args.stream(), &path, &mut out.macro_literals);
             }
-            // `name as other`: an import under another name (or a cast, which does no harm).
-            (TokenTree::Ident(name), Some(TokenTree::Ident(keyword)), Some(TokenTree::Ident(other)), _) if *keyword == "as" => {
-                out.aliases.push((name.to_string(), other.to_string()));
+            // `use a::b::{c, d as e}`, not `+ use<'a>` (the lifetimes an `impl Trait` captures).
+            (TokenTree::Ident(keyword), next, _, _) if *keyword == "use" && !matches!(next, Some(TokenTree::Punct(p)) if p.as_char() == '<') => {
+                let rest = trees.get(i + 1..).unwrap_or_default();
+                let end = rest.iter().position(|t| matches!(t, TokenTree::Punct(p) if p.as_char() == ';')).unwrap_or(rest.len());
+                use_tree(rest.get(..end).unwrap_or_default(), &[], &mut out.imports);
             }
             (TokenTree::Ident(keyword), Some(TokenTree::Ident(name)), Some(TokenTree::Punct(semicolon)), _)
                 if *keyword == "mod" && semicolon.as_char() == ';' && !module_path =>
@@ -831,19 +905,85 @@ fn writes_doc_from_argument(body: TokenStream) -> bool {
     })
 }
 
-/// The macros a `macro_rules!` body calls with one of its own arguments (`other!($text)`).
+/// The macros a `macro_rules!` body calls with one of its own arguments (`other!($text)`), by the
+/// path they are called by.
 fn forwards(body: TokenStream, caller: &str, out: &mut Vec<(String, String)>) {
     let trees: Vec<TokenTree> = body.into_iter().collect();
     for (i, tree) in trees.iter().enumerate() {
-        if let (TokenTree::Ident(callee), Some(TokenTree::Punct(bang)), Some(TokenTree::Group(args))) = (tree, trees.get(i + 1), trees.get(i + 2))
+        if let (TokenTree::Ident(_), Some(TokenTree::Punct(bang)), Some(TokenTree::Group(args))) = (tree, trees.get(i + 1), trees.get(i + 2))
             && bang.as_char() == '!'
             && has_metavariable(args.stream())
         {
-            out.push((caller.to_string(), callee.to_string()));
+            out.push((caller.to_string(), macro_path(&trees, i)));
         }
         if let TokenTree::Group(group) = tree {
             forwards(group.stream(), caller, out);
         }
+    }
+}
+
+/// The path a macro is called by, as written, from its name at `trees[at]` back through the `::`
+/// before it: `println`, `std::println`, `dependency::println`, `$crate::documented`.
+fn macro_path(trees: &[TokenTree], at: usize) -> String {
+    let punct = |i: Option<usize>, c: char| i.and_then(|i| trees.get(i)).is_some_and(|t| matches!(t, TokenTree::Punct(p) if p.as_char() == c));
+    let mut segments = Vec::new();
+    let mut i = at;
+    while let Some(TokenTree::Ident(segment)) = trees.get(i) {
+        if punct(i.checked_sub(1), '$') {
+            segments.push(format!("${segment}"));
+            break;
+        }
+        segments.push(segment.to_string());
+        match i.checked_sub(3) {
+            Some(before) if punct(i.checked_sub(1), ':') && punct(i.checked_sub(2), ':') => i = before,
+            _ => break,
+        }
+    }
+    segments.reverse();
+    segments.join("::")
+}
+
+/// What a `use` tree (after `prefix`) brings in: (the path it names, the name it brings in).
+/// `a::b::{self, c as d}` brings in `a::b` as `b` and `a::b::c` as `d`; a glob brings in nothing
+/// by name.
+fn use_tree(trees: &[TokenTree], prefix: &[String], out: &mut Vec<(String, String)>) {
+    let mut path = prefix.to_vec();
+    let mut i = 0;
+    while let Some(tree) = trees.get(i) {
+        match tree {
+            TokenTree::Ident(word) if *word == "as" => {
+                if let Some(TokenTree::Ident(name)) = trees.get(i + 1)
+                    && path.len() > prefix.len()
+                {
+                    out.push((path.join("::"), name.to_string()));
+                }
+                return;
+            }
+            TokenTree::Ident(segment) => path.push(segment.to_string()),
+            TokenTree::Punct(p) if p.as_char() == '$' => {
+                if let Some(TokenTree::Ident(segment)) = trees.get(i + 1) {
+                    path.push(format!("${segment}"));
+                    i += 1;
+                }
+            }
+            TokenTree::Punct(p) if p.as_char() == '*' => return,
+            TokenTree::Group(group) if group.delimiter() == Delimiter::Brace => {
+                for part in split_commas(group.stream()) {
+                    use_tree(&part, &path, out);
+                }
+                return;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if path.len() > prefix.len() && path.last().is_some_and(|last| last == "self") {
+        path.pop();
+    }
+    if path.len() > prefix.len()
+        && let Some(name) = path.last()
+    {
+        out.push((path.join("::"), name.clone()));
     }
 }
 
@@ -1005,8 +1145,8 @@ mod tests {
     /// that may write docs.
     fn found_in_calls(files: &[&str]) -> bool {
         let files: Vec<FileDocs> = files.iter().map(|source| file_docs(source, false)).collect();
-        let macros = macros(files.iter());
-        files.iter().flat_map(|f| &f.macro_literals).any(|(name, text)| macros.may_write_docs(name) && literal_has_doc_test(text, false))
+        let macros = macros(files.iter(), BTreeSet::from(["workspace_crate".to_string()]));
+        files.iter().any(|f| f.macro_literals.iter().any(|(path, text)| macros.may_write_docs(path, f) && literal_has_doc_test(text, false)))
     }
 
     const DOCUMENTED: &str = "macro_rules! documented {\n    ($doc:literal) => {\n        #[doc = $doc]\n        pub struct S;\n    };\n}\n";
@@ -1122,6 +1262,17 @@ mod tests {
         let plain = "macro_rules! plain {\n    ($s:literal) => {\n        const S: &str = $s;\n    };\n}\n";
         assert!(!found_in_calls(&[&format!("println!({block});\nuse std::println as say;\nsay!({block});\n")]));
         assert!(!found_in_calls(&[plain, &format!("plain!({block});\nuse crate::plain as p;\np!({block});\n")]));
+        // A path or a `use` tells a dependency's macro from the standard library's or the
+        // workspace's of the same name.
+        assert!(found_in_calls(&[&format!("dependency::println!({block});\n")]));
+        assert!(found_in_calls(&[&format!("use dependency::println;\nprintln!({block});\n")]));
+        assert!(found_in_calls(&[&format!("use dependency::{{other, println as say}};\nsay!({block});\n")]));
+        assert!(found_in_calls(&[plain, &format!("dependency::plain!({block});\n")]));
+        assert!(found_in_calls(&[plain, &format!("use dependency::plain;\nplain!({block});\n")]));
+        let forwarder = "macro_rules! wrap {\n    ($d:literal) => {\n        dependency::println!($d);\n    };\n}\n";
+        assert!(found_in_calls(&[forwarder, &format!("wrap!({block});\n")]));
+        let paths = format!("std::println!({block});\ncrate::plain!({block});\nworkspace_crate::plain!({block});\nuse std::{{self, println}};\n");
+        assert!(!found_in_calls(&[plain, &paths]));
         // A string with no code block is no doc wherever it goes.
         assert!(!found_in_calls(&["dependency::documented!(\"Plain    words.\");\n#[dependency::documented(\"Plain.\")]\nfn f() {}\n"]));
     }
@@ -1140,6 +1291,7 @@ mod tests {
         let package = root.join("package");
         let library = Library {
             name: "probe".into(),
+            crate_name: "probe".into(),
             root: package.join("src").join("lib.rs"),
             dir: package,
             writers: Vec::new(),
