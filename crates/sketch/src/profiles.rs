@@ -37,6 +37,22 @@ const ON_CARRIER_TOL: f64 = MERGE_TOL * 0.1;
 /// one direction, so that their curvature says which turns first. Curves the solver holds
 /// tangent differ by about 1e-7 there.
 const TANGENT_ANGLE_TOL: f64 = 1e-6;
+
+/// Whether two pieces leaving one corner `angle` radians apart, with curvatures `dk` apart and
+/// the shorter `reach` mm long, leave it the same way, so that curvature orders them: their
+/// tangents are within [`TANGENT_ANGLE_TOL`], or the bend crosses them back within
+/// [`TANGENT_JOIN_TOL`] of the corner and within both pieces. An end joined that far along a
+/// tangent tilts an arc's tangent by about that over its radius (7e-6 rad for 1e-4 mm on a
+/// radius of 15).
+fn leave_same_way(angle: f64, dk: f64, reach: f64) -> bool {
+    angle.abs() <= TANGENT_ANGLE_TOL.max(dk.abs() * reach.clamp(0.0, TANGENT_JOIN_TOL) * 0.5)
+}
+
+/// A piece's chord, the length [`leave_same_way`] gives the bend to cross back within.
+fn chord(s: &Seg2) -> f64 {
+    s.start().dist(s.end())
+}
+
 const MAX_EDGES: usize = 50_000;
 
 /// A closed region usable by features, with the ids of the curves bounding it.
@@ -626,6 +642,35 @@ fn merge_nearby_endpoints(sk: &Sketch, endpoints: &[(usize, usize)], groups: &mu
             let b_is_unique_nearest = nearest.get(&b).is_some_and(|(_, closest)| *closest == Some(a));
             if a_is_unique_nearest && b_is_unique_nearest {
                 union(groups, a, b);
+            }
+        }
+        // A third end at a corner (a line's end and two caps' arcs leaving it along the line) is
+        // nobody's unique nearest end, and left out it cuts the other two curves a hair from the
+        // corner. When every end it could join is already one corner, it joins that corner; an
+        // end near two separate corners still stays open.
+        let mut candidates = std::collections::BTreeMap::<usize, Vec<usize>>::new();
+        for &(a, b) in joins.keys() {
+            if !connected_endpoints.contains(&(a, b)) {
+                candidates.entry(a).or_default().push(b);
+                candidates.entry(b).or_default().push(a);
+            }
+        }
+        for _ in 0..4 {
+            let mut joined = false;
+            for (&point, others) in &candidates {
+                if others.len() < 2 {
+                    continue;
+                }
+                let root = find(groups, point);
+                let mut roots = others.iter().map(|&o| find(groups, o));
+                let Some(first) = roots.next() else { continue };
+                if first != root && roots.all(|r| r == first) {
+                    union(groups, point, first);
+                    joined = true;
+                }
+            }
+            if !joined {
+                break;
             }
         }
     }
@@ -1713,12 +1758,12 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             // First clockwise turn from the way back. Directions are compared a short way
             // along each segment (curvature decides between equal tangents, e.g. a line tangent
             // to an arc, or an arc leaving back along the incoming line).
-            // Tangents within [`TANGENT_ANGLE_TOL`] are equal: a solved tangency leaves them that
-            // far apart either way, and the turn the round-off picked lost every region at a
-            // corner where two arcs leave along one line.
+            // Tangents that [`leave_same_way`] are equal: a solved tangency leaves them that far
+            // apart either way, and the turn the round-off picked lost every region at a corner
+            // where two arcs leave along one line.
             let kt = half(twin).map(|(ts, _, _)| curvature(&ts)).unwrap_or(0.0);
-            // (clockwise turn from the way back, curvature, half-edge)
-            let mut turns: Vec<(f64, f64, usize)> = Vec::new();
+            // (clockwise turn from the way back, curvature, chord, half-edge)
+            let mut turns: Vec<(f64, f64, f64, usize)> = Vec::new();
             for &o in outgoing.get(to).map(Vec::as_slice).unwrap_or(&[]) {
                 if o == twin {
                     continue;
@@ -1728,19 +1773,19 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 let mut raw = (back - os.start_tangent().angle()).rem_euclid(TAU);
                 // Leaving along the way back: just clockwise of it when it bends away to the
                 // right of it, a whole turn round otherwise.
-                if raw < TANGENT_ANGLE_TOL || raw > TAU - TANGENT_ANGLE_TOL {
+                if leave_same_way(raw.min(TAU - raw), kt - k, chord(&seg).min(chord(&os))) {
                     raw = if kt - k > 1e-12 { 0.0 } else { TAU };
                 }
-                turns.push((raw, k, o));
+                turns.push((raw, k, chord(&os), o));
             }
             // Of the first turns, the one bending most to the left comes first; between equal
             // bends (two lines) the tangents decide.
-            let first = turns.iter().map(|t| t.0).fold(f64::INFINITY, f64::min);
+            let first = turns.iter().copied().min_by(|a, b| a.0.total_cmp(&b.0));
             let best = turns
                 .into_iter()
-                .filter(|t| t.0 <= first + TANGENT_ANGLE_TOL)
+                .filter(|t| first.is_some_and(|f| leave_same_way(t.0 - f.0, t.1 - f.1, t.2.min(f.2))))
                 .min_by(|a, b| b.1.total_cmp(&a.1).then(a.0.total_cmp(&b.0)))
-                .map(|(d, _, o)| (d, o));
+                .map(|(d, _, _, o)| (d, o));
             let Some((_, next)) = best else {
                 ok = false;
                 break;

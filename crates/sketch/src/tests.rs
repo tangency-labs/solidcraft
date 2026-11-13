@@ -2386,3 +2386,135 @@ fn a_cap_whose_arcs_leave_a_ring_along_its_sides_closes_a_profile() {
         }
     }
 }
+
+/// A ring with corners of radius 3 and 6 under a cap of radius 15 joined by a line, with a second
+/// cap of radius 9 resting on the ring's inner top line (the user's sketch from the app, as
+/// solved). The 9 cap's arcs and the 15 cap's arcs leave the top line at one point along one
+/// tangent, a few 1e-5 mm apart: the region under the line between the two caps must close.
+#[test]
+fn two_caps_leaving_one_line_along_its_direction_each_close_a_profile() {
+    let mut sk = Sketch::new();
+    let p = |sk: &mut Sketch, x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
+    let q0 = p(&mut sk, 233.19993940459707, 29.999999292653907);
+    let q1 = p(&mut sk, 167.19781559900548, 29.99999929262217);
+    let q2 = p(&mut sk, 248.48435974121094, -225.99999999999997);
+    let q3 = p(&mut sk, 151.89776611328125, -225.99999999999997);
+    let q4 = p(&mut sk, 135.69999694824216, -199.57247924804688);
+    let q5 = p(&mut sk, 135.70000664704736, 14.999914533408523);
+    let q6 = p(&mut sk, 138.7000936158169, 14.999915065490706);
+    let q7 = p(&mut sk, 138.7000931926349, 18.00000203430603);
+    let q8 = p(&mut sk, 261.29965684877084, 17.999990239354627);
+    let q9 = p(&mut sk, 261.2996563896866, 14.999658630968955);
+    let q10 = p(&mut sk, 264.2999879980585, 14.999658425879225);
+    let q11 = p(&mut sk, 264.29998779296875, -199.68319702148438);
+    let q12 = p(&mut sk, 132.6999969099925, -200.41869870184232);
+    let q13 = p(&mut sk, 132.70000664704736, 14.999914669010384);
+    let q14 = p(&mut sk, 138.7000927694652, 21.000002034306);
+    let q15 = p(&mut sk, 261.2996571373922, 20.999990239354613);
+    let q16 = p(&mut sk, 267.2999879980585, 14.999658220812163);
+    let q17 = p(&mut sk, 267.29998779217385, -200.515301325916);
+    let q18 = p(&mut sk, 250.18151790191052, -228.99999999999997);
+    let q19 = p(&mut sk, 150.21784601923127, -228.99999999999997);
+    let q20 = p(&mut sk, 147.7000919487902, 14.99991399099723);
+    let q21 = p(&mut sk, 147.6999862401083, 29.999999292367608);
+    let q22 = p(&mut sk, 132.70000664704736, 14.999914669010384);
+    let q23 = p(&mut sk, 147.6999862401083, 29.999999292494888);
+    let q24 = p(&mut sk, 252.299646940298, 14.999658235142217);
+    let q25 = p(&mut sk, 267.2999879980585, 14.999658220812163);
+    let q26 = p(&mut sk, 252.2998471366095, 29.99999929229453);
+    let q27 = p(&mut sk, 252.29983022468727, 29.99999929241428);
+    let q28 = p(&mut sk, 147.69996588613836, 21.000126174977034);
+    let q29 = p(&mut sk, 147.6999658860796, 29.99999929250639);
+    let q30 = p(&mut sk, 138.7000927694652, 21.000002034306);
+    let q31 = p(&mut sk, 252.29964895019748, 20.999991105219507);
+    let q32 = p(&mut sk, 261.2996571373922, 20.999990239354613);
+    let q33 = p(&mut sk, 252.2996489503104, 29.999999292414277);
+    sk.add_line_pts(q0, q1, Some("l15")).unwrap();
+    sk.add_line_pts(q2, q3, Some("l37")).unwrap();
+    sk.add_line_pts(q3, q4, Some("l38")).unwrap();
+    sk.add_line_pts(q4, q5, Some("l39")).unwrap();
+    sk.add_arc(
+        v(138.7000936158169, 14.999915065490706),
+        v(138.7000931926349, 18.00000203430603),
+        v(135.70000664704736, 14.999914533408523),
+        [Some(q6), Some(q7), Some(q5)],
+        Some("a7"),
+    )
+    .unwrap();
+    sk.add_line_pts(q7, q8, Some("l40")).unwrap();
+    sk.add_arc(
+        v(261.2996563896866, 14.999658630968955),
+        v(264.2999879980585, 14.999658425879225),
+        v(261.29965684877084, 17.999990239354627),
+        [Some(q9), Some(q10), Some(q8)],
+        Some("a8"),
+    )
+    .unwrap();
+    sk.add_line_pts(q10, q11, Some("l41")).unwrap();
+    sk.add_line_pts(q11, q2, Some("l42")).unwrap();
+    sk.add_line_pts(q12, q13, Some("l43")).unwrap();
+    sk.add_arc(
+        v(138.7000936158169, 14.999915065490706),
+        v(138.7000927694652, 21.000002034306),
+        v(132.70000664704736, 14.999914669010384),
+        [Some(q6), Some(q14), Some(q13)],
+        Some("a9"),
+    )
+    .unwrap();
+    sk.add_line_pts(q14, q15, Some("l44")).unwrap();
+    sk.add_arc(
+        v(261.2996563896866, 14.999658630968955),
+        v(267.2999879980585, 14.999658220812163),
+        v(261.2996571373922, 20.999990239354613),
+        [Some(q9), Some(q16), Some(q15)],
+        Some("a10"),
+    )
+    .unwrap();
+    sk.add_line_pts(q16, q17, Some("l45")).unwrap();
+    sk.add_line_pts(q17, q18, Some("l46")).unwrap();
+    sk.add_line_pts(q18, q19, Some("l47")).unwrap();
+    sk.add_line_pts(q19, q12, Some("l48")).unwrap();
+    sk.add_arc(
+        v(147.7000919487902, 14.99991399099723),
+        v(147.6999862401083, 29.999999292367608),
+        v(132.70000664704736, 14.999914669010384),
+        [Some(q20), Some(q21), Some(q22)],
+        Some("c2"),
+    )
+    .unwrap();
+    sk.add_line_pts(q1, q23, Some("l49")).unwrap();
+    sk.add_arc(
+        v(252.299646940298, 14.999658235142217),
+        v(267.2999879980585, 14.999658220812163),
+        v(252.2998471366095, 29.99999929229453),
+        [Some(q24), Some(q25), Some(q26)],
+        Some("c3"),
+    )
+    .unwrap();
+    sk.add_line_pts(q0, q27, Some("l50")).unwrap();
+    sk.add_arc(
+        v(147.69996588613836, 21.000126174977034),
+        v(147.6999658860796, 29.99999929250639),
+        v(138.7000927694652, 21.000002034306),
+        [Some(q28), Some(q29), Some(q30)],
+        Some("c4"),
+    )
+    .unwrap();
+    sk.add_arc(
+        v(252.29964895019748, 20.999991105219507),
+        v(261.2996571373922, 20.999990239354613),
+        v(252.2996489503104, 29.999999292414277),
+        [Some(q31), Some(q32), Some(q33)],
+        Some("c5"),
+    )
+    .unwrap();
+    let ps = find_profiles(&sk);
+    // Between the 9 cap and the ring's top line: 104.6 x 9 and two quarter discs of 9.
+    let want = (252.29964895 - 147.69996589) * 9.0 + PI * 81.0 / 2.0;
+    let top = ps.iter().find(|p| ["l44", "c4"].iter().all(|c| p.outer_curves.iter().any(|o| o == c)));
+    let Some(top) = top else { panic!("no profile between the caps: {:?}", ps.iter().map(|p| (&p.outer_curves, p.area)).collect::<Vec<_>>()) };
+    assert!((top.area - want).abs() < 1e-2, "{} vs {want}", top.area);
+    for p in &ps {
+        assert!(p.region.outer.is_closed(1e-6), "{:?}", p.outer_curves);
+    }
+}
