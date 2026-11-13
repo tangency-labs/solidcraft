@@ -5,7 +5,10 @@
 //!
 //! Two planes crossing at a small angle θ meet in a line fixed only to `tol / sin θ`.
 //! Their distance is affine across the line: zero on it, growing linearly to either side.
-//! Take each side of the crossing. When on both sides a straight boundary edge of either
+//! The rule is for a crossing through both faces: each has a vertex strictly on either side
+//! of it. Two faces that meet only along their boundaries (a shared edge, from opposite
+//! sides, at any angle) have no pieces beside the line to pair, and are intersected as
+//! upstream does. Take each side of the crossing. When on both sides a straight boundary edge of either
 //! face spans the crossing's extent along the line, faces back toward the line (its face's
 //! interior lies between it and the line), and lies within the intersection tolerance of
 //! the other face's plane at both ends, then every point where both faces exist beside the
@@ -75,11 +78,13 @@ impl PlanePos {
 }
 
 /// Whether the crossing line of planar faces `fa` and `fb` (of the two operands) lies
-/// inside a coincident pair of their pieces (module docs): on both sides of the line a
+/// inside a coincident pair of their pieces (module docs): each face crosses the line, and
+/// on both sides of the line a
 /// straight boundary edge of either face spans the crossing's extent, faces back toward the
 /// line and lies within the intersection tolerance of the other face's plane. `false` for
 /// any face that is not planar, for planes closer to parallel than `EFF_ZERO_SQRT`, and
-/// for faces whose projections onto the crossing's direction do not overlap.
+/// for faces whose projections onto the crossing's direction do not overlap, and for a
+/// face that does not reach both sides of the line.
 ///
 /// # Errors
 ///
@@ -118,6 +123,13 @@ pub(crate) fn crossing_inside_coincident_pair<O: ClassObject>(
     };
     let extent = (span_a.0.max(span_b.0), span_a.1.min(span_b.1));
     if extent.0 > extent.1 {
+        return Ok(false);
+    }
+    // Each face crosses the line: one of its vertices lies strictly above the other face's
+    // plane and one strictly below (beyond their rounding). Faces that only meet the line
+    // along their boundary, as two faces meeting along a shared edge from opposite sides,
+    // have no piece on both sides of it: there is no coincident pair, whatever the angle.
+    if !crosses_plane(k, brep, fa, pb)? || !crosses_plane(k, brep, fb, pa)? {
         return Ok(false);
     }
     // On fa, the side of the crossing a point lies on is the sign of its distance above
@@ -262,6 +274,35 @@ fn face_span<O: ClassObject>(
         }
     }
     Ok(span)
+}
+
+/// Whether `face` has an edge end strictly above `plane` and one strictly below, each
+/// beyond the rounding of its signed distance. The ends are points of the face, so its
+/// interior, which is connected, reaches both sides and the crossing line runs through it.
+fn crosses_plane<O: ClassObject>(
+    k: &Kernel,
+    brep: &impl IntersectorBrepP2<O>,
+    face: O,
+    plane: PlanePos,
+) -> Result<bool> {
+    let (mut above, mut below) = (false, false);
+    for edge in brep.face_edges(face)? {
+        let (Some(curve), Some(ivl)) = (
+            brep.edge_curve(edge).flatten().and_then(|c| brep.curve(c)),
+            brep.edge_interval(edge),
+        ) else {
+            continue;
+        };
+        for t in [ivl.min(), ivl.max()] {
+            let (g, rounding) = plane.signed_distance(curve.evaluate_point(k, t)?);
+            above |= g > rounding;
+            below |= g < -rounding;
+        }
+        if above && below {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The plane of `face` when its surface is planar with a valid normal.

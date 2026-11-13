@@ -1310,7 +1310,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             .ok_or(invalid(OP_INSERT_RELATE, "no other B-rep"))?;
 
         // Not upstream (#15718): a vertex of one operand within the intersection tolerance
-        // of a line edge of the other, off that edge's ends, is one point with its drop on
+        // of a line edge of the other, off that edge's ends and off its line by more than
+        // rounding (a near miss), is one point with its drop on
         // the edge, decided once here (the edge split there) for every curve through it;
         // and two line edges whose ends then lie within their intersection tolerance of
         // each other, end for end, are one coincident interval, where a crossing of the two
@@ -2570,8 +2571,12 @@ fn teardown_reads_freed<O: ClassObject>(mgr: &ProtoTopologyManager<O>) -> bool {
 /// once, before any intersection curve is classified, and every curve through the vertex
 /// reads it from the topology instead of deciding it again at its own end (where one curve
 /// saw the vertex on the edge and the next did not, and the intersection left a second edge
-/// a tolerance from the first). A vertex within that tolerance of an edge's end is that
-/// end's coincident vertex, which the vertex/vertex steps handle; a vertex near two edges
+/// a tolerance from the first). Only a near miss is split: a vertex on the edge's line to
+/// its rounding is its own drop, every curve through it meets the edge at the vertex itself
+/// and upstream's vertex/edge classification already decides it once (splitting the
+/// operands at every T-junction of piecewise boxes refused their booleans). A vertex within
+/// that tolerance of an edge's end is that end's coincident vertex, which the vertex/vertex
+/// steps handle; a vertex near two edges
 /// takes the first in the B-rep's list. Edges whose boxes lie farther than the tolerance from
 /// the vertex are never solved ([`SpatialIndex`]).
 ///
@@ -2626,14 +2631,25 @@ fn split_edges_at_vertices<O: ClassObject + SolutionObject + Ord>(
                     curve.evaluate_point(k, ivl.min())?,
                     curve.evaluate_point(k, ivl.max())?,
                 );
-                // on an end: that end's vertex, not a point inside the edge
-                if !(ends.0.distance(point) >= tol && ends.1.distance(point) >= tol) {
+                // the rounding of a distance between these points, or of the drop onto the
+                // line through them (the drop and the line evaluation, a few roundings of
+                // the coordinates)
+                let rounding = gamma(16) * (point.length() + ends.0.length() + ends.1.length());
+                // on an end: that end's vertex, not a point inside the edge (a split needs
+                // both ends certainly farther than the tolerance; a NaN refuses it)
+                if !(ends.0.distance(point) - rounding >= tol
+                    && ends.1.distance(point) - rounding >= tol)
+                {
                     break 'lines;
                 }
                 let dropped =
                     curve.drop_point(k, &ivl, point, None, tol, None, SolverOperation::Minimize)?;
+                // A vertex on the line to its rounding is its own drop: every curve through it
+                // meets the edge at the vertex itself, so there is no second point to decide.
+                let exact = dropped.distance <= rounding;
                 if dropped.success
-                    && dropped.distance < tol
+                    && !exact
+                    && dropped.distance + rounding < tol
                     && ivl.min() < dropped.parameter
                     && dropped.parameter < ivl.max()
                 {

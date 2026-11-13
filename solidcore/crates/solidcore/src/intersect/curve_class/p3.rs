@@ -2048,13 +2048,6 @@ impl<O: ClassObject> CurveClassification<O> {
     ) -> Result<()> {
         let ivl = self.at(index)?;
 
-        // no work - Mid already classified, or a 2D classification curve
-        if ivl.mid.point_class() != PointClassType::Unknown
-            || cc_curve(self, geometry, OP_EDGE_INTERVAL)?.dim() != 3
-        {
-            return Ok(());
-        }
-
         // the edge one of the interval's ends classifies to
         let edge = if ivl.start.point_class() == PointClassType::Edge {
             ivl.start.object()
@@ -2063,6 +2056,24 @@ impl<O: ClassObject> CurveClassification<O> {
         } else {
             None
         };
+
+        // Not upstream (#15718): without the fork's fix only a straight interval along a
+        // straight edge is decided (the certificate below). Anything else is left here,
+        // before any lookup that can fail, exactly as when the fix's caller made no call.
+        if !k.fixes.classify_edge_interval
+            && (ivl.mid.point_class() != PointClassType::Unknown
+                || !edge.is_some_and(|edge| straight_pair(self, geometry, edge)))
+        {
+            return Ok(());
+        }
+
+        // no work - Mid already classified, or a 2D classification curve
+        if ivl.mid.point_class() != PointClassType::Unknown
+            || cc_curve(self, geometry, OP_EDGE_INTERVAL)?.dim() != 3
+        {
+            return Ok(());
+        }
+
         let Some(edge) = edge else {
             return Ok(());
         };
@@ -2090,37 +2101,17 @@ impl<O: ClassObject> CurveClassification<O> {
             object_zone_tol_3d(k, geometry, Some(edge))?,
         );
 
-        // Not upstream: both curves straight. The distance from the interval to the edge's
-        // line is affine along the interval, so its two ends bound it, exactly up to the
-        // rounding counted here: the interval runs along the edge when both ends lie
-        // within the intersection tolerance of the edge's line, a certificate, not a
-        // sample. Always on; the fork's midpoint sample below stays opt-in for curves.
+        // Not upstream: both curves straight. The interval runs along the edge when both its
+        // ends lie within the intersection tolerance of the edge's line
+        // ([`straight_run_on_line`], a certificate, not a sample). Always on; the fork's
+        // midpoint sample below stays opt-in for curves.
         let curve = cc_curve(self, geometry, OP_EDGE_INTERVAL)?;
         let target = edge_curve(geometry, edge)?
             .ok_or_else(|| SolidError::intersect_missing(OP_EDGE_INTERVAL, "the edge's curve"))?;
         if matches!(curve.kind(), CurveKind::Line(_)) && matches!(target.kind(), CurveKind::Line(_))
         {
             let edge_ivl = edge_interval(geometry, edge)?;
-            let (e0, e1) = (
-                target.evaluate_point(k, edge_ivl.min())?,
-                target.evaluate_point(k, edge_ivl.max())?,
-            );
-            let along = e1 - e0;
-            let length = along.length();
-            let mut within = length > 0.0;
-            for t in [ivl.interval.min(), ivl.interval.max()] {
-                let p = curve.evaluate_point(k, t)?;
-                // |(p - e0) x along| / |along|: the differences carry an absolute error of a
-                // few units in the last place of the coordinates, which the direction
-                // `along / |along|` amplifies by |p - e0| / |along|; the cross product, its
-                // length and the division add a few relative roundings
-                let w = p - e0;
-                let rounding = gamma(16)
-                    * (p.length() + e0.length() + e1.length())
-                    * (1.0 + w.length() / length);
-                within &= w.cross(along).length() / length + rounding < xsect_tol_3d;
-            }
-            if within {
+            if straight_run_on_line(k, curve, &ivl.interval, target, &edge_ivl, xsect_tol_3d)? {
                 self.at_mut(index)?
                     .mid
                     .set_class_object(PointClassType::Edge, Some(edge));
@@ -2155,6 +2146,64 @@ impl<O: ClassObject> CurveClassification<O> {
         }
         Ok(())
     }
+}
+
+/// Not upstream (#15718): whether `curve` over `interval` runs along the line of
+/// `edge_curve` over `edge_interval` within `tol`, both curves lines. The distance from the
+/// interval to the edge's line is affine along it, so its two ends bound it, exactly up to
+/// the rounding counted here: a certificate, not a sample. `false` for a curve that is not
+/// a line and for an edge of zero length.
+///
+/// # Errors
+///
+/// Those of the end evaluations.
+pub(super) fn straight_run_on_line(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    edge_curve: &Curve,
+    edge_interval: &Extent1d,
+    tol: f64,
+) -> Result<bool> {
+    let line = |c: &Curve| matches!(c.kind(), CurveKind::Line(_));
+    if !line(curve) || !line(edge_curve) {
+        return Ok(false);
+    }
+    let (e0, e1) = (
+        edge_curve.evaluate_point(k, edge_interval.min())?,
+        edge_curve.evaluate_point(k, edge_interval.max())?,
+    );
+    let along = e1 - e0;
+    let length = along.length();
+    let mut within = length > 0.0;
+    for t in [interval.min(), interval.max()] {
+        let p = curve.evaluate_point(k, t)?;
+        // |(p - e0) x along| / |along|: the differences carry an absolute error of a few
+        // units in the last place of the coordinates, which the direction `along / |along|`
+        // amplifies by |p - e0| / |along|; the cross product, its length and the division
+        // add a few relative roundings
+        let w = p - e0;
+        let rounding =
+            gamma(16) * (p.length() + e0.length() + e1.length()) * (1.0 + w.length() / length);
+        within &= w.cross(along).length() / length + rounding < tol;
+    }
+    Ok(within)
+}
+
+/// Not upstream (#15718): whether the classification curve of `cc` and the curve of `edge`
+/// are both lines, read without failing: a handle that does not resolve is not straight.
+fn straight_pair<O: ClassObject>(
+    cc: &CurveClassification<O>,
+    geometry: &impl ClassGeometry<O>,
+    edge: O,
+) -> bool {
+    let line = |c: &Curve| matches!(c.kind(), CurveKind::Line(_));
+    let own = cc.curve().and_then(|c| geometry.curve(c)).is_some_and(line);
+    let target = match geometry.topology_entity(edge) {
+        Some((b, EntityRef::Edge(e))) => matches!(topo_edge::curve(b, e), Ok(Some(c)) if line(c)),
+        _ => false,
+    };
+    own && target
 }
 
 /// Whether `object` is an edge or vertex handle (used by the harness to keep stand-ins of

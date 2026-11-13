@@ -213,7 +213,9 @@ B-spline pair from the composed implicit field as `ssi/src/coincide.rs` does) is
 to tol / sin θ. When on both sides of the crossing a straight boundary edge of either face spans the
 crossing, faces back toward it and lies within the intersection tolerance of the other face's plane,
 the two faces lie within that tolerance of each other wherever both exist beside the crossing (their
-distance is affine across it): one coincident pair, and the crossing is no event. Upstream still makes
+distance is affine across it): one coincident pair, and the crossing is no event. The rule needs each
+face to cross the line (a vertex strictly on either side of the other plane); two faces meeting only
+along their boundaries, as at a shared edge, are intersected as upstream does. Upstream still makes
 the crossing an edge, whose ends are picked per body and never related, and `make_faceuse` then fails
 (`SM_ERR`). The port decides the rule from the planes and the bound edges before the face pair is
 intersected, and makes no curve, edge definition or vertex definition for such a crossing
@@ -221,15 +223,18 @@ intersected, and makes no curve, edge definition or vertex definition for such a
 `solidcore/tests/wr_614_coincident_strip_crossing.rs`). The rule is for planes only and the default.
 
 Two decisions it relies on are made once, before intersecting, for line edges. A vertex of one
-operand within the intersection tolerance of a line edge of the other, off its ends, is an event
-there: the edge is split at the vertex's drop and the two are one proto vertex
-(`split_edges_at_vertices`, `topology_intersector/p2.rs`). Two line edges whose ends then lie within
+operand within the intersection tolerance of a line edge of the other, off its ends and off its line
+by more than rounding (a near miss), is an event there: the edge is split at the vertex's drop and
+the two are one proto vertex (`split_edges_at_vertices`, `topology_intersector/p2.rs`). A vertex on
+the line to rounding is its own drop and stays with upstream's vertex/edge classification. Two line edges whose ends then lie within
 their intersection tolerance of each other, end for end, are one coincident interval (points at the
 same fraction along both are an affine distance apart, so the ends bound it), and a point where the
 two cross gets no vertex definition (`coincident_line_edges`;
 `ProtoTopologyManager::set_coincident_edges`). An interval of a straight intersection curve whose
 ends lie on one straight face edge is classified on that edge when both ends lie within the
-intersection tolerance of its line (`CurveClassification::classify_edge_interval`).
+intersection tolerance of its line (`CurveClassification::classify_edge_interval`). Such a certified
+run is coincident, not "maybe": upstream's `AreCoincidentMaybe` would remove it as mislabelled when
+it is short beside its edge, and the two edges were then never made one.
 
 **One point per proto vertex.** Each body classifies a curve end within its own band, so a point
 1.4e-5 from a vertex of each body classifies onto both even when the two vertices are 2.8e-5 apart,

@@ -337,8 +337,8 @@ fn flange_cut_exact(flange: &[Vec2; 4], cut: &[Vec2; 5]) -> [Vec<Vec2>; 3] {
 /// (V, and where the taper meets the side line x = left or the top line y = top, or its
 /// head, each within the stretch tx / sin(angle) of V along its line, when the taper passes
 /// within tx of V) may become one vertex anywhere among them, so each exact vertex within
-/// their diameter δ of V moves at most δ. Moving vertex p_i by δ changes the area by at most
-/// δ |p_(i+1) - p_(i-1)| / 2.
+/// their diameter δ of V moves at most δ. Moving vertex `p_i` by δ changes the area by at
+/// most `δ |p_(i+1) - p_(i-1)| / 2`.
 fn sliver_bound(exact: &[Vec2], corner: Vec2, foot: Vec2, head: Vec2, tx: f64) -> f64 {
     let w = v(head.x - foot.x, head.y - foot.y);
     let len = w.x.hypot(w.y);
