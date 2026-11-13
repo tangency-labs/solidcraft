@@ -1,4 +1,4 @@
-use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI};
+use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI};
 
 use super::*;
 
@@ -34,7 +34,7 @@ fn off_wall(c: Vec3, d: Vec3) -> f64 {
 
 fn wedge(theta: f64, style: Style) -> Wedge {
     let (a, b) = walls(theta);
-    wedge_relief(a, b, 10.0, 5.0, &opts(style))
+    wedge_relief(a, b, Vec3::Z, 10.0, 5.0, &opts(style))
         .unwrap()
         .unwrap()
 }
@@ -155,7 +155,7 @@ fn the_closed_form_areas_match_a_grid_count() {
                 // A minimal circle that reaches no wall at this angle: no relief.
                 let (a, b) = walls(theta);
                 assert_eq!(
-                    wedge_relief(a, b, 10.0, 5.0, &opts(style)).unwrap(),
+                    wedge_relief(a, b, Vec3::Z, 10.0, 5.0, &opts(style)).unwrap(),
                     Err(Skip::Unreached)
                 );
                 continue;
@@ -206,7 +206,7 @@ fn a_minimal_relief_stops_its_gap_short_of_the_corner() {
     );
     // A gap so large the circle reaches no wall: no relief.
     assert_eq!(
-        wedge_relief(a, b, 1.0, 1.0, &opts(Style::Minimal { gap: R })).unwrap(),
+        wedge_relief(a, b, Vec3::Z, 1.0, 1.0, &opts(Style::Minimal { gap: R })).unwrap(),
         Err(Skip::Unreached)
     );
 }
@@ -232,7 +232,7 @@ fn a_t_bone_bites_the_wall_it_is_told_to() {
     assert!(close(off_wall(short.centre, b), 0.0, 1e-12));
     // Equal walls: Longer takes the first, Shorter the second.
     let eq = |side| {
-        wedge_relief(a, b, 3.0, 3.0, &opts(Style::TBone { side }))
+        wedge_relief(a, b, Vec3::Z, 3.0, 3.0, &opts(Style::TBone { side }))
             .unwrap()
             .unwrap()
             .centre
@@ -256,6 +256,51 @@ fn a_t_bone_bites_the_wall_it_is_told_to() {
 }
 
 #[test]
+fn a_t_bone_bites_every_corner_of_a_square_pocket_the_same_way_round() {
+    // A 20 mm square pocket turned about z and moved off the origin, its corners counter-clockwise,
+    // each given with either face first and its edge either way up. Its walls are equal by
+    // design, their measured lengths only up to rounding. Every corner bites the same way round,
+    // so a quarter turn takes each relief's centre (from its corner) to the next corner's.
+    let square = [(-10.0, -10.0), (10.0, -10.0), (10.0, 10.0), (-10.0, 10.0)];
+    for turn in [0.0, 0.3, FRAC_PI_4, 1.0, 2.5, -2.0] {
+        let (c, s) = (f64::cos(turn), f64::sin(turn));
+        let at = |k: usize| {
+            let (x, y) = square[k % 4];
+            Point3::new(x * c - y * s + 123.4, x * s + y * c - 56.7, 8.9)
+        };
+        let centres: Vec<Vec3> = (0..4)
+            .map(|k| {
+                let (p, next, prev) = (at(k), at(k + 1), at(k + 3));
+                let a = (next - p).unitize().unwrap();
+                let b = (prev - p).unitize().unwrap();
+                let (la, lb) = (p.distance(next), p.distance(prev));
+                let (walls, lengths) = if k % 2 == 0 {
+                    ([a, b], [la, lb])
+                } else {
+                    ([b, a], [lb, la])
+                };
+                let top = p + Vec3::Z * 5.0;
+                let edge = if k < 2 {
+                    Edge { start: p, end: top }
+                } else {
+                    Edge { start: top, end: p }
+                };
+                let o = opts(Style::TBone { side: Side::Longer });
+                relief_cylinder(&edge, walls, lengths, [0.0, 0.0], &o)
+                    .unwrap()
+                    .unwrap()
+                    .base
+                    - edge.start
+            })
+            .collect();
+        for k in 0..4 {
+            let quarter = Vec3::new(-centres[k].y, centres[k].x, centres[k].z);
+            assert!(close3(quarter, centres[(k + 1) % 4]), "{turn} {k}");
+        }
+    }
+}
+
+#[test]
 fn corners_more_open_than_the_largest_angle_are_skipped() {
     let (a, b) = walls(FRAC_PI_2 + 0.01);
     let square_only = Options {
@@ -264,12 +309,14 @@ fn corners_more_open_than_the_largest_angle_are_skipped() {
         max_angle: FRAC_PI_2,
     };
     assert_eq!(
-        wedge_relief(a, b, 1.0, 1.0, &square_only).unwrap(),
+        wedge_relief(a, b, Vec3::Z, 1.0, 1.0, &square_only).unwrap(),
         Err(Skip::TooOpen)
     );
     // A square corner computed with rounding is still relieved.
     let (a, b) = walls(FRAC_PI_2 + 1e-9);
-    assert!(wedge_relief(a, b, 1.0, 1.0, &square_only).unwrap().is_ok());
+    assert!(wedge_relief(a, b, Vec3::Z, 1.0, 1.0, &square_only)
+        .unwrap()
+        .is_ok());
 }
 
 /// A face along an edge for [`edge_corner`] and [`edge_relief`], with no sides.
@@ -300,7 +347,10 @@ fn hostile_options_and_points_are_refused() {
             style: Style::Normal,
             max_angle: PI,
         };
-        assert!(wedge_relief(a, b, 1.0, 1.0, &o).is_err(), "{radius}");
+        assert!(
+            wedge_relief(a, b, Vec3::Z, 1.0, 1.0, &o).is_err(),
+            "{radius}"
+        );
         assert!(edge_relief(&up, &pocket, [NO_FACES, NO_FACES], &o).is_err());
     }
     for gap in [-0.1, f64::NAN, f64::INFINITY] {
@@ -318,12 +368,13 @@ fn hostile_options_and_points_are_refused() {
     assert!(wedge_relief(
         Vec3::new(f64::NAN, 0.0, 0.0),
         b,
+        Vec3::Z,
         1.0,
         1.0,
         &opts(Style::Normal)
     )
     .is_err());
-    assert!(wedge_relief(a, b, f64::NAN, 1.0, &opts(Style::Normal)).is_err());
+    assert!(wedge_relief(a, b, Vec3::Z, f64::NAN, 1.0, &opts(Style::Normal)).is_err());
     assert!(edge_corner(
         &edge(Vec3::ZERO, Vec3::ZERO),
         &[face(Vec3::X, true), face(Vec3::X, true)]

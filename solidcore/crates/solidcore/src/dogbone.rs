@@ -54,10 +54,12 @@ const MIN_BITE: f64 = STRAIGHT;
 /// Which wall a T-bone's bite is cut into.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Side {
-    /// The longer of the two walls (the first, `a`, when they are equally long).
+    /// The longer of the two walls. Of two equally long walls, the one from which the void turns
+    /// counter-clockwise about the edge's axis (see [`wedge_relief`]), so every corner of a
+    /// square pocket bites the same way round.
     #[default]
     Longer,
-    /// The shorter of the two walls (the second, `b`, when they are equally long).
+    /// The shorter of the two walls; of two equally long walls, the one `Longer` does not take.
     Shorter,
 }
 
@@ -140,9 +142,18 @@ struct Wedge {
 }
 
 /// The relief of the inside corner whose walls leave it in unit directions `a` and `b`, the void
-/// the wedge between them, walls `la` and `lb` long (only a T-bone reads them, to choose its
-/// side). The walls are those [`edge_corner`] gives a concave corner: neither in line nor folded
-/// back onto each other.
+/// the wedge between them, walls `la` and `lb` long, along an edge in unit direction `axis` (only
+/// a T-bone reads the lengths and the axis, to choose its side). The walls are those
+/// [`edge_corner`] gives a concave corner: neither in line nor folded back onto each other.
+///
+/// Walls whose lengths differ by at most [`STRAIGHT`] times the longer are equally long: lengths
+/// measured between a record's points differ by rounding far below that, and a square pocket's
+/// walls are equal by design. Of two equally long walls a T-bone's `Longer` takes the one from
+/// which the void turns counter-clockwise (`(a × b) · up > 0` takes `a`), `up` being `axis` turned
+/// so that its largest component (the first of equal ones) is positive: the choice depends on
+/// neither the order of the faces nor the edge's direction in the record, and every corner of a
+/// pocket cut along a coordinate axis bites the same way round, however the pocket is turned
+/// about that axis.
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for options out of range, a direction or length that is not
@@ -150,12 +161,13 @@ struct Wedge {
 fn wedge_relief(
     a: Vec3,
     b: Vec3,
+    axis: Vec3,
     la: f64,
     lb: f64,
     options: &Options,
 ) -> Result<std::result::Result<Wedge, Skip>> {
     let o = options.checked()?;
-    if !(a.is_finite() && b.is_finite() && la.is_finite() && lb.is_finite()) {
+    if !(a.is_finite() && b.is_finite() && axis.is_finite() && la.is_finite() && lb.is_finite()) {
         return Err(invalid("a corner's walls must be finite"));
     }
     let angle = a.angle_between(b)?;
@@ -171,9 +183,14 @@ fn wedge_relief(
         Style::Normal => bisector * r,
         Style::Minimal { gap } => bisector * (r + gap),
         Style::TBone { side } => {
+            let longer_is_a = if (la - lb).abs() <= STRAIGHT * la.max(lb) {
+                a.cross(b).dot(up(axis)) > 0.0
+            } else {
+                la > lb
+            };
             let a_first = match side {
-                Side::Longer => la >= lb,
-                Side::Shorter => la < lb,
+                Side::Longer => longer_is_a,
+                Side::Shorter => !longer_is_a,
             };
             (if a_first { a } else { b }) * r
         }
@@ -182,6 +199,22 @@ fn wedge_relief(
         return Ok(Err(Skip::Unreached));
     }
     Ok(Ok(Wedge { centre }))
+}
+
+/// `axis` turned so that its component of largest size (the first of equal ones) is positive.
+fn up(axis: Vec3) -> Vec3 {
+    let c = [axis.x, axis.y, axis.z];
+    let mut big = c[0];
+    for v in &c[1..] {
+        if v.abs() > big.abs() {
+            big = *v;
+        }
+    }
+    if big < 0.0 {
+        -axis
+    } else {
+        axis
+    }
 }
 
 /// Whether the circle of radius `r` about `centre` (relative to the corner) bites the wall that
@@ -492,7 +525,7 @@ fn relief_cylinder(
         .map_err(|_| invalid("an edge of zero length"))?;
     let [wa, wb] = walls;
     let [la, lb] = lengths;
-    let w = match wedge_relief(wa, wb, la, lb, &o)? {
+    let w = match wedge_relief(wa, wb, axis, la, lb, &o)? {
         Ok(w) => w,
         Err(skip) => return Ok(Err(skip)),
     };
