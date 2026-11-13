@@ -1547,8 +1547,10 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         ))?;
         ignored(copy.trim(k, &mut final_ivl, TrimMode::Notify))?;
 
-        // reparameterize the OtherCurveCopy to the ThisEdge Interval
-        ignored(copy.edit_parameterization(k, &this_edge_ivl))?;
+        // reparameterize the OtherCurveCopy to the ThisEdge Interval (not upstream, #15505:
+        // exactly, as ThisEdge keeps its interval; ends the same within the scaled zero
+        // were left outside the copy's natural interval)
+        ignored(copy.edit_parameterization_exactly(k, &this_edge_ivl))?;
 
         // when needed reverse parameterization
         if (((start_start_close && start_end_close) || (end_start_close && end_end_close))

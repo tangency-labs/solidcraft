@@ -2193,6 +2193,7 @@ fn project_and_trim_body(
     mut tol: f64,
 ) -> Result<()> {
     // Process each surface
+    let mut imprinted: Vec<EdgeId> = Vec::new();
     for (ii, &face) in projected.faces.iter().enumerate() {
         let c3 = projected.curves_3d.get(ii).cloned();
         let uv = projected.uv_curves.get(ii).cloned().flatten();
@@ -2210,8 +2211,9 @@ fn project_and_trim_body(
             }
         }
         let curve_ref = |e: EdgeId, _type_code: i64| (env.keys)(CacheObject::Curve(e));
-        let _ =
+        let (_, edges) =
             merge_curves_on_surface(k, b, notify, &curve_ref, face, tol, &c3, Some(&uv), false)?;
+        imprinted.extend(edges);
     }
 
     // If we're just Splitting, then we're done.
@@ -2222,7 +2224,9 @@ fn project_and_trim_body(
     // Turn off editing for classification.
     let editing = b.editing_enabled();
     b.set_editing_enabled(false);
-    let to_delete = faces_to_delete(k, b, env, curve, direction, reference, trim_type, tol);
+    let to_delete = faces_to_delete(
+        k, b, env, curve, direction, reference, trim_type, tol, &imprinted,
+    );
     b.set_editing_enabled(editing);
     let to_delete = to_delete?;
 
@@ -2259,6 +2263,33 @@ fn side_vote(
     }
 }
 
+/// Whether the projected curve ends inside `face` (not upstream, #13697, WR-781): one
+/// of the edges the projection imprinted is used twice by one loop of the face, once in
+/// each direction, so the face lies on both sides of it. An edge that cuts the face in
+/// two is used once by each part. An imprinted edge that a later imprint merged away is
+/// skipped.
+fn ends_inside(b: &Brep, face: FaceId, imprinted: &[EdgeId]) -> Result<bool> {
+    for &edge in imprinted {
+        let Ok(record) = b.edge(edge) else {
+            continue;
+        };
+        let mut loops = Vec::new();
+        for &eu in &record.edgeuses {
+            if eu1::face(b, eu)? != Some(face) {
+                continue;
+            }
+            let Some(lu) = eu1::loopuse(b, eu)? else {
+                continue;
+            };
+            if loops.contains(&lu) {
+                return Ok(true);
+            }
+            loops.push(lu);
+        }
+    }
+    Ok(false)
+}
+
 /// Classifies each face against the plane of the projected curve: by the votes of
 /// its vertices, else of its edges' mid-points, else by a ray along the projection
 /// direction.
@@ -2271,6 +2302,7 @@ fn faces_to_delete(
     reference: Point3,
     trim_type: TrimType,
     tol: f64,
+    imprinted: &[EdgeId],
 ) -> Result<Vec<FaceId>> {
     let mut to_delete = Vec::new();
     let mut edges: Vec<EdgeId> = Vec::new();
@@ -2325,8 +2357,19 @@ fn faces_to_delete(
 
         let mut face_right_side = i32::from(right_votes >= left_votes);
 
-        if right_votes == left_votes {
-            // Make a face shape with the face and its edges and vertices.
+        // (not upstream, #13697, WR-781) A face the curve ends inside is not cut in
+        // two, and neither is one with votes on both sides. Upstream gives such a face
+        // to the side with more votes, so the count of its corners decides, and the face
+        // under the reference point can go to the other side. It is judged like a tie,
+        // by its point nearest the reference point.
+        let uncut = (right_votes > 0 && left_votes > 0) || ends_inside(b, face, imprinted)?;
+        if right_votes == left_votes || uncut {
+            // Make a face shape with the face and its edges and vertices. The edges
+            // were collected only for a face without a vertex vote; upstream's list
+            // otherwise still holds the edges of an earlier face (not upstream, WR-781).
+            if right_votes > 0 || left_votes > 0 {
+                edges = face_edges(b, face)?;
+            }
             let edge_keys: Vec<_> = edges.iter().map(|&e| (env.brep_id, e)).collect();
             let vertex_keys: Vec<_> = vertices.iter().map(|&v| (env.brep_id, v)).collect();
             let shape = Shape::new(
@@ -3584,5 +3627,75 @@ mod tests {
         assert_eq!(side_vote(&k, &narrow, on_curve, Vec3::Z, 1e-6), Ok(None));
         assert_eq!(side_vote(&k, &wide, below, Vec3::Z, 1e-6), Ok(Some(1)));
         assert!(side_vote(&k, &narrow, below, Vec3::Z, 1e-6).is_err());
+    }
+
+    /// #13697: a cutting line that ends inside a face does not cut the face in two, so
+    /// the face holds the reference point whichever side of the line that point is on,
+    /// and a trim that keeps the reference point's side keeps the face. The line runs
+    /// along x = 0.5 and ends at y = 0.5, half-way up each outline. The hexagon is the
+    /// square with two more corners right of the line: it has one corner left of the
+    /// line and three right of it, and was deleted for a reference point on the left.
+    /// The pentagon has both its voting corners right of the line, and was deleted too.
+    #[test]
+    fn a_face_the_curve_ends_inside_is_kept_with_the_reference_point() {
+        use crate::primitive::{api_curves, api_trim_ops};
+        let segment = |a: (f64, f64), b: (f64, f64), z: f64| {
+            let line =
+                api_curves::create_line_segment(Point3::new(a.0, a.1, z), Point3::new(b.0, b.1, z));
+            Curve::from(line.unwrap())
+        };
+        // the number of faces left, and the x range of their vertices
+        let trim = |outline: &[(f64, f64)], end: f64, reference: (f64, f64)| {
+            let mut k = Kernel::default();
+            let sides: Vec<Curve> = (0..outline.len())
+                .map(|i| segment(outline[i], outline[(i + 1) % outline.len()], 0.0))
+                .collect();
+            let mut b = api_trim_ops::create_planar_faces(&mut k, &sides).unwrap();
+            let cutter = segment((0.5, -1.0), (0.5, end), 1.0);
+            let reference = Point3::new(reference.0, reference.1, 0.0);
+            api_trim_ops::project_and_trim(&mut k, &mut b, &cutter, Vec3::Z, reference).unwrap();
+            let faces = p1::faces(&b, None).unwrap();
+            let mut range = (f64::MAX, f64::MIN);
+            for &face in &faces {
+                for vertex in face_vertices(&b, face).unwrap() {
+                    let x = b.vertex(vertex).unwrap().point.x;
+                    range = (range.0.min(x), range.1.max(x));
+                }
+            }
+            (faces.len(), range)
+        };
+        let square = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        let hexagon = [
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (1.2, 0.1),
+            (1.2, 0.3),
+            (1.0, 1.0),
+            (0.0, 1.0),
+        ];
+        // the square without its lower left corner: its two voting corners are both
+        // right of the line
+        let pentagon = [(0.6, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.6)];
+        let (left, right) = ((0.25, 0.25), (0.75, 0.25));
+        // the line ends inside the face: the whole face is kept
+        for reference in [left, right] {
+            assert_eq!(
+                trim(&square, 0.5, reference),
+                (1, (0.0, 1.0)),
+                "{reference:?}"
+            );
+            assert_eq!(
+                trim(&hexagon, 0.5, reference),
+                (1, (0.0, 1.2)),
+                "{reference:?}"
+            );
+        }
+        assert_eq!(trim(&pentagon, 0.5, (0.25, 0.4)), (1, (0.0, 1.0)));
+        assert_eq!(trim(&pentagon, 0.5, right), (1, (0.0, 1.0)));
+        // the line crosses the face: the part on the reference point's side is kept
+        assert_eq!(trim(&square, 2.0, left), (1, (0.0, 0.5)));
+        assert_eq!(trim(&square, 2.0, right), (1, (0.5, 1.0)));
+        assert_eq!(trim(&hexagon, 2.0, left), (1, (0.0, 0.5)));
+        assert_eq!(trim(&hexagon, 2.0, right), (1, (0.5, 1.2)));
     }
 }

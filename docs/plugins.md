@@ -43,8 +43,20 @@ manifest asks for the group in `permissions.command_groups` and the user grants 
 File access requires approved folder grants. The reserved `net` permission is
 refused with a typed error. Traps, missing permissions, failed commands, limits
 and invalid manifest fields return structured errors. Later phases add
-import/export, author tooling, installation and browser execution after the
+import/export, author tooling and browser execution after the
 phase 1 design review.
+
+## Installing
+
+Install plugin… on Preferences › Plugins (desktop only) picks a plugin `.zip`, shows its name, version, summary and
+what it asks for, and installs it on Install. `plugin.install` does the same for programs:
+`{"path": "gears.zip"}` installs, `"dry_run": true` only checks and describes it, and replacing an
+installed plugin of the same id needs `"replace": true`. The `.zip` holds one plugin, `plugin.json`
+and its component, at its top or in one top-level folder. Before anything is written the host parses
+the manifest (refusing unknown or newer capabilities), and refuses absolute paths, `..`, symlinks
+and device entries, entries over 16 MiB and more than 64 MiB unpacked. It unpacks into a hidden
+folder beside the installed plugins and renames that to `plugins/<id>/`; the plugin's entries
+resolve at once, with no restart. Installing runs no plugin code.
 
 ## Plugin data in a design
 

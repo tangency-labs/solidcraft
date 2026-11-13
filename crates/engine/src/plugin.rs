@@ -31,9 +31,20 @@ pub struct AppState {
     /// Sensitive command groups ([`COMMAND_GROUPS`]) the user granted. A plugin calls a grouped
     /// command only when its manifest asks for the group too.
     pub command_groups: BTreeSet<String>,
+    /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
+    /// `plugins` folder ([`crate::recovery::data_dir`]).
+    pub plugins_dir: Option<PathBuf>,
 }
 
 impl AppState {
+    /// The installed plugins' folder, if this platform has one.
+    pub fn plugins_dir(&self) -> Option<PathBuf> {
+        if cfg!(target_arch = "wasm32") {
+            return None;
+        }
+        self.plugins_dir.clone().or_else(|| crate::recovery::data_dir().map(|p| p.join("plugins")))
+    }
+
     /// Discovery must not replace a package path explicitly selected by inspection.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn register_discovered(&mut self, id: String, path: String) {
@@ -181,6 +192,7 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
     }
 }
 
+pub mod install;
 #[cfg(test)]
 mod tests;
 

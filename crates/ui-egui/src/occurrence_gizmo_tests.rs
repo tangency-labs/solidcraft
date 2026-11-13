@@ -139,3 +139,35 @@ fn an_occurrence_ring_dragged_back_to_its_start_leaves_it_there() {
         assert!((got - want).abs() < 1e-9, "{world:?} != {before:?}");
     }
 }
+
+/// The triad sits on the part, wherever its component's origin is: a part modelled away from
+/// that origin must not be turned and moved from over there. The part turns on the spot.
+#[test]
+fn occurrence_triad_sits_on_the_part_and_turns_it_there() {
+    let mut h = Harness::new();
+    let part = h.app.run("component.create", json!({"name":"Block","grounded":false})).unwrap();
+    let first = part["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":20,"height":30,"corner":[100,40,0]})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    let centre = Vec3::new(105., 50., 15.);
+    h.app.cam = h.app.cam.looking_from(Vec3::new(1.0, 0.8, 0.6));
+    h.app.cam.target = centre;
+    h.app.cam.distance = 200.;
+    h.frames(3);
+    let target = Target::Occurrence { path: vec![first] };
+    let item = context_menu::items(&h.app, &target).into_iter().find(|item| item.id == "ui.moveOccurrence").unwrap();
+    context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+    h.frames(3);
+    let at = crate::browser::occurrence_triad_model(&h.app).unwrap().center;
+    assert!((at - centre).len() < 1e-6, "triad at {at:?}, part at {centre:?}");
+
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let t = crate::browser::occurrence_triad_model(&h.app).unwrap();
+    let grip = crate::gizmo::ring_grip(&proj, &t, 0).unwrap();
+    let [start, end] = [grip, grip + 35.].map(|a| crate::gizmo::handle_point("rx", Vec3::ZERO, a).unwrap());
+    h.step(&json!({"drag":[{"world":[start.x,start.y,start.z]},{"world":[end.x,end.y,end.z]}],"steps":12})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.tree.occurrence_move.as_ref().unwrap().angles.map(|a| a.round()), [35., 0., 0.]);
+    let bounds = h.app.session.world_state().unwrap().bodies.first().unwrap().mesh().bounds();
+    assert!((bounds.center() - centre).len() < 1e-6, "the part stays where it is: {bounds:?}");
+}

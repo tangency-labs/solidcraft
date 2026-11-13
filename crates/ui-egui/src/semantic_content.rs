@@ -18,8 +18,6 @@ pub struct ContentOwner(pub u64);
 impl ContentOwner {
     pub const BROWSER: Self = Self(0);
     pub const HISTORY: Self = Self(1);
-    /// The design tree over the view while a dialog holds the left column (`dialog_tree`, #6710).
-    pub const DESIGN_TREE: Self = Self(2);
 }
 
 /// Runtime identity of the document and presentation which produced an interaction.
@@ -38,12 +36,8 @@ pub(crate) struct FeatureDrag {
 /// Existing row compositions. This interface deliberately contains no panel or host policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ContentRequest {
-    Browser {
-        shrink_height: bool,
-    },
+    Browser { shrink_height: bool },
     ActiveBodiesOrigin,
-    /// The design's Origin, Bodies and Construction rows, for `dialog_tree` (#6710).
-    DesignTree,
 }
 
 pub type DrawnRow = (String, Rect, Option<Rect>, Option<bool>);

@@ -954,18 +954,35 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
     Some(snap)
 }
 
-/// A woken snap point picked in a joint origin input (#11227) stands for the edge or face that
-/// woke it when that item's own snap is there (a hole's centre, an edge's middle, a face's
-/// centre): the joint keeps it by name, as a pick of the item itself would. Any other woken point
-/// (an arc's end, a cylinder's far end) stays a point.
-/// `snaps`: whether the dialog's active input takes joint snaps ([`takes_snaps`]).
+/// A pick in a joint origin input, given the woken snap points (#11227, #11476):
+/// - an edge of the woken flat face is the face's point on it (a straight edge's middle, a
+///   hole's centre), so it lies on the face as the face's other points do;
+/// - a woken point that is its item's own snap (a hole's centre, an edge's middle, a face's
+///   centre) stands for that item, or for a face of its body crossed on the way to its centre:
+///   the joint keeps it by name, as a pick of the item itself would. Any other woken point (a
+///   corner, an arc's end, a cylinder's far end) stays a point.
+///
+/// Only the woken item's own body counts: another body's point or edge there is that body's.
+/// `snaps`: whether the dialog's active input takes joint snaps ([`takes_snaps`]). The caller
+/// says so, because the overlay draws with the dialog held apart from `app`.
 pub(crate) fn woken_pick(app: &SolveApp, snaps: bool, sel: Sel) -> Sel {
+    use solidcraft_engine::snap::SnapKind as Kind;
+    let woken = &app.viewport.woken;
+    if !snaps {
+        return sel;
+    }
+    if let (Sel::Edge { body, .. }, Some(Sel::Face { body: face_body, .. })) = (&sel, woken.item.as_ref())
+        && body == face_body
+        && let Some(own) = picked_snap(app, &sel)
+        && let Some(p) =
+            woken.points.iter().find(|p| matches!(p.kind, Kind::Middle | Kind::Centre) && p.at.dist(own.at) <= 1e-4 * (1.0 + own.at.len()))
+    {
+        return Sel::Vertex { body: body.clone(), point: p.at };
+    }
     let Sel::Vertex { body, point } = &sel else { return sel };
     let tol = 1e-4 * (1.0 + point.len());
-    let woken = &app.viewport.woken;
-    // Only the woken item's own body: another body's point there is that body's.
     let of_body = |i: &&Sel| matches!(i, Sel::Edge { body: b, .. } | Sel::Face { body: b, .. } if b == body);
-    if !snaps || !woken.points.iter().any(|p| p.at.dist(*point) <= tol) {
+    if !woken.points.iter().any(|p| p.at.dist(*point) <= tol) {
         return sel;
     }
     // The rim's item, or a face of its body crossed on the way to its centre.
@@ -1020,6 +1037,62 @@ pub(crate) fn picked_snap(app: &SolveApp, sel: &Sel) -> Option<SnapPt> {
     }
     memo.snaps.push((sel.clone(), snap.clone()));
     snap
+}
+
+/// Where a woken point picked in a joint origin input came from, when a hovered flat face
+/// offered it (#11476): one of the face's corners, edge middles or hole centres, with the face,
+/// its outward normal and the edge. `None` for anything else, the face's own centre included
+/// (that one is picked as the face, [`woken_pick`]). `snaps`: the active input takes joint
+/// origins (the caller knows: the overlay holds the dialog apart from `app`).
+pub(crate) fn face_point_source(
+    app: &SolveApp,
+    snaps: bool,
+    sel: &Sel,
+) -> Option<(solidcraft_engine::snap::SnapKind, solidcraft_engine::snap::SnapSource)> {
+    use solidcraft_engine::snap::SnapKind as Kind;
+    let Sel::Vertex { point, .. } = sel else { return None };
+    let item = app.viewport.woken.item.as_ref().filter(|i| snaps && matches!(i, Sel::Face { .. }))?;
+    let tol = 1e-4 * (1.0 + point.len());
+    solidcraft_engine::snap::snap_points_from(&app.session, item)
+        .into_iter()
+        .find(|(p, from)| p.at.dist(*point) <= tol && matches!(p.kind, Kind::End | Kind::Middle | Kind::Centre) && from.normal.is_some())
+        .map(|(p, from)| (p.kind, from))
+}
+
+/// A face's corner, edge middle or hole centre as a joint origin that lies on the face: z along
+/// the face's outward normal, the face, edge and corner kept by name (`joint.create`'s `edge`
+/// with `on` and no `z`; a hole's `circle`).
+fn face_tied(s: &Session, sel: &Sel, kind: solidcraft_engine::snap::SnapKind, from: &solidcraft_engine::snap::SnapSource) -> Option<SnapPt> {
+    use solidcraft_engine::snap::SnapKind as Kind;
+    let Sel::Vertex { body, point } = sel else { return None };
+    let (face, normal) = (from.face?, from.normal?);
+    let (kind, mut param) = match kind {
+        Kind::End => (SnapKind::Vertex, json!({"edge": pt(from.edge?), "corner": pt(*point), "on": pt(face)})),
+        Kind::Middle => (SnapKind::EdgeMid, json!({"edge": pt(from.edge?), "on": pt(face)})),
+        Kind::Centre => (SnapKind::CircleCenter, json!({"circle": pt(*point), "z": pt(normal)})),
+        _ => return None,
+    };
+    if let (Some(occ), Value::Object(m)) = (occurrence_of_body(s, body), &mut param) {
+        m.insert("occurrence".into(), json!(occ));
+    }
+    Some(SnapPt { at: *point, z: normal, kind, param })
+}
+
+/// The snap an input's pick stands for: tied to the face it came from when a hovered face
+/// offered it ([`SelInput::from_face`]), else the pick's own snap ([`picked_snap`]).
+pub fn snap_in(app: &SolveApp, input: &SelInput, sel: &Sel) -> Option<SnapPt> {
+    input
+        .from_face
+        .iter()
+        .find(|(x, ..)| x == sel)
+        .and_then(|(_, kind, from)| face_tied(&app.session, sel, *kind, from))
+        .or_else(|| picked_snap(app, sel))
+}
+
+/// The snap under the pointer in a joint origin input: tied to the hovered face when the face
+/// offered it, else the pick's own snap ([`picked_snap`]).
+fn snap_hovered(app: &SolveApp, sel: &Sel) -> Option<SnapPt> {
+    face_point_source(app, true, sel).and_then(|(kind, from)| face_tied(&app.session, sel, kind, &from)).or_else(|| picked_snap(app, sel))
 }
 
 /// A snap moved across its own plane by (x, y) (the joint's offset), as an explicit frame.
@@ -1746,7 +1819,7 @@ fn occurrences(s: &Session, items: &[Sel]) -> Vec<u64> {
 pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
     let snap = |i: usize, what: &str| -> Result<SnapPt, String> {
-        sel_items(inputs, i).first().and_then(|x| picked_snap(app, x)).ok_or_else(|| format!("select {what} first"))
+        inputs.get(i).and_then(|inp| inp.items.first().and_then(|x| snap_in(app, inp, x))).ok_or_else(|| format!("select {what} first"))
     };
     let eval = |e: &str, kind: ValueKind| -> Result<f64, String> {
         if e.trim().is_empty() { Ok(0.0) } else { crate::length_input::eval(&s.doc, e, kind).map_err(|e| e.to_string()) }
@@ -1814,7 +1887,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 if !custom_name.is_empty() {
                     p["name"] = json!(custom_name);
                 }
-                if let Some(x) = sel_items(inputs, 1).first().and_then(|x| picked_snap(app, x)) {
+                if let Some(x) = inputs.get(1).and_then(|inp| inp.items.first().and_then(|x| snap_in(app, inp, x))) {
                     p["at"] = x.param;
                 }
                 return Ok(cmd("joint.as_built", p));
@@ -2051,7 +2124,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         .iter()
         .enumerate()
         .filter(|(_, i)| i.accept == SNAPS)
-        .filter_map(|(n, i)| i.items.first().and_then(|x| picked_snap(app, x)).map(|s| (s, if n == 0 { t.accent } else { t.warning })))
+        .filter_map(|(n, i)| i.items.first().and_then(|x| snap_in(app, i, x)).map(|s| (s, if n == 0 { t.accent } else { t.warning })))
         .collect();
     for (n, (s, c)) in picked.iter().enumerate() {
         let tag = format!("Component {}", n + 1);
@@ -2064,7 +2137,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         Some(sel) => {
             let fresh = !matches!(hover, Some((s, _)) if *s == sel);
             if fresh {
-                *hover = Some((sel.clone(), picked_snap(app, &sel)));
+                *hover = Some((sel.clone(), snap_hovered(app, &sel)));
             }
             if let Some((_, Some(s))) = hover.as_ref() {
                 glyph(painter, proj, s, t.hover_profile_edge, app.cam.half_height(), Some(snap_tag(s)));
@@ -2074,11 +2147,34 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     }
 }
 
-/// A snap: its kind's marker at the point and the z axis as an arrow.
+/// A snap: the plane square to its z as a disc about the point, its kind's marker at the point and
+/// the z axis as an arrow.
 fn glyph(painter: &egui::Painter, proj: &Proj, s: &SnapPt, col: Color32, half_height: f64, tag: Option<&str>) {
     let Some(c) = proj.to_screen(s.at) else { return };
     let len = half_height * 2.0 * 0.06;
+    plane_disc(painter, proj, s.at, s.z, len * 0.5, col);
     crate::icons::markers::snap(painter, c, proj.to_screen(s.at + s.z * len), s.kind, col, tag);
+}
+
+/// The plane a joint origin's z stands square to, as a circle of radius `r` about its point, so
+/// the face it lies on reads at a glance however the arrow is foreshortened (#11476).
+fn plane_disc(painter: &egui::Painter, proj: &Proj, at: Vec3, z: Vec3, r: f64, col: Color32) {
+    const SIDES: usize = 48;
+    let Some(z) = z.normalized() else { return };
+    let (ax, ay) = (z.any_perp(), z.cross(z.any_perp()));
+    let rim: Vec<Pos2> = (0..SIDES)
+        .filter_map(|i| {
+            let a = std::f64::consts::TAU * i as f64 / SIDES as f64;
+            proj.to_screen(at + (ax * a.cos() + ay * a.sin()) * r)
+        })
+        .collect();
+    if rim.len() < SIDES {
+        return;
+    }
+    let halo = Tokens::get().icons.marker_halo;
+    painter.add(egui::Shape::convex_polygon(rim.clone(), col.gamma_multiply(56.0 / 255.0), Stroke::NONE));
+    painter.add(egui::Shape::closed_line(rim.clone(), Stroke::new(3.5, halo)));
+    painter.add(egui::Shape::closed_line(rim, Stroke::new(1.5, col)));
 }
 
 /// What a snap is called (the hover label).

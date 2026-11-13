@@ -35,8 +35,8 @@ fn preview(h: &mut Harness, curves: usize) {
 #[test]
 fn sketch_dialog_mirror_toggles_clears_references_previews_and_cancels() {
     let mut h = fixture();
-    // Keep the source curves and reference between the floating dialog and Sketch Palette.
-    step(&mut h, json!({"call":"ui.camera","params":{"target":[-40,0,0],"distance":150}}));
+    // Keep the source curves and reference left of the floating editor.
+    step(&mut h, json!({"call":"ui.camera","params":{"target":[-15,0,0],"distance":150}}));
     let original = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
     let revision = h.app.session.revision;
@@ -70,7 +70,7 @@ fn sketch_dialog_mirror_toggles_clears_references_previews_and_cancels() {
 fn sketch_dialog_patterns_update_counts_and_place_an_unsnapped_centre() {
     let mut h = fixture();
     // Keep the picked geometry clear of the two-column rectangular-pattern form.
-    step(&mut h, json!({"call":"ui.camera","params":{"target":[-60,0,0],"distance":120}}));
+    step(&mut h, json!({"call":"ui.camera","params":{"target":[-25,0,0],"distance":180}}));
     step(&mut h, json!({"start":"sketch.pattern.rectangular"}));
     pick(&mut h, [-22.5, 10.0], false);
     if let crate::dialogs::Kind::SketchModify(Mod::PatternRect { count, count2, .. }) = &mut h.app.dialog.as_mut().unwrap().kind {
@@ -131,8 +131,8 @@ fn sketch_dialog_mirror_refuses_external_and_curved_references() {
 #[test]
 fn sketch_dialog_box_selection_adds_replaces_and_preserves_reference() {
     let mut h = fixture();
-    // Put every selection box between the left dialog and the right Sketch Palette.
-    step(&mut h, json!({"call":"ui.camera","params":{"target":[-40,0,0],"distance":150}}));
+    // Keep the selection boxes left of the floating editor and Sketch Options.
+    step(&mut h, json!({"call":"ui.camera","params":{"target":[-15,0,0],"distance":150}}));
     step(&mut h, json!({"call":"engine.execute","params":{"command":"sketch.line","params":{"points":[[-50,-20],[-40,-20]]}}}));
     step(&mut h, json!({"start":"sketch.mirror"}));
     step(&mut h, json!({"call":"ui.dialogInput","params":{"index":1}}));
@@ -674,4 +674,18 @@ fn sketch_point_snaps_to_a_model_holes_woken_centre() {
         let placed = pts[before];
         assert_eq!(placed.dist(centre) < 1e-6, on, "snap points {on}: {placed:?}");
     }
+}
+
+/// In a sketch, Shift targets a midpoint, so it doesn't keep the woken snap points the way it
+/// does in a dialog's point input (#11809): with Shift held, the pointer going from the hole's
+/// rim onto the box's top edge wakes the edge's points.
+#[test]
+fn shift_in_a_sketch_doesnt_keep_the_snap_points() {
+    let mut h = holed_box_sketch();
+    h.app.start("sketch.point");
+    step(&mut h, json!({"move":{"world":[18,20,10]}}));
+    let rim = h.app.viewport.woken.item.clone();
+    assert!(rim.is_some(), "{:?}", h.app.viewport.woken);
+    step(&mut h, json!({"move":{"world":[40,0,10]},"shift":true}));
+    assert!(h.app.viewport.woken.item.is_some() && h.app.viewport.woken.item != rim, "{:?}", h.app.viewport.woken);
 }

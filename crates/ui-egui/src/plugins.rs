@@ -249,6 +249,13 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             ui.label(solidcraft_ui_text::tr("ui.plugins_desktop"));
             return;
         };
+        // Install plugin…: pick a .zip, review what it asks for, install it.
+        let install = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("plugin_install.menu"), "import", true, false);
+        crate::scenario::publish_target("prefs:plugins:install", install.rect);
+        if install.clicked() {
+            crate::plugin_install::start(app);
+        }
+        ui.add_space(8.0);
         resource_controls(app, ui);
         let t = solidcraft_theme::Tokens::get();
         let path = dir.display().to_string();

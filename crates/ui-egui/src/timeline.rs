@@ -1,7 +1,7 @@
 //! The timeline (bottom): features in order, the rollback marker, errors and warnings.
 
-use crate::ui_kit::{Container, Edge, Status, Surface};
-use egui::{Rect, UiBuilder, pos2};
+use crate::ui_kit::Status;
+use egui::{Rect, pos2};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{
     FeatureKind, FeatureResult, PlaneRef, SketchId,
@@ -124,40 +124,20 @@ pub(crate) fn transport_availability(app: &SolveApp, control: crate::ui_kit::His
 /// turns "History steps by component" off.
 fn transport_view(app: &SolveApp) -> crate::timeline_fold::View {
     let doc = &app.session.doc;
-    if app.preferences.timeline_left || app.preferences.history_in_browser || !app.preferences.history_steps_component {
+    use solidcraft_engine::panels::{SectionLocation, Zone};
+
+    let side_history = app.panel_runtime().is_some_and(|runtime| {
+        let layout = runtime.layout().layout();
+        layout.sections.iter().any(|section| {
+            matches!(section.location, SectionLocation::Dock { zone: Zone::Left | Zone::Right })
+                && section.tabs.iter().any(|instance| instance.0 == "history")
+        })
+    });
+    if side_history || app.preferences.history_in_browser || !app.preferences.history_steps_component {
         return crate::timeline_fold::View::of(doc, None, true);
     }
     let within = crate::timeline_scope::shown(app).map(|c| crate::timeline_scope::components_within(app, c));
     crate::timeline_fold::View::of(doc, within.as_ref(), app.tree.history_show_hidden)
-}
-
-/// A click runs a History control; a right-click offers to show or hide the Play button.
-pub(crate) fn transport_response(app: &mut SolveApp, control: crate::ui_kit::HistoryTransport, response: &egui::Response) {
-    for action in history_bar::transport_actions(control, response) {
-        run_control_action(app, action);
-    }
-}
-
-/// Runs what a History control asked for (the bar's other actions are its strip's).
-fn run_control_action(app: &mut SolveApp, action: history_bar::Action) {
-    use crate::ui_kit::HistoryTransport;
-    let control = match action {
-        history_bar::Action::Seek(history_bar::Seek::First) => HistoryTransport::First,
-        history_bar::Action::Seek(history_bar::Seek::Back) => HistoryTransport::Back,
-        history_bar::Action::Play => HistoryTransport::Play,
-        history_bar::Action::Seek(history_bar::Seek::Forward) => HistoryTransport::Forward,
-        history_bar::Action::Seek(history_bar::Seek::Last) => HistoryTransport::Last,
-        history_bar::Action::ControlsMenu { at } => {
-            crate::context_menu::open_for(app, at, crate::context_menu::Target::HistoryControls);
-            return;
-        }
-        history_bar::Action::Seek(history_bar::Seek::Slot { .. })
-        | history_bar::Action::Select { .. }
-        | history_bar::Action::Edit(_)
-        | history_bar::Action::Menu { .. }
-        | history_bar::Action::Reorder { .. } => return,
-    };
-    run_transport(app, control);
 }
 
 /// The History controls' menu: shows or hides the Play button, and — when the design marks any
@@ -313,6 +293,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Align { .. } => "align",
         FeatureKind::Coil { .. } => "coil",
         FeatureKind::SheetPerforate { .. } => "perforate",
+        FeatureKind::CellGrid { .. } => "perforate",
         FeatureKind::BoundaryFill { .. } => "boundary_fill",
         FeatureKind::Patch { .. } => "surface_patch",
         FeatureKind::Stitch { .. } => "surface_stitch",
@@ -941,44 +922,6 @@ pub(crate) fn tick_playback(app: &mut SolveApp, ctx: &egui::Context) {
     app.timeline_playback = Some(playback);
 }
 
-pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
-    crate::browser::sync_reveals(app);
-    let t = Tokens::get();
-    app.shell.history_dock_space = Some(ui.available_rect_before_wrap());
-    if Container::for_layout(app.ui.layout, Surface::Panel).floating() {
-        let rect = floating_rect(ui.available_rect_before_wrap());
-        // A window too short for the card (the ribbon already fills it) leaves the history out
-        // rather than drawing into a negative-size rectangle.
-        if !rect.is_finite() || rect.width() < 1.0 || rect.height() < 30.0 {
-            app.shell.history = None;
-            return;
-        }
-        app.shell.history = Some(rect);
-        crate::scenario::publish_rect("history:card", rect);
-        let mut child = ui.new_child(UiBuilder::new().id_salt("sc_timeline").max_rect(rect));
-        Container::paint_panel_frame(
-            ui.painter(),
-            Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), t.timeline, crate::frame::Side::Left),
-            rect,
-        );
-        child.set_clip_rect(rect);
-        timeline_contents(app, &mut child, true);
-    } else {
-        let host = Container::new(ui.ctx(), Surface::Panel);
-        let response = host.show_edge(ui, host.edge("sc_timeline", Edge::Bottom).exact_size(40.0), host.edge_frame(t.timeline), |ui| {
-            timeline_contents(app, ui, false);
-        });
-        let frame = host.edge_frame(t.timeline);
-        Container::paint_inset(ui.painter(), response.response.rect - frame.outer_margin, frame);
-        app.shell.history = Some(response.response.rect);
-        crate::scenario::publish_rect("history:strip", response.response.rect);
-    }
-}
-
-pub(crate) fn floating_rect(available: Rect) -> Rect {
-    Container::floating_card(Surface::Panel).bottom_strip_rect(available, 40.0)
-}
-
 /// A folder's Edit Holes item, when it holds holes only: one Hole dialog for all of them.
 pub(crate) fn edit_holes_item(app: &mut SolveApp, ui: &mut egui::Ui, folder: u64) {
     if crate::hole_folder::holes(app, folder).is_none() {
@@ -992,9 +935,8 @@ pub(crate) fn edit_holes_item(app: &mut SolveApp, ui: &mut egui::Ui, folder: u64
     }
 }
 
-/// Where the bottom History bar publishes its grip, marker and feature chips.
-const BAR_HANDLES: history_bar::Handles<'static> =
-    history_bar::Handles { grip: "history:grip", marker: "history:marker", step: "timeline:", controls: "history:" };
+/// Where the bottom History strip publishes its marker and feature chips.
+const BAR_HANDLES: history_bar::Handles<'static> = history_bar::Handles { marker: "history:marker", step: "timeline:" };
 
 /// A feature as the bar draws it: id, name, icon, suppressed, type name, kind.
 type BarFeature = (u64, String, &'static str, bool, &'static str, TimelineKind);
@@ -1008,11 +950,7 @@ pub(crate) fn play_labels() -> crate::ui_kit::PlayLabels<'static> {
 fn bar(app: &SolveApp, floating: bool) -> history_bar::Bar<'static> {
     let t = Tokens::get();
     history_bar::Bar {
-        title: solidcraft_ui_text::tr("ui.history_title"),
         marker_tip: solidcraft_ui_text::tr("ui.history_marker_tip"),
-        play: app.preferences.history_play_button,
-        playing: app.timeline_playback.is_some(),
-        play_labels: play_labels(),
         accent: crate::workspace::tab_accent(&t, &app.ui.tab),
         drag_accent: crate::workspace::tab_accent(&t, "SKETCH"),
         marker: 0,
@@ -1021,15 +959,6 @@ fn bar(app: &SolveApp, floating: bool) -> history_bar::Bar<'static> {
         reorder: true,
         handles: BAR_HANDLES,
     }
-}
-
-fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
-    let head = history_bar::header(ui, &bar(app, floating), ui.max_rect());
-    crate::timeline_left::dock_drag(app, ui, &head.grip);
-    for action in head.actions {
-        run_control_action(app, action);
-    }
-    timeline_strip(app, ui, floating, head.x);
 }
 
 /// The shared host already supplies the title and declared playback controls.
@@ -1099,7 +1028,7 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
             history_bar::Action::Edit(id) => app.edit_feature(id),
             // The same menu as the browser's, so the control channel reports it (#10745).
             history_bar::Action::Menu { step, at } => crate::context_menu::open_for(app, at, crate::context_menu::Target::Timeline { feature: step }),
-            history_bar::Action::Seek(history_bar::Seek::Slot { slot, before }) => {
+            history_bar::Action::Seek { slot, before } => {
                 let slot = position(slot, before);
                 let _ = app.run_heavy("timeline.roll_to", if slot >= n { json!({}) } else { json!({ "position": slot }) });
             }
@@ -1107,7 +1036,6 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
             history_bar::Action::Reorder { step, slot, before } => {
                 crate::timeline_folders::drop_feature(app, &history.folders, step, position(slot, before), before, marker.min(n));
             }
-            control => run_control_action(app, control),
         }
     }
 }
@@ -1318,7 +1246,7 @@ mod tests {
         assert_eq!(super::folder_kind_icon(&h.app, both), None);
         // Both Histories draw it without trouble.
         for left in [false, true] {
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             h.frames(3);
         }
     }
@@ -1329,7 +1257,7 @@ mod tests {
         for left in [false, true] {
             let mut h = Harness::new();
             h.app.home.open = false;
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             h.app.preferences.history_group_joints = true;
             h.app.preferences.history_bar_groups = true;
             h.app.run("component.create", json!({"name":"Part"})).unwrap();
@@ -1511,7 +1439,7 @@ mod tests {
         for left in [false, true] {
             let mut h = Harness::new();
             h.app.preferences.language = "ja".into();
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
             h.app.run("sketch.finish", json!({})).unwrap();
             h.frames(4);
@@ -1651,7 +1579,7 @@ mod tests {
 
     fn two_boxes(left: bool) -> Harness {
         let mut h = Harness::new();
-        h.app.preferences.timeline_left = left;
+        h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "First", "body_name": "One"})).unwrap();
         h.app
             .run(
@@ -1897,12 +1825,7 @@ mod tests {
 
             let at = |name: &str| crate::scenario::handle_at(name).unwrap();
             let (back, play, forward) = (at("history:back"), at("history:play"), at("history:forward"));
-            let across = dock == "bottom" || width > 56.0;
-            if across {
-                assert!(back.x < play.x && play.x < forward.x, "Play sits between Previous and Next; {dock} {width}");
-            } else {
-                assert!(back.y < play.y && play.y < forward.y, "Play sits between Previous and Next; {dock} {width}");
-            }
+            assert!(back.x < play.x && play.x < forward.x, "Play sits between Previous and Next; {dock} {width}");
 
             h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
             h.frames(2);
@@ -2110,6 +2033,7 @@ mod tests {
     fn a_deep_run_shows_only_its_component_and_the_path_steps_back_out() {
         use crate::scenario::{handle_at, rect_of};
         let (mut h, _) = rig_with_arm_and_leg(30);
+        h.call("ui.resize", json!({"width":2200,"height":1000}));
         let rig_chip = handle_at("timeline-group:Rig").expect("the rig folds");
         assert!(handle_at("timeline-group:Arm").is_none() && handle_at("timeline-path:Rig").is_none());
         assert!(handle_at("timeline-path:All components").is_some(), "the path starts at the whole design");
@@ -2498,7 +2422,7 @@ mod tests {
     fn find_in_timeline_scrolls_both_timelines_to_the_found_feature() {
         for left in [false, true] {
             let mut h = Harness::new();
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             for i in 0..80 {
                 h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
                 h.app.run("sketch.finish", json!({})).unwrap();
@@ -2530,7 +2454,7 @@ mod tests {
     fn a_face_picked_in_the_view_scrolls_both_timelines_to_the_feature_that_made_it() {
         for left in [false, true] {
             let mut h = Harness::new();
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             let block =
                 h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "name": "Block", "body_name": "Plate"})).unwrap()["feature"]
                     .as_u64()
@@ -2574,7 +2498,7 @@ mod tests {
     fn the_feature_menu_edits_its_profile_sketch_in_both_timelines() {
         for left in [false, true] {
             let mut h = Harness::new();
-            h.app.preferences.timeline_left = left;
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
             h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
             h.app.run("sketch.finish", json!({})).unwrap();
@@ -2947,10 +2871,9 @@ mod tests {
                 assert_eq!(rect_of("history:card").unwrap().bottom(), viewport.bottom() - crate::ui_kit::SHELL_GAP);
             } else {
                 let strip = rect_of("history:strip").unwrap();
-                assert_eq!(strip.top(), viewport.bottom());
-                assert_eq!(strip.bottom(), h.ctx.content_rect().bottom());
-                assert_eq!(strip.left(), 0.0);
-                assert_eq!(strip.height(), 40.0);
+                assert!(viewport.contains_rect(strip), "the strip overlays the viewport");
+                assert_eq!(strip.bottom(), viewport.bottom());
+                assert_eq!(strip.left(), viewport.left());
             }
             h.step(&json!({"click":{"handle":"timeline:First"}})).unwrap();
             h.step(&json!({"click":{"handle":"timeline:Second"},"ctrl":true})).unwrap();
@@ -3001,7 +2924,7 @@ mod tests {
     }
 
     #[test]
-    fn floating_strip_has_only_history_text_and_accents_the_last_done_chip_and_marker() {
+    fn history_strip_body_accents_the_last_done_chip_and_marker() {
         let mut h = two_boxes(false);
         h.app.ui.tab = "SURFACE".into();
         let t = solidcraft_theme::Tokens::get();
@@ -3013,7 +2936,7 @@ mod tests {
                 h.app.session.selection =
                     selected.map(|i| solidcraft_engine::Sel::Feature { id: h.app.session.doc.features[i].id }).into_iter().collect();
                 let ctx = crate::fonts::test_context();
-                let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::timeline(&mut h.app, ui));
+                let mut out = ctx.run_ui(egui::RawInput::default(), |ui| super::panel_inline(&mut h.app, ui));
                 out.textures_delta.clear();
                 let texts: Vec<_> = out
                     .shapes
@@ -3023,7 +2946,7 @@ mod tests {
                         _ => None,
                     })
                     .collect();
-                assert_eq!(texts, ["History"]);
+                assert!(texts.is_empty(), "the shared host owns the title");
                 let chips: Vec<_> = out
                     .shapes
                     .iter()
@@ -3149,19 +3072,19 @@ mod tests {
         assert!(handle_at("timeline:A").is_some() && handle_at("timeline:B").is_some(), "a click shows each feature");
 
         // Folded in the History beside the browser, it is folded here too, and the other way.
-        h.app.preferences.timeline_left = true;
+        h.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
         h.frames(4);
         assert!(handle_at("timeline:A").is_some(), "open there too");
         h.step(&json!({"click": {"handle": "timeline-folder-fold:Pair"}})).unwrap();
         assert!(handle_at("timeline:A").is_none());
-        h.app.preferences.timeline_left = false;
+        h.app.run("view.history_layout", json!({"dock":"bottom"})).unwrap();
         h.frames(4);
         assert!(handle_at("timeline:A").is_none() && handle_at("timeline-folder-chip:Pair").is_some(), "folded here too");
         h.step(&json!({"click": {"handle": "timeline-folder-chip:Pair"}})).unwrap();
-        h.app.preferences.timeline_left = true;
+        h.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
         h.frames(4);
         assert!(handle_at("timeline:A").is_some(), "opened here, open there");
-        h.app.preferences.timeline_left = false;
+        h.app.run("view.history_layout", json!({"dock":"bottom"})).unwrap();
         h.frames(4);
 
         let menu = |h: &mut Harness, name: &str, item: &str| {

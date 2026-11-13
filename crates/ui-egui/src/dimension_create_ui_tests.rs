@@ -46,8 +46,9 @@ fn dimension_editor_names_and_reference_picks_drive_new_and_existing_dimensions(
     assert!(h.widget(&format!("Dimension: {target}")).is_some(), "new dimension shows its actual parameter name");
     // Let the preceding placement clicks expire before starting a distinct double-click.
     h.frames(40);
-    h.step(&json!({"click":{"dimension":source},"double":true})).unwrap();
+    h.step(&json!({"click":{"dimension":source}})).unwrap();
     assert!(crate::dim_view::editing(), "reference click keeps the draft open");
+    h.frames(40);
     h.step(&json!({"text":" / 2"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
@@ -59,7 +60,8 @@ fn dimension_editor_names_and_reference_picks_drive_new_and_existing_dimensions(
     assert!(h.widget(&format!("Dimension: {target}")).is_some());
     type_value(&mut h, "2 * ");
     h.frames(40);
-    h.step(&json!({"click":{"dimension":source},"double":true})).unwrap();
+    h.step(&json!({"click":{"dimension":source}})).unwrap();
+    h.frames(40);
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.session.doc.param(&target).unwrap().expr, format!("2 * {source}"));
     h.app.run("parameters.change", json!({"name":source,"expression":"15 mm"})).unwrap();
@@ -84,7 +86,7 @@ fn editing_d2(typed: &str) -> Harness {
 fn click_d1_and_apply(h: &mut Harness) -> String {
     h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
     assert!(crate::dim_view::editing(), "a reference click keeps the editor open");
-    h.frames(2);
+    h.frames(40);
     assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")), "the value field keeps the keyboard");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
@@ -118,7 +120,7 @@ fn clicking_another_dimension_replaces_a_lone_value() {
 fn clicking_another_dimension_lets_typing_continue_after_its_name() {
     let mut h = editing_d2("2 * ");
     h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
-    h.frames(2);
+    h.frames(40);
     h.step(&json!({"text":" + 1"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "2 * d1 + 1");
@@ -141,14 +143,56 @@ fn clicking_another_dimension_replaces_the_selected_text() {
     assert_eq!(click_d1_and_apply(&mut h), "5 + d1");
 }
 
+/// Whether the open editor is the one for dimension parameter `param`.
+fn is_editing(h: &Harness, param: &str) -> bool {
+    crate::dim_view::editing() && h.widget(&format!("Dimension: {param}")).is_some()
+}
+
 #[test]
-fn double_clicking_another_dimension_inserts_its_name_once() {
-    let mut h = editing_d2("3 * ");
-    // Synthetic input feeds one pointer event per frame, so this is a click and, a frame
-    // later, a second click that egui reads as a double-click.
-    h.step(&json!({"click":{"dimension":"d1"},"double":true})).unwrap();
+fn a_single_click_waits_out_the_double_click_window_before_inserting() {
+    let mut h = editing_d2("2 * ");
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
+    // Not yet: a second click would open d1 instead.
     h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "3 * d1");
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "12", "an unfinished `2 * ` does not apply, so the box is open and untouched");
+    assert!(is_editing(&h, "d2"), "{}", h.call("ui.inspect", json!({})));
+    h.frames(40);
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "2 * d1", "the name went in after the delay");
+    crate::dim_view::cancel();
+}
+
+#[test]
+fn double_clicking_another_dimension_opens_it_and_inserts_nothing() {
+    let mut h = editing_d2("8");
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":"d1"},"double":true})).unwrap();
+    h.frames(40);
+    assert!(is_editing(&h, "d1"), "d1 is open: {}", h.call("ui.inspect", json!({})));
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "8", "the edit of d2 was applied, with no name in it");
+    type_value(&mut h, "30");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(!crate::dim_view::editing());
+    assert_eq!(h.app.session.doc.param("d1").unwrap().expr, "30", "d1's value was selected, so typing replaced it");
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "8");
+    crate::dim_view::cancel();
+}
+
+#[test]
+fn double_clicking_leaves_the_original_box_without_a_name_when_it_does_not_apply() {
+    let mut h = editing_d2("not a value (");
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":"d1"},"double":true})).unwrap();
+    h.frames(40);
+    assert!(is_editing(&h, "d2") && !is_editing(&h, "d1"), "an invalid value blocks the switch: {}", h.call("ui.inspect", json!({})));
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "12", "nothing was applied");
+    assert!(h.app.status.is_some(), "the error shows");
+    // The box still holds what was typed: no name was inserted.
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"7"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "7");
     crate::dim_view::cancel();
 }
 
@@ -1927,6 +1971,27 @@ fn double_clicking_a_shown_dimension_edits_it_without_editing_the_sketch() {
     h.app.run("edit.undo", json!({})).unwrap();
     h.settle();
     assert!((plate_max(&h)[1] - 10.0).abs() < 1e-6, "undo restores it");
+}
+
+#[test]
+fn double_clicking_another_shown_dimension_opens_it_from_the_model_view() {
+    let (mut h, _) = shown_dimensions();
+    let first = model_text(&h, "d1");
+    h.step(&json!({"click":first,"double":true})).unwrap();
+    assert!(crate::dim_view::editing());
+    h.frames(40);
+    let second = model_text(&h, "d2");
+    h.step(&json!({"click":second,"double":true})).unwrap();
+    h.frames(40);
+    assert!(crate::dim_view::editing() && h.widget("Dimension: d2").is_some(), "d2 is open: {}", h.call("ui.inspect", json!({})));
+    let d1 = h.app.session.doc.param("d1").unwrap().expr.clone();
+    assert!(!d1.contains("d2"), "nothing was inserted into d1: {d1}");
+    type_value(&mut h, "14");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "14");
+    assert_eq!(h.app.session.doc.param("d1").unwrap().expr, d1);
+    crate::dim_view::cancel();
 }
 
 /// A sketch seen nearly edge-on, with one of its directions pointing at the eye, keeps its

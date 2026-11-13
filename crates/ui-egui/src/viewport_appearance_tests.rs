@@ -132,7 +132,7 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
 
 /// The colour of a built triangle vertex: its palette index resolves through the scene.
 fn vertex_color(scene: &crate::gpu::GpuScene, v: &[u8]) -> [u8; 4] {
-    let index = v.get(crate::gpu::TRI_SIZE - 4..crate::gpu::TRI_SIZE).and_then(|b| b.try_into().ok()).map_or(0, u32::from_le_bytes);
+    let index = v.get(24..28).and_then(|b| b.try_into().ok()).map_or(0, u32::from_le_bytes);
     scene.palette.get(crate::gpu::PaletteIndex(index)).unwrap_or([0; 4])
 }
 

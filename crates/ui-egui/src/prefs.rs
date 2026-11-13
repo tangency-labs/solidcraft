@@ -301,10 +301,49 @@ impl NavPreset {
     }
 }
 
+/// What a two-finger trackpad scroll does in a navigation preset (#15079).
+///
+/// Fusion orbits with Shift held and pans without it; Blender is the other way
+/// round; the other presets pan either way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrackpadScroll {
+    /// Bare and Shift scrolls both pan.
+    Pans,
+    /// Shift + two fingers orbits; bare two fingers pan (Fusion).
+    ShiftOrbits,
+    /// Bare two fingers orbit; Shift + two fingers pans (Blender).
+    BareOrbits,
+}
+
+impl TrackpadScroll {
+    /// Whether the two gestures differ, so a coast ends when the modifier changes.
+    pub fn modes_differ(self) -> bool {
+        self != TrackpadScroll::Pans
+    }
+
+    /// Whether a two-finger scroll with `shift` held orbits.
+    pub fn orbits(self, shift: bool) -> bool {
+        match self {
+            TrackpadScroll::Pans => false,
+            TrackpadScroll::ShiftOrbits => shift,
+            TrackpadScroll::BareOrbits => !shift,
+        }
+    }
+}
+
 impl Prefs {
     /// Touchpad scroll zooms without overwriting the user's preference for other presets.
     pub fn trackpad_pans(&self) -> bool {
         self.nav != TOUCHPAD_NAV && self.trackpad_pan
+    }
+
+    /// What a two-finger trackpad scroll does in the chosen preset (#15079).
+    pub fn trackpad_scroll(&self) -> TrackpadScroll {
+        match self.nav.as_str() {
+            "fusion" => TrackpadScroll::ShiftOrbits,
+            "blender" => TrackpadScroll::BareOrbits,
+            _ => TrackpadScroll::Pans,
+        }
     }
 }
 
@@ -896,13 +935,24 @@ impl BodiesFolders {
 // Omitted pages keep fields such as grid_follows_view and added agents when restoring defaults.
 // Accepted control-channel ranges may differ from slider ranges (look_at_speed).
 macro_rules! preference_settings {
-    ($( $(#[$doc:meta])* $field:ident: $ty:ty = $default:expr $(, $page:expr)? $(, accept($accepted:expr))? $(=> $control:ident($($args:tt)*))? ;)*) => {
+    (legacy { $($legacy:ident: $legacy_ty:ty = $legacy_default:expr;)* } $( $(#[$doc:meta])* $field:ident: $ty:ty = $default:expr $(, $page:expr)? $(, accept($accepted:expr))? $(=> $control:ident($($args:tt)*))? ;)*) => {
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         #[serde(default)]
-        pub struct Prefs { $($(#[$doc])* pub $field: $ty,)* }
+        pub struct Prefs {
+            $($(#[$doc])* pub $field: $ty,)*
+            $(#[serde(skip_serializing)] pub $legacy: $legacy_ty,)*
+        }
 
         impl Default for Prefs {
-            fn default() -> Self { Self { $($field: $default,)* } }
+            fn default() -> Self { Self { $($field: $default,)* $($legacy: $legacy_default,)* } }
+        }
+
+        const LEGACY_PANEL_FIELDS: &[&str] = &[$(stringify!($legacy),)*];
+
+        impl Prefs {
+            fn retain_legacy_panel_fields(&mut self, loaded: &Self) {
+                $(self.$legacy.clone_from(&loaded.$legacy);)*
+            }
         }
 
         /// Every stored field and the page whose Defaults resets it (`None`: no page).
@@ -962,6 +1012,24 @@ macro_rules! preference_settings {
 }
 
 preference_settings! {
+    // Read old placement once when a saved shared layout is absent.
+    legacy {
+        timeline_left: bool = false;
+        timeline_left_width: f32 = 130.0;
+        timeline_under_browser: bool = false;
+        timeline_collapsed: bool = false;
+        browser_share: f32 = DEFAULT_BROWSER_SHARE;
+        timeline_left_browser_collapsed: bool = false;
+        browser_width: f32 = DEFAULT_BROWSER_WIDTH;
+        render_inspector_side: String = "right".into();
+        render_inspector_width: f32 = 305.0;
+        render_browser_side: String = "left".into();
+        render_browser_width: f32 = 266.0;
+        browser_collapsed: bool = false;
+        agent_chat_side: String = "right".into();
+        agent_chat_width: f32 = 380.0;
+        agent_chat_minimized: bool = false;
+    }
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
@@ -1211,6 +1279,9 @@ preference_settings! {
     max_step_file_mb: u64 = DEFAULT_STEP_MB, PAGE_GENERAL;
     /// The largest design file opened or saved, in MB (#4086): from the default (256) up to 16 GB.
     max_design_file_mb: u64 = DEFAULT_DESIGN_MB, PAGE_GENERAL;
+    /// A FreeCAD file opens or inserts as its sketches and features, rebuilt; off brings in only
+    /// its solids as one Import feature, as before.
+    freecad_history: bool = true, PAGE_GENERAL => check_id("settings.freecad_history");
     /// Explicit assembly Move uses joint handles; off keeps the previous Move panel.
     assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
     /// Degrees per step near the assembly Move ring.
@@ -1247,8 +1318,8 @@ preference_settings! {
     language: String = "system".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.
     layout: crate::ui_kit::LayoutMode = Default::default(), PAGE_LAYOUT;
-    /// Mount existing docked content in the shared layout; Classic stays available.
-    shared_panel_layout: bool = false, PAGE_LAYOUT;
+    /// Preview panel placement and reflow while dragging. Off shows the drop outline.
+    live_panel_drag_preview: bool = true, PAGE_LAYOUT;
     /// Ordered view controls and their appearance.
     #[serde(default)]
     navigation_bar: crate::navigation_bar::NavigationBar = Default::default(), PAGE_LAYOUT;
@@ -1317,23 +1388,10 @@ preference_settings! {
     /// The selection's length, area or distance in the view's bottom right corner (#7000). Off by
     /// default.
     quick_measure: bool = false, PAGE_GRAPHICS;
-    /// Put the feature history to the left of the browser instead of below the viewport.
-    timeline_left: bool = false, PAGE_LAYOUT;
-    /// Measured outer width; the contents react to this width without a names mode.
-    timeline_left_width: f32 = 130.0, PAGE_LAYOUT;
-    /// Share the browser column, vertically, instead of a separate left column.
-    timeline_under_browser: bool = false, PAGE_LAYOUT;
     /// Compact history: the browser lists each component's features in history order with the
     /// marker, and neither timeline is shown.
     history_in_browser: bool = false, PAGE_LAYOUT;
-    /// Fold the shared-column history to its header.
-    timeline_collapsed: bool = false, PAGE_LAYOUT;
-    /// The browser's share of the column's height when History sits under it, which the user
-    /// drags at the seam between the two cards (#7371).
-    browser_share: f32 = DEFAULT_BROWSER_SHARE, PAGE_LAYOUT;
-    /// Whether the browser beside the vertical history is collapsed to its rail.
-    timeline_left_browser_collapsed: bool = false, PAGE_LAYOUT;
-    /// Whether the History at the left lists a sketch under the feature built from it.
+    /// Whether vertical History lists a sketch under the feature built from it.
     history_sketches: HistorySketches = HistorySketches::default(), PAGE_LAYOUT;
     /// A Play History button in the History controls, between Previous and Next (#3688). Off
     /// gives the four controls History had before; right-clicking the controls toggles it too.
@@ -1353,33 +1411,13 @@ preference_settings! {
     /// `Group #N` folder (#8885). Off, the default, shows each feature, starts folders open and
     /// makes no folder, as the bar always has.
     history_bar_groups: bool = false, PAGE_LAYOUT;
-    /// The vertical history (left, or under the browser) starts with the active component's Bodies
-    /// folder and the Origin, as the browser shows them (#6490). The bottom strip is unchanged.
+    /// Vertical History starts with the active component's Bodies folder and the Origin (#6490).
     timeline_origin_bodies: bool = false, PAGE_LAYOUT;
-    /// Width of the browser sidebar, which
-    /// the user drags wider or narrower at its right edge.
-    browser_width: f32 = DEFAULT_BROWSER_WIDTH, PAGE_LAYOUT;
     /// Render shell preference, independent of the document and Design history.
     render_shots_strip: bool = true;
-    render_inspector_side: String = "right".into();
-    render_inspector_width: f32 = 305.0;
-    render_browser_side: String = "left".into();
-    render_browser_width: f32 = 266.0;
     /// Resource identities and history belong to the user, never the design.
     render_library_favorites: std::collections::BTreeSet<(String, String)> = Default::default();
     render_library_recent: std::collections::VecDeque<(String, String)> = Default::default();
-    /// Draw the parts browser on a translucent card over the 3D view instead of a column of its
-    /// own, so the workspace keeps the whole window width.
-    browser_float: bool = false, PAGE_LAYOUT;
-    /// The browser card folded to its header with the chevron in that header, kept from one run
-    /// to the next like the toolbar's pins (#8692).
-    browser_collapsed: bool = false, PAGE_LAYOUT;
-    /// Whether the browser card is always shown or kept out of sight until the pointer comes to
-    /// it, as the navigation bar's "Hide until hovered" does (#8692).
-    browser_show: crate::browser::BrowserShow = Default::default(), PAGE_LAYOUT;
-    /// Where command dialogs open: at the view's edge, or in the left column in place of the
-    /// browser and the History there (#6707).
-    dialog_place: crate::dialog_column::DialogPlace = Default::default(), PAGE_LAYOUT;
     /// The names the browser, dialogs and lists show for the origin planes (#6491).
     origin_plane_names: OriginPlaneNames = OriginPlaneNames::default(), PAGE_DESIGN;
     /// When components' bodies sit in a Bodies folder in the browser (#4217).
@@ -1601,10 +1639,6 @@ preference_settings! {
     agent_models: std::collections::BTreeMap<String, String> = Default::default();
     /// "Always allow" answers: per agent, the tools it may use without asking.
     agent_always_allow: std::collections::BTreeMap<String, Vec<String>> = Default::default();
-    /// The side the panel docks on (`left` or `right`), its width, and whether it is folded to a strip.
-    agent_chat_side: String = "right".into(), PAGE_ASSISTANT;
-    agent_chat_width: f32 = 380.0, PAGE_ASSISTANT;
-    agent_chat_minimized: bool = false, PAGE_ASSISTANT;
     /// Whether the chat is in its own window instead of the side panel, and that window's place
     /// and size as the system last reported them (`[x, y, width, height]`, points; `x` can be
     /// negative or past the main screen when the window sits on another one).
@@ -1919,6 +1953,7 @@ pub struct Snapshot {
     prefs: Prefs,
     panel_layout: Option<serde_json::Value>,
     panel_layout_state: crate::panel_runtime::PanelLayoutSnapshot,
+    panel_visibility: crate::panel_runtime::PanelVisibilitySnapshot,
     /// With no record yet, keep the small deferred legacy import state too.
     panel_layout_deferred: Option<crate::panel_runtime::PanelLayoutPreferences>,
     dark: bool,
@@ -1949,6 +1984,7 @@ impl Snapshot {
             prefs: app.preferences.clone(),
             panel_layout,
             panel_layout_state: crate::panel_runtime::panel_layout_snapshot(app),
+            panel_visibility: crate::panel_runtime::PanelVisibilitySnapshot::capture(app),
             panel_layout_deferred,
             dark: app.ui.dark,
             layout: app.ui.layout,
@@ -1981,6 +2017,7 @@ impl Snapshot {
         let stand_up_answers = std::mem::take(&mut app.preferences.stand_up_answers);
         app.preferences = self.prefs;
         crate::plugins::sync_policy(app);
+        self.panel_visibility.restore(app);
         sync_surface_analysis(app);
         crate::render_workspace::apply_memory_policy(app);
         app.preferences.stand_up_answers = stand_up_answers;
@@ -2019,6 +2056,7 @@ impl Snapshot {
             prefs,
             panel_layout: _,
             panel_layout_state,
+            panel_visibility: _,
             panel_layout_deferred,
             dark,
             layout,
@@ -2943,10 +2981,6 @@ impl prefs_window::Host for SolveApp {
     }
     fn confirm(&mut self) -> Result<(), String> {
         crate::plugins::commit_resource_inputs(self).inspect_err(|error| self.set_status(error.clone(), true))
-    }
-    /// The shared panel layout switches on or off only on Apply.
-    fn apply(&mut self) -> Result<(), String> {
-        crate::panel_runtime::sync_production_setting(self).map_err(solidcraft_engine::panels::commands::error_text)
     }
     fn keys_captured(&self) -> bool {
         crate::keymap::capturing(self)
@@ -4208,11 +4242,17 @@ pub fn lenient(saved: &serde_json::Value) -> Prefs {
     if let (Some(o), Some(src)) = (cur.as_object_mut(), saved.as_object()) {
         for (k, v) in src.iter().take(1000) {
             // Keys this version doesn't have are ignored anyway.
-            let Some(old) = o.get(k).cloned() else { continue };
-            o.insert(k.clone(), v.clone());
+            if !o.contains_key(k) && !LEGACY_PANEL_FIELDS.contains(&k.as_str()) {
+                continue;
+            }
+            let old = o.insert(k.clone(), v.clone());
             if serde_json::from_value::<Prefs>(serde_json::Value::Object(o.clone())).is_err() {
                 log::warn!("preferences: `{k}` is not understood by this version; using its default");
-                o.insert(k.clone(), old);
+                if let Some(old) = old {
+                    o.insert(k.clone(), old);
+                } else {
+                    o.remove(k);
+                }
             }
         }
     }
@@ -4296,6 +4336,7 @@ fn prepare_preferences(
         return Err("`dimension_colour` must be null or three numbers 0…255".into());
     }
     let mut new: Prefs = serde_json::from_value(cur).map_err(|e| e.to_string())?;
+    new.retain_legacy_panel_fields(base);
     migrate_gruvbox(&mut new);
     if let Some(update) = p.get("theme_options") {
         merge_theme_options(&mut new, followed, update)?;
@@ -4510,27 +4551,27 @@ mod tests {
     fn invalid_legacy_panel_preferences_recover_before_shared_host_setup() {
         let mut app = SolveApp::new(Default::default(), Default::default());
         app.load_prefs(
-            &json!({"preferences":{"browser_width":0.0,"timeline_left_width":-1.0,
+            &json!({"preferences":{"shared_panel_layout":false,"language":42,"browser_width":0.0,"timeline_left_width":-1.0,
                 "agent_chat_width":1e9,"render_browser_width":0.0,"browser_share":2.0}})
             .to_string(),
         );
         let defaults = Prefs::default();
         assert_eq!(app.preferences.browser_width, 0.0);
-        assert_eq!(crate::browser::browser_width(app.preferences.browser_width), 170.0, "Classic keeps its existing saved-width behavior");
-        app.preferences.shared_panel_layout = true;
-        crate::panel_runtime::sync_production_setting(&mut app).unwrap();
+        crate::panel_runtime::tick_app(&mut app, &egui::Context::default());
         assert!(app.panel_runtime().is_some(), "malformed legacy sizes must not leave setup retrying each frame");
         let imported = crate::panel_runtime::preferences_value(&app).unwrap();
         for (name, expected) in [
-            ("browser_width", defaults.browser_width),
             ("history_width", defaults.timeline_left_width),
             ("assistant_width", defaults.agent_chat_width),
             ("render_width", defaults.render_browser_width),
-            ("browser_share", defaults.browser_share),
         ] {
             assert_eq!(imported["legacy"][name], json!(expected));
         }
-        assert_eq!((app.preferences.browser_width, app.preferences.browser_share), (0.0, 2.0), "shared import never rewrites Classic preferences");
+        let saved = serde_json::to_value(&app.preferences).unwrap();
+        for key in ["shared_panel_layout", "browser_width", "timeline_left_width", "agent_chat_width", "render_browser_width", "browser_share"] {
+            assert!(saved.get(key).is_none(), "{key} is no longer written");
+            assert!(set(&mut app, &json!({(key): false})).is_err(), "{key} cannot be set after cutover");
+        }
     }
 
     #[test]
@@ -5030,8 +5071,6 @@ mod tests {
 
     #[test]
     fn layout_page_checkboxes_keep_their_labels_at_every_width() {
-        // "Origin and bodies on top" is greyed out unless History is on the left. Its disabled area once
-        // started at its row's end, so the label was squeezed away behind the (i) icon (#14564).
         let checks = [
             ("history_play_button", "prefs.layout_page.play_history"),
             ("history_group_joints", "prefs.history_group_joints"),
@@ -5042,39 +5081,36 @@ mod tests {
             ("browser_eye_left", "prefs.browser_eye_left"),
             ("browser_body_features", "prefs.browser_body_features"),
         ];
-        for timeline_left in [false, true] {
-            for width in [1600, 1100, 960, 800, 640] {
-                let mut h = crate::scenario::Harness::new();
-                h.app.preferences.language = "en".into();
-                h.app.home.open = false;
-                h.app.preferences.timeline_left = timeline_left;
-                h.call("ui.resize", json!({"width":width,"height":1100}));
-                h.call("ui.prefs", json!({"open":"Layout"}));
-                h.frames(20);
-                let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-                for (key, label) in checks {
-                    let label = solidcraft_ui_text::tr(label);
-                    let check = crate::scenario::rect_of(&format!("prefs:{key}")).unwrap();
-                    assert!(check.left() >= body.left() - 0.5 && check.right() <= body.right() + 0.5, "{key} at {width}: {check:?} outside {body:?}");
-                    let mut text_found = false;
-                    for shape in &h.shapes {
-                        crate::test_support::each_shape(&shape.shape, &mut |shape| {
-                            if let egui::Shape::Text(text) = shape
-                                && text.galley.job.text == label
-                            {
-                                let bounds = text.galley.rect.translate(text.pos.to_vec2());
-                                if check.contains(bounds.center()) {
-                                    assert!(
-                                        !text.galley.elided && check.expand(0.5).contains_rect(bounds),
-                                        "{key} label cut at {width}: {bounds:?} in {check:?}"
-                                    );
-                                    text_found = true;
-                                }
+        for width in [1600, 1100, 960, 800, 640] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.language = "en".into();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":width,"height":1100}));
+            h.call("ui.prefs", json!({"open":"Layout"}));
+            h.frames(20);
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            for (key, label) in checks {
+                let label = solidcraft_ui_text::tr(label);
+                let check = crate::scenario::rect_of(&format!("prefs:{key}")).unwrap();
+                assert!(check.left() >= body.left() - 0.5 && check.right() <= body.right() + 0.5, "{key} at {width}: {check:?} outside {body:?}");
+                let mut text_found = false;
+                for shape in &h.shapes {
+                    crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                        if let egui::Shape::Text(text) = shape
+                            && text.galley.job.text == label
+                        {
+                            let bounds = text.galley.rect.translate(text.pos.to_vec2());
+                            if check.contains(bounds.center()) {
+                                assert!(
+                                    !text.galley.elided && check.expand(0.5).contains_rect(bounds),
+                                    "{key} label cut at {width}: {bounds:?} in {check:?}"
+                                );
+                                text_found = true;
                             }
-                        });
-                    }
-                    assert!(text_found, "{key} shows its label \"{label}\" at {width} (History left: {timeline_left})");
+                        }
+                    });
                 }
+                assert!(text_found, "{key} shows its label \"{label}\" at {width}");
             }
         }
     }
@@ -6681,6 +6717,7 @@ mod tests {
             ("ui_scale", json!(1.25), PAGE_APPEARANCE),
             ("ui_font", json!("test font"), PAGE_APPEARANCE),
             ("layout", json!("compact"), PAGE_LAYOUT),
+            ("live_panel_drag_preview", json!(false), PAGE_LAYOUT),
             ("ribbon_labels", json!(false), PAGE_LAYOUT),
             ("persistent_ribbon_pressed", json!(false), PAGE_LAYOUT),
             ("viewport_analysis_status", json!(false), PAGE_GRAPHICS),
@@ -6699,17 +6736,11 @@ mod tests {
             ("construct_menu_groups", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_follow_hover", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_skip_pinned", json!(true), PAGE_LAYOUT),
-            ("timeline_left", json!(true), PAGE_LAYOUT),
-            ("timeline_under_browser", json!(true), PAGE_LAYOUT),
             ("history_sketches", json!("under_feature"), PAGE_LAYOUT),
             ("history_play_button", json!(false), PAGE_LAYOUT),
             ("history_folder_kind_icon", json!(true), PAGE_LAYOUT),
             ("history_group_joints", json!(true), PAGE_LAYOUT),
             ("history_bar_groups", json!(true), PAGE_LAYOUT),
-            ("browser_float", json!(true), PAGE_LAYOUT),
-            ("browser_collapsed", json!(true), PAGE_LAYOUT),
-            ("browser_show", json!("hover"), PAGE_LAYOUT),
-            ("dialog_place", json!("left_column"), PAGE_LAYOUT),
             ("color_vision", json!("protan"), PAGE_APPEARANCE),
             ("viewport_theme", json!("light"), PAGE_APPEARANCE),
             ("viewport_background", json!([255, 255, 255]), PAGE_APPEARANCE),
@@ -10458,7 +10489,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_cards_and_toolbar_chips_preserve_transactions_in_both_themes() {
+    fn panel_content_and_toolbar_choices_preserve_transactions_in_both_themes() {
         for theme in ["light", "dark"] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
@@ -10467,19 +10498,11 @@ mod tests {
             h.call("ui.prefs", json!({"open":"Layout"}));
             let before = h.app.preferences.clone();
             let doc = h.app.session.doc.to_json();
-            for (key, left, under, browser) in
-                [("left", true, false, false), ("under_browser", true, true, false), ("browser", false, false, true), ("bottom", false, false, false)]
-            {
-                scroll_to_and_click(&mut h, &format!("prefs:history:{key}"));
-                assert_eq!(
-                    (h.app.preferences.timeline_left, h.app.preferences.timeline_under_browser, h.app.preferences.history_in_browser),
-                    (left, under, browser)
-                );
-            }
-            for (key, floating) in [("card", true), ("column", false), ("card", true)] {
-                scroll_to_and_click(&mut h, &format!("prefs:browser:{key}"));
-                assert_eq!(h.app.preferences.browser_float, floating);
-            }
+            assert!(before.live_panel_drag_preview);
+            scroll_to_and_click(&mut h, "prefs:live_panel_drag_preview");
+            assert!(!h.app.preferences.live_panel_drag_preview);
+            scroll_to_and_click(&mut h, "prefs:history_in_browser");
+            assert!(h.app.preferences.history_in_browser);
             for tab in crate::workspace::choosable_tabs() {
                 scroll_to_and_click(&mut h, &format!("prefs:toolbar_tab:{tab}"));
                 assert!(!crate::workspace::tab_turned_on(&h.app, tab));
@@ -10490,13 +10513,19 @@ mod tests {
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert_eq!(h.app.preferences, before, "Cancel restores every Layout edit");
             h.call("ui.prefs", json!({"open":"Layout"}));
-            scroll_to_and_click(&mut h, "prefs:browser:card");
+            scroll_to_and_click(&mut h, "prefs:live_panel_drag_preview");
+            scroll_to_and_click(&mut h, "prefs:history_in_browser");
             h.call("ui.prefs", json!({"button":"apply"}));
+            let mut restored = SolveApp::new(Default::default(), Default::default());
+            restored.load_prefs(&h.app.prefs());
+            assert!(!restored.preferences.live_panel_drag_preview);
             h.call("ui.prefs", json!({"button":"defaults"}));
-            assert!(!h.app.preferences.browser_float);
+            assert!(h.app.preferences.live_panel_drag_preview);
+            assert!(!h.app.preferences.history_in_browser);
             assert!(h.app.preferences.quick_measure && h.app.preferences.invert_curved_roll_arrows, "Layout reset retains Graphics and Navigation");
             h.call("ui.prefs", json!({"button":"cancel"}));
-            assert!(h.app.preferences.browser_float, "Cancel after Apply returns to the applied state");
+            assert!(h.app.preferences.history_in_browser, "Cancel after Apply returns to the applied state");
+            assert!(!h.app.preferences.live_panel_drag_preview);
         }
     }
 
@@ -10546,7 +10575,6 @@ mod tests {
         assert_eq!(old.history_sketches, HistorySketches::InOrder, "designs and settings from before keep the creation order");
         assert_eq!(lenient(&json!({"history_sketches": "sideways"})).history_sketches, HistorySketches::InOrder);
         let mut h = crate::scenario::Harness::new();
-        h.call("ui.prefs", json!({"timeline_left": true, "timeline_under_browser": true}));
         let design = h.app.session.doc.to_json();
         h.call("ui.prefs", json!({"open": "Layout"}));
         let row = h.app.tr("prefs.history_sketches").to_string();
@@ -11701,10 +11729,9 @@ mod tests {
         assert_eq!(app.tr("ui.extrude"), "Extrude");
 
         // Switch language to Japanese
-        set(&mut app, &json!({"language": "ja", "timeline_left": true})).unwrap();
-        app.preferences.timeline_left_browser_collapsed = true;
+        set(&mut app, &json!({"language": "ja", "history_in_browser": true})).unwrap();
         assert_eq!(app.preferences.language, "ja");
-        assert!(app.preferences.timeline_left);
+        assert!(app.preferences.history_in_browser);
         assert_eq!(app.tr("ui.preferences"), "環境設定");
         assert_eq!(app.tr("ui.extrude"), "押し出し");
 
@@ -11712,8 +11739,7 @@ mod tests {
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
         assert_eq!(other.preferences.language, "ja");
-        assert!(other.preferences.timeline_left);
-        assert!(other.preferences.timeline_left_browser_collapsed);
+        assert!(other.preferences.history_in_browser);
         assert_eq!(other.tr("ui.preferences"), "環境設定");
     }
 
@@ -12942,9 +12968,8 @@ mod settings_search_tests {
             h.call("ui.resize", serde_json::json!({"width":width,"height":1100}));
             h.call("ui.prefs", serde_json::json!({"language":"en","open":"Layout"}));
             for (query, native) in [
-                ("History", None),
-                ("Browser", None),
                 ("Components start open", Some((Role::CheckBox, "prefs:browser_components_open"))),
+                ("Preview panel placement while dragging", Some((Role::CheckBox, "prefs:live_panel_drag_preview"))),
                 ("Menus", None),
                 ("Highlight active commands", Some((Role::CheckBox, "prefs:persistent_ribbon_pressed"))),
                 ("Show navigation bar", Some((Role::CheckBox, "prefs:navbar:show"))),
@@ -13401,7 +13426,6 @@ mod settings_search_tests {
             ("play history", "Play History button"),
             ("view's corner", "Also in the view's corner"),
             ("highlight active", "Highlight active commands"),
-            ("On hover", "On hover"),
         ];
         for (query, label) in rows {
             h.app.prefs_window.shell.filter = query.into();

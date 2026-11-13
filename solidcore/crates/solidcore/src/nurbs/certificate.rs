@@ -81,7 +81,7 @@ use crate::offset::construction::bernstein::{Bernstein2, Binomials};
 use crate::query::distance_bound::{pieces_about, Piece};
 use crate::surface::surface::Surface;
 
-const OP: &str = "sweep::loft_rails::certificate";
+const OP: &str = "nurbs::certificate";
 
 /// Most halvings of one interval between knot crossings.
 pub const MAX_HALVINGS: usize = 12;

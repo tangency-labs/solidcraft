@@ -92,6 +92,8 @@ pub mod intersect;
 pub mod mass;
 pub mod nurbs;
 pub mod offset;
+#[cfg(test)]
+mod phrase_sites;
 pub mod primitive;
 pub mod query;
 pub mod surface;

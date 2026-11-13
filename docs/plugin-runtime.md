@@ -249,8 +249,8 @@ execution before the application commits changes or publishes staged files. In t
 Normal command output and plugin result JSON are unchanged. The counter message contains no
 model data or package paths.
 
-There is no compiled-code cache, unsafe deserialization, WASI filesystem/clock/socket/process API,
-network integration, persistent store, plugin installer, signed index, custom panels or icons.
+Plugins install from a `.zip` with `plugin.install` (see [Plugins](plugins.md#installing)). There is no compiled-code cache, unsafe deserialization, WASI filesystem/clock/socket/process API,
+network integration, persistent store, signed index, custom panels or icons.
 The WIT has no persistent store interface yet (`storage` arrives later; designs already keep
 `plugins/<plugin-id>/` data untouched). `manifest()` is not used.
 

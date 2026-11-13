@@ -206,6 +206,14 @@ pub fn panel_host_control_label_opacity(
 /// The same full-header affordance collapses and restores with one click.
 /// Reuse the existing chevron master, with the kit's vertical mirror helper.
 #[allow(clippy::too_many_arguments)]
+pub fn panel_expand_menu_icon(painter: &egui::Painter, rect: egui::Rect, opacity: f32) {
+    crate::icons::paint_ink(painter, rect, "chevron", Tokens::get().form_ink.gamma_multiply(opacity));
+}
+
+pub fn panel_collapse_menu_icon(painter: &egui::Painter, rect: egui::Rect, opacity: f32) {
+    crate::icons::paint_ink_flipped(painter, rect, "chevron", Tokens::get().form_ink.gamma_multiply(opacity));
+}
+
 pub fn panel_host_disclosure(
     ui: &mut egui::Ui,
     id: egui::Id,

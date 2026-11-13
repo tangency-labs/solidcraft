@@ -83,3 +83,41 @@ pub struct ListResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
+
+/// Install a plugin from a `.zip`: `plugin.json` and its component at the top or in one folder.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InstallParams {
+    /// The `.zip` to install; subject to the caller's file scope.
+    pub path: String,
+    /// Replace an installed plugin with the same id. Without it, that is refused.
+    #[serde(default)]
+    pub replace: bool,
+    /// Check the `.zip` and describe the plugin; write nothing.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct InstallResult {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    /// Host capabilities it needs, as `name@major.minor`.
+    pub capabilities: Vec<String>,
+    /// What it asks for: command groups, named folders, the clock.
+    pub permissions: craft_plugin::Permissions,
+    /// App commands it calls.
+    pub commands: Vec<String>,
+    /// Its entries, as namespaced commands (`id.entry`).
+    pub entries: Vec<String>,
+    /// The installed plugin of the same id, `name version`, when there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaces: Option<String>,
+    /// Whether it was written (false for a dry run).
+    pub installed: bool,
+    /// Its folder.
+    pub folder: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
