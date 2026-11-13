@@ -539,7 +539,8 @@ fn a_cylinder_is_dimensioned_across_its_silhouettes() {
     assert!(close((tips[0].y - tips[1].y).abs(), 8.0), "{tips:?}");
 }
 
-/// What isn't found has no lines; a kind with the wrong number of points never lays out.
+/// What isn't found has no lines; a kind with the wrong number of points never lays out. A chain or a
+/// set of one point is a single point there, whichever way it runs: no layout, and no drag places it.
 #[test]
 fn a_dimension_with_no_points_has_no_lines() {
     let mut lost = read(&[], "");
@@ -557,6 +558,19 @@ fn a_dimension_with_no_points_has_no_lines() {
     assert!(laid(&dimension(chain, 10.0, TextPlace::Centred), &lost, &view_at("1:1")).is_none());
     let three = read(&[[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]], "1");
     assert!(laid(&dimension(length(LinearDirection::Aligned), 1.0, TextPlace::Centred), &three, &view_at("1:1")).is_none());
+
+    let (frame, fonts, one) = (view_at("1:1"), PaperFonts::new("", "en", true), read(&[[5.0, 3.0]], "0"));
+    for direction in [LinearDirection::Horizontal, LinearDirection::Vertical, LinearDirection::Along(Vec2::new(1.0, 1.0))] {
+        for kind in [
+            DimensionKind::Chain { points: Vec::new(), direction },
+            DimensionKind::Baseline { origin: corner(), targets: Vec::new(), direction },
+            DimensionKind::Ordinate { origin: corner(), targets: Vec::new(), direction },
+        ] {
+            let d = dimension(kind, 10.0, TextPlace::Centred);
+            assert!(laid(&d, &one, &frame).is_none(), "{:?}", d.kind);
+            assert_eq!(dragged(&d, &one, &frame, &fonts, Drag::Line(Vec2::new(25.0, -12.0))), Err(NotDragged::NoPlace), "{:?}", d.kind);
+        }
+    }
 }
 
 /// A text's own place, far off the sheet's middle, moves the text and the arc it sits on, never the

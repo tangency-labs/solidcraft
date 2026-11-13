@@ -301,14 +301,14 @@ pub(crate) fn dragged(
         }
         // Its members share the line `offset` from the middle of its two ends.
         (DimensionKind::Chain { direction, .. }, points, Drag::Line(p)) => {
+            let coords = ends_coords(points, *direction).ok_or(NotDragged::NoPlace)?;
             let (Some(first), Some(last)) = (points.first(), points.last()) else { return Err(NotDragged::NoPlace) };
-            let coords = LineCoords::forward(*direction, *last - *first).ok_or(NotDragged::NoPlace)?;
             Ok((encode_text(&DimFrame::Linear { p0: *first, p1: *last, dir: coords.unit }, p).y, place))
         }
         // Its nearest line (a baseline's first member's, an ordinate's leaders' end) is the offset past
         // the outermost point on the offset's side: on the side whose outermost point gives that sign.
         (DimensionKind::Baseline { direction, .. } | DimensionKind::Ordinate { direction, .. }, points, Drag::Line(p)) => {
-            let coords = set_coords(points, *direction).ok_or(NotDragged::NoPlace)?;
+            let coords = ends_coords(points, *direction).ok_or(NotDragged::NoPlace)?;
             for side in [1.0, -1.0] {
                 let offset = coords.across(p) - coords.reach(points, side);
                 if (offset >= 0.0) == (side > 0.0) {
@@ -391,8 +391,8 @@ fn centred(a: Vec2, b: Vec2, coords: LineCoords, across: f64, text: Text) -> Pie
 /// A chain's members, each a line from one point to the next, all on one line `offset` from the
 /// middle of the chain's two ends, each member's text set by `set`.
 fn chain(points: &[Vec2], direction: LinearDirection, offset: f64, resolved: &Resolved, set: &impl Fn(Option<&str>) -> Text) -> Option<Vec<Piece>> {
+    let coords = ends_coords(points, direction)?;
     let (first, last) = (*points.first()?, *points.last()?);
-    let coords = LineCoords::forward(direction, last - first)?;
     let line = coords.across((first + last) * 0.5) + offset;
     let member = |(i, (a, b)): (usize, (&Vec2, &Vec2))| {
         let text = resolved.members.get(i).map(|m| m.text.as_str());
@@ -412,7 +412,7 @@ fn baseline(
     set: &impl Fn(Option<&str>) -> Text,
 ) -> Option<Vec<Piece>> {
     let (origin, targets) = points.split_first()?;
-    let coords = set_coords(points, direction)?;
+    let coords = ends_coords(points, direction)?;
     let side = if offset < 0.0 { -1.0 } else { 1.0 };
     let outer = coords.reach(points, side);
     let value = |i: usize| resolved.members.get(i).map_or(0.0, |m| m.measured.value);
@@ -441,7 +441,7 @@ fn ordinate(
     out: &mut Drawn,
 ) -> Option<()> {
     let (_, targets) = points.split_first()?;
-    let coords = set_coords(points, direction)?;
+    let coords = ends_coords(points, direction)?;
     let side = if offset < 0.0 { -1.0 } else { 1.0 };
     let end = coords.reach(points, side) + offset;
     let numbers = std::iter::once(Some("0")).chain((0..targets.len()).map(|i| resolved.members.get(i).map(|m| m.text.as_str())));
@@ -466,11 +466,11 @@ fn ordinate(
     Some(())
 }
 
-/// The coordinates of a set's line ([`LineCoords::forward`]), from its origin (the first of `points`) to
-/// its last target. None for a set with no target.
-fn set_coords(points: &[Vec2], direction: LinearDirection) -> Option<LineCoords> {
-    let (origin, targets) = points.split_first()?;
-    LineCoords::forward(direction, *targets.last()? - *origin)
+/// The coordinates of a chain's or a set's line ([`LineCoords::forward`]), from the first of `points` (a
+/// set's origin) to the last. None for fewer than two: a single point has no line to run.
+fn ends_coords(points: &[Vec2], direction: LinearDirection) -> Option<LineCoords> {
+    let (first, rest) = points.split_first()?;
+    LineCoords::forward(direction, *rest.last()? - *first)
 }
 
 /// A line between two silhouettes or faces, each from one end to the other, at the ends on the side `offset`
