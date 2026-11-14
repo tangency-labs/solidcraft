@@ -3489,15 +3489,34 @@ fn interval_dot(a: [Ivl; 3], b: [Ivl; 3]) -> Ivl {
         .fold(Ivl::from(0.0), |sum, (a, b)| sum + a * b)
 }
 
+/// Whether `uv_seam` is, exactly, a line of constant angle `u` on the cone or
+/// cylinder: a native line whose direction has no `u` component. Read from the line's
+/// stored point and vector, as [`same_iso_support`] reads a constant coordinate; no
+/// station is sampled.
+fn constant_angle_uv_line(uv_seam: &Curve) -> bool {
+    let CurveKind::Line(line) = uv_seam.kind() else {
+        return false;
+    };
+    let (point, vector) = (line.line_point(), line.line_vector());
+    vector.x == 0.0
+        && vector.y != 0.0
+        && vector.y.is_finite()
+        && point.x.is_finite()
+        && point.y.is_finite()
+}
+
 /// The origin and across-seam direction of a cone's or cylinder's seam over `domain`,
 /// as enclosures for [`native_curve_in_strip`]. The seam of such a surface is a
 /// ruling, a straight line along which the surface normal is constant, so the
-/// across-seam direction `n x t` is one vector for the whole seam. That is checked,
-/// not assumed: three stations must be collinear and share one normal that is
-/// perpendicular to the line, to far below any tolerance, or there is no frame and
-/// so no relief. The values are floating point, so each is widened by a relative
-/// margin of `1e-12`, orders above the rounding of these few operations.
-/// `None` for a seam that is no ruling or whose normal cannot be evaluated.
+/// across-seam direction `n x t` is one vector for the whole seam. The relief is
+/// granted only on proof: the classified curve is a native line, or its UV curve is an
+/// exact constant-angle line on the analytic cone ([`constant_angle_uv_line`]).
+/// Agreement at a few stations proves nothing between them, so it never grants the
+/// relief; the stations only derive the frame (a point, the line's direction and a
+/// normal perpendicular to it) of a seam already proven straight. The values are
+/// floating point, so each is widened by a relative margin of `1e-12`, orders above
+/// the rounding of these few operations.
+/// `None` for a seam that is not so proven or whose normal cannot be evaluated.
 fn ruling_frame(
     k: &Kernel,
     seam: &Curve,
@@ -3506,6 +3525,9 @@ fn ruling_frame(
     domain: Extent1d,
 ) -> Result<Option<([Ivl; 3], [Ivl; 3])>> {
     const MARGIN: f64 = 1e-12;
+    if !(matches!(seam.kind(), CurveKind::Line(_)) || constant_angle_uv_line(uv_seam)) {
+        return Ok(None);
+    }
     let stations = [domain.min(), domain.mid(), domain.max()];
     let mut points = Vec::with_capacity(3);
     let mut normals = Vec::with_capacity(3);
@@ -3856,6 +3878,60 @@ mod tests {
         }
         assert!(trim.evaluate_point(&k, 0.125).unwrap().x - 2.0 > 1e-6);
         assert!(!same_iso_support(&source, &trim));
+    }
+
+    #[test]
+    fn a_seam_collinear_at_three_stations_but_not_a_ruling_gets_no_frame() {
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::surface::cone::Cone;
+
+        let k = Kernel::default();
+        let cylinder = Surface::from(
+            Cone::new_cylinder_unbounded(
+                &k,
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::X,
+                Vec3::Y,
+                1.0,
+                false,
+                false,
+            )
+            .unwrap(),
+        );
+        // Piecewise linear: the ends and the middle lie on the ruling at angle 0, but
+        // the control point at t = 1/8 is off it, in 3D and in the UV curve.
+        let spike = |in_3d: bool| {
+            let ctrl = [0.0, 0.125, 0.25, 0.5, 0.75, 1.0]
+                .iter()
+                .enumerate()
+                .map(|(i, &z)| {
+                    let bump = if i == 1 { 2e-3 } else { 0.0 };
+                    if in_3d {
+                        CPoint::new(1.0 + bump, 0.0, z, NOW)
+                    } else {
+                        CPoint::new(bump, z, 0.0, NOW)
+                    }
+                })
+                .collect();
+            Curve::from(BSplineCurve::from_nurb(
+                NurbCurve::new(ctrl, 1, vec![0.0, 0.0, 0.125, 0.25, 0.5, 0.75, 1.0, 1.0])
+                    .unwrap(),
+                3,
+                false,
+            ))
+        };
+        let (seam, uv) = (spike(true), spike(false));
+        let domain = Extent1d::from_min_max(0.0, 1.0);
+        assert!(ruling_frame(&k, &seam, &uv, &cylinder, domain)
+            .unwrap()
+            .is_none());
+        // A native line on the same ruling is still granted the relief.
+        let ruling = line([1.0, 0.0, 0.0], [1.0, 0.0, 1.0]);
+        let uv_ruling = line([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        assert!(ruling_frame(&k, &ruling, &uv_ruling, &cylinder, domain)
+            .unwrap()
+            .is_some());
     }
 
     #[test]
