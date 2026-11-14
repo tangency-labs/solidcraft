@@ -383,6 +383,26 @@ fn a_level_is_read_back_from_its_name() {
 }
 
 #[test]
+fn ui_prefs_browser_scroll_wheel_schema_lists_supported_modes() {
+    use super::ui_prefs::{BrowserScrollWheel, PrefsParams};
+    let schema = input_schema_for::<PrefsParams>();
+    let schema = schema.as_value();
+    assert!(schema["properties"]["browser_scroll_wheel"].is_object());
+    for (id, expected) in [("automatic", BrowserScrollWheel::Automatic), ("always_zoom", BrowserScrollWheel::AlwaysZoom)] {
+        let value = json!({"browser_scroll_wheel":id});
+        let parsed = serde_json::from_value::<PrefsParams>(value.clone()).unwrap();
+        assert_eq!(parsed.browser_scroll_wheel, Some(expected));
+        assert!(conforms(schema, schema, &value), "{value}");
+    }
+    assert_eq!(serde_json::from_value::<PrefsParams>(json!({})).unwrap().browser_scroll_wheel, None);
+    for invalid in [json!("future"), json!(42), json!(true), json!(null)] {
+        let value = json!({"browser_scroll_wheel":invalid});
+        assert!(serde_json::from_value::<PrefsParams>(value.clone()).is_err());
+        assert!(!conforms(schema, schema, &value), "{value}");
+    }
+}
+
+#[test]
 fn ui_prefs_theme_options_input_schema_covers_updates_and_resets() {
     use super::ui_prefs::PrefsParams;
     let schema = input_schema_for::<PrefsParams>();

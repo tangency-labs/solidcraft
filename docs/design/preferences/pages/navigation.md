@@ -39,6 +39,7 @@ its own page." Tag: In profile. Source today: Navigation page (`prefs/navigation
 | Reverse trackpad orbit | Checkbox | `Prefs.orbit_reverse` | `false` | none | none | |
 | Stop zoom at the model | Checkbox | `Prefs.zoom_stop_at_model` | `false` | none | none | |
 | Wheel zoom speed | Slider, "1.00x" readout (44 px) | `Prefs.wheel_zoom_speed` (0.25 to 4.0) | `1.0` | none | none | aria-label "Wheel zoom speed". |
+| Scroll wheel in the browser | Dropdown: Automatic / Always zoom | `Prefs.browser_scroll_wheel` (`BrowserScrollWheel`) | Automatic | Explains automatic detection and modifier-assisted two-finger pan | none | Browser only; desktop scroll phases remain authoritative. |
 | Two-finger zoom while holding | Dropdown (180 wide, "Ctrl / Cmd") | `Prefs.trackpad_zoom_modifier` (`TrackpadZoomModifier`: Cmd, Alt, Ctrl, Off) | Off | none | none | |
 
 ## View
