@@ -10,7 +10,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<Line3dParams>(), &["points", "sketch"]);
     assert_keys(input_schema_for::<Spline3dParams>(), &["points", "sketch"]);
     assert_keys(input_schema_for::<Point3dParams>(), &["point", "sketch"]);
-    assert_keys(input_schema_for::<Move3dParams>(), &["by", "index", "sketch", "to", "wire"]);
+    assert_keys(input_schema_for::<Move3dParams>(), &["by", "index", "point", "sketch", "to", "wire"]);
 }
 
 #[test]
@@ -165,6 +165,10 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"wire": "w1", "to": [1, 2, 3], "index": 500}), false),
             (json!({"wire": "w1", "to": [1, 2, 3], "index": -1}), false),
             (json!({"wire": 3, "to": [1, 2, 3]}), false),
+            (json!({"point": "l1.end", "by": [0, 0, 1]}), true),
+            (json!({"point": "p3", "wire": "w1", "to": [1, 2, 3]}), false),
+            (json!({"point": 3, "to": [1, 2, 3]}), false),
+            (json!({"point": "p3"}), false),
         ],
     );
 }

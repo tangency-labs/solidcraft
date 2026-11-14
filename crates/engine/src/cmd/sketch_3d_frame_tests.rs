@@ -474,3 +474,133 @@ fn wire_frame_copies_keep_component_and_legacy_coordinates() {
     let restored = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
     assert_eq!(restored.sketch(sketch).unwrap().wires, s.doc.sketch(sketch).unwrap().wires);
 }
+
+fn plane_3d_sketch() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Lifted"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    (s, sketch)
+}
+
+/// A line's end on the plane leaves it: both lines through it become drawn 3D lines through the
+/// same places, joined at the moved point; one undo puts the plane lines back.
+#[test]
+fn a_plane_point_lifts_the_lines_through_it() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0],[10,5]]}));
+    let lines: Vec<String> = s.doc.sketch(sketch).unwrap().curves.iter().map(|c| c.id.clone()).collect();
+    assert_eq!(lines.len(), 2);
+    let before = s.doc.sketch(sketch).unwrap().clone();
+    let r = run(&mut s, "sketch.move3d", json!({"point": format!("{}.end", lines[0]), "by":[0,0,4]}));
+    assert_eq!(r["moved"], 2, "{r}");
+    let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    assert_eq!(made.len(), 2, "{r}");
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.curves.iter().all(|c| !lines.contains(&c.id)), "the plane lines are gone");
+    let fit = |id: &str| sk.wires[sk.wire_index(id).unwrap()].fit.clone();
+    let (a, b) = (fit(&made[0]), fit(&made[1]));
+    near(a[0], Vec3::new(0.0, 0.0, 0.0));
+    near(a[1], Vec3::new(10.0, 0.0, 4.0));
+    near(b[0], Vec3::new(10.0, 0.0, 4.0));
+    near(b[1], Vec3::new(10.0, 5.0, 0.0));
+    run(&mut s, "edit.undo", json!({}));
+    let back = s.doc.sketch(sketch).unwrap();
+    assert_eq!((&back.curves, &back.wires, &back.points), (&before.curves, &before.wires, &before.points));
+}
+
+/// A fit-point spline's middle point and a lone point leave the plane too; `to` is a world
+/// point.
+#[test]
+fn a_spline_fit_point_and_a_lone_point_lift() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.spline.fit_point", json!({"points":[[0,0],[10,5],[20,0]]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    let solidcraft_sketch::CurveKind::Spline { pts, .. } = &sk.curves[0].kind else { panic!("{:?}", sk.curves[0].kind) };
+    let middle = sk.points[pts[1]].id.clone();
+    let r = run(&mut s, "sketch.move3d", json!({"point": middle, "to":[10,5,7]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    let w = &sk.wires[sk.wire_index(r["curves"][0].as_str().unwrap()).unwrap()];
+    assert_eq!(w.fit.len(), 3);
+    near(w.fit[0], Vec3::new(0.0, 0.0, 0.0));
+    near(w.fit[1], Vec3::new(10.0, 5.0, 7.0));
+    near(w.fit[2], Vec3::new(20.0, 0.0, 0.0));
+    assert!(sk.curves.is_empty());
+
+    run(&mut s, "sketch.point", json!({"point":[3,4]}));
+    let lone = s.doc.sketch(sketch).unwrap().points.last().unwrap().id.clone();
+    let r = run(&mut s, "sketch.move3d", json!({"point": lone, "by":[0,0,-2]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.points.iter().all(|p| p.id != lone), "the plane point is gone");
+    let w = &sk.wires[sk.wire_index(r["curves"][0].as_str().unwrap()).unwrap()];
+    assert_eq!(w.fit.len(), 1);
+    near(w.fit[0], Vec3::new(3.0, 4.0, -2.0));
+}
+
+/// What can't leave the plane says so, and changes nothing: a circle's centre, a point in a
+/// flat sketch, `wire` and `point` together.
+#[test]
+fn a_plane_point_lift_refuses_what_it_cannot_lift() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center":[0,0],"diameter":10,"id":"c1"}));
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move3d", &json!({"point":"c1.center","by":[0,0,1]})).unwrap_err().to_string();
+    assert!(e.contains("is a circle"), "{e}");
+    let e = s.execute("sketch.move3d", &json!({"point":"c1.center","wire":"w1","by":[0,0,1]})).unwrap_err().to_string();
+    assert!(e.contains("not both"), "{e}");
+    assert!(s.execute("sketch.move3d", &json!({"point":"nope","by":[0,0,1]})).is_err());
+    assert!(s.execute("sketch.move3d", &json!({"point":"origin","by":[0,0,1]})).is_err());
+    assert_eq!(s.doc.to_json(), before, "a refused lift changes nothing");
+    run(&mut s, "sketch.options", json!({"sketch_3d":false}));
+    run(&mut s, "sketch.line", json!({"points":[[20,0],[30,0]]}));
+    let l = s.doc.sketch(sketch).unwrap().curves.last().unwrap().id.clone();
+    let e = s.execute("sketch.move3d", &json!({"point": format!("{l}.end"),"by":[0,0,1]})).unwrap_err().to_string();
+    assert!(e.contains("3D Sketch"), "{e}");
+    assert!(s.doc.sketch(sketch).unwrap().wires.is_empty());
+}
+
+// The next two tests come from #7665 (Gabe's split of #4432), adapted to this reply's keys.
+
+/// A spline's middle fit point lifts: the reply says where the point is now (`wire`, `index`),
+/// so it can be moved again as a drawn point; two undos put the plane spline back.
+#[test]
+fn a_lifted_spline_point_moves_again_by_wire_and_index() {
+    let (mut s, sketch) = plane_3d_sketch();
+    let spline = run(&mut s, "sketch.spline.fit_point", json!({"points":[[0,0],[10,5],[20,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let sk = s.doc.sketch(sketch).unwrap();
+    let solidcraft_sketch::CurveKind::Spline { pts, .. } = &sk.curves[sk.curve_index(&spline).unwrap()].kind else { panic!("a spline") };
+    let middle = sk.points[pts[1]].id.clone();
+    let before = s.doc.to_json();
+    let r = run(&mut s, "sketch.move3d", json!({"point": middle, "by": [0, 0, 7]}));
+    assert_eq!(r["index"], 1, "{r}");
+    let wire = r["wire"].as_str().unwrap().to_string();
+    assert_eq!(r["curves"][0], wire.as_str());
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.curve_index(&spline).is_none(), "the plane spline is gone");
+    let w = &sk.wires[sk.wire_index(&wire).unwrap()];
+    near(w.fit[0], Vec3::new(0.0, 0.0, 0.0));
+    near(w.fit[1], Vec3::new(10.0, 5.0, 7.0));
+    near(w.fit[2], Vec3::new(20.0, 0.0, 0.0));
+    run(&mut s, "sketch.move3d", json!({"wire": wire, "index": 2, "by": [0, 0, -3]}));
+    near(s.doc.sketch(sketch).unwrap().wires.iter().find(|x| x.id == wire).unwrap().fit[2], Vec3::new(20.0, 0.0, -3.0));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// Lines joined at the grabbed point (a polyline's corner) lift together and stay joined there;
+/// their far ends stay put.
+#[test]
+fn lines_through_a_lifted_corner_stay_joined() {
+    let (mut s, sketch) = plane_3d_sketch();
+    let first = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0],[10,10]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.move3d", json!({"point": format!("{first}.end"), "to": [10, 0, 5]}));
+    assert_eq!(r["curves"].as_array().unwrap().len(), 2, "{r}");
+    let fits: Vec<Vec<Vec3>> = s.doc.sketch(sketch).unwrap().wires.iter().map(|w| w.fit.clone()).collect();
+    assert!(fits.iter().all(|f| f.iter().any(|p| p.dist(Vec3::new(10.0, 0.0, 5.0)) < 1e-9)), "{fits:?}");
+    assert!(
+        fits.iter().flatten().any(|p| p.dist(Vec3::new(0.0, 0.0, 0.0)) < 1e-9)
+            && fits.iter().flatten().any(|p| p.dist(Vec3::new(10.0, 10.0, 0.0)) < 1e-9),
+        "{fits:?}"
+    );
+}
