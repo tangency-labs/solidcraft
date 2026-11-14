@@ -88,6 +88,14 @@
 //!   the symmetric scatter matrix `M` (preserving [`BestFitLine::m`]), the least-squares
 //!   line direction. Pinned v1.0.1 takes the largest eigenvector of `C = del I - M` built
 //!   with un-negated off-diagonals, a perpendicular or skewed direction (`WR-10`).
+//! - [`circle_coplanar_circle_intersect`] takes two circles that overlap by less than
+//!   `tolerance` past touching (from outside or one inside the other) as tangent, as it
+//!   takes two circles that far apart; upstream takes them as tangent only within
+//!   `SM_EFF_ZERO` and returns two crossing points `2√(rδ)` apart for an overlap δ, so
+//!   two holes a hair less than tangent were crossing in one intersection and tangent in
+//!   another (#15429). The tangent point lies on the side where they touch, decided by
+//!   the smaller of the two overlaps (upstream: inside whenever the centres are nearer
+//!   than the radii's sum by more than `SM_EFF_ZERO`).
 //! - `SM_ASSERT*` and `SM_DEBUG_CODE` blocks are not compiled upstream (release build)
 //!   and are not ported.
 
@@ -920,17 +928,17 @@ pub fn circle_coplanar_circle_intersect(
         return Ok(CircleCircle::None); // no intersections too far apart
     }
 
+    // How far the circles overlap past touching from outside each other, and past touching
+    // with one inside the other: within the tolerance either way they touch (#15429).
+    let outside = circle1_radius + circle2_radius - cc_dist;
+    let inside = cc_dist - (circle1_radius - circle2_radius).abs();
     let zero = EFF_ZERO * (1.0 + circle1_radius + circle2_radius);
-    if cc_dist > circle1_radius + circle2_radius - zero
-        || circle1_radius > cc_dist + circle2_radius - zero
-        || circle2_radius > cc_dist + circle1_radius - zero
-    {
+    if outside.min(inside) < zero.max(tolerance) {
         // Tangent intersection - from either inside or outside.
         let mut vec = circle2_center - circle1_center;
         vec /= cc_dist; // Unitize
 
-        let scaled_zero = EFF_ZERO * (1.0 + circle1_center.max_dimension());
-        let (pt1, pt2) = if cc_dist < circle1_radius + circle2_radius - scaled_zero {
+        let (pt1, pt2) = if inside < outside {
             // Inside Cases
             if circle2_radius < circle1_radius {
                 (

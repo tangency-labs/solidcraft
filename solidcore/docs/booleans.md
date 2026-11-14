@@ -276,6 +276,14 @@ What the port does today:
   `topology/brep/p3.rs`, `remove_slit_loops_where_solids_touch`).
 - **Solids touching along an edge or at a vertex** are a valid result: ops checks the result with
   `is_outward_touching_solids` (§3).
+- **Circles a hair less than tangent.** Two coplanar circles that overlap past touching by less
+  than the intersection's tolerance touch at one point, as two circles that far apart do
+  (`circle_coplanar_circle_intersect`, `geom/geom_utility/p1.rs`). Their two crossings lie
+  2√(rδ) apart for an overlap δ, far outside the tolerance, while the circles stay within δ of
+  each other between them. Parallel cylinders are cut through the same test (`surface/cone/p3.rs`),
+  so two holes a hair less than tangent touch along one line in the wall intersection and at one
+  point on each rim, consistently. Cones and other surfaces met by the marching intersection
+  are not decided this way.
 - **The sector test near tangency** steps off the edge and compares binormals until they separate
   (§4.2); where they never do within the face, it returns the coincident or zero-sector class.
   Tangent faces part as the square of the step over their relative radius, so fixed steps and
