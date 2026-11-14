@@ -50,7 +50,9 @@
 //! draft, the sense of its outer faceuse and the [`Draft`]. It is re-certified by the label
 //! and the derivation: the net's analytic surface is the drafted one's kind, and its NURBS
 //! form lies on both that analytic surface and the one derived from the definition
-//! ([`lies_on`], to the rounding of checking it).
+//! ([`lies_on`], to the rounding of checking it). A radial edit retains the source
+//! frame on its positive neutral circle: fitted end circles supply parameter conventions,
+//! while [`AnalyticSupport::build`] certifies the intended support on the edited form.
 
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::station::as_b_spline;
@@ -572,7 +574,14 @@ impl Cone {
         };
         let pull = d.along;
         if self.is_cylinder() {
-            return cone_edit(self.lean_cylinder(k, d.turned * d.sense, d.v0));
+            return match cone_edit(self.lean_cylinder(k, d.turned * d.sense, d.v0))? {
+                Ok(cone) => Ok(Ok(self.drafted_on_source_axis(
+                    k,
+                    cone.rev.base().copy(),
+                    d,
+                )?)),
+                Err(refusal) => Ok(Err(refusal)),
+            };
         }
         let mut cone = self.clone();
         let net = cone.base_mut();
@@ -612,7 +621,38 @@ impl Cone {
         if let Err(refusal) = cone_edit(cone.rebuild_step_from_nurb_parameters(k))? {
             return Ok(Err(refusal));
         }
-        Ok(Ok(cone))
+        Ok(Ok(self.drafted_on_source_axis(
+            k,
+            cone.rev.base().copy(),
+            d,
+        )?))
+    }
+
+    /// A radial edit keeps its source axis. End-circle recognition supplies the
+    /// parameter conventions, but its fitted centres must not redefine that axis.
+    /// Use the positive neutral circle as origin and certify both the implicit
+    /// support and its UV parametrisation on the edited form.
+    fn drafted_on_source_axis(
+        &self,
+        k: &Kernel,
+        form: BSplineSurface,
+        d: ConeDraft,
+    ) -> Result<Cone> {
+        let mut placement = self.canonical().origin;
+        placement.set_origin(d.centre);
+        let support = AnalyticSupport::Cone {
+            placement,
+            base_radius: d.r0,
+            semi_angle_deg: (d.sense * d.turned).atan().to_degrees(),
+        };
+        let surface = support.build(k, form)?;
+        match surface.kind() {
+            SurfaceKind::Cone(cone) => Ok((**cone).clone()),
+            _ => Err(SolidError::invalid_input(
+                OP,
+                "a drafted cone keeps its cone kind",
+            )),
+        }
     }
 }
 
@@ -1058,6 +1098,51 @@ mod tests {
         assert!(on(&k, &hole, &cone(THETA.tan())));
     }
 
+    /// Radial drafting preserves the source axis and the angular frame. Re-fitting
+    /// the two end circles can perturb that frame and lose exact coaxiality.
+    #[test]
+    fn a_drafted_cylinder_keeps_its_source_axis() {
+        use crate::geom::expansion as exact;
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let b = create_cylinder(&mut k, Point3::ZERO, 10.0, 20.0).unwrap();
+        let f = curved_face(&k, &b);
+        let SurfaceKind::Cone(source) = b.face(f).unwrap().surface.as_ref().unwrap().kind() else {
+            panic!("cylinder")
+        };
+        let frame = source.canonical().origin;
+        for pull in [Vec3::Z, -Vec3::Z] {
+            for degrees in [3.0_f64, 5.0] {
+                let draft = Draft::new(
+                    Point3::new(0.0, 0.0, 10.0),
+                    Vec3::Z,
+                    pull,
+                    degrees.to_radians(),
+                )
+                .unwrap();
+                let s = draft_surface(&k, &b, f, &draft).unwrap().unwrap();
+                let SurfaceKind::Cone(cone) = s.kind() else {
+                    panic!("drafted cone")
+                };
+                let placement = cone.canonical().origin;
+                assert_eq!(placement.x_axis(), frame.x_axis());
+                assert_eq!(placement.y_axis(), frame.y_axis());
+                let axis = frame.x_axis().cross(frame.y_axis());
+                let was = exact::cross(frame.origin(), axis).unwrap();
+                let now = exact::cross(placement.origin(), axis).unwrap();
+                for (a, c) in was.iter().zip(&now) {
+                    assert!(
+                        exact::is_zero(&exact::sub(a, c)),
+                        "pull={pull:?}, angle={degrees}: {placement:?} vs {frame:?}"
+                    );
+                }
+                assert_eq!(s.procedural_blend().unwrap().recertify(&k).unwrap(), 0.0);
+            }
+        }
+    }
+
     /// A frustum r 10 at its base to 8 at its top, 20 tall, drafted 5 degrees about its base:
     /// its generators turn 5 degrees more, radius 10 + z tan(atan(-0.1) - 5 degrees).
     #[test]
@@ -1080,6 +1165,33 @@ mod tests {
             }
         ));
         assert_eq!(s.procedural_blend().unwrap().recertify(&k).unwrap(), 0.0);
+        // Cancelling the source slope gives a zero-angle cone on the same axis;
+        // its analytic label must agree with the cylinder-shaped edited net.
+        let SurfaceKind::Cone(source) = b.face(f).unwrap().surface.as_ref().unwrap().kind() else {
+            panic!("cone")
+        };
+        let cancel = Draft::new(
+            Point3::ZERO,
+            Vec3::Z,
+            Vec3::Z,
+            source.tan_semi_angle().atan(),
+        )
+        .unwrap();
+        let straight = draft_surface(&k, &b, f, &cancel).unwrap().unwrap();
+        assert!(on(
+            &k,
+            &straight,
+            &Implicit::Cone {
+                origin: Point3::ZERO,
+                axis: Vec3::Z,
+                radius: 10.0,
+                tan_angle: 0.0,
+            }
+        ));
+        assert_eq!(
+            straight.procedural_blend().unwrap().recertify(&k).unwrap(),
+            0.0
+        );
     }
 
     #[test]

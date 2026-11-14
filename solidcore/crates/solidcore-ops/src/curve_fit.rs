@@ -9,12 +9,13 @@
 use solidcore::curve::from_parameters::{from_parameters, record_of as kernel_record, EdgeCurve};
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::crv_deviation::{certified_distance, interpolation_bound};
+use solidcore::nurbs::crv_fit::end_directions::interp_end_directions;
 use solidcore::nurbs::crv_fit::p1::{approx_knots, param_values, ParamMethod};
 use solidcore::nurbs::crv_fit::p2::interp;
 use solidcore::nurbs::geom::Interval;
 use solidcore::nurbs::knots::{clamped_uniform, periodic_uniform, KnotVector, Side, MAX_DEGREE};
 use solidcore::topology::edge::create_trimmed_nurbs_curve;
-use solidcore::Vec3;
+use solidcore::{SolidError, Vec3};
 use solidcore_record::brep::{check_curve, Budget, Curve, Invalid, Natural, MAX_SPLINE_DEGREE};
 
 use crate::body::Body;
@@ -49,6 +50,55 @@ pub fn ep_curve(points: &[[f64; 3]], degree: usize) -> Result<(Curve, f64)> {
     run("curve_fit::ep_curve", |_| {
         let params = param_values(&data, ParamMethod::ChordLength)?;
         let fit = interp(&data, degree, ParamMethod::ChordLength)?;
+        let bound = interpolation_bound(&fit, &params, &data)?;
+        Ok(record_of(&fit).map(|c| (c, bound)))
+    })?
+}
+
+/// As [`ep_curve`], with the tangent at the start along `start` and at the end along `end`
+/// where they are given (the kernel's [`interp_end_directions`]: each direction taken as the end
+/// derivative, scaled to the points' polygon length): a half section whose end at a mirror
+/// plane runs square to it joins its mirror smoothly. With neither given it is [`ep_curve`].
+///
+/// # Errors
+/// As [`ep_curve`]; [`Error::Argument`] also for a direction with a coordinate that is not
+/// finite or of no length, or one given on a curve of degree below 2.
+pub fn ep_curve_with_ends(
+    points: &[[f64; 3]],
+    degree: usize,
+    start: Option<[f64; 3]>,
+    end: Option<[f64; 3]>,
+) -> Result<(Curve, f64)> {
+    if start.is_none() && end.is_none() {
+        return ep_curve(points, degree);
+    }
+    if points.len() < 2 || points.len() > CURVE_MAX_POINTS || !points.iter().all(|p| coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    if points.windows(2).any(|w| w.first() == w.get(1)) {
+        return Err(Error::Argument);
+    }
+    if !(2..=MAX_DEGREE).contains(&degree) {
+        return Err(Error::Argument);
+    }
+    let direction = |d: Option<[f64; 3]>| -> Result<Option<Vec3>> {
+        match d {
+            Some([x, y, z]) if [x, y, z].iter().all(|c| c.is_finite()) => {
+                Ok(Some(Vec3::new(x, y, z)))
+            }
+            Some(_) => Err(Error::Argument),
+            None => Ok(None),
+        }
+    };
+    let (start, end) = (direction(start)?, direction(end)?);
+    let data: Vec<Vec3> = points.iter().map(|&[x, y, z]| Vec3::new(x, y, z)).collect();
+    run("curve_fit::ep_curve_with_ends", |_| {
+        let params = param_values(&data, ParamMethod::ChordLength)?;
+        let fit = match interp_end_directions(&data, degree, start, end, ParamMethod::ChordLength) {
+            Ok(fit) => fit,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
         let bound = interpolation_bound(&fit, &params, &data)?;
         Ok(record_of(&fit).map(|c| (c, bound)))
     })?
@@ -137,10 +187,15 @@ pub fn rebuild(curve: &Curve, degree: usize, spans: usize) -> Result<(Curve, f64
 
 /// Record edge `edge` of `body` (through `order`, its record's [`Order`]) as a free curve: the
 /// edge's curve trimmed to the edge ([`create_trimmed_nurbs_curve`]: its B-spline over the
-/// edge's interval, a trimmed or intersection edge's included) refitted as a clamped spline of
-/// `degree` (2 or 3) with `spans` uniform spans on `[0, 1]` ([`rebuild`]), running the way the
-/// edge's curve runs, and the largest distance in mm between the refit and the edge, kept
-/// when within `tol`. The distance is between the shapes, whatever their parameters: the
+/// edge's interval, a trimmed or intersection edge's included) as a clamped spline of `degree`
+/// (2 or 3) with at most `spans` spans on `[0, 1]`, running the way the edge's curve runs, and
+/// the largest distance in mm between it and the edge, kept when within `tol`.
+///
+/// A trimmed curve that already fits (its degree at most `degree`, its spans at most `spans`:
+/// a skin's section edge on the section's own knots) is the edge itself: raised to `degree`
+/// exactly ([`crate::curve_knots::set_degree`]) and put on `[0, 1]`, its bound the kernel's
+/// certified rounding. Any other is refitted with `spans` uniform spans ([`rebuild`]), and the
+/// distance is measured. The distance is between the shapes, whatever their parameters: the
 /// kernel's sampled closest-point maximum taken both ways
 /// ([`solidcore::curve::curve::Curve::curve_max_distance_between`], its samples by the knot
 /// counts and the largest gap refined by a local maximisation). It is measured, not certified:
@@ -182,6 +237,13 @@ pub fn edge_as_curve(
             "a rational edge: the refit takes polynomial splines (its fit's certified bound)",
         ));
     }
+    if let Some((own, bound)) = as_itself(&trimmed, degree, spans, tol)? {
+        return if bound <= tol {
+            Ok((own, bound))
+        } else {
+            Err(Error::PastTolerance { bound })
+        };
+    }
     // rebuild's own bound compares the two at one parameter; the edge's parameter is not the
     // refit's spacing, so that bound can stand far above the gap between the shapes
     let (fit, _) = rebuild(&trimmed, degree, spans)?;
@@ -216,6 +278,29 @@ pub fn edge_as_curve(
     } else {
         Err(Error::PastTolerance { bound })
     }
+}
+
+/// The polynomial spline `curve` as itself when it fits `degree` and `spans` (its degree and
+/// its span count at most those): raised to `degree` (exact, with the kernel's certified bound
+/// of the rounding) and its parameter mapped onto `[0, 1]`; `None` when it does not fit.
+fn as_itself(curve: &Curve, degree: usize, spans: usize, tol: f64) -> Result<Option<(Curve, f64)>> {
+    let Curve::Spline { knots, .. } = curve else {
+        return Ok(None);
+    };
+    let own_spans = knots
+        .windows(2)
+        .filter(|w| matches!(w, [a, b] if b > a))
+        .count();
+    if nurb_of(curve)?.degree() > degree || own_spans > spans {
+        return Ok(None);
+    }
+    let (raised, bound) = crate::curve_knots::set_degree(curve, degree, tol)?;
+    let bound = bound.ok_or(Error::Argument)?;
+    let mut unit = nurb_of(&raised)?;
+    run("curve_fit::edge_as_curve", |_| {
+        unit.reparam_to_interval(Interval { ul: 0.0, ur: 1.0 })?;
+        Ok(record_of(&unit).map(|c| Some((c, bound))))
+    })?
 }
 
 /// The kernel's curve of the record spline `curve` over its whole domain; `None` for a curve

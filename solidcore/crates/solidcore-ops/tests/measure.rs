@@ -192,3 +192,26 @@ fn a_batch_of_face_distances_matches_one_face_at_a_time_within_its_reach() {
         record.faces.len()
     );
 }
+
+/// A ray down the line x = 5, y = -3 from z = 4, beside a 10 mm box at the origin: of the box's
+/// edges, the one along x at y = 0, z = 0 is nearest, at (5, 0, 0), 3 from the ray's (5, -3, 0).
+#[test]
+fn a_ray_beside_a_box_is_nearest_the_edge_it_passes() {
+    let b = make_box([0.0; 3], [10.0; 3]).unwrap();
+    let (_, order) = b.to_record().unwrap();
+    let nearest = (0..order.edges.len())
+        .filter_map(|i| {
+            b.edge_closest_to_ray(&order, i, [5.0, -3.0, 4.0], [0.0, 0.0, -1.0])
+                .unwrap()
+        })
+        .min_by(|a, c| a.distance.total_cmp(&c.distance))
+        .unwrap();
+    let close = |p: [f64; 3], q: [f64; 3]| p.iter().zip(q).all(|(a, b)| (a - b).abs() <= 1e-6);
+    assert!(near(nearest.distance, 3.0, 1e-6), "{nearest:?}");
+    assert!(close(nearest.point, [5.0, 0.0, 0.0]), "{nearest:?}");
+    assert!(close(nearest.on_ray, [5.0, -3.0, 0.0]), "{nearest:?}");
+    assert_eq!(
+        b.edge_closest_to_ray(&order, order.edges.len(), [0.0; 3], [0.0, 0.0, 1.0]),
+        Err(solidcore_ops::Error::Argument)
+    );
+}

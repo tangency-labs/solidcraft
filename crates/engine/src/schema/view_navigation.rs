@@ -62,6 +62,52 @@ pub struct ZoomTool {
     pub on: Option<bool>,
 }
 
+/// Show or hide a viewport display setting: the Grid, the Ground Shadow or Continuous Orbit. The
+/// three commands read the one key the same way (`cmd/view_navigation.rs`'s `view_toggle`), so one
+/// contract describes all three. Omitting the key asks the UI to toggle the setting; `null` is not
+/// omitting it, which is what the handlers have always refused.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DisplayToggleParams {
+    /// True shows it or starts it, false hides it or stops it; omitted toggles it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub on: Option<bool>,
+}
+
+/// What the viewport display toggles answer: the flag they were given, and nothing when the call
+/// asked for a toggle. The UI applies the echo; the setting is the app's, never saved in the design.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DisplayToggleResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Show or hide the navigation bar. A window setting the app keeps, not saved with the design; the
+/// same optional flag as the other viewport toggles, under the key this command uses.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NavigationBarParams {
+    /// True shows the bar, false hides it; omitted toggles it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub visible: Option<bool>,
+}
+
+/// What `view.navigation_bar` answers: the flag it was given, and nothing when the call asked for
+/// a toggle.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct NavigationBarResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visible: Option<bool>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// Empty input for the read-only viewport effect query.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

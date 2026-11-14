@@ -27,12 +27,10 @@
 //! ownership are restored explicitly after fallible bodies, including on deferral.
 //! The upstream `cbi_MAP_TOPO_EDGES=0` experiments remain disabled. Parent-linked
 //! stage hooks borrow this live executive, never an adapter-owned duplicate.
-//! Opt-in, not upstream: with `Kernel::fixes.fillet_refuse_non_manifold_result`
-//! (WR-212, tangency-labs/solidcore#422) `do_fillet` ends with a closed-manifold
-//! check of the target (`check_closed_manifold`). A target with an edge that is
-//! not `SmEdge::IsManifold` is then refused with error code `SM_FILERR_BAD_MERGE`,
-//! the edge in the error info and in the error, where upstream (the default)
-//! returns success. `do_filleting` alone is unchanged.
+//! `do_fillet` returns the filleting's status, as upstream: whether a solid stayed one
+//! is decided on the stitched body by the three public edge-list wrappers
+//! (`fillet_edges`, `fillet_edges_per_edge`, `variable_radius_fillet` in `api`) and by
+//! the offset's put-back of its blends (`OffsetFacesExecutive::reblend`), WR-212.
 //! Not upstream: [`ExecutiveAccess::shrink_face`] shrinks the new fillet faces with
 //! knot snapping of rounding errors (tangency-labs/solidcore#472).
 
@@ -44,8 +42,7 @@ use crate::blend::fillet_geom::p1::{FilStatus, FilletCornerType, FilletEdgeType,
 use crate::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use crate::blend::fillet_solver::p5::RailsFit;
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
-use crate::error::blend::BlendFailure;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{Result, SolidError};
 use crate::geom::assert_array::c_general;
 use crate::geom::object::NotifyOperation;
 use crate::geom::solution_array::SolutionObject;
@@ -221,6 +218,12 @@ pub enum NoRoomReason {
     /// for the typed failure record ([`crate::error::ErrorKind::EndAtSeamVertex`]); its refusal
     /// notes it once it moves onto the record.
     EndAtSeamVertex,
+    /// A blend past its faces keeps no length of its edge and no corner takes any of it: the
+    /// trim takes the whole of it, as a knife edge's chamfer wider than the body does (not
+    /// the fork's, #15250). The fit, where the kernel computes one, is the size beyond which
+    /// the blend keeps nothing (a knife edge's chamfer between a plane and a cylinder tangent
+    /// to it) or where its rails stay on their faces, less the fit margin.
+    OverflowKeepsNothing,
 }
 
 /// The initialized error-info members p3 reads or writes. Corner kinds use the
@@ -753,6 +756,11 @@ pub struct FilletExecutive<O> {
     /// the least setback that builds one: `> 0`, `0` when none does, `< 0` when not that
     /// cause (`NoteFitSetBack`).
     pub fit_setback: f64,
+    /// Not upstream (#15906): set while the rails' classification recomputes the edges of
+    /// the corners it adjusted (`classify_solver_rails_with_adjusted`), the pass an End at a
+    /// smooth vertex that waited for the rails' rollover is built in. An End that would wait
+    /// again then has no later pass to build its edges, so it fails instead.
+    pub rollover_adjusting: bool,
 }
 
 /// What a refusal's fit sizes (the fork's `SM_FIT_RADIUS`, `SM_FIT_SCALE`, `SM_FIT_CHORD`).
@@ -1005,13 +1013,6 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     fn set_editing_enabled(&mut self, brep: O, enabled: bool) -> Result<()>;
     /// `SmBrep::GetEdges`, preserving list order.
     fn edges(&self, brep: O) -> Result<Vec<O>>;
-    /// `SmEdge::IsManifold` (`topology::edge::is_manifold`): four edge uses, the
-    /// first a loop edge use. Used only by the closed-manifold result check.
-    fn edge_is_manifold(&self, edge: O) -> Result<bool>;
-    /// The typed id of `edge` for error context, when the handle has one.
-    fn edge_entity(&self, _edge: O) -> Option<EntityRef> {
-        None
-    }
     /// `SmBrep::GetVertices`, preserving list order.
     fn vertices(&self, brep: O) -> Result<Vec<O>>;
     /// `SmBrep::GetFaces`, preserving list order.
@@ -2793,40 +2794,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return Err(invalid("fillet parameters not set up"));
         }
         access.create_corners(k, self, None)?;
-        self.do_filleting(k, access, None)?;
-        if !k.fixes.fillet_refuse_non_manifold_result {
-            return Ok(());
-        }
-        self.check_closed_manifold(access)
-    }
-
-    /// Refuse a filleted target that is not a closed manifold solid (not upstream;
-    /// opt-in `fixes.fillet_refuse_non_manifold_result`, WR-212,
-    /// tangency-labs/solidcore#422). Upstream ignores the `bMaybeNotSolid` that
-    /// `OrientTrimmedSurfaces` reports and returns success, so a round whose
-    /// trimming breaks the shell came back as a valid body. The first edge of the
-    /// target, in `GetEdges` order, that is not `SmEdge::IsManifold` is recorded in
-    /// the error info and named in the error. The target keeps the merged
-    /// topology, as on upstream's other merge failures.
-    fn check_closed_manifold(&mut self, access: &impl ExecutiveAccess<O>) -> Result<()> {
-        let target = self.target.ok_or_else(|| invalid("missing target B-rep"))?;
-        for edge in access.edges(target)? {
-            if access.edge_is_manifold(edge)? {
-                continue;
-            }
-            self.error.code = 7; // SM_FILERR_BAD_MERGE
-            self.error.status = 2; // SM_FIL_FAILURE
-            self.error.edge = Some(edge);
-            self.error.comment =
-                "Fillet Merge Failure: Result Is Not A Closed Manifold Solid".into();
-            let failure =
-                BlendFailure::Failed("the fillet's result is not a closed manifold solid");
-            return Err(match access.edge_entity(edge) {
-                Some(at) => SolidError::blend_at(OP, failure, at),
-                None => SolidError::blend(OP, failure),
-            });
-        }
-        Ok(())
+        self.do_filleting(k, access, None)
     }
 
     fn record_corner_failure(&mut self, view: CornerView<O>, comment: &str) -> Result<()> {
@@ -3488,7 +3456,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             }
             for corner in adjusted.iter().copied() {
                 ignore(access.rails_reinitialize_corner(k, corner, self))?;
-                if ignore(access.edges_calculate(k, corner, self))?.is_none() {
+                self.rollover_adjusting = true;
+                let edges = ignore(access.edges_calculate(k, corner, self));
+                self.rollover_adjusting = false;
+                if edges?.is_none() {
                     self.corner_vertex_failure(
                         access,
                         corner,

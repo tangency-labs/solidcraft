@@ -19,10 +19,11 @@
 //! `BooleanPostProcess` notify through the session's records and attributes, so their
 //! face and edge merges carry the dying objects' attributes to the survivors
 //! (`SM_NO_MERGE_IN_BREP`); afterwards the attributes of target edges they deleted are
-//! cleared from the session store. With the opt-in `Kernel::fixes.fillet_refuse_non_manifold_result`
-//! `do_fillet` ends with the closed-manifold check of the generic
-//! `FilletExecutive::do_fillet` (not upstream, WR-212, tangency-labs/solidcore#422);
-//! the public wrappers that drive it put the caller's body back on that refusal.
+//! cleared from the session store. `do_fillet` returns the filleting's status, as
+//! upstream: whether a solid stayed one is decided on the stitched body by the three
+//! public edge-list wrappers (`fillet_edges`, `fillet_edges_per_edge`,
+//! `variable_radius_fillet` in `api`) and by the offset's put-back of its blends
+//! (`OffsetFacesExecutive::reblend`), WR-212.
 //! After the in-place merge (also on error) the geometry bound to the target's
 //! edges, edge uses and faces under the session's kernel identities is rebound to the
 //! target's naming, as the piecewise merge does (owners are pointers upstream;
@@ -45,7 +46,6 @@ use crate::blend::fillet_executive::p3::{
     ErrorInfo, FilletExecutive, FilletFinishAccess, StitchAttempt, StitchSettings,
 };
 use crate::blend::fillet_geom::p1::FilletErrorType;
-use crate::error::blend::BlendFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::object::NotifyOperation;
 use crate::geom::tol::approx_tol3d;
@@ -56,43 +56,6 @@ use crate::topology::{BrepId, EdgeId};
 use std::collections::BTreeSet;
 
 const OP: &str = "blend::fillet_executive::session::finish";
-
-/// Whether `error` is the refusal of `fixes.fillet_refuse_non_manifold_result`
-/// (WR-212): a result that is not a closed manifold solid, the only status 1001 of
-/// this file that names an edge. The public wrappers recognise it to put the caller's
-/// body back.
-pub(crate) fn is_non_manifold_refusal(error: &SolidError) -> bool {
-    // the status, not the variant: a typed failure that replaced the `Upstream` is the same
-    // refusal (#13790)
-    error.upstream_status() == Some(1001)
-        && error.operation() == OP
-        && matches!(error.entity(), Some(EntityRef::Edge(_)))
-}
-
-/// `error` without the entity it names (the refused result's edge, gone once the
-/// caller's body is put back): an [`SolidError::Upstream`], or a typed failure that
-/// replaced one (its [`SolidError::upstream_status`] is set; the reasons of those name no
-/// entity of their own, so clearing the failure's entity clears the error's). Other errors
-/// are returned as they are.
-pub(crate) fn without_entity(error: SolidError) -> SolidError {
-    match error {
-        SolidError::Upstream {
-            operation, code, ..
-        } => SolidError::Upstream {
-            operation,
-            code,
-            entity: None,
-        },
-        replaced if replaced.upstream_status().is_some() => match replaced {
-            SolidError::Failed(mut f) => {
-                f.entity = None;
-                SolidError::Failed(f)
-            }
-            other => other,
-        },
-        other => other,
-    }
-}
 
 /// The operation, status and entity of a failure the executive turns into a
 /// [`SolidError::FilletRefused`] when a size builds (WR-696): one that answers with an
@@ -569,8 +532,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
 
 impl FilletSession<'_> {
     /// `DoFillet`: refuse uninitialized parameters, create the corners, then
-    /// [`Self::do_filleting`] and the closed-manifold check of the generic
-    /// [`FilletExecutive::do_fillet`].
+    /// [`Self::do_filleting`], as the generic [`FilletExecutive::do_fillet`].
     ///
     /// # Errors
     /// The first stage error, with the executive's error info recorded as upstream.
@@ -624,36 +586,7 @@ impl FilletSession<'_> {
             }
         }
         result?;
-        split_and_logged?;
-        if !k.fixes.fillet_refuse_non_manifold_result {
-            return Ok(());
-        }
-        self.check_closed_manifold()
-    }
-
-    /// The closed-manifold result check of `FilletExecutive::do_fillet` (not
-    /// upstream, opt-in `fixes.fillet_refuse_non_manifold_result`, WR-212,
-    /// tangency-labs/solidcore#422), on the live target.
-    fn check_closed_manifold(&mut self) -> Result<()> {
-        for edge in p1::edges(self.objects.target, None)? {
-            if crate::topology::edge::is_manifold(self.objects.target, edge)? {
-                continue;
-            }
-            self.executive.error.code = 7; // SM_FILERR_BAD_MERGE
-            self.executive.error.status = 2; // SM_FIL_FAILURE
-            self.executive.error.edge = Some(FilletObject::Topology(
-                FilletBody::Target,
-                EntityRef::Edge(edge),
-            ));
-            self.executive.error.comment =
-                "Fillet Merge Failure: Result Is Not A Closed Manifold Solid".into();
-            return Err(SolidError::blend_at(
-                OP,
-                BlendFailure::Failed("the result is not a closed manifold solid"),
-                EntityRef::Edge(edge),
-            ));
-        }
-        Ok(())
+        split_and_logged
     }
 
     /// `DoFilleting`: build the intermediate fillet body, shrink its main faces,
@@ -1130,6 +1063,7 @@ mod pre_edit_tests {
 mod ball_fit_tests {
     use super::*;
     use crate::blend::fillet_geom::p1::FilletErrorType;
+    use crate::error::blend::BlendFailure;
     use crate::geom::global_solver::SolverOperation;
     use crate::math::Point3;
     use crate::topology::{edge, Brep};
@@ -1228,13 +1162,11 @@ mod ball_fit_tests {
         assert_eq!(e.upstream_status(), Some(1001));
         assert_eq!(e.operation(), OP);
         assert_eq!(e.entity(), None);
-        assert!(!is_non_manifold_refusal(&e));
         assert_eq!(refusable(&e), Some((OP, 1001, None)));
     }
 
-    /// #13790: the executive's decisions on a bare `Upstream` (the WR-696 refusal with a fit
-    /// size, the WR-212 non-manifold refusal and the entity it drops once the body is put
-    /// back) treat a typed failure that replaced the `Upstream` alike, and leave typed
+    /// #13790: the executive's decision on a bare `Upstream` (the WR-696 refusal with a fit
+    /// size) treats a typed failure that replaced the `Upstream` alike, and leaves typed
     /// failures that never stood for a status as they are.
     #[test]
     fn typed_failures_that_replaced_an_upstream_status_are_refused_alike() {
@@ -1254,42 +1186,5 @@ mod ball_fit_tests {
         for native in native_failures("intersect::x", 1001) {
             assert_eq!(refusable(&native), None, "{native:?}");
         }
-        // the non-manifold refusal
-        let upstream = SolidError::Upstream {
-            operation: OP,
-            code: 1001,
-            entity: edge,
-        };
-        assert!(is_non_manifold_refusal(&upstream));
-        for typed in replaced_upstream(OP, 1001, edge) {
-            assert!(is_non_manifold_refusal(&typed), "{typed:?}");
-        }
-        for other in replaced_upstream(OP, 1001, None)
-            .into_iter()
-            .chain(replaced_upstream(OP, 1006, edge))
-            .chain(native_failures(OP, 1001))
-        {
-            assert!(!is_non_manifold_refusal(&other), "{other:?}");
-        }
-        // the entity it drops: the same operation and status, with no entity
-        let stripped = without_entity(upstream);
-        assert_eq!(stripped.entity(), None);
-        for typed in replaced_upstream(OP, 1001, edge) {
-            let kept = typed.clone();
-            let stripped_typed = without_entity(typed);
-            assert_eq!(stripped_typed.entity(), stripped.entity());
-            assert_eq!(stripped_typed.operation(), stripped.operation());
-            assert_eq!(stripped_typed.upstream_status(), stripped.upstream_status());
-            // only the entity changes: the typed reason is kept
-            assert_eq!(
-                stripped_typed.failure().map(|f| &f.reason),
-                kept.failure().map(|f| &f.reason)
-            );
-        }
-        // a failure that never stood for a status keeps its entity
-        let native = crate::error::Failure::new(OP, crate::error::Reason::Failed("native"))
-            .at(EntityRef::Edge(EdgeId::from_index(3)))
-            .into_error();
-        assert_eq!(without_entity(native).entity(), edge);
     }
 }

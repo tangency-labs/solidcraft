@@ -75,7 +75,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
-    f.fillet_refuse_non_manifold_result = true;
     f.fillet_vertex_error_diagnostics = true;
     f.fillet_corner_ball_patch = true;
     f.fillet_chamfer_cone_on_arc = true;
@@ -103,7 +102,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.torus_major_radius_from_origin = true;
     f.fillet_nx1_opposite_continuation_side_edge = true;
     f.torus_iso_circle_axis_from_midpoint = true;
-    f.torus_keeps_inside_out = true;
     f.internal_pole_row_through_knot = true;
     f.extrusion_origin_scaled_zero = true;
     f.transform_scales_each_tolerance = true;
@@ -262,7 +260,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.closed_smooth_pole_tangent_limit = true;
     // Held back: see `HELD_BACK`.
     f.fillet_round_ends_on_outline = false;
-    f.fillet_setback_beside_curved_faces = true;
     f.fillet_chamfer_corner = true;
     f.brep_ray_classifies_current_trims = true;
     f

@@ -655,6 +655,7 @@ impl FilletCorner {
         let mixed = (!same0 || !same1) && !closes_onto_vertex;
         let mut end_face = None;
         let mut extend_edge = None;
+        let mut turned_back = [None, None];
 
         for rail in 0..2 {
             let side = *need(sides.get(rail), "side index")?;
@@ -724,9 +725,28 @@ impl FilletCorner {
                     *need(sides.get_mut(rail), "side index")? = radial(target, side)?;
                 }
             } else {
+                // Not upstream (solidcore-native): a rail rolled onto a face whose foot edge
+                // turns back at the rolled-over edge's vertex ends where it crosses the end
+                // face's surface, inside that face (`nx1_end::TurnedBack`)
+                let turned = match solver.rolled_faces.get(solver_rail).copied().flatten() {
+                    Some(rolled) if mixed => nx1_end::rolled_rail_turns_back(
+                        k,
+                        target,
+                        side,
+                        vertex,
+                        rolled,
+                        solver.tangency_tolerance,
+                    )?,
+                    _ => None,
+                };
                 pseudo
                     .fillet_vertex_mut(fv)?
-                    .set_fillet_vertex_type(FilletVertexType::RailXEdgeuse);
+                    .set_fillet_vertex_type(if turned.is_some() {
+                        FilletVertexType::RailXExtendedEdgeuse
+                    } else {
+                        FilletVertexType::RailXEdgeuse
+                    });
+                *need(turned_back.get_mut(rail), "side index")? = turned;
                 if is_fillet_side_face(target, filleted, face)? {
                     *need(sides.get_mut(rail), "side index")? = radial(target, side)?;
                 }
@@ -759,6 +779,7 @@ impl FilletCorner {
             sides,
             end_face,
             extend_edge,
+            turned_back,
         })
     }
 }

@@ -38,7 +38,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
-    k.fixes.fillet_refuse_non_manifold_result = true;
     k.fixes.fillet_vertex_error_diagnostics = true;
     k.fixes.fillet_corner_ball_patch = true;
     k.fixes.fillet_corner_ball_center_from_axes = true;
@@ -106,7 +105,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.transform_scales_each_tolerance = true;
     k.fixes.transform_model_size_from_body_box = true;
     k.fixes.torus_signed_gen_curve_interval = true;
-    k.fixes.torus_keeps_inside_out = true;
     k.fixes.torus_major_radius_from_origin = true;
     k.fixes.torus_iso_circle_axis_from_midpoint = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;

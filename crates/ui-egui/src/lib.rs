@@ -110,12 +110,14 @@ pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub(crate) mod joint_symbols;
 pub mod keymap;
+pub mod kicad_import_dialog;
 #[cfg(test)]
 mod kit_gallery_tests;
 #[cfg(test)]
 mod kit_host_tests;
 mod length_input;
 mod linked_source;
+pub mod links;
 #[cfg(test)]
 mod loft_rails_dialog_tests;
 #[cfg(test)]
@@ -200,6 +202,7 @@ mod blend_dialog_tests;
 #[cfg(test)]
 mod boundary_dialog_tests;
 pub(crate) mod display_lod;
+pub(crate) mod edge_detail;
 #[cfg(test)]
 mod file_load_ui_tests;
 #[cfg(test)]
@@ -652,6 +655,8 @@ pub struct SolveApp {
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Sketch report window (`sketch.inspect` from the ribbon), when open.
     pub sketch_report: Option<sketch_report::SketchReport>,
+    /// The KiCad import options window, when a board is chosen to open.
+    pub kicad_import: Option<kicad_import_dialog::Dialog>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
@@ -967,6 +972,7 @@ impl SolveApp {
             params: None,
             design_properties: None,
             sketch_report: None,
+            kicad_import: None,
             bom: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
@@ -1851,12 +1857,15 @@ impl SolveApp {
     }
 
     /// Insert Design's file picker: another design becomes a linked component; a STEP or mesh
-    /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240).
+    /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240), and a KiCad
+    /// board asks for its import settings.
     pub(crate) fn pick_design_to_insert(&mut self) {
         self.pick_open(|app, path| {
             let Some(path) = path else { return };
             if solidcraft_engine::io::is_design_path(&path) {
                 app.insert_design_async(&path, None);
+            } else if solidcraft_engine::io::is_kicad_path(&path) {
+                kicad_import_dialog::open(app, &path);
             } else {
                 app.insert_path_async(&path);
             }
@@ -2227,6 +2236,12 @@ impl SolveApp {
             } else {
                 self.pick_design_to_insert();
             }
+            return;
+        }
+        if id == "doc.open" {
+            // Open asks for the file (and a board for its import options) rather than running
+            // the command with no path.
+            self.pick_open_file();
             return;
         }
         if id == "component.relink" {
@@ -2648,8 +2663,22 @@ impl SolveApp {
             }
             None => {
                 dialogs::restore_editing(self, marker);
-                self.sbox.text = format!("timeline.edit {{\"feature\": {id}, \"set\": {{}}}}");
-                self.ui.palette_open = true;
+                if let Some(f) = self.session.doc.feature(id) {
+                    use solidcraft_engine::doc::FeatureKind;
+                    let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
+                    let kind = match &f.kind {
+                        FeatureKind::Import { .. } => language.text("ui.feature_kind.import"),
+                        FeatureKind::MeshImport { .. } => language.text("ui.feature_kind.mesh_import"),
+                        FeatureKind::MeshConvert { .. } => language.text("ui.feature_kind.mesh_convert"),
+                        FeatureKind::Repair { .. } => language.text("ui.feature_kind.repair"),
+                        FeatureKind::Align { .. } => language.text("ui.feature_kind.align"),
+                        FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
+                        FeatureKind::ConstructionAxis { .. } => language.text("ui.feature_kind.construction_axis"),
+                        FeatureKind::ConstructionPoint { .. } => language.text("ui.feature_kind.construction_point"),
+                        _ => f.kind.base_name(),
+                    };
+                    self.set_status(language.format("ui.feature_nothing_to_edit", &[("kind", kind)]), false);
+                }
             }
         }
     }
@@ -3024,6 +3053,33 @@ impl SolveApp {
         }
         rx
     }
+
+    /// Open `path` asynchronously with the command's options (a KiCad board's import settings).
+    pub fn open_path_async_with_options(&mut self, path: &str, options: serde_json::Value) {
+        let mut request = file_load::Request::new(path, file_load::Kind::Open);
+        if let Some(map) = options.as_object() {
+            request.options = map.clone();
+        }
+        let _ = file_load::begin_request(self, request);
+    }
+
+    /// Ask for a file to open: a design, a CAD or mesh file, or a KiCad board.
+    pub fn pick_open_file(&mut self) {
+        self.pick_open(|app, path| {
+            if let Some(path) = path {
+                app.open_chosen_file(&path);
+            }
+        });
+    }
+
+    /// Open a chosen file: a KiCad board asks for its import options first, anything else opens.
+    pub fn open_chosen_file(&mut self, path: &str) {
+        if solidcraft_engine::io::is_kicad_path(path) {
+            kicad_import_dialog::open(self, path);
+        } else {
+            self.open_path_async(path);
+        }
+    }
     pub fn insert_path_async(&mut self, path: &str) {
         file_load::begin(self, path, true);
     }
@@ -3086,6 +3142,8 @@ impl SolveApp {
             || solidcraft_engine::cmd::drawing_import_command(path).is_some();
         if import && (!self.session.doc.features.is_empty() || !self.session.doc.point_clouds.is_empty()) {
             self.insert_path_async(path);
+        } else if solidcraft_engine::io::is_kicad_path(path) {
+            self.open_chosen_file(path);
         } else {
             self.open_path_async(path);
         }
@@ -3746,6 +3804,7 @@ impl SolveApp {
         }
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
+        kicad_import_dialog::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());

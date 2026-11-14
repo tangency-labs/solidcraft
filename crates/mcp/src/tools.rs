@@ -220,8 +220,8 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             object(
                 json!({
                     "name": string("Parameter name"),
-                    "value": {"type": ["number", "string"], "description": "Number or expression (or give it as `expression`)"},
-                    "expression": {"type": ["number", "string"], "description": "Same as `value` (the parameters.change name); give one of the two"},
+                    "value": {"anyOf": [{"type": "number"}, {"type": "string"}], "description": "Number or expression (or give it as `expression`)"},
+                    "expression": {"anyOf": [{"type": "number"}, {"type": "string"}], "description": "Same as `value` (the parameters.change name); give one of the two"},
                     "unit": string("mm, deg or \"\" (unitless); default from the expression"),
                     "comment": string("Comment shown in the parameters table"),
                 }),
@@ -246,7 +246,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "set": {
                         "type": "object",
                         "description": "Values to try, by parameter name: a number (mm) or an expression (\"140 mm\", \"wall * 2\"), as set_parameter's `value`",
-                        "additionalProperties": {"type": ["number", "string"]},
+                        "additionalProperties": {"anyOf": [{"type": "number"}, {"type": "string"}]},
                     },
                     "report": {
                         "type": "array",
@@ -467,7 +467,7 @@ fn inspect_design_tool(opts: Options) -> Value {
                     "sketches": {"type": "boolean", "description": "Full sketch contents (default true; false = summary only)"},
                     "joints": {"type": "boolean", "description": "Joint definitions as joint.inspect gives them, when the design has joints (default true)"},
                     "timeline": timeline_arg(),
-                    "bodies": {"type": ["boolean", "string"], "description": BODIES_ARG},
+                    "bodies": {"anyOf": [{"type": "boolean"}, {"type": "string"}], "description": BODIES_ARG},
                 }),
                 &[],
             ),
@@ -490,13 +490,15 @@ fn inspect_design_tool(opts: Options) -> Value {
             json!({
                 "measure": {"type": "boolean", "description": "Measure bodies (default true)"},
                 "sketches": {
-                    "type": ["boolean", "string", "array"],
-                    "items": {"type": ["string", "integer"]},
+                    "anyOf": [
+                        {"type": "boolean"},
+                        {"type": "string"},
+                        {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "integer"}]}},
+                    ],
                     "description": "Which sketches in full: a list of sketch names or ids, true (all of them), or false / \"summary\" (none: summaries only, the default)",
                 },
                 "bodies": {
-                    "type": ["array", "boolean", "string"],
-                    "items": {"type": "string"},
+                    "anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "boolean"}, {"type": "string"}],
                     "description": "Only these bodies, by name (default: all); or \"names\" (only the body names, nothing measured) or false (no bodies)",
                 },
                 "joints": {"type": "boolean", "description": "Joint definitions as joint.inspect gives them, when the design has joints (default true)"},
@@ -508,12 +510,12 @@ fn inspect_design_tool(opts: Options) -> Value {
     )
 }
 
-/// `inspect_design`'s `timeline` argument, as `document.inspect` takes it. No `enum` beside the
-/// list of types: Moonshot refuses every tool when one argument has both (#15306), so
-/// [`inspect_words`] checks the word.
+/// `inspect_design`'s `timeline` argument, as `document.inspect` takes it. No `enum`: Moonshot
+/// refuses every tool when an argument of two types has one (#15306), so [`inspect_words`] checks
+/// the word. The two types are an `anyOf`, not a list of types, which Gemini refuses (#16257).
 fn timeline_arg() -> Value {
     json!({
-        "type": ["boolean", "string"],
+        "anyOf": [{"type": "boolean"}, {"type": "string"}],
         "description": "true (default): every feature with its state and timing; \"summary\": each feature as id, name and type, with error, warning, suppressed and rolled_back only when set; false: no timeline",
     })
 }

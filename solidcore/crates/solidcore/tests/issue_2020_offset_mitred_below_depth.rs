@@ -255,7 +255,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.fillet_rails_meet_at_one_end_point = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
-    k.fixes.fillet_refuse_non_manifold_result = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;
@@ -322,7 +321,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.thicken_planar_side_walls = true;
     k.fixes.torus_check_spindle_apex = true;
     k.fixes.torus_iso_circle_axis_from_midpoint = true;
-    k.fixes.torus_keeps_inside_out = true;
     k.fixes.torus_major_radius_from_origin = true;
     k.fixes.torus_signed_gen_curve_interval = true;
     k.fixes.transform_model_size_from_body_box = true;

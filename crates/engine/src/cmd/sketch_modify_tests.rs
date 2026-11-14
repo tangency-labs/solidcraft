@@ -5977,3 +5977,93 @@ fn an_unlinked_offset_says_its_parameter_drives_nothing() {
     assert!(r["param"].is_string(), "{r}");
     assert!(r.get("warning").is_none(), "{r}");
 }
+
+fn side_directions(s: &Session, sides: &[String]) -> Vec<Vec2> {
+    let sk = sketch(s);
+    sides
+        .iter()
+        .map(|id| {
+            let ends = sk.curves[sk.curve_index(id).unwrap()].kind.point_ids();
+            sk.point(ends[1]).unwrap() - sk.point(ends[0]).unwrap()
+        })
+        .collect()
+}
+
+fn rect_with_sides() -> (Session, Vec<String>) {
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [1, 1], "p1": [21, 15]}));
+    let sides = ids(&r["curves"]);
+    (s, sides)
+}
+
+/// A rectangle turned 30 degrees stays a rectangle: parallel and perpendicular relations take the
+/// place of the horizontal and vertical ones it can't keep. Four horizontal/vertical relations
+/// held x, y, width, height; the turned one has the same four plus its angle, so one more freedom
+/// than before (5), and three relations (2 parallel, 1 perpendicular) replace the four.
+#[test]
+fn a_rectangle_turned_off_the_axes_stays_a_rectangle() {
+    let (mut s, sides) = rect_with_sides();
+    let before = run(&mut s, "sketch.inspect", json!({}))["dof"].as_i64().unwrap();
+    assert_eq!(before, 4);
+    let r = run(&mut s, "sketch.move", json!({"entities": sides, "angle": 30, "center": [1, 1]}));
+    assert_eq!(r["sketch"]["solved"], true, "{r}");
+    let kinds: Vec<_> = r["added"].as_array().unwrap().iter().map(|a| a["kind"].as_str().unwrap().to_string()).collect();
+    assert_eq!(kinds.iter().filter(|k| *k == "Parallel").count(), 2, "{r}");
+    assert_eq!(kinds.iter().filter(|k| *k == "Perpendicular").count(), 1, "{r}");
+    let sk = sketch(&s);
+    assert!(!sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Horizontal { .. } | ConstraintKind::Vertical { .. })));
+    assert_eq!(run(&mut s, "sketch.inspect", json!({}))["dof"].as_i64().unwrap(), before + 1);
+    // Drag a corner: it stays a rectangle.
+    let ends = |id: &str| sk.curves[sk.curve_index(id).unwrap()].kind.point_ids();
+    let corner = ends(&sides_of(&r)[0])[0];
+    let at = sk.point(corner).unwrap();
+    let corner_name = sk.points[corner].id.clone();
+    run(&mut s, "sketch.drag", json!({"entity": corner_name, "from": [at.x, at.y], "to": [at.x - 3.0, at.y + 2.0]}));
+    let d = side_directions(&s, &sides_of(&r));
+    let cross = |a: Vec2, b: Vec2| a.x * b.y - a.y * b.x;
+    let dot = |a: Vec2, b: Vec2| a.x * b.x + a.y * b.y;
+    assert!(cross(d[0], d[2]).abs() < 1e-6 && cross(d[1], d[3]).abs() < 1e-6, "{d:?}");
+    for i in 0..4 {
+        assert!(dot(d[i], d[(i + 1) % 4]).abs() < 1e-6, "{d:?}");
+    }
+    assert!(d[0].len() > 1e-6 && d[1].len() > 1e-6);
+}
+
+fn sides_of(r: &Value) -> Vec<String> {
+    ids(&r["curves"])
+}
+
+/// Quarter turns are as before: 90 swaps horizontal and vertical, 180 keeps them, nothing added.
+#[test]
+fn quarter_turns_of_a_rectangle_swap_or_keep_horizontal_and_vertical() {
+    for (angle, swapped) in [(90, true), (180, false)] {
+        let (mut s, sides) = rect_with_sides();
+        let before = sketch(&s);
+        let r = run(&mut s, "sketch.move", json!({"entities": sides, "angle": angle, "center": [1, 1]}));
+        assert!(r.get("added").is_none(), "{r}");
+        let count = |sk: &solidcraft_sketch::Sketch, h: bool| {
+            sk.constraints
+                .iter()
+                .filter(|c| if h { matches!(c.kind, ConstraintKind::Horizontal { .. }) } else { matches!(c.kind, ConstraintKind::Vertical { .. }) })
+                .count()
+        };
+        let after = sketch(&s);
+        assert_eq!(
+            (count(&after, true), count(&after, false)),
+            if swapped { (count(&before, false), count(&before, true)) } else { (count(&before, true), count(&before, false)) }
+        );
+        assert_eq!(after.constraints.len(), before.constraints.len());
+    }
+}
+
+/// A lone horizontal line turned 30 degrees just loses its horizontal: no vertical, nothing added.
+#[test]
+fn a_lone_horizontal_line_turned_loses_its_horizontal_and_gains_nothing() {
+    let mut s = new_sketch();
+    let line = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0]], "connect": false}))["curves"]).remove(0);
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": line, "mode": "horizontal"}));
+    assert!(sketch(&s).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Horizontal { .. })));
+    let r = run(&mut s, "sketch.move", json!({"entities": [line], "angle": 30, "center": [0, 0]}));
+    assert!(r.get("added").is_none(), "{r}");
+    assert!(sketch(&s).constraints.is_empty(), "{:?}", sketch(&s).constraints);
+}

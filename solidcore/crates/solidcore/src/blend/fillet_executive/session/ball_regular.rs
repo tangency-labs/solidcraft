@@ -663,7 +663,8 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
 /// (`fillet_tangent_rollover`), the point dropped is that edge's point nearest the edge
 /// point ([`rolled_edge_point`]), on the face beyond: the edge point lies off that face, and
 /// dropped on its surface extended it may land on another sheet of it (the far side of a
-/// boss), where the solve finds the ball rolling there (#15767).
+/// boss), where the solve finds the ball rolling there (#15767). On a seam of that surface the
+/// point is taken on the side the ball rolls onto (`fillet_tangent_rollover::section_seeds`).
 ///
 /// [`rolled_edge_point`]: crate::blend::fillet_tangent_rollover::rolled_edge_point
 pub(crate) fn ball_section_at(
@@ -708,24 +709,8 @@ pub(crate) fn ball_section_at(
     // where a ball of radius 0 touches each face: the edge's point, or for a rail rolled over a
     // smooth far edge of its face (`fillet_tangent_rollover`) that edge's point nearest it, on
     // the face beyond
-    let mut seeds = [point; 2];
-    let tangency = ops.solver().tangency_tolerance;
-    for (rail, seed) in seeds.iter_mut().enumerate() {
-        let Some(onto) = ops.solver().rolled_faces.get(rail).copied().flatten() else {
-            continue;
-        };
-        let Some(own) = ops.solver().edgeuse(rail)? else {
-            continue;
-        };
-        let Some(from) = eu::face(target, own)? else {
-            continue;
-        };
-        if let Some(p) = crate::blend::fillet_tangent_rollover::rolled_edge_point(
-            k, target, from, onto, point, tangency,
-        )? {
-            *seed = p;
-        }
-    }
+    let seeds =
+        crate::blend::fillet_tangent_rollover::section_seeds(k, target, ops.solver(), point)?;
     let mut guesses = [Point2::UNDEF; 2];
     let mut dropped = true;
     for (((base, domain), g), seed) in bases
@@ -737,7 +722,15 @@ pub(crate) fn ball_section_at(
         if !dropped {
             break;
         }
-        let drop = base.drop_point::<NoObject>(k, seed, domain, &DropPointOptions::default())?;
+        let drop = base.drop_point::<NoObject>(
+            k,
+            seed.point,
+            domain,
+            &DropPointOptions {
+                tgt_seam_side: seed.seam_side,
+                ..DropPointOptions::default()
+            },
+        )?;
         dropped = drop.success;
         *g = drop.result_uv;
     }

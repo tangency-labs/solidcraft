@@ -95,6 +95,7 @@ decal	false
 delete	false
 delete_face	false
 dimension	false
+discord	false
 display	false
 dots	false
 draft	false
@@ -149,6 +150,7 @@ iso_analysis	false
 iso_curve	false
 joint	false
 joint_origin	false
+kofi	false
 library	false
 line	false
 line_mid	false
