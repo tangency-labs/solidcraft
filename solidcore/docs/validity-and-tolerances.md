@@ -168,8 +168,13 @@ a size between 0.5 and 500, 1e-4 up to 5e4, 1e-6 down to 0.005, and so on by fac
 size. Vertex tolerances must be finite and at least the body's tolerance (allowing the check's 1%
 rounding margin). There is no upper ratio between a vertex's local tolerance and the body's:
 an imported corner's gap does not change the accuracy of unrelated topology. Geometric gap checks
-still apply. The pointer check also drops each vertex onto non-incident bounded edges and
-trimmed faces: a vertex ball that reaches either is refused, including contact at its radius.
+still apply. The pointer check also drops each vertex onto bounded edges and trimmed faces
+outside its incident and adjacent neighbourhood (§8): a vertex ball that reaches either is
+refused, including contact at its radius. The refusal is a numbered pointer report (test 82),
+with the reached entity, separation and radius; it does not discard the body's other diagnostics.
+A failed distance query (including an unsuccessful solver status or non-finite distance)
+or an inconclusive trimmed-face classification reports that clearance could not be established;
+it never establishes clearance. Cancellation and unavailable implementation errors still propagate.
 Bounding boxes prune these queries; they do not decide contact. The pointer check retains
 legacy upper ratios of 1000 for faces and edges
 (`validation/pointers.rs`); the separate Edge tests 5, 6 are obsolete, and Face tests 25, 26 and 30
@@ -316,7 +321,7 @@ edge recomputed on the sphere and the wall's intersection, which no healer step 
 
 ## 8. When a tolerance may grow
 
-![The decision for a gap g: (1) a gap between an entity and what it bounds; (2) if this kernel did not build the result (imported data), ask whether g is enclosed; (3) if it is, grow τ to cover g and record the old τ and g; (4) if it is not, enclose g first, since the healer samples it today; (5) if this kernel built the result, ask whether g is at most ε1 + ε2 + δ, each proved; (6) if it is, set τ to that bound with its certificate; (7) if not, the construction is wrong: refuse, or recompute C on S1 ∩ S2. In every branch τ grows only while its tube stays clear of every entity it does not bound.](validity-and-tolerances/tolerance-growth.svg)
+![The decision for a gap g: (1) a gap between an entity and what it bounds; (2) if this kernel did not build the result (imported data), ask whether g is enclosed; (3) if it is, grow τ to cover g and record the old τ and g; (4) if it is not, enclose g first, since the healer samples it today; (5) if this kernel built the result, ask whether g is at most ε1 + ε2 + δ, each proved; (6) if it is, set τ to that bound with its certificate; (7) if not, the construction is wrong: refuse, or recompute C on S1 ∩ S2. In every branch τ grows only while its tube stays clear of topology outside its incident and adjacent neighbourhood.](validity-and-tolerances/tolerance-growth.svg)
 
 *Figure 3. Look at the two questions: whether the kernel built the result decides what may justify
 a tolerance, a bound on imported data or the certificate of a construction.*
@@ -343,11 +348,34 @@ justification (imported data), it must be enclosed, as a certificate is
 ([definitions-and-certificates.md](definitions-and-certificates.md) §4.2), and the growth recorded
 with the old tolerance and the gap.
 
-**A tube must stay clear of what it does not bound.** A tolerance region that reaches an entity the
-entity is not incident to merges topology that the body says is separate [9, 5]: an edge whose
+**A tube must stay clear of what it does not bound.** A tolerance region that reaches an entity
+outside its local incidence and adjacency merges topology that the body says is separate [9, 5]: an edge whose
 tube covers its own length (Edge 7), two vertices or edges that coincide within tolerance
 (`contains_coincident_topology`). Past that size the stored topology no longer has one meaning, and
 no growth is valid whatever the gap.
+
+For a vertex, distinguish separate topology from the local boundary neighbourhood. Shared IDs
+give direct incidence. Split boundaries, unmerged sweeps and solids touching along an edge or
+vertex can instead carry different IDs at the same local boundary (§4). Adjacency is defined
+geometrically from the incident edge ends, not from the vertex's possibly enlarged radius:
+
+1. Take the 3D curve endpoints whose start or end vertex is this vertex, with each edge's zone.
+   A vertex without a curve end uses its point with the body's zone.
+2. An edge is adjacent when its bounded curve comes within the sum of its own zone and an
+   endpoint's edge zone of one of those endpoints. Use the existing exact curve-distance query.
+3. A face is adjacent when it bounds an incident or adjacent edge, or its trimmed surface
+   meets a fixed endpoint within that endpoint's edge zone plus the face zone. Use the exact
+   surface-distance query and trimmed-face classification, including interior point contact:
+   a cone pole can touch a cap without sharing a cap boundary ID. A vertex loop also counts
+   when its point meets a fixed endpoint within those same edge and face zones.
+
+This is one neighbourhood, not a transitive walk: newly adjacent edges do not supply more
+endpoints. It admits local split or touching boundaries and faces across an edge shorter than
+the local zones' sum. It does not excuse distant topology merely because it shares a shell or
+neighbours an incident face. In particular, widening the origin corner's radius to 2 on a
+1×2×3 box does not make the face at x=1 adjacent: the incident curve ends remain at the origin,
+and that face's boundary is outside their edge zones. Ordinary coincidence, edge-size and gap
+checks remain independent; adjacency does not repair topology that fails them.
 
 **Where the code stands.** Today's growth paths are measured, not proved: `Fix_TolSizes` and
 `validate_and_update_tolerances` take 20-sample gaps; the boolean's imprint grows vertex, edge and
@@ -372,8 +400,8 @@ tolerance.
 6. Every gap is within its tolerances: edge/face ≤ τ_e + τ_f, an edge's ends ≤ τ_e + τ_v. At a
    shared vertex, a loop's endpoint gap is bounded by τ_e1 + τ_e2 + 2τ_v, provided both endpoints
    meet that same vertex within their own edge and vertex zones.
-7. No tube or ball reaches an entity it does not bound: an edge is longer than its tolerance, and no
-   two entities coincide.
+7. No tube or ball reaches separate topology outside its incident and adjacent neighbourhood
+   (§8): an edge is longer than its tolerance, and no two unrelated entities coincide.
 8. A solid result is one closed manifold, valid at level 0, facing out (positive volume); a
    boolean's may be closed solids that touch along an edge or at a vertex.
 9. A constructed result's tolerances come from its certificates (§8); a measured gap past them is a

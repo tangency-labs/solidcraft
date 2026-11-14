@@ -13,7 +13,7 @@
 //! Deviations: no recursion; CCW walks are bounded at the native 100000 steps.
 //! Vertex tolerances must be finite, but have no upper ratio to the body's tolerance:
 //! imported local gaps do not change the accuracy of unrelated topology. Their balls
-//! must remain clear of non-incident edges and trimmed faces.
+//! must remain clear of topology outside their incident and adjacent neighbourhood.
 //! Native const geometry repairs use mutable curve access. Warning-only checks
 //! retain their evaluations and repairs; diagnostic log strings are omitted.
 //! Not upstream (WR-406, tangency-labs/solidcore#891): a UV trim's turn at its
@@ -26,15 +26,16 @@
 //! the existing face and every status are kept.
 use super::{invalid, required, Object, Reports, ERROR, SUCCESS};
 use crate::error::{EntityRef, Result};
-use crate::geom::assert_array::AssertArray;
+use crate::geom::assert_array::{AssertArray, AssertReport, ReportSpec};
 use crate::geom::global_solver::SolverOperation;
+use crate::geom::tol;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec3, EFF_ZERO, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{BrepFaceServices, FaceCaches};
-use crate::surface::surface::p5::DropPointOptions;
+use crate::surface::surface::{p5::DropPointOptions, Surface};
 use crate::topology::brep::p1;
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge;
@@ -42,8 +43,8 @@ use crate::topology::edgeuse::{p1 as eu1, p3 as eu3};
 use crate::topology::face::p2 as face2;
 use crate::topology::shell::{ShellMembers, ShellType};
 use crate::topology::{
-    Brep, BrepId, EdgeId, EdgeuseId, EdgeuseOwner, FaceuseId, LoopuseId, LoopuseStart, VertexuseId,
-    VertexuseOwner,
+    Brep, BrepId, EdgeId, EdgeuseId, EdgeuseOwner, FaceId, FaceuseId, LoopuseId, LoopuseStart,
+    VertexId, VertexuseId, VertexuseOwner,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -357,6 +358,7 @@ fn preflight(b: &Brep, r: &mut Reports<'_>, cache: &mut Lists) -> Result<bool> {
 /// `walk` skips `CheckFace`'s loop checks, as `SM_WALK` does. The returned integer
 /// preserves native `SM_SUCCESS` (1000), required-pointer failure (1001), and the
 /// early boolean return (0). Ordinary failed checks are reports, not an error status.
+/// Geometric exclusion also returns failure when the caller omits the report array.
 /// `keys` supplies the caller's topology identities used by curve-owner checks.
 /// `level` is the native `SM_LEVEL_0` through `SM_LEVEL_GIVEN` (0 through 4).
 pub fn validate_pointers(
@@ -765,7 +767,11 @@ pub fn validate_pointers(
     }
     // Geometry queries need intact topology, including when reports are omitted.
     if !r.failed {
-        check_vertex_exclusion(k, b)?;
+        check_vertex_exclusion(k, b, &mut r)?;
+        // Without a report array the status is the caller's only refusal signal.
+        if r.failed && r.array.is_none() {
+            return Ok(ERROR);
+        }
     }
     Ok(SUCCESS)
 }
@@ -983,72 +989,49 @@ fn check_vertices(b: &Brep, r: &mut Reports<'_>) -> Result<()> {
     Ok(())
 }
 
-/// A local ball may cover incident gaps, but may not swallow separate topology.
-/// Use the same bounded-curve drop and trimmed-surface drop/classification as the
-/// coincidence validator, with each vertex's radius rather than a body-wide ratio.
-fn check_vertex_exclusion(k: &Kernel, b: &mut Brep) -> Result<()> {
-    let vertices = b.vertex_list().to_vec();
-    let mut caches = FaceCaches::new();
-    for f in b.face_list().to_vec() {
-        let incident: BTreeSet<_> = crate::topology::face::p4::vertices(b, f, None, false, None)?
-            .into_iter()
-            .collect();
-        let Some(surface) = b.face(f)?.surface.as_ref() else {
-            // The missing surface has already been reported by the pointer check.
+/// The geometric star of a vertex's incident curve ends. Split boundaries and
+/// touching lumps can use different IDs at the same corner. An edge belongs to
+/// this star when its bounded curve meets an incident endpoint within the sum of
+/// their edge zones. The vertex radius is deliberately not an adjacency radius:
+/// increasing it must not make an opposite face into a neighbour.
+struct VertexNeighbourhood {
+    edges: BTreeSet<EdgeId>,
+    anchors: Vec<(Vec3, f64)>,
+}
+
+fn vertex_neighbourhood_edges(k: &Kernel, b: &Brep, v: VertexId) -> Result<VertexNeighbourhood> {
+    let mut local: BTreeSet<_> = crate::topology::vertex::edges(b, v, None)?
+        .into_iter()
+        .collect();
+    let mut anchors = Vec::new();
+    for &e in &local {
+        let data = b.edge(e)?;
+        let Some(curve) = data.curve.as_ref() else {
             continue;
         };
-        let surface = surface.clone_for_evaluation()?;
-        let bbox = crate::query::face::p1::calculate_bounding_box(k, &mut *b, f, false)?;
-        let domain = b.face(f)?.uv_domain;
-        for &v in &vertices {
-            k.check_cancelled("topology::brep::validation::vertex_exclusion")?;
-            if incident.contains(&v) {
-                continue;
-            }
-            let point = b.vertex(v)?.point;
-            let radius = b.vertex(v)?.tolerance;
-            if !bbox.contains_point(point, radius) {
-                continue;
-            }
-            let mut services = BrepFaceServices::with_caches(b, std::mem::take(&mut caches));
-            let drop = surface.drop_point_with_context(
-                k,
-                point,
-                &domain,
-                &DropPointOptions::default(),
-                Some(CacheObject::Surface(f)),
-                &mut services,
-            );
-            caches = services.into_caches();
-            let drop = drop?;
-            if !drop.success || drop.gap > radius {
-                continue;
-            }
-            let mut classification = PointClassification::<EntityRef>::new(b.face(f)?.tolerance);
-            crate::query::face::p2::point_classify(
-                k,
-                b,
-                f,
-                drop.result_uv,
-                &mut classification,
-                crate::query::face::p2::PointClassifyOptions {
-                    use_uv_classification: true,
-                    ..Default::default()
-                },
-            )?;
-            if matches!(
-                classification.point_class(),
-                PointClassType::Face | PointClassType::Edge | PointClassType::Vertex
-            ) {
-                return Err(invalid("vertex tolerance reaches a non-incident face"));
+        let (start, end) = edge::start_end_vertices(b, e)?;
+        for (vertex, parameter) in [(start, data.interval.min()), (end, data.interval.max())] {
+            if vertex == Some(v) {
+                anchors.push((
+                    curve.evaluate_point(k, parameter)?,
+                    tol::zone_tol3d(k, data.tolerance),
+                ));
             }
         }
     }
-    for e in b.edge_list().to_vec() {
-        if b.edge(e)?.curve.is_none() {
+    if anchors.is_empty() {
+        anchors.push((b.vertex(v)?.point, tol::zone_tol3d(k, b.tolerance())));
+    }
+    for &e in b.edge_list() {
+        k.check_cancelled("topology::brep::validation::vertex_neighbourhood")?;
+        if local.contains(&e) {
             continue;
         }
-        let bbox = crate::query::edge::calculate_bounding_box(
+        let data = b.edge(e)?;
+        let Some(curve) = data.curve.as_ref() else {
+            continue;
+        };
+        let bbox = exclusion_probe(crate::query::edge::calculate_bounding_box(
             k,
             b,
             e,
@@ -1058,8 +1041,278 @@ fn check_vertex_exclusion(k: &Kernel, b: &mut Brep) -> Result<()> {
                 polar: false,
             },
             false,
-        )?
-        .normal;
+        ))?
+        .and_then(|bounds| bounds.normal)
+        .filter(|bounds| bounds.is_defined());
+        for &(point, zone) in &anchors {
+            let limit = tol::xsect_tol_3d_from_zones(k, zone, tol::zone_tol3d(k, data.tolerance));
+            if bbox.is_some_and(|bbox| !bbox.contains_point(point, limit)) {
+                continue;
+            }
+            let drop = curve.drop_point(
+                k,
+                &data.interval,
+                point,
+                None,
+                b.tolerance(),
+                None,
+                SolverOperation::Minimize,
+            )?;
+            if drop.success && drop.distance <= limit {
+                local.insert(e);
+                break;
+            }
+        }
+    }
+    Ok(VertexNeighbourhood {
+        edges: local,
+        anchors,
+    })
+}
+
+/// An unsuccessful geometric query cannot prove clearance. Keep operational
+/// cancellation and unavailable implementation errors distinct from a finding.
+fn exclusion_probe<T>(result: Result<T>) -> Result<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if error.is_unported_or_cancelled() => Err(error),
+        Err(_) => Ok(None),
+    }
+}
+
+/// A geometric refusal remains a normal numbered pointer report. In particular,
+/// callers doing local operations must retain their Unsound refusal and rollback,
+/// rather than receiving an unrelated InvalidInput error that loses the reports.
+fn report_vertex_exclusion(
+    b: &Brep,
+    r: &mut Reports<'_>,
+    v: VertexId,
+    other: EntityRef,
+    gap: Option<f64>,
+) -> Result<()> {
+    r.failed = true;
+    let Some(array) = r.array.as_deref_mut() else {
+        return Ok(());
+    };
+    let (owner, owner_type, owner_name) = super::object_info(b, EntityRef::Vertex(v).into())?;
+    let (other_key, other_type, other_name) = super::object_info(b, other.into())?;
+    let message = match (gap, other) {
+        (None, EntityRef::Face(_)) => "Cannot establish vertex clearance from a non-adjacent face",
+        (None, _) => "Cannot establish vertex clearance from a non-adjacent edge",
+        (Some(_), EntityRef::Face(_)) => "Vertex tolerance reaches a non-adjacent face",
+        _ => "Vertex tolerance reaches a non-adjacent edge",
+    };
+    array.add_unique_delete_duplicate(AssertReport::new(ReportSpec {
+        reporter: Some(super::object_info(b, EntityRef::Brep(BrepId::from_index(0)).into())?.0),
+        test_index: 82,
+        test_class: super::BREP_TYPE,
+        owner: Some(owner),
+        owner_type,
+        owner_type_string: Some(owner_name),
+        other: Some(other_key),
+        other_type,
+        other_type_string: Some(other_name),
+        tol3d: gap.unwrap_or(UNDEF_DOUBLE),
+        value: b.vertex(v)?.tolerance,
+        list_index: 1,
+        message: Some(message.into()),
+    })?);
+    Ok(())
+}
+
+enum FaceContact {
+    Clear,
+    Contact(f64),
+    Inconclusive,
+}
+
+/// Probe the trimmed face, retaining failed solves as uncertainty. The same query
+/// decides fixed-endpoint adjacency and contact with a vertex's wider ball.
+fn face_contact(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    surface: &Surface,
+    point: Vec3,
+    limit: f64,
+    caches: &mut FaceCaches,
+) -> Result<FaceContact> {
+    let domain = b.face(f)?.uv_domain;
+    let mut services = BrepFaceServices::with_caches(b, std::mem::take(caches));
+    let drop = surface.drop_point_with_context(
+        k,
+        point,
+        &domain,
+        &DropPointOptions::default(),
+        Some(CacheObject::Surface(f)),
+        &mut services,
+    );
+    *caches = services.into_caches();
+    let Some(drop) = exclusion_probe(drop)?.filter(|drop| {
+        drop.success
+            && drop.gap.is_finite()
+            && drop.result_uv.x.is_finite()
+            && drop.result_uv.y.is_finite()
+    }) else {
+        return Ok(FaceContact::Inconclusive);
+    };
+    if drop.gap > limit {
+        return Ok(FaceContact::Clear);
+    }
+    let mut classification = PointClassification::<EntityRef>::new(b.face(f)?.tolerance);
+    let classified = exclusion_probe(crate::query::face::p2::point_classify(
+        k,
+        b,
+        f,
+        drop.result_uv,
+        &mut classification,
+        crate::query::face::p2::PointClassifyOptions {
+            use_uv_classification: true,
+            ..Default::default()
+        },
+    ))?;
+    if classified.is_none() {
+        return Ok(FaceContact::Inconclusive);
+    }
+    Ok(match classification.point_class() {
+        PointClassType::Face | PointClassType::Edge | PointClassType::Vertex => {
+            FaceContact::Contact(drop.gap)
+        }
+        PointClassType::Nothing => FaceContact::Clear,
+        _ => FaceContact::Inconclusive,
+    })
+}
+
+/// A local ball may cover incident and adjacent gaps, but not separate topology.
+/// Use the same bounded-curve drop and trimmed-surface drop/classification as the
+/// coincidence validator, with each vertex's radius rather than a body-wide ratio.
+fn check_vertex_exclusion(k: &Kernel, b: &mut Brep, r: &mut Reports<'_>) -> Result<()> {
+    let vertices = b.vertex_list().to_vec();
+    let mut caches = FaceCaches::new();
+    let mut neighbourhoods = BTreeMap::new();
+    let mut excluded = BTreeSet::new();
+    for f in b.face_list().to_vec() {
+        let incident: BTreeSet<_> = crate::topology::face::p4::vertices(b, f, None, false, None)?
+            .into_iter()
+            .collect();
+        let face_edges = crate::topology::face::p4::edges(b, f, None, false, None)?;
+        let mut vertex_loops = Vec::new();
+        for lu in crate::topology::face::p4::upward_loopuses(b, f, false, None)? {
+            if let LoopuseStart::Vertexuse(Some(vu)) = b.loopuse(lu)?.start {
+                if let Some(w) = b.vertexuse(vu)?.vertex {
+                    vertex_loops.push(w);
+                }
+            }
+        }
+        let Some(surface) = b.face(f)?.surface.as_ref() else {
+            // The missing surface has already been reported by the pointer check.
+            continue;
+        };
+        let surface = exclusion_probe(surface.clone_for_evaluation())?;
+        let bbox = exclusion_probe(crate::query::face::p1::calculate_bounding_box(
+            k, &mut *b, f, false,
+        ))?
+        .filter(|bounds| bounds.is_defined());
+        for &v in &vertices {
+            k.check_cancelled("topology::brep::validation::vertex_exclusion")?;
+            if incident.contains(&v) || excluded.contains(&v) {
+                continue;
+            }
+            let point = b.vertex(v)?.point;
+            let radius = b.vertex(v)?.tolerance;
+            if bbox.is_some_and(|bbox| !bbox.contains_point(point, radius)) {
+                continue;
+            }
+            if let std::collections::btree_map::Entry::Vacant(entry) = neighbourhoods.entry(v) {
+                let Some(local) = exclusion_probe(vertex_neighbourhood_edges(k, b, v))? else {
+                    report_vertex_exclusion(b, r, v, EntityRef::Face(f), None)?;
+                    excluded.insert(v);
+                    continue;
+                };
+                entry.insert(local);
+            }
+            if let Some(local) = neighbourhoods.get(&v) {
+                if face_edges.iter().any(|e| local.edges.contains(e)) {
+                    continue;
+                }
+                // A vertex loop has no boundary edge. Its point uses the
+                // face zone, not that other vertex's possibly wide radius.
+                let face_zone = tol::zone_tol3d(k, b.face(f)?.tolerance);
+                let mut adjacent_vertex = false;
+                for &w in &vertex_loops {
+                    let point = b.vertex(w)?.point;
+                    if local.anchors.iter().any(|&(anchor, zone)| {
+                        anchor.distance(point) <= tol::xsect_tol_3d_from_zones(k, zone, face_zone)
+                    }) {
+                        adjacent_vertex = true;
+                        break;
+                    }
+                }
+                if adjacent_vertex {
+                    continue;
+                }
+            }
+            let Some(surface) = surface.as_ref() else {
+                report_vertex_exclusion(b, r, v, EntityRef::Face(f), None)?;
+                excluded.insert(v);
+                continue;
+            };
+            // A singular pole can touch the interior of another face without a
+            // shared edge ID. Test only fixed curve ends at edge/face accuracy;
+            // the widened vertex radius must never define this adjacency.
+            let mut adjacent = false;
+            let mut uncertain = false;
+            if let Some(local) = neighbourhoods.get(&v) {
+                let face_zone = tol::zone_tol3d(k, b.face(f)?.tolerance);
+                for &(anchor, zone) in &local.anchors {
+                    let limit = tol::xsect_tol_3d_from_zones(k, zone, face_zone);
+                    if bbox.is_some_and(|bounds| !bounds.contains_point(anchor, limit)) {
+                        continue;
+                    }
+                    match face_contact(k, b, f, surface, anchor, limit, &mut caches)? {
+                        FaceContact::Contact(_) => {
+                            adjacent = true;
+                            break;
+                        }
+                        FaceContact::Inconclusive => uncertain = true,
+                        FaceContact::Clear => {}
+                    }
+                }
+            }
+            if adjacent {
+                continue;
+            }
+            let contact = if uncertain {
+                FaceContact::Inconclusive
+            } else {
+                face_contact(k, b, f, surface, point, radius, &mut caches)?
+            };
+            let gap = match contact {
+                FaceContact::Clear => continue,
+                FaceContact::Contact(gap) => Some(gap),
+                FaceContact::Inconclusive => None,
+            };
+            report_vertex_exclusion(b, r, v, EntityRef::Face(f), gap)?;
+            excluded.insert(v);
+        }
+    }
+    for e in b.edge_list().to_vec() {
+        if b.edge(e)?.curve.is_none() {
+            continue;
+        }
+        let bbox = exclusion_probe(crate::query::edge::calculate_bounding_box(
+            k,
+            b,
+            e,
+            BoundingBoxRequest {
+                normal: true,
+                pseudo: false,
+                polar: false,
+            },
+            false,
+        ))?
+        .and_then(|bounds| bounds.normal)
+        .filter(|bounds| bounds.is_defined());
         let first = edge::vertex(b, e)?;
         let last = edge::other_vertex(b, e, first)?;
         let data = b.edge(e)?;
@@ -1068,14 +1321,14 @@ fn check_vertex_exclusion(k: &Kernel, b: &mut Brep) -> Result<()> {
         };
         for &v in &vertices {
             k.check_cancelled("topology::brep::validation::vertex_exclusion")?;
-            if Some(v) == first || Some(v) == last {
+            if Some(v) == first || Some(v) == last || excluded.contains(&v) {
                 continue;
             }
             let vertex = b.vertex(v)?;
             if bbox.is_some_and(|bbox| !bbox.contains_point(vertex.point, vertex.tolerance)) {
                 continue;
             }
-            let drop = curve.drop_point(
+            let drop = exclusion_probe(curve.drop_point(
                 k,
                 &data.interval,
                 vertex.point,
@@ -1083,9 +1336,29 @@ fn check_vertex_exclusion(k: &Kernel, b: &mut Brep) -> Result<()> {
                 b.tolerance(),
                 None,
                 SolverOperation::Minimize,
-            )?;
-            if drop.success && drop.distance <= vertex.tolerance {
-                return Err(invalid("vertex tolerance reaches a non-incident edge"));
+            ))?;
+            let Some(drop) = drop.filter(|drop| drop.success && drop.distance.is_finite()) else {
+                report_vertex_exclusion(b, r, v, EntityRef::Edge(e), None)?;
+                excluded.insert(v);
+                continue;
+            };
+            if drop.distance <= vertex.tolerance {
+                if let std::collections::btree_map::Entry::Vacant(entry) = neighbourhoods.entry(v) {
+                    let Some(local) = exclusion_probe(vertex_neighbourhood_edges(k, b, v))? else {
+                        report_vertex_exclusion(b, r, v, EntityRef::Edge(e), None)?;
+                        excluded.insert(v);
+                        continue;
+                    };
+                    entry.insert(local);
+                }
+                if neighbourhoods
+                    .get(&v)
+                    .is_some_and(|local| local.edges.contains(&e))
+                {
+                    continue;
+                }
+                report_vertex_exclusion(b, r, v, EntityRef::Edge(e), Some(drop.distance))?;
+                excluded.insert(v);
             }
         }
     }
@@ -1160,7 +1433,7 @@ fn end_turns_back(p0: Vec3, p1: Vec3, p2: Vec3, metric: Option<[f64; 3]>) -> boo
 /// surface cannot be evaluated.
 fn first_fundamental_form(
     k: &Kernel,
-    surface: &crate::surface::surface::Surface,
+    surface: &Surface,
     uv: Point2,
     u_from_left: bool,
     v_from_left: bool,
@@ -1179,7 +1452,7 @@ fn first_fundamental_form(
 fn fix_reversed_on(
     k: &Kernel,
     c: &mut crate::curve::curve::Curve,
-    surface: Option<&crate::surface::surface::Surface>,
+    surface: Option<&Surface>,
 ) -> Result<()> {
     use crate::curve::curve::CurveKind;
     let owner = c.owner();
@@ -1345,7 +1618,7 @@ fn edge_geometry(
         let v_tol = b.vertex(v)?.tolerance;
         if dist > v_tol + b.edge(e)?.tolerance {
             if fix_tolerances && dist < v_tol * 100.0 {
-                let zone = crate::geom::tol::zone_tol3d(k, dist * 2.0);
+                let zone = tol::zone_tol3d(k, dist * 2.0);
                 crate::topology::vertex::set_tolerance(b, v, zone, true, true)?;
             } else {
                 return Err(crate::SolidError::topology_failed(
@@ -1362,10 +1635,10 @@ fn edge_geometry(
             if let Some(trim) = b.edgeuse_mut(eu)?.uv_trim_curve.as_mut() {
                 let uv_ivl = trim.natural_interval();
                 // (statuses ignored upstream)
-                if !crate::geom::tol::are_same(uv_ivl.min(), ivl.min()) {
+                if !tol::are_same(uv_ivl.min(), ivl.min()) {
                     crate::error::ignore_status(trim.edit_parameterization(k, &ivl))?;
                 }
-                if !crate::geom::tol::are_same(uv_ivl.max(), ivl.max()) {
+                if !tol::are_same(uv_ivl.max(), ivl.max()) {
                     crate::error::ignore_status(trim.edit_parameterization(k, &ivl))?;
                 }
             }
@@ -1507,13 +1780,204 @@ mod issue_891_tests {
             create_wire_edge_from_curve(&mut k, &mut body, Curve::from(line), interval).unwrap();
         }
         let vertex = body.vertex_list()[0];
+        let mut reports = Reports {
+            array: None,
+            level: 0,
+            failed: false,
+        };
         body.vertex_mut(vertex).unwrap().tolerance = 0.9;
-        check_vertex_exclusion(&k, &mut body).unwrap();
+        check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
+        assert!(!reports.failed);
         body.vertex_mut(vertex).unwrap().tolerance = 1.0;
-        let error = check_vertex_exclusion(&k, &mut body).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("vertex tolerance reaches a non-incident edge"));
+        check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
+        assert!(reports.failed);
+    }
+
+    #[test]
+    fn distinct_boundary_ids_in_the_edge_zones_are_local_neighbours() {
+        use crate::curve::curve::Curve;
+        use crate::curve::line::Line;
+        use crate::geom::extent1d::Extent1d;
+        use crate::topology::brep::p5::create_wire_edge_from_curve;
+
+        for gap in [0.0, 1.5e-5] {
+            let mut k = Kernel::default();
+            let mut body = Brep::new_with_infinite_region().unwrap();
+            let interval = Extent1d::from_min_max(0.0, 1.0);
+            let mut edges = Vec::new();
+            for y in [0.0, gap] {
+                let curve = Line::create_line_segment(
+                    3,
+                    Vec3::new(0.0, y, 0.0),
+                    Vec3::new(2.0, y, 0.0),
+                    Some(&interval),
+                )
+                .unwrap();
+                edges.push(
+                    create_wire_edge_from_curve(&mut k, &mut body, Curve::from(curve), interval)
+                        .unwrap(),
+                );
+            }
+            let v = edge::start_vertex(&body, edges[0]).unwrap().unwrap();
+            let other = edge::start_vertex(&body, edges[1]).unwrap().unwrap();
+            assert_ne!(v, other, "separate boundary records");
+            body.vertex_mut(v).unwrap().tolerance = 4e-5;
+            let local = vertex_neighbourhood_edges(&k, &body, v).unwrap();
+            assert!(local.edges.contains(&edges[1]), "gap {gap}");
+            let mut reports = Reports {
+                array: None,
+                level: 0,
+                failed: false,
+            };
+            check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
+            assert!(!reports.failed, "gap {gap}");
+        }
+    }
+
+    #[test]
+    fn widening_a_vertex_does_not_expand_its_neighbourhood_to_the_opposite_face() {
+        let mut k = Kernel::default();
+        let mut body =
+            crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let v = body.vertex_list()[0];
+        let before = vertex_neighbourhood_edges(&k, &body, v).unwrap();
+        body.vertex_mut(v).unwrap().tolerance = 2.0;
+        let after = vertex_neighbourhood_edges(&k, &body, v).unwrap();
+        assert_eq!(before.edges, after.edges);
+        assert_eq!(after.edges.len(), 3, "only the three incident box edges");
+        let mut reports = Reports {
+            array: None,
+            level: 0,
+            failed: false,
+        };
+        check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
+        assert!(reports.failed);
+    }
+
+    #[test]
+    fn inconclusive_exclusion_queries_preserve_operational_errors() {
+        let failed: Result<()> = Err(crate::SolidError::invalid_input(
+            "vertex exclusion test",
+            "the geometric query cannot evaluate its curve",
+        ));
+        assert_eq!(exclusion_probe(failed).unwrap(), None);
+        assert_eq!(exclusion_probe(Ok(7)).unwrap(), Some(7));
+        let cancelled: Result<()> = Err(crate::SolidError::cancelled("vertex exclusion test"));
+        assert!(exclusion_probe(cancelled).unwrap_err().is_cancelled());
+        let unported: Result<()> = Err(crate::SolidError::unported(
+            "vertex exclusion test",
+            "topology.brep.validation",
+        ));
+        assert!(exclusion_probe(unported)
+            .unwrap_err()
+            .is_unported_or_cancelled());
+    }
+
+    #[test]
+    fn unevaluable_separate_curve_reports_each_uncertain_vertex_and_continues() {
+        use crate::curve::line::Line;
+        use crate::geom::extent1d::Extent1d;
+        use crate::topology::brep::p5::create_wire_edge_from_curve;
+
+        let mut k = Kernel::default();
+        let mut body = Brep::new_with_infinite_region().unwrap();
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let mut edges = Vec::new();
+        for y in [0.0, 1.0, 2.0] {
+            let line = Line::create_line_segment(
+                3,
+                Vec3::new(0.0, y, 0.0),
+                Vec3::new(2.0, y, 0.0),
+                Some(&interval),
+            )
+            .unwrap();
+            edges.push(
+                create_wire_edge_from_curve(&mut k, &mut body, Curve::from(line), interval)
+                    .unwrap(),
+            );
+        }
+        // A missing NURB gives a deterministic geometric query error. It must
+        // yield an inconclusive-clearance finding, rather than abort the walk or
+        // silently count the edge as clear of the other two wires' vertices.
+        body.edge_mut(edges[0]).unwrap().curve = Some(Curve::from(BSplineCurve::new(3)));
+        assert!(body
+            .edge(edges[0])
+            .unwrap()
+            .curve
+            .as_ref()
+            .unwrap()
+            .drop_point(
+                &k,
+                &interval,
+                Vec3::new(0.0, 1.0, 0.0),
+                None,
+                body.tolerance(),
+                None,
+                SolverOperation::Minimize,
+            )
+            .is_err());
+        let expected: Vec<_> = body.vertex_list().iter().copied().skip(2).collect();
+        let mut array = AssertArray::new();
+        let mut reports = Reports {
+            array: Some(&mut array),
+            level: 0,
+            failed: false,
+        };
+        check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
+        assert!(reports.failed);
+        for vertex in expected {
+            let owner = super::super::object_info(&body, EntityRef::Vertex(vertex).into())
+                .unwrap()
+                .0;
+            assert!(
+                array.reports().iter().any(|report| {
+                    report.owner == Some(owner)
+                        && report.test_index == 82
+                        && report.message.as_deref()
+                            == Some("Cannot establish vertex clearance from a non-adjacent edge")
+                }),
+                "missing inconclusive finding for {vertex:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn incident_curve_end_touching_a_separate_face_interior_is_local() {
+        use crate::curve::line::Line;
+        use crate::geom::extent1d::Extent1d;
+        use crate::topology::brep::p5::create_wire_edge_from_curve;
+
+        let mut k = Kernel::default();
+        let mut body =
+            crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        // Like a cone pole touching its cap, this curve endpoint meets the
+        // interior of a face with separate topology, away from its boundary.
+        let line = Line::create_line_segment(
+            3,
+            Vec3::new(0.0, 1.0, 1.5),
+            Vec3::new(-1.0, 1.0, 1.5),
+            Some(&interval),
+        )
+        .unwrap();
+        let wire =
+            create_wire_edge_from_curve(&mut k, &mut body, Curve::from(line), interval).unwrap();
+        let vertex = edge::start_vertex(&body, wire).unwrap().unwrap();
+        let mut reports = Reports {
+            array: None,
+            level: 0,
+            failed: false,
+        };
+        check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
+        assert!(!reports.failed, "the fixed curve endpoint meets the face");
+
+        // Widening the vertex cannot make the opposite x=1 face adjacent:
+        // the incident curve endpoint stays at x=0 with its original edge zone.
+        body.vertex_mut(vertex).unwrap().tolerance = 2.0;
+        check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
+        assert!(reports.failed, "the ball reaches a separate opposite face");
     }
 
     fn key(e: EntityRef) -> crate::geom::object::ObjectRef {
@@ -1593,7 +2057,7 @@ mod issue_891_tests {
             context: None,
             key_of: &key,
         };
-        let face_key = |f: crate::topology::FaceId| key(EntityRef::Face(f));
+        let face_key = |f: FaceId| key(EntityRef::Face(f));
         b.set_infinite_region(Some(region));
         let made = make_face_with_curves(
             k,

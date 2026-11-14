@@ -188,12 +188,15 @@ fn vertex_ball_must_not_reach_non_incident_topology() {
             assert!(report.is_valid(), "radius {radius}: {:?}", report.lines());
             assert_eq!(b.vertex(v).unwrap().tolerance, radius);
         } else {
-            let error = result.unwrap_err();
+            let report = result.unwrap();
+            assert!(!report.is_valid(), "radius {radius}");
             assert!(
-                error
-                    .to_string()
-                    .contains("vertex tolerance reaches a non-incident face"),
-                "radius {radius}: {error}"
+                report
+                    .lines()
+                    .iter()
+                    .any(|line| line.contains("Vertex tolerance reaches a non-adjacent face")),
+                "radius {radius}: {:?}",
+                report.lines()
             );
         }
     }

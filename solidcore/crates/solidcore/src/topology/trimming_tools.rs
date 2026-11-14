@@ -3412,16 +3412,23 @@ mod tests {
             eu.ccw = Some(EdgeuseId::from_index(c));
             eu.cw = eu.ccw;
         }
-        b.vertex_mut(VertexId::from_index(1)).unwrap().point = Vec3::new(0.5, 0.0, 0.0);
         let surface = Surface::from(crate::surface::plane::Plane::from_normal(
             Vec3::ZERO,
             Vec3::Z,
         ));
+        // FromNormal chooses its own UV axes: UV (0.5, 0) need not map to
+        // world (0.5, 0, 0). Put the shared vertex at the actual trim endpoint.
+        b.vertex_mut(VertexId::from_index(1)).unwrap().point =
+            surface.evaluate_point(&k, Point2::new(0.5, 0.0)).unwrap();
         for start in 0..4 {
             b.loopuse_mut(crate::topology::LoopuseId::from_index(0))
                 .unwrap()
                 .start = crate::topology::LoopuseStart::Edgeuse(Some(EdgeuseId::from_index(start)));
-            assert_eq!(check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(), 0);
+            assert_eq!(
+                check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(),
+                0,
+                "loop start edge use {start}"
+            );
         }
         // Missing endpoint topology must fall back to the edges, not another vertex.
         b.vertexuse_mut(VertexuseId::from_index(2)).unwrap().vertex = None;
