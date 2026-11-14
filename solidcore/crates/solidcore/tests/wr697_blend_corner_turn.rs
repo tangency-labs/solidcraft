@@ -252,7 +252,7 @@ fn sloping_fin(k: &mut Kernel, mirrored: bool) -> Brep {
 /// q = sqrt(2t - t²), the side strip is r(1-q). The bottom strip is
 /// r(3t/4 + 1/2 - q), ending at t = 2/5, where the circle touches the sloping plane.
 /// Integrating the strips gives the quadratic term below. Their common rectangle
-/// and the sloping end of the side strip give integral_0^(2/5) (1-q)(1/2-q) dt
+/// and the sloping end of the side strip give `integral_0^(2/5) (1-q)(1/2-q) dt`
 /// - (3/4) integral_(2/5)^1 t(1-q) dt. The unrounded union is 100 + 30 - 13.5.
 fn sloping_fin_volume(radius: f64) -> f64 {
     let angle = 0.75_f64.atan();
