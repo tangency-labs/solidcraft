@@ -171,7 +171,7 @@ fn unsound(
             tolerance,
             bound,
         } => Unsoundness::ToleranceBeyondBound {
-            entity: index(entity),
+            entity: entity.and_then(index),
             tolerance,
             bound,
         },

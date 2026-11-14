@@ -507,8 +507,9 @@ pub enum Unsoundness {
     /// The tolerance of an edge or vertex grew to `tolerance`, past the `bound` its certificate
     /// allows.
     ToleranceBeyondBound {
-        /// The edge or vertex, by its record index (`None` where the call has no record order
-        /// that holds it).
+        /// The entity of the input it comes from, by its record index: `None` where the kernel
+        /// names none, where the call's order does not hold it, or for an edge or vertex of a
+        /// call without an order.
         entity: Option<RecordEntity>,
         /// Its tolerance.
         tolerance: f64,
@@ -535,12 +536,12 @@ impl std::fmt::Display for Unsoundness {
                 bound,
             } => {
                 match entity {
-                    Some(e) => write!(f, "the tolerance of {e}")?,
+                    Some(e) => write!(f, "the tolerance at {e} of the input")?,
                     None => f.write_str("the tolerance of an edge or vertex")?,
                 }
                 return write!(
                     f,
-                    " grew to {tolerance}, past the {bound} its certificate allows"
+                    " grew to {tolerance:e}, past the {bound:e} its certificate allows"
                 );
             }
         };
@@ -548,7 +549,8 @@ impl std::fmt::Display for Unsoundness {
     }
 }
 
-/// A face, edge or vertex by its index in the caller's record [`crate::Order`].
+/// A face, edge or vertex by its index in the caller's record [`crate::Order`] (a face of a call
+/// without one: by its index among the body's faces).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecordEntity {
     /// Record face `i`.

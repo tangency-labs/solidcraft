@@ -234,13 +234,15 @@ pub enum Unsoundness {
     /// allow. No check returns it yet; it is named so a caller's match covers it when one
     /// does.
     LoopGapNotClosable,
-    /// The tolerance of `entity`, an edge or vertex of the body, grew to `tolerance`, past the
-    /// `bound` its certificate allows (`docs/validity-and-tolerances.md` §8: a constructed
-    /// result's tolerances come from its certificates). No check returns it yet; it is named
-    /// so a caller's match covers it when one does.
+    /// The tolerance of an edge or vertex of the body grew to `tolerance`, past the `bound` its
+    /// certificate allows (`docs/validity-and-tolerances.md` §8: a constructed result's
+    /// tolerances come from its certificates). No check returns it yet; it is named so a
+    /// caller's match covers it when one does.
     ToleranceBeyondBound {
-        /// The edge or vertex, of the body built.
-        entity: EntityRef,
+        /// The entity of the operation's input the edge or vertex comes from (as every entity
+        /// these failures name is the input's), `None` where it comes from none (one the
+        /// operation made): the built body's own ids name nothing a caller holds.
+        entity: Option<EntityRef>,
         /// Its tolerance.
         tolerance: f64,
         /// The largest tolerance its certificate allows.
@@ -249,11 +251,12 @@ pub enum Unsoundness {
 }
 
 impl Unsoundness {
-    /// The entity the reason names: the edge or vertex whose tolerance grew past its bound.
+    /// The entity of the operation's input the reason names: the one the edge or vertex whose
+    /// tolerance grew past its bound comes from.
     #[must_use]
     pub const fn entity(&self) -> Option<EntityRef> {
         match *self {
-            Self::ToleranceBeyondBound { entity, .. } => Some(entity),
+            Self::ToleranceBeyondBound { entity, .. } => entity,
             Self::Check { .. }
             | Self::GeometryUnchecked
             | Self::NotManifoldSolid
@@ -560,11 +563,16 @@ impl core::fmt::Display for Unsoundness {
                 entity,
                 tolerance,
                 bound,
-            } => write!(
-                f,
-                "the tolerance of {entity} grew to {tolerance}, past the {bound} its \
-                 certificate allows"
-            ),
+            } => {
+                match entity {
+                    Some(e) => write!(f, "the tolerance at {e} of the input")?,
+                    None => f.write_str("the tolerance of an edge or vertex")?,
+                }
+                write!(
+                    f,
+                    " grew to {tolerance:e}, past the {bound:e} its certificate allows"
+                )
+            }
         }
     }
 }
@@ -967,23 +975,31 @@ mod tests {
     }
 
     /// A body whose edge or vertex tolerance grew past its certificate's bound is refused
-    /// naming that entity and both numbers (#15035); the reasons without an entity name none.
+    /// naming the input's entity it comes from and both numbers (#15035); the reasons without
+    /// an entity name none.
     #[test]
     fn an_unsound_body_names_the_entity_its_check_names() {
         let edge = EntityRef::Edge(EdgeId::from_index(4));
-        let grown = OffsetFailure::Unsound {
+        let grown = |entity| OffsetFailure::Unsound {
             what: Unsoundness::ToleranceBeyondBound {
-                entity: edge,
+                entity,
                 tolerance: 2e-4,
                 bound: 1e-5,
             },
         };
-        assert_eq!(grown.entity(), Some(edge));
-        assert_eq!(grown.kind(), ErrorKind::Unsupported);
+        assert_eq!(grown(Some(edge)).entity(), Some(edge));
+        assert_eq!(grown(Some(edge)).kind(), ErrorKind::Unsupported);
         assert_eq!(
-            grown.to_string(),
-            "the tolerance of edge 4 grew to 0.0002, past the 0.00001 its certificate allows: \
-             refused, the input unchanged"
+            grown(Some(edge)).to_string(),
+            "the tolerance at edge 4 of the input grew to 2e-4, past the 1e-5 its certificate \
+             allows: refused, the input unchanged"
+        );
+        // an edge or vertex that comes from none of the input's
+        assert_eq!(grown(None).entity(), None);
+        assert_eq!(
+            grown(None).to_string(),
+            "the tolerance of an edge or vertex grew to 2e-4, past the 1e-5 its certificate \
+             allows: refused, the input unchanged"
         );
         for (what, says) in [
             (
