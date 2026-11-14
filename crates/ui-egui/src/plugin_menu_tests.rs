@@ -192,6 +192,15 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
     assert_eq!((dialog.plugin.id.as_str(), dialog.entry.as_str(), dialog.label.as_str()), ("tools", "tidy", "tidy"));
     assert!(!choose_ribbon(&mut app, "sketch.line"), "a command's id is not a plugin's");
 
+    // The ribbon group's label opens the same menu below it (a narrow ribbon trims buttons).
+    let label = egui::Rect::from_min_size(egui::pos2(900.0, 140.0), egui::vec2(60.0, 16.0));
+    let listed = app.plugin_menu.listed.clone();
+    toggle_below(&mut app, &egui::Context::default(), label);
+    assert!(app.plugin_menu.open && app.plugin_menu.y == Some(156.0) && app.plugin_menu.x == 900.0);
+    app.plugin_menu.open = false;
+    // Opening reads the plugins folder again; this test's plugins are not on disk.
+    app.plugin_menu.listed = listed;
+
     app.preferences.disabled_plugins.insert("gears".into());
     let ids: Vec<String> = ribbon_buttons(&app).into_iter().map(|b| b.id).collect();
     assert_eq!(ids, ["plugin_entry:tools:measure", "plugin_entry:tools:tidy"], "off: no ribbon button");

@@ -42,6 +42,8 @@ pub(crate) struct State {
     opened_pass: u64,
     /// The left edge of the Plugins button, where the menu opens.
     x: f32,
+    /// Where the menu's top is: the app bar's bottom, unless the ribbon's Plugins group opened it.
+    y: Option<f32>,
     /// The plugins listed when the menu last opened.
     pub(crate) listed: Vec<Listed>,
     /// `listed` has been read at least once since the plugins last changed (the ribbon reads it
@@ -487,11 +489,19 @@ pub(crate) fn toggle(app: &mut SolveApp, ctx: &egui::Context, rect: egui::Rect) 
     state.open = !state.open;
     state.opened_pass = ctx.cumulative_pass_nr();
     state.x = rect.left();
+    state.y = None;
     if state.open {
         // One menu at a time: File closes.
         ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu"), false));
         refresh(app);
     }
+}
+
+/// The ribbon's Plugins group label at `rect` was clicked: open the Plugins menu below it, or
+/// close it.
+pub(crate) fn toggle_below(app: &mut SolveApp, ctx: &egui::Context, rect: egui::Rect) {
+    toggle(app, ctx, rect);
+    app.plugin_menu.y = Some(rect.bottom());
 }
 
 /// Read the installed plugins again, as the menu shows them when it opens.
@@ -541,7 +551,7 @@ pub(crate) fn menu(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let rows = rows(app);
-    let at = egui::pos2(app.plugin_menu.x, crate::app_bar::HEIGHT);
+    let at = egui::pos2(app.plugin_menu.x, app.plugin_menu.y.unwrap_or(crate::app_bar::HEIGHT));
     let just_opened = app.plugin_menu.opened_pass == ctx.cumulative_pass_nr();
     let out = crate::app_bar::file_menu(ctx, &rows, at, egui::Id::unique("sc_plugins_area"), just_opened);
     if out.close {

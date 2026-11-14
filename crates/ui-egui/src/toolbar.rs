@@ -1319,8 +1319,9 @@ impl RibbonPanels {
                         cells: Vec::new(),
                         commands: g.buttons.iter().map(|b| b.id.as_str()).collect(),
                         icon: Some("prefs_plugins"),
-                        // No drop-down of its own: the Plugins menu lists the same commands.
-                        enabled: false,
+                        // Its label (and its collapsed button) opens the Plugins menu below it,
+                        // which lists every command, the ones a narrow ribbon leaves out too.
+                        enabled: true,
                         open: false,
                         running: None,
                         more: g
@@ -1583,7 +1584,16 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         // What was chosen on the row, in order.
         let mut opened = Vec::new();
+        let plugin_group = panels.plugins.as_ref().map(|_| panels.panels.len());
         for action in std::mem::take(&mut out.actions) {
+            if let ribbon::Action::Section { group } | ribbon::Action::Open { group } = action
+                && Some(group) == plugin_group
+            {
+                if let Some(g) = out.groups.iter().find(|g| g.group == group) {
+                    crate::plugin_menu::toggle_below(app, ui.ctx(), g.label);
+                }
+                continue;
+            }
             match action {
                 ribbon::Action::Run { id, rect, place } => {
                     // A plugin command's button opens that command's dialog, and nothing else.
