@@ -398,6 +398,18 @@ impl Transform {
         }
     }
 
+    /// The unit, orthogonal frame axes nearest to `x` and `y`: `x` normalized, and `y` made
+    /// perpendicular to it and normalized (the kernel picks a perpendicular when `y` is parallel to
+    /// `x` or has no length). Restores a frame carried through a rigid motion to exactly unit and
+    /// orthogonal axes.
+    ///
+    /// # Errors
+    /// Non-finite coordinates or an `x` of no length.
+    pub fn orthonormal_frame(x: Vec3, y: Vec3) -> crate::error::Result<[Vec3; 2]> {
+        let [x, y, _] = x.make_unit_ortho_vectors(Some(y))?;
+        Ok([x, y])
+    }
+
     /// Carry a plane's axes by a rigid motion, preserving its UV scales and orthogonality.
     /// Source axes square to the same dot-product rounding as the plane constructor are
     /// reconstructed as an orthogonal pair after the move. Genuinely skew axes keep their

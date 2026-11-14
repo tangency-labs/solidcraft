@@ -52,7 +52,7 @@ pub fn rotation(point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix> {
 }
 
 /// The orthonormal axes along `x` and in the plane of `x` and `y` (on `y`'s side),
-/// using the kernel's [`Vec3::make_unit_ortho_vectors`]. If `y` is parallel to `x` or has
+/// using the kernel's [`Transform::orthonormal_frame`]. If `y` is parallel to `x` or has
 /// no length, the kernel chooses a perpendicular direction. This restores a unit frame after
 /// carrying its axes through a rigid motion.
 ///
@@ -62,9 +62,7 @@ pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2]> {
     if !finite(&x) || !finite(&y) {
         return Err(Error::Argument);
     }
-    let [x, y, _] = vec3(x)
-        .make_unit_ortho_vectors(Some(vec3(y)))
-        .map_err(|_| Error::Argument)?;
+    let [x, y] = Transform::orthonormal_frame(vec3(x), vec3(y)).map_err(|_| Error::Argument)?;
     Ok([[x.x, x.y, x.z], [y.x, y.y, y.z]])
 }
 
