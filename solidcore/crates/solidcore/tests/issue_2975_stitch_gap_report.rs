@@ -672,7 +672,7 @@ fn lifted_sheets_beside(
         b.face_mut(f).unwrap().tolerance = 0.002;
     }
     // (a body with a third face, which the scope's clearance proof is about, has wider balls)
-    let vertex_zone = if beside.is_some() { 0.012 } else { 0.006 };
+    let vertex_zone = if beside.is_some() { 0.006 } else { 0.006 };
     for v in b.vertex_list().to_vec() {
         b.vertex_mut(v).unwrap().tolerance = vertex_zone;
     }
@@ -823,13 +823,16 @@ fn the_stitch_scope_refuses_a_gap_whose_ball_reaches_other_topology() {
 
 #[test]
 fn dbg_near() {
-    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::topology::brep::validation::{check_brep_scoped, CheckLevel, ValidityScope};
     let mut k = Kernel::default();
-    for d in [0.009, 0.5] {
-        let (mut b, sewed) = lifted_sheets_beside(&mut k, 0.008, 0.01, 0.005, Some((1.0, 1.0 + d)));
-        let tols: Vec<f64> = b.vertex_list().iter().map(|&v| b.vertex(v).unwrap().tolerance).collect();
-        let etols: Vec<f64> = b.edge_list().iter().map(|&e| b.edge(e).unwrap().tolerance).collect();
-        let r = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-        eprintln!("DBG d={d} sewed={sewed} vtol={tols:?} etol={etols:?} lines={:?}", r.lines());
+    for (gap, zone) in [(0.004, 0.005), (0.004, 0.0045), (0.003, 0.0035)] {
+        for d in [0.0045, 0.0055, 0.5] {
+            for scope in [ValidityScope::Body, ValidityScope::Stitched] {
+                let (mut b, sewed) = lifted_sheets_beside(&mut k, gap, 0.01, zone, Some((1.0, 1.0 + d)));
+                let tols: Vec<f64> = b.vertex_list().iter().map(|&v| b.vertex(v).unwrap().tolerance).collect();
+                let r = check_brep_scoped(&mut k, &mut b, CheckLevel::Level2, scope).unwrap();
+                eprintln!("DBG gap={gap} zone={zone} d={d} {scope:?} sewed={sewed} vtol={:?} n={}", &tols[..4], r.lines().len());
+            }
+        }
     }
 }
