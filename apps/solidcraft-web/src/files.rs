@@ -383,8 +383,14 @@ pub fn flush(files: &Rc<Files>) {
     }
 }
 
-/// Hand `bytes` to the user as a download named `name`.
+/// Hand `bytes` to the user as a download named `name`. A host page in `?host=parent` mode
+/// receives every download as `solidcraft:save` instead, so it keeps what crosses (exports with
+/// `export: true`).
 pub fn download(name: &str, bytes: &[u8]) -> Result<(), String> {
+    let export = !solidcraft_engine::io::is_design_path(name);
+    if crate::host::offer_save(name, bytes, export) {
+        return Ok(());
+    }
     let doc = web_sys::window().and_then(|w| w.document()).ok_or("no document")?;
     let parts = Array::new();
     parts.push(&Uint8Array::from(bytes));

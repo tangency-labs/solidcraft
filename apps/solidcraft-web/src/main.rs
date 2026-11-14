@@ -4,7 +4,9 @@
 //! (wgpu: WebGPU where available, WebGL2 otherwise). Build with `trunk build --release` from this
 //! directory (output in `dist/web`). URL flags: `?webgl` forces WebGL2 (remembered until
 //! `?webgpu`), `?sample` opens the sample part, `?embed=editor` runs it as an editing embed in a
-//! host page (no application bar or start page; nothing kept in the browser; #8517).
+//! host page (no application bar or start page; nothing kept in the browser; #8517), and
+//! `?host=parent` (or a `?host_origin=` the page names) runs it framed by a host page that keeps
+//! the files (`solidcraft:open`/`save`, #16439).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 #[cfg(target_arch = "wasm32")]
@@ -17,6 +19,8 @@ mod disk;
 mod easyprint;
 #[cfg(target_arch = "wasm32")]
 mod files;
+#[cfg(any(target_arch = "wasm32", test))]
+mod host;
 #[cfg(target_arch = "wasm32")]
 mod install;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -1144,6 +1148,10 @@ mod web {
             self.tick_font(ctx);
             self.app.logic(ctx);
             self.api.poll();
+            // The host page hears when unsaved changes appear or go away, and saves it never
+            // acknowledged are reported as failed.
+            crate::host::set_dirty(solidcraft_ui_egui::documents::any_dirty(&self.app));
+            crate::host::poll();
             self.space_mouse.logic(&mut self.app, ctx);
             self.files_tick(ctx);
             UNSAVED.with(|u| u.set(self.asks_before_unload()));
@@ -1279,9 +1287,19 @@ mod web {
             }
             leave_tab_switching_to_browser(&window);
             keep_ctrl_w_for_the_design(&window);
-            let Some(document) = window.document() else { return };
+            // The bridge is up before anything can fail, so a host page hears about it
+            // (`solidcraft:failed`), and the files it hands over land in it.
+            let files = Rc::new(Files::default());
+            if let Err(e) = crate::host::start(&files) {
+                log::warn!("host bridge: {e}");
+            }
+            let Some(document) = window.document() else {
+                crate::host::failed("SolidCraft did not start");
+                return;
+            };
             let Some(canvas) = document.get_element_by_id(CANVAS_ID).and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok()) else {
                 log::error!("missing <canvas id=\"{CANVAS_ID}\">");
+                crate::host::failed("SolidCraft did not start");
                 return;
             };
             // The window's pass (egui's) has no depth buffer: the scene has its own
@@ -1300,7 +1318,6 @@ mod web {
                     options,
                     Box::new(move |cc| {
                         solidcraft_ui_egui::fonts::setup_fonts(&cc.egui_ctx);
-                        let files = Rc::new(Files::default());
                         if launch.persists() {
                             files::start(&files);
                         }
@@ -1324,6 +1341,11 @@ mod web {
                             // where the browser can't pick one; everything else is downloaded.
                             pick_save: Some(Box::new(move |name: &str, exts: &[&str]| {
                                 let design = exts.contains(&solidcraft_engine::io::DESIGN_EXT);
+                                // A host page keeps the saves: the design goes to it, not to a
+                                // folder or this browser.
+                                if crate::host::active() {
+                                    return Box::pin(std::future::ready(Some(format!("{}{name}", files::DOWNLOADS))));
+                                }
                                 match disk::save_target(disk::supported(), design) {
                                     SaveTarget::Disk => Box::pin(disk::pick_save(&saver, name)),
                                     SaveTarget::Browser => {
@@ -1363,7 +1385,7 @@ mod web {
                         if let Some(rs) = &cc.wgpu_render_state {
                             install_viewport(&mut app, rs);
                         }
-                        if launch.open.is_none() && crate::query_flag(&query(), "sample") {
+                        if launch.open.is_none() && !crate::host::active() && crate::query_flag(&query(), "sample") {
                             if let Err(e) = app.session.run_script(&solidcraft_engine::sample::script()) {
                                 app.set_status(format!("sample: {e}"), true);
                             }
@@ -1415,6 +1437,11 @@ mod web {
                     }),
                 )
                 .await;
+            if let Err(e) = &result {
+                crate::host::failed(&format!("SolidCraft did not start: {e:?}"));
+            } else {
+                crate::host::ready();
+            }
             if result.is_ok()
                 && crate::Launch::parse(&query()).persists()
                 && let Some(window) = web_sys::window()
