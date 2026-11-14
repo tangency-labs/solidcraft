@@ -1714,3 +1714,35 @@ fn a_tapped_hole_across_slots_is_threaded_along_every_piece_of_its_wall() {
         assert!(cut < drilled - 1.0, "z {z0}..{z1}: {cut} vs {drilled}");
     }
 }
+
+/// #16668: two components built alike each have a cylinder at the same place in their own
+/// coordinates. A thread made in the second one is on the second one's body: cut into it when
+/// modelled, and recorded on it when cosmetic. It went on the first component's body.
+#[test]
+fn a_thread_goes_on_a_body_of_its_own_component() {
+    let studs = |modeled: bool| {
+        let mut s = Session::default();
+        for name in ["Stud A", "Stud B"] {
+            run(&mut s, "component.activate", json!({"component": 0}));
+            run(&mut s, "component.create", json!({"name": name}));
+            run(&mut s, "solid.cylinder", json!({"diameter": 8, "height": 20}));
+        }
+        // Stud B is the active component.
+        run(&mut s, "solid.thread", json!({"face": [4, 0, 10], "designation": "M8x1.25", "modeled": modeled}));
+        s
+    };
+    let body_of = |s: &Session, name: &str| {
+        let comp = s.doc.components.iter().find(|c| c.name == name).map(|c| c.id).unwrap();
+        s.model.state().bodies.iter().find(|b| b.component == comp).map(|b| b.name.clone()).unwrap()
+    };
+    let plain = PI * 16.0 * 20.0;
+    let mut s = studs(true);
+    let (a, b) = (body_of(&s, "Stud A"), body_of(&s, "Stud B"));
+    assert_ne!(a, b);
+    let (va, vb) = (volume(&mut s, &a), volume(&mut s, &b));
+    assert!((va - plain).abs() < 0.5, "Stud A is left as it was: {va} against {plain}");
+    assert!(vb < plain - 20.0, "Stud B is threaded: {vb} against {plain}");
+    let s = studs(false);
+    let on: Vec<String> = s.model.state().threads.iter().map(|t| t.body.clone()).collect();
+    assert_eq!(on, [body_of(&s, "Stud B")]);
+}
