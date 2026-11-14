@@ -60,7 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("emboss")
         .contract(&EMBOSS_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] selecting a planar or complete exterior cylindrical wall (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
+        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] on the face to emboss: planar, a cylinder wall or another curved face (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
     CommandSpec::new("solid.replace_face", "Replace Face", crate::checked!("solid.replace_face", replace_face))
         .contract(&REPLACE_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
@@ -273,26 +273,16 @@ fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
         let (selected, index) = candidates.first().copied().ok_or_else(|| bad(cmd, "no target face"))?;
         let name = selected.definition_name();
         let body = &selected.body;
-        match solidcraft_kernel::face_surface(body, index) {
-            Some(solidcraft_kernel::FaceSurface::Plane { .. }) => {
-                targets = vec![name.to_owned()];
-                None
-            }
-            Some(solidcraft_kernel::FaceSurface::Cylinder { .. }) => {
-                if targets.len() > 1 {
-                    return Err(bad(cmd, "cylinder emboss needs one selected target body"));
-                }
-                // Viewport picks lie on tessellated chords. Keep their axial and
-                // angular position, and certify their distance before storing an
-                // exact surface anchor for later replay.
-                let at = solidcraft_kernel::cylinder_emboss_anchor(body, index, at).map_err(|e| bad(cmd, e.to_string()))?;
-                let face = emboss_selection(s, selected, at)?;
-                check_emboss_positions(s, sketch, selected, &face)?;
-                targets = vec![name.to_owned()];
-                Some(face)
-            }
-            _ => return Err(bad(cmd, "only planar faces and complete exterior cylindrical walls support emboss")),
+        if targets.len() > 1 {
+            return Err(bad(cmd, "an emboss on a selected face needs one target body"));
         }
+        // Viewport picks lie on tessellated chords: certify their distance and store the point
+        // on the exact surface for later replay.
+        let at = solidcraft_kernel::emboss_anchor(body, index, at).map_err(|e| bad(cmd, e.to_string()))?;
+        let face = emboss_selection(s, selected, at)?;
+        check_emboss_positions(s, sketch, selected, &face)?;
+        targets = vec![name.to_owned()];
+        Some(face)
     } else {
         let inferred = infer_emboss_selection(s, sketch, &profiles, &depth, deboss, &targets)?;
         if let Some(face) = &inferred {
@@ -320,12 +310,12 @@ fn emboss_selection(s: &Session, selected: &solidcraft_doc::ModelBody, at: Vec3)
         .map(|(_, path, _)| path)
         .collect();
     if paths.len() != 1 {
-        return Err(bad(cmd, "selected cylinder placement is ambiguous"));
+        return Err(bad(cmd, "the selected body's placement is ambiguous"));
     }
-    let path = paths.into_iter().next().ok_or_else(|| bad(cmd, "selected cylinder placement"))?;
+    let path = paths.into_iter().next().ok_or_else(|| bad(cmd, "selected placement"))?;
     let author_path = s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(s.active_component));
     if path.len() > 64 || author_path.len() > 64 {
-        return Err(bad(cmd, "cylinder placement is too deep"));
+        return Err(bad(cmd, "the selected placement is too deep"));
     }
     let inverse = solidcraft_doc::mat_inverse(&s.active_component_frame()).ok_or_else(|| bad(cmd, "invalid active frame"))?;
     Ok(solidcraft_doc::EmbossFace { body: name.into(), at: FacePick(solidcraft_doc::apply_point(&inverse, at)), path, author_path })
@@ -343,7 +333,7 @@ fn check_emboss_positions(s: &Session, sketch: u64, body: &solidcraft_doc::Model
         s.doc.first_path(sketch_owner)
     };
     if face.path.iter().chain(&face.author_path).chain(&sketch_path).any(|id| s.pending_moves.contains_key(id)) {
-        return Err(bad(cmd, "capture pending source, author and profile positions with Capture Position before cylinder emboss"));
+        return Err(bad(cmd, "capture pending source, author and profile positions with Capture Position before an emboss on a face"));
     }
     Ok(())
 }

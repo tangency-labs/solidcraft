@@ -348,7 +348,7 @@ pub struct EmbossParams {
     /// The bodies to emboss, by name. With `face`, only these are searched for it.
     #[serde(default)]
     pub targets: Option<NameList>,
-    /// A world point selecting a planar face or a complete exterior cylindrical wall. Default:
+    /// A world point on the face to emboss: planar, a cylinder wall (either side) or another curved face. Default:
     /// inferred when exactly one supported tangent cylinder matches the selected profiles.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "EmbossFacePoint")]

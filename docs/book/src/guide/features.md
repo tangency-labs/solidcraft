@@ -159,13 +159,15 @@ angular placement when opened, edited or copied; creating another revolve uses t
 To Object follows that same direction for each selected profile, including curved target faces.
 Pick a target away from the axis so its angular position is defined.
 
-For cylindrical **Emboss**, select a supported exterior cylinder face and a tangent sketch
-profile. **Deboss** cuts radially into the wall. Orthogonal line profiles, including holes and
-concave outlines, wrap with exact radial walls; the profile must stay clear of seams and ends.
-Complete cylinders and coaxial sleeves are supported. Capture pending component positions
-before applying. The feature stores the selected target and author occurrence paths, so edits
-and reopening retain the chosen instances. Other curved surfaces and free-form profiles remain
-unsupported. A new Emboss without an explicit face infers a unique eligible supported cylinder;
+For **Emboss** on a picked face, select the face (planar, an exterior or interior cylinder wall,
+or another curved face) and a sketch profile. **Deboss** cuts into the face. On an exterior
+cylinder, profiles of straight edges along the axis and round the circumference, including holes
+and concave outlines, wrap with exact radial walls and must stay clear of seams and ends. Curved
+profiles and text there, and any profile on another face, follow the face at the given depth: on a
+cylinder each closed region is laid on the wall at its arc length from the sketch, elsewhere it is
+projected along the sketch normal. Capture pending component positions before applying. The
+feature stores the selected target and author occurrence paths, so edits and reopening retain the
+chosen instances. A new Emboss without an explicit face infers a unique eligible exterior cylinder;
 select the face when the target is ambiguous. Older saved features without a face retain their
 planar placement.
 

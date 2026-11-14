@@ -17,6 +17,12 @@ use solidcraft_geom::prelude::*;
 fn fail(s: &str) -> KernelError {
     KernelError::Invalid(format!("cylinder emboss: {s}"))
 }
+/// Why an emboss onto a picked face is refused when a profile lies off it, and what to do.
+const NOT_FITTING: &str = "the text is not fitting the selected target face. Either scale the face up or the text down";
+/// A refusal of an emboss onto a picked face.
+fn refuse(s: &str) -> KernelError {
+    KernelError::Invalid(format!("emboss: {s}"))
+}
 fn angle(p: Vec3, o: Vec3, axis: Vec3, radial: Vec3, tangent: Vec3) -> f64 {
     let w = p - o;
     let w = w - axis * w.dot(axis);
@@ -42,14 +48,22 @@ fn wall_angles(b: &Brep, face: usize, o: Vec3, axis: Vec3, radial: Vec3, tangent
         if z.dot(axis).abs() < 1.0 - 1e-9 {
             continue;
         }
-        // The circle's parameter is its angle: the wall spans the edge's angles on the circle
-        // (`interval` is on its NURBS form where it has one) about the angle of its middle (a
-        // whole turn, from the seam, for a wall in one piece).
+        // The wall spans the angles of the arc's ends about the angle of its middle (a whole
+        // turn, from the seam, for a wall in one piece). The ends are measured: `interval` is on
+        // the circle's NURBS form where it has one, whose parameter is not the angle.
         let c = CurveEval::new(&e.curve).ok()?;
         let [t0, t1] = solidcore_ops::label::edge_curve_interval(e)?;
+        let (p0, p1) = (c.point(t0)?, c.point(t1)?);
         let am = angle(c.point(0.5 * (t0 + t1))?, o, axis, radial, tangent);
-        let half = 0.5 * (t1 - t0);
-        return Some((am - half, am + half));
+        if p0.dist(p1) <= 1e-9 * (1.0 + p0.len()) {
+            return Some((am - std::f64::consts::PI, am + std::f64::consts::PI));
+        }
+        let from_middle = |p: Vec3| {
+            let d = (angle(p, o, axis, radial, tangent) - am).rem_euclid(std::f64::consts::TAU);
+            if d > std::f64::consts::PI { d - std::f64::consts::TAU } else { d }
+        };
+        let (d0, d1) = (from_middle(p0), from_middle(p1));
+        return Some((am + d0.min(d1), am + d0.max(d1)));
     }
     None
 }
@@ -79,6 +93,189 @@ pub fn cylinder_emboss_anchor(body: &Body, face: usize, at: Vec3) -> Result<Vec3
         }
         Ok(o + a * w.dot(a) + radial.normalized().ok_or_else(|| fail("radial point"))? * r)
     })
+}
+
+/// Certify a pick on face `face` and put it on the face's surface: a plane, a cylinder (either
+/// side) or a sphere. A pick on another surface is kept as given.
+pub fn emboss_anchor(body: &Body, face: usize, at: Vec3) -> Result<Vec3> {
+    if !at.is_finite() || at.len() > 1e9 {
+        return Err(refuse("invalid selected face point"));
+    }
+    guard("emboss anchor", || {
+        let rec = record(body)?;
+        if face >= rec.faces.len() {
+            return Err(refuse("selected face"));
+        }
+        let near = (body.size() * 1e-3).max(1e-3);
+        let onto = |c: Vec3, r: f64, w: Vec3| -> Result<Vec3> {
+            if (w.len() - r).abs() > near.min(r * 0.05) {
+                return Err(refuse("selected point is too far from the face"));
+            }
+            Ok(c + w.normalized().ok_or_else(|| refuse("radial point"))? * r)
+        };
+        match surf_of(&rec, face) {
+            Some(Surf::Plane { n, d }) => {
+                let off = at.dot(n) - d;
+                if off.abs() > near {
+                    return Err(refuse("selected point is too far from the face"));
+                }
+                Ok(at - n * off)
+            }
+            Some(Surf::Cylinder { o, a, r, .. }) => {
+                let h = a * (at - o).dot(a);
+                onto(o + h, r, at - o - h)
+            }
+            Some(Surf::Sphere { c, r, .. }) => onto(c, r, at - c),
+            _ => Ok(at),
+        }
+    })
+}
+
+/// Emboss (`depth > 0`) or deboss (`depth < 0`) `regions` onto face `face` of `body`, `at` a
+/// point on it. Each region is cut out of a slab between offsets of the face, so the raised or
+/// sunk cap follows the face at `depth`, then joined to or cut from the body. On a cylinder
+/// (either side) each region is laid on the wall at its centroid's arc length from the sketch;
+/// on any other face it is projected along the sketch normal.
+pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, regions: &[Region2], depth: f64) -> Result<Body> {
+    body.require_brep("emboss")?;
+    if !depth.is_finite() || depth.abs() < 1e-6 || depth.abs() > 1e6 || regions.is_empty() || regions.len() > 4096 {
+        return Err(refuse("needs finite nonzero depth and 1..4096 profiles"));
+    }
+    if !at.is_finite() || at.len() > 1e9 || Plane::new(plane.origin, plane.x, plane.y).is_none() || !plane.origin.is_finite() {
+        return Err(refuse("invalid sketch frame or selected point"));
+    }
+    guard("emboss", || {
+        let rec = record(body)?;
+        if face >= rec.faces.len() {
+            return Err(refuse("selected face"));
+        }
+        let d = depth.abs();
+        // The slab reaches a little past the face on the side away from the depth, so the pieces
+        // overlap the body rather than touch it.
+        let overlap = (d * 0.2).clamp(0.1, 2.0);
+        let (lo, hi) = if depth > 0.0 { (-overlap, d) } else { (-d, overlap) };
+        let mut prisms = Vec::new();
+        let slab = if let Some(Surf::Cylinder { o, a, r, convex }) = surf_of(&rec, face) {
+            // The prisms below reach at most the radius either side of the wall (further, they
+            // would meet the ring's far side), so a deeper slab would be cut short.
+            if d + overlap >= r {
+                return Err(refuse("the depth must stay below the cylinder's radius"));
+            }
+            // SMLib does not thicken a whole wall, so the slab is the exact ring between the
+            // offsets' radii, as long as the selected face along the axis (the body where the
+            // face's edges do not bound it).
+            let (r_in, r_out) = if convex { (r + lo, r + hi) } else { (r - hi, r - lo) };
+            // The wall is every face of the body on this cylinder: a wall is stored as several
+            // faces between its seams.
+            let tol = (body.size() * 1e-7).max(1e-7);
+            let on_cylinder = |f: usize| {
+                matches!(surf_of(&rec, f), Some(Surf::Cylinder { o: fo, a: fa, r: fr, convex: fc })
+                    if fc == convex && (fr - r).abs() <= tol && fa.dot(a).abs() > 1.0 - 1e-8 && (fo - o - a * (fo - o).dot(a)).len() <= tol)
+            };
+            let wall: Vec<usize> = (0..rec.faces.len()).filter(|f| *f == face || on_cylinder(*f)).collect();
+            let heights = wall.iter().map(|f| face_axial_bounds(&rec, *f, o, a)).collect::<Result<Vec<_>>>()?;
+            let (z_lo, z_hi) = match heights.iter().copied().collect::<Option<Vec<_>>>() {
+                Some(spans) => spans.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), (a, b)| (l.min(*a), h.max(*b))),
+                None => span(body.exact_bounds()?, o, a),
+            };
+            let base = o + a * z_lo;
+            let length = z_hi - z_lo;
+            let outer = crate::cylinder(base, a, r_out, length)?;
+            let slab = if r_in > 1e-6 {
+                crate::boolean(&outer, &crate::cylinder(base, a, r_in, length)?, crate::BoolOp::Cut)?.ok_or_else(|| refuse("slab"))?
+            } else {
+                outer
+            };
+            let w = at - o;
+            let radial_at = (w - a * w.dot(a)).normalized().ok_or_else(|| refuse("selected point is on the axis"))?;
+            // Text reads round the wall when the sketch's x runs round it, along the axis otherwise.
+            let (kx, ky) = (plane.x.dot(a), plane.y.dot(a));
+            let along_axis = kx.abs() > ky.abs();
+            let reading = if along_axis { plane.y } else { plane.x };
+            let v = reading.cross(a).normalized().unwrap_or(radial_at);
+            let radial0 = if v.dot(radial_at) >= 0.0 { v } else { -v };
+            let t = a.cross(radial0);
+            let tangent0 = if t.dot(reading) >= 0.0 { t } else { -t };
+            let (u0, z0) = ((plane.origin - o).dot(tangent0), (plane.origin - o).dot(a));
+            // Through the ring near the region, short of its far side.
+            let pad = ((d + overlap) * 2.5 + 2.0).min(r);
+            let angles: Vec<_> = wall.iter().map(|f| wall_angles(&rec, *f, o, a, radial0, tangent0)).collect();
+            let tau = std::f64::consts::TAU;
+            for reg in regions {
+                let c = reg.centroid();
+                let theta = (u0 + c.x * plane.x.dot(tangent0) + c.y * plane.y.dot(tangent0)) / r;
+                let height = z0 + c.x * kx + c.y * ky;
+                // On a face of the wall: within its angles and heights, where its edges give them.
+                let on_wall = angles.iter().zip(&heights).any(|(turn, along)| {
+                    turn.is_none_or(|(alo, ahi)| [theta - tau, theta, theta + tau].iter().any(|t| (alo..=ahi).contains(t)))
+                        && along.is_none_or(|(zl, zh)| (zl..=zh).contains(&height))
+                });
+                if !on_wall {
+                    return Err(refuse(NOT_FITTING));
+                }
+                let radial = radial0 * theta.cos() + tangent0 * theta.sin();
+                let tangent = tangent0 * theta.cos() - radial0 * theta.sin();
+                let at_c = o + a * height + radial * r;
+                let (x, y) = if along_axis { (a * kx.signum(), tangent) } else { (tangent, a * ky.signum()) };
+                // The region keeps its sketch coordinates: the frame's origin sits so its centroid lands on the wall.
+                let Some(local) = Plane::new(at_c - x * c.x - y * c.y, x, y) else { continue };
+                prisms.extend(crate::extrude(&local, std::slice::from_ref(reg), -pad, pad)?);
+            }
+            slab
+        } else {
+            let sheet = crate::surfaces::offset_faces(body, &[face], lo, (body.size() * 1e-7).max(1e-7))?;
+            let slab = crate::thicken(&sheet, hi - lo, false)?;
+            let (h0, h1) = span(slab.exact_bounds()?, plane.origin, plane.normal());
+            prisms = crate::extrude(plane, regions, h0 - d - 1.0, h1 + d + 1.0)?;
+            slab
+        };
+        // Every region must reach the face: one that misses it would leave its letter out.
+        let mut pieces = Vec::new();
+        let mut missed = Vec::new();
+        for (i, prism) in prisms.iter().enumerate() {
+            match crate::boolean(prism, &slab, crate::BoolOp::Intersect)? {
+                Some(piece) => pieces.push(piece),
+                None => missed.push((i + 1).to_string()),
+            }
+        }
+        if !missed.is_empty() {
+            let which = match missed.split_last() {
+                Some((last, [])) => format!("profile {last} of {} lies", prisms.len()),
+                Some((last, rest)) => format!("profiles {} and {last} of {} lie", rest.join(", "), prisms.len()),
+                None => String::new(),
+            };
+            return Err(refuse(&format!("{NOT_FITTING} ({which} off it)")));
+        }
+        apply_pieces(body, pieces, depth)
+    })
+}
+
+/// The heights of a box's corners above `o` along `dir`: lowest and highest.
+fn span(b: solidcraft_geom::Aabb3, o: Vec3, dir: Vec3) -> (f64, f64) {
+    let corners =
+        [b.min.x, b.max.x].into_iter().flat_map(|x| [b.min.y, b.max.y].into_iter().flat_map(move |y| [b.min.z, b.max.z].map(|z| Vec3::new(x, y, z))));
+    corners.map(|p| (p - o).dot(dir)).fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), x| (l.min(x), h.max(x)))
+}
+
+/// Join (`depth > 0`) or cut the emboss pieces: all at once where they make one tool, else one by
+/// one. Every piece must apply: one that cannot refuses the whole emboss, so no letter goes missing.
+fn apply_pieces(body: &Body, pieces: Vec<Body>, depth: f64) -> Result<Body> {
+    if pieces.is_empty() {
+        return Err(refuse("the profile does not meet the selected face"));
+    }
+    let op = if depth > 0.0 { crate::BoolOp::Union } else { crate::BoolOp::Cut };
+    if let Ok(Some(tool)) = crate::ops::join_pieces(pieces.clone())
+        && let Ok(Some(result)) = crate::boolean(body, &tool, op)
+    {
+        return Ok(result);
+    }
+    let mut current = body.clone();
+    for piece in &pieces {
+        current = crate::boolean(&current, piece, op)
+            .map_err(|e| KernelError::Failed(format!("emboss: a profile could not be applied to the face: {e}")))?
+            .ok_or_else(|| refuse("a profile would leave nothing of the body"))?;
+    }
+    Ok(current)
 }
 
 /// Wrap sketch arc length around an exterior cylinder, retaining exact radial depth.
@@ -852,5 +1049,86 @@ mod tests {
         assert!(emboss_cylinder_at(&sleeve, -Vec3::Y * 8. + Vec3::Z * 7.5, &plane(), &[profile()], 1.).is_err());
         assert!(emboss_cylinder_at(&sleeve, -Vec3::Y * 10. + Vec3::Z * 20., &plane(), &[profile()], 1.).is_err());
         assert_eq!(crate::step_export(&[&sleeve], "unchanged").unwrap(), before);
+    }
+
+    /// The face of `body` on the surface `which` picks.
+    fn face_where(body: &Body, which: impl Fn(Surf) -> bool) -> usize {
+        let rec = record(body).unwrap();
+        (0..rec.faces.len()).find(|f| surf_of(&rec, *f).is_some_and(&which)).unwrap()
+    }
+    fn square(h: f64) -> Region2 {
+        Region2 { outer: Loop2::polygon(&[Vec2::new(-h, -h), Vec2::new(h, -h), Vec2::new(h, h), Vec2::new(-h, h)]), holes: vec![] }
+    }
+    fn volume(b: &Body) -> f64 {
+        crate::measure(b).unwrap().volume
+    }
+
+    #[test]
+    fn projected_emboss_on_a_plane_adds_and_removes_the_prism() {
+        let block = crate::box_solid(Vec3::ZERO, Vec3::new(40., 40., 20.)).unwrap();
+        let top = face_where(&block, |s| matches!(s, Surf::Plane { n, .. } if n.z > 0.5));
+        let at = emboss_anchor(&block, top, Vec3::new(20., 20., 20.0005)).unwrap();
+        assert!((at.z - 20.).abs() < 1e-12);
+        // The sketch floats above the face: the profile is projected down onto it.
+        let sketch = Plane::new(Vec3::new(20., 20., 30.), Vec3::X, Vec3::Y).unwrap();
+        let v = volume(&block);
+        for depth in [2., -2.] {
+            let result = emboss_project_face(&block, top, at, &sketch, &[square(5.)], depth).unwrap();
+            assert_eq!(result.shell_count(), 1);
+            assert!((volume(&result) - v - 200. * depth.signum()).abs() < 1e-4, "{depth}: {}", volume(&result) - v);
+        }
+    }
+
+    #[test]
+    fn projected_emboss_on_concave_and_convex_cylinders() {
+        // A trough: a box with a cylinder cut along y from its top.
+        let block = crate::box_solid(Vec3::ZERO, Vec3::new(40., 40., 40.)).unwrap();
+        let tool = crate::cylinder(Vec3::new(20., 0., 40.), Vec3::Y, 15., 40.).unwrap();
+        let trough = crate::boolean(&block, &tool, crate::BoolOp::Cut).unwrap().unwrap();
+        let inner = face_where(&trough, |s| matches!(s, Surf::Cylinder { convex: false, .. }));
+        let at = emboss_anchor(&trough, inner, Vec3::new(20., 20., 25.)).unwrap();
+        let sketch = Plane::new(Vec3::new(20., 20., 45.), Vec3::X, Vec3::Y).unwrap();
+        let cyl = crate::cylinder(Vec3::ZERO, Vec3::Z, 20., 40.).unwrap();
+        let wall = face_where(&cyl, |s| matches!(s, Surf::Cylinder { convex: true, .. }));
+        let side = Plane::new(Vec3::new(25., 0., 20.), -Vec3::Y, Vec3::Z).unwrap();
+        for (body, face, at, sketch) in [(&trough, inner, at, &sketch), (&cyl, wall, Vec3::new(20., 0., 20.), &side)] {
+            let v = volume(body);
+            // A 6 x 6 patch 1 deep on a wall of radius 15 or 20: about 36 either way.
+            for depth in [1., -1.] {
+                let result = emboss_project_face(body, face, at, sketch, &[square(3.)], depth).unwrap();
+                assert_eq!(result.shell_count(), 1);
+                let change = (volume(&result) - v) * depth.signum();
+                assert!((30.0..42.0).contains(&change), "{depth}: {change}");
+            }
+        }
+        assert!(emboss_project_face(&cyl, 99, Vec3::new(20., 0., 20.), &side, &[square(3.)], 1.).is_err());
+    }
+
+    #[test]
+    fn projected_cylinder_emboss_stays_on_the_selected_wall_and_within_reach() {
+        // A stepped shaft: radius 10 up to z 10, radius 15 above it.
+        let lower = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 10.).unwrap();
+        let upper = crate::cylinder(Vec3::new(0., 0., 10.), Vec3::Z, 15., 10.).unwrap();
+        let shaft = crate::boolean(&lower, &upper, crate::BoolOp::Union).unwrap().unwrap();
+        let wall = face_where(&shaft, |s| matches!(s, Surf::Cylinder { r, convex: true, .. } if (r - 10.).abs() < 1e-9));
+        let sketch = Plane::new(Vec3::new(10., 0., 0.), Vec3::Y, Vec3::Z).unwrap();
+        let at = Vec3::new(10., 0., 5.);
+        let square_at = |z: f64| Region2 {
+            outer: Loop2::polygon(&[Vec2::new(-2., z - 2.), Vec2::new(2., z - 2.), Vec2::new(2., z + 2.), Vec2::new(-2., z + 2.)]),
+            holes: vec![],
+        };
+        let v = volume(&shaft);
+        let result = emboss_project_face(&shaft, wall, at, &sketch, &[square_at(5.)], -1.).unwrap();
+        let removed = v - volume(&result);
+        assert!((14.0..18.0).contains(&removed), "{removed}");
+        // A profile above the step lies off the wall: it is refused rather than cut into the
+        // wider section as a closed cavity.
+        let e = emboss_project_face(&shaft, wall, at, &sketch, &[square_at(5.), square_at(15.)], -1.).unwrap_err();
+        assert!(e.to_string().contains("not fitting the selected target face"), "{e}");
+        // A depth the prisms cannot reach is refused, not cut short.
+        let cyl = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 40.).unwrap();
+        let side = face_where(&cyl, |s| matches!(s, Surf::Cylinder { convex: true, .. }));
+        let e = emboss_project_face(&cyl, side, at, &sketch, &[square_at(5.)], 20.).unwrap_err();
+        assert!(e.to_string().contains("radius"), "{e}");
     }
 }
