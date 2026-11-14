@@ -663,11 +663,7 @@ pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, compon
             }
         }
         // A construction axis by name: where it is on each evaluation, so what turns about it follows it.
-        GeoRef::Axis { name } => {
-            let (o, d) = crate::eval::construction_axis_in(doc, st, name, component)?;
-            let d = d.normalized().filter(|_| o.is_finite()).ok_or_else(|| bad("the axis has no direction"))?;
-            Ok((o, d))
-        }
+        GeoRef::Axis { name } => crate::eval::construction_axis_in(doc, st, name, component),
         _ => model_axis(st, g),
     }
 }

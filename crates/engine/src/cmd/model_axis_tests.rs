@@ -158,13 +158,14 @@ fn plane_at_angle_on_a_face_about_an_edge_follows_both() {
 }
 
 /// A box `h` high with a construction axis "Rim" on its top front edge (y = 0, along X), and a
-/// plane "Slanted" turned 45 degrees about that axis, given by the axis's name.
+/// plane "Slanted" turned 45 degrees about that axis, given by the axis's name, from the top
+/// face (which contains the axis, so the plane contains it too).
 fn slanted_about_a_named_axis() -> Session {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "h", "expression": "20 mm"}));
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": "h", "name": "Base"}));
     run(&mut s, "construct.axis.edge", json!({"edge": {"edge": [20, 0, 20]}, "name": "Rim"}));
-    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": "Rim", "angle": "45 deg", "name": "Slanted"}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": {"face": [5, 5, 20]}, "axis": "Rim", "angle": "45 deg", "name": "Slanted"}));
     s
 }
 
@@ -183,7 +184,7 @@ fn plane_at_angle_about_a_named_axis_follows_the_axis() {
     let half = 0.5_f64.sqrt();
     let pl = slanted(&s);
     assert!(pl.height(Vec3::new(0.0, 0.0, 20.0)).abs() < 1e-6, "through the rim: {pl:?}");
-    assert!((pl.normal().z.abs() - half).abs() < 1e-9 && pl.normal().x.abs() < 1e-9, "45 degrees to XY: {pl:?}");
+    assert!((pl.normal().z.abs() - half).abs() < 1e-9 && pl.normal().x.abs() < 1e-9, "45 degrees to the top: {pl:?}");
     // A taller box moves the edge, so the axis and the plane move with it.
     run(&mut s, "parameters.change", json!({"name": "h", "expression": "50 mm"}));
     let pl = slanted(&s);
@@ -204,12 +205,13 @@ fn a_plane_at_angle_saved_with_a_fixed_axis_stays_fixed() {
     let mut stripped = 0;
     if let Some(Value::Array(features)) = json.get_mut("features") {
         for f in features {
-            let line = f.pointer_mut("/plane/line").filter(|_| f.get("name").and_then(Value::as_str) == Some("Slanted"));
-            if line.is_some() {
-                if let Some(Value::Object(plane)) = f.get_mut("plane") {
-                    plane.remove("line");
-                    stripped += 1;
-                }
+            if f.get("name").and_then(Value::as_str) != Some("Slanted") {
+                continue;
+            }
+            if let Some(Value::Object(plane)) = f.get_mut("plane")
+                && plane.remove("line").is_some()
+            {
+                stripped += 1;
             }
         }
     }
@@ -217,7 +219,10 @@ fn a_plane_at_angle_saved_with_a_fixed_axis_stays_fixed() {
     let mut old = Session::new(solidcraft_doc::Document::from_json(&json.to_string()).unwrap());
     run(&mut old, "parameters.change", json!({"name": "h", "expression": "50 mm"}));
     let pl = slanted(&old);
-    assert!(pl.height(Vec3::new(0.0, 0.0, 20.0)).abs() < 1e-6, "fixed where it was saved: {pl:?}");
+    // Followed, the plane would pass through the moved rim (0, 0, 50); with the axis fixed at
+    // z = 20 it turns about that line instead and misses it.
+    assert!(pl.height(Vec3::new(0.0, 0.0, 50.0)).abs() > 1.0, "fixed where it was saved: {pl:?}");
+    assert!((pl.normal().z.abs() - 0.5_f64.sqrt()).abs() < 1e-9, "still turned 45 degrees: {pl:?}");
 }
 
 #[test]
