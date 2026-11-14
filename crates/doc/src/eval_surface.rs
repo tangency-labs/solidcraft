@@ -425,7 +425,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             // The path runs on from the end nearest the middle of the curves.
             let pts: Vec<Vec2> = chains.iter().flatten().flat_map(|s| s.polyline(1e-2)).collect();
             let start = ss.plane.to_world(pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64));
-            let body = match path_points(ps, path, start)? {
+            let body = match path_points(&curves_in(ps, path), start)? {
                 Some(path) => {
                     let pts = path.points();
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, pts.first().copied().unwrap_or(start))?;
@@ -433,7 +433,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     kernel::sweep_sheet_points_with(&ss.plane, &chains, &pts, &ctl)?
                 }
                 None => {
-                    let segs = path_segments_at(ps, path, start, Some(&ss.plane))?;
+                    let segs = path_segments_at(&curves_in(ps, path), start, Some(&ss.plane))?;
                     let path_start = segs.first().map_or(start, kernel::PathSeg::start);
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, path_start)?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
@@ -664,7 +664,7 @@ fn network_sources(
             let raw = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk} (it must come earlier in the timeline)")))?;
             // 3D sketch curves are followed through their points; planar ones exactly.
             let mapped = path_in_frame(doc, raw, f.component)?;
-            match path_points(&mapped, &c.curves, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
+            match path_points(&curves_in(mapped.as_ref(), &c.curves), Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
                 Some(path) => NetSource::Points(path.points()),
                 None => {
                     let ss = sketch_in_feature_frame(doc, raw, f.component)?;

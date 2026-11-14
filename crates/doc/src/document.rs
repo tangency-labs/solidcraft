@@ -412,6 +412,30 @@ pub struct ThinWall {
     pub thickness2: Option<Expr>,
 }
 
+/// One curve of a sweep's path: a curve of the feature's `path_sketch`, saved as its id alone,
+/// or a curve of another sketch, saved with that sketch (#16168). A path may join the curves of
+/// several sketches: each curve is taken where it is drawn, and the chain is put in order from
+/// whichever end the picks begin at.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(untagged)]
+pub enum PathEntry {
+    /// A curve of the feature's `path_sketch`, as designs before cross-sketch paths saved.
+    OfPathSketch(String),
+    /// A curve of the sketch saved with it.
+    OfSketch { sketch: SketchId, curve: String },
+}
+
+impl PathEntry {
+    /// The curve's id and the sketch it is in, the feature's `path_sketch` where the entry
+    /// names none.
+    pub fn split(&self, path_sketch: SketchId) -> (SketchId, &str) {
+        match self {
+            PathEntry::OfPathSketch(id) => (path_sketch, id),
+            PathEntry::OfSketch { sketch, curve } => (*sketch, curve),
+        }
+    }
+}
+
 /// How a swept profile turns as it follows its path.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(rename_all = "snake_case")]
@@ -1131,7 +1155,9 @@ pub enum FeatureKind {
         #[walk(profiles_of = sketch)]
         profiles: ProfileSel,
         path_sketch: SketchId,
-        path: Vec<String>,
+        /// The path as a chain of curves: each a curve of `path_sketch` (its id alone) or of the
+        /// sketch saved with it (#16168).
+        path: Vec<PathEntry>,
         /// The path on a body's edges, instead of the curves of `path_sketch` (#2216): the body
         /// and a point on each edge of the chain.
         #[serde(default, skip_serializing_if = "Option::is_none")]
