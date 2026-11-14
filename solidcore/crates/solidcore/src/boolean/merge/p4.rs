@@ -15,6 +15,9 @@
 //! are explicit; `None` for the second kernel means a shared context. Contexts are temporarily moved
 //! together only for the existing paired mark-lock API. No input-driven recursion
 //! is introduced; the two retry loops retain upstream's ten-attempt limits.
+//! Not upstream (#16935): `MarkCommon` goes on to the next single vertex after a loop
+//! closure that deleted no topology, instead of starting a new pass, so the ten passes are
+//! not a limit of ten gaps.
 //! Global cache queue limits are absent (the port has no global caches).
 //! The temporary origin shift goes through `merge_p1`, before any topology
 //! mutation. Its inverse token spans the entire operation,
@@ -574,9 +577,17 @@ fn mark_common(
                     made = false;
                 }
             }
-            if made || intersector.topology_deleted() {
+            // Not upstream (#16935): a closure that deleted nothing leaves the vertex list
+            // valid, so the pass goes on to the loop's other ends. Upstream ended the pass at
+            // each closure, so its ten passes closed at most ten gaps: a cut with twenty
+            // left the rest open and classified whole faces across them.
+            if intersector.topology_deleted() {
                 done = false;
                 break;
+            }
+            if made {
+                done = false;
+                continue;
             }
             single.push(v);
         }
