@@ -2651,6 +2651,8 @@ pub fn subdivide_face_at_discontinuities(
 /// Not upstream (#16651): [`subdivide_face_at_discontinuities`] along the iso lines at
 /// the given knots of the face's surface, `u_knots` and `v_knots`, instead of those its
 /// knot search finds (a chamfer's creases, [`crate::surface::procedural_blend::ProceduralBlend::chord_creases`]).
+/// Only the knots strictly inside the surface's natural domain are taken, as the knot
+/// search finds only interior knots.
 ///
 /// # Errors
 ///
@@ -2664,9 +2666,19 @@ pub fn subdivide_face_at_knots(
     u_knots: &[f64],
     v_knots: &[f64],
 ) -> Result<Vec<FaceId>> {
+    let domain = surface_of_face(b, face)?.natural_uv_domain_with_nurb(k)?;
+    let inside = |knots: &[f64], lo: f64, hi: f64| -> Vec<f64> {
+        knots
+            .iter()
+            .copied()
+            .filter(|&t| lo < t && t < hi)
+            .collect()
+    };
+    let u_knots = inside(u_knots, domain.min().x, domain.max().x);
+    let v_knots = inside(v_knots, domain.min().y, domain.max().y);
     let editing = b.editing_enabled();
     b.set_editing_enabled(true);
-    let result = subdivide_face_body(k, b, env, curve_ref, face, u_knots, v_knots);
+    let result = subdivide_face_body(k, b, env, curve_ref, face, &u_knots, &v_knots);
     b.set_editing_enabled(editing);
     result
 }

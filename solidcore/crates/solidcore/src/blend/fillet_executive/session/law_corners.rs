@@ -190,6 +190,7 @@ impl FilletSession<'_> {
     /// The body of [`Self::split_fillet_faces_at_radius_corners`] on the noted surfaces.
     fn split_noted_faces(&mut self, k: &mut Kernel, noted: &[RadiusCornerSurface]) -> Result<()> {
         let serial = self.objects.target_serial;
+        let mut found = vec![false; noted.len()];
         let key_of = move |entity| p3::topology_ref(serial, entity);
         for face in brep_faces(self.objects.target, None)? {
             // (a face of a round rebuilt at its law's corners below is gone)
@@ -202,8 +203,12 @@ impl FilletSession<'_> {
                 continue;
             };
             let mut fillet = None;
-            for (index, (copy, _, _)) in noted.iter().enumerate() {
-                if copy.approx_eq(k, surface)? || same_procedural_blend(k, copy, surface)? {
+            for (index, (copy, _, creases)) in noted.iter().enumerate() {
+                // (a chamfer noted at its creases, #16651, by its net and definition: only
+                // those, a round by its definition is matched as before)
+                if copy.approx_eq(k, surface)?
+                    || (creases.is_some() && same_procedural_blend(k, copy, surface)?)
+                {
                     fillet = Some(index);
                     break;
                 }
@@ -211,6 +216,9 @@ impl FilletSession<'_> {
             let Some(index) = fillet else {
                 continue;
             };
+            if let Some(slot) = found.get_mut(index) {
+                *slot = true;
+            }
             let creases = noted.get(index).and_then(|(_, _, c)| c.as_ref());
             let mut pieces = with_target_env_of(&mut self.objects, k, |k, b, env, _| {
                 let key_of = env.key_of;
@@ -312,6 +320,16 @@ impl FilletSession<'_> {
             // where the law dips or peaks, the exact round there (the faces are rebuilt)
             if let Some(kept) = noted.get(index).and_then(|(_, kept, _)| kept.as_ref()) {
                 self.build_law_corners(k, &pieces, kept)?;
+            }
+        }
+        // (#16651) a chamfer noted at its creases whose face is not found again would keep
+        // its crease inside one face: refused, not left for the check to find
+        for ((_, _, creases), found) in noted.iter().zip(&found) {
+            if creases.is_some() && !found {
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "a chamfer noted at its creases has no face after the merge",
+                ));
             }
         }
         Ok(())

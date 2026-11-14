@@ -606,12 +606,14 @@ impl ProceduralBlend {
     /// are linear in `w`: their dot and cross products are quadratics bounded by their
     /// Bernstein coefficients, and each normal is at least its segment's distance from the
     /// origin. That bounds the sine of the turn over the whole chord (in exact arithmetic
-    /// over the net's control points). A knot is listed where the bound exceeds the sine
+    /// over the net's control points; the rounding of the bound itself is not counted). A
+    /// knot is listed where the bound exceeds the sine
     /// of [`crate::geom::tol::ANG_TOL_DEG`] (`SM_CONTINUITY_ANGLE`, the G1 angle
     /// `CalculateContinuities` and `check_brep`'s Test #4 judge knots by), or where it is
     /// no bound (a dot coefficient that is not positive, a value that is not finite):
     /// splitting at a knot that is G1 after all only adds an edge between faces that meet
-    /// smoothly. Nothing for a blend of another order, or a net that is not the chord's
+    /// smoothly; so is every full-multiplicity knot of a net that is not clamped (whose
+    /// rows are not read). Nothing for a blend of another order, or a net that is not the chord's
     /// (not of degree 1 and two control points across, or rational with unequal weights).
     ///
     /// # Errors
@@ -649,6 +651,9 @@ impl ProceduralBlend {
         let (knots, mults) = net.knots(along, None)?;
         let sin_turn = (crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0)).sin();
         let last = knots.len().saturating_sub(1);
+        // the rows below are those of a clamped net (its first knot p + 1 times, as the
+        // Hermite nets are); another lists every full-multiplicity knot, unbounded
+        let clamped = p.checked_add(1).is_some_and(|q| mults.first() == Some(&q));
         let mut first = mults.first().copied().unwrap_or(0);
         for (kk, (&u, &m)) in knots.iter().zip(&mults).enumerate() {
             if kk == 0 || kk >= last {
@@ -660,7 +665,7 @@ impl ProceduralBlend {
             if m < p {
                 continue; // G1 or better by its multiplicity
             }
-            let rows_at = i.and_then(|i| {
+            let rows_at = i.filter(|_| clamped).and_then(|i| {
                 let (b, c, d) = (i.checked_sub(1)?, i, i.checked_add(1)?);
                 if d >= rows {
                     return None;
