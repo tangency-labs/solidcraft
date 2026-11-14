@@ -394,7 +394,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         // once an axis is selected.
         let triad = crate::dialogs_move::triad(app, &d);
         let rotation = draw_move_rotation(app, ui, painter, proj, &mut d);
-        dragging |= rotation.is_some_and(|(_, changed)| changed);
+        dragging |= rotation.is_some_and(|(_, changed, _)| changed);
+        // In Creative Mode letting go of Rotate's handle applies the move too.
+        if rotation.is_some_and(|(.., released)| released) && crate::creative_mode::on(app) {
+            d.confirm = true;
+        }
         // The box stays clear of the triad's handles: it is a foreground area, so a box over a
         // handle takes the press and the drag never reaches the model (#6608).
         let mut place = box_place(app, proj);
@@ -420,7 +424,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             // Clear of the triad: its arrows reach LEN_PX and its rings RING of that, so a box
             // beside the centre would cover the handles the user is reaching for.
             let off = if triad.is_some() { vec2(crate::gizmo::LEN_PX as f32 + 16.0, -12.0) } else { vec2(16.0, -30.0) };
-            let box_at = rotation.map_or(bs + off, |(end, _)| end + vec2(16.0, -12.0));
+            let box_at = rotation.map_or(bs + off, |(end, ..)| end + vec2(16.0, -12.0));
             value_box_with(ui, label, value, box_at, focus || dragging, true, place);
         }
         app.dialog = Some(d);
@@ -469,7 +473,8 @@ fn move_rotation(app: &SolveApp, d: &Dialog, proj: &Proj) -> Option<MoveRotation
 }
 
 /// Reuse the angular handle's snapping and edge-on projection for Move's selected axis.
-fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) -> Option<(Pos2, bool)> {
+/// Rotate's handle: where it is, whether the drag changed the angle, and whether it was let go.
+fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) -> Option<(Pos2, bool, bool)> {
     let r = move_rotation(app, d, proj)?;
     let points: Vec<_> = (0..=64).filter_map(|i| proj.to_screen(r.point(i as f64 / 64.0 * std::f64::consts::TAU))).collect();
     painter.add(egui::Shape::line(points, Stroke::new(1.8, Tokens::get().manipulator)));
@@ -496,7 +501,8 @@ fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter
         "move_rotate",
         angle,
     )?;
-    Some((end, *angle != before))
+    let released = ui.ctx().read_response(egui::Id::unique(("sc_rotator", "move_rotate"))).is_some_and(|r| r.drag_stopped());
+    Some((end, *angle != before, released))
 }
 
 /// A round step for dragged values at this zoom (1, 2 or 5 times a power of ten).

@@ -2768,6 +2768,10 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         }
         // Joins, cuts and intersects meet their targets where those are placed (#3383).
         kind if drawn_tools_change_bodies(kind) => reads.drawn_targets(st, f),
+        // A carried construction is moved in its own component's frame, so that placement is read.
+        FeatureKind::Move { carry, .. } if !carry.is_empty() => {
+            reads.components.extend(carry.iter().filter_map(|id| doc.feature(*id)).map(|g| g.component));
+        }
         FeatureKind::Sketch { plane, sketch } => {
             match crate::face_anchor::plane_face_anchor(plane) {
                 // Read in the frame of the placement it was drawn in, its face through the

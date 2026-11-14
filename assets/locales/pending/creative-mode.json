@@ -14,7 +14,8 @@
     "creative_mode.intersect_tip": "Keep only where {target} and {tools} overlap.",
     "creative_mode.pole": "Center Pole",
     "creative_mode.pole_tip": "Add a center pivot pole: a construction axis through the middle of {target}, to revolve, pattern or rotate around.",
-    "move.keep_axes": "Keep Axes With Body"
+    "move.keep_axes": "Keep Axes With Body",
+    "creative_mode.selected_count": "{count} selected"
   },
   "de": {
     "prefs.creative_mode": "Kreativmodus",
@@ -31,7 +32,8 @@
     "creative_mode.intersect_tip": "Nur behalten, wo sich {target} und {tools} überschneiden.",
     "creative_mode.pole": "Mittelachse",
     "creative_mode.pole_tip": "Eine Mittelachse hinzufügen: eine Konstruktionsachse durch die Mitte von {target}, zum Drehen, Mustern oder Rotieren.",
-    "move.keep_axes": "Achsen mit Körper behalten"
+    "move.keep_axes": "Achsen mit Körper behalten",
+    "creative_mode.selected_count": "{count} ausgewählt"
   },
   "ko": {
     "prefs.creative_mode": "크리에이티브 모드",
@@ -48,7 +50,8 @@
     "creative_mode.intersect_tip": "{target}와(과) {tools}이(가) 겹치는 부분만 남깁니다.",
     "creative_mode.pole": "중심 축",
     "creative_mode.pole_tip": "중심 회전 축 추가: {target}의 중심을 지나는 구성 축으로, 회전, 패턴 또는 회전 이동에 사용합니다.",
-    "move.keep_axes": "바디와 함께 축 유지"
+    "move.keep_axes": "바디와 함께 축 유지",
+    "creative_mode.selected_count": "{count}개 선택됨"
   },
   "ar": {
     "prefs.creative_mode": "الوضع الإبداعي",
@@ -65,7 +68,8 @@
     "creative_mode.intersect_tip": "الإبقاء فقط على تداخل {target} و{tools}.",
     "creative_mode.pole": "عمود مركزي",
     "creative_mode.pole_tip": "إضافة عمود محوري مركزي: محور إنشائي يمر بمنتصف {target}، للدوران أو التكرار أو التدوير حوله.",
-    "move.keep_axes": "إبقاء المحاور مع الجسم"
+    "move.keep_axes": "إبقاء المحاور مع الجسم",
+    "creative_mode.selected_count": "{count} محدد"
   },
   "he": {
     "prefs.creative_mode": "מצב יצירתי",
@@ -82,7 +86,8 @@
     "creative_mode.intersect_tip": "השארת החלק שבו {target} ו-{tools} חופפים בלבד.",
     "creative_mode.pole": "ציר מרכזי",
     "creative_mode.pole_tip": "הוספת ציר סיבוב מרכזי: ציר בנייה דרך אמצע {target}, לסיבוב, לתבנית או להטיה סביבו.",
-    "move.keep_axes": "שמירת צירים עם הגוף"
+    "move.keep_axes": "שמירת צירים עם הגוף",
+    "creative_mode.selected_count": "{count} נבחרו"
   },
   "ja": {
     "prefs.creative_mode": "クリエイティブモード",
@@ -99,7 +104,8 @@
     "creative_mode.intersect_tip": "{target} と {tools} が重なる部分だけを残します。",
     "creative_mode.pole": "中心軸",
     "creative_mode.pole_tip": "中心の回転軸を追加: {target} の中心を通る構築軸で、回転、パターン、回転移動の基準にします。",
-    "move.keep_axes": "ボディと一緒に軸を保持"
+    "move.keep_axes": "ボディと一緒に軸を保持",
+    "creative_mode.selected_count": "{count} 個選択"
   },
   "vi": {
     "prefs.creative_mode": "Chế độ Sáng tạo",
@@ -116,7 +122,8 @@
     "creative_mode.intersect_tip": "Chỉ giữ phần {target} và {tools} chồng lên nhau.",
     "creative_mode.pole": "Trục tâm",
     "creative_mode.pole_tip": "Thêm trục xoay tâm: một trục dựng hình qua giữa {target}, để xoay, tạo mẫu hoặc quay quanh.",
-    "move.keep_axes": "Giữ trục cùng khối"
+    "move.keep_axes": "Giữ trục cùng khối",
+    "creative_mode.selected_count": "Đã chọn {count}"
   },
   "zh": {
     "prefs.creative_mode": "创意模式",
@@ -133,6 +140,7 @@
     "creative_mode.intersect_tip": "只保留 {target} 与 {tools} 重叠的部分。",
     "creative_mode.pole": "中心轴",
     "creative_mode.pole_tip": "添加中心旋转轴：穿过 {target} 中心的构造轴，用于绕其旋转、阵列或转动。",
-    "move.keep_axes": "随实体保留轴"
+    "move.keep_axes": "随实体保留轴",
+    "creative_mode.selected_count": "已选择 {count} 个"
   }
 }

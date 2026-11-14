@@ -36,6 +36,8 @@ pub struct Gesture {
     out: Vec3,
     /// Where along `out` the press was: the value is measured from here.
     grab: f64,
+    /// The edge's direction on screen at the press (its nearest segment), when it shows.
+    along: Option<Vec2>,
     /// The drag went in (Chamfer) rather than out (Fillet); set when it starts.
     push: bool,
     /// The window is open and follows the pointer.
@@ -84,9 +86,20 @@ pub fn press(app: &mut SolveApp, proj: &Proj, at: Pos2) {
         return;
     };
     let Some(grab) = crate::canvas::along(proj, at, point, out) else { return };
+    let along = app.session.world_state().ok().and_then(|st| edge_on_screen(&st.body(&body)?.mesh(), index, proj, at));
     crate::drag_extrude::forget(app);
     let keep = in_selection(app, &body, index);
-    app.viewport.drag_fillet.gesture = Some(Gesture { press: at, sel, base: point, out, grab, push: false, started: false, keep });
+    app.viewport.drag_fillet.gesture = Some(Gesture { press: at, sel, base: point, out, grab, along, push: false, started: false, keep });
+}
+
+/// The screen direction of edge `index`'s segment nearest the press at `at`.
+fn edge_on_screen(m: &solidcraft_engine::geom::Mesh, index: usize, proj: &Proj, at: Pos2) -> Option<Vec2> {
+    let line: Vec<Pos2> = m.edges.get(index)?.iter().filter_map(|p| proj.to_screen(*p)).collect();
+    line.windows(2)
+        .map(|w| (w[0], w[1]))
+        .filter(|(a, b)| (*b - *a).length() > 1e-3)
+        .min_by(|x, y| crate::viewport::seg_dist(at, x.0, x.1).total_cmp(&crate::viewport::seg_dist(at, y.0, y.1)))
+        .map(|(a, b)| b - a)
 }
 
 /// Whether edge `index` of `body` is selected, or lies on a selected face, while the selection is
@@ -114,7 +127,13 @@ fn crossing(proj: &Proj, g: &Gesture, p: Pos2) -> Option<bool> {
         return None;
     }
     let n = proj.to_screen(g.base).zip(proj.to_screen(g.base + g.out)).map(|(a, b)| b - a).filter(|n| n.length() > 1e-3)?;
-    let c = (n / n.length()).dot(delta / delta.length());
+    let unit = delta / delta.length();
+    let c = (n / n.length()).dot(unit);
+    // A drag that follows the edge more than it crosses it is a box selection, as is one where
+    // the edge and the way out of the material show the same way on screen.
+    if g.along.is_some_and(|t| (t / t.length()).dot(unit).abs() >= c.abs()) {
+        return None;
+    }
     (c.abs() > ACROSS).then_some(c < 0.0)
 }
 

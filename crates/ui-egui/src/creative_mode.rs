@@ -139,7 +139,7 @@ pub(crate) fn pill_items(app: &SolveApp) -> Vec<Item> {
 fn selection_name(app: &SolveApp) -> String {
     match app.session.selection.as_slice() {
         [Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. }] | [Sel::Body { name: body }] => body.clone(),
-        many => format!("{} selected", many.len()),
+        many => app.tr("creative_mode.selected_count").replace("{count}", &many.len().to_string()),
     }
 }
 
@@ -183,7 +183,9 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     let items = pill_items(app);
-    if !screen.is_positive() || !screen.intersects(free) || items.is_empty() {
+    // A vertex, or an edge seen end-on or square to the screen, spans no area: it still has a pill.
+    let seen = if screen.is_positive() { screen } else { screen.expand(1.0) };
+    if !seen.is_positive() || !seen.intersects(free) || items.is_empty() {
         crate::shell::register_panel(app, "creative:selection", None);
         return;
     }

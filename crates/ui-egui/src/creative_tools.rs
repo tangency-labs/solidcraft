@@ -72,19 +72,30 @@ pub(crate) fn fitting(app: &SolveApp) -> Vec<&'static str> {
     ids
 }
 
-/// What the cached answer depends on: the selection and the model it is on.
-#[derive(Clone, PartialEq)]
+/// What the cached answer depends on: the selection and the model it is on (the placed model
+/// state itself, which every change to the design replaces), and the history.
+#[derive(Clone)]
 struct Key {
     selection: Vec<Sel>,
+    model: std::sync::Arc<solidcraft_engine::doc::ModelState>,
     features: usize,
     undo: usize,
     redo: usize,
+}
+
+impl PartialEq for Key {
+    fn eq(&self, o: &Key) -> bool {
+        self.selection == o.selection
+            && std::sync::Arc::ptr_eq(&self.model, &o.model)
+            && (self.features, self.undo, self.redo) == (o.features, o.undo, o.redo)
+    }
 }
 
 impl Key {
     fn of(app: &SolveApp) -> Key {
         Key {
             selection: app.session.selection.clone(),
+            model: crate::open_meshing::session_world(&app.session),
             features: app.session.doc.features.len(),
             undo: app.session.undo.len(),
             redo: app.session.redo.len(),
@@ -127,11 +138,7 @@ fn selected_bodies(app: &SolveApp) -> Option<Vec<String>> {
 fn overlapping(app: &SolveApp, a: &str, others: &[String]) -> bool {
     let st = crate::open_meshing::session_world(&app.session);
     let Some(ba) = st.body(a).map(|b| b.mesh().bounds()) else { return false };
-    others.iter().all(|o| {
-        st.body(o).map(|b| b.mesh().bounds()).is_some_and(|bo| {
-            ba.min.x < bo.max.x && bo.min.x < ba.max.x && ba.min.y < bo.max.y && bo.min.y < ba.max.y && ba.min.z < bo.max.z && bo.min.z < ba.max.z
-        })
-    })
+    others.iter().all(|o| st.body(o).map(|b| b.mesh().bounds()).is_some_and(|bo| ba.meets(&bo)))
 }
 
 /// Join, Cut and Intersect for two or more overlapping bodies, applied at once on the first
@@ -201,8 +208,9 @@ pub(crate) fn pole(app: &SolveApp) -> Option<Item> {
         [Sel::Body { name }] => {
             let st = crate::open_meshing::session_world(&app.session);
             let b = st.body(name)?.mesh().bounds();
-            let (cx, cy) = ((b.min.x + b.max.x) / 2.0, (b.min.y + b.max.y) / 2.0);
-            if b.max.z - b.min.z <= 1e-9 {
+            let (c, size) = (b.center(), b.size());
+            let (cx, cy) = (c.x, c.y);
+            if size.z <= 1e-9 {
                 return None;
             }
             let params = json!({
@@ -408,6 +416,38 @@ mod tests {
             let (x, y) = pole_foot(&h);
             assert!((x - foot).abs() < 1e-6 && (y - 10.0).abs() < 1e-6, "keep {keep}: the pole stands at ({x}, {y})");
         }
+    }
+
+    /// Outside Creative Mode an ordinary Move leaves a Center Pole where it is, as Move always
+    /// did; Keep Axes With Body takes it along only when ticked.
+    #[test]
+    fn outside_creative_mode_a_move_leaves_the_pole_unless_asked() {
+        let mut h = two_boxes(40.0);
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": "Body1"}]})).unwrap();
+        click_pole(&mut h);
+        h.app.preferences.creative_mode = false;
+        h.app.start("solid.move");
+        let d = h.app.dialog.as_ref().unwrap();
+        assert!(!crate::dialogs_move::keeps_axes(&h.app, d), "unticked outside Creative Mode");
+        h.app.dialog = None;
+        h.app.preferences.creative_mode = true;
+        assert!(crate::dialogs_move::keeps_axes(&h.app, &crate::dialogs::Dialog::for_command(&h.app, "solid.move").unwrap()), "ticked in it");
+    }
+
+    /// Editing a Move keeps the constructions it was saved with while its bodies and the option
+    /// stay as they were, rather than working them out again.
+    #[test]
+    fn an_edited_move_keeps_the_poles_it_carried() {
+        let mut h = two_boxes(40.0);
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": "Body1"}]})).unwrap();
+        click_pole(&mut h);
+        let pole = h.app.session.doc.features.last().unwrap().id;
+        move_body1(&mut h, true);
+        let mv = h.app.session.doc.features.last().unwrap().id;
+        let d = crate::dialogs::for_feature(&h.app, mv, None).unwrap();
+        assert!(crate::dialogs_move::keeps_axes(&h.app, &d));
+        let p = crate::dialogs_move::params(&h.app, &d).unwrap();
+        assert_eq!(p["carry"], json!([pole]), "{p}");
     }
 
     #[test]

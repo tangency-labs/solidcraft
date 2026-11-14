@@ -465,13 +465,25 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
     if d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false) {
         p["copy"] = json!(true);
     } else {
-        let (built_on, through) = body_axes(app, &names(&p));
-        if keeps_axes(d) {
+        let keep = keeps_axes(app, d);
+        let bodies = names(&p);
+        // An edited Move keeps the lists it was saved with while its bodies and the option are
+        // unchanged, so confirming it as it is replays the same constructions.
+        let saved = d
+            .extra
+            .get("saved_axes")
+            .filter(|s| s.get("keep").and_then(Value::as_bool) == Some(keep) && s.get("bodies").is_some_and(|b| *b == json!(bodies)));
+        if let Some(saved) = saved {
+            for key in ["carry", "leave"] {
+                if let Some(list) = saved.get(key).filter(|l| l.as_array().is_some_and(|a| !a.is_empty())) {
+                    p[key] = list.clone();
+                }
+            }
+        } else if keep {
+            let through = axes_through(app, &bodies);
             if !through.is_empty() {
                 p["carry"] = json!(through);
             }
-        } else if !built_on.is_empty() {
-            p["leave"] = json!(built_on);
         }
     }
     Ok(p)
@@ -482,46 +494,26 @@ fn names(p: &Value) -> Vec<String> {
     p.get("bodies").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect()
 }
 
-/// Whether Keep Axes With Body is ticked (it starts ticked).
-pub(crate) fn keeps_axes(d: &Dialog) -> bool {
-    d.extra.get("keep_axes").and_then(Value::as_bool).unwrap_or(true)
+/// Whether Keep Axes With Body is ticked. It starts ticked in Creative Mode and unticked
+/// otherwise, so an ordinary Move moves what it always did.
+pub(crate) fn keeps_axes(app: &SolveApp, d: &Dialog) -> bool {
+    d.extra.get("keep_axes").and_then(Value::as_bool).unwrap_or_else(|| crate::creative_mode::on(app))
 }
 
-/// The construction axes that go with `bodies`, by feature id: those built on them alone, which
-/// a move takes along unless told to leave them, and the others whose line runs through one of
-/// the bodies (a Center Pole placed at fixed points), which a move takes along only when told.
-pub(crate) fn body_axes(app: &SolveApp, bodies: &[String]) -> (Vec<u64>, Vec<u64>) {
-    let st = app.session.model.state();
+/// The construction axes held only by fixed points (a Center Pole) whose line runs through one
+/// of `bodies`, by feature id: Keep Axes With Body takes them along. Axes built on the bodies go
+/// with them anyway (#10127). Tested where the placed model puts them, as the bodies are.
+pub(crate) fn axes_through(app: &SolveApp, bodies: &[String]) -> Vec<u64> {
     let world = crate::open_meshing::session_world(&app.session);
     let boxes: Vec<_> = bodies.iter().filter_map(|n| world.body(n).map(|b| b.mesh().bounds())).collect();
-    let (mut built_on, mut through) = (Vec::new(), Vec::new());
-    for c in &st.construct {
+    let mut through = Vec::new();
+    for c in &world.construct {
         let solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } = c.geom else { continue };
-        if !c.bodies.is_empty() && c.bodies.iter().all(|b| bodies.contains(b)) {
-            built_on.push(c.feature);
-        } else if c.bodies.is_empty() && boxes.iter().any(|b| line_meets_box(origin, dir, b.min, b.max)) {
+        if c.bodies.is_empty() && !through.contains(&c.feature) && boxes.iter().any(|b| b.meets_line(origin, dir)) {
             through.push(c.feature);
         }
     }
-    (built_on, through)
-}
-
-/// Whether the endless line through `o` along `d` passes through the box `lo`..`hi`.
-fn line_meets_box(o: Vec3, d: Vec3, lo: Vec3, hi: Vec3) -> bool {
-    let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
-    for (o, d, lo, hi) in [(o.x, d.x, lo.x, hi.x), (o.y, d.y, lo.y, hi.y), (o.z, d.z, lo.z, hi.z)] {
-        let tol = 1e-6 * (hi - lo).abs().max(1.0);
-        if d.abs() < 1e-12 {
-            if o < lo - tol || o > hi + tol {
-                return false;
-            }
-        } else {
-            let (a, b) = ((lo - tol - o) / d, (hi + tol - o) / d);
-            t0 = t0.max(a.min(b));
-            t1 = t1.min(a.max(b));
-        }
-    }
-    t0 <= t1
+    through
 }
 
 /// The current type's move, or what it still needs picked.
@@ -818,7 +810,7 @@ pub fn for_feature(
     feature: &solidcraft_engine::doc::FeatureKind,
     frame: &solidcraft_engine::doc::Mat,
 ) {
-    let solidcraft_engine::doc::FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy, leave, .. } = feature else { return };
+    let solidcraft_engine::doc::FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy, carry, leave } = feature else { return };
     let mut translate = translate.clone();
     let mut origin = origin.clone();
     let mut axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
@@ -870,9 +862,12 @@ pub fn for_feature(
     if *copy {
         d.extra.insert("copy".into(), json!(true));
     }
-    if !leave.is_empty() {
-        d.extra.insert("keep_axes".into(), json!(false));
-    }
+    // The lists it was saved with, kept until the bodies or the option change.
+    d.extra.insert("keep_axes".into(), json!(!carry.is_empty()));
+    d.extra.insert(
+        "saved_axes".into(),
+        json!({"keep": !carry.is_empty(), "bodies": bodies.iter().map(|b| b.to_string()).collect::<Vec<_>>(), "carry": carry, "leave": leave}),
+    );
 }
 
 #[cfg(test)]
