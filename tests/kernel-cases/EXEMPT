@@ -310,6 +310,7 @@ sketch.fillet                     2D sketch only (the sketch solver and engine t
 sketch.finish_auto_constrain      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.glyphs                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.infinite                   2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.insert_airfoil             2D sketch only; tested in crates/engine/src/cmd/sketch_import.rs (its file reader in crates/io/src/airfoil.rs, its bounds in solidcore-ops curve_fit)
 sketch.insert_dxf                 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.insert_svg                 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.inspect                    2D sketch only (the sketch solver and engine tests); no kernel operation

@@ -7479,7 +7479,8 @@ mod tests {
         s.holes.push(Region2 { outer: Loop2::circle(Vec2::new(50.0, 30.0), 10.0), holes: vec![Loop2::circle(Vec2::new(50.0, 30.0), 5.0)] });
         let regions = s.flat_regions().unwrap();
         assert_eq!(regions.len(), 2);
-        let island = regions.iter().find(|r| r.outer.contains(Vec2::new(50.0, 30.0))).unwrap();
+        // The island holds the centre but not the ring between the radii, which the plate's outline does.
+        let island = regions.iter().find(|r| r.outer.contains(Vec2::new(50.0, 30.0)) && !r.outer.contains(Vec2::new(50.0, 37.5))).unwrap();
         assert!(island.holes.is_empty());
         assert!(island.outer.segs.iter().all(|s| matches!(s, Seg2::Arc { radius, .. } if (*radius - 5.0).abs() < 1e-9)));
         let area: f64 = regions.iter().map(Region2::area).sum();

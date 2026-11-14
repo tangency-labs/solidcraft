@@ -2483,41 +2483,6 @@ fn edge_zone_tol(k: &Kernel, b: &Brep, e: Option<EdgeId>) -> Result<f64> {
     })
 }
 
-// Only a genuinely shared topological vertex can enlarge the edge/edge limit, and only
-// with the opt-in `Kernel::fixes.check_loop_vertex_tolerance` (WR-381, #476).
-// Use the previous edge use's mate: its vertex use is the previous end regardless
-// of either edge use's orientation (including closed edges and reversed loops).
-fn loop_junction_tolerance(
-    k: &Kernel,
-    b: &Brep,
-    current: EdgeuseId,
-    previous: EdgeuseId,
-) -> Result<f64> {
-    let edge_limit = tol::xsect_tol_3d_from_zones(
-        k,
-        edge_zone_tol(k, b, eu1::edge(b, current)?)?,
-        edge_zone_tol(k, b, eu1::edge(b, previous)?)?,
-    );
-    if !k.fixes.check_loop_vertex_tolerance {
-        return Ok(edge_limit);
-    }
-    let Some(start_use) = eu1::vertexuse(b, current)? else {
-        return Ok(edge_limit);
-    };
-    let Some(end) = eu1::mate(b, previous)? else {
-        return Ok(edge_limit);
-    };
-    let Some(end_use) = eu1::vertexuse(b, end)? else {
-        return Ok(edge_limit);
-    };
-    let start_vertex = b.vertexuse(start_use)?.vertex;
-    let end_vertex = b.vertexuse(end_use)?.vertex;
-    if let Some(vertex) = start_vertex.filter(|v| Some(*v) == end_vertex) {
-        return Ok(edge_limit.max(tol::zone_tol3d(k, b.vertex(vertex)?.tolerance)));
-    }
-    Ok(edge_limit)
-}
-
 // A projected endpoint is known only modulo the natural period. Exact UV trims
 // keep their chosen sheet. This lift is only for the UV gap test: surface points
 // are evaluated at the original parameters so a real 3D gap cannot be hidden by
@@ -2536,8 +2501,9 @@ fn nearest_period(value: f64, target: f64, period: f64) -> f64 {
 
 /// `CheckLoop`: for each pair of consecutive edge uses of the loop whose UV ends differ
 /// (by more than `1e-10`), the surface points must be within the edges'
-/// intersection tolerance (with `Kernel::fixes.check_loop_vertex_tolerance`, the larger of
-/// it and their shared vertex's zone tolerance; else closure 3, signalled only) and the UV jump must stay under a tenth of
+/// intersection tolerance (with `Kernel::fixes.check_loop_vertex_tolerance`, plus twice
+/// the shared vertex zone when each endpoint meets its edge and vertex zones; else
+/// closure 3, signalled only) and the UV jump must stay under a tenth of
 /// the natural domain in each direction, unless both ends are singular in that
 /// direction or the gap is certified by [`is_loop_uv_gap_within_tolerance`] (not across
 /// a seam). A large UV jump gives closure 1 when an end is singular, else `SM_ERR`.
@@ -2579,9 +2545,22 @@ pub fn check_loop(
             let current_start_3d = surface.evaluate_point(k, current_start)?;
             let end_start_dist = previous_end_3d.distance(current_start_3d);
 
-            // A widened shared vertex covers gaps that the two edge zones alone
-            // need not cover (#476). Retain the existing edge intersection limit.
-            let xsect = loop_junction_tolerance(k, b, cur, prev)?;
+            let previous_zone = edge_zone_tol(k, b, eu1::edge(b, prev)?)?;
+            let current_zone = edge_zone_tol(k, b, eu1::edge(b, cur)?)?;
+            // Use the same bounded shared-vertex junction as IsClosed3d; the
+            // surface-domain checks below still constrain the UV gap.
+            let xsect = if k.fixes.check_loop_vertex_tolerance {
+                crate::topology::loopuse::junction_tolerance(
+                    k,
+                    b,
+                    prev,
+                    cur,
+                    [previous_end_3d, current_start_3d],
+                    [previous_zone, current_zone],
+                )?
+            } else {
+                tol::xsect_tol_3d_from_zones(k, previous_zone, current_zone)
+            };
             report(
                 &mut alist,
                 lp,
@@ -3355,7 +3334,8 @@ mod tests {
         for (gap, vertex_tol, same_vertex, expected) in [
             (1.3e-5, 2.6e-5, true, 0),
             (2.6e-5, 2.6e-5, true, 0),
-            (2.61e-5, 2.6e-5, true, 3),
+            (2.61e-5, 2.6e-5, true, 0),
+            (3.19e-5, 2.6e-5, true, 3), // One endpoint exceeds vertex + edge zone.
             (1.3e-5, 1e-6, true, 3),
             (1e-5, 1e-6, true, 0), // Existing edge intersection tolerance remains valid.
             (1.3e-5, 2.6e-5, false, 3), // Unrelated vertices cannot bridge the gap.
@@ -3436,11 +3416,19 @@ mod tests {
             Vec3::ZERO,
             Vec3::Z,
         ));
+        // FromNormal chooses its own UV axes: UV (0.5, 0) need not map to
+        // world (0.5, 0, 0). Put the shared vertex at the actual trim endpoint.
+        b.vertex_mut(VertexId::from_index(1)).unwrap().point =
+            surface.evaluate_point(&k, Point2::new(0.5, 0.0)).unwrap();
         for start in 0..4 {
             b.loopuse_mut(crate::topology::LoopuseId::from_index(0))
                 .unwrap()
                 .start = crate::topology::LoopuseStart::Edgeuse(Some(EdgeuseId::from_index(start)));
-            assert_eq!(check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(), 0);
+            assert_eq!(
+                check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(),
+                0,
+                "loop start edge use {start}"
+            );
         }
         // Missing endpoint topology must fall back to the edges, not another vertex.
         b.vertexuse_mut(VertexuseId::from_index(2)).unwrap().vertex = None;

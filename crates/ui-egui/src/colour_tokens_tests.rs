@@ -75,7 +75,7 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
     let ctx = crate::fonts::test_context();
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
     let cam = solidcraft_viewport::Camera::default();
-    let proj = crate::viewport::Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
+    let proj = crate::viewport::Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect, bounds: None };
     let triad = crate::gizmo::Triad { center: Vec3::ZERO, translate: true, rotate: true };
     for (dark, mode) in [false, true].into_iter().flat_map(|d| ColorVision::ALL.map(|m| (d, m))) {
         set_dark(dark);
@@ -167,6 +167,12 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
     ("prefs.rs", 1, "a saved sketch dimension colour: the colour is the user's own data"),
     ("titlebar.rs", 2, "the window close button's red hover (the system's convention) and white ink"),
+    (
+        "app_bar.rs",
+        5,
+        "the link pills' brand fills (Ko-fi coral, Discord blurple: the services' own colours, the same in every theme), their white ink and the hover veil on the x",
+    ),
+    ("links.rs", 1, "the link pills' white ink on the brand fills"),
     ("ui_kit/icons/mod.rs", 1, "the white tint that carries an icon image's opacity"),
     ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),
     ("ui_kit/menu.rs", 1, "a menu entry's swatch: the colour is document data"),

@@ -4,6 +4,7 @@
 //! Operations take a body and change it, as the kernel does; an application that keeps its
 //! input calls [`Body::copy`] first.
 
+use std::collections::BTreeSet;
 use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
 
 use solidcore::kernel::Kernel;
@@ -259,10 +260,17 @@ impl Body {
     ///
     /// # Errors
     /// [`Error::Unsupported`] for a body with a closed shell (turned over, a solid would be inside
-    /// out), the body as it was; [`Error::Argument`] for an `order` that is not this body's; the
-    /// kernel's status; those of [`Body::to_record`].
+    /// out), the body as it was; [`Error::Argument`], before the body is touched, for an `order`
+    /// that is not this body's (one naming an edge the body does not have); the kernel's status;
+    /// those of [`Body::to_record`].
     pub fn turn_over(&self, order: &Order) -> Result<TurnedOver> {
         with_body("turn_over_sheet", self, |k, b| {
+            // the kernel keeps every edge, so an order whose edges are all the body's maps
+            // through the turned record below; any other is refused before the sheet turns
+            let edges: BTreeSet<_> = b.edge_list().iter().collect();
+            if !order.edges.iter().all(|e| edges.contains(e)) {
+                return Ok(Err(Error::Argument));
+            }
             Ok(turn_over_sheet(k, b).map_err(status))
         })??;
         let (record, new_order) = self.to_record()?;

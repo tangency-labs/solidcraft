@@ -16,7 +16,7 @@ use solidcore::nurbs::srf_basic::{
     falloff_weight as kernel_falloff, Direction, FalloffShape, Surface as NurbSurface,
 };
 use solidcore::nurbs::srf_deviation::certified_distance;
-use solidcore::nurbs::srf_match::match_boundary;
+use solidcore::nurbs::srf_match::{match_boundary, match_plane as kernel_match_plane};
 pub use solidcore::nurbs::srf_match::{MatchOrder, MatchRows, SeamBounds};
 use solidcore::SolidError;
 use solidcore::Vec3;
@@ -30,10 +30,12 @@ use solidcore::topology::brep::sheet::editable_sheet;
 
 use crate::body::Body;
 use crate::error::status;
+use crate::session::with_body;
 use crate::session::{read_body, run};
-use crate::surface::{record, sheet as sheet_of};
+use crate::surface::{record, sheet_starting};
 use crate::sweep::coord_ok;
 use crate::{Error, Result};
+use solidcore::surface::side::BoxSide;
 
 /// The most sample points a rebuild fits (rows times columns).
 pub const REBUILD_MAX_SAMPLES: usize = 1 << 20;
@@ -91,6 +93,25 @@ pub(crate) fn editable(sheet: &Brep) -> Result<Cow<'_, Brep>> {
     }
 }
 
+/// The side of `sheet`'s box its one face's loop starts on (the kernel's `first_side`), so an
+/// edit makes its sheet again listing the edges in its order: an edit changes no topology, and a
+/// client names an edge by its index in the record. `None` for a record of other than one face.
+///
+/// # Errors
+/// [`Error::Record`] for a record the kernel refuses; the kernel's error.
+fn first_side(sheet: &Brep) -> Result<Option<BoxSide>> {
+    if sheet.faces.len() != 1 {
+        return Ok(None);
+    }
+    let (body, _) = Body::from_record(sheet, true)?;
+    with_body("surface_cvs::first_side", &body, |k, b| {
+        let Some(&f) = b.face_list().first() else {
+            return Ok(None);
+        };
+        solidcore::topology::brep::sheet::first_side(k, b, f)
+    })
+}
+
 /// The control net of `sheet`'s surface (a planar or analytic sheet's after [`editable`]): its
 /// Euclidean points, their weights and the points tied together.
 ///
@@ -140,6 +161,7 @@ fn tied(ties: &[Vec<(usize, usize)>], p: (usize, usize)) -> Vec<(usize, usize)> 
 /// past the coordinate bound; the kernel's status otherwise.
 pub fn move_cvs(sheet: &Brep, moves: &[((usize, usize), [f64; 3])]) -> Result<Brep> {
     let sheet = editable(sheet)?;
+    let first = first_side(&sheet)?;
     let ((u, v), net) = untrimmed(&sheet)?;
     let mut surface = kernel_surface(u, v, net)?;
     let ties = net_of(&surface, sheet.tolerance)?.ties;
@@ -153,7 +175,7 @@ pub fn move_cvs(sheet: &Brep, moves: &[((usize, usize), [f64; 3])]) -> Result<Br
         }
     }
     record(run("surface_cvs::move_cvs", |k| {
-        sheet_of(k, BSplineSurface::from_gw_nurb(&surface))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&surface), first)
     }))
 }
 
@@ -275,6 +297,7 @@ pub fn move_net(
         return Err(Error::Argument);
     }
     let sheet = editable(sheet)?;
+    let first = first_side(&sheet)?;
     let ((u, v), record_net) = untrimmed(&sheet)?;
     let mut surface = kernel_surface(u, v, record_net)?;
     let net = net_of(&surface, sheet.tolerance)?;
@@ -299,7 +322,7 @@ pub fn move_net(
         .collect();
     let moved = record(run("surface_cvs::move_net", |k| {
         surface.displace_cpts(&moves, Vec3::new(delta[0], delta[1], delta[2]))?;
-        sheet_of(k, BSplineSurface::from_gw_nurb(&surface))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&surface), first)
     }))?;
     if !control_net(&moved)?
         .points
@@ -337,6 +360,7 @@ pub fn rebuild(
     tol: f64,
 ) -> Result<(Brep, f64)> {
     let sheet = editable(sheet)?;
+    let first = first_side(&sheet)?;
     let ((u, v), points) = untrimmed(&sheet)?;
     if points.is_rational() {
         return Err(Error::Unsupported(
@@ -422,7 +446,7 @@ pub fn rebuild(
         return Err(Error::PastTolerance { bound });
     }
     let made = record(run("surface_cvs::rebuild", |k| {
-        sheet_of(k, BSplineSurface::from_gw_nurb(&fit))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&fit), first)
     }))?;
     Ok((made, bound))
 }
@@ -460,6 +484,7 @@ pub fn match_edge(
     }
     let side = side_of(sheet, edge)?;
     let target_side = side_of(other, target)?;
+    let first = first_side(sheet)?;
     let ((u, v), points) = untrimmed(sheet)?;
     let ((tu, tv), tpoints) = untrimmed(other)?;
     // spline sheets on polynomial surfaces only, as before rational nets were read
@@ -489,7 +514,91 @@ pub fn match_edge(
         ));
     }
     let made = record(run("surface_cvs::match_edge", |k| {
-        sheet_of(k, BSplineSurface::from_gw_nurb(&matched.surface))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&matched.surface), first)
+    }))?;
+    Ok((made, after))
+}
+
+/// A plane a sheet's edge is matched to as its plane of symmetry ([`match_plane`]): a point on
+/// it and its normal (any length but none).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MirrorPlane {
+    /// A point on the plane.
+    pub origin: [f64; 3],
+    /// Its normal.
+    pub normal: [f64; 3],
+}
+
+/// `sheet` with the control rows next to its record edge `edge` moved so the sheet meets its own
+/// mirror image in `plane` at `order` (the kernel's
+/// [`solidcore::nurbs::srf_match::match_plane`]: the edge row put on the plane, at G1 and G2 the
+/// next row square to it, which makes the sheet curvature continuous with its mirror too; at
+/// most `rows.rows` rows from the edge move, the rows the order does not fix following by
+/// `rows.blend`), and the seam with the mirror after, measured at the edge's stations. The sheet
+/// is one untrimmed face (as [`control_net`] reads it), the edge a side of its face's box.
+/// Refused when the seam would be worse than before in a measure the order holds, past both what
+/// it was and `held`, as [`match_edge`] refuses.
+///
+/// # Errors
+/// As [`control_net`]; [`Error::Argument`] for an edge past the record's list or not a side of
+/// its face's box, a plane not finite or past the coordinate bound, a floor in `held` negative or
+/// not finite, and the kernel's refusals of the input (a normal of no length, an edge that does
+/// not leave the plane to one side, rows outside 1..=3 or below what the order fixes, a blend
+/// outside 0..=1, knots not clamped); [`Error::Unsupported`] for a match that would leave the seam
+/// worse; the kernel's status otherwise.
+pub fn match_plane(
+    sheet: &Brep,
+    edge: usize,
+    plane: MirrorPlane,
+    order: MatchOrder,
+    rows: MatchRows,
+    held: SeamBounds,
+) -> Result<(Brep, SeamBounds)> {
+    if ![held.gap, held.angle, held.curvature]
+        .iter()
+        .all(|t| t.is_finite() && *t >= 0.0)
+        || !coord_ok(&plane.origin)
+        || !coord_ok(&plane.normal)
+    {
+        return Err(Error::Argument);
+    }
+    let side = side_of(sheet, edge)?;
+    let first = first_side(sheet)?;
+    let ((u, v), points) = untrimmed(sheet)?;
+    if points.is_rational() {
+        return Err(Error::Argument);
+    }
+    let surface = kernel_surface(u, v, points)?;
+    let v3 = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z);
+    let matched = run("surface_cvs::match_plane", |_| {
+        Ok(
+            match kernel_match_plane(
+                &surface,
+                side,
+                v3(plane.origin),
+                v3(plane.normal),
+                order,
+                rows,
+            ) {
+                Ok(m) => Ok(m),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
+    })??;
+    let (before, after) = (matched.before, matched.after);
+    let worse = |now: f64, was: f64, floor: f64| now > was.max(floor);
+    let k = order.order();
+    if worse(after.gap, before.gap, held.gap)
+        || (k >= 1 && worse(after.angle, before.angle, held.angle))
+        || (k >= 2 && worse(after.curvature, before.curvature, held.curvature))
+    {
+        return Err(Error::Unsupported(
+            "the match would leave the seam worse than it was",
+        ));
+    }
+    let made = record(run("surface_cvs::match_plane", |k| {
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&matched.surface), first)
     }))?;
     Ok((made, after))
 }

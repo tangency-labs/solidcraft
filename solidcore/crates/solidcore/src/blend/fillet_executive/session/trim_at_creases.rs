@@ -24,7 +24,7 @@
 //!   edge and the extension, `NoteFitRadius` from `sm_CornerTakesPerRadius` after the
 //!   whole edge; tangency-labs/smlib a3d6d81, 49f393d) note them (WR-696, #2278).
 //! - **Section ends (not the fork's).** A round with WR-674's section ends is trimmed here
-//!   only with `fixes.fillet_section_end_trim_at_creases` (WR-706, #2223): each such end is
+//!   with `fixes.fillet_overflow_trim_at_creases` (WR-706, #2223): each such end is
 //!   cut by its section's plane and closed by the section's flat face, and a side of that
 //!   face that lies along an edge of the body is sewn to the edge's piece the rail's
 //!   imprint cuts off, not imprinted.
@@ -253,26 +253,27 @@ impl FilletSession<'_> {
     /// The fork's fit for a blend whose corners take the whole of its edge (a3d6d81): for a
     /// constant ball, the edge's length over what its corners take per unit radius at both
     /// ends (`sm_CornerTakesPerRadius`, over the solvers of the same radius), less the fit
-    /// margin, noted where some corner takes any.
+    /// margin, noted where some corner takes any. Returns the refusal's reason: corners that
+    /// take the edge, or, where no corner takes any of it, an overflow that keeps nothing.
     fn note_fit_of_corners_taking_the_edge(
         &mut self,
         k: &mut Kernel,
         solver: FilletObject,
         solvers: &[FilletObject],
-    ) -> Result<()> {
+    ) -> Result<NoRoomReason> {
         let FilletObject::Solver(id) = solver else {
             return Err(invalid("object is not a solver"));
         };
         let current = self.objects.solver(id)?;
         let Some(eu) = current.base().edgeuse(0)? else {
-            return Ok(());
+            return Ok(NoRoomReason::CornersTakeWholeEdge);
         };
         let Some(e) = eu1::edge(self.objects.target, eu)? else {
-            return Ok(());
+            return Ok(NoRoomReason::CornersTakeWholeEdge);
         };
         let (rolls, on_edge) = super::ball_regular::rolls_a_ball(current);
         if !rolls || on_edge {
-            return Ok(());
+            return Ok(NoRoomReason::CornersTakeWholeEdge);
         }
         let offset = |o: &super::SolverObject| -> Result<f64> {
             Ok(o.base()
@@ -320,14 +321,40 @@ impl FilletSession<'_> {
                 )),
                 crate::blend::fillet_executive::FitKind::Radius,
             );
+            Ok(NoRoomReason::CornersTakeWholeEdge)
         } else {
-            // not the fork's (#2401): no corner takes any of the edge (its ends are open ends
-            // the round runs out to), so the trim took it all: the overflow's own bound,
-            // where its rails stay on their faces
-            self.executive
-                .note_fit_on_its_faces(k, &mut self.objects, solver)?;
+            // not the fork's (#15250): a knife edge's equal chamfer between a plane and a
+            // cylinder tangent to it keeps nothing past the distance its chord's sweep takes
+            // the whole body at, computed from the geometry; open, so less the fit margin.
+            // The radius that fits is its distance (`FilletSession::chamfer_fit`). Named
+            // only below the size asked: a chamfer that keeps nothing short of that limit
+            // fails for another cause, and keeps the overflow's own bound.
+            let margin = 1000.0 * edge::tolerance(target, e)?;
+            let knife = if self.objects.knife_chamfers.contains(&e) {
+                super::fit_size::knife_chamfer_keeps_nothing(k, target, e)?
+                    .map(|limit| smos_max(0.0, limit - margin))
+                    .filter(|&fit| fit < own.abs())
+            } else {
+                None
+            };
+            if let Some(fit) = knife {
+                self.executive.note_fit_radius(
+                    fit,
+                    Some(FilletObject::Topology(
+                        FilletBody::Target,
+                        EntityRef::Edge(e),
+                    )),
+                    crate::blend::fillet_executive::FitKind::Radius,
+                );
+            } else {
+                // not the fork's (#2401): no corner takes any of the edge (its ends are open
+                // ends the round runs out to), so the trim took it all: the overflow's own
+                // bound, where its rails stay on their faces
+                self.executive
+                    .note_fit_on_its_faces(k, &mut self.objects, solver)?;
+            }
+            Ok(NoRoomReason::OverflowKeepsNothing)
         }
-        Ok(())
     }
 
     /// Not the fork's (#2404): whether an edge of the target other than the blended ones runs
@@ -593,10 +620,8 @@ impl FilletSession<'_> {
             faces_of.insert(solver, self.fillet_faces(solver)?);
         }
         let open_ends = self.executive.open_ends.clone();
-        // WR-706: a section end (WR-674) is trimmed here only with its own fix
-        let section_trim = k.fixes.fillet_section_end_trim_at_creases
-            && k.fixes.fillet_overflow_trim_at_creases
-            && k.fixes.fillet_round_ends_at_tangent_continuation;
+        // WR-706: a section end (WR-674) is trimmed here only with the crease trim
+        let section_trim = k.fixes.fillet_overflow_trim_at_creases;
         if !section_trim && open_ends.iter().any(|end| end.section) {
             return Err(invalid("a section end is not trimmed at its creases"));
         }
@@ -1000,16 +1025,20 @@ impl FilletSession<'_> {
                 // r <u, e> at each end (sm_CornerTakesPerRadius), the edge's length L in all
                 // at r = L / (s0 + s1); open, so less the fit margin (the fork's a3d6d81,
                 // WR-696)
-                if let Some(&solver) = solvers.get(i) {
-                    self.note_fit_of_corners_taking_the_edge(k, solver, solvers)?;
-                }
+                let reason = match solvers.get(i) {
+                    Some(&solver) => {
+                        self.note_fit_of_corners_taking_the_edge(k, solver, solvers)?
+                    }
+                    None => NoRoomReason::CornersTakeWholeEdge,
+                };
+                let comment = if reason == NoRoomReason::OverflowKeepsNothing {
+                    "Fillet Error: a blend past its faces keeps no length of its edge: no corner takes any of it, the trim takes the whole of it (the blend is larger than the faces allow)"
+                } else {
+                    "Fillet Error: a blend past its faces keeps no length of its edge: its corners take the whole of it (the blend is larger than the faces allow)"
+                };
                 return refuse(
                     note,
-                    refusal(
-                        FilletErrorType::NoRoom,
-                        Some(NoRoomReason::CornersTakeWholeEdge),
-                        "Fillet Error: a blend past its faces keeps no length of its edge: its corners take the whole of it (the blend is larger than the faces allow)",
-                    ),
+                    refusal(FilletErrorType::NoRoom, Some(reason), comment),
                 );
             }
         }
