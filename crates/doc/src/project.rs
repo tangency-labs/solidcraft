@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::Mesh;
 use solidcraft_sketch::linalg::{Mat, solve};
-use solidcraft_sketch::{CurveKind, LinkGeom, LinkKind, LinkSource, Sketch, WireCurve};
+use solidcraft_sketch::{CurveKind, Link, LinkGeom, LinkKind, LinkSource, Sketch, WireCurve};
 
 use crate::eval::ModelState;
 use crate::expr::Value;
@@ -1191,11 +1191,11 @@ pub fn refresh_face_anchor_links(
 /// What a link kept by the name of a face or edge does when the name finds nothing any more.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LostNames {
-    /// The sketch fails, asking for the reference to be picked again ([`DocError::Reselect`]).
+    /// The sketch fails, naming every such link ([`DocError::LostProjections`]).
     Fail,
-    /// The link is marked lost and keeps its last geometry, with a warning naming the reference.
-    /// No other face or edge is taken for it. Only for showing a failed sketch while it is edited
-    /// (#12085), never for the evaluation the features after it build from.
+    /// The link is marked lost and keeps its last geometry, with a warning naming it.
+    /// No other face or edge is taken for it. Only for a failed sketch built to be shown, or to
+    /// check what it fails for (#12085), never for the evaluation the features after it build from.
     Mark,
 }
 
@@ -1299,8 +1299,8 @@ fn merge_family_lines(geom: Vec<LinkGeom>) -> Result<Vec<LinkGeom>> {
 
 /// Re-resolve every link of a sketch (in place). Returns warnings for lost, moved or rebuilt
 /// links; lost links keep their last geometry. A link kept by the name of a face or edge that no
-/// longer finds exactly that face or edge is not lost: the sketch fails, asking for the
-/// reference to be picked again ([`DocError::Reselect`]).
+/// longer finds exactly that face or edge is not lost: the sketch fails, naming every such link
+/// ([`DocError::LostProjections`]).
 pub fn refresh_links(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, plane: &Plane, sk: &mut Sketch) -> Result<Vec<String>> {
     refresh_links_in(doc, vals, st, plane, sk, None, LostNames::Fail, None)
 }
@@ -1342,6 +1342,7 @@ fn refresh_links_in(
     frame: Option<&(u64, crate::Mat)>,
 ) -> Result<Vec<String>> {
     let mut warn = Vec::new();
+    let mut lost_by_name = Vec::new();
     let links = sk.links.clone();
     for l in &links {
         let mut source = l.source.clone();
@@ -1357,7 +1358,7 @@ fn refresh_links_in(
                 }
             });
             let Some((index, p)) = found else {
-                lose_named(sk, &l.id, name, lost_names, &mut warn)?;
+                lost_by_name.push(lose_named(sk, l, name, lost_names, &mut warn));
                 continue;
             };
             *at = p;
@@ -1368,7 +1369,7 @@ fn refresh_links_in(
         let mut named_edge = None;
         if let (Some(name), LinkSource::Edge { body, at }) = (&l.edge_name, &source) {
             let Some((body, hit)) = locate_named_edge(st, l.kind, body, name, *at) else {
-                lose_named(sk, &l.id, name, lost_names, &mut warn)?;
+                lost_by_name.push(lose_named(sk, l, name, lost_names, &mut warn));
                 continue;
             };
             warn.extend(hit.note(name).map(|note| format!("projected {note}")));
@@ -1379,7 +1380,7 @@ fn refresh_links_in(
         let mut named_vertex = None;
         if let (Some(name), LinkSource::Vertex { body, at }) = (&l.vertex_name, &source) {
             let Some((body, hit)) = locate_named_vertex(st, l.kind, body, name, *at) else {
-                lose_named(sk, &l.id, name, lost_names, &mut warn)?;
+                lost_by_name.push(lose_named(sk, l, name, lost_names, &mut warn));
                 continue;
             };
             warn.extend(hit.note(name).map(|note| format!("projected {note}")));
@@ -1463,20 +1464,32 @@ fn refresh_links_in(
             }
         }
     }
+    if lost_names == LostNames::Fail && !lost_by_name.is_empty() {
+        return Err(DocError::LostProjections { feature: String::new(), links: lost_by_name });
+    }
     Ok(warn)
 }
 
-/// A link whose face or edge `name` finds nothing: the sketch fails asking for it again, or (only
-/// while a failed sketch is shown for editing) the link is marked lost, with a warning naming it.
-fn lose_named(sk: &mut Sketch, id: &str, name: &str, lost_names: LostNames, warn: &mut Vec<String>) -> Result<()> {
-    match lost_names {
-        LostNames::Fail => Err(DocError::reselect(name)),
-        LostNames::Mark => {
-            sk.set_link_lost(id, true);
-            warn.push(format!("projected reference lost: `{name}` no longer exists as it was picked; reselect it"));
-            Ok(())
-        }
+/// A link whose face or edge `name` finds nothing, keeping its geometry. The sketch fails naming
+/// every such link; or, built to be shown, the link is marked lost and gets a warning.
+fn lose_named(sk: &mut Sketch, l: &Link, name: &str, lost_names: LostNames, warn: &mut Vec<String>) -> crate::LostProjection {
+    let what = match l.kind {
+        LinkKind::Intersect => format!("intersected {}", l.source.describe()),
+        LinkKind::Include => format!("included {}", l.source.describe()),
+        _ => format!("projected {}", l.source.describe()),
+    };
+    let lost = crate::LostProjection {
+        link: l.id.clone(),
+        what,
+        curves: sk.link_curves(&l.id).into_iter().filter_map(|i| sk.curves.get(i)).map(|c| c.id.clone()).collect(),
+        points: sk.link_points(&l.id).into_iter().filter_map(|i| sk.points.get(i)).map(|p| p.id.clone()).collect(),
+        name: name.to_string(),
+    };
+    if lost_names == LostNames::Mark {
+        sk.set_link_lost(&l.id, true);
+        warn.push(lost.warning());
     }
+    lost
 }
 
 // ---------------------------------------------------------------------------------------------

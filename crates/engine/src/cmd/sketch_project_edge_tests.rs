@@ -1,6 +1,6 @@
 //! A projected edge stays the edge that was picked: its link keeps the edge's persistent name,
 //! so the edge is found by that name wherever a change of the body takes it, and no other edge
-//! is taken for it when it is split or gone: the sketch fails, asking for the edge again.
+//! is taken for it when it is split or gone: the sketch fails, naming the projection it lost.
 
 use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
@@ -120,17 +120,27 @@ fn a_projected_edge_stays_that_edge_when_the_body_changes_size() {
     assert!(matches!(&stored(&s).source, LinkSource::Edge { body, at } if body == "Body1" && at.dist(Vec3::new(400.0, 25.0, 20.0)) < 1e-6));
 }
 
-/// What sketch `Top` asks to be picked again, when it fails for a reference it lost.
-fn reselect(s: &Session) -> Option<String> {
+/// The projections sketch `Top` says are lost, when it fails for them.
+fn lost(s: &Session) -> Option<String> {
     let r = s.model.result(s.doc.find_feature("Top").unwrap().id).unwrap();
-    r.error.as_deref().and_then(solidcraft_doc::reselect_parts).filter(|(feature, _)| *feature == "Top").map(|(_, reference)| reference.to_string())
+    r.error.as_deref().and_then(solidcraft_doc::lost_projection_parts).filter(|t| t.feature == "Top").map(|t| t.listed.to_string())
+}
+
+/// How sketch `Top` names its projected edge: by its body and its curve, never by the edge's
+/// persistent name `name`.
+#[track_caller]
+fn assert_lost_edge(s: &Session, name: &str) {
+    let sk = s.doc.sketch(s.doc.find_feature("Top").unwrap().id).unwrap();
+    let curve = &sk.curves[sk.link_curves(&sk.links[0].id)[0]].id;
+    assert_eq!(lost(s), Some(format!("projected edge of Body1 (curve {curve})")), "{}", trouble(s));
+    assert!(!trouble(s).contains(name), "{}", trouble(s));
 }
 
 /// A slot cut through the plate from x = 80 to 120, y = 20 to 30 leaves the picked edge in two
-/// pieces, y = 0..20 and y = 30..50. Neither is the edge: the sketch fails, asking for it again
+/// pieces, y = 0..20 and y = 30..50. Neither is the edge: the sketch fails, naming its projection
 /// (never the piece nearest the pick); without the slot it is the whole edge again.
 #[test]
-fn a_projected_edge_that_was_split_fails_its_sketch_asking_for_the_edge_again() {
+fn a_projected_edge_that_was_split_fails_its_sketch_naming_the_lost_projection() {
     let mut s = Session::default();
     plate(&mut s);
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SlotSketch"}));
@@ -142,15 +152,15 @@ fn a_projected_edge_that_was_split_fails_its_sketch_asking_for_the_edge_again() 
     assert_line(&s, 100.0, (0.0, 50.0), "drawn");
     let name = stored(&s).edge_name.unwrap();
     run(&mut s, "timeline.suppress", json!({"feature": "Slot", "suppressed": false}));
-    assert_eq!(reselect(&s), Some(name), "{}", trouble(&s));
+    assert_lost_edge(&s, &name);
     run(&mut s, "timeline.suppress", json!({"feature": "Slot", "suppressed": true}));
     assert_line(&s, 100.0, (0.0, 50.0), "whole again");
     assert_eq!(trouble(&s), "");
 }
 
 /// A fillet of radius 4 takes the picked edge away. Its two tangent edges are 4 from the picked
-/// point, the nearest edges there are now: the sketch takes neither of them, it fails, asking for
-/// its edge again. Without the fillet the link has its edge again.
+/// point, the nearest edges there are now: the sketch takes neither of them, it fails, naming its
+/// projection. Without the fillet the link has its edge again.
 #[test]
 fn a_projected_edge_that_is_gone_fails_its_sketch_not_replaced() {
     let mut s = Session::default();
@@ -161,7 +171,7 @@ fn a_projected_edge_that_is_gone_fails_its_sketch_not_replaced() {
     assert_line(&s, 100.0, (0.0, 50.0), "drawn");
     let name = stored(&s).edge_name.unwrap();
     run(&mut s, "timeline.suppress", json!({"feature": "Round", "suppressed": false}));
-    assert_eq!(reselect(&s), Some(name), "{}", trouble(&s));
+    assert_lost_edge(&s, &name);
     run(&mut s, "timeline.suppress", json!({"feature": "Round", "suppressed": true}));
     assert_eq!(trouble(&s), "");
     assert!(!link(&s).lost);
@@ -190,12 +200,12 @@ fn a_sketch_that_lost_its_projected_edge_opens_with_its_curves_and_the_link_mark
     let curves = |s: &mut Session| run(s, "sketch.inspect", json!({"sketch": "Top"}))["curves"].as_array().map_or(0, Vec::len);
     let name = stored(&s).edge_name.unwrap();
     run(&mut s, "timeline.suppress", json!({"feature": "Round", "suppressed": false}));
-    assert_eq!(reselect(&s), Some(name.clone()), "{}", trouble(&s));
+    assert_lost_edge(&s, &name);
     assert!(s.model.state().sketch(top).is_none(), "a failed sketch not edited is not shown");
     assert!(boss_error(&s).is_some());
 
     run(&mut s, "sketch.edit", json!({"sketch": "Top", "restore_marker": false}));
-    assert_eq!(reselect(&s), Some(name.clone()), "still fails while edited");
+    assert_lost_edge(&s, &name);
     assert!(boss_error(&s).is_some(), "the extrude does not build from the held sketch");
     assert!(link(&s).lost);
     assert_line(&s, 100.0, (0.0, 50.0), "kept where it was");

@@ -67,6 +67,8 @@ crates/solidcore-step/src/topology/swept.rs	hyperbola_spline	Ord::clamp	1	proven
 crates/solidcore-step/src/topology/swept.rs	revolution	int-div	1	proven	ts.len() / 2	constant non-zero divisor
 crates/solidcore-step/src/topology/swept.rs	whole	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore-step/src/topology/swept.rs	widest_gap	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore-step/src/topology/wound.rs	along	f64::clamp	1	proven	clamp(0.0, FRAC_PI_2)	constant bounds 0 <= FRAC_PI_2
+crates/solidcore-step/src/topology/wound.rs	pcurve	Ord::clamp	1	proven	clamp(16, MAX_PIECES / 4)	constant bounds 16 <= MAX_PIECES / 4 (1000)
 crates/solidcore-step/src/write/topology.rs	BrepWriter::edge_geometry	with_capacity	1	proven	Vec::with_capacity(edge.uses.len())	the length of a collection already in memory
 crates/solidcore-step/src/write/topology.rs	BrepWriter::face	with_capacity	1	proven	Vec::with_capacity(face.loops.len())	the length of a collection already in memory
 crates/solidcore-step/src/write/topology.rs	BrepWriter::face	with_capacity	2	proven	Vec::with_capacity(edges.len())	the length of a collection already in memory
@@ -1095,8 +1097,8 @@ crates/solidcore/src/topology/brep/validation/assert_valid/loops.rs	loop_	int-re
 crates/solidcore/src/topology/brep/validation/pointers.rs	Lists::new	int-rem	1	proven	(i + 1) % e.edgeuses.len()	inside e.edgeuses.iter().enumerate(), so e.edgeuses.len() > 0
 crates/solidcore/src/topology/brep/validation/pointers.rs	Lists::new	int-rem	2	proven	(i + e.edgeuses.len() - 1) % e.edgeuses.len()	inside e.edgeuses.iter().enumerate(), so e.edgeuses.len() > 0
 crates/solidcore/src/topology/brep/validation/pointers.rs	check_edges	int-rem	1	proven	uses.len() % 2	constant non-zero divisor
-crates/solidcore/src/topology/brep/validation/pointers.rs	validate_pointers	int-rem	1	proven	(j + 1) % uses.len()	inside for j in (1..uses.len()).step_by(2), so uses.len() > 1
-crates/solidcore/src/topology/brep/validation/pointers.rs	validate_pointers	step_by	1	proven	step_by(2)	constant non-zero step
+crates/solidcore/src/topology/brep/validation/pointers.rs	validate_pointers_excluding	int-rem	1	proven	(j + 1) % uses.len()	inside for j in (1..uses.len()).step_by(2), so uses.len() > 1
+crates/solidcore/src/topology/brep/validation/pointers.rs	validate_pointers_excluding	step_by	1	proven	step_by(2)	constant non-zero step
 crates/solidcore/src/topology/brep/validation/spatial.rs	SpatialIndex::new	int-div	1	proven	(end - begin) / 2	constant non-zero divisor
 crates/solidcore/src/topology/brep/validation/spatial.rs	SpatialIndex::new	int-rem	1	proven	(axis + 1) % 3	constant non-zero divisor
 crates/solidcore/src/topology/brep/validation/spatial.rs	SpatialIndex::new	int-rem	2	proven	(axis + 1) % 3	constant non-zero divisor

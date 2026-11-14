@@ -10,8 +10,7 @@
 //! | `FilletSession::holds_its_law` (private)   | `sm_HoldsItsLaw`                          |
 //!
 //! Deviations:
-//! - **Section ends (not the fork's).** With `fixes.fillet_round_ends_at_tangent_continuation`
-//!   (WR-674, #2176) an open end noted as a section is cut by the plane through its vertex
+//! - **Section ends (not the fork's).** (WR-674, #2176) An open end noted as a section is cut by the plane through its vertex
 //!   normal to the filleted edge, and a round whose two ends are both such ends is closed by
 //!   `close_section_ended_round` instead of `close_removal_region`; any other combination
 //!   is refused as no room.

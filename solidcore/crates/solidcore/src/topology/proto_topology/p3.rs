@@ -1126,7 +1126,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
                 // Combine PVs:
                 let pv1 = self.which_pv_to_combine(k, &*geometry, pe1, t11, npv11)?;
-                let pv2 = self.which_pv_to_combine(k, &*geometry, pe1, t21, npv21)?;
+                let pv2 = self.which_pv_to_combine(k, &*geometry, pe2, t21, npv21)?;
                 self.combine_and_delete_pvs(pv1, pv2, pass)?;
 
                 // T2: first decide which pieces to split.

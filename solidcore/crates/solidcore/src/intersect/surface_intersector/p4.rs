@@ -9,7 +9,7 @@
 //! | Rust                                                  | Upstream                      |
 //! |-------------------------------------------------------|-------------------------------|
 //! | [`SurfaceIntersector::trace_curve`]                   | `TraceCurve`                  |
-//! | [`SurfaceIntersector::trace_back`]                    | the reverse/trace/reverse block of `SmSurfaceIntersector::FindInteriorCurves` and `DoIntersection` |
+//! | [`SurfaceIntersector::trace_back`]                    | the reverse/trace/reverse block of `SmSurfaceIntersector::FindInteriorCurves` and `DoIntersection`, and of `SmAdvSurfaceIntersector::FindInteriorCurves` |
 //! | [`SurfaceIntersector::find_interior_curves`], [`SurfaceIntersector::find_interior_curves_from_node_pairs`], [`InteriorNodePair`] | `FindInteriorCurves` |
 //! | [`SurfaceIntersector::do_point_intersection`], [`PointIntersectionOptions`] | `DoPointIntersection` |
 //! | [`SurfaceIntersector::do_law_intersection`], [`LawIntersectionOptions`] | `DoLawIntersection` |
@@ -83,14 +83,15 @@
 //!   passes a found curve's free end stops there, its last span shortened to that end
 //!   (`SurfaceIntersector::reaches_found_curve_end`); the SolidCraft fork's
 //!   tangency-labs/smlib@0ce09f2. Off by default (upstream behaviour).
-//! - **Empty trace (WR-80).** The trace-back of `FindInteriorCurves` and
-//!   `DoIntersection` (part 5) is one method, [`SurfaceIntersector::trace_back`], which
-//!   traces a curve back the other way only when `TraceCurve` produced points.
+//! - **Empty trace (WR-80).** The trace-back of `FindInteriorCurves`,
+//!   `DoIntersection` (part 5) and `SmAdvSurfaceIntersector::FindInteriorCurves` is one
+//!   method, [`SurfaceIntersector::trace_back`], which traces a curve back the other way
+//!   only when `TraceCurve` produced points.
 //!   Upstream also reverses the empty curve of a trace whose start already lies on a
 //!   found curve, and `ReverseCurveDirection` fails the whole intersection with
-//!   `SM_ERR_NULL_POINTER` (the fork's tangency-labs/smlib@0dbe681). Upstream's two
-//!   blocks negate the direction and reverse the points in opposite orders; the two
-//!   steps touch disjoint state, so the shared method gives both the same result.
+//!   `SM_ERR_NULL_POINTER` (the fork's tangency-labs/smlib@0dbe681). Upstream's
+//!   blocks negate the direction and reverse the points in different orders; the two
+//!   steps touch disjoint state, so the shared method gives all three the same result.
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks (graphics, dumps), the
 //!   `SM_ASSERT`s and the point-count warnings (`MSG`).
 
@@ -511,10 +512,10 @@ impl SurfaceIntersector<'_> {
     /// negates the trace direction, traces ([`SurfaceIntersector::trace_curve`]) and
     /// reverses the points back (upstream then multiplies the direction by 1.0, so it
     /// stays negated). The trace-back of `SmSurfaceIntersector`'s
-    /// `FindInteriorCurves` and `DoIntersection`, after a first trace from an open
-    /// curve's start point (`SmAdvSurfaceIntersector` has its own).
+    /// `FindInteriorCurves` and `DoIntersection` and of `SmAdvSurfaceIntersector`'s
+    /// `FindInteriorCurves`, after a first trace from an open curve's start point.
     ///
-    /// A trace that produced no points is not traced back (WR-80, #391): its start
+    /// A trace that produced no points is not traced back (WR-80): its start
     /// point already lies on a found curve, and there is nothing to trace back from.
     /// Upstream reverses the empty curve, which is `SM_ERR_NULL_POINTER`.
     ///
@@ -2126,7 +2127,8 @@ mod tests {
 
     /// WR-80: a trace that produced no points (its start point already on a found
     /// curve) is not traced back. Upstream reverses the empty curve, which is
-    /// `SM_ERR_NULL_POINTER`; the trace-back of p4 and p5 is this one call.
+    /// `SM_ERR_NULL_POINTER`; the trace-back of p4, p5 and the advanced intersector is
+    /// this one call.
     #[test]
     fn empty_trace_is_not_traced_back() {
         let k = &Kernel::default();

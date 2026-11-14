@@ -1152,6 +1152,7 @@ mod web {
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
             // First, so everything after sees the buttons the browser holds.
             crate::mouse_buttons::reconcile(&self.mouse_buttons, ctx, raw);
+            solidcraft_ui_egui::window_chrome::release_stale_input(ctx, raw);
             let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
             if let Some(delay) = self.wheel_gestures.update(raw, now) {
                 ctx.request_repaint_after(delay);
