@@ -17,8 +17,9 @@ at its ends (WR-668), where the radius vanishes with the speed, it must be at le
 growth line WR-668 reads there, `(tol / stretch) |t - t_end| / 2`, at the near edge of each
 of at most 52 dyadic pieces (`tol 2^-(j+2)` over the piece `stretch 2^-(j+1)` to
 `stretch 2^-j` from the end). A genuine zero-speed end has its radius on the line to first
-order, so the full line would leave it no margin; that half is enough is ARGUED (it echoes
-WR-668's own check, which accepts a radius within half the tolerance of the line). The
+order, so the full line would leave it no margin. This margin is a DEFINITION of the defect
+inside a zero-speed stretch. It is looser than WR-668's own check, which wants at least
+`tol / 2` at the stretch's far end, where the outermost piece asks for `tol / 4`. The
 pieces stop at a cut from the end, and the last piece's near edge is the cut. The cut is
 the largest of `ulp(t_end)` and `stretch 2^-52` (below which the pieces would round onto
 the end) and the parameter length over which the trim covers a UV length of `L / 4`,
@@ -30,8 +31,10 @@ that the sliver within it is one polynomial piece. The sliver's UV diameter is t
 bounded from all of its power coefficients in rounded intervals and must be at most `L`,
 at the trim's own coordinate rounding; otherwise the stretch is not certified (for
 instance where `ulp(t_end)` binds). Within the sliver the radius vanishes with the speed
-and no positive bound clears it; that an extent of `L` is too short for the trim to hold
-a corner it could represent is ARGUED. The bound composes each polynomial piece
+and no positive bound clears it. In 3D the sliver's image is at most `|∇S| L` across, which
+is not bounded here; that an extent at the trim's own rounding holds no corner the trim
+could represent is ARGUED. A knot of full multiplicity inside the trim (a possible C0
+corner, which the pieces, cut at the knots, would not see) refuses the bound. The bound composes each polynomial piece
 of the trim with each polynomial patch of the surface in rounded interval arithmetic and
 bounds `|g'|^3 / |g' x g''|` from the composed coefficients (no sampling); pieces that do not
 clear are halved, breadth first, at most 4096 pieces and 64 halvings each, no recursion. A

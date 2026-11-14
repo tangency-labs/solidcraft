@@ -81,7 +81,10 @@ const MAX_PATCHES: usize = 4;
 /// How far, relative to the knots' largest end (or 1), a trim piece's parameter range may
 /// pass the surface's knot range and still be enclosed on the end span: 64 units in the
 /// last place, far above the rounding a point on the domain's boundary is widened by, and
-/// far below a trim that truly leaves the domain.
+/// far below a trim that truly leaves the domain. In 3D the stretch enclosed on the end
+/// span's polynomial past the knots is at most `|∇S|` times that UV slack; that it holds
+/// no feature of the surface is ARGUED (it is rounding of a point on the boundary), not
+/// bounded.
 const KNOT_RANGE_SLACK: f64 = 64.0 * f64::EPSILON;
 
 /// A polynomial in `s` by its power coefficients, each an interval.
@@ -120,6 +123,11 @@ pub(crate) fn radius_clears_on_surface(
     };
     let polynomial = curve.pw.chunks(4).all(|c| c.get(3) == Some(&1.0));
     if !polynomial {
+        return Ok(false);
+    }
+    // a knot of full multiplicity inside the trim can carry a tangent jump (a C0 corner)
+    // that the pieces, cut at the knots, never see: not certified
+    if has_c0_knot(&curve, lo, hi) {
         return Ok(false);
     }
     // a procedural blend's net only approximates its positions: a bound on the net is no
@@ -171,6 +179,24 @@ pub(crate) fn radius_clears_on_surface(
         pieces.push_back((m, b, halvings + 1));
     }
     Ok(true)
+}
+
+/// Whether `curve` has a knot of multiplicity at least its degree strictly inside its
+/// domain and within `[lo, hi]` (ends included): a point where its tangent may jump.
+fn has_c0_knot(curve: &NurbsCurve, lo: f64, hi: f64) -> bool {
+    let (Some(&first), Some(&last)) = (curve.u.get(curve.p), curve.u.get(curve.n)) else {
+        return true;
+    };
+    let mut i = 0;
+    while let Some(&x) = curve.u.get(i) {
+        let mult = curve.u.iter().skip(i).take_while(|&&y| y == x).count();
+        let inside = x > first && x < last && x >= lo && x <= hi;
+        if inside && mult >= curve.p {
+            return true;
+        }
+        i += mult.max(1);
+    }
+    false
 }
 
 /// Not upstream: whether the piece `[lo, hi]` of the trim `trim`, inside one of its knot
