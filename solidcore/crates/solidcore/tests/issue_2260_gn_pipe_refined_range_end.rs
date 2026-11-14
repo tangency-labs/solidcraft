@@ -86,7 +86,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "edgeuse_convexity_propagates_step_off_failure",
     "ellipse_step_interval_checks",
     "ellipse_trim_seam_lines_span_cone_height",
-    "extent3d_contains_both_segment_endpoints",
     "extrusion_origin_scaled_zero",
     "face_points_span_domain",
     "face_tight_box_searches_trim",
