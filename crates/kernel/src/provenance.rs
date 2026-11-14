@@ -289,19 +289,26 @@ pub fn blend_origins(result: &Body, input: &Body, edges: &[usize], prov: &mut Hi
 /// comes from that face ([`FaceOrigin::Offset`]).
 pub fn offset_origins(result: &Body, input: &Body, thickness: f64, prov: &mut History) -> Result<()> {
     let size = input.size().max(1e-9);
-    let tol = size * 4e-4;
-    let rm = result.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
-    let im = input.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
-    let rfaces = face_tris(&rm);
-    let ifaces = face_tris(&im);
+    let tol = (size * 1e-3).max(1e-3);
+    let rfaces = result.faces(tol)?;
+    let Some((ops, order)) = input.ops_body() else {
+        return Ok(());
+    };
     for (fi, fp) in prov.faces.iter_mut().enumerate() {
         if fp.change != Change::Generated {
             continue;
         }
         let Some(rf) = rfaces.get(fi) else { continue };
-        let samples = face_samples(rf);
-        // Inner walls face into the cavity: their normal points back toward the input face.
-        let found = ifaces.iter().position(|f| samples.iter().all(|(p, n)| on_face(f, *p - *n * thickness, *n, tol)));
+        let Some(n) = rf.plane_normal else { continue };
+        let q = rf.centroid - n * thickness;
+        let Ok(dists) = ops.face_distances_within(order, &[[q.x, q.y, q.z]], tol) else { continue };
+        let found = dists
+            .into_iter()
+            .enumerate()
+            .filter_map(|(f, row)| Some((row.first().copied().flatten()?, f)))
+            .filter(|(d, _)| *d <= tol)
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, f)| f);
         if let Some(face) = found {
             fp.origins = vec![FaceOrigin::Offset { operand: 0, face }];
         }

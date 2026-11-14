@@ -152,7 +152,6 @@ crates/kernel/src/polyhedron.rs:offset_faces picks the faces to offset by a mesh
 crates/kernel/src/provenance.rs:blend_origins traces blend faces by meshes
 crates/kernel/src/provenance.rs:extrude_origins traces extrusion faces by meshes
 crates/kernel/src/provenance.rs:face_tris reads face triangles for provenance
-crates/kernel/src/provenance.rs:offset_origins traces offset faces by meshes
 crates/kernel/src/provenance.rs:revolve_origins traces revolution faces by meshes
 crates/kernel/src/provenance.rs:swept_origins traces swept faces by meshes
 crates/kernel/src/provenance.rs:trace traces a result's faces to its operands by meshes
