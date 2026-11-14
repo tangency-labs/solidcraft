@@ -322,29 +322,34 @@ fn solve_top(
         .map(|(st, _)| st)
 }
 
-/// `GetNaturalInterval` as `(min, max)`.
 /// The most halvings a span over the target is cut by at once.
 const MOST_CUTS: u32 = 4;
 
+/// How much one halving lowers a span's bound: `2^HERMITE`, its Hermite remainder
+/// `(h / 2)^HERMITE / HERMITE!` falling as `h^HERMITE`.
+const HALVING_GAIN: f64 = (1_u64 << HERMITE) as f64;
+
 /// How many halvings a span whose certified bound is `bound` takes to reach `target` (not
-/// upstream: the fork halves once and certifies again). The section's spans are cubic
-/// Hermite, whose bound falls as `h^4`: `2^cuts` pieces bring it to `bound / 16^cuts`, so the
-/// fewest cuts with that at most the target, at least one (a bound not finite: one, a plain
-/// halving) and at most [`MOST_CUTS`]. Each piece is still certified on its own.
+/// upstream: the fork halves once and certifies again). The section's spans are Hermite of
+/// order [`HERMITE`], whose bound falls as `h^HERMITE`: `2^cuts` pieces bring it to
+/// `bound / HALVING_GAIN^cuts`, so the fewest cuts with that at most the target, at least one
+/// (a bound not finite: one, a plain halving) and at most [`MOST_CUTS`]. Each piece is still
+/// certified on its own.
 fn cuts_to_target(bound: f64, target: f64) -> u32 {
     let ratio = bound / target;
     if !(ratio.is_finite() && target > 0.0) {
         return 1;
     }
     let mut cuts = 1;
-    let mut reach = 16.0;
+    let mut reach = HALVING_GAIN;
     while cuts < MOST_CUTS && ratio > reach {
         cuts += 1;
-        reach *= 16.0;
+        reach *= HALVING_GAIN;
     }
     cuts
 }
 
+/// `GetNaturalInterval` as `(min, max)`.
 fn interval(c: &BSplineCurve) -> (f64, f64) {
     let i = c.natural_interval();
     (i.min(), i.max())
