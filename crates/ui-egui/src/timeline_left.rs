@@ -879,15 +879,7 @@ pub(crate) fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bo
         table: &table,
         order: &order,
         marker,
-        selected: app
-            .session
-            .selection
-            .iter()
-            .filter_map(|selection| match selection {
-                solidcraft_engine::Sel::Feature { id } => Some(*id),
-                _ => None,
-            })
-            .collect(),
+        selected: app.session.selection.iter().filter_map(|selection| crate::timeline::feature_of_sel(&app.session.doc, selection)).collect(),
         results: crate::timeline::result_index(&app.session.model.results),
         reveal: app.tree.timeline_reveal,
         from_view,
