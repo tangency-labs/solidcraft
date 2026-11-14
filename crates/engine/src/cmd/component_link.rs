@@ -533,7 +533,7 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
     }
     let hidden: std::collections::BTreeSet<&str> =
         names.iter().zip(slots).filter(|(_, slot)| sources.get(*slot).is_some_and(|source| source.hidden)).map(|(name, _)| name.as_str()).collect();
-    changed |= false && hide_in_every_placement(s, link.feature, &hidden)?; // TEMP
+    changed |= hide_in_every_placement(s, link.feature, &hidden)?;
     Ok(changed)
 }
 
