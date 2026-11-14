@@ -227,6 +227,11 @@ impl<'t> Assembly<'t> {
         self.tol
     }
 
+    /// Where vertex `v` is, if there is one.
+    pub fn vertex_point(&self, v: u32) -> Option<P3> {
+        self.vertices.get(v as usize).map(|x| x.point)
+    }
+
     /// A vertex at `point`, its index.
     pub fn add_vertex(&mut self, point: P3) -> R<u32> {
         let i = index(self.vertices.len())?;
