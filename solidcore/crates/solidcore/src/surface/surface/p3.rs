@@ -66,6 +66,7 @@
 //!   `across_wrapped_seams` argument of the context variant: `false` keeps the cover
 //!   within one period.
 
+use crate::curve::curve::p5::CurveMemoKey;
 use crate::error::{ignored, ignored_or_pass_on, passed_on, Result, SolidError};
 use crate::geom::assert_array::labels;
 use crate::geom::extent1d::{Extent1d, ExtentNd};
@@ -88,6 +89,7 @@ use crate::nurbs::b_spline_surface::LocationType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::plane::Plane;
+use std::sync::Mutex;
 
 use super::p1::{
     crossed_seam_or_pole, evaluate_1st_derivatives, evaluate_2nd_derivatives,
@@ -512,6 +514,101 @@ pub fn evaluate_normal_section_of<S: SurfaceEvaluate + ?Sized>(
     })
 }
 
+/// The key of a memoised [`Surface::get_singularities`] result (not upstream): the kernel
+/// inputs of the search ([`CurveMemoKey::of_kernel`]), the bits of the approximation
+/// tolerance it compares the samples with, and which pole data it was asked for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SingularitiesKey {
+    kernel: CurveMemoKey,
+    approx_tol: u64,
+    pole_points: bool,
+    pole_normals: bool,
+}
+
+impl SingularitiesKey {
+    /// The key of a search on `surface`, or `None` when it must not be memoised: the
+    /// memo is off ([`Kernel::memoize_curve_caches`]), the tolerance cannot be had, or the
+    /// surface is not a pure value. B-spline, plane, cone, sphere and torus surfaces are
+    /// searched on their own value only (the kinds the boundary curve memo of
+    /// `CoincidenceCheck` takes too); the other kinds hold curves, other surfaces or
+    /// volumes with state of their own.
+    fn of(
+        k: &Kernel,
+        surface: &Surface,
+        face_tolerance: Option<f64>,
+        pole_points: bool,
+        pole_normals: bool,
+    ) -> Option<Self> {
+        let pure_kind = matches!(
+            surface.kind(),
+            SurfaceKind::BSpline(_)
+                | SurfaceKind::Plane(_)
+                | SurfaceKind::Cone(_)
+                | SurfaceKind::Sphere(_)
+                | SurfaceKind::Torus(_)
+        );
+        if !pure_kind {
+            return None;
+        }
+        let kernel = CurveMemoKey::of_kernel(k)?;
+        let approx_tol = surface_approx_tol_3d(k, surface, face_tolerance).ok()?;
+        Some(Self {
+            kernel,
+            approx_tol: approx_tol.to_bits(),
+            pole_points,
+            pole_normals,
+        })
+    }
+}
+
+/// The most results a [`SingularitiesMemo`] keeps: a surface is searched with and without
+/// its face's tolerance, with and without its pole data.
+const SINGULARITIES_MEMO_ENTRIES: usize = 4;
+
+/// The memo of a surface's singular sides (not upstream: upstream samples the four
+/// natural boundaries again on every `GetSingularities`, which the checks of a body ask
+/// for once per edge use and per vertex sector). It lives in the [`Surface`] value; a
+/// copy starts an empty one and an edit through `&mut Surface` replaces it. The search
+/// is a function of the surface value and the key, so a hit gives what a fresh search
+/// gives. Only a search that succeeded is kept (a cancelled one is not), and at most
+/// [`SINGULARITIES_MEMO_ENTRIES`] of them.
+#[derive(Default)]
+pub(crate) struct SingularitiesMemo(Mutex<Vec<(SingularitiesKey, Singularities)>>);
+
+impl core::fmt::Debug for SingularitiesMemo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // the memo is not part of the surface's observable state
+        f.write_str("SingularitiesMemo")
+    }
+}
+
+impl SingularitiesMemo {
+    /// An empty memo.
+    pub(crate) const fn new() -> Self {
+        Self(Mutex::new(Vec::new()))
+    }
+
+    fn get(&self, key: &SingularitiesKey) -> Option<Singularities> {
+        let entries = self.0.lock().ok()?;
+        entries.iter().find(|(k, _)| k == key).map(|(_, s)| *s)
+    }
+
+    fn put(&self, key: &SingularitiesKey, found: &Singularities) {
+        if let Ok(mut entries) = self.0.lock() {
+            if entries.len() < SINGULARITIES_MEMO_ENTRIES && !entries.iter().any(|(k, _)| k == key)
+            {
+                entries.push((*key, *found));
+            }
+        }
+    }
+
+    /// How many results the memo keeps.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.0.lock().map_or(0, |e| e.len())
+    }
+}
+
 impl Surface {
     /// The curvatures, fundamental forms and principal directions at `uv`
     /// (`EvaluateGeometric`); `u_side` and `v_side` pick the interval at a boundary.
@@ -583,7 +680,32 @@ impl Surface {
         self.get_singularities_at(k, Some(face_tolerance), want_pole_points, want_pole_normals)
     }
 
+    /// [`Surface::find_singularities`] through the surface's [`SingularitiesMemo`].
     fn get_singularities_at(
+        &self,
+        k: &Kernel,
+        face_tolerance: Option<f64>,
+        want_pole_points: bool,
+        want_pole_normals: bool,
+    ) -> Result<Singularities> {
+        let key =
+            SingularitiesKey::of(k, self, face_tolerance, want_pole_points, want_pole_normals);
+        if let Some(hit) = key
+            .as_ref()
+            .and_then(|key| self.singularities_memo().get(key))
+        {
+            return Ok(hit);
+        }
+        let found =
+            self.find_singularities(k, face_tolerance, want_pole_points, want_pole_normals)?;
+        if let Some(key) = key {
+            self.singularities_memo().put(&key, &found);
+        }
+        Ok(found)
+    }
+
+    /// `GetSingularities`: the search [`Surface::get_singularities`] describes, run in full.
+    fn find_singularities(
         &self,
         k: &Kernel,
         face_tolerance: Option<f64>,
@@ -2223,5 +2345,93 @@ mod tests {
             assert_eq!(typed.is_status_answer(), before.is_status_answer());
             assert_eq!(typed.surface_failure(), Some(&failure));
         }
+    }
+
+    /// The memo of singular sides answers a search it made before with the search itself,
+    /// to the bit (the pole points and normals too): every face surface of a sphere
+    /// (poles), a torus, a cone (an apex) and a box (planes), searched with the memo off,
+    /// then twice with it on, with and without the face's tolerance and the pole data. A
+    /// copy starts with an empty memo, an edit empties it, and other tolerances miss and
+    /// search again, with the result a fresh search gives.
+    #[test]
+    fn remembered_singular_sides_are_the_search() {
+        use crate::primitive::api_primitives::{
+            create_box, create_cone, create_sphere, create_torus,
+        };
+        let mut k = Kernel::default();
+        let bodies = [
+            create_sphere(&mut k, Point3::ZERO, 5.0).unwrap(),
+            create_torus(&mut k, Point3::ZERO, 8.0, 2.0).unwrap(),
+            create_cone(&mut k, Point3::ZERO, 4.0, 0.0, 6.0).unwrap(),
+            create_box(&mut k, Point3::ZERO, 2.0, 3.0, 4.0).unwrap(),
+        ];
+        let off = Kernel {
+            memoize_curve_caches: false,
+            ..Kernel::default()
+        };
+        let on = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let searches = |k: &Kernel, s: &Surface, tol: f64| -> Vec<String> {
+            [(false, false), (true, true)]
+                .into_iter()
+                .flat_map(|(points, normals)| {
+                    [
+                        format!("{:?}", s.get_singularities(k, points, normals)),
+                        format!("{:?}", s.get_singularities_of_face(k, tol, points, normals)),
+                    ]
+                })
+                .collect()
+        };
+        let mut singular = 0;
+        for b in &bodies {
+            for (_, face) in b.faces().iter() {
+                let s = face.surface.as_ref().unwrap();
+                let tol = face.tolerance;
+                // (the body's making may have searched its surfaces already)
+                let made = s.singularities_memo().len();
+                let fresh = searches(&off, s, tol);
+                assert_eq!(
+                    s.singularities_memo().len(),
+                    made,
+                    "the memo off keeps nothing"
+                );
+                let first = searches(&on, s, tol);
+                let kept = s.singularities_memo().len();
+                assert!(kept > 0);
+                let again = searches(&on, s, tol);
+                assert_eq!(s.singularities_memo().len(), kept, "a hit adds nothing");
+                assert_eq!(first, fresh);
+                assert_eq!(again, fresh);
+                if s.get_singularities(&on, false, false).unwrap().singular != SS_NONE {
+                    singular += 1;
+                }
+                // a copy starts empty
+                assert_eq!(s.clone().singularities_memo().len(), 0);
+                // other tolerances miss and search again, as a fresh search does
+                let mut loose_on = Kernel {
+                    memoize_curve_caches: true,
+                    ..Kernel::default()
+                };
+                loose_on.tolerances.zone_tol_3d *= 10.0;
+                let mut loose_off = Kernel {
+                    memoize_curve_caches: false,
+                    ..Kernel::default()
+                };
+                loose_off.tolerances.zone_tol_3d *= 10.0;
+                assert_eq!(
+                    searches(&loose_on, s, 10.0 * tol),
+                    searches(&loose_off, s, 10.0 * tol)
+                );
+                // an edit empties the memo
+                let mut edited = s.clone_for_evaluation().unwrap();
+                let _ = edited.get_singularities(&on, false, false).unwrap();
+                assert!(edited.singularities_memo().len() > 0);
+                let _ = edited.kind_mut();
+                assert_eq!(edited.singularities_memo().len(), 0);
+            }
+        }
+        assert!(singular > 0, "no surface had a singular side");
     }
 }

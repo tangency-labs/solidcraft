@@ -5738,6 +5738,24 @@ fn blend_body(
     r: f64,
     warning: &mut Option<String>,
 ) -> Result<(Traced, Option<Vec<f64>>, Tapered)> {
+    let (nb, from, used, tapered) = blend_raw(vals, f, mb, edges, r, warning)?;
+    // Keeping the input's planar certificates may join faces; their history stays over the same
+    // operand.
+    Ok((Traced::step(nb.with_preserved_planar_sources(&mb.body)?, &[&from]), used, tapered))
+}
+
+/// The blended body of [`blend_body`], with the stage its last blend started from (the input,
+/// or the body after the edges before the last for a blend made one edge at a time), the radii a
+/// fitted fillet used and the edges it tapered. Every type, fit, corner and setback of `f` is
+/// built here, so a pattern's or a mirror's copy of a blend is the same blend (#16912).
+fn blend_raw(
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    mb: &ModelBody,
+    edges: &[Vec3],
+    r: f64,
+    warning: &mut Option<String>,
+) -> Result<(kernel::Body, Traced, Option<Vec<f64>>, Tapered)> {
     let input = mb.traced();
     let (mut used, mut tapered) = (None, Vec::new());
     if let FeatureKind::Fillet { turn: crate::FilletTurn::Swept, style, fit, corner, setbacks, .. } = &f.kind
@@ -5806,9 +5824,7 @@ fn blend_body(
         FeatureKind::Chamfer { distance2, angle, flip, .. } => (chamfer_with(vals, &mb.body, edges, r, distance2, angle, *flip)?, input),
         _ => return Err(DocError::Invalid("blend".into())),
     };
-    // Keeping the input's planar certificates may join faces; their history stays over the same
-    // operand.
-    Ok((Traced::step(nb.with_preserved_planar_sources(&mb.body)?, &[&from]), used, tapered))
+    Ok((nb, from, used, tapered))
 }
 
 /// `f` as the naming of its faces reads it: a revolve's explicit axis origin written as the values
@@ -8792,6 +8808,21 @@ fn copy_instances(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelStat
     Ok(all)
 }
 
+/// Blend `src` (a fillet or chamfer) as its copy placed by `m` reads it: the points its radius
+/// law starts from and its corner setbacks' vertices moved with its edges.
+fn moved_blend(src: &Feature, m: &Mat) -> Feature {
+    let mut copy = src.clone();
+    if let FeatureKind::Fillet { style, setbacks, .. } = &mut copy.kind {
+        if let crate::FilletStyle::Variable { start, .. } | crate::FilletStyle::Spline { start, .. } = style {
+            start.0 = crate::apply_point(m, start.0);
+        }
+        for c in setbacks {
+            c.vertex.0 = crate::apply_point(m, c.vertex.0);
+        }
+    }
+    copy
+}
+
 /// Apply transformed copies of the tools of `features` (patterns, mirrors).
 fn replay(
     doc: &Document,
@@ -8853,20 +8884,22 @@ fn replay(
                 for (ti, idx) in groups {
                     let moved: Vec<Vec3> = idx.iter().filter_map(|i| moved_all.get(*i).copied()).collect();
                     let Some(mb) = st.bodies.get(ti).cloned() else { continue };
-                    let nb = match &src.kind {
-                        FeatureKind::Chamfer { distance2, angle, flip, .. } => chamfer_with(vals, &mb.body, &moved, r, distance2, angle, *flip)?,
+                    let nb = match (&src.kind, st.fitted.get(&src.id)) {
                         // A copy is congruent to the original: the radius it was reduced to first.
-                        FeatureKind::Fillet { fit, turn, .. } => match st.fitted.get(&src.id) {
-                            Some(used) => {
-                                let used: Vec<f64> = idx.iter().map(|i| used.get(*i).copied().unwrap_or(r)).collect();
-                                kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?
-                            }
-                            None => fillet_fitted(&mb.body, &moved, r, *fit, turn.kernel())?.0,
-                        },
-                        _ => kernel::fillet(&mb.body, &moved, r)?,
+                        (FeatureKind::Fillet { turn, .. }, Some(used)) => {
+                            let used: Vec<f64> = idx.iter().map(|i| used.get(*i).copied().unwrap_or(r)).collect();
+                            mb.traced().then(kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?)
+                        }
+                        // Otherwise the copy is the same blend, with its type, fit, corners and
+                        // setbacks, at the copied edges (#16912): a curvature or spline fillet's
+                        // copy was a constant-radius round. Its notes are the original's.
+                        _ => {
+                            let (nb, from, _, _) = blend_raw(vals, &moved_blend(src, m), &mb, &moved, r, &mut None)?;
+                            // A copy blends edges the pattern's own copies made: named after the
+                            // body so far.
+                            from.then(nb)
+                        }
                     };
-                    // A copy blends edges the pattern's own copies made: named after the body so far.
-                    let nb = mb.traced().then(nb);
                     if let Some(slot) = st.bodies.get_mut(ti) {
                         *slot = mb.remade(nb);
                     }
@@ -9594,10 +9627,21 @@ fn eval_feature(
             }
             Ok(())
         }
-        FeatureKind::Hole { thread, thread_depth, diameter, hand, modeled, ease_out, depth, to, .. } => {
+        FeatureKind::Hole { thread, thread_depth, thread_class, diameter, hand, modeled, ease_out, depth, to, .. } => {
             let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
             if thread_depth.is_some() && thread.is_none() {
                 return Err(DocError::Invalid("thread depth requires a tapped hole".into()));
+            }
+            // A class the command would refuse (a hand-edited file) fails the hole, saying why.
+            // An unknown thread fails where the thread is cut, with its own reason.
+            match (thread_class, thread) {
+                (None, _) => {}
+                (Some(_), None) => return Err(DocError::Invalid("a thread class needs a tapped hole".into())),
+                (Some(class), Some(t)) => {
+                    if let Some(tapped) = crate::parse_tapped_thread(t) {
+                        tapped.check_class(class).map_err(DocError::Invalid)?;
+                    }
+                }
             }
             if *modeled && thread.is_none() {
                 return Err(DocError::Invalid("a modelled thread needs a tapped hole".into()));
@@ -10166,7 +10210,9 @@ fn eval_feature(
                 reduced |= used.is_some();
                 fitted.extend(used.unwrap_or_else(|| vec![r; edges.len()]));
                 tapered_all.extend(tapered);
-                found.extend(edges);
+                // A pattern repeats each edge at a moved copy of a point on it: the edge's middle,
+                // never the pick, which at a vertex two edges share finds either on a copy (#16934).
+                found.extend(kernel::blend_edge_middles(&mb.body, &edges)?);
                 blended.push((*ti, nb));
             }
             if !notes.is_empty() {
@@ -10857,15 +10903,29 @@ pub fn face_point_state<'a>(doc: &Document, st: &'a ModelState, kind: &FeatureKi
 /// resting a hair from the picked face would otherwise take its name. Another feature's point is
 /// named on the bodies of the feature's own component first: each component's bodies lie in its
 /// own coordinates there, where a part inserted twice has a face at the same point in each.
+/// A feature that names the body whose faces it picks ([`FeatureKind::face_body`]) names each
+/// point on that body first: another body with a face a hair from the pick (#16871) would
+/// otherwise take the name, and evaluation would move the pick onto that body's face.
 pub fn face_point_names(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64) -> Result<Vec<String>> {
     let pts = kind.face_points();
     if !matches!(kind, FeatureKind::Extrude { .. } | FeatureKind::Revolve { .. }) {
+        let named =
+            kind.face_body().map(|n| ModelState { bodies: st.bodies.iter().filter(|b| b.name == n).cloned().collect(), ..ModelState::default() });
+        let on_named: Vec<String> = match &named {
+            Some(one) if !one.bodies.is_empty() => crate::naming::face_names_at(one, &pts),
+            _ => vec![String::new(); pts.len()],
+        };
         let own = ModelState { bodies: st.bodies.iter().filter(|b| doc.model_body_component(b) == comp).cloned().collect(), ..ModelState::default() };
-        let names = crate::naming::face_names_at(&own, &pts);
-        return Ok(names
+        return Ok(on_named
             .into_iter()
             .zip(&pts)
-            .map(|(name, p)| if name.is_empty() { crate::naming::face_names_at(st, std::slice::from_ref(p)).pop().unwrap_or_default() } else { name })
+            .map(|(name, p)| {
+                if !name.is_empty() {
+                    return name;
+                }
+                let name = crate::naming::face_names_at(&own, std::slice::from_ref(p)).pop().unwrap_or_default();
+                if name.is_empty() { crate::naming::face_names_at(st, std::slice::from_ref(p)).pop().unwrap_or_default() } else { name }
+            })
             .collect());
     }
     let fst = face_point_state(doc, st, kind, comp)?;
