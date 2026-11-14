@@ -1,0 +1,1 @@
+| crates/look/themes/solid-glass.json | SolidCraft contributors | original SolidCraft theme file (Solid Glass, dark): translucent frosted panels with a green accent and green tool icons | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
