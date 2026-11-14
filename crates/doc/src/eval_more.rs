@@ -2013,6 +2013,33 @@ pub(super) fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
     a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y || a.max.z < b.min.z || b.max.z < a.min.z
 }
 
+/// Whether `tools` may cover `body`: the body's exact box lies inside the box around the tools'
+/// ([`exact_box`]), grown by twice the body's own tolerance, as it does for a body inside its
+/// tools. A cut that leaves nothing of a body they cannot cover is a failed boolean, not an empty
+/// result (#15700). Unknown is covered, and so is a mesh body or a body cut by a mesh, as such a
+/// cut always was.
+pub(super) fn tools_may_cover(body: &Body, tools: &[Traced]) -> bool {
+    if body.is_mesh() || tools.iter().any(|t| t.body.is_mesh()) {
+        return true;
+    }
+    let mut hull = Aabb3::EMPTY;
+    for t in tools {
+        let Some(b) = exact_box(&t.body) else { return true };
+        hull = hull.union(&b);
+    }
+    let hull = hull.inflated(2.0 * body.record().tolerance);
+    match body.exact_bounds() {
+        Ok(b) if !b.is_empty() && b.min.is_finite() && b.max.is_finite() => hull.contains(b.min) && hull.contains(b.max),
+        _ => true,
+    }
+}
+
+/// The refusal of a cut that left nothing of `body` although its tools cannot cover it
+/// ([`tools_may_cover`]): the body is kept instead of vanishing without a word (#15700).
+pub(super) fn failed_cut(body: &str) -> DocError {
+    DocError::Invalid(format!("the cut failed: it would remove all of `{body}`, which the tools do not cover"))
+}
+
 /// A cut's note on the pieces it parted from the base of `sh` (see
 /// [`sheet::SheetBody::parted_from_base`]; `material` is the sheet's flat material after the cut,
 /// `before` the sheet before it): how many, their area and where they lie in the flat pattern.

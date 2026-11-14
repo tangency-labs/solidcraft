@@ -25,6 +25,18 @@ impl CurveEval {
     }
 }
 
+/// A closed spline or polyline with its seam moved to `start`, exactly.
+pub(crate) fn restart_curve(curve: &Curve, start: f64) -> Result<Curve, Error> {
+    let curve = c::curve(curve).map_err(|e| e.to_string())?;
+    let restarted = k::pcurve::restart_curve(&curve, start).map_err(|e| match e {
+        solidcore::SolidError::InvalidInput { reason, .. }
+        | solidcore::SolidError::Unsupported { reason, .. }
+        | solidcore::SolidError::PortInvariant { reason, .. } => reason.to_string(),
+        other => other.to_string(),
+    })?;
+    c::record_curve(restarted).map_err(|e| e.to_string())
+}
+
 /// A surface record ready to evaluate.
 pub(crate) struct SurfaceEval(k::SurfaceEval);
 

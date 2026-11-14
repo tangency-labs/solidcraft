@@ -30,7 +30,6 @@
     clippy::indexing_slicing
 )] // test helpers
 
-use solidcore::blend::blend_corner::end::RUNS_ON_ACROSS_SEAM;
 use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::fillet_executive::p1::{FilletLaw, FilletLawKind};
 use solidcore::blend::fillet_executive::session::FilletSession;
@@ -67,7 +66,6 @@ fn solidcraft_kernel() -> Kernel {
         "planar_section_face_tolerance",
         "face_swap_uv_transposes_trims",
         "closed_smooth_pole_tangent_limit",
-        "fillet_setback_beside_curved_faces",
         "fillet_chamfer_corner",
     ]) {
         *f.flag_mut(name).unwrap_or_else(|| panic!("flag {name}")) = true;
@@ -519,17 +517,19 @@ fn block_cylinder_is_the_closed_form() {
     }
 }
 
-/// One piece rounded alone (the rig's pick, then its mirror): the round would end at the
-/// seam vertex, where the arc runs on between the same two faces. A round does not end at a
-/// seam (#2864), so the blend refuses it, saying why, instead of capping it there with
-/// #453's construction.
+/// One piece rounded alone (the rig's pick, then its mirror): the round reaches the seam
+/// vertex, where the arc runs on between the same two faces. A seam is the cylinder's
+/// parameterisation, not a feature, so the round runs on across it into the rest of the half
+/// circle (#2864): the same torus as both pieces picked, V = 19091.962003483477. Without the
+/// run-on it was refused there (and before that, capped with #453's construction).
 #[test]
-fn block_cylinder_arc_piece_is_refused_at_the_seam() {
+fn block_cylinder_arc_piece_runs_on_across_the_seam() {
     let mut k = solidcraft_kernel();
     for &(at_pick, _) in &ARC_PIECES {
         let mut b = block_cylinder(&mut k);
-        let r = blend(&mut k, &mut b, Kind::Round, &[at_pick], 2.0);
-        assert_eq!(r.unwrap_err().1, RUNS_ON_ACROSS_SEAM, "not capped");
+        blend(&mut k, &mut b, Kind::Round, &[at_pick], 2.0).unwrap();
+        let (_, v) = measured(&mut k, &mut b);
+        assert_rel(v, 19_091.962_003_483_477, 1e-9, "one piece");
     }
 }
 
@@ -547,8 +547,8 @@ fn block_cylinder_both_pieces_round_the_half_circle() {
     assert_rel(v, 19_091.962_003_483_477, 1e-9, "both pieces");
 }
 
-/// Both pieces rounded r 2 through the session's `do_fillet` (its tolerance scope, the split
-/// at radius corners and the closed-manifold check) with every fix but
+/// Both pieces rounded r 2 through the session's `do_fillet` (its tolerance scope and the
+/// split at radius corners) with every fix but
 /// `geometric_g2_continuity`, as the blend's other End tests: the same torus, valid at level
 /// 2 and a manifold solid, its volume at 1e-12.
 #[test]

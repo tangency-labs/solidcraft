@@ -98,15 +98,15 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         return Err(format!("plugin.json id `{}` does not match the folder `{folder}`", m.id));
     }
     if !valid_id(&m.id) {
-        return Err("the id must be 1–64 lowercase letters, digits and hyphens".into());
+        return Err("the id must be 1 to 64 lowercase letters, digits and hyphens".into());
     }
     let name = m.name.trim();
     if !plain(name, 80) {
-        return Err("the name must be 1–80 characters with no line breaks".into());
+        return Err("the name must be 1 to 80 characters with no line breaks".into());
     }
     let version = m.version.trim();
     if !plain(version, 32) || !version.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')) {
-        return Err("the version must be 1–32 letters, digits, dots, hyphens or plus signs".into());
+        return Err("the version must be 1 to 32 letters, digits, dots, hyphens or plus signs".into());
     }
     let description = m.description.trim();
     if description.chars().count() > 240 || description.chars().any(|c| c.is_control()) {

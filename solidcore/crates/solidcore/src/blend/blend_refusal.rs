@@ -144,6 +144,13 @@ pub enum SetbackTooLongWhy {
     /// `largest` is the largest scale of the asked setbacks that keeps every spring curve on
     /// its face, times the setback.
     SpringLeaves,
+    /// At a Setback corner beside a curved face, the piece it takes out of a face (bounded by
+    /// the face's spring curve, the end sections' traces on the face and its two edges from
+    /// the vertex to their setbacks) holds another edge or loop of the face, or is not shown
+    /// not to (solidcore#2343 (d), condition 2). `largest` is the largest scale of the asked
+    /// setbacks at which every spring curve stays on its face and no piece holds another edge
+    /// of its face, times the setback.
+    PieceHoldsEdge,
 }
 
 impl BlendRefusal {

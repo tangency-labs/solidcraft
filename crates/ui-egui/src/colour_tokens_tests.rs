@@ -167,6 +167,12 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
     ("prefs.rs", 1, "a saved sketch dimension colour: the colour is the user's own data"),
     ("titlebar.rs", 2, "the window close button's red hover (the system's convention) and white ink"),
+    (
+        "app_bar.rs",
+        5,
+        "the link pills' brand fills (Ko-fi coral, Discord blurple: the services' own colours, the same in every theme), their white ink and the hover veil on the x",
+    ),
+    ("links.rs", 1, "the link pills' white ink on the brand fills"),
     ("ui_kit/icons/mod.rs", 1, "the white tint that carries an icon image's opacity"),
     ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),
     ("ui_kit/menu.rs", 1, "a menu entry's swatch: the colour is document data"),
@@ -267,7 +273,6 @@ fn analysis_shader_colours_come_from_the_uniform() {
     assert_eq!(
         literals,
         [
-            "vec3<f32>(0.0, 0.0, 1.0)",
             "vec3<f32>(1.0, 0.0, 0.0)",
             "vec3<f32>(c)",
             "vec3<f32>(0.32, 0.34, 0.38)",

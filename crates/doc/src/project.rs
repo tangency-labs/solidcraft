@@ -328,8 +328,15 @@ fn resolve_uncached(
                 "X" => (Vec3::ZERO, Vec3::X),
                 "Y" => (Vec3::ZERO, Vec3::Y),
                 "Z" => (Vec3::ZERO, Vec3::Z),
-                // A construction axis, by name (#9324), where the timeline so far puts it.
-                _ => crate::eval::construction_axis_in(Some(doc), st, name, 0)?,
+                _ => match crate::construct::DatumRef::parse_key(name) {
+                    // The origin axis of a component (#15086), where that component now stands.
+                    Some(datum) => match crate::construct::resolve_datum_in(doc, &datum, 0)? {
+                        crate::construct::ConstructGeom::Axis { origin, dir } => (origin, dir),
+                        _ => return Err(lost(&format!("axis {name}"))),
+                    },
+                    // A construction axis, by name (#9324), where the timeline so far puts it.
+                    None => crate::eval::construction_axis_in(Some(doc), st, name, 0)?,
+                },
             };
             let o = plane.to_local(o);
             let d2 = Vec2::new(d.dot(plane.x), d.dot(plane.y));

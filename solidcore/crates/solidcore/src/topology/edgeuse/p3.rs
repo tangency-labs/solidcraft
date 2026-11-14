@@ -1588,6 +1588,11 @@ pub fn get_or_create_uv_trim_curve(
     want_deviation: bool,
     uv_space_ok: bool,
 ) -> Result<UvTrimCurveFetch> {
+    // low work - UVTrimCurve already exists
+    if let Some(out) = existing_uv_trim_curve(b, eu, want_dist)? {
+        return Ok(out);
+    }
+
     // init outputs
     let mut out = UvTrimCurveFetch {
         status: Ok(()),
@@ -1595,34 +1600,9 @@ pub fn get_or_create_uv_trim_curve(
         deviation: -1.0,
     };
 
-    // get cached UVTrimCurve (if any)
-    let present = uv_trim_curve(b, eu)?.0.is_some();
-
     // no work - no UVTrimCurve and not allowed to build one for fear of DropCurve
     // failure during healing - return NULL
-    if !present && !uv_space_ok {
-        return Ok(out);
-    }
-
-    // low work - UVTrimCurve already exists
-    if present {
-        // prevent infinite loop - only ask for FaceEdge Gap if it already exists
-        if want_dist && crate::topology::edgeuse::p1::is_max_edge_face_gap_init(b, eu)? {
-            let gap = max_edge_face_gap(k, b, eu, false)?;
-            out.dist_to_surf = gap.map_or(0.0, |g| g.gap_3d);
-        }
-        // `m_pDropCurveFail` itself, not `GetDropCurveFail()`: the record of this edge
-        // use only (`SetUVTrimCurve` nulls the non-owner's)
-        if let Some(f) = b.edgeuse(eu)?.drop_curve_fail.as_deref() {
-            if f.fail_status != SM_SUCCESS {
-                out.status = Err(SolidError::topology(
-                    OP,
-                    TopologyFailure::DropFailed {
-                        status: f.fail_status,
-                    },
-                ));
-            }
-        }
+    if !uv_space_ok {
         return Ok(out);
     }
 
@@ -1679,6 +1659,47 @@ pub fn get_or_create_uv_trim_curve(
         target_fail.as_mut(),
     )?;
     Ok(out)
+}
+
+/// [`get_or_create_uv_trim_curve`] of an edge use that has a UV trim curve (its own or
+/// its mate's), which reads the B-rep only; `None` without one.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id.
+fn existing_uv_trim_curve(
+    b: &Brep,
+    eu: EdgeuseId,
+    want_dist: bool,
+) -> Result<Option<UvTrimCurveFetch>> {
+    // get cached UVTrimCurve (if any)
+    if uv_trim_curve(b, eu)?.0.is_none() {
+        return Ok(None);
+    }
+    let mut out = UvTrimCurveFetch {
+        status: Ok(()),
+        dist_to_surf: -1.0,
+        deviation: -1.0,
+    };
+    // prevent infinite loop - only ask for FaceEdge Gap if it already exists (so it is
+    // read, not calculated)
+    if want_dist && crate::topology::edgeuse::p1::is_max_edge_face_gap_init(b, eu)? {
+        let gap = crate::topology::edgeuse::p1::cached_max_edge_face_gap(b, eu)?;
+        out.dist_to_surf = gap.map_or(0.0, |g| g.gap_3d);
+    }
+    // `m_pDropCurveFail` itself, not `GetDropCurveFail()`: the record of this edge
+    // use only (`SetUVTrimCurve` nulls the non-owner's)
+    if let Some(f) = b.edgeuse(eu)?.drop_curve_fail.as_deref() {
+        if f.fail_status != SM_SUCCESS {
+            out.status = Err(SolidError::topology(
+                OP,
+                TopologyFailure::DropFailed {
+                    status: f.fail_status,
+                },
+            ));
+        }
+    }
+    Ok(Some(out))
 }
 
 // ---- EvaluateBinormal -------------------------------------------------------------------
@@ -2290,14 +2311,116 @@ pub fn normalized_evaluate(
     want_first_deriv: bool,
     ok_to_make_uv_trim_curve: bool,
 ) -> Result<NormalizedEval> {
+    if !(parameter_space && ok_to_make_uv_trim_curve) {
+        return normalized_evaluate_read_only(
+            k,
+            b,
+            eu,
+            normalized_parameter,
+            parameter_space,
+            want_first_deriv,
+        );
+    }
+    orientation(b, eu)?;
+    // fetch or create UVTrimCurve (status ignored; the outputs are for the
+    // suspicious-result debug check)
+    let _ = get_or_create_uv_trim_curve(k, b, eu, true, true, true)?;
+    let b = &*b;
+    on_own_surfaces(evaluate_fetched(
+        k,
+        b,
+        eu,
+        normalized_parameter,
+        parameter_space,
+        want_first_deriv,
+        &own_surface(b),
+    ))
+}
+
+/// [`normalized_evaluate`] without making a UV trim curve (`ok_to_make_uv_trim_curve`
+/// false), which only reads the B-rep: the UV trim curve the edge use has, else its 3D
+/// point dropped to the surface.
+///
+/// # Errors
+///
+/// As [`normalized_evaluate`].
+pub fn normalized_evaluate_read_only(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    normalized_parameter: f64,
+    parameter_space: bool,
+    want_first_deriv: bool,
+) -> Result<NormalizedEval> {
+    on_own_surfaces(normalized_evaluate_reading(
+        k,
+        b,
+        eu,
+        normalized_parameter,
+        parameter_space,
+        want_first_deriv,
+        &own_surface(b),
+    ))
+}
+
+/// [`normalized_evaluate_read_only`] reading the face surface it drops onto through
+/// `surface` (for face `f`: `Some` of the face's surface, or `Some(None)` for a face
+/// without one); `Ok(None)` when `surface` gives no answer (`None`) for the face.
+///
+/// # Errors
+///
+/// As [`normalized_evaluate`].
+pub(crate) fn normalized_evaluate_reading<'s, S: Fn(FaceId) -> Option<Option<&'s Surface>>>(
+    k: &Kernel,
+    b: &'s Brep,
+    eu: EdgeuseId,
+    normalized_parameter: f64,
+    parameter_space: bool,
+    want_first_deriv: bool,
+    surface: &S,
+) -> Result<Option<NormalizedEval>> {
+    if parameter_space {
+        orientation(b, eu)?;
+        // fetch UVTrimCurve, making none (status ignored; the outputs are for the
+        // suspicious-result debug check)
+        let _ = existing_uv_trim_curve(b, eu, true)?;
+    }
+    evaluate_fetched(
+        k,
+        b,
+        eu,
+        normalized_parameter,
+        parameter_space,
+        want_first_deriv,
+        surface,
+    )
+}
+
+/// The face surfaces of `b` itself, for [`evaluate_fetched`].
+fn own_surface<'s>(b: &'s Brep) -> impl Fn(FaceId) -> Option<Option<&'s Surface>> + 's {
+    move |f| Some(b.face(f).ok().and_then(|face| face.surface.as_ref()))
+}
+
+/// The evaluation on the B-rep's own surfaces ([`own_surface`]), which always answer.
+fn on_own_surfaces(r: Result<Option<NormalizedEval>>) -> Result<NormalizedEval> {
+    r?.ok_or_else(|| SolidError::port_invariant(OP, "NormalizedEvaluate read no face surface"))
+}
+
+/// [`normalized_evaluate`] once its UV trim curve is fetched (or made), reading the face
+/// surface it drops onto through `surface`; `Ok(None)` when `surface` gives no answer.
+fn evaluate_fetched<'s, S: Fn(FaceId) -> Option<Option<&'s Surface>>>(
+    k: &Kernel,
+    b: &'s Brep,
+    eu: EdgeuseId,
+    normalized_parameter: f64,
+    parameter_space: bool,
+    want_first_deriv: bool,
+    surface: &S,
+) -> Result<Option<NormalizedEval>> {
     let orient = orientation(b, eu)?;
 
     // when looking for parameter space evaluations let p3dOrUVCurve = UVTrimCurve
     if parameter_space {
-        // fetch or create UVTrimCurve (status ignored; the outputs are for the
-        // suspicious-result debug check)
-        let _ = get_or_create_uv_trim_curve(k, b, eu, true, true, ok_to_make_uv_trim_curve)?;
-
         if let Some(trim) = uv_trim_curve(b, eu)?.0 {
             let ivl = trim.natural_interval();
             return eval_on_curve(
@@ -2307,7 +2430,8 @@ pub fn normalized_evaluate(
                 orient,
                 normalized_parameter,
                 want_first_deriv,
-            );
+            )
+            .map(Some);
         }
         {
             {
@@ -2325,11 +2449,12 @@ pub fn normalized_evaluate(
                 )?;
                 let f = crate::topology::edgeuse::p1::face(b, eu)?
                     .ok_or_else(|| null("NormalizedEvaluate: edge use without face"))?;
-                let surf = b
-                    .face(f)?
-                    .surface
-                    .as_ref()
-                    .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?; // NER(pSurf)
+                b.face(f)?;
+                let Some(surf) = surface(f) else {
+                    return Ok(None);
+                };
+                let surf =
+                    surf.ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?; // NER(pSurf)
                 let domain = surf.natural_uv_domain_with_nurb(k)?;
                 let drop = surface_drop_point(k, surf, three_d.point, &domain)?;
                 if !drop.found {
@@ -2362,16 +2487,16 @@ pub fn normalized_evaluate(
                 }
 
                 // All done.
-                return Ok(NormalizedEval {
+                return Ok(Some(NormalizedEval {
                     point: Vec3::new(uv.x, uv.y, 0.0),
                     first_deriv,
-                });
+                }));
             }
         }
     }
 
     // xyzSpace - let p3dOrUVCurve = 3DCurve and sIvl = Edge domain.
-    normalized_evaluate_3d(k, b, eu, orient, normalized_parameter, want_first_deriv)
+    normalized_evaluate_3d(k, b, eu, orient, normalized_parameter, want_first_deriv).map(Some)
 }
 
 /// `NormalizedEvaluate(t, FALSE, ..)`: the edge curve evaluated at the oriented

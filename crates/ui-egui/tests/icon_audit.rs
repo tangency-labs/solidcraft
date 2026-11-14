@@ -93,6 +93,17 @@ fn universal_panel_host_menus(requested: &mut BTreeMap<String, bool>) {
         h.call("ui.resize", json!({"width":width,"height":height}));
         enable_host_specimen(&mut h.app, preset).unwrap();
         h.frames(3);
+        if preset == "content_fill" {
+            h.app
+                .dispatch_panel_layout(LayoutAction::Apply {
+                    expected_revision: None,
+                    mutations: vec![Mutation::SetSize {
+                        section: SectionId::new("specimen-section-0").unwrap(),
+                        size: Size { width: 280.0, height: 220.0 },
+                    }],
+                })
+                .unwrap();
+        }
         if preset == "overflow" {
             let section = SectionId::new("specimen-section-0").unwrap();
             let members =

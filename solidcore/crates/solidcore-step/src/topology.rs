@@ -468,8 +468,10 @@ fn model_shells(ex: &Exchange, shells: &[u64]) -> (Vec<u64>, Vec<u64>) {
 }
 
 /// The items a solid item is read as, each one body: the item itself, but for a surface model
-/// with both closed and open shells (a part with a sheet beside it) each closed shell on its own
-/// (a solid), then the model (its open shells, a sheet).
+/// with both closed and open shells (a part with a sheet beside a solid) each closed shell is a
+/// solid body of its own and each open shell a surface body of its own, so each sheet keeps its
+/// own body count. A model of open shells only keeps the model as its one body, and so does a model of
+/// closed shells only.
 pub fn items(ex: &Exchange, item: u64) -> Vec<u64> {
     let shells = match ex.get(item) {
         Some(e) if e.name() == "SHELL_BASED_SURFACE_MODEL" => {
@@ -479,9 +481,14 @@ pub fn items(ex: &Exchange, item: u64) -> Vec<u64> {
     };
     let (closed, open) = model_shells(ex, &shells);
     if closed.is_empty() || open.is_empty() {
+        // A model of open shells only (even one whose shell is geometrically closed) is the
+        // model's one body, as before; so is a model of closed shells only.
         return vec![item];
     }
-    closed.into_iter().chain([item]).collect()
+    // A closed shell beside open ones: each closed shell is a solid body and each open shell a
+    // surface body of its own. One open shell stays the model item,
+    // which carries the model's name and colour.
+    closed.into_iter().chain(if open.len() == 1 { vec![item] } else { open }).collect()
 }
 
 /// The shells of a solid item (the outer shell first, then its voids), and what kind it is.
@@ -605,6 +612,8 @@ struct Builder<'b, 'a> {
     lines_between_vertices: usize,
     /// Inner loops written running the way the outer loop runs, run the other way.
     inner_loops_turned: usize,
+    /// Spline surfaces whose first and last control lines met within the tolerance, closed.
+    splines_closed: usize,
     /// Edges whose tolerance was raised to the gap their curve has to a face's surface.
     raised_edges: HashSet<u32>,
     /// The line edges of POLY_LOOPs, by their two CARTESIAN_POINTs (lower id first): faces that
@@ -629,6 +638,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             sense_mismatches: 0,
             lines_between_vertices: 0,
             inner_loops_turned: 0,
+            splines_closed: 0,
             raised_edges: HashSet::new(),
             poly_edges: HashMap::new(),
         }
@@ -1032,6 +1042,13 @@ impl<'b, 'a> Builder<'b, 'a> {
         }
         let extent = self.extent(&loops)?;
         let (surface, reversed) = swept::map_surface(&step_surface, &extent, self.tol).map_err(|m| format!("face #{id}: {m}"))?;
+        let surface = match closed_within(&surface, self.tol) {
+            Some(closed) => {
+                self.splines_closed += 1;
+                closed
+            }
+            None => surface,
+        };
         // Loops relative to the record's natural normal: the face's normal is STEP's surface
         // normal when same_sense, and the record's is STEP's unless `reversed`.
         let sense = same_sense != reversed;
@@ -1132,9 +1149,21 @@ impl<'b, 'a> Builder<'b, 'a> {
         for l in loops {
             match l {
                 LoopB::Edges(es) => {
-                    for (e, _) in es {
-                        *count.entry(*e).or_default() += 1;
+                    let mut walk = Vec::new();
+                    for &(e, forward) in es {
+                        *count.entry(e).or_default() += 1;
+                        let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                        let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+                        let [lo, hi] = edge.interval;
+                        for k in 0..8 {
+                            let s = f64::from(k) / 8.0;
+                            walk.push(c.point(if forward { lo + (hi - lo) * s } else { hi - (hi - lo) * s }).ok_or("edge point")?);
+                        }
                     }
+                    if let Some(&p) = walk.first() {
+                        walk.push(p);
+                    }
+                    ext.walks.push(walk);
                 }
                 LoopB::Vertex(v) => ext.points.push(v3(self.point(*v)?)),
             }
@@ -1203,6 +1232,12 @@ impl<'b, 'a> Builder<'b, 'a> {
         let seams = self.add_seams()?;
         if seams > 0 {
             notes.push(format!("{seams} seam edges added to faces that wind around their surface"));
+        }
+        if self.splines_closed > 0 {
+            notes.push(format!(
+                "{} spline surfaces whose ends meet within {} mm closed on themselves (their end control lines made one)",
+                self.splines_closed, self.tol
+            ));
         }
         if self.inner_loops_turned > 0 {
             notes.push(format!("{} inner loops written the way their outer loop runs turned round", self.inner_loops_turned));
@@ -2152,6 +2187,108 @@ fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
     })
 }
 
+/// A spline surface whose first and last control lines along one parameter are the same to
+/// within `tol` (mm) but not exactly (a file that closes a surface on itself to its own
+/// uncertainty, not to the last digit), with those two lines made one, their mean: the surface
+/// moves by at most half the gap, and it closes on itself, so a face on it reads as on any
+/// closed surface (a seam where its loops wind round it, its pcurves on one side of where the
+/// surface starts). Only where the knots are clamped at both ends of that parameter (elsewhere
+/// the end lines are not the surface's ends), and only where the surface moves by at most `tol`,
+/// weights included. A surface no wider than a few `tol` across that parameter, one meeting
+/// itself both ways, or one the kernel already takes as closed is left as it is (`None`).
+fn closed_within(s: &BSurface, tol: f64) -> Option<BSurface> {
+    let (u_knots, v_knots, rows, rational): (&Vec<f64>, &Vec<f64>, Vec<Vec<[f64; 4]>>, bool) = match s {
+        BSurface::Spline { u_knots, v_knots, points } => {
+            (u_knots, v_knots, points.iter().map(|r| r.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()).collect(), false)
+        }
+        BSurface::RationalSpline { u_knots, v_knots, homogeneous } => (u_knots, v_knots, homogeneous.clone(), true),
+        _ => return None,
+    };
+    let point = |h: &[f64; 4]| (h[3] > 0.0).then(|| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]));
+    // The end control lines are the surface's ends only where its knots are clamped there
+    // (each end knot repeated degree + 1 times).
+    let clamped = |knots: &[f64], count: usize| -> bool {
+        let Some(p) = knots.len().checked_sub(count + 1) else { return false };
+        let (Some(head), Some(tail)) = (knots.get(..=p), knots.get(knots.len() - 1 - p..)) else { return false };
+        head.windows(2).all(|w| w.first() == w.last()) && tail.windows(2).all(|w| w.first() == w.last())
+    };
+    let counts = [rows.len(), rows.first().map_or(0, Vec::len)];
+    let ends_clamped = [clamped(u_knots, counts[0]), clamped(v_knots, counts[1])];
+    // The control net's size: no point of the surface lies farther than it from a control point.
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    for p in rows.iter().flatten().filter_map(point) {
+        for (k, x) in [p.x, p.y, p.z].into_iter().enumerate() {
+            if let (Some(l), Some(h)) = (lo.get_mut(k), hi.get_mut(k)) {
+                (*l, *h) = (l.min(x), h.max(x));
+            }
+        }
+    }
+    let size = v3(hi).dist(v3(lo));
+    let least_weight = rows.iter().flatten().map(|h| h[3]).fold(f64::INFINITY, f64::min);
+    // Each direction's two end lines and a line across the middle, as lists of control points.
+    let columns = transposed(&rows);
+    let lines = |d: usize| -> Option<(&Vec<[f64; 4]>, &Vec<[f64; 4]>, &Vec<[f64; 4]>)> {
+        let set = if d == 0 { &rows } else { &columns };
+        Some((set.first()?, set.get(set.len() / 2)?, set.last()?))
+    };
+    let meets = |d: usize| -> Option<bool> {
+        let (a, mid, b) = lines(d)?;
+        if a.len() != b.len() || a.is_empty() || !ends_clamped.get(d).copied().unwrap_or(false) {
+            return Some(false);
+        }
+        let (mut gap, mut width, mut weights) = (0.0_f64, 0.0_f64, 0.0_f64);
+        for ((x, y), m) in a.iter().zip(b).zip(mid) {
+            let (p, q, r) = (point(x)?, point(y)?, point(m)?);
+            gap = gap.max(p.dist(q));
+            width = width.max(p.dist(r));
+            weights = weights.max((x[3] - y[3]).abs());
+        }
+        // The mean moves each control point by half the gap, so the surface by no more (its
+        // points are convex combinations of them); halving a weight difference δ moves it by at
+        // most δ / 2 × the net's size / its least weight. Together within the tolerance.
+        let by_weights = 0.5 * weights * size / least_weight;
+        Some(gap > 0.0 && gap <= tol && width > 10.0 * tol && 0.5 * gap + by_weights <= tol)
+    };
+    let d = match (meets(0)?, meets(1)?) {
+        (true, false) => 0,
+        (false, true) => 1,
+        _ => return None,
+    };
+    // Already closed as the kernel takes it (its ends the same to rounding).
+    if SurfaceEval::new(s).ok()?.domain().period.get(d).copied().flatten().is_some() {
+        return None;
+    }
+    let mean = |x: &[f64; 4], y: &[f64; 4]| [0.5 * (x[0] + y[0]), 0.5 * (x[1] + y[1]), 0.5 * (x[2] + y[2]), 0.5 * (x[3] + y[3])];
+    let mut rows = rows;
+    if d == 0 {
+        let (Some(a), Some(b)) = (rows.first().cloned(), rows.last().cloned()) else { return None };
+        let m: Vec<[f64; 4]> = a.iter().zip(&b).map(|(x, y)| mean(x, y)).collect();
+        if let Some(r) = rows.first_mut() {
+            r.clone_from(&m);
+        }
+        if let Some(r) = rows.last_mut() {
+            *r = m;
+        }
+    } else {
+        for r in &mut rows {
+            let (Some(x), Some(y)) = (r.first().copied(), r.last().copied()) else { return None };
+            let m = mean(&x, &y);
+            if let Some(p) = r.first_mut() {
+                *p = m;
+            }
+            if let Some(p) = r.last_mut() {
+                *p = m;
+            }
+        }
+    }
+    let (u_knots, v_knots) = (u_knots.clone(), v_knots.clone());
+    Some(if rational {
+        BSurface::RationalSpline { u_knots, v_knots, homogeneous: rows }
+    } else {
+        BSurface::Spline { u_knots, v_knots, points: rows.iter().map(|r| r.iter().map(|h| [h[0], h[1], h[2]]).collect()).collect() }
+    })
+}
+
 /// A CURVE_REPLICA's curve: the parent (under its SURFACE_CURVE and TRIMMED_CURVE wrappers)
 /// moved by `t`, as the same kind of curve, with the parent's parameter. A mirroring operator
 /// would turn a conic over, so it is not supported.
@@ -2330,17 +2467,32 @@ fn open_or_closed(curve: BCurve, ps: P3, pe: P3, same_sense: bool, closed: bool,
         return Ok(Mapped { curve, interval, with_step, sense_mismatch: with_step != same_sense });
     }
     let (mut from, mut to) = if same_sense { (ts, te) } else { (te, ts) };
-    let at_seam = |t: f64| t - a <= eps || b - t <= eps;
+    // A vertex at the seam: its parameter there, or its point within the tolerance of the
+    // curve's ends (a vertex a few µm off the seam projects a hair inside either end).
+    let (vf, vt) = if same_sense { (ps, pe) } else { (pe, ps) };
+    let near_seam = |v: P3| v3(v).dist(pa).min(v3(v).dist(pb)) <= tol;
     if !(from + eps < to) {
-        if at_seam(from) && b - from <= eps {
+        let (start_at_end, end_at_start) = (b - from <= eps, to - a <= eps);
+        let (start_near, end_near) = (start_at_end || near_seam(vf), end_at_start || near_seam(vt));
+        // Both ends at the seam yet not its two ends exactly: an edge a few µm long across the
+        // seam, which no interval of the curve is (taking both ends to the seam would make it
+        // the whole curve).
+        if start_near && end_near && !(start_at_end && end_at_start) {
+            return Err(unsupported("a short edge across a closed spline's seam"));
+        }
+        if start_near {
             from = a;
         }
-        if at_seam(to) && to - a <= eps {
+        if end_near {
             to = b;
         }
     }
-    if !(from + eps < to) {
-        return Err(unsupported("an edge across a closed spline's seam"));
+    if (from - to).abs() <= eps {
+        return Err("a degenerate edge on a closed spline".into());
+    }
+    if from > to {
+        let curve = crate::kernel::restart_curve(&curve, from)?;
+        return Ok(Mapped { curve, interval: [from, to + (b - a)], with_step: same_sense, sense_mismatch: false });
     }
     Ok(Mapped { curve, interval: [from, to], with_step: same_sense, sense_mismatch: false })
 }
@@ -2393,8 +2545,10 @@ fn project(c: &CurveEval, a: f64, b: f64, knots: &[f64], p: Vec3) -> Option<f64>
         }
     }
     let t = 0.5 * (x0 + x1);
-    // The ends themselves when they are as near (a vertex at the end of the curve).
-    let t = [a, b, t].into_iter().min_by(|x, y| dist(*x).total_cmp(&dist(*y)))?;
+    // Keep the best sampled parameter: an exact point on an interior knot must
+    // not be replaced by a less accurate refinement beside that knot.
+    let t = [a, b, *ts.get(best)?, t].into_iter().min_by(|x, y| dist(*x).total_cmp(&dist(*y)))?;
+    // Prefer the domain's ends when they are just as near (a vertex at the seam).
     let near_end = |e: f64| (dist(e) - dist(t)).abs() <= 1e-12 * (1.0 + p.len());
     Some(
         if near_end(a) {

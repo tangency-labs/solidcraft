@@ -15,11 +15,12 @@
 //! the reference's point no longer lies, is reported: only geometry decided.
 //! Saved numbered Project links also have a compatibility check for a whole face that
 //! contains the saved pick and comes directly from its original construction feature.
-//! This check is local to manual sketch projection.
+//! This check is local to manual sketch projection. A thread alone also finds a round side
+//! again that 0.30.1 saved as a numbered piece (`F2:side#2`) or under a later index
+//! (`F4:bore:side:1`): see [`locate_thread_face_on_body`] (#16602).
 
 use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
-use solidcraft_geom::brep::eval::SurfaceEval;
 use solidcraft_geom::prelude::*;
 
 use crate::history_names::{Match, Names};
@@ -845,6 +846,10 @@ impl EdgeHit {
 /// told apart by the faces around it, or a numbered piece of a face that is whole now (see
 /// [`recover_numbered_face_in`]). `None` when no face does, or several do.
 pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
+    locate_face_with(st, name, p, false)
+}
+
+fn locate_face_with(st: &ModelState, name: &str, p: Vec3, round: bool) -> Option<FaceHit> {
     if crate::sheet::split_sheet_face_name(name).is_some() {
         return sheet_locate(st, name, p).ok();
     }
@@ -856,7 +861,7 @@ pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
     naming::warm_names(st.bodies.iter().filter(|b| !b.body.is_mesh()));
     match locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p) {
         Ok(hit) => Some(hit),
-        Err(Miss::Gone) => recover_numbered_face_in(st, name, p),
+        Err(Miss::Gone) => recover_numbered_face_in(st, name, p, round),
         Err(Miss::Several) => None,
     }
 }
@@ -864,13 +869,14 @@ pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
 /// A numbered piece of a round face (`F2:side:c1#2`, from the kernel before SMLib) on whichever
 /// one body recovers it as its whole face (#13252): see [`recover_numbered_projected_face`] for
 /// when that is safe. `None` when no body, or more than one, does.
-fn recover_numbered_face_in(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
-    if !name.contains('#') {
+fn recover_numbered_face_in(st: &ModelState, name: &str, p: Vec3, round: bool) -> Option<FaceHit> {
+    if !name.contains('#') && !(round && name.contains(":side:")) {
         return None;
     }
     let mut found = None;
     for (body, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()) {
-        if let Some((face, point)) = recover_numbered_projected_face(b, name, p) {
+        let recovered = recover_numbered_projected_face(b, name, p).or_else(|| if round { recover_round_face(b, name, p) } else { None });
+        if let Some((face, point)) = recovered {
             if found.is_some() {
                 return None;
             }
@@ -908,8 +914,22 @@ pub(crate) fn face_body<'a>(st: &'a ModelState, name: &str) -> Option<&'a ModelB
 /// body (a combine took the face). The same face on another body (a copy of this one) does not
 /// make this body's face ambiguous.
 pub fn locate_face_on_body(st: &ModelState, body: Option<&str>, name: &str, p: Vec3) -> Option<FaceHit> {
+    locate_face_on_body_with(st, body, name, p, false)
+}
+
+/// [`locate_face_on_body`] with the recovery of a thread's face: a round side (cylinder or cone) saved by
+/// 0.30.1 as a numbered piece (`F1:side#2`) or a round tool's wall under a later index
+/// (`F4:bore:side:1`) is found as the whole face it is now, when it is the only face of its stem
+/// and the saved pick lies on it (#16602). Only a thread asks for this: a thread wants the whole
+/// face whatever piece it was saved on, while any other feature would take in material the old
+/// piece never covered.
+pub fn locate_thread_face_on_body(st: &ModelState, body: Option<&str>, name: &str, p: Vec3) -> Option<FaceHit> {
+    locate_face_on_body_with(st, body, name, p, true)
+}
+
+fn locate_face_on_body_with(st: &ModelState, body: Option<&str>, name: &str, p: Vec3, round: bool) -> Option<FaceHit> {
     if crate::sheet::split_sheet_face_name(name).is_some() || legacy_name(name).is_some() {
-        return locate_face(st, name, p);
+        return locate_face_with(st, name, p, round);
     }
     if let Some(i) = body.and_then(|n| st.bodies.iter().position(|b| b.name == n))
         && let Some(b) = st.bodies.get(i).filter(|b| !b.body.is_mesh())
@@ -920,7 +940,7 @@ pub fn locate_face_on_body(st: &ModelState, body: Option<&str>, name: &str, p: V
             Err(Miss::Gone) => {}
         }
     }
-    locate_face(st, name, p)
+    locate_face_with(st, name, p, round)
 }
 
 /// [`locate_face`] for a sheet face's readable name (`sheet:<body>:<panel>:<side>`, see
@@ -1014,22 +1034,18 @@ pub(crate) fn locate_projected_face(body: &ModelBody, name: &str, p: Vec3) -> Op
     }
 }
 
+/// A thread's saved face the body no longer has, recovered as the one round face it is now: a
+/// numbered piece of a round side ([`recover_numbered_round_face`]) or a round wall under an old
+/// index ([`recover_renumbered_round_face`]).
+fn recover_round_face(body: &ModelBody, name: &str, pick: Vec3) -> Option<(usize, Vec3)> {
+    recover_numbered_round_face(body, name, pick).or_else(|| recover_renumbered_round_face(body, name, pick))
+}
+
 /// Bound the quadratic scan in remove_faces, which takes the list of faces to remove.
 const MAX_PROJECTION_RECOVERY_FACES: usize = 1024;
 
 fn recover_numbered_projected_face(body: &ModelBody, name: &str, pick: Vec3) -> Option<(usize, Vec3)> {
-    let (stem, number) = name.rsplit_once('#')?;
-    let count = body.body.face_count();
-    if count > MAX_PROJECTION_RECOVERY_FACES
-        || !pick.is_finite()
-        || stem.is_empty()
-        || strip_piece(stem) != stem
-        || number.is_empty()
-        || number.starts_with('0')
-        || !number.bytes().all(|digit| digit.is_ascii_digit())
-    {
-        return None;
-    }
+    let (face, stem) = numbered_whole_face(body, name, pick)?;
     // A changed body may keep the same face name while the face absorbs a smaller piece.
     // Projecting that larger face could silently grow a downstream feature's material.
     let producer = stem.strip_prefix('F')?.split_once(':')?.0.parse::<u64>().ok()?;
@@ -1044,7 +1060,36 @@ fn recover_numbered_projected_face(body: &ModelBody, name: &str, pick: Vec3) -> 
     if producer != body.feature || !(live_construction || body.names.cached_construction == Some(producer)) {
         return None;
     }
+    on_face(body, face, pick)
+}
 
+/// A thread's numbered piece of a round side (`F1:side#2`) found as the whole side: it is the one
+/// face of its stem, a cylinder or cone, and the saved pick lies on it (#16602). A thread wants
+/// the whole face whatever piece it was saved on; no other feature may use this.
+fn recover_numbered_round_face(body: &ModelBody, name: &str, pick: Vec3) -> Option<(usize, Vec3)> {
+    let (face, _) = numbered_whole_face(body, name, pick)?;
+    let record = body.body.record().faces.get(face)?;
+    let round = matches!(record.surface, solidcore_record::brep::Surface::Cylinder { .. } | solidcore_record::brep::Surface::Cone { .. });
+    if !round {
+        return None;
+    }
+    on_face(body, face, pick)
+}
+
+/// The one verified face a numbered name's stem finds on `body`, and that stem.
+fn numbered_whole_face<'n>(body: &ModelBody, name: &'n str, pick: Vec3) -> Option<(usize, &'n str)> {
+    let (stem, number) = name.rsplit_once('#')?;
+    let count = body.body.face_count();
+    if count > MAX_PROJECTION_RECOVERY_FACES
+        || !pick.is_finite()
+        || stem.is_empty()
+        || strip_piece(stem) != stem
+        || number.is_empty()
+        || number.starts_with('0')
+        || !number.bytes().all(|digit| digit.is_ascii_digit())
+    {
+        return None;
+    }
     let candidates = faces_with_stem(body, stem);
     let &[face] = candidates.as_slice() else { return None };
     let names = naming::names(body);
@@ -1052,29 +1097,50 @@ fn recover_numbered_projected_face(body: &ModelBody, name: &str, pick: Vec3) -> 
     if names.faces.get(face)?.as_str() != stem || !info.verified || info.aliases.iter().any(|alias| strip_piece(alias) != stem) {
         return None;
     }
+    Some((face, stem))
+}
 
+/// A thread's hole or tool round wall saved under a later index than it has now: 0.30.1 built a
+/// round tool in several lateral pieces (`F4:bore:side:1`) where the kernel now builds one
+/// (`F4:bore:side:0`). The wall is found again when it is the only face of that stem, a
+/// cylinder or cone, and the saved pick lies on it (#16602). `None` for any other name.
+fn recover_renumbered_round_face(body: &ModelBody, name: &str, pick: Vec3) -> Option<(usize, Vec3)> {
+    let (stem, index) = name.rsplit_once(':')?;
+    if body.body.is_mesh()
+        || body.body.face_count() > MAX_PROJECTION_RECOVERY_FACES
+        || !pick.is_finite()
+        || !stem.ends_with(":side")
+        || index.is_empty()
+        || !index.bytes().all(|digit| digit.is_ascii_digit())
+        || strip_piece(name) != name
+    {
+        return None;
+    }
+    let names = naming::names(body);
+    let mut found = None;
+    for (face, face_name) in names.faces.iter().enumerate() {
+        // Every face of the stem counts, split pieces (`:1#2`) included: only a stem with one
+        // face left can stand for the missing index.
+        let Some((other, _)) = face_name.rsplit_once(':') else { continue };
+        if other != stem {
+            continue;
+        }
+        if found.replace(face).is_some() {
+            return None;
+        }
+    }
+    let face = found?;
     let record = body.body.record().faces.get(face)?;
-    let [[u0, u1], [v0, v1]] = record.domain;
-    let surface = SurfaceEval::new(record.parameters()).ok()?;
-    let tolerance = (body.body.size() * 1e-3).max(1e-3);
-    if !tolerance.is_finite() {
-        return None;
-    }
-    let point = surface.point(surface.project(pick, Some([u0.midpoint(u1), v0.midpoint(v1)]), tolerance)?)?;
-    if !point.is_finite() || !(point.dist(pick) <= tolerance) {
-        return None;
-    }
+    let round = matches!(record.surface, solidcore_record::brep::Surface::Cylinder { .. } | solidcore_record::brep::Surface::Cone { .. });
+    (round && names.info.get(face)?.verified).then(|| on_face(body, face, pick)).flatten()
+}
 
-    // Isolate the face so a point on another face of the same surface cannot pass the trim test.
-    let others: Vec<_> = (0..count).filter(|index| *index != face).collect();
-    let isolated;
-    let trimmed = if others.is_empty() {
-        &body.body
-    } else {
-        isolated = solidcraft_kernel::remove_faces(&body.body, &others).ok()?;
-        &isolated
-    };
-    matches!(trimmed.classify_point(point), Ok(solidcraft_kernel::PointClass::OnBoundary)).then_some((face, point))
+/// The point of face `face` nearest `pick`, when `pick` lies on that face itself (the exact
+/// query is the kernel's [`solidcraft_kernel::Body::point_lies_on_face`]).
+fn on_face(body: &ModelBody, face: usize, pick: Vec3) -> Option<(usize, Vec3)> {
+    let tolerance = (body.body.size() * 1e-3).max(1e-3);
+    let point = body.body.point_lies_on_face(face, pick, tolerance).ok()??;
+    Some((face, point))
 }
 
 /// The one face a name `model.faces` lists finds, on the body called `body` or, without one, on

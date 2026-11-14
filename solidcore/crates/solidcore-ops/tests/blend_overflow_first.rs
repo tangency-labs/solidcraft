@@ -28,7 +28,6 @@ const NOTCHED: &[u8] =
 fn fixes() {
     let off = [
         "cone_unbounded_parameterized_as_nurb",
-        "ellipse_open_arc_keeps_end_angle",
         "fillet_round_on_round_as_definition",
         "fillet_overflow_crease_along_edge",
         "fillet_refuse_rounds_breaking_through",

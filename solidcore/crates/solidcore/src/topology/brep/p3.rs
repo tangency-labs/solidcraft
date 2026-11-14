@@ -759,6 +759,23 @@ pub(crate) fn seed_records(
     records.or_default(p2::brep_ref(b).key);
 }
 
+/// [`seed_records`] that visits only the objects `b` gained since this store last seeded
+/// this B-rep value under this key scheme ([`seed_records_once`]), so seeding before each
+/// of many small edits of a large B-rep walks each object once, not once per edit. The
+/// store ends exactly as [`seed_records`] leaves it. The progress is shared with the
+/// edits [`with_caller_identities`] runs on `b` under the same keys.
+pub(crate) fn seed_records_since(
+    records: &mut crate::topology::topology::NotifyRecords,
+    b: &mut Brep,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+) {
+    let id = progress_id(b, b.notify_serial(), key_of);
+    let instance = b.progress_tag();
+    if seed_records_once(records, (id, instance), b, key_of).is_err() {
+        seed_records(records, b, key_of);
+    }
+}
+
 /// How [`reseed_records`] names a B-rep's objects: `key_of` for the objects, `brep_key`
 /// for the B-rep, `entity_of` for `key_of`'s inverse on keys, and `serial`, the B-rep's
 /// serial as the edits that follow read it (for their seeding progress id).
@@ -4606,6 +4623,10 @@ fn orient_body(
     let mut faceuses_processed = 0usize;
     let mut swap_faces: Vec<FaceId> = Vec::new();
     let in_swap = |f: FaceId| faces_to_swap_uv.is_some_and(|l| l.contains(&f));
+    // The B-rep's bounding sphere radius, taken at the first ray vote. The loop only swaps
+    // faces' UVs, which moves no vertex or edge curve, so the box is the same for every
+    // face: one box per pass, not one per face (that was faces x faces on a large part).
+    let mut radius: Option<f64> = None;
 
     // Check orientation of each face
     for &face in &faces {
@@ -4641,7 +4662,17 @@ fn orient_body(
         let (reverse_votes, same_votes) = if just_unify_normals {
             (0u32, 10u32)
         } else {
-            match orient_ray_votes(k, b, env, marks, mark, face, normals_outward, tolerance)? {
+            match orient_ray_votes(
+                k,
+                b,
+                env,
+                marks,
+                mark,
+                face,
+                normals_outward,
+                tolerance,
+                &mut radius,
+            )? {
                 RayVotes::Skip => continue,
                 RayVotes::Votes {
                     reverse,
@@ -4775,6 +4806,7 @@ fn orient_ray_votes(
     face: FaceId,
     normals_outward: bool,
     tolerance: f64,
+    radius: &mut Option<f64>,
 ) -> Result<RayVotes> {
     // five more or less random points
     let test_param = [0.234_567, 0.567_891, 0.789_123, 0.156_789, 0.856_789];
@@ -4782,9 +4814,17 @@ fn orient_ray_votes(
     // Random vector
     let ray_vec = Vec3::new(1.23456, 2.34567, 3.45678).unitize()?;
 
-    // Brep BoundingBox and BoundingSphere
-    let bbox = brep_bounding_box(k, b, true, false, true)?;
-    let radius = bbox.sphere_bound().radius;
+    // Brep BoundingBox and BoundingSphere (once per orient pass: `radius` keeps it)
+    let radius = if let Some(r) = *radius {
+        r
+    } else {
+        k.work_counters.add_orient_box();
+        let r = brep_bounding_box(k, b, true, false, true)?
+            .sphere_bound()
+            .radius;
+        *radius = Some(r);
+        r
+    };
 
     let fu = face2::upward_faceuse(b, face)?.ok_or(null_deref("face without face use"))?;
     let other_fu = eu1::faceuse_mate(b, fu)?.ok_or(null_deref("face use without mate"))?;
@@ -6245,12 +6285,100 @@ mod tests {
         }
     }
 
+    /// Orienting a solid's faces fires its ray votes face by face, and each vote took the box
+    /// of the whole B-rep, so one pass on a large part cost faces x vertices. The faces only
+    /// have their UVs swapped in the pass, which moves no vertex or edge, so the box is taken
+    /// once per pass. A box's 6 faces each vote (each lies between the solid and the outside):
+    /// one box, and the faces keep their orientation.
+    #[test]
+    fn orienting_a_solid_takes_its_box_once_per_pass() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let faces = b.face_list().to_vec();
+        let ups = |b: &Brep| {
+            faces
+                .iter()
+                .map(|&f| face2::upward_faceuse(b, f).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let before = ups(&b);
+        b.set_editing_enabled(true);
+        let mut marks = Marks::default();
+        k.work_counters.reset();
+        let r = with_env(|env| {
+            orient_trimmed_surfaces(&mut k, &mut b, env, &mut marks, true, false, None)
+        });
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(faces.len(), 6);
+        assert_eq!(k.work_counters.orient_boxes(), 1);
+        assert_eq!(ups(&b), before);
+    }
+
     /// `reseed_records` leaves the store exactly as a fresh seeding of the B-rep leaves an
     /// empty map, whatever happened since the last reset: records handed out and changed,
     /// a foreign key, objects removed (one whose record was changed, one added and removed
     /// in between) and added. After another edit of the same B-rep value under the same
     /// scheme it asks the key of only what changed (the scheme's progress id asks one
     /// per kind); a removed record, a copy put back and another scheme walk it all.
+    /// Seeding before each small edit of a large part walked every object of the part each
+    /// time, which made a fillet's merge cost edits x objects. `seed_records_since` visits
+    /// only the objects added since, and leaves the store as a full seeding would.
+    #[test]
+    fn seed_records_since_visits_only_new_objects() {
+        use crate::topology::topology::NotifyRecords;
+        use std::cell::Cell;
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let asked = Cell::new(0_usize);
+        let key_of = |e: EntityRef| {
+            asked.set(asked.get() + 1);
+            topology_ref(7, e)
+        };
+        let full = |b: &Brep| {
+            let mut fresh = NotifyRecords::new();
+            seed_records(&mut fresh, b, &|e| topology_ref(7, e));
+            fresh
+        };
+        let mut records = NotifyRecords::new();
+        // (the progress id asks one key per kind)
+        seed_records_since(&mut records, &mut b, &key_of);
+        assert!(asked.get() > entity_count(&b));
+        assert_eq!(records, full(&b));
+
+        // nothing new: no object is visited
+        asked.set(0);
+        seed_records_since(&mut records, &mut b, &key_of);
+        assert_eq!(asked.get(), KINDS);
+
+        // a record the caller changed is kept, as `seed_records` keeps it
+        let face = b.face_list()[0];
+        records
+            .get_mut(&topology_ref(7, EntityRef::Face(face)).key)
+            .unwrap()
+            .set_user_index1(5);
+
+        // one object added: only it is visited
+        let added = b.add_vertex(Point3::new(5.0, 5.0, 5.0)).unwrap();
+        asked.set(0);
+        seed_records_since(&mut records, &mut b, &key_of);
+        assert_eq!(asked.get(), KINDS + 1);
+        assert!(records.contains_key(&topology_ref(7, EntityRef::Vertex(added)).key));
+        let mut want = full(&b);
+        want.get_mut(&topology_ref(7, EntityRef::Face(face)).key)
+            .unwrap()
+            .set_user_index1(5);
+        assert_eq!(records, want);
+
+        // a removed record makes the next seeding visit everything again
+        records.remove(&topology_ref(7, EntityRef::Vertex(added)).key);
+        seed_records_since(&mut records, &mut b, &key_of);
+        assert_eq!(records, want);
+    }
+
     #[test]
     fn reseed_records_equals_a_fresh_seeding() {
         use crate::topology::topology::NotifyRecords;

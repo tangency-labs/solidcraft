@@ -504,12 +504,14 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
             let flat = (b - a).cross(c - a).normalized().unwrap_or(Vec3::Z);
             for (k, p) in t.iter().zip([a, b, c]) {
                 let n = mesh.normals.get(*k as usize).copied().filter(|n| n.is_finite() && n.len() > 0.5).unwrap_or(flat);
-                if m.glass() {
-                    sc.glass_tri(p.to_f32(), n.to_f32(), col);
-                } else if m.closed {
-                    sc.tri(p.to_f32(), n.to_f32(), col);
-                } else {
-                    sc.open_tri(p.to_f32(), n.to_f32(), col);
+                // A mesh with values gives each vertex its own ([`SceneMesh::values`]).
+                match m.values.as_ref().and_then(|v| v.get(*k as usize)).copied() {
+                    Some(value) if m.glass() => sc.glass_tri_value(p.to_f32(), n.to_f32(), col, value),
+                    Some(value) if m.closed => sc.tri_value(p.to_f32(), n.to_f32(), col, value),
+                    Some(value) => sc.open_tri_value(p.to_f32(), n.to_f32(), col, value),
+                    None if m.glass() => sc.glass_tri(p.to_f32(), n.to_f32(), col),
+                    None if m.closed => sc.tri(p.to_f32(), n.to_f32(), col),
+                    None => sc.open_tri(p.to_f32(), n.to_f32(), col),
                 }
             }
         }
@@ -634,7 +636,7 @@ fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::Texture
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::TRI_SIZE;
+    use crate::view::{TRI_COLOR_AT, TRI_SIZE};
     use solidcore_tess::Mesh;
     use std::sync::Arc;
 
@@ -651,7 +653,7 @@ mod tests {
 
     /// The colour of a triangle `scene_geometry` wrote (its first vertex's palette entry).
     fn color(scene: &GpuScene, bytes: &[u8]) -> Option<[u8; 4]> {
-        let index = bytes.get(TRI_SIZE - 4..TRI_SIZE)?.try_into().ok().map(u32::from_le_bytes)?;
+        let index = bytes.get(TRI_COLOR_AT..TRI_COLOR_AT + 4)?.try_into().ok().map(u32::from_le_bytes)?;
         scene.palette.get(crate::view::PaletteIndex(index))
     }
 
@@ -667,6 +669,7 @@ mod tests {
             opacity,
             closed: true,
             hatch: Default::default(),
+            values: None,
         };
         let geometry = |opacity: f32| scene_geometry(&Scene { meshes: vec![mesh(opacity)], ..Default::default() });
 
@@ -817,6 +820,7 @@ mod tests {
             opacity: 0.5,
             closed: true,
             hatch: Default::default(),
+            values: None,
         };
         let sc = scene_geometry(&Scene { meshes: vec![mesh], ..Default::default() });
         assert_eq!(sc.tris.len(), 0);

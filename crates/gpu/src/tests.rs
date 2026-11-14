@@ -200,6 +200,7 @@ fn bodies() -> Vec<(&'static str, Body)> {
         ("cross hole", cut(&pin, &cross)),
         ("torus", ok(solidcraft_kernel::torus(Vec3::ZERO, 6.0, 1.5))),
         ("fillets", ok(solidcraft_kernel::fillet(&bx, &edges, 1.5))),
+        ("sphere", ok(solidcraft_kernel::sphere(Vec3::ZERO, 12.0))),
         (
             "mirrored",
             ok(solidcraft_kernel::transform_matrix(&pin, [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [3.0, 0.0, 1.0, 1.0]])),
@@ -233,6 +234,27 @@ fn gpu_evaluation_matches_the_cpu() {
             k += f.uv.len();
         }
     }
+}
+
+/// A sphere's pole has no cross product to give its normal: the shader takes it from a step
+/// inside, and that step must stay in the surface's parameter range. Stepping out of it gave a
+/// normal from the other side of the sphere, the dark quarter-disc at a fillet's corner patch
+/// (#14889).
+#[test]
+fn a_spheres_pole_normal_is_the_surfaces_normal_on_the_gpu() {
+    let Some(gpu) = gpu() else { return };
+    let body = ok(solidcraft_kernel::sphere(Vec3::ZERO, 12.0));
+    let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.01)));
+    let got = ok(gpu.evaluate(&gpu_form(&plan)));
+    let mut poles = 0;
+    for (p, n) in got.positions.iter().zip(&got.normals) {
+        let Some(radial) = p.normalized() else { continue };
+        if radial.z.abs() > 0.999 {
+            poles += 1;
+            assert!(n.dist(radial) < 2e-3, "pole normal {n:?} is not {radial:?}");
+        }
+    }
+    assert!(poles >= 2, "both poles are vertices");
 }
 
 /// A plan drawn straight from the GPU: `prepare` and `record` into an encoder, as the viewport

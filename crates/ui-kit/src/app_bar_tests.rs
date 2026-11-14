@@ -11,6 +11,7 @@ const HANDLES: Handles<'static> = Handles {
     separator: "t:separator:",
     search: "t:search",
     report: "t:report",
+    pill: "t:",
     settings: "t:settings",
     version: "t:version",
 };
@@ -70,6 +71,7 @@ impl BarRig {
             help: BarButton { id: "help", icon: "help", tip: "Help", enabled: true, narrow: false, wide_only: false },
             settings: BarButton { id: "settings", icon: "settings", tip: "Settings", enabled: true, narrow: false, wide_only: false },
             report: Report { label: "Report", tip: "Report a problem", icon_only: false },
+            pills: vec![],
             search: false,
             search_shortcut: Some("S"),
             assistant: true,
@@ -139,6 +141,33 @@ fn the_plugins_button_sits_between_file_and_the_file_actions() {
     }
 }
 
+/// Between the compact width and the room the Plugins label needs, the bar leaves Plugins out (the
+/// app lists it in the File menu) and keeps exactly what it showed before there was a Plugins menu.
+#[test]
+fn between_compact_and_the_labels_room_plugins_moves_to_the_file_menu() {
+    for width in [645.0, 660.0] {
+        let rig = BarRig::new(width);
+        let before = rig.out.borrow().as_ref().map(|out| (out.quick, out.tabs_start)).unwrap();
+        let save = solidcraft_ui_registry::rect_of("t:save");
+        let rig = BarRig { plugins: true, ..rig };
+        rig.frame(Vec::new());
+        assert!(solidcraft_ui_registry::rect_of("t:plugins").is_none(), "{width}: no Plugins button");
+        assert!(solidcraft_ui_registry::rect_of("t:undo").is_some(), "{width}: Undo stays");
+        assert_eq!(solidcraft_ui_registry::rect_of("t:save"), save, "{width}: Save stays put");
+        let out = rig.out.borrow();
+        let out = out.as_ref().unwrap();
+        assert!(out.plugins_in_file, "{width}: the app is told to list Plugins in File");
+        assert_eq!((out.quick, out.tabs_start), before, "{width}: the quick-access room and tabs stay put");
+    }
+    for (width, label) in [(1200.0, true), (600.0, false)] {
+        let rig = BarRig { plugins: true, ..BarRig::new(width) };
+        rig.frame(Vec::new());
+        let plugins = solidcraft_ui_registry::rect_of("t:plugins").expect("Plugins is drawn");
+        assert_eq!(plugins.width() > 40.0, label, "{width}: label when wide, icon when compact");
+        assert!(!rig.out.borrow().as_ref().unwrap().plugins_in_file);
+    }
+}
+
 /// A compact bar leaves out the wide-only buttons and the quick-access room.
 #[test]
 fn a_compact_bar_keeps_only_what_fits() {
@@ -195,7 +224,7 @@ impl TabsRig {
             focused: true,
             ..Default::default()
         };
-        let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet" };
+        let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None };
         let mut strip = TabStrip {
             tabs: vec![tab("One"), tab("Two"), tab("Three")],
             selected: 0,

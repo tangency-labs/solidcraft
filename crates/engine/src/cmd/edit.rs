@@ -17,7 +17,10 @@ use crate::schema::edit::{
     TimelineReordered, TimelineReorderedMany, TimelineRollToParams, TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult,
     TimelineUngroupParams, TimelineUngrouped,
 };
-use crate::schema::select::{PartialPick, SelectClearParams, SelectClearResult, SelectItem, SelectSetParams, SelectSetResult, read_item};
+use crate::schema::select::{
+    PartialPick, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem, SelectMode, SelectSetParams,
+    SelectSetResult, read_item,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
@@ -79,7 +82,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&RESTORE_CHECKPOINT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::CheckpointResult>)
-        .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included. Restoring or forgetting uses it and every later checkpoint up: take a new one to go back again"),
+        .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included. Restoring uses it and every later checkpoint up: take a new one to go back again. Forgetting drops only it"),
     CommandSpec::new("timeline.compute_all", "Compute All", crate::checked!("timeline.compute_all", compute_all))
         .at("SOLID", "MODIFY")
         .icon("compute")
@@ -204,7 +207,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SELECT_SET_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
         .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool; face/edge: body plus point [x,y,z] in world mm or index (both also accepted); a point uses Measure's pick tolerance, an index supplies a point on the item; invalid partial picks leave the selection unchanged"),
-    CommandSpec::new("select.filter", "Selection filter", select_filter).icon("select").noundo().doc_only()
+    CommandSpec::new("select.filter", "Selection filter", crate::checked!("select.filter", select_filter)).icon("select").noundo().doc_only()
+        .contract(&SELECT_FILTER_CONTRACT).output(output_schema_for::<SelectFilterResult>)
         .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
     CommandSpec::new("select.clear", "Clear Selection", crate::checked!("select.clear", select_clear))
         .icon("select")
@@ -216,6 +220,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
+const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
@@ -1469,6 +1474,29 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
         super::features::stable_profiles(s, &mut nf.kind, false)?;
     }
+    // A body Pattern's copy names move with the bodies they copy (#12114). Names the edit gives
+    // are in the order the copies are made, as they always were: they are read that way, not
+    // moved by source, and stored source by source once the pattern has run. A pattern of several
+    // bodies whose names were not yet stored as its copies have them (a design made in memory,
+    // before a command stored them) takes its copies' names first, so each moves with its own.
+    if let FeatureKind::Pattern { bodies: old, .. } = &f.kind {
+        if set.get("body_names").is_some() {
+            nf.pattern_names_in_order = nf.pins_every_body_name();
+        } else {
+            if f.pins_every_body_name() && !f.pattern_names_in_order {
+                let made: Vec<String> = s
+                    .model
+                    .result(id)
+                    .filter(|r| r.error.is_none() && !r.skipped)
+                    .map(|r| r.state.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect())
+                    .unwrap_or_default();
+                if !made.is_empty() && made.len() != nf.body_names.len() {
+                    nf.body_names = made;
+                }
+            }
+            nf.keep_pattern_names_with_sources(old);
+        }
+    }
     // New face points: their faces' names now.
     if nf.kind.face_points() != f.kind.face_points() {
         nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component)?;
@@ -1575,10 +1603,8 @@ fn select_filter(_s: &mut Session, p: &Value) -> Result<Value> {
         mode: String,
     }
     let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("select.filter", e.to_string()))?;
-    if !matches!(request.mode.as_str(), "body" | "face" | "component") {
-        return Err(bad("select.filter", "mode must be body, face or component"));
-    }
-    Ok(json!({"mode": request.mode}))
+    let mode = SelectMode::parse(&request.mode).ok_or_else(|| bad("select.filter", "mode must be body, face or component"))?;
+    reply("select.filter", SelectFilterResult { mode, param_warnings: Vec::new() })
 }
 
 fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2065,6 +2091,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let constructor = super::features::COMMANDS
         .iter()
         .chain(super::features_more::COMMANDS)
+        .chain(super::cell_grid::COMMANDS)
         .chain(super::construct::COMMANDS)
         .chain(super::surface::COMMANDS)
         .chain(super::surface_boundary::COMMANDS)

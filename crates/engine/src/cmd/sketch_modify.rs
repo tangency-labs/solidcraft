@@ -17,7 +17,7 @@ use crate::schema::sketch_modify::{
     BreakParams, BreakResult, ChamferDistanceAngleParams, ChamferEqualParams, ChamferResult, ChamferTwoParams, CircularPatternParams, ExtendParams,
     ExtendResult, FilletParams, FilletResult, MAX_BREAK_POINTS, MAX_COPIES, MAX_INSTANCES, MAX_PATH_POINTS, MirrorParams, MirrorResult, MoveParams,
     MoveResult, OffsetBreakParams, OffsetBreakResult, OffsetParams, OffsetResult, OffsetSide, PatternResult, RectangularPatternParams, ScaleParams,
-    ScaleResult, TrimOutcome, TrimParams, TrimPathParams, TrimPathResult, TrimResult,
+    ScaleResult, TransformParams, TransformResult, TrimOutcome, TrimParams, TrimPathParams, TrimPathResult, TrimResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -40,6 +40,7 @@ const OFFSET_BREAK_CONTRACT: TypedContract<OffsetBreakParams> = TypedContract::n
 const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
 const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
 const SCALE_CONTRACT: TypedContract<ScaleParams> = TypedContract::new();
+const TRANSFORM_CONTRACT: TypedContract<TransformParams> = TypedContract::new();
 const CIRCULAR_PATTERN_CONTRACT: TypedContract<CircularPatternParams> = TypedContract::new();
 const RECTANGULAR_PATTERN_CONTRACT: TypedContract<RectangularPatternParams> = TypedContract::new();
 
@@ -129,7 +130,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_scale")
         .enabled(in_sketch)
         .params("entities: [curve/point ids], base: [x,y] or point ref, factor: number; the driving length and radius dimensions wholly inside the selection scale too (a formula becomes `(formula) * factor`)"),
-    CommandSpec::new("sketch.transform", "Transform", transform)
+    CommandSpec::new("sketch.transform", "Transform", crate::checked!("sketch.transform", transform))
+        .contract(&TRANSFORM_CONTRACT)
+        .output(output_schema_for::<TransformResult>)
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
         .key("G")
@@ -141,7 +144,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
         .enabled(in_sketch)
-        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; copy also accepts drawn 3D curves, preserving exact arcs and height above the sketch plane; returns `released`: the constraints tying the moved geometry to what stays that the move let go, as {id, kind}", created_doc!())),
+        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; copy also accepts drawn 3D curves, preserving exact arcs and height above the sketch plane; a turned rectangle keeps its shape: parallel and perpendicular relations replace the horizontal and vertical ones lost; returns `released`: the constraints tying the moved geometry to what stays that the move let go, as {id, kind}, and `added`: the relations put in their place, as {id, kind}", created_doc!())),
     CommandSpec::new("sketch.mirror", "Mirror", crate::checked!("sketch.mirror", mirror))
         .contract(&MIRROR_CONTRACT)
         .output(output_schema_for::<MirrorResult>)
@@ -3779,8 +3782,14 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
 /// Move the points of the entities (in place) through `f`; circle radii scale by `k`.
 fn transform_in_place(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) -> Vec2, k: f64, cmd: &str) -> Result<()> {
     let pts = involved_points(sk, cs, ps);
-    if pts.iter().any(|q| sk.points.get(*q).is_some_and(|x| x.fixed || x.link.is_some())) {
-        return Err(bad(cmd, "fixed or projected geometry cannot move"));
+    // A point the sketch holds fixed, or one it projects from a body or another sketch, follows
+    // its source: it cannot move by itself. The refusal names the point and says which of the
+    // two it is, so the user knows what to move instead (#16164).
+    if let Some((id, reason)) = pts.iter().find_map(|q| {
+        let x = sk.points.get(*q)?;
+        (x.fixed || x.link.is_some()).then(|| (x.id.as_str(), if x.link.is_some() { "projected" } else { "fixed" }))
+    }) {
+        return Err(bad(cmd, format!("point `{id}` is {reason} and cannot move")));
     }
     // A point the origin holds goes where the move takes it: the coincidence that held it
     // there is dropped (#5034).
@@ -3811,17 +3820,21 @@ fn transform_in_place(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Ve
 /// every point they refer to is in `moved`: horizontal and vertical relations and dimensions swap
 /// at odd quarter turns and stay at half turns, and a line's angle dimension turns with the line,
 /// its parameter too. Horizontal and vertical relations and dimensions cannot hold at any other
-/// angle and are removed. Every other constraint keeps its meaning under a rigid move.
-fn rotate_axis_constraints(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, moved: &[usize], angle: f64) -> Result<()> {
+/// angle and are removed; when the removed ones held both horizontal and vertical lines, parallel
+/// and perpendicular relations between those lines take their place so a rectangle stays one at
+/// the new angle (returned as `{id, kind}`). Every other constraint keeps its meaning under a
+/// rigid move.
+fn rotate_axis_constraints(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, moved: &[usize], angle: f64) -> Result<Vec<Value>> {
     let quarters = angle.rem_euclid(TAU) / FRAC_PI_2;
     let turns = quarters.round();
     if turns.rem_euclid(4.0) == 0.0 && (quarters - turns).abs() < 1e-10 {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let square = (quarters - turns).abs() < 1e-10;
     let odd = square && turns.rem_euclid(2.0) == 1.0;
     let curves = &sk.curves;
     let mut angles = Vec::new();
+    let (mut level, mut upright) = (Vec::new(), Vec::new());
     sk.constraints.retain_mut(|c| {
         if c.driven {
             return true;
@@ -3857,8 +3870,16 @@ fn rotate_axis_constraints(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, 
         if odd {
             c.kind = swapped;
         }
+        if !square {
+            match c.kind {
+                Horizontal { l } => level.push(l),
+                Vertical { l } => upright.push(l),
+                _ => {}
+            }
+        }
         square
     });
+    let added = keep_rectangles(sk, &level, &upright);
     for (name, turned) in angles {
         let Some(param) = doc.param(&name) else { continue };
         let degrees = (angle.to_degrees() * 1e6).round() / 1e6;
@@ -3870,7 +3891,38 @@ fn rotate_axis_constraints(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, 
         };
         doc.set_param(&name, &expr, None, None)?;
     }
-    Ok(())
+    Ok(added)
+}
+
+/// Lines that were held horizontal and vertical lose both when turned off the axes. Where there
+/// were some of each, hold them parallel among themselves and one pair perpendicular, so the
+/// shape stays square to itself. A relation the rest of the sketch already implies, or that would
+/// conflict, is not added.
+fn keep_rectangles(sk: &mut Sketch, level: &[usize], upright: &[usize]) -> Vec<Value> {
+    let (Some(&h), Some(&v)) = (level.first(), upright.first()) else { return Vec::new() };
+    use ConstraintKind::*;
+    let wanted = level
+        .iter()
+        .skip(1)
+        .map(|&b| Parallel { a: h, b })
+        .chain(upright.iter().skip(1).map(|&b| Parallel { a: v, b }))
+        .chain([Perpendicular { a: h, b: v }]);
+    let mut added = Vec::new();
+    for kind in wanted {
+        if sk.same_constraint(&kind).is_some() {
+            continue;
+        }
+        let name = kind.name();
+        let Ok(id) = sk.add_constraint(kind, None) else { continue };
+        let mut probe = sk.clone();
+        let report = solidcraft_sketch::solve(&mut probe);
+        if report.status != solidcraft_sketch::SolveStatus::Solved || report.redundant.contains(&id) {
+            sk.constraints.retain(|c| c.id != id);
+        } else {
+            added.push(json!({"id": id, "kind": name}));
+        }
+    }
+    added
 }
 
 /// Drop the coincidences that held the moved points to the sketch's origin: a move translates
@@ -3920,6 +3972,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let selection = string_list(cmd, p, "entities")?;
     let (planar, drawn) = if copy { drawn_copy_selection(s, p, selection)? } else { (selection, Vec::new()) };
     let mut released = Vec::new();
+    let mut added = Vec::new();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (mut cs, mut ps) =
             if planar.is_empty() && !drawn.is_empty() { (Vec::new(), Vec::new()) } else { entities(sk, &json!({"entities": planar}), cmd)? };
@@ -3953,16 +4006,17 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
         with_ellipse_axes(sk, &mut cs);
         let held = holding(sk, &involved_points(sk, &cs, &ps));
         transform_in_place(sk, &cs, &ps, &f, 1.0, cmd)?;
+        // Broken external holds must not make the rectangle's replacement relations look redundant.
+        released = release_broken(sk, &held);
         if rotate_constraints {
             let moved = involved_points(sk, &cs, &ps);
-            rotate_axis_constraints(sk, doc, &moved, ang)?;
+            added = rotate_axis_constraints(sk, doc, &moved, ang)?;
         }
-        released = release_broken(sk, &held);
         cs.extend(text_curves);
         Ok(ids_of(sk, &cs))
     })?;
     s.doc_mut().prune_model_params();
-    reply(cmd, MoveResult { curves: out, released, sketch: info, created: None, param_warnings: Vec::new() })
+    reply(cmd, MoveResult { curves: out, released, added, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 /// Scale, turn and move the entities in one step: scaled about `center`, then turned about it,
@@ -3986,12 +4040,12 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         let f = move |q: Vec2| rot(c + (q - c) * k) + t;
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
         let moved = involved_points(sk, &cs, &ps);
-        rotate_axis_constraints(sk, doc, &moved, ang)?;
+        let _ = rotate_axis_constraints(sk, doc, &moved, ang)?;
         scale_dimensions(sk, doc, &cs, &moved, k)?;
         Ok(ids_of(sk, &cs))
     })?;
     s.doc_mut().prune_model_params();
-    Ok(json!({"curves": out, "sketch": info}))
+    reply(cmd, TransformResult { curves: out, sketch: info, param_warnings: Vec::new() })
 }
 
 /// The driving lengths wholly inside a transformed selection scale with it. Keep formulas

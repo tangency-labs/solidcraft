@@ -706,6 +706,102 @@ What is left is mostly what is on screen: about 100 joint chips, the Browser's r
 toolbar, and egui's tessellation and painting. With nothing moving, the window draws no frames
 (0.8 % of a core idle with the assembly open).
 
+## Whole-body highlights: edges drawn from the model's own lines (2026-11-11, #5646)
+
+Hovering a Browser row that holds a whole assembly lights every body under it. The faces were
+already lit from what the model has on the GPU (its plans, blocks and placements), but the
+edges were not: the highlight built a copy of every edge of every lit body on the CPU (a halo, a
+line and a dimmed hidden line for each segment) and uploaded it, at each change of the hovered
+row.
+
+Now each body's edge lines are recorded where the model's blocks hold them, and the highlight
+draws those same lines again in its own colours and widths (`LitEdges`, the `vs_line_lit`
+shader entry, which reads the style from the draw's first vertex). Nothing is built or uploaded.
+Where the view draws no edges (Shaded), the highlight still copies them.
+
+Measured on a 561-body STEP printer assembly (194 parts, 2.8 million triangles, 600,000 edge
+segments), NVIDIA GB10, 3774 × 2094 viewport, release build, Shaded with edges: the pointer
+moved on and off the assembly's row 20 times through the control channel, `SOLIDCRAFT_PROFILE_FRAMES=1`
+reporting each highlight build.
+
+| | highlight build | edge bytes built and uploaded |
+|---|---|---|
+| before (`main`) | 20–24 ms (median 22) | 57 MB (38 MB lines, 19 MB hidden) |
+| after | 1–2 ms | 0 |
+
+The GPU draws the same segments as before. The few edges a body can be picked by that the view
+does not draw (smooth edges between tangent faces, in a shaded view) are still copied, so the
+highlight lights the same edges as before. `whole_body_hover_edges_look_as_their_copies_did`
+renders the hover both ways.
+
+In Wireframe the model draws no faces, so a whole hovered body's faces are still copied (239 MB
+and about 150 ms for this assembly): the next section removes that copy.
+
+## Whole-body highlights in Wireframe: faces evaluated from plans (2026-11-12)
+
+In Wireframe the model draws no faces, so a whole hovered or selected body's faces could not be
+drawn again from the model's own triangles, as they are when the view shades: the highlight
+copied every triangle of every lit body on the CPU and uploaded it, at each change of the
+hovered row. Now the highlight hands the GPU each body's display plan and draws the triangles
+the GPU evaluates from it (the highlight scene's own `planned` bodies), as the model does when
+it shades. Without GPU evaluation the triangles are copied as before.
+
+Measured on the 561-body STEP printer assembly (2.8 million triangles), NVIDIA GB10, 3774 × 2094
+viewport, release build, Wireframe: the pointer moved on and off the assembly's Browser row 20
+times through the control channel, `SOLIDCRAFT_PROFILE_FRAMES=1` reporting each highlight build.
+
+| | highlight build | triangle bytes built and uploaded |
+|---|---|---|
+| before (`main`) | 178–190 ms, each a frame over 180 ms | 239 MB |
+| after | 21–36 ms (median 22) | 0 |
+
+The GPU evaluates the 561 plans in under 5 ms (the longest GPU workload in an `nsys` trace of
+the same hovers). The remaining CPU time was the copy of the bodies' edges, which drawing the
+model's own edge lines again (the section above) removes as well.
+
+## The History bar: a step out of view only takes its place (2026-11-13)
+
+The History bar paints only the steps in view, but every step of a long history still did work
+at every frame. The bar copied each feature's name into a list and built a table of every
+result. Then, for each step, in view or not, its widget copied the theme, built the step's handle
+name and copied it into the handle registry. For each step out of view it also asked egui twice,
+for the focus and for open menus. On Rover-v7 (3,324 features) that was 0.86 ms of every frame.
+
+What changed:
+- **The bar's list is kept while the features stay the same**: each feature's name, icon, icon
+  accent and handle name. Its key is of the same kind as the vertical History's row plan's: the
+  session, its revision, the document's address and the feature count. When the key changes,
+  the list is checked against the features, value by value and without allocating (about
+  0.06 ms here), and built again only if one differs: a selection or a step of a sketch drag
+  builds nothing. Nothing in the list depends on the theme, the results, the selection or the
+  marker.
+- **A step's result is read at its own place** while the results line up with the features, one
+  result each. Otherwise the table is built as before.
+- **A step out of view takes its place and publishes its kept handle**, nothing more. A run of
+  such steps asks egui once about the focus and open menus.
+
+Every step still publishes its `timeline:` handle, and the marker, drops and Shift+click ranges
+see every step's place as before.
+
+Median UI time of a frame on Rover-v7, in a headless test build (Windows 11, 48 CPU threads,
+`ci` profile, 300 frames a round, window 2560 × 1392, the camera turning every frame). Each
+number is the median of the rounds measured, two before and six after. For the frame, the rounds
+stayed within 0.02 ms of each other before and 0.13 ms after; for the bar, within about 0.01 ms.
+
+| | frame, before | frame, after | inside the bar, before | inside the bar, after |
+|---|---|---|---|---|
+| History bar shown | 3.09 ms | 2.34 ms | 0.86 ms | 0.17 ms |
+| a feature selected | 3.12 ms | 2.40 ms | 0.89 ms | 0.20 ms |
+| "Fold the History bar into groups" on | 3.06 ms | 2.61 ms | 0.84 ms | 0.37 ms |
+| History bar hidden | 2.05 ms | 2.07 ms | — | — |
+
+Nothing drawn changed: each state painted the same number of shapes before and after (562, 566,
+772 and 408), and a test compares a frame drawn from the kept list with the frame that built it
+(the same handles at the same points, the same shapes).
+
+What remains inside the bar is one pass over the steps (about 40 ns each) and, with the groups
+on, the grouping worked out again at every frame.
+
 # Recompute performance
 
 `solidcraft-cli bench-edit <script> <param> "(<old>) * 1.02"` builds a design from its script
