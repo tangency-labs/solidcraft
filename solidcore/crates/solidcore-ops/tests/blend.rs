@@ -1495,3 +1495,70 @@ fn the_faces_a_round_is_carried_on_past_are_the_kernels() {
         Err(Error::Argument)
     ));
 }
+
+/// A revolved r8 corner, clipped on x = +/-10. Its torus support must survive the
+/// round's definition record and reload, including the partial generator's parameters.
+#[test]
+fn a_round_on_a_revolved_torus_end_edge_survives_reload() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::BooleanOp;
+
+    all_fixes();
+    let radial = [-3.0_f64.sqrt() / 2.0, 0.5, 0.0];
+    let at = |rho: f64, z: f64| [radial[0] * rho, radial[1] * rho, z];
+    let profile = [
+        Curve::Line {
+            start: at(39.4, 8.8),
+            end: at(20.0, 8.8),
+        },
+        Curve::Line {
+            start: at(20.0, 8.8),
+            end: at(20.0, 4.0),
+        },
+        Curve::Line {
+            start: at(20.0, 4.0),
+            end: at(41.0, 4.0),
+        },
+        Curve::Arc {
+            center: at(33.0, 4.0),
+            axis: [radial[1], -radial[0], 0.0],
+            reference: radial,
+            radius: 8.0,
+            start: 0.0,
+            end: 0.6_f64.asin(),
+        },
+    ];
+    // Independent torus/plane/canal flux integration with div(x+10,0,0)=1.
+    // The ball centres are (-10+r, sqrt((33+(8-r)cos(t))^2-(-10+r)^2),
+    // 4+(8-r)sin(t)); the canal is trimmed on z=4 and z=8.8. Integrating
+    // its circular sections analytically and the remaining t integral numerically
+    // gives these values, stable to 1e-10 mm^3 from 8192 to 32768 panels.
+    for (radius, expected) in [(1.0, 2009.800477555554), (0.5, 2010.294917895084)] {
+        let ring = revolve(&profile, [0.0; 3], [0.0, 0.0, -1.0], 2.0 * PI / 3.0, true).unwrap();
+        let clip = make_box([-10.0, 0.0, -10.0], [20.0, 50.0, 30.0]).unwrap();
+        let body = boolean(ring, clip, BooleanOp::Intersect).unwrap().unwrap();
+        let rho = 33.0 + (64.0_f64 - 2.5 * 2.5).sqrt();
+        let selected = edge_at(&body, [-10.0, (rho * rho - 100.0).sqrt(), 6.5]);
+        blend(
+            &body,
+            Blend::Round,
+            &[selected],
+            &[radius],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+        // Reopen the saved definition, rather than measuring only the live result.
+        let (record, _) = body.to_record().unwrap();
+        let (reopened, _) = Body::from_record(&record, true).unwrap();
+        assert!(reopened.is_manifold_solid().unwrap());
+        let report = reopened.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "r{radius}: {}", report.text);
+        let actual = volume(&reopened);
+        assert!(
+            (actual - expected).abs() < 1e-4,
+            "r{radius}: {actual} vs {expected}"
+        );
+    }
+}
