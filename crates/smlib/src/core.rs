@@ -255,7 +255,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_round_as_definition = true;
     f.fillet_overflow_crease_along_edge = true;
     f.keep_exact_pcurves = true;
-    f.planar_section_face_tolerance = true;
     f.face_swap_uv_transposes_trims = true;
     f.closed_smooth_pole_tangent_limit = true;
     // Held back: see `HELD_BACK`.
