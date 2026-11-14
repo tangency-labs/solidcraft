@@ -2462,9 +2462,9 @@ mod tests {
         let ring = std::f64::consts::PI / 4.0 * (36.0 - 4.773 * 4.773) * 20.0;
         assert!(plain - cut > ring / 3.0 && plain - cut < ring, "{plain} - {cut} against a ring of {ring}");
         let m = run(&mut Session::default(), "parts.library", json!({"family": "socket_head_cap_screw"}));
-        assert_eq!(m["family"]["threads"], json!(["cosmetic", "modeled", "none"]), "{m}");
+        assert_eq!(m["threads"], json!(["cosmetic", "modeled", "none"]), "{m}");
         let w = run(&mut Session::default(), "parts.library", json!({"family": "washer"}));
-        assert!(w["family"].get("threads").is_none_or(Value::is_null), "{w}");
+        assert!(w.get("threads").is_none_or(Value::is_null), "{w}");
     }
 
     /// A long screw is threaded over its standard's thread length only (ISO 4762: 2d + 12), so
