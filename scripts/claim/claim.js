@@ -97,17 +97,30 @@ function linkedPulls(timeline, context, number) {
   return [...seen.values()].sort((a, b) => a.number - b.number);
 }
 
-// Who the bot's latest "Claimed by @user" reply names, unless the label came off after it.
+// The bot's latest "Claimed by @user" reply, unless the label came off after it: who claimed,
+// and the PR it was claimed through ("Claimed by @user through #P"), or null for a /claim.
 // GitHub doesn't assign people who aren't collaborators, so for them this reply is the only record.
-function recordedClaimant(timeline) {
-  let who = null;
+function recordedClaim(timeline) {
+  let found = null;
   for (const ev of timeline) {
-    if (ev.event === 'unlabeled' && ev.label && ev.label.name === LABEL) who = null;
+    if (ev.event === 'unlabeled' && ev.label && ev.label.name === LABEL) found = null;
     const mine = ev.event === 'commented' && ev.user && ev.user.login === BOT;
-    const m = mine && /^Claimed by @([A-Za-z0-9-]+)/.exec(ev.body || '');
-    if (m) who = m[1];
+    const m = mine && /^Claimed by @([A-Za-z0-9-]+)(?: through #(\d{1,7})\b)?/.exec(ev.body || '');
+    if (m) found = { who: m[1], pr: m[2] ? Number(m[2]) : null };
   }
-  return who;
+  return found;
+}
+
+function recordedClaimant(timeline) {
+  const found = recordedClaim(timeline);
+  return found ? found.who : null;
+}
+
+// What the bot says when it frees an issue because its claiming PR #P closed.
+function closedMessage(number, merged) {
+  return merged
+    ? `#${number} merged as part of this issue but didn't close it, so the rest is free again. If nothing is left, it can be closed. Anyone can \`/claim\` the rest.`
+    : `#${number} was closed without merging, so this one is free again. Anyone can \`/claim\` it.`;
 }
 
 async function lastPush(github, context, pr) {
@@ -124,6 +137,24 @@ async function claimStatus(github, context, issue, now) {
   const timeline = await getTimeline(github, context, issue.number);
   const since = await labeledAt(github, context, issue, timeline);
   const pulls = linkedPulls(timeline, context, issue.number);
+  if (pulls.length === 0) {
+    // The claim may name its PR even when the PR no longer reads as a claim (it closed or merged,
+    // or it says "Part of #N"). A closed one frees the issue now; an open one still holds it.
+    const recorded = recordedClaim(timeline);
+    if (recorded && recorded.pr) {
+      let pr = null;
+      try {
+        ({ data: pr } = await github.rest.pulls.get({ ...repoArgs(context), pull_number: recorded.pr }));
+      } catch (e) {
+        if (e.status !== 404) throw e;
+      }
+      if (pr && pr.state === 'closed') {
+        const merged = Boolean(pr.merged || pr.merged_at);
+        return { pulls, since, expires: since, release: true, reason: merged ? 'merged PR' : 'closed PR', pr: recorded.pr };
+      }
+      if (pr && pr.state === 'open') pulls.push({ number: recorded.pr });
+    }
+  }
   if (pulls.length === 0) {
     const expires = since + CLAIM_HOURS * HOUR;
     return { pulls, since, expires, release: now >= expires, reason: 'no PR' };
@@ -348,6 +379,62 @@ async function handlePull({ github, context }) {
   return claimed;
 }
 
+// Every `#N` in a PR's title and body, closing keyword or not ("Part of #N"), capped. Only
+// candidates: handlePullClosed checks each issue's recorded claim before touching it.
+const MAX_MENTIONS = 20;
+function mentionedIssues(title, body) {
+  const found = new Set();
+  for (const m of `${title || ''}\n${body || ''}`.matchAll(/(?:^|[\s(])#(\d{1,7})\b/g)) found.add(Number(m[1]));
+  return [...found].filter((n) => n > 0).slice(0, MAX_MENTIONS);
+}
+
+function closingIssues(body) {
+  const found = new Set();
+  const closing = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d{1,7})\b/gi;
+  for (const m of String(body || '').matchAll(closing)) found.add(Number(m[1]));
+  return found;
+}
+
+// A pull request closed, merged or not: free each open issue whose recorded claim is through it,
+// unless another open PR still claims the issue or a maintainer holds it. A merged PR's closing
+// keywords are left to GitHub's auto-close (it may not have happened yet); the sweep catches any
+// issue that stays open.
+async function handlePullClosed({ github, context }) {
+  const pull = context.payload.pull_request;
+  if (!pull || pull.state !== 'closed') return [];
+  const merged = Boolean(pull.merged || pull.merged_at);
+  const closing = merged ? closingIssues(pull.body) : new Set();
+  const cache = new Map();
+  const released = [];
+  for (const n of mentionedIssues(pull.title, pull.body)) {
+    if (n === pull.number || closing.has(n)) continue;
+    const timeline = await getTimeline(github, context, n);
+    const recorded = recordedClaim(timeline);
+    if (!recorded || recorded.pr !== pull.number) continue;
+    if (linkedPulls(timeline, context, n).some((p) => p.number !== pull.number)) continue;
+    let issue;
+    try {
+      ({ data: issue } = await github.rest.issues.get({ ...repoArgs(context), issue_number: n }));
+    } catch (e) {
+      if (e.status === 404 || e.status === 410) continue;
+      throw e;
+    }
+    if (issue.pull_request || issue.state !== 'open' || issue.locked || !hasLabel(issue)) continue;
+    const assignees = (issue.assignees || []).map((a) => a.login);
+    let maintained = false;
+    for (const a of assignees) maintained = maintained || (await isMaintainer(github, context, a, cache));
+    if (maintained) continue;
+    await release(github, context, issue, assignees);
+    await github.rest.issues.createComment({
+      ...repoArgs(context),
+      issue_number: n,
+      body: closedMessage(pull.number, merged),
+    });
+    released.push(n);
+  }
+  return released;
+}
+
 // The daily sweep over open issues labelled `in progress`.
 async function sweep({ github, context, now = Date.now() }) {
   const issues = await github.paginate(github.rest.issues.listForRepo, {
@@ -373,7 +460,9 @@ async function sweep({ github, context, now = Date.now() }) {
       body:
         status.reason === 'no PR'
           ? `No draft PR showed up within ${CLAIM_HOURS} h, so this one is free again. Anyone can \`/claim\` it.`
-          : `Nothing has been pushed for ${PR_IDLE_DAYS} days, so this one is free again. Anyone can \`/claim\` it.`,
+          : status.reason === 'idle PR'
+            ? `Nothing has been pushed for ${PR_IDLE_DAYS} days, so this one is free again. Anyone can \`/claim\` it.`
+            : closedMessage(status.pr, status.reason === 'merged PR'),
     });
     released.push(issue.number);
   }
@@ -386,8 +475,10 @@ module.exports = {
   referencedIssues,
   isMaintainer,
   linkedPulls,
+  recordedClaim,
   claimStatus,
   handleComment,
   handlePull,
+  handlePullClosed,
   sweep,
 };

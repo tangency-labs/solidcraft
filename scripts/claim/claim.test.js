@@ -25,7 +25,7 @@ function fake(world = {}) {
         },
         getCommit: async () => ({ data: { commit: { committer: { date: world.pushed || ago(H) } } } }),
       },
-      pulls: { get: async () => ({ data: { head: { sha: 'abc' } } }) },
+      pulls: { get: async ({ pull_number }) => ({ data: { head: { sha: 'abc' }, ...((world.pulls || {})[pull_number] || {}) } }) },
       reactions: { createForIssueComment: rec('react') },
       issues: {
         getLabel: async () => {
@@ -388,4 +388,90 @@ test('PRs from bots, references to PRs, closed and missing issues are ignored', 
   bot.payload.pull_request.user = { login: 'dependabot[bot]', type: 'Bot' };
   assert.deepEqual(await claim.handlePull({ github: w.github, context: bot }), []);
   assert.equal(w.calls.length, 0);
+});
+
+// A claim recorded through PR #50 whose PR then merged "as part of" the issue or closed (#16544).
+const claimedThrough50 = [labeled(ago(10 * H)), said('Claimed by @alice through #50. The claim lapses after 14 days without pushes.')];
+const closedCtx = (title, body, merged) => ({
+  repo,
+  payload: { pull_request: { number: 50, state: 'closed', merged, title, body, user: { login: 'alice', type: 'User' } } },
+});
+
+test('recordedClaim names the claimant and the PR the claim went through', () => {
+  assert.deepEqual(claim.recordedClaim(claimedThrough50), { who: 'alice', pr: 50 });
+  assert.deepEqual(claim.recordedClaim([said('Claimed by @bob. Please open a draft PR referencing #7 within 72 h.')]), { who: 'bob', pr: null });
+  assert.equal(claim.recordedClaim([...claimedThrough50, { event: 'unlabeled', label: { name: 'in progress' } }]), null);
+});
+
+test('a PR merged as part of an issue frees the rest of it at once', async () => {
+  const { github, calls } = fake({
+    byNumber: { 7: openIssue(7, ['alice'], ['in progress']) },
+    timeline: [...claimedThrough50, pr(50, 'alice', 'closed', { title: 'Tight box', body: 'Part of #7' })],
+  });
+  const released = await claim.handlePullClosed({ github, context: closedCtx('Tight box', 'Part of #7 (the tight box half)', true) });
+  assert.deepEqual(released, [7]);
+  assert.equal(find(calls, 'removeLabel')[1].issue_number, 7);
+  assert.deepEqual(find(calls, 'removeAssignees')[1].assignees, ['alice']);
+  const c = find(calls, 'comment')[1];
+  assert.equal(c.issue_number, 7);
+  assert.match(c.body, /^#50 merged as part of this issue but didn't close it, so the rest is free again\. If nothing is left, it can be closed\./);
+});
+
+test('a claiming PR closed without merging frees the issue', async () => {
+  const { github, calls } = fake({ byNumber: { 7: openIssue(7, ['alice'], ['in progress']) }, timeline: claimedThrough50 });
+  assert.deepEqual(await claim.handlePullClosed({ github, context: closedCtx('Thing (#7)', 'Fixes #7', false) }), [7]);
+  assert.match(find(calls, 'comment')[1].body, /^#50 was closed without merging, so this one is free again\. Anyone can `\/claim` it\.$/);
+});
+
+test('a merged PR leaves the issues it closes by keyword to GitHub', async () => {
+  // Already auto-closed, and still open (auto-close pending): neither gets a comment.
+  for (const state of ['closed', 'open']) {
+    const { github, calls } = fake({ byNumber: { 7: { ...openIssue(7, ['alice'], ['in progress']), state } }, timeline: claimedThrough50 });
+    assert.deepEqual(await claim.handlePullClosed({ github, context: closedCtx('Thing (#7)', 'Fixes #7', true) }), []);
+    assert.equal(find(calls, 'comment'), undefined);
+    assert.equal(find(calls, 'removeLabel'), undefined);
+  }
+});
+
+test('a closed PR does not free an issue another open PR still claims, or one it never claimed', async () => {
+  let w = fake({
+    byNumber: { 7: openIssue(7, ['alice'], ['in progress']) },
+    timeline: [...claimedThrough50, pr(50, 'alice', 'open'), pr(61, 'alice', 'open', { title: 'The other half (#7)' })],
+  });
+  assert.deepEqual(await claim.handlePullClosed({ github: w.github, context: closedCtx('Tight box', 'Part of #7', true) }), []);
+  assert.equal(find(w.calls, 'removeLabel'), undefined);
+  w = fake({
+    byNumber: { 7: openIssue(7, ['bob'], ['in progress']) },
+    timeline: [labeled(ago(10 * H)), said('Claimed by @bob through #42. The claim lapses after 14 days without pushes.')],
+  });
+  assert.deepEqual(await claim.handlePullClosed({ github: w.github, context: closedCtx('Tight box', 'Part of #7', true) }), []);
+  w = fake({ byNumber: { 7: openIssue(7, ['carol'], ['in progress']) }, timeline: claimedThrough50, perms: { carol: 'write' } });
+  assert.deepEqual(await claim.handlePullClosed({ github: w.github, context: closedCtx('Tight box', 'Part of #7', true) }), []);
+  assert.equal(w.calls.length, 0);
+});
+
+test('sweep frees a claim whose PR merged as part of the issue before 72 h, with the merged message', async () => {
+  const w = fake({
+    issues: [issue(7, ['alice'])],
+    timeline: [...claimedThrough50, pr(50, 'alice', 'closed', { title: 'Tight box', body: 'Part of #7' })],
+    pulls: { 50: { state: 'closed', merged: true, merged_at: ago(8 * H) } },
+  });
+  assert.deepEqual(await claim.sweep({ github: w.github, context: { repo }, now: NOW }), [7]); // labelled 10 h ago
+  assert.match(find(w.calls, 'comment')[1].body, /^#50 merged as part of this issue but didn't close it/);
+});
+
+test('sweep keeps a claim whose recorded PR is open but only says "Part of"', async () => {
+  const w = fake({
+    issues: [issue(7, ['alice'])],
+    timeline: [labeled(ago(100 * H)), said('Claimed by @alice through #50.'), pr(50, 'alice', 'open', { title: 'Tight box', body: 'Part of #7' })],
+    pulls: { 50: { state: 'open' } },
+    pushed: ago(2 * H),
+  });
+  assert.deepEqual(await claim.sweep({ github: w.github, context: { repo }, now: NOW }), []);
+});
+
+test('sweep still says no draft PR showed up for a claim that never recorded one', async () => {
+  const w = fake({ issues: [issue(7)], timeline: [labeled(ago(80 * H)), said('Claimed by @bob. Please open a draft PR referencing #7 within 72 h; the claim lapses otherwise.')] });
+  assert.deepEqual(await claim.sweep({ github: w.github, context: { repo }, now: NOW }), [7]);
+  assert.equal(find(w.calls, 'comment')[1].body, 'No draft PR showed up within 72 h, so this one is free again. Anyone can `/claim` it.');
 });
