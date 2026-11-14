@@ -89,7 +89,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.refine_cc_range_ends = true;
     f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
-    f.revolve_analytic_profile_faces = true;
     f.taper_tangent_corner_planes = true;
     f.revolve_nested_shells_as_cavities = true;
     f.revolve_holed_profile_void = true;

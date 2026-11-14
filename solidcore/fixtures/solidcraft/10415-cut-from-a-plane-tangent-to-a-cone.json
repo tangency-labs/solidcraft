@@ -7,9 +7,7 @@
   {
    "name": "blind_cut_8",
    "note": "A circle of diameter 4 on the plane tangent to the cone's side at half height, cut 8 into the cone: the tool's base touches the cone along 4 mm of the generator through (5, 0, 10) and its end stays inside. On SolidCraft 0.29.0 (truck) this cut builds (1994.93 meshed) after a retry with the tool moved ('Boolean retry: tool displacement 6.122475e-5 mm').",
-   "fixes": [
-    "revolve_analytic_profile_faces"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "revolve",
@@ -82,9 +80,7 @@
   {
    "name": "blind_cut_12",
    "note": "The same circle cut 12: the tool's end is still inside, 0.24 short of the far side (it breaks out from 12.2405). On SolidCraft 0.29.0 (truck) this cut builds (1944.67 meshed), after the same retry.",
-   "fixes": [
-    "revolve_analytic_profile_faces"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "revolve",
@@ -157,9 +153,7 @@
   {
    "name": "cut_13_partly_through",
    "note": "The same circle cut 13: the tool's end breaks out through part of the far side. On SolidCraft 0.29.0 (truck) the cut fails: 'boolean Cut: the operation failed: no result' (also at 14 and 15).",
-   "fixes": [
-    "revolve_analytic_profile_faces"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "revolve",
@@ -232,9 +226,7 @@
   {
    "name": "cut_30_through",
    "note": "The report's case on the default cone, as the triage built it: the same circle cut 30, through the far side (fully from 17.574), not reaching the base. On SolidCraft 0.29.0 (truck) the cut fails: 'boolean Cut: the operation failed: no result' (also at 20 and through all).",
-   "fixes": [
-    "revolve_analytic_profile_faces"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "revolve",
@@ -307,9 +299,7 @@
   {
    "name": "circle_6_cut_30_through",
    "note": "A circle of diameter 6 cut 30, through the far side and a little of the base. On SolidCraft 0.29.0 (truck) the cut is refused: 'the cut could not be computed reliably: it would change the body away from the tool'.",
-   "fixes": [
-    "revolve_analytic_profile_faces"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "revolve",
@@ -382,9 +372,7 @@
   {
    "name": "circle_6_cut_60_through",
    "note": "The triage's control: the diameter 6 circle cut 60, the same result as cut 30. On SolidCraft 0.29.0 (truck) this cut builds (1686.75 meshed), after a retry with the tool moved 1.213859e-4 mm.",
-   "fixes": [
-    "revolve_analytic_profile_faces"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "revolve",
@@ -457,9 +445,7 @@
   {
    "name": "circle_3_low_cut_15_through_base",
    "note": "The triage's other control: a circle of diameter 3 on the plane tangent at height 5, cut 15, out through the base (fully from 14.18). On SolidCraft 0.29.0 (truck) this cut builds (2015.59 meshed), after the 6.122475e-5 mm retry.",
-   "fixes": [
-    "revolve_analytic_profile_faces"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "revolve",

@@ -24,6 +24,8 @@
 //! `GetOrCreateGwNurbPointer` in `EdgeSweepHigher` already made it in place.
 //! Non-merged in-place whole-body translations remove degenerate swept faces and
 //! isolated slit loops (UB-170).
+//! A rotational sweep whose result has a vertex failing `check_brep`'s Level 0 vertex test
+//! #2 refuses with [`SweepFailure::InconsistentVertexUses`] (#14425).
 //!
 //! Cancellation: the sweep polls the cancel token (#2136, #2372) of the source's kernel per repetition, vertex, edge and face.
 
@@ -33,6 +35,7 @@ use super::access::{
 use super::geometry::SweepGeometry;
 use super::{SweepEntity as E, TopologySweep, OP};
 use crate::curve::curve::Curve;
+use crate::error::sweep::SweepFailure;
 use crate::error::{ignore_status, passed_on, Result, SolidError};
 use crate::geom::attribute::{tag_ids, TagData};
 use crate::geom::tol::ZONE_TOL_3D;
@@ -65,6 +68,32 @@ pub fn check_sweep_repetitions(repetitions: u64) -> Result<()> {
 /// `Kernel::fixes.sweep_statuses_pass_on` of `brep`'s kernel (fork c8f6a31, WR-662).
 fn pass_on(a: &impl SweepAccess, brep: crate::topology::BrepId) -> Result<bool> {
     Ok(a.kernel(brep)?.fixes.sweep_statuses_pass_on)
+}
+
+/// Not upstream (#14425): [`SweepFailure::InconsistentVertexUses`] when a vertex of `brep`
+/// fails [`vertex::check_pointers`], `check_brep`'s Level 0 vertex test #2 (`SmVertex` test
+/// 2): a vertex duplicated where the sweep should have reused one, or mated edge uses
+/// running one way. O(vertices). A stopgap until the rotational sweep reuses the vertex
+/// and edge (tangency-labs/solidcraft#15536).
+fn refuse_inconsistent_vertex_uses(
+    a: &impl SweepAccess,
+    brep: crate::topology::BrepId,
+) -> Result<()> {
+    let b = a.brep(brep)?;
+    let mut vertex_count = 0;
+    for &v in b.vertex_list() {
+        if !vertex::check_pointers(b, v)? {
+            vertex_count += 1;
+        }
+    }
+    if vertex_count == 0 {
+        Ok(())
+    } else {
+        Err(SolidError::sweep(
+            OP,
+            SweepFailure::InconsistentVertexUses { vertex_count },
+        ))
+    }
 }
 
 fn required<T>(value: Option<T>) -> Result<T> {
@@ -994,6 +1023,11 @@ impl TopologySweep {
                 && matches!(g, SweepGeometry::Translation(_))
             {
                 self.regularize_translation(a, original)?;
+            }
+            // Not upstream (#14425): a rotational sweep whose result holds a vertex with
+            // inconsistent vertex uses is refused, not returned
+            if matches!(g, SweepGeometry::Rotation(_)) {
+                refuse_inconsistent_vertex_uses(&*a, destination_brep)?;
             }
             Ok(())
         })();

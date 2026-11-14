@@ -7,10 +7,10 @@
 //!   recognised cylinder's Z is reversed and its STEP evaluation is mirrored in height.
 //!   Upstream does the same; `fixes.nurb_cylinder_inside_out_frame` (opt-in) builds the
 //!   frame as `is_nurb_surface_cone` does.
-//! - With `fixes.revolve_analytic_profile_faces`, the revolve made an inside-out
-//!   cylinder (or cone) for a profile line running against the axis. Fork commit
-//!   tangency-labs/smlib 9853e54, which that flag ports, builds them from the low end
-//!   upwards, never inside out.
+//! - The revolve's analytic faces (WR-448, the default since
+//!   tangency-labs/solidcraft#14425) made an inside-out cylinder (or cone) for a profile
+//!   line running against the axis. Fork commit tangency-labs/smlib 9853e54, which they
+//!   port, builds them from the low end upwards, never inside out.
 //!
 //! tangency-labs/solidcore#2539: the cylinder a revolved line sweeps is exact: its net lies
 //! on the cylinder the profile defines, to rounding, with the circle's weights.
@@ -192,7 +192,6 @@ fn issue_1463_revolved_cylinders_are_never_inside_out() {
     ] {
         let case = format!("reverse {reverse}, {angle} deg, scale {scale}");
         let mut k = Kernel::default();
-        k.fixes.revolve_analytic_profile_faces = true;
         let cones = revolve_cones(&mut k, reverse, angle, scale);
         assert_eq!(cones.len(), 3, "{case}");
         for c in &cones {
@@ -238,7 +237,6 @@ fn issue_1463_revolved_cylinders_are_never_inside_out() {
 #[test]
 fn issue_2539_a_revolved_line_sweeps_its_exact_cylinder() {
     let mut k = Kernel::default();
-    k.fixes.revolve_analytic_profile_faces = true;
     let corners = [
         Vec3::new(15.984703566454204, -14.5, -54.99999718598504),
         Vec3::new(15.984703566454204, -6.5, -54.99999718598504),

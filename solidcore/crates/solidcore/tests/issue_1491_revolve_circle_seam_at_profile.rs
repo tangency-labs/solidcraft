@@ -2,8 +2,9 @@
 //! circle went through upstream's one-curve special case
 //! (`sm_CreateAnalyticRotationalSweep`), whose torus takes X from the circle's normal,
 //! so its seam lies a quarter turn from the profile. Fork tangency-labs/smlib 9853e54
-//! deletes that case; with `fixes.revolve_analytic_profile_faces` the circle goes
-//! through the per-curve rule, its torus's X radial into the profile's half-plane.
+//! deletes that case; so does the kernel (WR-448, tangency-labs/solidcraft#14425): the
+//! circle goes through the per-curve rule, its torus's X radial into the profile's
+//! half-plane.
 
 #![allow(
     clippy::unwrap_used,
@@ -78,10 +79,9 @@ fn issue_1491_whole_circle_revolve_has_its_seam_at_the_profile() {
     let want = 2.0 * PI * 30.0 * PI * 9.0;
     for (axis, other_way) in [(Vec3::Z, false), (Vec3::Z, true), (-Vec3::Z, false)] {
         let case = format!("axis {axis:?}, other way {other_way}");
-        // the fix: X from the axis into the profile's half-plane, Z the turn axis, the
-        // seam vertex the circle's start
+        // X from the axis into the profile's half-plane, Z the turn axis, the seam vertex
+        // the circle's start
         let mut k = Kernel::default();
-        k.fixes.revolve_analytic_profile_faces = true;
         let mut b = round_bar(&mut k, axis, other_way);
         let (x, z, vertices) = seam(&b);
         assert!(near(x, -Vec3::X), "{case}: X {x:?}");
@@ -95,19 +95,6 @@ fn issue_1491_whole_circle_revolve_has_its_seam_at_the_profile() {
         }
         let got = volume(&k, &mut b);
         assert!((got - want).abs() <= 1e-6 * want, "{case}: {got} {want}");
-
-        // upstream (the special case): X the circle's plane normal, a quarter turn off
-        let mut k = Kernel::default();
-        let b = round_bar(&mut k, axis, other_way);
-        let (x, _, vertices) = seam(&b);
-        assert!(
-            x.dot(Vec3::Y).abs() > 1.0 - 1e-9,
-            "{case}: upstream X {x:?}"
-        );
-        assert!(
-            vertices.iter().all(|v| v.x.abs() < 1e-9),
-            "{case}: upstream vertices {vertices:?}"
-        );
     }
 }
 
@@ -116,7 +103,6 @@ fn issue_1491_seam_at_the_profile_unions_with_a_square_ring() {
     // the rig's sweeps/3006: the round bar joined to the 5 x 5 square swept round the
     // same circle (the square's seam in the plane x = 0)
     let mut k = Kernel::default();
-    k.fixes.revolve_analytic_profile_faces = true;
     let round = round_bar(&mut k, Vec3::Z, false);
     let p = |y: f64, z: f64| Vec3::new(0.0, y, z);
     let corners = [p(-27.5, -2.5), p(-32.5, -2.5), p(-32.5, 2.5), p(-27.5, 2.5)];

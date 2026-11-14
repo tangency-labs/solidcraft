@@ -1231,6 +1231,60 @@ mod tests {
     use solidcore::topology::shell::{ShellMembers, ShellType};
     use solidcore::topology::{Edgeuse, Face, Faceuse, Shell, ShellId};
 
+    /// #14425: `nm_test_rotation_neg_y_36` (the test B-rep turned 36 degrees about -y through
+    /// (-10, 0, 0)) makes a second vertex at (10, 0, 0) and runs both faces of its swept arc one
+    /// way; the rotational sweep refuses it, naming the inconsistent vertex uses (the stopgap
+    /// for tangency-labs/solidcraft#15536), where it returned a Level 0 invalid body.
+    #[test]
+    fn the_neg_y_36_rotation_refuses_its_inconsistent_vertex_uses() -> Result<()> {
+        use solidcore::error::sweep::SweepFailure;
+        use solidcore::sweep::topology_sweep::store::{SweepIdentities, SweepStore};
+        let mut k = Kernel::default();
+        let mut records = solidcore::topology::topology::NotifyRecords::new();
+        let mut attributes = AttributeStore::new();
+        let handle = BrepId::from_index(0);
+        let key_of = |e: solidcore::error::EntityRef| WholeIdentities.topology(handle, e);
+        let mut b = {
+            let mut env = solidcore::topology::edge::NotifyEnv {
+                records: &mut records,
+                attributes: &mut attributes,
+                context: None,
+                key_of: &key_of,
+            };
+            build_body(&mut k, 1., key_of(solidcore::error::EntityRef::Brep(handle)).key, &mut env)?
+        };
+        let g = SweepGeometry::Rotation(RotationalSweepGeometry::new(
+            Point3::new(-10., 0., 0.),
+            Point3::new(0., -1., 0.),
+            36.,
+            1e-4,
+        ));
+        let mut next = 0;
+        let mut store = SweepStore::new(&WholeIdentities, &mut records, &mut attributes, &mut next);
+        let context = store.register_kernel(&mut k)?;
+        let id = store.register_brep(context, &mut b)?;
+        let region = store.infinite_region(id)?;
+        let mut sweep = TopologySweep {
+            do_stitching: false,
+            do_merge: false,
+            do_tagging: false,
+            tag_id: 0,
+            repetitions: 1,
+            ..TopologySweep::default()
+        };
+        let mut targets = solidcore::sweep::topology_sweep::engine::SweepTargets::default();
+        let result = sweep.do_sweep(&mut store, &g, Some(id), Some((id, region)), &mut targets);
+        let error = result.err();
+        assert!(
+            matches!(
+                error.as_ref().and_then(SolidError::sweep_failure),
+                Some(SweepFailure::InconsistentVertexUses { vertex_count: 2 })
+            ),
+            "{error:?}"
+        );
+        Ok(())
+    }
+
     #[test]
     fn default_queries_reach_the_live_lists_and_missing_infinite_region_is_null() -> Result<()> {
         let mut model = Model::new([1., 0., 0.])?;

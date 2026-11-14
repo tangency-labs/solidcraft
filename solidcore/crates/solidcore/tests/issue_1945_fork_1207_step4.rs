@@ -68,7 +68,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.torus_check_spindle_apex = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.nurb_cylinder_inside_out_frame = true;
-    k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.taper_tangent_corner_planes = true;
     k.fixes.revolve_nested_shells_as_cavities = true;
     k.fixes.revolve_holed_profile_void = true;

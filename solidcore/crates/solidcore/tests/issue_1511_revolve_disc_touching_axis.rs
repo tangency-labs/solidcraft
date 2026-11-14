@@ -65,22 +65,19 @@ fn revolve_disc(k: &mut Kernel, axis_x: f64) -> solidcore::Result<solidcore::Bre
 fn issue_1511_disc_touching_the_axis_errs_or_builds_a_sound_body() {
     // a quarter of the horn torus: (pi / 2) * (pi 5^2) * 5 (Pappus)
     let want = PI / 2.0 * PI * 25.0 * 5.0;
-    for fix in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.revolve_analytic_profile_faces = fix;
-        match revolve_touching_disc(&mut k) {
-            Err(e) => eprintln!("fix {fix}: no body: {e}"),
-            Ok(mut b) => {
-                // a sound body: intact topology and the quarter horn torus's volume (to a
-                // coarse integration tolerance, which keeps the test cheap)
-                solidcore::topology::integrity::check(&b).unwrap();
-                let got = volume(&k, &mut b);
-                eprintln!("fix {fix}: body, volume {got} (horn torus quarter {want})");
-                assert!(
-                    (got - want).abs() <= 1e-2 * want,
-                    "fix {fix}: unsound body, volume {got}, want {want}"
-                );
-            }
+    let mut k = Kernel::default();
+    match revolve_touching_disc(&mut k) {
+        Err(e) => eprintln!("no body: {e}"),
+        Ok(mut b) => {
+            // a sound body: intact topology and the quarter horn torus's volume (to a
+            // coarse integration tolerance, which keeps the test cheap)
+            solidcore::topology::integrity::check(&b).unwrap();
+            let got = volume(&k, &mut b);
+            eprintln!("body, volume {got} (horn torus quarter {want})");
+            assert!(
+                (got - want).abs() <= 1e-2 * want,
+                "unsound body, volume {got}, want {want}"
+            );
         }
     }
 }

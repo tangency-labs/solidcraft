@@ -303,7 +303,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.refine_cc_range_ends = true;
     k.fixes.revolution_round_offset_collapses = true;
-    k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.revolve_holed_profile_void = true;
     k.fixes.revolve_nested_shells_as_cavities = true;
     k.fixes.revolve_splits_curves_on_axis = true;

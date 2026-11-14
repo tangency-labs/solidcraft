@@ -19,16 +19,15 @@
 //! Not upstream (WR-442, tangency-labs/solidcore#478, opt-in
 //! `Kernel::fixes.revolve_nested_shells_as_cavities`): after a full turn's
 //! stitch, a closed shell inside another becomes that solid's cavity.
-//! Not upstream (WR-448, tangency-labs/solidcore#545, opt-in
-//! `Kernel::fixes.revolve_analytic_profile_faces`; SolidCraft change, tangency-labs/smlib
-//! 0b143f7): upstream makes analytic faces only for a one-curve profile. With the fix
-//! a whole turn gives each other curve its cylinder, cone, sphere or torus
-//! ([`analytic_revolution`]) before falling back to the `SmSurfOfRevolution`, and a
-//! partial turn sweeps with [`RotationalSweepGeometry::set_analytic_revolutions`] on.
-//! With the fix a whole turn also skips the one-curve special case
-//! (`sm_CreateAnalyticRotationalSweep`), as fork 9853e54 deletes it: a one-curve profile
-//! goes through the same per-curve rule, so a whole circle's torus has its seam at the
-//! profile (#1491).
+//! Not upstream (WR-448, tangency-labs/solidcore#545; SolidCraft change,
+//! tangency-labs/smlib 0b143f7; the only path since tangency-labs/solidcraft#14425):
+//! upstream makes analytic faces only for a one-curve profile. Here a whole turn gives
+//! each curve its cylinder, cone, sphere or torus ([`analytic_revolution`]) before
+//! falling back to the `SmSurfOfRevolution`, and a partial turn's
+//! [`RotationalSweepGeometry`] does the same for each edge it sweeps. There is no
+//! one-curve special case (`sm_CreateAnalyticRotationalSweep`), as fork 9853e54 deletes
+//! it: a one-curve profile goes through the same per-curve rule, so a whole circle's
+//! torus has its seam at the profile (#1491).
 //! Not upstream (WR-590, opt-in `Kernel::fixes.revolve_splits_curves_on_axis`;
 //! SolidCraft change, tangency-labs/smlib e4f1377): a partial turn first splits each
 //! curve where it meets the axis inside itself ([`split_curves_on_axis`], the fork's
@@ -53,7 +52,7 @@ use crate::geom::geom_utility::{
 use crate::kernel::Kernel;
 use crate::math::{max4, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
-use crate::primitive::primitive_creation::p1::{analytic_rotational_sweep, PrimitiveCreation};
+use crate::primitive::primitive_creation::p1::PrimitiveCreation;
 use crate::surface::surf_of_revolution::p1::SurfOfRevolution;
 use crate::surface::surface::Surface;
 use crate::sweep::analytic_revolution::analytic_revolution;
@@ -447,23 +446,10 @@ impl PrimitiveCreation {
         self.init_entity_maps();
         let _ = target(self, brep)?;
         a.set_editing(brep, true)?;
-        // Not upstream (#1491, with `fixes.revolve_analytic_profile_faces`): fork
-        // 9853e54 deletes the one-curve special case (sm_CreateAnalyticRotationalSweep),
-        // whose whole-circle torus puts its seam a quarter turn from the profile; the
-        // per-curve rule below covers a one-curve profile too
-        let one_curve_special_case = !a.kernel(brep)?.fixes.revolve_analytic_profile_faces;
-        if let (true, [Some(curve)]) = (one_curve_special_case, &mut *curves) {
-            if ignored(a.with_primitive_brep(brep, |k, b| {
-                analytic_rotational_sweep(k, b, curve, axis_base, axis)
-            }))?
-            .is_some()
-            {
-                if let Some(slot) = curves.first_mut() {
-                    *slot = None;
-                }
-                return Ok(());
-            }
-        }
+        // Not upstream (#1491): fork 9853e54 deletes the one-curve special case
+        // (sm_CreateAnalyticRotationalSweep), whose whole-circle torus puts its seam a
+        // quarter turn from the profile; the per-curve rule below covers a one-curve
+        // profile too
         for slot in curves.iter_mut() {
             let curve = slot
                 .as_ref()
@@ -531,20 +517,16 @@ impl PrimitiveCreation {
                 if let Some(curve) = slot.as_ref() {
                     // Not upstream (WR-448, #545): the curve's cylinder, cone,
                     // sphere or torus, else the surface of revolution
-                    let analytic = if a.kernel(brep)?.fixes.revolve_analytic_profile_faces {
-                        let tolerance = a.brep(brep)?.tolerance();
-                        analytic_revolution(
-                            a.kernel(brep)?,
-                            curve,
-                            axis_base,
-                            axis,
-                            360.0,
-                            tolerance,
-                            None,
-                        )?
-                    } else {
-                        None
-                    };
+                    let tolerance = a.brep(brep)?.tolerance();
+                    let analytic = analytic_revolution(
+                        a.kernel(brep)?,
+                        curve,
+                        axis_base,
+                        axis,
+                        360.0,
+                        tolerance,
+                        None,
+                    )?;
                     let rev = match analytic {
                         Some(surface) => Some(surface),
                         None => ignored(SurfOfRevolution::create_canonical(
@@ -652,9 +634,8 @@ impl PrimitiveCreation {
             } else {
                 cap = false;
             }
-            let mut rotation = RotationalSweepGeometry::new(axis_base, axis, angle_deg, tolerance);
-            // Not upstream (WR-448, #545): analytic side faces
-            rotation.set_analytic_revolutions(a.kernel(brep)?.fixes.revolve_analytic_profile_faces);
+            // Not upstream (WR-448, #545): analytic side faces (the geometry's only path)
+            let rotation = RotationalSweepGeometry::new(axis_base, axis, angle_deg, tolerance);
             let geometry = SweepGeometry::Rotation(rotation);
             let mut sweep = TopologySweep {
                 repetitions: options.repetitions,
@@ -705,8 +686,8 @@ mod tests {
     /// the result is as far from the axis as the profile's point at the same axial
     /// coordinate, both measured here from the profile's and the axis's own numbers.
     /// Upstream's one-curve special case made the cone through the end circles, 3.85 mm
-    /// off its hyperboloid half way along this line; with the analytic-faces fix or
-    /// without, the line is its surface of revolution.
+    /// off its hyperboloid half way along this line; the analytic path (the default since
+    /// #14425) makes the line's surface of revolution.
     #[test]
     fn a_line_skew_to_the_axis_revolves_onto_its_hyperboloid() {
         let (p0, p1) = ([600.0, 0.0, 0.0], [700.0, 0.0, 200.0]);
@@ -722,9 +703,8 @@ mod tests {
         };
         let ((h0, _), (h1, _)) = (polar(p0), polar(p1));
         let profile = segment(p0, p1);
-        for analytic in [false, true] {
+        {
             let mut k = Kernel::default();
-            k.fixes.revolve_analytic_profile_faces = analytic;
             let sheet = create_rotational_sweep(
                 &mut k,
                 &[Some(&profile)],
@@ -757,10 +737,7 @@ mod tests {
                     }
                 }
             }
-            assert!(
-                worst <= 1e-6,
-                "{worst} mm off the hyperboloid (fix {analytic})"
-            );
+            assert!(worst <= 1e-6, "{worst} mm off the hyperboloid");
         }
     }
 

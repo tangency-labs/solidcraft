@@ -245,16 +245,14 @@ fn curved_shell_tangent_quarter_torus_seam_tracks_boundary() -> solidcore::Resul
     // `CloseLoopGaps` — including `reconcile_shell_tangent_rails` — runs on the default
     // path before `do_extended_offset` merges the shell (WR-578, the split flags are the
     // only path since #2981).
-    // 1. Default surface representations (`SmBSplineSurface` revolved wall and
+    // 1. Default surface representations (the revolved wall its `SmCone`, WR-448, and
     //    `SmOffsetSurface` over the B-spline top-rim round).
-    let k_bspline = Kernel::default();
-    check_quarter_torus_seam_case(k_bspline)?;
+    let k_default = Kernel::default();
+    check_quarter_torus_seam_case(k_default)?;
 
-    // 2. Analytic wall and round (`revolve_analytic_profile_faces` produces `SmCone`
-    //    for the cylindrical wall, and `fillet_exact_round_classes` produces `SmTorus`
-    //    for the circular top-rim round).
+    // 2. The round exact too (`fillet_exact_round_classes` produces `SmTorus` for the
+    //    circular top-rim round).
     let mut k_analytic = Kernel::default();
-    k_analytic.fixes.revolve_analytic_profile_faces = true;
     k_analytic.fixes.fillet_exact_round_classes = true;
     check_quarter_torus_seam_case(k_analytic)
 }
