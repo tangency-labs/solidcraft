@@ -5502,6 +5502,24 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             EntityRef::Edge(edge),
         )))
     }
+    fn geometry_ends_at_roll_over(&self, solver: FilletObject) -> Result<bool> {
+        if self.roll_over_ends.is_empty() {
+            return Ok(false);
+        }
+        let FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge)) =
+            self.geometry_edge(solver)?
+        else {
+            return Err(invalid("solver edge is not a target edge"));
+        };
+        let ends = [
+            crate::topology::edge::start_vertex(self.target, edge)?,
+            crate::topology::edge::end_vertex(self.target, edge)?,
+        ];
+        Ok(ends
+            .iter()
+            .flatten()
+            .any(|v| self.roll_over_ends.contains(v)))
+    }
     fn geometry_mitred_corner_edges(
         &self,
         corner: FilletObject,

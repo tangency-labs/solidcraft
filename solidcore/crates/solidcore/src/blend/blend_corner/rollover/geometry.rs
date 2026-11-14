@@ -517,13 +517,14 @@ pub fn torus_creases(
         let Ok(frame) = TorusFrame::new(centre, axis * sign, towards, radii) else {
             return Ok(None);
         };
-        let Some((pieces, shift)) = face_pieces(&frame, face, tol) else {
+        let Some((pieces, shift, tilt)) = face_pieces(&frame, face, tol) else {
             return Ok(None);
         };
         let moved = norm2(shift);
         let rounding = frame_rounding(&frame, moved);
-        // what is left of the target for the fit, after the move and the rounding
-        let left = target - moved - rounding;
+        // what is left of the target for the fit, after the move, the face's tilt and the
+        // rounding
+        let left = target - moved - tilt - rounding;
         let room = left > 0.0;
         if !room {
             return Ok(None);
@@ -575,8 +576,19 @@ fn frame_rounding(frame: &TorusFrame, moved: f64) -> f64 {
 
 /// The profile pieces of `face` in `frame` ([`torus_creases`]), with the move (local) that
 /// carries the face moved to touch the round's circle back onto `face` (zero where the face
-/// is not moved); `None` where the face is not one of its kinds.
-fn face_pieces(frame: &TorusFrame, face: &Surface, tol: f64) -> Option<(Vec<Piece>, [f64; 2])> {
+/// is not moved), and the bound of the face's tilt; `None` where the face is not one of its
+/// kinds.
+///
+/// The face is parallel to the axis only to `tol`: its profile is taken in the torus's centre
+/// plane (where the face crosses it), and the crease, the profile carried along the axis, is
+/// then off the tilted face by at most `|h| tan(tilt)` at height `h`, `|h| <= r2`, and on a
+/// cylinder also by its section's ellipse, `radius (1 / cos(tilt) - 1)`: the tilt bound, 0 for
+/// a face exactly parallel. It is charged to the target as the move is.
+fn face_pieces(
+    frame: &TorusFrame,
+    face: &Surface,
+    tol: f64,
+) -> Option<(Vec<Piece>, [f64; 2], f64)> {
     let (r1, big_r) = (frame.radii.r1, frame.radii.major());
     let parallel = |d: Vec3| d.dot(frame.axis).abs() <= tol * d.length();
     match face.kind() {
@@ -593,6 +605,18 @@ fn face_pieces(frame: &TorusFrame, face: &Surface, tol: f64) -> Option<(Vec<Piec
             }
             let n2 = [n2[0] / n_len, n2[1] / n_len];
             let dir = [-n2[1], n2[0]];
+            // the plane where it crosses the centre plane: `at` moved along the plane's
+            // steepest direction towards the axis, `a_p = axis - n c`, to height 0
+            let n_hat = normal.unitize().ok()?;
+            let c = n_hat.dot(frame.axis);
+            let steep = 1.0 - c * c;
+            let upright = steep > 0.0;
+            if !upright {
+                return None;
+            }
+            let a_p = frame.axis - n_hat * c;
+            let at = at - a_p * (frame.height(at) / steep);
+            let tilt = frame.radii.r2 * c.abs() / steep.sqrt();
             let q = frame.local(at);
             // the foot of the axis on the line, and its distance
             let foot = add2(q, dir, -dot2(q, dir));
@@ -616,7 +640,7 @@ fn face_pieces(frame: &TorusFrame, face: &Surface, tol: f64) -> Option<(Vec<Piec
                     .iter()
                     .map(|&b| Piece::Tangent { a, b })
                     .collect();
-                Some((pieces, [toward[0] * (d - r1), toward[1] * (d - r1)]))
+                Some((pieces, [toward[0] * (d - r1), toward[1] * (d - r1)], tilt))
             } else {
                 let reach = (big_r * big_r - d * d).sqrt();
                 let ends = [add2(foot, dir, reach), add2(foot, dir, -reach)];
@@ -626,6 +650,7 @@ fn face_pieces(frame: &TorusFrame, face: &Surface, tol: f64) -> Option<(Vec<Piec
                         b: ends[1],
                     }],
                     [0.0, 0.0],
+                    tilt,
                 ))
             }
         }
@@ -635,7 +660,17 @@ fn face_pieces(frame: &TorusFrame, face: &Surface, tol: f64) -> Option<(Vec<Piec
                 return None;
             }
             let radius = c.radius(0.0);
-            let actual = frame.local(rev.origin());
+            // the axis where it crosses the centre plane, and the tilt
+            let axis_c = rev.z_axis().unitize().ok()?;
+            let cos_t = axis_c.dot(frame.axis);
+            let leans = cos_t.abs() > 0.0;
+            if !leans {
+                return None;
+            }
+            let origin = rev.origin() - axis_c * (frame.height(rev.origin()) / cos_t);
+            let sin_t = (1.0 - cos_t * cos_t).max(0.0).sqrt();
+            let tilt = frame.radii.r2 * sin_t / cos_t.abs() + radius * (1.0 / cos_t.abs() - 1.0);
+            let actual = frame.local(origin);
             let d_actual = norm2(actual);
             let touches = (d_actual - radius - r1).abs() <= tol && d_actual > 0.0 && radius > 0.0;
             if !touches {
@@ -681,7 +716,7 @@ fn face_pieces(frame: &TorusFrame, face: &Surface, tol: f64) -> Option<(Vec<Piec
                     kappa: d / radius,
                 });
             }
-            Some((pieces, shift))
+            Some((pieces, shift, tilt))
         }
         _ => None,
     }
@@ -827,6 +862,53 @@ mod tests {
         assert!((2.0 * 5e-7_f64).sqrt() > 1e-8);
         let far = torus_creases(&k, &torus, &wall_at(-5e-7), 1e-6, target).unwrap();
         assert!(far.is_none());
+    }
+
+    /// The wall `x = -0.5 + eps y` (through `(-0.5 + eps y0, y0, 0)`), tilted `eps` from
+    /// parallel to the torus's axis (y), clear of the round: a plain segment's crease.
+    fn tilted_wall(eps: f64, y0: f64) -> Surface {
+        use crate::geom::extent2d::Extent2d;
+        use crate::geom::vector2d::Vec2;
+        use crate::surface::plane::Plane;
+        let domain = Extent2d::from_bounds(-1e5, -1e5, 1e5, 1e5);
+        let along = Vec3::new(eps, 1.0, 0.0).unitize().unwrap();
+        Surface::from(Plane::new(
+            Point3::new(-0.5 + eps * y0, y0, 0.0),
+            along,
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec2::new(1.0, 1.0),
+            &domain,
+        ))
+    }
+
+    /// A wall tilted within `tol` of parallel to the axis, whose own point lies far along
+    /// it, is profiled where it crosses the torus's centre plane, and its tilt is charged:
+    /// tilted 1e-11 with its point at y = 1e4 (where the wall is 1e-7 off its crossing),
+    /// its crease lies within the target of the torus and on the real wall; tilted 1e-7 with
+    /// its point at y = 30 (the tilt alone 1e-7 off over the crease's heights, past the
+    /// target 1e-8) it is not certified, `None`. Profiled at its own point instead, its
+    /// crease would lie 1e-7 and 3e-6 off the wall.
+    #[test]
+    fn a_tilted_wall_is_profiled_in_the_centre_plane_and_its_tilt_charged() {
+        let k = Kernel::default();
+        let torus = planar_torus(&k);
+        let (eps, target) = (1e-11, 1e-8);
+        let curves = torus_creases(&k, &torus, &tilted_wall(eps, 1e4), 1e-6, target)
+            .unwrap()
+            .unwrap();
+        assert_eq!(curves.len(), 2);
+        for c in &curves {
+            let ivl = c.natural_interval();
+            for i in 0..=64 {
+                let p = c
+                    .evaluate_point(&k, ivl.evaluate(f64::from(i) / 64.0))
+                    .unwrap();
+                assert!((p.x - (-0.5 + eps * p.y)).abs() < 1e-10, "{p:?}");
+                assert!(off_torus(p) <= target, "{p:?} {}", off_torus(p));
+            }
+        }
+        let steep = torus_creases(&k, &torus, &tilted_wall(1e-7, 30.0), 1e-6, target).unwrap();
+        assert!(steep.is_none());
     }
 
     /// A wall just clear of the round's circle, past the touching tolerance (x = -2 tol, so

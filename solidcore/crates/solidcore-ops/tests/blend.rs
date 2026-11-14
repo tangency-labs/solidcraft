@@ -2091,3 +2091,34 @@ fn only_the_corner_at_v_looks_across_the_cliffs_seam() {
     assert_eq!(at_v, 1, "a corner at V");
     assert!(far_end >= 1, "a corner away from V");
 }
+
+/// The stair twin's concave chain (E1 rounded at 1 first) rounded at 12, past the riser's
+/// height 10: E2's remainder overflows the riser's top rim, away from V, so even as the
+/// Roll-over's second pass (tried on the first call's refusal) that concave overflow is
+/// refused (only a blend whose edge ends at V overflows as the event's). The call keeps the
+/// first call's refusal, too large with its rail leaving the face, at a size under the riser's
+/// height, and leaves the body as it was.
+#[test]
+fn an_oversized_ledge_chain_keeps_its_refusal() {
+    rig_fixes();
+    let b = stair_twin();
+    let e1 = nearest_edge(&b, [0.0, -5.0, 0.0]);
+    blend(&b, Blend::Round, &[e1], &[1.0], &[], Corners::Filled).unwrap();
+    let before = b.volume(1e-12).unwrap();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let chain = [
+        nearest_edge(&b, [5.0, 0.0, 0.0]),
+        nearest_edge(&b, [1.0 - s, 0.0, -1.0 + s]),
+    ];
+    let got = blend(&b, Blend::Round, &chain, &[12.0], &[], Corners::Filled);
+    match got {
+        Err(Error::TooLarge {
+            size,
+            kind: FitKind::Radius,
+            why: Some(solidcore_ops::RoomReason::RailLeavesFace),
+            ..
+        }) => assert!(size > 0.0 && size < 10.0, "{size}"),
+        other => panic!("not the too-large refusal: {other:?}"),
+    }
+    assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
+}

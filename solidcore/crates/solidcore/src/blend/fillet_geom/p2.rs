@@ -2506,14 +2506,22 @@ impl FilletBrep {
             }
             self.fillet_vertexuse_mut(vu1)?.set_tsect_pnt(&tsect1);
 
-            // Not upstream (#10876): in the Roll-over's second pass, a rail's end found on a
-            // straight side edge's line continued past its far end is not on the side edge:
-            // it is looked for across the cliff's tangent seam there (below)
-            if found
-                && corners.corner(corner)?.roll_over
-                && !ivl.contains_value(edgeuse_parameter, EFF_ZERO * (1.0 + ivl.length()))
-            {
-                found = false;
+            // Not upstream (#10876): in the Roll-over's second pass (its corner at V), a
+            // rail's end found on a straight side edge's line continued past its far end (the
+            // end away from the corner's vertex) is not on the side edge: it is looked for
+            // across the cliff's tangent seam there (below). One found behind the corner's
+            // vertex stays as any pass takes it.
+            if found && corners.corner(corner)?.roll_over {
+                let slack = EFF_ZERO * (1.0 + ivl.length());
+                let far_is_max = edge::start_vertex(target, side_edge)? == cp_vertex;
+                let past_far = if far_is_max {
+                    edgeuse_parameter > ivl.max() + slack
+                } else {
+                    edgeuse_parameter < ivl.min() - slack
+                };
+                if past_far {
+                    found = false;
+                }
             }
 
             // SolidCraft change (the fork's 63c7962): a side edge

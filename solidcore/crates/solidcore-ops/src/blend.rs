@@ -1533,56 +1533,14 @@ fn blend_on_body(
     // the blend corner's Roll-over (#10876): its corners are noted where the corners step
     // refuses them; a round asked of the event's concave chain on its own (B1 rounded by an
     // earlier feature: [`is_concave_chain`], the ledge's edges once B1 is rounded, never a
-    // pocket floor's) is the event's second pass
+    // pocket floor's) is the event's second pass where the first call refuses it
     let step = if may_go_first && kind == Blend::Round && turn == Turn::Mitre {
         RollOverStep::Classify
     } else {
         RollOverStep::No
     };
-    // on a copy (the asked edges at their places in the copy's order): where it does not
-    // build or does not finish, the round is asked as before, on the untouched input
-    if step == RollOverStep::Classify && is_concave_chain(k, b, &picked)? {
-        // the faces the sessions log, put back where the copy is given up (its faces are not
-        // the result's)
-        let log = k.blend_face_log.clone();
-        let mut copy = brep_copy(k, b)?;
-        let (order, copy_list) = (b.edge_list().to_vec(), copy.edge_list().to_vec());
-        let mapped: Option<Vec<EdgeId>> = picked
-            .iter()
-            .map(|e| {
-                order
-                    .iter()
-                    .position(|x| x == e)
-                    .and_then(|i| copy_list.get(i).copied())
-            })
-            .collect();
-        let ends = match &mapped {
-            Some(mapped) => concave_chain_ends(k, &mut copy, mapped)?,
-            None => Vec::new(),
-        };
-        if let (Some(mapped), false) = (mapped, ends.is_empty()) {
-            let p = Pass {
-                roll_over: RollOverStep::Concave(&ends),
-                ..together(&mapped, section(each), turn, &[])
-            };
-            match pass_or_refuse(k, &mut copy, p).and_then(|r| match r {
-                Ok(_) => finish(k, copy, expect),
-                Err(e) => Ok(Err(e)),
-            }) {
-                Ok(Ok(rolled)) => {
-                    *b = rolled;
-                    return Ok(Ok(Blended {
-                        dropped,
-                        holes: Vec::new(),
-                        made: Vec::new(),
-                    }));
-                }
-                Err(e) if e.is_cancelled() => return Err(e),
-                Ok(Err(_)) | Err(_) => {}
-            }
-        }
-        k.blend_face_log = log;
-    }
+    // the input's edge order, for the asked edges' places in a copy of it
+    let input_order = b.edge_list().to_vec();
     let mut stopped = Stopped::default();
     let p = Pass {
         edges: &picked,
@@ -1636,6 +1594,60 @@ fn blend_on_body(
                 Err(e) if e.is_cancelled() => return Err(e),
                 Ok(Err(_)) | Err(_) => k.blend_face_log = log,
             }
+        }
+    }
+    // a round asked of the event's concave chain on its own that the first call refuses (no
+    // overflow left to go first): built as the event's second pass on a copy of the
+    // untouched input (the asked edges at their places in the copy's order); where it is
+    // not the chain, does not build or does not finish, the first call's refusal stands
+    if step == RollOverStep::Classify
+        && stopped.roll_overs.is_empty()
+        && stopped.overflow.is_none()
+        && made.is_err()
+    {
+        if let Some(input) = fresh.as_ref() {
+            // the faces the sessions log, put back where the copy is given up (its faces
+            // are not the result's)
+            let log = k.blend_face_log.clone();
+            let mut copy = brep_copy(k, input)?;
+            let copy_list = copy.edge_list().to_vec();
+            let mapped: Option<Vec<EdgeId>> = picked
+                .iter()
+                .map(|e| {
+                    input_order
+                        .iter()
+                        .position(|x| x == e)
+                        .and_then(|i| copy_list.get(i).copied())
+                })
+                .collect();
+            let ends = match &mapped {
+                Some(mapped) if is_concave_chain(k, &mut copy, mapped)? => {
+                    concave_chain_ends(k, &mut copy, mapped)?
+                }
+                _ => Vec::new(),
+            };
+            if let (Some(mapped), false) = (mapped, ends.is_empty()) {
+                let p = Pass {
+                    roll_over: RollOverStep::Concave(&ends),
+                    ..together(&mapped, section(each), turn, &[])
+                };
+                match pass_or_refuse(k, &mut copy, p).and_then(|r| match r {
+                    Ok(_) => finish(k, copy, expect),
+                    Err(e) => Ok(Err(e)),
+                }) {
+                    Ok(Ok(rolled)) => {
+                        *b = rolled;
+                        return Ok(Ok(Blended {
+                            dropped,
+                            holes: Vec::new(),
+                            made: Vec::new(),
+                        }));
+                    }
+                    Err(e) if e.is_cancelled() => return Err(e),
+                    Ok(Err(_)) | Err(_) => {}
+                }
+            }
+            k.blend_face_log = log;
         }
     }
     if stopped.overflow.is_some() {
