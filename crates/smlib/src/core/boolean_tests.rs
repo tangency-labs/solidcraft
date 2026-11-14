@@ -95,6 +95,14 @@ fn case(name: &str) -> Case {
             Some(9000.0),
             None,
         ),
+        // Fifteen 10 mm cubes in a row, each overlapping its neighbour by 5 mm (SolidCraft issue
+        // #16552's join of fifteen tools): the level-by-level union or the one-by-one retry builds
+        // them all into one body of 15000 - 14 * 125 mm3.
+        "union_all_fifteen_chain" => plain(
+            Op::UnionAll((0..15).map(|i| Shape::Box([f64::from(i) * 5.0, 0.0, 0.0], [10.0; 3])).collect()),
+            Some(15.0 * 1000.0 - 14.0 * 125.0),
+            None,
+        ),
         "intersect_disjoint" => plain(Op::Boolean(A, Shape::Box([20.0; 3], [10.0; 3]), BooleanOp::Intersect), None, None),
         // A 10 mm sphere less a cap of height h = 5: 4/3 πr³ - πh²(3r - h)/3.
         // (solidcore#1431, brep_volume of a whole sphere failing at 1e-8, does not touch the cut
@@ -207,6 +215,7 @@ cases!(
     subtract_inside_void,
     subtract_cylinder_hole,
     union_all_grid,
+    union_all_fifteen_chain,
     intersect_disjoint,
     sphere_minus_box,
     imprint_top_face,

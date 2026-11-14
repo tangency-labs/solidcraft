@@ -162,34 +162,83 @@ pub(crate) fn boolean(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>>
     result(d, Ok(None))
 }
 
-/// `smlib_boolean_union_all`: copies of `bodies` unioned pairwise, level by level (an odd one
+/// `smlib_boolean_union_all`: copies of `bodies` united pairwise, level by level (an odd one
 /// carried to the next level as it is), each union `SmApiBoolean`'s; then `finish` with
 /// non-manifold results allowed. An empty result is [`Error::Empty`].
+///
+/// Not upstream: when the level-by-level union fails with a retriable kernel failure (a
+/// classification that found no single nearest point on a face's surface, a refused gap, ...),
+/// the same bodies are united once more on fresh copies, one at a time against the result so far
+/// ([`union_one_by_one`]). The union of solids is the same set whichever pairing computes it, and
+/// a pair the level scheme cannot classify may classify fine against the accumulated body, so a
+/// join of many bodies that fails one pairing is built instead of refused
+/// (SolidCraft issue #16552). A failure of the retry, an unported or cancelled first failure
+/// keeps its own error.
 pub(crate) fn union_all(bodies: &[&Body]) -> Result<Body> {
     if bodies.is_empty() || bodies.len() > crate::MAX_UNION_BREPS {
         return Err(Error::Argument);
     }
     usable("smlib_boolean_union_all", bodies)?;
     let d = run_on("smlib_boolean_union_all", &operands(bodies), |k| {
-        let mut level = copies(k, bodies)?;
+        let level = copies(k, bodies)?;
         let solid_in = all_solid(&level)?;
-        while level.len() > 1 {
-            let mut next = Vec::with_capacity(level.len().div_ceil(2));
-            let mut it = level.into_iter();
-            while let Some(a) = it.next() {
-                match it.next() {
-                    Some(b) => next.push(sm::boolean(k, a, b, BooleanOperation::Union)?.result),
-                    None => next.push(a),
+        match union_level_by_level(k, level) {
+            Ok(r) => finish(r, solid_in, true),
+            Err(first) if first.is_unported() => Err(first),
+            Err(first) => {
+                let fresh = copies(k, bodies)?;
+                match union_one_by_one(k, fresh) {
+                    Ok(r) => finish(r, solid_in, true),
+                    // a cancellation of the retry is the answer, not the first failure
+                    Err(e) if e.is_cancelled() => Err(e),
+                    Err(_) => Err(first),
                 }
             }
-            level = next;
-        }
-        match level.pop() {
-            Some(r) => finish(r, solid_in, true),
-            None => Ok(Done::Empty),
         }
     })?;
     result(d, Err(Error::Empty))?.ok_or(Error::Empty)
+}
+
+/// The level-by-level union of `level`: pairs united at each level, an odd one carried, until one
+/// body is left (the level scheme of upstream's `smlib_boolean_union_all`).
+fn union_level_by_level(k: &mut Kernel, mut level: Vec<Brep>) -> SolidResult<Brep> {
+    while level.len() > 1 {
+        let mut next = Vec::with_capacity(level.len().div_ceil(2));
+        let mut it = level.into_iter();
+        while let Some(a) = it.next() {
+            match it.next() {
+                Some(b) => next.push(sm::boolean(k, a, b, BooleanOperation::Union)?.result),
+                None => next.push(a),
+            }
+        }
+        level = next;
+    }
+    level.pop().ok_or_else(|| SolidError::invalid_input("smlib_boolean_union_all", "no operand"))
+}
+
+/// Not upstream: the same bodies united one at a time, each into the result so far. A body whose
+/// union fails is put aside until the others are in (a later union may classify the pair that
+/// failed now); one that still fails then fails the retry. Each union works on a copy of the
+/// result so far and a copy of the body, so a failed union leaves both ready to try again.
+fn union_one_by_one(k: &mut Kernel, breps: Vec<Brep>) -> SolidResult<Brep> {
+    let mut breps = breps.into_iter();
+    let Some(mut acc) = breps.next() else {
+        return Err(SolidError::invalid_input("smlib_boolean_union_all", "no operand"));
+    };
+    let mut deferred = Vec::new();
+    for b in breps {
+        let acc_try = brep_copy(k, &acc)?;
+        let tool = brep_copy(k, &b)?;
+        match sm::boolean(k, acc_try, tool, BooleanOperation::Union) {
+            Ok(r) => acc = r.result,
+            Err(_) => deferred.push(b),
+        }
+    }
+    for b in deferred {
+        let acc_try = brep_copy(k, &acc)?;
+        acc = sm::boolean(k, acc_try, b, BooleanOperation::Union)?.result;
+    }
+    Ok(acc)
 }
 
 /// `smlib_boolean2d`: `SmApiBoolean2d` (`SmPrimitiveCreation::Boolean2D`) on copies of `a` and
