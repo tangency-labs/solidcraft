@@ -163,6 +163,22 @@ impl Faces {
     }
 }
 
+/// The unit direction record edge `e` leaves its end vertex `v` in, from its exact curve. None
+/// for a closed edge (both ends at one vertex) or one that does not end at `v`.
+pub(crate) fn leaving(rec: &Brep, e: usize, v: u32) -> Option<Vec3> {
+    let edge = rec.edges.get(e)?;
+    let [a, b] = edge.vertices;
+    if a == b {
+        None
+    } else if a == v {
+        curve_tangent(edge.parameters(), edge.interval[0])
+    } else if b == v {
+        curve_tangent(edge.parameters(), edge.interval[1]).map(|t| t * -1.0)
+    } else {
+        None
+    }
+}
+
 /// The unit tangent of a record curve at `t`, along increasing `t`.
 pub(crate) fn curve_tangent(c: &Curve, t: f64) -> Option<Vec3> {
     curve_derivative(c, t)?.normalized().filter(|d| d.is_finite())
@@ -305,13 +321,13 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
 /// that material touches the edge, so none of it stands further off. `reach`: how far the blend
 /// reaches from the edge (a round's radius, a chamfer's larger distance), which sizes the slab.
 ///
-/// Only where it gives the blend SMLib would build on an unbounded face: the edge is straight,
-/// one of its faces is planar and it is concave (material in front of that face on the other
-/// face's side, and in its plane on one side of the edge's line only, the other face's), and
-/// at each end of the edge a planar face square to it ends the blend, so the
-/// slab's square ends add no material the blend could run into. `None` where it does not apply
-/// or a step fails: the caller keeps SMLib's refusal. Decided on exact geometry. Its steps are
-/// checked as they are built whatever the evaluation checks, also under `Validation::Off`.
+/// The kernel says where that gives the blend it would build on an unbounded face, and
+/// measures the slab ([`solidcore_ops::carried_faces_ordered`]: a straight concave edge, a flat
+/// face of it, and a flat face square to the edge at each end, so the slab's square ends add no
+/// material the blend could run into). This only sequences the operations, each recording its
+/// history. `None` where it does not apply or a step fails: the caller keeps SMLib's refusal.
+/// Its steps are checked as they are built whatever the evaluation checks, also under
+/// `Validation::Off`.
 fn concave_overflow_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -> Result<Body>) -> Option<Body> {
     // Each step checked as it is built: one whose result the check refuses gives `None`, so the
     // caller keeps the kernel's refusal rather than a body the feature's check refuses later.
@@ -321,65 +337,26 @@ fn concave_overflow_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&B
 /// [`concave_overflow_round`]'s steps.
 fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -> Result<Body>) -> Option<Body> {
     use solidcore_record::{Loop2, Plane, Region2, Vec2};
-    if !(reach.is_finite() && reach > 0.0) {
-        return None;
-    }
-    let rec = Faces::of(body).ok()?;
     let (picked, _) = crate::blend_smlib::picked_edges(body, &[pick]).ok()?;
     let [e] = picked.as_slice() else { return None };
     let e = *e;
-    if !rec.straight(e) {
-        return None;
-    }
-    let (a, b) = rec.ends(e)?;
-    let length = a.dist(b);
-    let d = (b - a).normalized()?;
+    let (ops, order) = body.ops_body()?;
+    let found = solidcore_ops::carried_faces_ordered(ops, order, e, reach).ok()?;
+    let rec = Faces::of(body).ok()?;
     let size = body.size();
-    if !(length > 0.0 && size.is_finite() && size > 0.0) {
-        return None;
-    }
-    let eps = (size * 1e-4).max(1e-4).min(reach * 0.1);
-    let middle = (a + b) * 0.5;
-    let [vs, ve] = rec.rec.edges.get(e)?.vertices;
-    // A planar face square to the edge, other than its own, at vertex v.
-    let squared_at = |v: u32| {
-        rec.rec.edges.iter().enumerate().filter(|(_, x)| x.vertices.contains(&v)).any(|(i, _)| {
-            rec.faces_of(i)
-                .into_iter()
-                .any(|f| !rec.faces_of(e).contains(&f) && rec.plane_normal(f as usize).is_some_and(|n| n.dot(d).abs() > 1.0 - 1e-9))
-        })
-    };
-    if !(squared_at(vs) && squared_at(ve)) {
-        return None;
-    }
-    for f in rec.faces_of(e) {
-        let f = f as usize;
-        let Some(n) = rec.plane_normal(f) else { continue };
-        if n.dot(d).abs() > 1e-9 {
-            continue;
-        }
-        let u = n.cross(d);
-        // concave: material in front of the plane beside the edge, on the other face's side
-        let inside = |p: Vec3| matches!(body.classify_point(p), Ok(crate::PointClass::Inside));
-        if !(inside(middle + n * eps + u * eps) || inside(middle + n * eps - u * eps)) {
-            continue;
-        }
-        // The side of the edge's line, in the plane, that the other face stands on: the
-        // material is there, and the flat face lies on the other.
-        let along_u = match (inside(middle + u * eps), inside(middle - u * eps)) {
-            (true, false) => true,
-            (false, true) => false,
-            _ => continue,
-        };
-        let far = 4.0 * (size + reach);
-        let plane = Plane { origin: a, x: d, y: u };
-        let rect = Loop2::polygon(&[Vec2::new(0.0, -far), Vec2::new(length, -far), Vec2::new(length, far), Vec2::new(0.0, far)]);
-        let slab = crate::build::extrude(&plane, &[Region2 { outer: rect, holes: vec![] }], -far, 0.0).ok()?.into_iter().next()?;
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    let volume = |x: &Body| crate::measure(x).ok().map(|m| m.volume);
+    // A face whose carried-on blend fails at a step gives way to the edge's other face.
+    let carry = |c: &solidcore_ops::CarriedFace| -> Option<Body> {
+        let plane = Plane { origin: v(c.origin), x: v(c.along), y: v(c.across) };
+        let length = c.outline[1][0];
+        let rect = Loop2::polygon(&c.outline.map(|p| Vec2::new(p[0], p[1])));
+        let slab = crate::build::extrude(&plane, &[Region2 { outer: rect, holes: vec![] }], c.depth[0], c.depth[1]).ok()?.into_iter().next()?;
         let carried = crate::boolean(body, &slab, crate::BoolOp::Union).ok()??;
         let rounded = blend(&carried).ok()?;
         let fill = crate::boolean(&rounded, &carried, crate::BoolOp::Cut).ok()??;
         // the face itself, by its index, for its sheet
-        let sheet = crate::surfaces::taken(body, &rec.rec, &[(f, false)]).ok()?;
+        let sheet = crate::surfaces::taken(body, &rec.rec, &[(c.face, false)]).ok()?;
         // The fill touches the edge, so it stands no further off the face's plane or the edge's
         // line than its own box is across.
         let bounds = fill.exact_bounds().ok()?;
@@ -387,19 +364,19 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
         let prism = crate::thicken(&sheet, 2.0 * room, true).ok()?;
         // Past the edge's line the fill stands over the other face, not over the flat face's
         // outline, and is kept whole.
-        let (from, to) = if along_u { (0.0, room) } else { (-room, 0.0) };
+        let (from, to) = if c.other_side > 0.0 { (0.0, room) } else { (-room, 0.0) };
         let beyond = Loop2::polygon(&[Vec2::new(0.0, from), Vec2::new(length, from), Vec2::new(length, to), Vec2::new(0.0, to)]);
         let beyond = crate::build::extrude(&plane, &[Region2 { outer: beyond, holes: vec![] }], -room, room).ok()?.into_iter().next()?;
         let keep = crate::boolean(&prism, &beyond, crate::BoolOp::Union).ok()??;
         let kept = crate::boolean(&fill, &keep, crate::BoolOp::Intersect).ok()??;
         let joined = crate::boolean(body, &kept, crate::BoolOp::Union).ok()??;
         let joined = closed(body, joined).ok()?;
-        let grew = |x: &Body| crate::measure(x).ok().map(|m| m.volume);
-        if grew(&joined)? > grew(body)? {
+        if volume(&joined)? > volume(body)? {
             return Some(over_body_alone(joined, body, e));
         }
-    }
-    None
+        None
+    };
+    found.iter().find_map(carry)
 }
 
 /// What a refusal of a setback too short for its corner says before the least that builds (in
@@ -1175,14 +1152,7 @@ fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Result<Vec<usize>>
         }
         Ok(s)
     };
-    // The unit direction edge `e` leaves its end `v` in.
-    let leaving = |e: usize, v: u32| -> Option<Vec3> {
-        let [a, b] = rec.rec.edges.get(e)?.vertices;
-        if a == b {
-            return None;
-        }
-        if a == v { rec.tangent(e, false) } else { rec.tangent(e, true).map(|t| t * -1.0) }
-    };
+    let leaving = |e: usize, v: u32| leaving(&rec.rec, e, v);
     let cos = solidcraft_geom::TANGENT_CHAIN.cos();
     let accept = normal_reach(rec);
     // Whether edge `e` is convex at its end `v` (its faces meet at less than 180° inside the

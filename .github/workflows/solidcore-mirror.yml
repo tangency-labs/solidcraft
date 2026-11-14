@@ -46,7 +46,7 @@ env:
 jobs:
   mirror:
     name: Mirror main's kernel commits
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     # Incremental: seconds per run.
     timeout-minutes: 15
     defaults:

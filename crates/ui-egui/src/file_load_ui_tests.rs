@@ -1114,6 +1114,43 @@ fn a_newer_design_opens_with_a_notice_and_no_dialog() {
     assert!(app.dialog.is_none() && !app.ui.palette_open);
 }
 
+/// Imported STEP bodies have no editor. Both edit entry points explain this without opening
+/// the palette, changing its text, or leaving the timeline rolled back.
+#[test]
+fn editing_an_imported_body_reports_nothing_to_edit() {
+    let dir = scratch("import-edit");
+    let path = step_box(&dir);
+    for double_click in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.open_path(&path);
+        h.app.home.open = false;
+        let feature = h.app.session.doc.features.iter().find(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Import { .. })).unwrap();
+        let (id, name) = (feature.id, feature.name.clone());
+        h.app.run("solid.box", json!({"length": 2, "width": 3, "height": 4, "corner": [40,0,0]})).unwrap();
+        h.settle();
+        let before = h.app.session.doc.to_json();
+        h.app.sbox.text = "kept search".into();
+        if double_click {
+            h.frames(4);
+            h.step(&json!({"click": {"handle": format!("timeline:{name}")}, "double": true})).unwrap();
+        } else {
+            let reply = h.call("ui.editFeature", json!({"feature": id}));
+            assert_eq!(reply["ok"], true, "{reply}");
+            assert_eq!(reply["result"]["dialog"], serde_json::Value::Null, "{reply}");
+            assert_eq!(reply["result"]["marker"], serde_json::Value::Null, "{reply}");
+        }
+        h.settle();
+        assert!(!h.app.ui.palette_open, "no raw command palette");
+        assert!(h.app.dialog.is_none() && h.app.editing_state.is_none());
+        assert_eq!(h.app.sbox.text, "kept search");
+        assert_eq!(h.app.session.doc.to_json(), before, "the timeline is restored");
+        let (text, _, error) = h.app.status.as_ref().expect("a status explains the missing editor");
+        assert_eq!(text, "Imported body: nothing to edit");
+        assert!(!error, "an informational notice");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A STEP file of a 10 x 20 x 30 box in `dir`.
 fn step_box(dir: &std::path::Path) -> String {
     let path = dir.join("box.step").to_string_lossy().to_string();
@@ -1143,6 +1180,70 @@ fn hold_next(w: &mut Win) -> (std::sync::mpsc::Receiver<std::thread::ThreadId>, 
 
 fn bodies(app: &SolveApp) -> usize {
     app.session.world_state().map_or(0, |state| state.bodies.len())
+}
+
+#[test]
+fn opening_a_file_from_home_shows_progress_and_cancel_until_the_design_lands() {
+    let dir = scratch("home-open");
+    let path = large_design(&dir, 0);
+    for size in [vec2(1280.0, 720.0), vec2(640.0, 480.0)] {
+        let mut w = Win::new();
+        w.size = size;
+        w.app.home.open = true;
+        let (started, release) = hold_next(&mut w);
+        crate::file_load::begin(&mut w.app, &path, false);
+        started.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+        for _ in 0..3 {
+            w.frame(vec![]);
+        }
+        assert!(w.app.home.open && w.app.file_load.busy(), "Home stays open while the worker waits");
+        let cancel = crate::scenario::handle_at("file_loading:cancel").expect("Home shows the loading card's Cancel button");
+        assert!(Rect::from_min_size(Pos2::ZERO, size).contains(cancel), "Cancel is inside the window at {size:?}");
+        assert!(crate::scenario::rect_of("operations:panel").is_none(), "Home has no operations panel");
+        release.send(()).unwrap();
+        frames_until(&mut w, "the file opened from Home lands", |app| app.file_load.idle());
+        w.frame(vec![]);
+        assert!(!w.app.home.open, "the loaded design replaces Home");
+        assert_eq!(bodies(&w.app), 1);
+        assert!(w.app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, &path)));
+        assert!(crate::scenario::handle_at("file_loading:cancel").is_none(), "the completed load's card disappears");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn returning_home_during_a_file_open_shows_cancel_and_preserves_the_current_design() {
+    let dir = scratch("home-cancel");
+    let path = large_design(&dir, 0);
+    let mut w = Win::new();
+    w.size = vec2(1280.0, 720.0);
+    w.app.home.open = false;
+    w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    let original = w.app.session.doc.clone();
+    let (started, release) = hold_next(&mut w);
+    crate::file_load::begin(&mut w.app, &path, false);
+    started.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+    for _ in 0..3 {
+        w.frame(vec![]);
+    }
+    assert!(crate::scenario::rect_of("operations:panel").is_some(), "the workspace shows the operation");
+    assert!(crate::scenario::handle_at("file_loading:cancel").is_none());
+    w.app.home.open = true;
+    for _ in 0..3 {
+        w.frame(vec![]);
+    }
+    assert!(w.app.home.open && w.app.file_load.busy());
+    assert!(crate::scenario::rect_of("operations:panel").is_none());
+    let cancel = crate::scenario::handle_at("file_loading:cancel").expect("Cancel stays available after returning Home");
+    w.gesture(&[cancel]);
+    assert!(!w.app.file_load.busy(), "Home's Cancel button cancels the open");
+    drop(release);
+    w.frame(vec![]);
+    assert!(w.app.home.open);
+    assert!(std::sync::Arc::ptr_eq(&original, &w.app.session.doc));
+    assert_eq!((w.app.docs.count(), bodies(&w.app)), (1, 1));
+    assert!(crate::scenario::handle_at("file_loading:cancel").is_none());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// With the design usable (the default), a file opening is a row of the operations panel, not a

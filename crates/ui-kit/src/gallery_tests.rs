@@ -430,6 +430,38 @@ pub const ELEMENTS: &[Element] = &[
             },
         );
     }),
+    element!("browser", |ui, _| {
+        let mut state = browser::BrowserState::default();
+        let header = browser::Header { title: "Objects", count: "2 objects", collapsible: true, search: Some("Search objects") };
+        let _ = browser::Browser::new(&mut state, browser::Style::default(), 0).header(header).show(ui, |rows| {
+            rows.row(browser::Node {
+                id: 1,
+                key: "layer",
+                row: Row { fold: Some(true), eye: Some(true), icon: "folder", label: "Default", radio: Some(true), count: "2", ..Default::default() },
+                click_folds: true,
+                ..Default::default()
+            });
+            for (id, label, selected) in [(2, "Body 1", true), (3, "Body 2", false)] {
+                rows.row(browser::Node {
+                    id,
+                    key: label,
+                    row: Row {
+                        depth: 1,
+                        eye: Some(true),
+                        icon: "body",
+                        label,
+                        name: true,
+                        selected,
+                        mark: if selected { Mark::Here } else { Mark::None },
+                        ..Default::default()
+                    },
+                    select: browser::Selectable::Yes(0),
+                    rename: browser::Rename::Inline,
+                    ..Default::default()
+                });
+            }
+        });
+    }),
     element!("tree_row_disabled_actions", |ui, _| {
         let actions =
             [TreeAction { icon: "lookat", hover_only: true, label: "Solo", reason: Some("Not available yet"), target: "gallery:tree:solo" }];
@@ -1121,6 +1153,7 @@ pub const ELEMENTS: &[Element] = &[
                         workspace: "Design",
                         thumbnail: None,
                         thumbnail_failed: false,
+                        security: None,
                     },
                 );
             }
@@ -1137,6 +1170,7 @@ pub const ELEMENTS: &[Element] = &[
                 workspace: "Design",
                 thumbnail: None,
                 thumbnail_failed: false,
+                security: None,
             },
         );
     }),
@@ -1710,6 +1744,12 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("expr_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         expr_row(ui, "Gallery", &mut s.value);
+    }),
+    element!("action_row", "dialog:action:gallery", Some("dialog:action:gallery"), |ui, _| {
+        action_row(ui, "gallery", "Option");
+    }),
+    element!("value_row", "dialog:row:Gallery", None, |ui, _| {
+        value_row(ui, "Gallery", "XY plane");
     }),
     element!("count_row", "dialog:row:Gallery", Some("dialog:Gallery up"), |ui, _| {
         let mut count = "6".to_owned();
@@ -2664,6 +2704,53 @@ fn preset_card_and_help_icon_behave() {
         let help = help_icon(ui, "Help text");
         assert!(help.rect.width() > 8.0 && help.rect.width() < 20.0);
     });
+}
+
+/// The (i) shows its text after a click or a key, not only on hover: a click opens the popover, a
+/// click outside closes it, and Enter or Space on the focused icon opens it again until Escape closes it.
+#[test]
+fn help_icon_opens_its_text_on_a_click_or_a_key() {
+    use super::preferences_cards::help_icon;
+    use super::test_support::{frame, frame_cursor, key, pointer};
+    let ctx = super::test_support::context();
+    let focus = std::cell::Cell::new(false);
+    let mut draw = |ui: &mut Ui| {
+        let response = help_icon(ui, "Help text");
+        if focus.replace(false) {
+            response.request_focus();
+        }
+    };
+    let popover = || solidcraft_ui_registry::rect_of("prefs:help_icon:popover");
+    frame(&ctx, vec![], &mut draw);
+    let at = solidcraft_ui_registry::handle_at("prefs:help_icon").expect("the icon publishes its handle");
+    assert_eq!(frame_cursor(&ctx, at, &mut draw), egui::CursorIcon::PointingHand);
+    for pressed in [true, false] {
+        frame(&ctx, pointer(at, pressed), &mut draw);
+    }
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_some(), "a click on the icon opens the popover");
+    let outside = egui::pos2(300.0, 390.0);
+    for pressed in [true, false] {
+        frame(&ctx, pointer(outside, pressed), &mut draw);
+    }
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_none(), "a click outside closes the popover");
+    focus.set(true);
+    frame(&ctx, vec![], &mut draw);
+    frame(&ctx, key(egui::Key::Enter), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_some(), "Enter on the focused icon opens the popover");
+    frame(&ctx, key(egui::Key::Escape), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_none(), "Escape closes the popover");
+    focus.set(true);
+    frame(&ctx, vec![], &mut draw);
+    frame(&ctx, key(egui::Key::Space), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_some(), "Space on the focused icon opens the popover");
+    frame(&ctx, key(egui::Key::Escape), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_none(), "Escape closes the popover again");
 }
 
 /// Light and dark boards of the shared Preferences widgets and of every figure, rendered on the CPU.

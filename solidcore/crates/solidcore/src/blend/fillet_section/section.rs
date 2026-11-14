@@ -41,10 +41,12 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData
 use crate::nurbs::b_spline_surface::p1::CanonicalSurfaceData;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm};
 use crate::nurbs::knots::Side;
+use crate::surface::offset_surface::OffsetSurface;
 use crate::surface::procedural_blend::chamfer::ChamferDefinition;
 use crate::surface::procedural_blend::{count_area_root, BlendDefinitionInput, ProceduralBlend};
 use crate::surface::surface::{Surface, SurfaceKind};
 use core::sync::atomic::{AtomicU32, Ordering};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -151,11 +153,43 @@ pub struct GnLawRound<'a> {
 /// sets (the balls' centres at the stations, over t; 0d43b4c).
 type Built = (Surface, Option<BSplineCurve>);
 
-/// The surface under an offset surface (`GetBaseSurface`), else the surface itself.
-fn base_of(s: &Surface) -> &Surface {
+/// Not the fork's: the face a ball rolls on, for a section by its definition (the round's
+/// circle, [`crate::blend::fillet_standard_solver::p2`], and a section of any order, the
+/// curvature-continuous round's): the surface the trace rolled the ball on. Past its domain
+/// the offset of a B-spline, surface of revolution or surface of extrusion is evaluated on
+/// its extended base (`m_pExtendedSurface`: the base's tangent extension, or a surface of
+/// revolution of a circle's arc carried on as its circle), while the base itself continues
+/// otherwise (a B-spline's end spans carried on, a revolved generator's extrapolation). A
+/// section whose rails run on past the face (an edge's round run on past the edge's ends,
+/// or out to an End round a tube) had no foot on the plain base there: its first station
+/// missed the rails (by more than 1 on a twisted wall; by 93 at the open end of a long
+/// shoulder between two lofted sheets, where the curvature-continuous round was refused).
+/// So where the offset holds an extension (the one it holds now, pending or stored, which
+/// contains every point the trace evaluated), the section rolls on it. A plane, cylinder,
+/// cone, sphere or torus continues as itself and keeps its analytic kind, and a blend by its
+/// definition keeps its definition.
+pub(crate) fn rolled_on(offset: &OffsetSurface) -> Cow<'_, Surface> {
+    let base = offset.base_surface();
+    let extends = matches!(
+        base.kind(),
+        SurfaceKind::BSpline(_)
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_)
+    );
+    let extended = if extends {
+        offset.with_extended_base_surface(|e| e.map(Surface::clone_keeping_owner))
+    } else {
+        None
+    };
+    extended.map_or(Cow::Borrowed(base), Cow::Owned)
+}
+
+/// The face `s` stands for: under an offset surface, the surface its ball rolls on
+/// ([`rolled_on`]); any other surface, itself.
+fn face_of(s: &Surface) -> Cow<'_, Surface> {
     match s.kind() {
-        SurfaceKind::OffsetSurface(o) => o.base_surface(),
-        _ => s,
+        SurfaceKind::OffsetSurface(o) => rolled_on(o),
+        _ => Cow::Borrowed(s),
     }
 }
 
@@ -1061,7 +1095,8 @@ impl GnSectionFsg {
         uvs: [&mut BSplineCurve; 2],
     ) -> Result<Surface> {
         let [s1, s2] = surfaces;
-        let faces = [base_of(s1), base_of(s2)];
+        let (f1, f2) = (face_of(s1), face_of(s2));
+        let faces = [f1.as_ref(), f2.as_ref()];
         self.build(
             k,
             center_line,
@@ -2189,6 +2224,58 @@ mod tests {
     use crate::geom::extent2d::Extent2d;
     use crate::math::Vec2;
     use crate::surface::plane::Plane;
+
+    /// A curved patch: one bicubic span over [0, 1] x [0, 1].
+    fn dome() -> Surface {
+        use crate::nurbs::math::{CPoint, NOW};
+        let net: Vec<Vec<CPoint>> = (0..4_u32)
+            .map(|i| {
+                (0..4_u32)
+                    .map(|j| {
+                        let (x, y) = (f64::from(i) / 3.0, f64::from(j) / 3.0);
+                        let z = 0.5 * ((x - 0.5).powi(2) + (y - 0.5).powi(2)) + 0.3 * x * y;
+                        CPoint::new(x, y, z, NOW)
+                    })
+                    .collect()
+            })
+            .collect();
+        let knots = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        Surface::from(BSplineSurface::from_data(3, 3, 3, 3, 7, 7, &net, &knots, &knots).unwrap())
+    }
+
+    /// Past its face's domain a section's station is solved on the surface the trace rolled
+    /// the ball on: the offset's extension of its base. There the face's point with the
+    /// offset distance along its normal is the ball's centre the offset gives; the base's
+    /// own end span carried on is another surface, whose foot misses that centre (a
+    /// curvature-continuous round run on past the open ends of two lofted sheets was refused
+    /// for it).
+    #[test]
+    fn past_its_face_a_section_rolls_on_the_offset_s_extension() {
+        let k = Kernel::default();
+        let d = 0.25;
+        let mut offset =
+            OffsetSurface::new(&k, d, dome(), true, crate::geom::extent2d::SS_NONE).unwrap();
+        offset.set_allow_extension(true);
+        let past = Point2::new(1.6, 0.4);
+        // the trace's ball centre there, on the offset, which extends its base to reach it
+        let centre = offset.evaluate_point(&k, past).unwrap();
+        let miss = |s: &Surface| -> f64 {
+            let p = surface_partials(&k, s, past, 1).unwrap();
+            let foot = vec3(p.at(0, 0));
+            let n = vec3(p.at(1, 0)).cross(vec3(p.at(0, 1))).unitize().unwrap();
+            (foot + n * d)
+                .distance(centre)
+                .min((foot - n * d).distance(centre))
+        };
+        let faced = Surface::from(offset.clone());
+        let face = face_of(&faced);
+        assert!(miss(&face) < 1e-9, "the extension's foot: {}", miss(&face));
+        assert!(
+            miss(&dome()) > 1e-2,
+            "the base carried on: {}",
+            miss(&dome())
+        );
+    }
 
     fn plane(x_axis: Vec3, y_axis: Vec3) -> Surface {
         Surface::from(Plane::new(

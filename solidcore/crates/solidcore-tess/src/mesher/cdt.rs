@@ -82,6 +82,14 @@ pub(crate) struct Flat {
 /// vertices keep their indices; added points follow. Triangles are counter-clockwise in
 /// (u, v). `None` when a loop cannot be kept as constraints (it crosses itself or another).
 pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], fill: Fill) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
+    triangulate_impl(boundary, loops, fill, false)
+}
+
+pub(crate) fn triangulate_clipped(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], fill: Fill) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
+    triangulate_impl(boundary, loops, fill, true)
+}
+
+fn triangulate_impl(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], fill: Fill, clipped: bool) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
     if boundary.iter().flatten().any(|x| !x.is_finite()) {
         return None;
     }
@@ -90,7 +98,7 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
         _ => [1.0, 1.0],
     };
     let from = |p: Point2<f64>| [p.x / scale[0], p.y / scale[1]];
-    let Bounded { mut cdt, index, slits } = bounded(boundary, loops, scale, fill.lenient)?;
+    let Bounded { mut cdt, index, slits } = bounded(boundary, loops, scale, fill.lenient, clipped)?;
     for s in fill.seeds {
         if s.iter().all(|x| x.is_finite()) {
             let _ = cdt.insert(to(s, scale));
@@ -135,7 +143,7 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
             return None;
         }
     }
-    collect(&cdt, index, boundary, &slits, &from)
+    collect(&cdt, index, boundary, loops, &slits, &from, clipped)
 }
 
 /// A face's triangles as [`mesh`] made them.
@@ -169,7 +177,7 @@ pub(crate) fn mesh(
     }
     let scale = if sag.scale.iter().all(|k| k.is_finite() && *k > 0.0) { sag.scale } else { [1.0, 1.0] };
     let from = |p: Point2<f64>| [p.x / scale[0], p.y / scale[1]];
-    let Bounded { mut cdt, index, slits } = bounded(boundary, loops, scale, false)?;
+    let Bounded { mut cdt, index, slits } = bounded(boundary, loops, scale, false, false)?;
     for s in seeds {
         if s.iter().all(|x| x.is_finite()) {
             let _ = cdt.insert(to(s, scale));
@@ -181,7 +189,7 @@ pub(crate) fn mesh(
     if cdt.num_constraints() != constraints {
         return None;
     }
-    let (extra, triangles) = collect(&cdt, index, boundary, &slits, &from)?;
+    let (extra, triangles) = collect(&cdt, index, boundary, loops, &slits, &from, false)?;
     Some(Meshed { extra, triangles, capped: !settled })
 }
 
@@ -203,8 +211,10 @@ struct Bounded {
 
 /// The constrained Delaunay triangulation of `boundary`'s points in the metric `scale` with the
 /// sides of `loops` as constraints. `None` when a side crosses one already kept, unless
-/// `lenient` (see [`Fill::lenient`]): then it is left out.
-fn bounded(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], scale: [f64; 2], lenient: bool) -> Option<Bounded> {
+/// `lenient` (see [`Fill::lenient`]): then it is left out, or unless `clipped`: then the two sides
+/// are split where they cross and both are kept, which is how a display fill takes outlines that
+/// cross each other (a drill through a pour's edge).
+fn bounded(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], scale: [f64; 2], lenient: bool, clipped: bool) -> Option<Bounded> {
     let mut cdt = Cdt::new();
     let mut index: Vec<Option<u32>> = Vec::with_capacity(boundary.len());
     let mut handles: Vec<FixedVertexHandle> = Vec::with_capacity(boundary.len());
@@ -236,6 +246,13 @@ fn bounded(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], scale: [f64;
                 continue;
             }
             if !cdt.can_add_constraint(a, b) {
+                if clipped {
+                    cdt.add_constraint_and_split(a, b, |point| point);
+                    if cdt.num_vertices() > 500_000 {
+                        return None;
+                    }
+                    continue;
+                }
                 if lenient {
                     continue;
                 }
@@ -249,17 +266,21 @@ fn bounded(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], scale: [f64;
 
 /// The triangles of `cdt` inside the region its constraints bound (see [`region`]), with the
 /// points added after `boundary`'s in the order the triangles first use them, each back in
-/// (u, v) by `from`. `index`: each boundary vertex's index, by its handle's.
+/// (u, v) by `from`. `index`: each boundary vertex's index, by its handle's. A `clipped`
+/// triangulation keeps every face inside the region of its `loops` rather than trusting the
+/// constraint crossing that was split ([`clipped_region`]).
 fn collect(
     cdt: &Cdt,
     mut index: Vec<Option<u32>>,
     boundary: &[[f64; 2]],
+    loops: &[std::ops::Range<usize>],
     slits: &std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)>,
     from: &dyn Fn(Point2<f64>) -> [f64; 2],
+    clipped: bool,
 ) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
     let mut uv: Vec<[f64; 2]> = boundary.to_vec();
     let mut tris = Vec::new();
-    let region = region(cdt, slits);
+    let region = if clipped { clipped_region(cdt, boundary, loops) } else { region(cdt, slits) };
     for face in cdt.inner_faces() {
         if !region.get(face.index()).copied().unwrap_or(false) {
             continue;
@@ -287,6 +308,211 @@ fn collect(
     }
     let extra = uv.split_off(boundary.len());
     Some((extra, tris))
+}
+
+fn clipped_region(cdt: &Cdt, boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>]) -> Vec<bool> {
+    let polygons: Vec<&[[f64; 2]]> = loops.iter().filter_map(|range| boundary.get(range.clone())).collect();
+    let contains = |polygon: &[[f64; 2]], point: [f64; 2]| {
+        let mut inside = false;
+        for (first, second) in polygon.iter().zip(polygon.iter().cycle().skip(1)).take(polygon.len()) {
+            if (first[1] > point[1]) != (second[1] > point[1])
+                && point[0] < first[0] + (point[1] - first[1]) * (second[0] - first[0]) / (second[1] - first[1])
+            {
+                inside = !inside;
+            }
+        }
+        inside
+    };
+    // The outer boundary is the largest loop: whatever order the caller names them in, and
+    // whichever way each runs, a region's holes lie inside it and cannot be larger than it (a
+    // shape mirrored by a y flip names the two the other way round).
+    let area = |polygon: &[[f64; 2]]| {
+        polygon.iter().zip(polygon.iter().cycle().skip(1)).take(polygon.len()).map(|(a, b)| a[0] * b[1] - b[0] * a[1]).sum::<f64>().abs()
+    };
+    let outer = polygons.iter().enumerate().max_by(|(_, a), (_, b)| area(a).total_cmp(&area(b))).map(|(index, _)| index);
+    let inside = |point: [f64; 2]| match outer {
+        Some(outer) => {
+            polygons.get(outer).is_some_and(|polygon| contains(polygon, point))
+                && !polygons.iter().enumerate().any(|(index, hole)| index != outer && contains(hole, point))
+        }
+        None => false,
+    };
+    let mut classified = vec![None; cdt.num_all_faces()];
+    for face in cdt.inner_faces() {
+        if classified.get(face.index()).is_some_and(Option::is_some) {
+            continue;
+        }
+        let vertices = face.vertices().map(|vertex| vertex.position());
+        let point = [(vertices[0].x + vertices[1].x + vertices[2].x) / 3.0, (vertices[0].y + vertices[1].y + vertices[2].y) / 3.0];
+        let inside = inside(point);
+        let mut pending = vec![face.fix()];
+        while let Some(handle) = pending.pop() {
+            match classified.get_mut(handle.index()) {
+                Some(slot @ None) => *slot = Some(inside),
+                _ => continue,
+            }
+            for edge in cdt.face(handle).adjacent_edges() {
+                if !edge.is_constraint_edge()
+                    && let Some(next) = edge.rev().face().as_inner()
+                {
+                    pending.push(next.fix());
+                }
+            }
+        }
+    }
+    classified.into_iter().map(|inside| inside.unwrap_or(false)).collect()
+}
+
+/// The union of planar regions, triangulated as one surface: `loops` are the regions' boundaries
+/// (ranges of `boundary`) and `region_of` names each loop's region. A face is material when it
+/// lies inside some region, so regions that overlap or abut come back as one surface with no edge
+/// between them — which is what a copper layer is, and what keeps it manifold.
+pub(crate) fn triangulate_union(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], region_of: &[usize]) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
+    if boundary.iter().flatten().any(|x| !x.is_finite()) {
+        return None;
+    }
+    let mut cdt = Cdt::new();
+    let mut index: Vec<Option<u32>> = Vec::with_capacity(boundary.len());
+    let mut handles: Vec<FixedVertexHandle> = Vec::with_capacity(boundary.len());
+    for (i, p) in boundary.iter().enumerate() {
+        let h = cdt.insert(spade::mitigate_underflow(Point2::new(p[0], p[1]))).ok()?;
+        if index.len() <= h.index() {
+            index.resize(h.index() + 1, None);
+        }
+        if let Some(slot @ None) = index.get_mut(h.index()) {
+            *slot = Some(u32::try_from(i).ok()?);
+        }
+        handles.push(h);
+    }
+    for r in loops {
+        let n = r.len();
+        for k in 0..n {
+            let (a, b) = (*handles.get(r.start + k)?, *handles.get(r.start + (k + 1) % n)?);
+            if a == b || cdt.exists_constraint(a, b) {
+                continue;
+            }
+            if !cdt.can_add_constraint(a, b) {
+                // Two items crossing: the crossing point becomes a vertex, so the union's boundary
+                // runs through it.
+                cdt.add_constraint_and_split(a, b, |point| point);
+                if cdt.num_vertices() > 500_000 {
+                    return None;
+                }
+                continue;
+            }
+            cdt.add_constraint(a, b);
+        }
+    }
+    let region = union_region(&cdt, boundary, loops, region_of);
+    let mut uv: Vec<[f64; 2]> = boundary.to_vec();
+    let mut tris = Vec::new();
+    for face in cdt.inner_faces() {
+        if !region.get(face.index()).copied().unwrap_or(false) {
+            continue;
+        }
+        let vs = face.vertices();
+        let mut t = [0u32; 3];
+        for (slot, v) in t.iter_mut().zip(vs) {
+            let k = v.fix().index();
+            *slot = match index.get(k).copied().flatten() {
+                Some(i) => i,
+                None => {
+                    let i = u32::try_from(uv.len()).ok()?;
+                    uv.push([v.position().x, v.position().y]);
+                    if index.len() <= k {
+                        index.resize(k + 1, None);
+                    }
+                    if let Some(s) = index.get_mut(k) {
+                        *s = Some(i);
+                    }
+                    i
+                }
+            };
+        }
+        tris.push(t);
+    }
+    let extra = uv.split_off(boundary.len());
+    Some((extra, tris))
+}
+
+/// Which faces of the arrangement are inside the union ([`triangulate_union`]). Every item's
+/// boundary is a constraint, so a face and its neighbour across a free edge are the same side of
+/// every item: one test per piece, then a flood fill.
+fn union_region(cdt: &Cdt, boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], region_of: &[usize]) -> Vec<bool> {
+    let polygons: Vec<&[[f64; 2]]> = loops.iter().filter_map(|range| boundary.get(range.clone())).collect();
+    let contains = |polygon: &[[f64; 2]], point: [f64; 2]| {
+        let mut inside = false;
+        for (first, second) in polygon.iter().zip(polygon.iter().cycle().skip(1)).take(polygon.len()) {
+            if (first[1] > point[1]) != (second[1] > point[1])
+                && point[0] < first[0] + (point[1] - first[1]) * (second[0] - first[0]) / (second[1] - first[1])
+            {
+                inside = !inside;
+            }
+        }
+        inside
+    };
+    let area = |polygon: &[[f64; 2]]| {
+        polygon.iter().zip(polygon.iter().cycle().skip(1)).take(polygon.len()).map(|(a, b)| a[0] * b[1] - b[0] * a[1]).sum::<f64>().abs()
+    };
+    // A region's outline is its largest loop: whatever order they arrive in, and whichever way
+    // each runs, its holes lie inside it and cannot be larger (a shape mirrored by a y flip names
+    // the two the other way round).
+    let count = region_of.iter().copied().max().map_or(0usize, |region| region.saturating_add(1));
+    let mut members: Vec<Vec<usize>> = vec![Vec::new(); count];
+    for (index, &region) in region_of.iter().enumerate() {
+        if let Some(list) = members.get_mut(region) {
+            list.push(index);
+        }
+    }
+    let outlines: Vec<Option<(usize, [f64; 4])>> = members
+        .iter()
+        .map(|list| {
+            let polygon = |index: &usize| polygons.get(*index).copied().unwrap_or(&[] as &[[f64; 2]]);
+            let best = list.iter().copied().max_by(|a, b| area(polygon(a)).total_cmp(&area(polygon(b))))?;
+            let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+            for p in polygon(&best) {
+                b = [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])];
+            }
+            Some((best, b))
+        })
+        .collect();
+    let inside = |point: [f64; 2]| -> bool {
+        members.iter().enumerate().any(|(region, list)| {
+            let Some((outline, b)) = outlines.get(region).copied().flatten() else { return false };
+            if point[0] < b[0] || point[0] > b[2] || point[1] < b[1] || point[1] > b[3] {
+                return false;
+            }
+            let Some(outer) = polygons.get(outline) else { return false };
+            if !contains(outer, point) {
+                return false;
+            }
+            !list.iter().copied().any(|hole| hole != outline && polygons.get(hole).is_some_and(|polygon| contains(polygon, point)))
+        })
+    };
+    let mut classified = vec![None; cdt.num_all_faces()];
+    for face in cdt.inner_faces() {
+        if classified.get(face.index()).is_some_and(Option::is_some) {
+            continue;
+        }
+        let vertices = face.vertices().map(|vertex| vertex.position());
+        let point = [(vertices[0].x + vertices[1].x + vertices[2].x) / 3.0, (vertices[0].y + vertices[1].y + vertices[2].y) / 3.0];
+        let inside = inside(point);
+        let mut pending = vec![face.fix()];
+        while let Some(handle) = pending.pop() {
+            match classified.get_mut(handle.index()) {
+                Some(slot @ None) => *slot = Some(inside),
+                _ => continue,
+            }
+            for edge in cdt.face(handle).adjacent_edges() {
+                if !edge.is_constraint_edge()
+                    && let Some(next) = edge.rev().face().as_inner()
+                {
+                    pending.push(next.fix());
+                }
+            }
+        }
+    }
+    classified.into_iter().map(|inside| inside.unwrap_or(false)).collect()
 }
 
 /// The band between a face's boundary `loops` (ranges of the first `n` points of `points`) and

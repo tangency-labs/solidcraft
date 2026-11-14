@@ -318,7 +318,7 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
                 && let Some(group) = result.get("group").and_then(serde_json::Value::as_u64)
             {
                 crate::timeline_folders::set_open(app, group, true);
-                crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(group), pos2(0.0, 0.0));
+                start_folder_rename(app, group);
             }
             ui.close();
         }
@@ -617,6 +617,14 @@ fn visible_order(
     order
 }
 
+/// Start a folder rename typed in its History row: no floating box (#16217).
+fn start_folder_rename(app: &mut SolveApp, group: u64) {
+    crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(group), pos2(0.0, 0.0));
+    if let Some(rename) = app.menu.rename.as_mut() {
+        rename.inline = true;
+    }
+}
+
 fn timeline_group_name(
     app: &mut SolveApp,
     ui: &mut egui::Ui,
@@ -644,6 +652,11 @@ fn timeline_group_name(
     }
 
     let Some(mut rename) = app.menu.rename.take() else { return false };
+    // F2 starts the rename before it is known where it is drawn; the row owns it from here (#16217).
+    if !rename.inline {
+        rename.inline = true;
+        rename.focused = false;
+    }
     let left = rect.left() + 38.0 + offset;
     let edit_rect = Rect::from_min_max(pos2(left, rect.top() + 1.0), pos2(rect.right() - 3.0, rect.bottom() - 1.0));
     let edit_id = ui.scope_id().with(("timeline_group_rename", group.id));
@@ -756,14 +769,14 @@ fn vertical_group_row(
         *drag = Some(Drag::Items(selected_drag_items(app, origin_x, group.parent)));
     }
     if !renaming && response.double_clicked() {
-        crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(group.id), rect.center());
+        start_folder_rename(app, group.id);
     }
     if response.secondary_clicked() && !selected {
         select_only(app, TimelineItem::Group(group.id));
     }
     crate::ui_kit::Menu::context(&response, |ui| {
         if crate::ui_kit::menu::button(ui, "Rename Folder", "rename").clicked() {
-            crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(group.id), rect.center());
+            start_folder_rename(app, group.id);
             ui.close();
         }
         crate::timeline::edit_holes_item(app, ui, group.id);
@@ -1603,6 +1616,31 @@ mod tests {
         assert!((after.y - before.y).abs() < 0.5, "selection count shifted the row from {} to {}", before.y, after.y);
     }
 
+    /// F2 on a clicked History folder opens its name, as a double-click does (#16213).
+    #[test]
+    fn f2_renames_the_clicked_folder() {
+        let mut harness = Harness::new();
+        harness.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
+        harness.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Feature"})).unwrap();
+        harness.frames(4);
+        harness.step(&json!({"click": {"handle": "timeline:Feature"}})).unwrap();
+        harness.step(&json!({"click": {"handle": "timeline:Feature"}, "button": "right"})).unwrap();
+        harness.step(&json!({"widget": "Add to New Folder"})).unwrap();
+        harness.frames(2);
+        harness.step(&json!({"key": "Enter"})).unwrap();
+        let name = harness.app.session.doc.timeline_groups.first().unwrap().name.clone();
+
+        harness.step(&json!({"click": {"handle": format!("timeline-folder:{name}")}})).unwrap();
+        harness.frames(2);
+        assert!(handle_at(&format!("timeline-folder-rename:{name}")).is_none(), "a click alone does not rename");
+        harness.step(&json!({"key": "F2"})).unwrap();
+        harness.frames(2);
+        assert!(handle_at(&format!("timeline-folder-rename:{name}")).is_some(), "F2 did not open the folder's name");
+        harness.step(&json!({"text": "Renamed"})).unwrap();
+        harness.step(&json!({"key": "Enter"})).unwrap();
+        assert_eq!(harness.app.session.doc.timeline_groups.first().map(|group| group.name.as_str()), Some("Renamed"));
+    }
+
     #[test]
     fn new_folder_starts_inline_rename_with_its_name_selected() {
         let mut harness = Harness::new();
@@ -1628,6 +1666,31 @@ mod tests {
         harness.step(&json!({"text": "Again"})).unwrap();
         harness.step(&json!({"key": "Enter"})).unwrap();
         assert_eq!(harness.app.session.doc.timeline_groups.first().map(|group| group.name.as_str()), Some("Again"));
+    }
+
+    /// The upright History can be on screen with `timeline_left` off (a side zone, a tall narrow
+    /// bottom section); its folder rows must still type the name in the row, never in the
+    /// floating box at (0, 0) (#16217).
+    #[test]
+    fn new_folder_name_is_typed_in_its_row_without_the_left_dock_preference() {
+        let mut harness = Harness::new();
+        harness.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
+        harness.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Feature"})).unwrap();
+        harness.frames(4);
+        harness.app.preferences.timeline_left = false;
+        harness.frames(2);
+
+        harness.step(&json!({"click": {"handle": "timeline:Feature"}})).unwrap();
+        harness.step(&json!({"click": {"handle": "timeline:Feature"}, "button": "right"})).unwrap();
+        harness.step(&json!({"widget": "Add to New Folder"})).unwrap();
+        harness.frames(2);
+
+        let original = harness.app.session.doc.timeline_groups.first().unwrap().name.clone();
+        assert!(handle_at(&format!("timeline-folder-rename:{original}")).is_some(), "new folder did not show its inline name editor");
+        assert!(crate::scenario::rect_of("rename:name").is_none(), "a floating rename box was drawn over the folder's row editor");
+        harness.step(&json!({"text": "Renamed"})).unwrap();
+        harness.step(&json!({"key": "Enter"})).unwrap();
+        assert_eq!(harness.app.session.doc.timeline_groups.first().map(|group| group.name.as_str()), Some("Renamed"));
     }
 
     #[test]

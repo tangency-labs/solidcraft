@@ -40,6 +40,11 @@
 //! | `offset_vertex_image` (private)                             | not upstream: a vertex's image on its face's offset (WR-736; opt-in) |
 //!
 //! Deviations:
+//! - **Curved tangent crossings.** A local operation may create two intersection
+//!   branches beside an originally tangent edge. A plane/curved pair keeps the curved
+//!   face's side. Two curved faces require a proved unique physical component
+//!   ([`unique_cone_meeting`]); otherwise they are refused explicitly before SSI.
+//!   Midpoint distance cannot identify a retained curved branch.
 //! - **Four faces at a vertex (WR-666, the only path).** The fork's
 //!   tangency-labs/smlib@2e1bb8c: the tangency
 //!   tolerance is half a degree, `trim_extended_edge` keeps a near-tangent trim point where
@@ -175,6 +180,7 @@ use crate::error::{Failure, Reason, Result, SolidError};
 use crate::geom::assert_array::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::context::MarkType;
+use crate::geom::expansion as exact;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::point_project_to_plane;
@@ -199,6 +205,7 @@ use crate::nurbs::knots::Side;
 use crate::nurbs::math::{NOW, NOZ};
 use crate::query::brep::BrepFaceServices;
 use crate::query::edge::ClosestPoint;
+use crate::surface::implicit::{AnalyticSupport, Implicit};
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN as OFFSET_SS_UNKNOWN};
 use crate::surface::surface::p1::{SurfaceIntersectContext, SurfaceSolveContext};
 use crate::surface::surface::p2::{
@@ -237,6 +244,66 @@ const MAX_EXACT_PIECE_TURNS: u32 = 1 << 16;
 /// tells it apart from a real `SM_ERR_INVALID_INPUT` status of a callee.
 pub const UNDEFINED_UPSTREAM: &str =
     "offset::offset_geometry_creation (undefined behaviour upstream)";
+
+/// On a common exact unit axis, positive-nappe cones have radial laws
+/// `rho = c_i + t_i z`. Unequal signed slopes admit at most one meeting height,
+/// hence one physical circle. The reach certificate supplies a regular meeting;
+/// SSI pieces can only be fragments of that circle, never competing branches.
+/// Failed exact axis proofs retain the refusal. This is used only on crossings
+/// certified by reach, and checks the new supports' analytic classes as well.
+#[allow(clippy::float_cmp)] // equality of stored coefficients is the exact hypothesis
+fn unique_cone_meeting(k: &Kernel, first: &Surface, second: &Surface) -> Result<bool> {
+    let mut cones = Vec::new();
+    for s in [first, second] {
+        let Some(label) = AnalyticSupport::of(s) else {
+            return Ok(false);
+        };
+        let Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        } = label.implicit()
+        else {
+            return Ok(false);
+        };
+        if !radius.is_finite() || !tan_angle.is_finite() {
+            return Ok(false);
+        }
+        match AnalyticSupport::check(k, s) {
+            Ok(_) => {}
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(false),
+        }
+        cones.push((origin, axis, tan_angle));
+    }
+    let [(o1, a1, t1), (o2, a2, t2)] = cones.as_slice() else {
+        return Ok(false);
+    };
+    let sign = if a1 == a2 {
+        1.0
+    } else if *a1 == -*a2 {
+        -1.0
+    } else {
+        return Ok(false);
+    };
+    if *t1 == sign * *t2 {
+        return Ok(false);
+    }
+    let Some(norm) = exact::dot(*a1, *a1) else {
+        return Ok(false);
+    };
+    if !exact::is_zero(&exact::sub(&norm, &[1.0])) {
+        return Ok(false);
+    }
+    let (Some(c1), Some(c2)) = (exact::cross(*o1, *a1), exact::cross(*o2, *a1)) else {
+        return Ok(false);
+    };
+    Ok(c1
+        .iter()
+        .zip(&c2)
+        .all(|(x, y)| exact::is_zero(&exact::sub(x, y))))
+}
 
 /// A dereference of a null pointer or a cast that fails upstream (undefined
 /// behaviour): `InvalidInput` with [`UNDEFINED_UPSTREAM`] as operation.
@@ -3917,6 +3984,8 @@ impl OffsetGeometryCreation {
     /// # Errors
     ///
     /// `SM_ERR_NULL_POINTER` for a null edge use or a missing UV curve; `SM_ERR`
+    /// [`OffsetFailure::TangentBranchUncertified`] where tangent curved neighbours now cross
+    /// without a proof of the retained intersection branch or a unique physical circle;
     /// when no intersection curve can be trimmed ([`OffsetFailure::TangentEndOffCurve`]
     /// where a curve was refused for it); `SER` of the geometry calls
     /// (`GetCreateExtendedSurface` included); [`SolidError::Unported`] for the callees
@@ -3946,13 +4015,58 @@ impl OffsetGeometryCreation {
         let surf1 = brep
             .face_surface(face1)?
             .ok_or(dangling("face without surface"))?;
-        let (ext_surface1, domain1) = executive.get_create_extended_surface(k, brep, surf1)?;
         let face2 = brep
             .edgeuse_face(other_offset_edgeuse)?
             .ok_or(dangling("edge use without face"))?;
         let surf2 = brep
             .face_surface(face2)?
             .ok_or(dangling("face without surface"))?;
+        // Not upstream: where faces tangent in the input cross in a local operation
+        // (`OffsetExecutive::crosses_at`), the plane cuts the curved surface on both sides of
+        // the old edge, about as far on each (`√(2 r δ)` for a round of radius `r` moved
+        // `δ`), so the nearest midpoint decides nothing. The edge is the cut on the curved
+        // face's own side, where the plane is extended past its edge; the other lies on the
+        // curved surface's continuation past its old tangent line.
+        let curved_side = if executive.crosses_at(edgeuse)
+            && brep.edgeuse_is_tangent_sector(k, edgeuse, self.tangency_tol_degrees())?
+        {
+            let plane = |h: O| -> Result<bool> {
+                Ok(matches!(surface_of(brep, h)?.kind(), SurfaceKind::Plane(_)))
+            };
+            let curved = match (plane(surf1)?, plane(surf2)?) {
+                (true, false) => Some(other_edgeuse),
+                (false, true) => Some(edgeuse),
+                (false, false)
+                    if unique_cone_meeting(
+                        k,
+                        surface_of(brep, surf1)?,
+                        surface_of(brep, surf2)?,
+                    )? =>
+                {
+                    None
+                }
+                (false, false) => {
+                    // The nearest circle can lie on a curved face's continuation past
+                    // the old edge. Unlike a plane/curved pair, neither face supplies
+                    // the existing one-sided construction; distance proves no branch.
+                    return Err(
+                        Failure::new(OP_MATE, OffsetFailure::TangentBranchUncertified).into_error(),
+                    );
+                }
+                (true, true) => None,
+            };
+            match curved {
+                Some(curved) => Some((
+                    edgeuse_normalized_evaluate(k, brep, edgeuse, 0.5, false, false, true)?,
+                    brep.edgeuse_middle_binormal(k, curved)?,
+                )),
+                None => None,
+            }
+        } else {
+            None
+        };
+
+        let (ext_surface1, domain1) = executive.get_create_extended_surface(k, brep, surf1)?;
         let (ext_surface2, domain2) = executive.get_create_extended_surface(k, brep, surf2)?;
 
         // locals for surf/surf intersection
@@ -4107,34 +4221,6 @@ impl OffsetGeometryCreation {
                 None => None,
             });
         }
-
-        // Not upstream: where faces tangent in the input cross in a local operation
-        // (`OffsetExecutive::crosses_at`), the plane cuts the curved surface on both sides of
-        // the old edge, about as far on each (`√(2 r δ)` for a round of radius `r` moved
-        // `δ`), so the nearest midpoint decides nothing. The edge is the cut on the curved
-        // face's own side, where the plane is extended past its edge; the other lies on the
-        // curved surface's continuation past its old tangent line.
-        let curved_side = if executive.crosses_at(edgeuse)
-            && brep.edgeuse_is_tangent_sector(k, edgeuse, self.tangency_tol_degrees())?
-        {
-            let plane = |h: O| -> Result<bool> {
-                Ok(matches!(surface_of(brep, h)?.kind(), SurfaceKind::Plane(_)))
-            };
-            let curved = match (plane(surf1)?, plane(surf2)?) {
-                (true, false) => Some(other_edgeuse),
-                (false, true) => Some(edgeuse),
-                _ => None,
-            };
-            match curved {
-                Some(curved) => Some((
-                    edgeuse_normalized_evaluate(k, brep, edgeuse, 0.5, false, false, true)?,
-                    brep.edgeuse_middle_binormal(k, curved)?,
-                )),
-                None => None,
-            }
-        } else {
-            None
-        };
 
         // Now see if we have an intersection curve that has proper trimming
         let mut off_curve: Option<SolidError> = None;
@@ -4670,7 +4756,8 @@ impl OffsetGeometryCreation {
 
             // Mate a couple of edges by extension and intersection (a problem is only
             // reported; not upstream: a port invariant (through `ignore_soft`), and an
-            // exact intersection curve that cannot be cut into its pieces, are passed on)
+            // exact intersection curve that cannot be cut into its pieces and an
+            // uncertified retained intersection branch, are passed on)
             let mated = match self.mate_edges(
                 k,
                 brep,
@@ -4684,7 +4771,10 @@ impl OffsetGeometryCreation {
                 Err(e)
                     if matches!(
                         e.failure().map(|f| &f.reason),
-                        Some(Reason::Offset(OffsetFailure::ExactCurveUncut))
+                        Some(Reason::Offset(
+                            OffsetFailure::ExactCurveUncut
+                                | OffsetFailure::TangentBranchUncertified
+                        ))
                     ) || is_tangent_end_off_curve(&e) =>
                 {
                     return Err(e)
@@ -6063,6 +6153,25 @@ impl<O: ClassObject + SolutionObject> LocalOperationGeometryCreation<O> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn coaxial_cones_have_only_one_physical_meeting_circle() {
+        use crate::primitive::api_primitives as ap;
+        let k = Kernel::default();
+        let cylinder =
+            Surface::from(ap::create_cylinder_surface(&k, Point3::ZERO, 3.0, 4.0).unwrap());
+        let cone = Surface::from(
+            ap::create_cone_surface(&k, Point3::new(0.0, 0.0, 2.0), 3.0, 2.8, 2.0).unwrap(),
+        );
+        assert!(unique_cone_meeting(&k, &cylinder, &cone).unwrap());
+        assert!(unique_cone_meeting(&k, &cone, &cylinder).unwrap());
+        assert!(!unique_cone_meeting(&k, &cone, &cone).unwrap());
+        // A tiny transverse shift is not exact coaxiality, even below body tolerance.
+        let shifted = Surface::from(
+            ap::create_cone_surface(&k, Point3::new(1e-12, 0.0, 2.0), 3.0, 2.8, 2.0).unwrap(),
+        );
+        assert!(!unique_cone_meeting(&k, &cylinder, &shifted).unwrap());
+    }
 
     #[test]
     fn audit_483_tangent_gaps_preserve_errors_and_no_solution() {

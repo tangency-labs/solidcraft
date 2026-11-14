@@ -360,6 +360,7 @@ pub(super) fn srf_srf_intersection_with_context(
         super::p2::SrfSrfOptions {
             skip_two_pnts_intersection,
             ref_point,
+            closed_by_start_direction: false,
         },
         context,
     )?;

@@ -40,13 +40,13 @@
 //!   and radii scale by `N . N`, with tolerance added in objective units. A zero
 //!   normal or nonfinite bound cannot certify exclusion and does not cull.
 //!   The C++ compares unscaled distances (WR-764).
-//! - WR-21 (#2155): `fixes.global_solver_identical_prefers_larger_when_maximizing`
-//!   opts into preferring the larger `start.solution_value` in
-//!   [`GlobalSolver::identical_solutions_in`] when [`GlobalSolver::operation`] is
-//!   `SM_SO_MAXIMIZE`, `SM_SO_DIRECTED_MAXIMIZE` or `SM_SO_PROJECTED_MAXIMIZE`;
-//!   default uses pinned C++ (`<`).
-//! - WR-608 (#525): `fixes.perspective_sphere_offsets` opts into projecting each
-//!   sphere's own radius vectors about its own center; default uses pinned C++.
+//! - WR-21 (#2155): [`GlobalSolver::identical_solutions_in`] prefers the larger
+//!   `start.solution_value` when [`GlobalSolver::operation`] is `SM_SO_MAXIMIZE`,
+//!   `SM_SO_DIRECTED_MAXIMIZE` or `SM_SO_PROJECTED_MAXIMIZE` (upstream always takes
+//!   the smaller, `<`).
+//! - WR-608 (#525): each sphere's own radius vectors are projected about its own
+//!   center (upstream offsets the second centre by the first radius and projects
+//!   relative to the first centre).
 //! - **Virtual methods.** Derived solvers (curve/curve, surface/surface, ...)
 //!   implement [`GlobalSolve`] and override its hooks; the base behaviour lives
 //!   in inherent methods of [`GlobalSolver`] (and [`subdivide`]) so an override
@@ -1032,38 +1032,15 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
             let mut dir1 = eye_vec1.cross(v1).unitize_or_z(); // vec perp to eyevec and view norm
             let mut dir2 = dir1.cross(eye_vec1).unitize_or_z(); // vec perp to eyevec in view normal plane
             sph1_radius -= tol;
-            let fix_offsets = self.fixes.perspective_sphere_offsets;
-            let new_rad1_max_sq = max_projected_radius_sq(
-                sph1_center,
-                sph1_center,
-                [dir1, dir2],
-                sph1_radius,
-                [v0, v1, v2],
-                fix_offsets,
-            );
+            let new_rad1_max_sq =
+                max_projected_radius_sq(sph1_center, [dir1, dir2], sph1_radius, [v0, v1, v2]);
 
             let eye_vec2 = sph2_center - v2;
             dir1 = eye_vec2.cross(v1).unitize_or_z(); // vec perp to eyevec and view norm
             dir2 = dir1.cross(eye_vec2).unitize_or_z(); // vec perp to eyevec in view normal plane
 
-            // (upstream offsets the second centre by the first radius and projects
-            // relative to the first centre)
-            let new_rad2_max_sq = max_projected_radius_sq(
-                sph2_center,
-                if fix_offsets {
-                    sph2_center
-                } else {
-                    sph1_center
-                },
-                [dir1, dir2],
-                if fix_offsets {
-                    sph2_radius
-                } else {
-                    sph1_radius
-                },
-                [v0, v1, v2],
-                fix_offsets,
-            );
+            let new_rad2_max_sq =
+                max_projected_radius_sq(sph2_center, [dir1, dir2], sph2_radius, [v0, v1, v2]);
 
             // arrive here when sProjPnt1 and sProjPnt2 are the projected centers of the spheres and
             //   dNewRad1Max and dNewRad2Max are the maximum radii of the sphere projections onto the viewing plane
@@ -1470,11 +1447,9 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
     /// same (same counts, type, objects, solution values within
     /// `SM_EFF_ZERO_SQRT` and parameters within a scaled zero or `1e-4` of the
     /// parameter interval), and for identical ones the preferred solution:
-    /// the smaller solution value by default, or the larger solution value for
+    /// the smaller solution value, or the larger solution value for
     /// [`SolverOperation::Maximize`], [`SolverOperation::DirectedMaximize`] and
-    /// [`SolverOperation::ProjectedMaximize`] when
-    /// [`UpstreamFixes::global_solver_identical_prefers_larger_when_maximizing`](crate::kernel::UpstreamFixes::global_solver_identical_prefers_larger_when_maximizing)
-    /// is enabled.
+    /// [`SolverOperation::ProjectedMaximize`] (WR-21).
     ///
     /// # Errors
     ///
@@ -1546,11 +1521,7 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
         // All tests passed - identical Solutions
 
         // prefer the solution with the tighter solution (or larger value when maximising, WR-21)
-        let prefer_first = if self
-            .fixes
-            .global_solver_identical_prefers_larger_when_maximizing
-            && self.operation.is_plain_maximize()
-        {
+        let prefer_first = if self.operation.is_plain_maximize() {
             sol1.start.solution_value > sol2.start.solution_value
         } else {
             sol1.start.solution_value < sol2.start.solution_value
@@ -1580,25 +1551,17 @@ fn other_index(index: usize) -> Result<usize> {
 }
 
 /// The largest squared length of the four offsets `center ± dir1 * radius`,
-/// `center ± dir2 * radius`, each perspective projected relative to `base`
+/// `center ± dir2 * radius`, each perspective projected relative to `center`
 /// (the radius loops of the perspective test in `BranchMayContainAnswers`).
 /// `view` is the plane point, the unit plane normal and the eye point.
-fn max_projected_radius_sq(
-    center: Point3,
-    base: Point3,
-    dirs: [Vec3; 2],
-    radius: f64,
-    view: [Vec3; 3],
-    fix_offsets: bool,
-) -> f64 {
+fn max_projected_radius_sq(center: Point3, dirs: [Vec3; 2], radius: f64, view: [Vec3; 3]) -> f64 {
     let [dir1, dir2] = dirs;
     let [plane_point, plane_normal, eye_point] = view;
     let mut new_rad_max_sq = 0.0;
     for offset in [dir1 * radius, -dir1 * radius, dir2 * radius, -dir2 * radius] {
         // WR-608: the vector API already adds its base to the offset.
-        let vector = if fix_offsets { offset } else { center + offset };
         let rad_vec =
-            vector.perspective_project_to_plane(base, plane_point, plane_normal, eye_point);
+            offset.perspective_project_to_plane(center, plane_point, plane_normal, eye_point);
         let new_rad_sq = rad_vec.length_squared();
         if new_rad_sq > new_rad_max_sq {
             new_rad_max_sq = new_rad_sq;
@@ -2340,7 +2303,6 @@ mod tests {
     use crate::geom::extent1d::Extent1d;
     use crate::geom::solution_array::ObjectKind;
     use crate::geom::tree::TreeNode;
-    use crate::kernel::UpstreamFixes;
 
     #[derive(Debug, Clone, Copy, PartialEq)]
     struct Obj;
@@ -2442,7 +2404,7 @@ mod tests {
 
     #[test]
     fn perspective_culling_uses_each_spheres_own_radius_and_center() {
-        fn may(a: ([f64; 3], [f64; 3]), b: ([f64; 3], [f64; 3]), fixed: bool) -> bool {
+        fn may(a: ([f64; 3], [f64; 3]), b: ([f64; 3], [f64; 3])) -> bool {
             let mut first = Tree::new(None);
             let ia = first.add_node(leaf(a.0, a.1));
             first.set_top_node(Some(ia));
@@ -2450,7 +2412,6 @@ mod tests {
             let ib = second.add_node(leaf(b.0, b.1));
             second.set_top_node(Some(ib));
             let mut solver = GlobalSolver::with_trees(&first, &second, 0);
-            solver.fixes.perspective_sphere_offsets = fixed;
             solver.operation = SolverOperation::PerspectiveIntersect;
             solver.opt_vectors = vec![
                 Vec3::new(0.0, 0.0, 1.0),
@@ -2464,16 +2425,14 @@ mod tests {
         let point = ([1.75, 0.0, 2.0], [1.75, 0.0, 2.0]);
         let separate = ([3.0, 0.0, 2.0], [3.0, 0.0, 2.0]);
         // Distinct point projections at x=.875 and x=1.5 have zero radii.
-        assert!(!may(point, separate, true));
-        assert!(!may(separate, point, true));
+        assert!(!may(point, separate));
+        assert!(!may(separate, point));
         let contains = ([0.0, 0.0, 2.0], [2.0, 0.0, 2.0]);
         // The second box actually contains the first point; using the first
         // sphere's zero radius must not shrink away this intersection.
-        assert!(may(point, contains, true));
-        assert!(may(contains, point, true));
-        assert!(may(point, point, true));
-        // Default behavior remains the pinned reference, which misses this pair.
-        assert!(!may(point, contains, false));
+        assert!(may(point, contains));
+        assert!(may(contains, point));
+        assert!(may(point, point));
     }
 
     #[test]
@@ -2763,7 +2722,7 @@ mod tests {
     }
 
     #[test]
-    fn wr21_identical_solutions_default_vs_opt_in_maximize() {
+    fn wr21_identical_solutions_maximize_prefers_larger() {
         let sol_hi = curve_single(0.42578125, 0.50001);
         let sol_lo = curve_single(0.425781245, 0.5);
 
@@ -2772,38 +2731,11 @@ mod tests {
             SolverOperation::DirectedMaximize,
             SolverOperation::ProjectedMaximize,
         ] {
-            let mut k_default = Kernel::default();
-            assert!(
-                !k_default
-                    .fixes
-                    .global_solver_identical_prefers_larger_when_maximizing
-            );
-            let mut solver_default: GlobalSolver<'_, UnitCurve> =
-                GlobalSolver::new_with_kernel(&k_default);
-            solver_default.set_solver_operation(op);
-
-            // Default (pinned C++): prefers `<` (smaller value `sol_lo`) in both argument orders.
-            assert_eq!(
-                solver_default
-                    .identical_solutions(&sol_hi, &sol_lo)
-                    .unwrap(),
-                (SolutionPairType::Identical, Some(PreferredSolution::Second)),
-            );
-            assert_eq!(
-                solver_default
-                    .identical_solutions(&sol_lo, &sol_hi)
-                    .unwrap(),
-                (SolutionPairType::Identical, Some(PreferredSolution::First)),
-            );
-
-            // Opt-in (WR-21): prefers `>` (larger value `sol_hi`) in both argument orders.
-            k_default
-                .fixes
-                .global_solver_identical_prefers_larger_when_maximizing = true;
-            let mut solver_fixed: GlobalSolver<'_, UnitCurve> =
-                GlobalSolver::new_with_kernel(&k_default);
+            let k = Kernel::default();
+            let mut solver_fixed: GlobalSolver<'_, UnitCurve> = GlobalSolver::new_with_kernel(&k);
             solver_fixed.set_solver_operation(op);
 
+            // WR-21: prefers `>` (larger value `sol_hi`) in both argument orders.
             assert_eq!(
                 solver_fixed.identical_solutions(&sol_hi, &sol_lo).unwrap(),
                 (SolutionPairType::Identical, Some(PreferredSolution::First)),
@@ -2813,14 +2745,8 @@ mod tests {
                 (SolutionPairType::Identical, Some(PreferredSolution::Second)),
             );
 
-            // Exact value ties prefer `Second` (retaining an existing stored solution) in both modes.
+            // Exact value ties prefer `Second` (retaining an existing stored solution).
             let sol_tie = curve_single(0.42578125, 0.50002);
-            assert_eq!(
-                solver_default
-                    .identical_solutions(&sol_hi, &sol_tie)
-                    .unwrap(),
-                (SolutionPairType::Identical, Some(PreferredSolution::Second)),
-            );
             assert_eq!(
                 solver_fixed.identical_solutions(&sol_hi, &sol_tie).unwrap(),
                 (SolutionPairType::Identical, Some(PreferredSolution::Second)),
@@ -2870,34 +2796,25 @@ mod tests {
 
         // Direct `add_sorted_solution` in both arrival orders.
         for candidates in [[sol_interior, sol_boundary], [sol_boundary, sol_interior]] {
-            for fixed in [false, true] {
-                let mut k = Kernel::default();
-                k.fixes
-                    .global_solver_identical_prefers_larger_when_maximizing = fixed;
-                let mut solver: GlobalSolver<'_, UnitCurve> = GlobalSolver::new_with_kernel(&k);
-                solver.set_solver_operation(SolverOperation::Maximize);
-                solver.set_operation_category(OperationCategory::Maximize);
-                solver.set_solution_requested(SolutionRequested::All);
-                solver.set_3d_tolerance(1.0e-5);
-                solver.set_best_answer_so_far_sq(0.0);
+            let k = Kernel::default();
+            let mut solver: GlobalSolver<'_, UnitCurve> = GlobalSolver::new_with_kernel(&k);
+            solver.set_solver_operation(SolverOperation::Maximize);
+            solver.set_operation_category(OperationCategory::Maximize);
+            solver.set_solution_requested(SolutionRequested::All);
+            solver.set_3d_tolerance(1.0e-5);
+            solver.set_best_answer_so_far_sq(0.0);
 
-                for c in &candidates {
-                    solver
-                        .add_sorted_solution(c, SortKey::BySolutionValue, true)
-                        .unwrap();
-                }
-
-                assert_eq!(solver.solutions.len(), 1);
-                let kept = solver.solutions.get(0).unwrap();
-                if fixed {
-                    assert_eq!(kept.start.solution_value, 0.42578125);
-                    assert_eq!(kept.start.parameters[0], 0.50001);
-                } else {
-                    assert_eq!(kept.start.solution_value, 0.425781242);
-                    assert_eq!(kept.start.parameters[0], 0.5);
-                }
-                assert_eq!(solver.best_answer_so_far_sq, 0.42578125 * 0.42578125);
+            for c in &candidates {
+                solver
+                    .add_sorted_solution(c, SortKey::BySolutionValue, true)
+                    .unwrap();
             }
+
+            assert_eq!(solver.solutions.len(), 1);
+            let kept = solver.solutions.get(0).unwrap();
+            assert_eq!(kept.start.solution_value, 0.42578125);
+            assert_eq!(kept.start.parameters[0], 0.50001);
+            assert_eq!(solver.best_answer_so_far_sq, 0.42578125 * 0.42578125);
         }
 
         // Full two-tree `solve_it` across two adjacent curve-span leaves in both leaf assignments.
@@ -2924,67 +2841,40 @@ mod tests {
             [(c1, sol_boundary), (c2, sol_interior)],
             [(c1, sol_interior), (c2, sol_boundary)],
         ] {
-            for fixed in [false, true] {
-                let mut k = Kernel::default();
-                k.fixes
-                    .global_solver_identical_prefers_larger_when_maximizing = fixed;
-                let mut solver = TwoLeafMaxSolver {
-                    base: GlobalSolver::with_trees_and_kernel(&k, &pt_tree, &crv_tree, 1),
-                    leaf_solutions,
-                };
-                let mut out = SolutionArray::new();
-                solver
-                    .solve_it(
-                        &SolveRequest {
-                            operation: SolverOperation::Maximize,
-                            solution_requested: SolutionRequested::All,
-                            tolerance_3d: 1.0e-5,
-                            best_answer_so_far_sq: BIG_DOUBLE,
-                            opt_vectors: &[],
-                        },
-                        &mut out,
-                    )
-                    .unwrap();
+            let k = Kernel::default();
+            let mut solver = TwoLeafMaxSolver {
+                base: GlobalSolver::with_trees_and_kernel(&k, &pt_tree, &crv_tree, 1),
+                leaf_solutions,
+            };
+            let mut out = SolutionArray::new();
+            solver
+                .solve_it(
+                    &SolveRequest {
+                        operation: SolverOperation::Maximize,
+                        solution_requested: SolutionRequested::All,
+                        tolerance_3d: 1.0e-5,
+                        best_answer_so_far_sq: BIG_DOUBLE,
+                        opt_vectors: &[],
+                    },
+                    &mut out,
+                )
+                .unwrap();
 
-                assert_eq!(out.len(), 1);
-                let kept = out.get(0).unwrap();
-                if fixed {
-                    assert_eq!(kept.start.solution_value, 0.42578125);
-                    assert_eq!(kept.start.parameters[0], 0.50001);
-                } else {
-                    assert_eq!(kept.start.solution_value, 0.425781242);
-                    assert_eq!(kept.start.parameters[0], 0.5);
-                }
-            }
+            assert_eq!(out.len(), 1);
+            let kept = out.get(0).unwrap();
+            assert_eq!(kept.start.solution_value, 0.42578125);
+            assert_eq!(kept.start.parameters[0], 0.50001);
         }
     }
 
     #[test]
-    fn wr21_minimize_and_intersect_unchanged_and_flag_lookup() {
-        let mut k = Kernel::default();
-        assert!(
-            !k.fixes
-                .global_solver_identical_prefers_larger_when_maximizing
-        );
-        assert!(UpstreamFixes::NAMES
-            .contains(&"global_solver_identical_prefers_larger_when_maximizing"));
-        *k.fixes
-            .flag_mut("global_solver_identical_prefers_larger_when_maximizing")
-            .unwrap() = true;
-        assert!(
-            k.fixes
-                .global_solver_identical_prefers_larger_when_maximizing
-        );
+    fn wr21_minimize_and_intersect_unchanged() {
+        let k = Kernel::default();
 
         let mut one_tree = Tree::new(None);
         let top = one_tree.add_node(curve_leaf([0.0, 0.0, 0.0], [1.0, 1.0, 0.0]));
         one_tree.set_top_node(Some(top));
         let mut solver = GlobalSolver::with_tree_and_kernel(&k, &one_tree, 1);
-        assert!(
-            solver
-                .fixes
-                .global_solver_identical_prefers_larger_when_maximizing
-        );
 
         let sol_hi = curve_single(2.0e-7, 0.50001);
         let sol_lo = curve_single(1.0e-7, 0.5);

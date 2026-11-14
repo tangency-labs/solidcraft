@@ -69,5 +69,6 @@ The test starts a local server and headless Chrome, discovers commands, creates 
 live document, checks undo and redo, and verifies error handling and the pending-request limit.
 It also checks that Ctrl+Tab and Ctrl+Shift+Tab are left to the browser, which switches tabs with them.
 Last, it checks that the app's mouse buttons follow the browser's after chords (two buttons held
-at once), a drag let go outside the window, a release the page never heard of and the window losing focus.
+at once), a drag let go outside the window, a release the page never heard of and the window losing focus,
+and that the focus moving inside the page (to a text field's hidden input and back) lets go of none.
 Set `CHROME` to a Chrome or Chromium executable if it is not installed in a usual location.

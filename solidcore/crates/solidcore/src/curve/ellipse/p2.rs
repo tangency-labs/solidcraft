@@ -68,8 +68,7 @@
 //!   than [`MAX_PERIOD_SHIFTS`] shifts, the set-up returns
 //!   [`SolidError::NotConverged`] with the converter left impossible and the saved
 //!   STEP interval restored, so the temporary full-circle domain does not leak.
-//!   With the opt-in `Kernel::fixes.ellipse_open_arc_keeps_end_angle` (WR-719, the
-//!   fork's cbeb14b) an open arc's end angles are its ends' own polar angles rather than
+//!   An open arc's (WR-719, the fork's cbeb14b) end angles are its ends' own polar angles rather than
 //!   `STEPInversion`'s, whose seam rule turns an end just short of 360 into 0.
 //! - **Notifications.** `SmBSplineCurve::SetFromGwNurb` and `Transform` send
 //!   `SM_NO_POST_EDIT`, whose `SmEllipse::Notify` override rebuilds the polar
@@ -2192,7 +2191,7 @@ pub(crate) fn set_up_polar_conversion(
         let pnt1 = e.base.evaluate_point(lowest_angle_param)?;
         let pnt2 = e.base.evaluate_point(highest_angle_param)?;
 
-        // With the opt-in fix (WR-719, the fork's cbeb14b): STEPInversion() on the full
+        // WR-719 (the fork's cbeb14b): STEPInversion() on the full
         // circle set above takes a point at its seam's end (360, to its zone tolerance /
         // 100 and 1e-4 deg) as the seam's start (0): right for a closed curve, whose end
         // is its start, but an open arc ending that near the seam (an ellipse trimmed
@@ -2200,9 +2199,7 @@ pub(crate) fn set_up_polar_conversion(
         // disagreeing with its NURB by the gap. An open arc's ends are their own polar
         // angles, as STEPInversion() computes them before that rule.
         let (mut lowest_deg, mut highest_deg);
-        if !k.fixes.ellipse_open_arc_keeps_end_angle
-            || is_closed_base(k, &e.base, &e.base.natural_interval(), 0.0)?
-        {
+        if is_closed_base(k, &e.base, &e.base.natural_interval(), 0.0)? {
             lowest_deg = e.step_inversion(k, pnt1, false, 0.0).0;
             highest_deg = e.step_inversion(k, pnt2, false, 0.0).0;
         } else {

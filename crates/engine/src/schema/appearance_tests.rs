@@ -2,10 +2,11 @@ use serde_json::{Value, json};
 
 use super::{
     AppearanceAssignParams, AppearanceAssignResult, AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult,
+    AppearancePaintParams, AppearancePaintResult, AppearancePickUpParams, AppearancePickUpResult, ChainTarget,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
-use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+use crate::schema::{ParamCheck, input_schema_for, issues, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
@@ -15,6 +16,8 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(input_schema_for::<AppearanceLibraryParams>(), &[]);
     assert_keys(input_schema_for::<AppearanceListParams>(), &["body"]);
+    assert_keys(input_schema_for::<AppearancePaintParams>(), &["appearance", "color", "done", "name", "opacity", "pbr"]);
+    assert_keys(input_schema_for::<AppearancePickUpParams>(), &["target"]);
 }
 
 #[test]
@@ -28,6 +31,14 @@ fn strict_keeps_todays_errors() {
         ("appearance.assign", json!({"color": "#ff0000", "pbr": {"metallic": 1}})),
         ("appearance.assign", json!({"color": "#ff0000", "pbr": {"metallic": "1", "roughness": 0.5, "dielectric_ior": 1.5}})),
         ("appearance.assign", json!({"color": "#ff0000", "pbr": {"metallic": 2, "roughness": 0.5, "dielectric_ior": 1.5}})),
+        // The paint request reads its look through the same parser, so its refusals are the same.
+        ("appearance.paint", json!({"color": "red"})),
+        ("appearance.paint", json!({"color": "#ff0000", "name": ""})),
+        ("appearance.paint", json!({"color": "#ff0000", "pbr": {"metallic": 1}})),
+        // A name the library doesn't have is the handler's to refuse, in both modes.
+        ("appearance.paint", json!({"appearance": "not in the library"})),
+        // A target of the right shape that names no body is the handler's to refuse too.
+        ("appearance.pick_up", json!({"target": {"body": "NoSuchBody"}})),
     ]);
 }
 
@@ -96,4 +107,100 @@ fn the_colour_pattern_allows_what_the_reader_trims() {
     let ws = crate::schema::types::whitespace_class();
     let pattern = format!("^[{ws}]*#*(?:[0-9A-Fa-f]{{2}}|\\+[0-9A-Fa-f]){{3}}[{ws}]*$");
     assert_eq!(schema.as_value()["anyOf"][0]["pattern"], json!(pattern), "{}", schema.as_value());
+}
+
+/// The chain's three target forms, as `cmd::appearance_chain::chain` reads them: the same objects
+/// mean the same target, and an object it refuses comes back with the chain's own message.
+#[test]
+fn the_target_is_read_as_the_chain_reads_it() {
+    let reads = |p: Value| serde_json::from_value::<ChainTarget>(p.clone()).ok();
+    for (p, want) in [
+        (json!({"body": "Box1"}), ChainTarget::Body("Box1".into())),
+        (json!({"body": "Box1", "face": 2}), ChainTarget::Face { body: "Box1".into(), face: 2 }),
+        (json!({"component": "K:2"}), ChainTarget::Component("K:2".into())),
+        (json!({"component": 7}), ChainTarget::Component("7".into())),
+    ] {
+        assert_eq!(reads(p.clone()), Some(want), "{p}");
+    }
+    let refused = |p: Value| issues("appearance.pick_up", &json!({"target": p})).into_iter().map(|i| i.message).collect::<Vec<_>>();
+    for (p, message) in [
+        (json!("Box1"), "give one target object"),
+        (json!([]), "give one target object"),
+        (json!({}), "target must be {body}, {body, face}, or {component}"),
+        (json!({"face": 1}), "target must be {body}, {body, face}, or {component}"),
+        (json!({"body": "Box1", "extra": 1}), "target must be {body}, {body, face}, or {component}"),
+        (json!({"body": "Box1", "component": "C"}), "target must be {body}, {body, face}, or {component}"),
+        (json!({"body": ""}), "target name must have 1..4096 bytes"),
+        (json!({"body": 5}), "target name must have 1..4096 bytes"),
+        (json!({"body": "Box1", "face": -1}), "face must be a zero-based unsigned index"),
+        (json!({"body": "Box1", "face": 1.5}), "face must be a zero-based unsigned index"),
+        (json!({"component": -1}), "component must be a name or unsigned id"),
+        (json!({"component": null}), "component must be a name or unsigned id"),
+    ] {
+        assert_eq!(refused(p.clone()), [message], "{p}");
+        assert_eq!(reads(p.clone()), None, "{p}");
+    }
+}
+
+/// What the two handlers read as nothing at all, the contract names: `done` as a boolean, and a
+/// target that isn't an object. The pick-up's message is the one difference on purpose: today it
+/// comes from the chain the request runs, strict names the command that was called.
+#[test]
+fn strict_names_the_command_that_was_called() {
+    let error = |id: &str, p: Value, level: ParamCheck| {
+        let mut s = Session { param_check: level, ..Session::default() };
+        s.execute(id, &p).err().map(|e| e.to_string())
+    };
+    assert_eq!(error("appearance.paint", json!({"done": "yes"}), ParamCheck::Off), bad_params("appearance.paint", "choose a look first"));
+    assert_eq!(error("appearance.paint", json!({"done": "yes"}), ParamCheck::Strict), bad_params("appearance.paint", "`done` must be true or false"));
+    assert_eq!(error("appearance.pick_up", json!({"target": "Box1"}), ParamCheck::Off), bad_params("appearance.chain", "give one target object"));
+    assert_eq!(
+        error("appearance.pick_up", json!({"target": "Box1"}), ParamCheck::Strict),
+        bad_params("appearance.pick_up", "give one target object")
+    );
+}
+
+/// The engine's refusal for a call with bad parameters.
+fn bad_params(cmd: &str, message: &str) -> Option<String> {
+    Some(format!("invalid parameters for `{cmd}`: {message}"))
+}
+
+/// Picking a look up from a body, painting with what came back, ending the tool and asking the UI
+/// to sample, in Warn: each reply matches its output schema and carries no warning, and a
+/// misspelt key's warning still matches.
+#[test]
+fn the_gestures_answer_with_their_schemas() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    let matches = |schema: schemars::Schema, id: &str, reply: &Value| {
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, reply), "{id}: {reply} doesn't match {schema}");
+    };
+    let made = run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]}));
+    let body = made["created_bodies"][0].as_str().unwrap_or_default().to_string();
+    run(
+        "appearance.assign",
+        json!({"bodies": [body], "color": "#345678", "name": "Sampled", "pbr": {"metallic": 0.2, "roughness": 0.3, "dielectric_ior": 1.6}}),
+    );
+    let picked = run("appearance.pick_up", json!({"target": {"body": body}}));
+    assert_eq!(picked["look"]["name"], "Sampled", "{picked}");
+    assert!(picked.get("param_warnings").is_none(), "{picked}");
+    matches(output_schema_for::<AppearancePickUpResult>(), "appearance.pick_up", &picked);
+    let painted = run("appearance.paint", picked["look"].clone());
+    assert_eq!(painted["look"], picked["look"], "painting with a picked look keeps it");
+    matches(output_schema_for::<AppearancePaintResult>(), "appearance.paint", &painted);
+    let ended = run("appearance.paint", json!({"done": true}));
+    assert_eq!(ended, json!({"done": true}), "ending the tool answers with nothing else");
+    matches(output_schema_for::<AppearancePaintResult>(), "appearance.paint", &ended);
+    let asked = run("appearance.pick_up", json!({}));
+    assert_eq!(asked, json!({"tool": "pick_up"}), "no target asks the UI to sample one");
+    matches(output_schema_for::<AppearancePickUpResult>(), "appearance.pick_up", &asked);
+    let warned = run("appearance.pick_up", json!({"target": {"body": body}, "targt": 1}));
+    assert_eq!(warned["look"]["name"], "Sampled", "{warned}");
+    assert!(warned["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{warned}");
+    matches(output_schema_for::<AppearancePickUpResult>(), "appearance.pick_up", &warned);
+    let warned = run("appearance.paint", json!({"color": "#ff0000", "colour": "#00ff00"}));
+    assert_eq!(warned["look"]["color"], "#ff0000", "{warned}");
+    assert!(warned["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{warned}");
+    matches(output_schema_for::<AppearancePaintResult>(), "appearance.paint", &warned);
 }

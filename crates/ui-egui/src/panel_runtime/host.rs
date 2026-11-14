@@ -16,6 +16,8 @@ pub struct PanelContext {
     pub flow: Flow,
     pub size_class: SizeClass,
     pub focused: bool,
+    /// Paint-only geometry during a live drag; do not publish measurements or input.
+    pub preview_geometry: bool,
     pub direction: Direction,
     pub motion: Motion,
 }

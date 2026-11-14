@@ -831,6 +831,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             fit_edge: None,
             fit_kind: super::p3::FitKind::Radius,
             fit_setback: -1.0,
+            rollover_adjusting: false,
         }
     }
 

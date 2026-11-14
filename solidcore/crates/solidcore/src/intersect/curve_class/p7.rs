@@ -114,7 +114,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
 use crate::geom::tol::{eff_zero_ang_rad, scaled_zero, xsect_tol_3d_from_zones, ScaledZero};
-use crate::intersect::curve_class::p3::curve_is_degenerate;
+use crate::intersect::curve_class::p3::{curve_is_degenerate, straight_run_on_line};
 use crate::intersect::curve_class::p5::ClassGeometryMut;
 use crate::intersect::point_class::{
     object_zone_tol_3d, ClassGeometry, ClassObject, ClassObjectKind, PointClassType,
@@ -969,6 +969,25 @@ impl<O: ClassObject> CurveClassification<O> {
 
                 let edge_curve = edge_curve(geometry, edge_obj)?;
                 let edge_ivl = edge_interval(geometry, Some(edge_obj))?;
+
+                // Not upstream (#15718): a straight interval whose two ends lie within the
+                // intersection tolerance of a straight edge's line runs along that edge, by
+                // certificate (`straight_run_on_line`): it is coincident, not "maybe", and no
+                // heuristic below removes it as mislabelled. Upstream's case 1 removed such a
+                // run when it was short beside its edge, so two edges that coincide over a
+                // piece never got their edge definition and were never made one.
+                if !on_surface
+                    && straight_run_on_line(
+                        k,
+                        tgt_curve_3d,
+                        &tgt_ivl.interval,
+                        edge_curve,
+                        &edge_ivl,
+                        xsect_tol_3d,
+                    )?
+                {
+                    continue;
+                }
                 let tgt_curve: Cow<'_, Curve> = if on_surface {
                     Cow::Owned(crv_on_surf(
                         k,
@@ -1547,8 +1566,10 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         ))?;
         ignored(copy.trim(k, &mut final_ivl, TrimMode::Notify))?;
 
-        // reparameterize the OtherCurveCopy to the ThisEdge Interval
-        ignored(copy.edit_parameterization(k, &this_edge_ivl))?;
+        // reparameterize the OtherCurveCopy to the ThisEdge Interval (not upstream, #15505:
+        // exactly, as ThisEdge keeps its interval; ends the same within the scaled zero
+        // were left outside the copy's natural interval)
+        ignored(copy.edit_parameterization_exactly(k, &this_edge_ivl))?;
 
         // when needed reverse parameterization
         if (((start_start_close && start_end_close) || (end_start_close && end_end_close))

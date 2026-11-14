@@ -138,6 +138,15 @@ pub trait SweptSolvers {
     ///
     /// When `id` is not a live solver.
     fn solver(&self, id: FilletSolverId) -> Result<&FilletSolver>;
+
+    /// Not upstream (#15906): the fixed offset distances of the solver `id`'s two surfaces
+    /// (each rail's radius times its orientation) where it is a constant-radius solver;
+    /// `None` where its offsets change along the blend.
+    ///
+    /// # Errors
+    ///
+    /// When `id` is not a live solver.
+    fn constant_offsets(&self, id: FilletSolverId) -> Result<Option<[f64; 2]>>;
 }
 
 /// `smos_Min`.

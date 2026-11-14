@@ -16,6 +16,7 @@
 //! | [`OffsetFailure::ToleranceUnresolved`] | `SM_ERR_INVALID_INPUT` (solidcore-native, WR-749) |
 //! | [`OffsetFailure::SeamOpened`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ExactCurveUncut`]     | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::TangentBranchUncertified`] | `SM_ERR` (solidcore-native)            |
 //! | [`OffsetFailure::TangentEndOffCurve`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
@@ -59,10 +60,11 @@ pub enum OffsetFailure {
         /// The largest wall that works.
         largest: f64,
     },
-    /// The offset of `face` by `distance` is not proved regular, and no wall size would help:
-    /// the face does not bend towards that side anywhere the sizing looked, so no radius of
-    /// curvature limits the wall. The proof ran out where the face's normal vanishes (a flat
-    /// patch whose boundary curves leave a corner tangent to each other) or out of patches.
+    /// The offset of `face` by `distance` is neither proved regular nor proved to fold, so no
+    /// wall size is named: the proof ran out of patches (where the face's normal vanishes, a
+    /// flat patch whose boundary curves leave a corner tangent to each other; where the
+    /// offset collapses; or where a fold point is not proved), or a fold was proved but the
+    /// face does not bend towards that side anywhere the sizing looked.
     NotCertified {
         /// The face whose offset is not certified.
         face: FaceId,
@@ -146,6 +148,9 @@ pub enum OffsetFailure {
     /// vertex on the curve: the end is not where the edges meet, and no cut chosen by
     /// distance stands in for it.
     TangentEndOffCurve,
+    /// Two curved faces tangent at the old edge now cross, but the intersection
+    /// branch on their retained sides has not been certified.
+    TangentBranchUncertified,
     /// In a local operation, the new surfaces of `face` and of its neighbour across an
     /// edge meet nowhere near the edge, so no extension of either makes them meet there
     /// and the edge cannot be found again. (The reach,
@@ -279,6 +284,7 @@ impl OffsetFailure {
             Self::LoopGapUncertified { face } => face.map(EntityRef::Face),
             Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::TangentBranchUncertified
             | Self::Unsound { .. }
             | Self::DistanceUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
@@ -320,6 +326,7 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::TangentBranchUncertified
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
@@ -349,6 +356,7 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::TangentBranchUncertified
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
@@ -370,6 +378,7 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::TangentBranchUncertified
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
             | Self::Failed(_) => SM_ERR,
@@ -399,6 +408,7 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::TangentBranchUncertified
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. } => ErrorKind::Unsupported,
             Self::DistanceUnresolved { .. } | Self::ToleranceUnresolved { .. } => {
@@ -519,9 +529,8 @@ impl core::fmt::Display for OffsetFailure {
             ),
             Self::NotCertified { face, distance } => write!(
                 f,
-                "the offset of face {} by {distance} is not proved regular: its parametrisation \
-                 defeats the proof, and no radius of curvature limits the wall, so no size is \
-                 named",
+                "the offset of face {} by {distance} is neither proved regular nor proved to \
+                 fold, so no size is named",
                 face.index()
             ),
             Self::Collapses {
@@ -606,6 +615,10 @@ impl core::fmt::Display for OffsetFailure {
                 "the extended faces beside an edge meet on an exact curve that could not be \
                  cut into its pieces with their UV curves, so the edge's offsets cannot be \
                  mated",
+            ),
+            Self::TangentBranchUncertified => f.write_str(
+                "two curved faces tangent at the old edge now cross, but the intersection \
+                 branch on their retained sides has no certificate",
             ),
             Self::TangentEndOffCurve => f.write_str(
                 "an edge ends beside a tangent edge whose new faces now cross, and that edge's new \
@@ -856,6 +869,12 @@ mod tests {
             (O::InvalidValue("x"), ErrorKind::InvalidInput, true, false),
             // a consistency check of the kernel's own data that did not hold: its fault
             (O::Inconsistent("x"), ErrorKind::Failed, true, true),
+            (
+                O::TangentBranchUncertified,
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -878,6 +897,7 @@ mod tests {
                 O::Missing(_) => 16,
                 O::InvalidValue(_) => 17,
                 O::Inconsistent(_) => 18,
+                O::TangentBranchUncertified => 19,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {

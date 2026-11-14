@@ -11,6 +11,9 @@ use solidcraft_geom::Aabb3;
 use solidcraft_sketch::{CurveKind, Sketch};
 use solidcraft_viewport::{Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
 
+/// The grid's spacing and reach for a view, shared with the other apps that draw a grid.
+pub use solidcraft_viewport::grid::{grid_ext, grid_step};
+
 use crate::{Result, Sel, Session};
 
 /// Colours (shared with the GPU viewport).
@@ -219,20 +222,6 @@ pub fn grid_plane(back: Vec3, last: GridPlane) -> GridPlane {
         return last;
     }
     GridPlane::Ground
-}
-
-/// Grid spacing (minor, major) for a view of the given half height.
-pub fn grid_step(half_height: f64) -> (f64, f64) {
-    let raw = (half_height / 10.0).max(1e-3);
-    let p = 10f64.powf(raw.log10().floor());
-    let minor = if raw / p < 2.0 {
-        p
-    } else if raw / p < 5.0 {
-        2.0 * p
-    } else {
-        5.0 * p
-    };
-    (minor, minor * 5.0)
 }
 
 /// How wide the cross-fade between two grid levels is, in powers of ten of the view's height
@@ -645,17 +634,6 @@ pub fn grid_far_reach(cam: &Camera, far: f64, c: Vec3, n: Vec3) -> f64 {
         return 0.0;
     }
     (far - depth) / len
-}
-
-/// The grid's half size for a view of the given half height, seen at the given slant (the cosine
-/// of the angle between the view and the grid's plane): the grid reaches as far on its plane as
-/// the view is wide, which stretches as the plane is seen at a slant (#3087).
-///
-/// The picture and the window share it, so that they draw the same grid (#4214).
-pub fn grid_ext(half_height: f64, major: f64, slant: f64) -> f64 {
-    let major = major.max(1e-3);
-    let ext = (half_height * 3.0 / major).ceil() * major;
-    (ext / slant.abs().max(0.25) / major).ceil() * major
 }
 
 /// Sketch curves as world polylines with their colour.
@@ -1081,7 +1059,15 @@ fn build_scene(
         // body is drawn solid, so the selection colour reads.
         let opacity = if selected { 1.0 } else { s.doc.model_body_opacity(body) as f32 };
         let cut_solid = section.is_some() && body.is_closed() && opacity >= solidcraft_viewport::SEE_THROUGH;
-        sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default() });
+        sc.meshes.push(SceneMesh {
+            mesh: Arc::clone(&mesh),
+            color,
+            face_colors,
+            opacity,
+            closed: body.is_closed(),
+            hatch: Default::default(),
+            values: None,
+        });
         let at = sc.meshes.len() - 1;
         if cosmetic_threads
             && thread_budget.available()
@@ -1364,6 +1350,7 @@ fn consumed_sketches(doc: &solidcraft_doc::Document) -> impl Iterator<Item = u64
     doc.features.iter().filter_map(|f| match &f.kind {
         FeatureKind::Extrude { sketch, .. }
         | FeatureKind::Revolve { sketch, .. }
+        | FeatureKind::CellGrid { sketch, .. }
         | FeatureKind::SheetBase { sketch, .. }
         | FeatureKind::SheetContour { sketch, .. }
         | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. }
@@ -1415,6 +1402,49 @@ pub fn construction_planes(s: &Session) -> Vec<(u64, String, Plane)> {
             _ => None,
         })
         .collect()
+}
+
+/// The planar body face each construction plane was made from, as it is now: (plane name, body
+/// name, the face's indices on that body), for a plane of the design (not a component's) whose
+/// definition reaches an attached face: an Offset Plane on a face, and planes offset, turned,
+/// flipped or moved through a point from it. The viewport draws such a plane over its face, which
+/// its origin, the plane's point nearest the world origin, can be far from (#4345). A plane on a
+/// face found again only by its picked point or name, or whose face is gone, has none.
+pub fn construction_plane_faces(s: &Session) -> Vec<(String, String, Vec<usize>)> {
+    let st = s.model.state();
+    s.doc
+        .features
+        .iter()
+        .filter(|f| !f.suppressed && f.component == 0)
+        .filter_map(|f| {
+            let solidcraft_doc::FeatureKind::ConstructionPlane { plane } = &f.kind else { return None };
+            let anchor = plane_face_anchor(&s.doc, plane, 0).filter(|a| a.path.is_empty())?;
+            let body = st.body(&anchor.target.body)?;
+            let (faces, _) = s.doc.anchored_face_indices(&st, body, &anchor.target).ok()?;
+            (!faces.is_empty()).then(|| (f.name.clone(), anchor.target.body.clone(), faces))
+        })
+        .collect()
+}
+
+/// The face anchor a plane's definition reaches: its own, its base's (offset, turned, flipped,
+/// moved through a point) or, through a construction plane it is built on, that plane's.
+fn plane_face_anchor<'a>(
+    doc: &'a solidcraft_doc::Document,
+    plane: &'a solidcraft_doc::PlaneRef,
+    depth: usize,
+) -> Option<&'a solidcraft_doc::FaceAnchor> {
+    use solidcraft_doc::PlaneRef;
+    match plane {
+        PlaneRef::Face { anchor, .. } => anchor.as_deref(),
+        PlaneRef::Offset { base, .. } | PlaneRef::ThroughPoint { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => {
+            plane_face_anchor(doc, base, depth + 1)
+        }
+        PlaneRef::Construction { feature } if depth < 32 => match &doc.feature(feature.0)?.kind {
+            solidcraft_doc::FeatureKind::ConstructionPlane { plane } => plane_face_anchor(doc, plane, depth + 1),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Construction axes, as evaluated: (feature id, name, origin, unit direction).

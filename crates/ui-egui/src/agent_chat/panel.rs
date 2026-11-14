@@ -452,7 +452,9 @@ pub(crate) fn finish_shared(app: &mut SolveApp, ctx: &egui::Context) {
         app.agent_chat.hover.clear();
     }
     #[cfg(not(target_arch = "wasm32"))]
-    gallery_window(&mut app.agent_chat, ctx);
+    if !shared_section(app).is_some_and(|section| section.location.zone() == solidcraft_engine::panels::Zone::Window) {
+        gallery_window(&mut app.agent_chat, ctx);
+    }
     show_drop_hint(&app.agent_chat, ctx);
 }
 
@@ -467,8 +469,21 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow) 
     let prefs = AgentPanelPrefs::read(&app.preferences);
     draw_content(&mut app.agent_chat, &view, &prefs, ui, flow);
     hand_over(app, ui);
+    let ctx = ui.ctx().clone();
+    #[cfg(not(target_arch = "wasm32"))]
+    if ctx.viewport_id() != egui::ViewportId::ROOT {
+        if ui.is_enabled() {
+            window_input(&mut app.agent_chat, &ctx, ui.max_rect());
+            gallery_window(&mut app.agent_chat, &ctx);
+        }
+        app.agent_chat.panel_rect = None;
+        app.agent_chat.drop_rect = None;
+        app.agent_chat.hovered = None;
+        run_actions(app, &ctx);
+        return;
+    }
     light_hovered(app);
-    run_actions(app, &ui.ctx().clone());
+    run_actions(app, &ctx);
 }
 
 /// The controls and conversation alone, filling `ui` (the shared host's body, which has its own
@@ -845,19 +860,7 @@ fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &m
             return;
         }
         let ctx = ui.ctx().clone();
-        // A window of its own gets the drops made on it: the whole window is the chat, so there
-        // is no pointer to ask about (the main window's handling never sees them).
-        let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
-        if !dropped.is_empty() {
-            chat.actions.push(PanelAction::AttachDropped(dropped.iter().map(|f| f.path().to_path_buf()).collect()));
-        }
-        if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
-            drop_hint(&ctx, r.response.rect);
-        }
-        // The whole window is the chat, so New chat works anywhere in it.
-        if ctx.input_mut(|i| i.consume_shortcut(&NEW_CHAT_SHORTCUT)) {
-            chat.actions.push(PanelAction::RequestNewChat);
-        }
+        window_input(chat, &ctx, r.response.rect);
         let (outer, inner, close) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().inner_rect, i.viewport().close_requested()));
         if let (Some(o), Some(n)) = (outer, inner) {
             prefs.window = Some([o.min.x, o.min.y, n.width(), n.height()]);
@@ -866,6 +869,21 @@ fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &m
             chat.open = false;
         }
     });
+}
+
+/// A detached Assistant owns its file drops and keyboard input in that viewport.
+#[cfg(not(target_arch = "wasm32"))]
+fn window_input(chat: &mut AgentChat, ctx: &egui::Context, area: Rect) {
+    let dropped = ctx.input_mut(|input| std::mem::take(&mut input.raw.dropped_files));
+    if !dropped.is_empty() {
+        chat.actions.push(PanelAction::AttachDropped(dropped.iter().map(|file| file.path().to_path_buf()).collect()));
+    }
+    if ctx.input(|input| !input.raw.hovered_files.is_empty()) {
+        drop_hint(ctx, area);
+    }
+    if ctx.input_mut(|input| input.consume_shortcut(&NEW_CHAT_SHORTCUT)) {
+        chat.actions.push(PanelAction::RequestNewChat);
+    }
 }
 
 /// Whether the chat's own window should become active because the pointer is over its text box:

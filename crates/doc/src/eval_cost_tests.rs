@@ -21,7 +21,8 @@ use crate::*;
 /// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on,
 /// bodies whose faces a tapped hole read for its wall, intersects run to find a pattern's copies
 /// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
-/// go), and face surfaces classified for a hole's direction.
+/// go), face surfaces classified for a hole's direction, and joins made of bodies that are all
+/// apart without running the kernel's union.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -37,6 +38,7 @@ pub(super) struct Counts {
     pub miss_intersects: usize,
     pub cut_tools: usize,
     pub surfaces: usize,
+    pub joined_apart: usize,
 }
 
 thread_local! {
@@ -55,6 +57,7 @@ thread_local! {
             miss_intersects: 0,
             cut_tools: 0,
             surfaces: 0,
+            joined_apart: 0,
         })
     };
 }
@@ -287,6 +290,24 @@ fn a_sketch_on_a_fixed_plane_costs_the_same_in_a_large_placed_design() {
         assert_eq!(work, Counts::default(), "sketch {k} edited");
         assert_eq!(model.last_recomputed, 1);
     }
+}
+
+/// Construction geometry is an input of every feature: moving a construction plane moves the
+/// sketch on it, though the sketch itself is unchanged.
+#[test]
+fn moving_a_construction_plane_moves_the_sketch_on_it() {
+    let mut doc = Document::new("Datum");
+    let offset = |distance: &str| FeatureKind::ConstructionPlane {
+        plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: distance.into() },
+    };
+    let plane = doc.add_feature(offset("5 mm"), Some("Datum")).unwrap();
+    let sketch = doc.add_feature(line_sketch(PlaneRef::Construction { feature: plane.into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!((model.state().sketch(sketch).unwrap().plane.origin.z - 5.0).abs() < 1e-9);
+    doc.feature_mut(plane).unwrap().kind = offset("12 mm");
+    model.evaluate(&doc);
+    assert!((model.state().sketch(sketch).unwrap().plane.origin.z - 12.0).abs() < 1e-9, "the sketch follows its plane");
 }
 
 #[test]
@@ -2080,4 +2101,63 @@ fn a_hole_whose_run_on_column_cannot_be_built_keeps_its_run_on() {
     let (top, near) = super::hole_run_on(&state, &Plane::XY, 3.0, 1.0);
     assert!((top - 0.25).abs() < 1e-6, "top {top}");
     assert!(near.is_empty());
+}
+
+/// `n` boxes of 2 x 2 x 2 in a row, `pitch` from one to the next, joined into the first by one
+/// Combine: the model, and the Combine.
+fn boxes_joined(n: usize, pitch: f64) -> (Model, u64, Counts) {
+    let mut doc = Document::new("joined boxes");
+    let mut made = Vec::new();
+    for i in 0..n {
+        let kind = FeatureKind::Box {
+            corner: point_expr(Vec3::new(pitch * i as f64, 0.0, 0.0)),
+            length: "2".into(),
+            width: "2".into(),
+            height: "2".into(),
+            operation: Operation::NewBody,
+            centred: false,
+        };
+        made.push(doc.add_feature(kind, None).unwrap());
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let names: Vec<String> = made.iter().map(|id| model.state().bodies.iter().find(|b| b.feature == *id).unwrap().name.clone()).collect();
+    let (target, tools) = names.split_first().unwrap();
+    let combine = doc
+        .add_feature(
+            FeatureKind::Combine {
+                target: target.clone().into(),
+                tools: tools.iter().map(|t| t.clone().into()).collect(),
+                operation: Operation::Join,
+                keep_tools: false,
+            },
+            None,
+        )
+        .unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    (model, combine, work)
+}
+
+/// Joining bodies that are all apart runs no kernel union (#3455: 64 separate pegs took the
+/// union 4.5 s, growing with the square of their number): they are one body of several pieces
+/// as they stand. Bodies that meet still go through the union.
+#[test]
+fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
+    let (model, combine, work) = boxes_joined(12, 5.0);
+    assert!(model.result(combine).is_some_and(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.result(combine));
+    assert_eq!(work.joined_apart, 1, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    let body = &st.bodies[0].body;
+    assert_eq!((body.lumps().unwrap().len(), body.face_count()), (12, 72));
+    assert!((kernel::measure(body).unwrap().volume - 96.0).abs() < 1e-9);
+
+    // Each box overlaps the next by half: the kernel's union makes them one piece.
+    let (model, combine, work) = boxes_joined(4, 1.0);
+    assert!(model.result(combine).is_some_and(|r| r.error.is_none()), "{:?}", model.result(combine));
+    assert_eq!(work.joined_apart, 0, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    assert_eq!(st.bodies[0].body.lumps().unwrap().len(), 1);
+    assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 20.0).abs() < 1e-9);
 }

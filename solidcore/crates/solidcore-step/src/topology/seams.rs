@@ -32,6 +32,9 @@ use super::{Builder, EdgeB, LoopB, R, index, unsupported};
 
 /// Samples per edge when following a loop around the axis.
 const SAMPLES: usize = 16;
+/// How often a Bézier piece that reaches half a turn about an axis is halved for its parts'
+/// arcs before its edge is taken to reach every angle.
+const MAX_HALVINGS: u32 = 4;
 /// Edges split to place seams, per solid.
 const MAX_SPLITS: usize = 10_000;
 
@@ -293,6 +296,7 @@ impl Builder<'_, '_> {
             let eval = SurfaceEval::new(&face.surface).map_err(|e| e.to_string())?;
             let dom = eval.domain();
             let (Some(period), None, Some((u0, _))) = (dom.period[0], dom.period[1], dom.range[0]) else { continue };
+            let poles: Vec<Vec3> = spline_axis(&face.surface, &eval).iter().flat_map(|ax| ax.poles.iter().flatten().copied()).collect();
             // How far along u each loop of the face reaches, followed round from its first point
             // (unwrapped across the start); a face winding round is the seams' to handle. The
             // widest loop bounds the face.
@@ -300,7 +304,7 @@ impl Builder<'_, '_> {
             let mut winds = false;
             for l in &face.loops {
                 let LoopB::Edges(es) = l else { continue };
-                winds |= self.winding(&eval, es, [Some(period), None])?[0] != 0;
+                winds |= self.winding(&eval, es, [Some(period), None], &poles)?[0] != 0;
                 let mut last: Option<f64> = None;
                 let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
                 for &(e, _) in es {
@@ -358,6 +362,7 @@ impl Builder<'_, '_> {
                 continue;
             }
             let found = axis(&surface).or_else(|| spline_axis(&surface, &eval));
+            let poles: Vec<Vec3> = found.iter().flat_map(|ax| ax.poles.iter().flatten().copied()).collect();
             let mut up = Vec::new();
             let mut down = Vec::new();
             // On a torus a face may wind round its tube instead, and on a spline closed in v it
@@ -366,7 +371,7 @@ impl Builder<'_, '_> {
             let mut tube = false;
             for (li, l) in face.loops.iter().enumerate() {
                 let LoopB::Edges(es) = l else { continue };
-                let mut w = self.winding(&eval, es, periods)?;
+                let mut w = self.winding(&eval, es, periods, &poles)?;
                 if v_turns && w[0] == 0 && w[1].abs() == 1 {
                     tube = true;
                     w = [w[1], 0];
@@ -474,18 +479,26 @@ impl Builder<'_, '_> {
         Ok((d(t) <= reach && ends.iter().all(|x| *x > reach) && t > lo && t < hi).then_some(t))
     }
 
-    /// Turns (in u, in v) a loop makes around a periodic surface.
-    fn winding(&self, eval: &SurfaceEval, es: &[(u32, bool)], periods: [Option<f64>; 2]) -> R<[i64; 2]> {
+    /// Turns (in u, in v) a loop makes around a periodic surface. Points on one of the surface's
+    /// `poles` are passed over: every angle round the axis is the pole, so the parameter found
+    /// there is any, and a loop running in to the pole and out again turned as the points either
+    /// side of it say (a cap split along a meridian, one half's loop from the rim to the pole and
+    /// back, does not wind round the axis).
+    fn winding(&self, eval: &SurfaceEval, es: &[(u32, bool)], periods: [Option<f64>; 2], poles: &[Vec3]) -> R<[i64; 2]> {
         let mut last: Option<[f64; 2]> = None;
         let mut total = [0.0; 2];
         for &(e, forward) in es {
             let edge = self.edges.get(e as usize).ok_or("edge reference")?;
             let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
             let [lo, hi] = edge.interval;
+            let reach = self.tol.max(edge.tolerance);
             for k in 0..=SAMPLES {
                 let s = k as f64 / SAMPLES as f64;
                 let t = if forward { lo + (hi - lo) * s } else { hi - (hi - lo) * s };
                 let p = c.point(t).ok_or("edge point")?;
+                if poles.iter().any(|q| p.dist(*q) <= reach) {
+                    continue;
+                }
                 let Some(q) = eval.project(p, last, f64::INFINITY) else { continue };
                 if let Some(l) = last {
                     for (((t, period), q), l) in total.iter_mut().zip(periods).zip(q).zip(l) {
@@ -633,8 +646,14 @@ impl Builder<'_, '_> {
         let c = CurveEval::new(&curve).map_err(|m| m.to_string())?;
         if check {
             let m = c.point(0.5 * (interval[0] + interval[1])).ok_or("seam point")?;
-            let off = eval.project(m, None, f64::INFINITY).and_then(|q| eval.point(q)).map_or(f64::INFINITY, |s| s.dist(m));
-            if !(off <= self.tol) {
+            let gap = |p: Vec3| eval.project(p, None, f64::INFINITY).and_then(|q| eval.point(q)).map_or(f64::INFINITY, |s| s.dist(p));
+            // As far off as its ends are, at most: a vertex on an edge the file has a little off
+            // the surface (a spline rim 0.3 um off its cone, in a file stating 0.01 um) puts the
+            // seam's middle off by no more, and the seam's tolerance covers it as any edge's does
+            // (`measure_edges`). Vertices at different angles leave the chord between them far
+            // more than that inside the surface.
+            let allowed = self.tol.max(gap(pa).max(gap(pb)).min(super::MAX_TOLERANCE));
+            if !(gap(m) <= allowed) {
                 return Err(unsupported("a seam off its surface: loops with no vertices at one angle"));
             }
         }
@@ -1375,8 +1394,9 @@ impl Perpendicular {
     }
 
     /// The Bézier pieces of a curve's NURBS form on `interval` (a line, circle or ellipse on its
-    /// form, [`crate::kernel::form::curve`]): each piece's arc of angles, the whole turn where its
-    /// hull is not clear of the axis, and the way its angle runs.
+    /// form, [`crate::kernel::form::curve`]): each piece's arc of angles and the way its angle
+    /// runs, a piece that reaches half a turn in halves ([`MAX_HALVINGS`]); the whole turn where a
+    /// hull is still not clear of the axis.
     pub(super) fn pieces(&self, curve: &BCurve, interval: [f64; 2], tol: f64) -> Vec<Piece> {
         let whole = || vec![Piece { arc: [0.0, TAU], pad: 0.0, runs: None }];
         let form = match curve {
@@ -1401,15 +1421,26 @@ impl Perpendicular {
         cuts.extend(knots.iter().copied().filter(|k| *k > a && *k < b));
         cuts.push(b);
         cuts.dedup();
+        // A piece that reaches half a turn about the axis (a closed spline of two pieces, each
+        // half way round: a cylinder's end as some exporters write it) has no arc of its own:
+        // halved, exactly, until each part has.
+        let mut todo: Vec<(f64, f64, u32)> = cuts.windows(2).rev().filter_map(|w| if let &[s, t] = w { Some((s, t, 0)) } else { None }).collect();
         let mut out = Vec::new();
-        for w in cuts.windows(2) {
-            let &[s, t] = w else { continue };
+        while let Some((s, t, halvings)) = todo.pop() {
             let Ok((_, piece)) = solidcore::eval::pcurve::segment(degree, knots, &homogeneous, s, t) else { return whole() };
             if piece.len() != degree + 1 || piece.iter().any(|h| !(h[3] > 0.0)) {
                 return whole();
             }
             let points: Vec<Vec3> = piece.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect();
-            let Some((arc, pad)) = self.span(&points, tol) else { return whole() };
+            let Some((arc, pad)) = self.span(&points, tol) else {
+                let middle = 0.5 * (s + t);
+                if halvings >= MAX_HALVINGS || !(s < middle && middle < t) {
+                    return whole();
+                }
+                todo.push((middle, t, halvings + 1));
+                todo.push((s, middle, halvings + 1));
+                continue;
+            };
             // The homogeneous coordinates square to the axis: the angle of the piece's points.
             let flat: Vec<[f64; 2]> = piece
                 .iter()

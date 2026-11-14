@@ -1388,6 +1388,7 @@ mod tests {
         KitCall { name: "hint_row", args: &[1], id: false, trim: &[1] },
         KitCall { name: "text_row", args: &[1], id: false, trim: &[1] },
         KitCall { name: "choice_row", args: &[1, 4], id: false, trim: &[1] },
+        KitCall { name: "action_row", args: &[2], id: false, trim: &[] },
         KitCall { name: "section", args: &[2], id: false, trim: &[] },
         KitCall { name: "section_count", args: &[2], id: false, trim: &[] },
         // fields.rs
@@ -2066,7 +2067,7 @@ mod tests {
         "multiline_text_field, dropdown, cell_editor, bounded_cell_editor, search_field, menu_filter, placement_field, ",
         "library_cell, icon_button_at, icon_button_colored, footer, button, primary_button, ",
         "wide_primary_button, action_menu, compact_button, icon_label_button, command_menu_button, ",
-        "checkbox_grid, options, checkbox_row, toggle_icon, removable_header, bin_button, ",
+        "checkbox_grid, options, checkbox_row, action_row, toggle_icon, removable_header, bin_button, ",
         "Column, Menu, MenuItem, CommandSearch};"
     );
 
@@ -2118,6 +2119,7 @@ mod tests {
             ("checkbox_grid(ui, &mut [(\"checkbox_grid\", value)], 1)", &["checkbox_grid"]),
             ("options(ui, id, &mut [(\"options\", value)])", &["options"]),
             ("checkbox_row(ui, key, \"checkbox_row\", true)", &["checkbox_row"]),
+            ("action_row(ui, key, \"action_row\")", &["action_row"]),
             ("toggle_icon(ui, row, \"toggle_icon\", selected, icon)", &["toggle_icon"]),
             ("Column::new(\"Column::new\", 1.0)", &["Column::new"]),
             ("table.add_prompt(ui, \"add_prompt\", \"add_prompt tooltip\")", &["add_prompt", "add_prompt tooltip"]),

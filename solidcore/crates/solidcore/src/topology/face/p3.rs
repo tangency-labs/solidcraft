@@ -34,8 +34,14 @@
 //!   `topology_traverser::face_edges`; `GetEdges(.., TRUE)` (outer loop only),
 //!   `GetUpwardLoopuses`, `GetUpwardEdgeuses`, `GetUpwardVertexuses` (default arguments)
 //!   and `GetBrep` call `topology::face::p4`.
-//! - **Statuses.** `ComputeProjectedLoopOrientation`'s status is checked as upstream (a
-//!   failure falls through to the 3D walk); `sm_AreConnected` and `IsDegenerate` of a
+//! - **The UV loop's orientation** (not upstream; #15107). `ComputeLoopOrientation`'s
+//!   UV path decides from the sign of the trims' loop's certified signed area
+//!   ([`crate::mass::loop_area`]), not from `ComputeProjectedLoopOrientation`'s sampled
+//!   polygon area against its box (a thin loop far from the origin, whose area is far
+//!   below its box's, came out zero area). An undecided sign, a failure, or a trim with
+//!   no NURBS form falls through to the 3D walk, as upstream's `Unknown` and failures
+//!   do; on this path `uv_bounds` still receives the samples of upstream's walk.
+//! - **Statuses.** `sm_AreConnected` and `IsDegenerate` of a
 //!   curve return values; ignored as upstream: the `Trim`, `EvaluatePoint` and
 //!   `Point3DClassify` calls of `FaceIntersect`, the `NormalizedEvaluate` /
 //!   `Evaluate1stDerivatives` / `PointClassify` of the quick check and the
@@ -96,6 +102,7 @@
 //!   (upstream's own bound) within a budget of 65536 samples; every other loop is over
 //!   B-rep arrays or a fixed sample count.
 
+use crate::blend::fillet_section::certificate::NurbsCurve;
 use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::curve::p2::CRV_ON_SURF_TYPE;
 use crate::curve::curve::Curve;
@@ -115,6 +122,7 @@ use crate::intersect::point_class::{
     ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
 };
 use crate::kernel::Kernel;
+use crate::mass::loop_area::{loop_area_sign, LoopAreaSign};
 use crate::math::{Point3, Vec3, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -811,10 +819,56 @@ impl LoopOrientationSampler<'_> {
     }
 }
 
+/// The orientation of the closed UV loop of `uv_curves` (curve `i` taken backwards where
+/// `senses[i]` is false) from the sign of its certified signed area
+/// ([`loop_area_sign`]): `Same` above 0, `Opposite` below, `Unknown` where the enclosure
+/// holds 0 or a curve has no NURBS form. With `bounds`, it receives the samples of
+/// upstream's `ComputeProjectedLoopOrientation` walk, as before (the box only; its
+/// orientation is not used).
+fn uv_loop_orientation(
+    k: &Kernel,
+    uv_curves: &[Curve],
+    senses: &[bool],
+    bounds: Option<&mut Extent2d>,
+) -> Result<OrientType> {
+    if let Some(b) = bounds {
+        let normal = Vec3::new(0.0, 0.0, 1.0);
+        match CompositeCurve::compute_projected_loop_orientation(
+            k,
+            uv_curves,
+            senses,
+            normal,
+            Some(b),
+        ) {
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            _ => {}
+        }
+    }
+    let mut nurbs = Vec::new();
+    for c in uv_curves {
+        let Some(bs) = c.b_spline_base() else {
+            return Ok(OrientType::Unknown);
+        };
+        nurbs.push(NurbsCurve::of(bs)?);
+    }
+    if senses.len() < nurbs.len() {
+        return Err(null("ComputeLoopOrientation: fewer senses than curves"));
+    }
+    let lp: Vec<(&NurbsCurve, bool)> = nurbs.iter().zip(senses.iter().copied()).collect();
+    Ok(match loop_area_sign(k, &lp)? {
+        LoopAreaSign::Positive(_) => OrientType::Same,
+        LoopAreaSign::Negative(_) => OrientType::Opposite,
+        LoopAreaSign::Undecided(_) => OrientType::Unknown,
+    })
+}
+
 /// `ComputeLoopOrientation`: the orientation of loop `l` on the face: `Same` (counter-
 /// clockwise in UV), `Opposite` (clockwise) or `Unknown`. A vertex loop is `Opposite`
 /// without measuring an area. Without `do_3d_loop_computation`, the edge uses' existing
-/// or generated UV trim curves decide when they form a connected loop. Otherwise (or
+/// or generated UV trim curves decide when they form a connected loop, by the sign of the
+/// loop's certified signed area (not upstream: upstream compares a sampled polygon's area
+/// with its box's, which takes a thin loop far from the origin for zero area; #15107);
+/// an undecided sign goes on to the 3D walk. Otherwise (or
 /// when they do not decide) the defining 3D curves are sampled in passes of decreasing
 /// angle tolerance (10, 1, 0.1 degrees), keeping every knot and tessellating each span
 /// separately; the samples are dropped onto a copy of the surface and their signed UV
@@ -905,18 +959,13 @@ pub fn compute_loop_orientation(
 
     // when all the UVTrimCurves are available, connected, and form a closed loop
     if uv_curves_ok {
-        // walk all UVTrimCurves to determine if this is a CCW or CW loop
-        let normal = Vec3::new(0.0, 0.0, 1.0);
-        match CompositeCurve::compute_projected_loop_orientation(
-            k,
-            &uv_curves,
-            &senses,
-            normal,
-            uv_bounds.as_deref_mut(),
-        ) {
+        // Not upstream (#15107): the sign of the loop's certified signed area, not a
+        // sampled polygon's area against its box (a thin loop far from the origin has an
+        // area far below its box's and came out zero area).
+        match uv_loop_orientation(k, &uv_curves, &senses, uv_bounds.as_deref_mut()) {
             Ok(o) if o != OrientType::Unknown => return Ok(o),
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            // a failure or an unknown orientation falls through to the 3D walk
+            // a failure or an undecided sign falls through to the 3D walk
             _ => {}
         }
     }

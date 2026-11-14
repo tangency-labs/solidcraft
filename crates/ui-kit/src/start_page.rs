@@ -108,6 +108,8 @@ pub struct Recent<'a, A> {
     pub path: Label<'a>,
     pub when: Label<'a>,
     pub kind: Label<'a>,
+    /// What hovering the row says about the file's signing provenance, when it has any.
+    pub security: Option<Label<'a>>,
     pub thumbnail: Option<(egui::TextureId, egui::Vec2)>,
     /// No picture could be made: a dimmed placeholder rather than a loading one.
     pub thumbnail_failed: bool,
@@ -304,6 +306,7 @@ fn start_content<A>(ui: &mut egui::Ui, id: &str, start: Start<'_, A>, chosen: &m
                         workspace: &row.kind,
                         thumbnail: row.thumbnail,
                         thumbnail_failed: row.thumbnail_failed,
+                        security: row.security.as_deref(),
                     },
                 );
                 publish(&row_id, &response);
@@ -431,6 +434,7 @@ mod tests {
                         path: "~/part".into(),
                         when: "Just now".into(),
                         kind: "Surface".into(),
+                        security: None,
                         thumbnail: None,
                         thumbnail_failed: false,
                         chosen: Picked::Recent(i),

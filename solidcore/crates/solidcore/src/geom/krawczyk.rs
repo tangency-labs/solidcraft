@@ -18,20 +18,55 @@
 //! | [`krawczyk`], [`newton`], [`KRAWCZYK_STEPS`], [`NEWTON_STEPS`] | (not upstream: #15009's, moved) |
 //! | [`inverse3`], [`inverse_of_columns2`], [`inverse_of_columns3`], [`inverse_of_columns4`] | (not upstream: #15009's, moved) |
 //! | [`contraction`], [`k_operator`] | `sm_GnEncloseOver`'s `C`, `q` and `K` (the fork's order), extracted (#15140) |
+//! | [`KNumber`], [`start_minus_y`], [`plus_c_times`] | `K`'s two sums, in the same order, for the feet's Taylor-model tube (not upstream: #14405's, #15140) |
 //!
 //! Deviations: [`krawczyk`]'s centre, first box, widening and step count are #15009's as they
 //! were in `reach/net.rs`; its operator is the crate's one ([`contraction`], [`k_operator`],
 //! the fork's `sm_GnEncloseOver` order, #15140), so its boxes differ from #15009's by
 //! roundings only (each operation rounds outward; the order of the terms changed, not the
-//! maths).
+//! maths). [`contraction`], [`start_minus_y`] and [`plus_c_times`] take any [`KNumber`]:
+//! [`Ivl`] for the certificate, `net.rs`, the ball and [`krawczyk`], a Taylor model
+//! ([`TmN`]) for the feet's tube (`feet_tm.rs`, Rump's form about its polynomial), each in
+//! the operations and order it had in its own copy, so every caller's bits are unchanged.
 
 use crate::blend::fillet_section::certificate::inverse4;
 use crate::blend::fillet_section::interval::{cmax, round_up, Ivl};
+use crate::blend::fillet_section::tay::Ring;
+use crate::blend::fillet_section::taylor_model::TmN;
 use crate::error::Result;
 use crate::geom::vector3d::Vec3;
 
 /// The point interval 0 (a missing entry's value, as `IZ` in the certificate).
 const ZERO: Ivl = Ivl::new(0.0, 0.0);
+
+/// A number Krawczyk's operator is formed in: an interval, or a Taylor model in one
+/// variable over intervals (`feet_tm.rs`'s tube), every operation rounding outward.
+pub(crate) trait KNumber: Ring {
+    /// `self` times the number `y`, as each caller's copy formed it: [`Ivl`]'s product
+    /// `y · self`, [`TmN::scale`].
+    fn scaled(self, y: f64) -> Self;
+    /// The range of values `self` encloses: an [`Ivl`] itself, a [`TmN`]'s
+    /// [`TmN::range`] over `[-1, 1]`.
+    fn hull(self) -> Ivl;
+}
+
+impl KNumber for Ivl {
+    fn scaled(self, y: f64) -> Self {
+        Ivl::from(y) * self
+    }
+    fn hull(self) -> Ivl {
+        self
+    }
+}
+
+impl<const M: usize> KNumber for TmN<M> {
+    fn scaled(self, y: f64) -> Self {
+        self.scale(Ivl::from(y))
+    }
+    fn hull(self) -> Ivl {
+        self.range()
+    }
+}
 
 /// The most Krawczyk steps one root gets ([`krawczyk`]).
 pub(crate) const KRAWCZYK_STEPS: usize = 8;
@@ -116,25 +151,61 @@ pub(crate) fn krawczyk<const N: usize>(
 /// `C = I − Y F′`, each `C_ij` formed from `δ_ij` by subtracting `y_ik F′_kj` in `k`'s
 /// order, and `q = max_i Σ_j |C_ij|`, each row's sum rounded up as it grows. The fork's
 /// order (`sm_GnEncloseOver`), shared with [`k_operator`] (tangency-labs/solidcraft#15140).
-pub(crate) fn contraction<const N: usize>(
+/// Over Taylor models, `q` is taken over their ranges ([`KNumber::hull`]).
+pub(crate) fn contraction<T: KNumber, const N: usize>(
     y: &[[f64; N]; N],
-    jac: &[[Ivl; N]; N],
-) -> ([[Ivl; N]; N], f64) {
-    let mut cm = [[Ivl::from(0.0); N]; N];
+    jac: &[[T; N]; N],
+) -> ([[T; N]; N], f64) {
+    let mut cm = [[T::lift(0.0); N]; N];
     let mut q = 0.0_f64;
     for (i, (yi, ci)) in y.iter().zip(cm.iter_mut()).enumerate() {
         let mut row = 0.0_f64;
         for (j, cij) in ci.iter_mut().enumerate() {
-            let mut c = Ivl::from(if i == j { 1.0 } else { 0.0 });
+            let mut c = T::lift(if i == j { 1.0 } else { 0.0 });
             for (&yik, jk) in yi.iter().zip(jac) {
-                c = c - Ivl::from(yik) * jk.get(j).copied().unwrap_or(ZERO);
+                // never read: `j < N` and every row of `jac` holds N entries
+                let jkj = jk.get(j).copied().unwrap_or_else(|| T::lift(0.0));
+                c = c - jkj.scaled(yik);
             }
             *cij = c;
-            row = round_up(row + c.mag());
+            row = round_up(row + c.hull().mag());
         }
         q = cmax(q, row);
     }
     (cm, q)
+}
+
+/// `start_i − Σ_j y_ij g_j`, each term subtracted from `start_i` in `j`'s order: the first
+/// sum of Krawczyk's operator ([`k_operator`] from `mid`; the feet's tube from 0, `−Y G`).
+pub(crate) fn start_minus_y<T: KNumber, const N: usize>(
+    start: [T; N],
+    y: &[[f64; N]; N],
+    g: &[T; N],
+) -> [T; N] {
+    let mut out = start;
+    for (o, yi) in out.iter_mut().zip(y) {
+        for (&yij, &gj) in yi.iter().zip(g) {
+            *o = *o - gj.scaled(yij);
+        }
+    }
+    out
+}
+
+/// `start_i + Σ_j c_ij delta_j`, each term added to `start_i` in `j`'s order: the second
+/// sum of Krawczyk's operator ([`k_operator`] with `delta = x − mid`; the feet's tube with
+/// its radii `[−r_j, r_j]`, and its coefficients' iteration and defect).
+pub(crate) fn plus_c_times<T: Ring, const N: usize>(
+    start: [T; N],
+    c: &[[T; N]; N],
+    delta: &[T; N],
+) -> [T; N] {
+    let mut out = start;
+    for (o, ci) in out.iter_mut().zip(c) {
+        for (&cij, &dj) in ci.iter().zip(delta) {
+            *o = *o + cij * dj;
+        }
+    }
+    out
 }
 
 /// Krawczyk's operator over the box `x` about `mid`: `K_i = mid_i − Σ_j y_ij g_j + Σ_j
@@ -142,7 +213,8 @@ pub(crate) fn contraction<const N: usize>(
 /// fork's `sm_GnEncloseOver`), `g` the system at the point `mid`, `c` the [`contraction`] for
 /// `y`. A box `x` with `K` strictly inside it holds a root of the system (module docs); each
 /// caller keeps its own centre, first box, preconditioner and widening, and a caller whose
-/// proof needs `q < 1` tests it itself (tangency-labs/solidcraft#15140).
+/// proof needs `q < 1` tests it itself (tangency-labs/solidcraft#15140). It is
+/// [`plus_c_times`] after [`start_minus_y`] from `mid`, with `delta = x − mid`.
 pub(crate) fn k_operator<const N: usize>(
     mid: &[f64; N],
     y: &[[f64; N]; N],
@@ -150,19 +222,11 @@ pub(crate) fn k_operator<const N: usize>(
     c: &[[Ivl; N]; N],
     x: &[Ivl; N],
 ) -> [Ivl; N] {
-    let mut kk = [Ivl::from(0.0); N];
-    for (i, ((yi, ci), ki)) in y.iter().zip(c).zip(kk.iter_mut()).enumerate() {
-        let mut k = Ivl::from(mid.get(i).copied().unwrap_or(f64::NAN));
-        for (&yij, gj) in yi.iter().zip(g) {
-            k = k - Ivl::from(yij) * *gj;
-        }
-        for (j, &cij) in ci.iter().enumerate() {
-            let xj = x.get(j).copied().unwrap_or(ZERO);
-            k = k + cij * (xj - Ivl::from(mid.get(j).copied().unwrap_or(f64::NAN)));
-        }
-        *ki = k;
+    let mut delta = *x;
+    for (dj, &mj) in delta.iter_mut().zip(mid) {
+        *dj = *dj - Ivl::from(mj);
     }
-    kk
+    plus_c_times(start_minus_y(mid.map(Ivl::from), y, g), c, &delta)
 }
 
 /// `F` at a point and its columns there, as numbers ([`newton`]).
@@ -237,4 +301,71 @@ pub(crate) fn inverse_of_columns2(j: &[[f64; 2]; 2]) -> Option<[[f64; 2]; 2]> {
     }
     let inv = [[d / det, -b / det], [-c / det, a / det]];
     inv.iter().flatten().all(|x| x.is_finite()).then_some(inv)
+}
+
+#[cfg(test)]
+mod tests {
+    //! Closed forms of the one operator (#15140): `x² − 2` has its root √2 bracketed;
+    //! over `[2, 3]` its operator lies wholly below the box, so the box holds no root; a
+    //! singular Jacobian has no inverse, and Newton refuses it.
+    #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // test
+
+    use super::*;
+
+    /// `x² − 2` at a point box.
+    fn value(x: [Ivl; 1]) -> [Ivl; 1] {
+        [x[0] * x[0] - Ivl::from(2.0)]
+    }
+
+    /// Its derivative `2x` over a box, as columns.
+    fn jacobian(x: [Ivl; 1]) -> [[Ivl; 1]; 1] {
+        [[Ivl::from(2.0) * x[0]]]
+    }
+
+    #[test]
+    fn the_root_of_x_squared_minus_two_is_proved_in_a_box_about_root_two() {
+        let mid = core::f64::consts::SQRT_2;
+        let c = [[1.0 / (2.0 * mid)]];
+        let f = |x| -> Result<Option<[Ivl; 1]>> { Ok(Some(value(x))) };
+        let j = |x| -> Result<Option<[[Ivl; 1]; 1]>> { Ok(Some(jacobian(x))) };
+        let b = krawczyk([mid], c, &f, &j).unwrap().unwrap()[0];
+        // the box holds √2 (its square brackets 2) and is no wider than the first box
+        assert!(b.lo * b.lo < 2.0 && 2.0 < b.hi * b.hi, "{b:?}");
+        assert!(b.hi - b.lo < 1e-10, "{b:?}");
+    }
+
+    #[test]
+    fn a_box_whose_operator_lies_outside_it_holds_no_root() {
+        // over X = [2, 3] about 2.5, with y = 1 / (2 · 2.5): C = 1 − y [4, 6] = [−0.2, 0.2],
+        // q = 0.2, and K = 2.5 − y · 4.25 + C · [−0.5, 0.5] = [1.55, 1.75], below X
+        let (mid, y) = ([2.5], [[0.2]]);
+        let x = [Ivl::new(2.0, 3.0)];
+        let (c, q) = contraction(&y, &jacobian(x));
+        // the closed forms, to the operations' outward rounding
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-12;
+        assert!(near(c[0][0].lo, -0.2) && near(c[0][0].hi, 0.2), "{c:?}");
+        assert!(near(q, 0.2), "{q}");
+        let g = value([Ivl::from(2.5)]);
+        let k = k_operator(&mid, &y, &g, &c, &x)[0];
+        assert!(near(k.lo, 1.55) && near(k.hi, 1.75), "{k:?}");
+        // K misses X: by Krawczyk's theorem every root in X lies in K ∩ X, which is empty
+        assert!(k.hi < x[0].lo);
+    }
+
+    #[test]
+    fn a_singular_jacobian_has_no_inverse_and_newton_refuses_it() {
+        assert_eq!(inverse_of_columns2(&[[1.0, 2.0], [2.0, 4.0]]), None);
+        assert_eq!(
+            inverse_of_columns3(&[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0]]),
+            None
+        );
+        // F(x, y) = (x + y − 1, 2x + 2y − 2): its Jacobian's columns are dependent everywhere
+        let at = |p: [f64; 2]| -> Result<Linearised<2>> {
+            Ok(Some((
+                [p[0] + p[1] - 1.0, 2.0 * p[0] + 2.0 * p[1] - 2.0],
+                [[1.0, 2.0], [1.0, 2.0]],
+            )))
+        };
+        assert_eq!(newton([0.0, 0.0], &at, &inverse_of_columns2).unwrap(), None);
+    }
 }

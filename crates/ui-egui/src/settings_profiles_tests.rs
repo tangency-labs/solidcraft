@@ -19,21 +19,25 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
     let mut h = Harness::new();
     crate::keymap::bind(&mut h.app, "panel.sash.left", "Ctrl+Left", false).unwrap();
     crate::keymap::bind(&mut h.app, "panel.sash.right", "", false).unwrap();
+    h.app.preferences.live_panel_drag_preview = false;
     run(&mut h, "settings.profile.save", json!({"name":"Panels"}));
     let profile = run(&mut h, "settings.profile.export", json!({"name":"Panels"}))["profile"].clone();
     assert_eq!(profile["shortcuts"]["panel.sash.left"], "Ctrl+Left");
     assert_eq!(profile["shortcuts"]["panel.sash.right"], "");
+    assert_eq!(profile["preferences"]["live_panel_drag_preview"], false);
+    h.app.preferences.live_panel_drag_preview = true;
     crate::keymap::reset(&mut h.app, None);
     run(&mut h, "settings.profile.import", json!({"profile":profile,"name":"Imported panels"}));
     run(&mut h, "settings.profile.apply", json!({"name":"Imported panels"}));
     assert_eq!(crate::keymap::keys(&h.app, "panel.sash.left"), ["Ctrl+Left"]);
     assert!(crate::keymap::keys(&h.app, "panel.sash.right").is_empty());
+    assert!(!h.app.preferences.live_panel_drag_preview);
 }
 
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 96, "Appearance system-theme slots and Maya zoom are included");
+    assert_eq!(keys.len(), 97, "include the live panel drag preference among the current portable settings");
     for key in [
         "nav",
         "maya_horizontal_zoom",
@@ -819,6 +823,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "layout",
         "line_drag_draws_one",
         "line_hover_tangent_arc",
+        "live_panel_drag_preview",
         "logo_accent",
         "look_at_anim",
         "look_at_speed",
@@ -896,7 +901,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 96);
+    assert_eq!(expected.len(), 97);
     assert_eq!(actual, expected);
 }
 

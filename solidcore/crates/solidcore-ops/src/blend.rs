@@ -29,6 +29,7 @@ use solidcore::blend::band_room::law_fits_band;
 use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::faces_along;
+use solidcore::blend::definition_check::BlendFaceLog;
 use solidcore::blend::fillet_executive::p3::{
     ErrorInfo, FitKind as KernelFit, FitSize as KernelFitSize, NoRoomReason,
 };
@@ -174,6 +175,10 @@ pub struct Blended {
     /// With [`Corners::Open`], each set-back corner's hole, in the setbacks' order (none
     /// otherwise).
     pub holes: Vec<Hole>,
+    /// The faces the blend made (its rounds', chamfers' and corners'), by index in the result's
+    /// native face list, as the kernel's fillet sessions mark them; every other face of the
+    /// result is a face of the body, kept or cut back.
+    pub made: Vec<usize>,
 }
 
 /// The second size of [`chamfer_sides`].
@@ -262,7 +267,10 @@ fn room_reason(r: NoRoomReason) -> Option<RoomReason> {
     use RoomReason as R;
     Some(match r {
         NoRoomReason::BallDoesNotFit => R::BallDoesNotFit,
+        // the crease trim's refusal: the blend runs off its face across a tangent edge onto
+        // the face beyond, which would need a crease
         NoRoomReason::RailLeavesFace
+        | NoRoomReason::CreaseAcrossTangentEdge
         | NoRoomReason::ConcaveOverflow
         | NoRoomReason::OverflowWithConcaveBlend
         | NoRoomReason::OverflowWithRollover
@@ -275,6 +283,7 @@ fn room_reason(r: NoRoomReason) -> Option<RoomReason> {
         NoRoomReason::BreaksThrough => R::BreaksThrough,
         NoRoomReason::OffsetCollapses => R::OffsetCollapses,
         NoRoomReason::CornersTakeWholeEdge => R::CornersTakeWholeEdge,
+        NoRoomReason::OverflowKeepsNothing => R::OverflowKeepsNothing,
         NoRoomReason::RoundIntoMaterial | NoRoomReason::RailRunsPastFaceIntoMaterial => {
             R::RunsIntoMaterial
         }
@@ -1278,169 +1287,214 @@ fn blend_impl(
         })
         .collect();
     with_body("blend", body, |k, b| {
-        // the Facet is the kernel's blend corner's, under its fix: refused, not built as the
-        // Mitre, without it
-        if options.chamfer_corner == ChamferCorner::Facet && !k.fixes.fillet_chamfer_corner {
-            return Ok(Err(Error::Unsupported(
-                "the chamfered corner needs the kernel's fillet_chamfer_corner fix",
-            )));
+        // the faces the blend makes, as the kernel's fillet sessions mark them: its log on for
+        // this blend, whatever the caller had it at, and put back after
+        let outer = k.blend_face_log.replace(BlendFaceLog::default());
+        let ran = blend_on_body(k, b, order, kind, edges, &each, setbacks, corners, options);
+        let ours = std::mem::replace(&mut k.blend_face_log, outer);
+        let made: HashSet<FaceId> = ours
+            .iter()
+            .flat_map(|log| log.sessions.iter().flatten())
+            .map(|m| m.face)
+            .collect();
+        if let (Some(log), Some(ours)) = (k.blend_face_log.as_mut(), ours) {
+            log.sessions.extend(ours.sessions);
         }
-        let edge_order = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
-        let picked = match each_once(edge_order, edges) {
-            Ok(p) => p,
-            Err(e) => return Ok(Err(e)),
-        };
-        if order.is_some() && picked.iter().any(|e| !b.edge_list().contains(e)) {
-            return Ok(Err(Error::Argument));
-        }
-        let vertices: Vec<usize> = setbacks.iter().map(|s| s.vertex).collect();
-        let vertex_order = order.map_or_else(|| b.vertex_list(), |o| o.vertices.as_slice());
-        let back: Vec<(VertexId, f64)> = match each_once(vertex_order, &vertices) {
-            Ok(vs) => vs
-                .into_iter()
-                .zip(setbacks)
-                .map(|(v, s)| (v, s.distance))
-                .collect(),
-            Err(e) => return Ok(Err(e)),
-        };
-        if order.is_some() && back.iter().any(|(v, _)| !b.vertex_list().contains(v)) {
-            return Ok(Err(Error::Argument));
-        }
-        let expect = Expect::of(k, b)?;
-        let mut dropped = vec![false; edges.len()];
-        let section: fn(&[f64]) -> Section<'_> = match kind {
-            Blend::Round => |s| Section::Round(s),
-            Blend::Curvature => |s| Section::Curvature(s),
-            Blend::Chord => |s| Section::Chord(s),
-            Blend::Chamfer => {
-                let sizes: Vec<ChamferSize> = each
-                    .iter()
-                    .map(|&d| ChamferSize::Distances([d, d]))
-                    .collect();
-                let p = Pass {
-                    edges: &picked,
-                    section: Section::Chamfer {
-                        sizes: &sizes,
-                        along: &[],
-                    },
-                    law: None,
-                    setbacks: &[],
-                    earlier: &[],
-                    patches: false,
-                    overflow: None,
-                    turn,
-                    chamfer_corner: options.chamfer_corner,
-                };
-                if let Err(e) = pass_or_refuse(k, b, p)? {
-                    return Ok(Err(e));
-                }
-                return Ok(done(k, b, expect)?.map(|()| Blended {
-                    dropped,
-                    holes: Vec::new(),
-                }));
-            }
-        };
-        let may_go_first = OVERFLOW_GOES_FIRST
-            && back.is_empty()
-            && corners == Corners::Filled
-            && picked.len() > 1;
-        // the untouched input, for the overflowing rounds to go first on
-        let fresh = if may_go_first {
-            Some(brep_copy(k, b)?)
-        } else {
-            None
-        };
-        let mut stopped = Stopped::default();
-        let p = Pass {
-            edges: &picked,
-            section: section(&each),
-            law: None,
-            setbacks: &back,
-            earlier: &[],
-            patches: corners == Corners::Open,
-            overflow: may_go_first.then_some(Overflow {
-                classify_only: false,
-            }),
-            turn,
-            chamfer_corner: ChamferCorner::Mitre,
-        };
-        let made = pass(k, b, p, &mut stopped)?;
-        if stopped.overflow.is_some() {
-            let Some(fresh) = fresh else {
-                return Ok(Err(Error::Exception));
-            };
-            let mitred = std::mem::take(&mut stopped.mitred);
-            return match overflow_first(
-                k,
-                b,
-                fresh,
-                &picked,
-                &each,
-                section,
+        Ok(ran?.map(|mut blended| {
+            blended.made = b
+                .face_list()
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| made.contains(f))
+                .map(|(i, _)| i)
+                .collect();
+            blended
+        }))
+    })?
+}
+
+/// [`blend_impl`] on the kernel's body: every pass, its corners and refusals, the body
+/// finished as the result.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn blend_on_body(
+    k: &mut Kernel,
+    b: &mut Brep,
+    order: Option<&crate::Order>,
+    kind: Blend,
+    edges: &[usize],
+    each: &[f64],
+    setbacks: &[SetBack],
+    corners: Corners,
+    options: BlendOptions,
+) -> solidcore::Result<Result<Blended>> {
+    let turn = options.turn;
+    // the Facet is the kernel's blend corner's, under its fix: refused, not built as the
+    // Mitre, without it
+    if options.chamfer_corner == ChamferCorner::Facet && !k.fixes.fillet_chamfer_corner {
+        return Ok(Err(Error::Unsupported(
+            "the chamfered corner needs the kernel's fillet_chamfer_corner fix",
+        )));
+    }
+    let edge_order = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
+    let picked = match each_once(edge_order, edges) {
+        Ok(p) => p,
+        Err(e) => return Ok(Err(e)),
+    };
+    if order.is_some() && picked.iter().any(|e| !b.edge_list().contains(e)) {
+        return Ok(Err(Error::Argument));
+    }
+    let vertices: Vec<usize> = setbacks.iter().map(|s| s.vertex).collect();
+    let vertex_order = order.map_or_else(|| b.vertex_list(), |o| o.vertices.as_slice());
+    let back: Vec<(VertexId, f64)> = match each_once(vertex_order, &vertices) {
+        Ok(vs) => vs
+            .into_iter()
+            .zip(setbacks)
+            .map(|(v, s)| (v, s.distance))
+            .collect(),
+        Err(e) => return Ok(Err(e)),
+    };
+    if order.is_some() && back.iter().any(|(v, _)| !b.vertex_list().contains(v)) {
+        return Ok(Err(Error::Argument));
+    }
+    let expect = Expect::of(k, b)?;
+    let mut dropped = vec![false; edges.len()];
+    let section: fn(&[f64]) -> Section<'_> = match kind {
+        Blend::Round => |s| Section::Round(s),
+        Blend::Curvature => |s| Section::Curvature(s),
+        Blend::Chord => |s| Section::Chord(s),
+        Blend::Chamfer => {
+            let sizes: Vec<ChamferSize> = each
+                .iter()
+                .map(|&d| ChamferSize::Distances([d, d]))
+                .collect();
+            let p = Pass {
+                edges: &picked,
+                section: Section::Chamfer {
+                    sizes: &sizes,
+                    along: &[],
+                },
+                law: None,
+                setbacks: &[],
+                earlier: &[],
+                patches: false,
+                overflow: None,
                 turn,
-                &mitred,
-                &mut dropped,
-            )? {
-                Ok(made) => {
-                    *b = made;
-                    Ok(done(k, b, expect)?.map(|()| Blended {
-                        dropped,
-                        holes: Vec::new(),
-                    }))
-                }
-                Err(e) => Ok(Err(e)),
+                chamfer_corner: options.chamfer_corner,
             };
-        }
-        let made = match made {
-            Ok(made) => made,
-            Err(Refused::Corner(corner)) => return Ok(Err(Error::CornerRefused { corner })),
-            Err(Refused::Error(e)) => return Ok(Err(e)),
-        };
-        if corners == Corners::Filled {
+            if let Err(e) = pass_or_refuse(k, b, p)? {
+                return Ok(Err(e));
+            }
             return Ok(done(k, b, expect)?.map(|()| Blended {
                 dropped,
                 holes: Vec::new(),
+                made: Vec::new(),
             }));
         }
-        // each corner opened: its patch removed, the edges round its hole in the result's
-        // orders
-        if !is_manifold_solid(b)? {
-            return Ok(Err(Error::NotSolid));
-        }
-        let rims = match open_corners(k, b, &made.patches)? {
-            Ok(r) => r,
-            Err(e) => return Ok(Err(e)),
+    };
+    let may_go_first =
+        OVERFLOW_GOES_FIRST && back.is_empty() && corners == Corners::Filled && picked.len() > 1;
+    // the untouched input, for the overflowing rounds to go first on
+    let fresh = if may_go_first {
+        Some(brep_copy(k, b)?)
+    } else {
+        None
+    };
+    let mut stopped = Stopped::default();
+    let p = Pass {
+        edges: &picked,
+        section: section(each),
+        law: None,
+        setbacks: &back,
+        earlier: &[],
+        patches: corners == Corners::Open,
+        overflow: may_go_first.then_some(Overflow {
+            classify_only: false,
+        }),
+        turn,
+        chamfer_corner: ChamferCorner::Mitre,
+    };
+    let made = pass(k, b, p, &mut stopped)?;
+    if stopped.overflow.is_some() {
+        let Some(fresh) = fresh else {
+            return Ok(Err(Error::Exception));
         };
-        let edge_index: HashMap<EdgeId, usize> = b
-            .edge_list()
-            .iter()
-            .enumerate()
-            .map(|(i, &e)| (e, i))
-            .collect();
-        let face_index: HashMap<FaceId, usize> = b
-            .face_list()
-            .iter()
-            .enumerate()
-            .map(|(i, &f)| (f, i))
-            .collect();
-        let mut holes = Vec::new();
-        for rim in rims {
-            let mut hole = Hole::default();
-            for h in rim {
-                let (Some(&edge), Some(&face)) = (edge_index.get(&h.edge), face_index.get(&h.face))
-                else {
-                    return Ok(Err(Error::Exception));
-                };
-                hole.edges.push(HoleEdge {
-                    edge,
-                    face,
-                    forward: h.forward,
-                });
+        let mitred = std::mem::take(&mut stopped.mitred);
+        return match overflow_first(
+            k,
+            b,
+            fresh,
+            &picked,
+            each,
+            section,
+            turn,
+            &mitred,
+            &mut dropped,
+        )? {
+            Ok(made) => {
+                *b = made;
+                Ok(done(k, b, expect)?.map(|()| Blended {
+                    dropped,
+                    holes: Vec::new(),
+                    made: Vec::new(),
+                }))
             }
-            holes.push(hole);
+            Err(e) => Ok(Err(e)),
+        };
+    }
+    let made = match made {
+        Ok(made) => made,
+        Err(Refused::Corner(corner)) => return Ok(Err(Error::CornerRefused { corner })),
+        Err(Refused::Error(e)) => return Ok(Err(e)),
+    };
+    if corners == Corners::Filled {
+        return Ok(done(k, b, expect)?.map(|()| Blended {
+            dropped,
+            holes: Vec::new(),
+            made: Vec::new(),
+        }));
+    }
+    // each corner opened: its patch removed, the edges round its hole in the result's
+    // orders
+    if !is_manifold_solid(b)? {
+        return Ok(Err(Error::NotSolid));
+    }
+    let rims = match open_corners(k, b, &made.patches)? {
+        Ok(r) => r,
+        Err(e) => return Ok(Err(e)),
+    };
+    let edge_index: HashMap<EdgeId, usize> = b
+        .edge_list()
+        .iter()
+        .enumerate()
+        .map(|(i, &e)| (e, i))
+        .collect();
+    let face_index: HashMap<FaceId, usize> = b
+        .face_list()
+        .iter()
+        .enumerate()
+        .map(|(i, &f)| (f, i))
+        .collect();
+    let mut holes = Vec::new();
+    for rim in rims {
+        let mut hole = Hole::default();
+        for h in rim {
+            let (Some(&edge), Some(&face)) = (edge_index.get(&h.edge), face_index.get(&h.face))
+            else {
+                return Ok(Err(Error::Exception));
+            };
+            hole.edges.push(HoleEdge {
+                edge,
+                face,
+                forward: h.forward,
+            });
         }
-        Ok(done(k, b, Expect::FACES)?.map(|()| Blended { dropped, holes }))
-    })?
+        holes.push(hole);
+    }
+    Ok(done(k, b, Expect::FACES)?.map(|()| Blended {
+        dropped,
+        holes,
+        made: Vec::new(),
+    }))
 }
 
 /// The result contract on the body in place ([`finish`]).
@@ -1655,6 +1709,115 @@ fn faces_along_indices(
         (Some(i0), Some(i1)) => Ok([(i0, l0), (i1, l1)]),
         _ => Err(Error::Exception),
     })
+}
+
+/// A flat face of a concave straight edge that a round can be carried on past, with the slab
+/// that carries it on (the kernel's [`solidcore::blend::carried_face::CarriedFace`], its face
+/// by index).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CarriedFace {
+    /// The flat face's index.
+    pub face: usize,
+    /// The edge's start vertex: the origin of the slab's frame.
+    pub origin: [f64; 3],
+    /// The unit direction of the edge.
+    pub along: [f64; 3],
+    /// The unit direction in the face's plane square to the edge; `along` × `across` is the
+    /// face's outward normal.
+    pub across: [f64; 3],
+    /// The slab's rectangle in (`along`, `across`) from `origin`.
+    pub outline: [[f64; 2]; 4],
+    /// The slab's extent along the outward normal, up to the face's plane.
+    pub depth: [f64; 2],
+    /// How far to either side of its plane the face's outline is to be carried.
+    pub reach: f64,
+    /// Which way along `across` from the edge's line the other face's material stands, in the
+    /// face's plane: `1.0` or `-1.0`.
+    pub other_side: f64,
+}
+
+/// The flat faces of `body`'s edge at index `edge` that a round of radius `radius` can be
+/// carried on past (the kernel's [`solidcore::blend::carried_face::carried_faces`]): for an
+/// application building a round wider than the flat face beside its edge, by rounding the
+/// edge on the body with that face carried on as a slab and keeping what the round adds
+/// within the face's outline. None where that does not give the round of an unbounded face:
+/// the edge is not straight and concave, no face of it is flat, or an end of it has no flat
+/// face square to it.
+///
+/// # Errors
+/// [`Error::Argument`] for an index past the edges or a radius not finite, positive and at
+/// most [`MAX_SIZE`]; the kernel's refusals.
+pub fn carried_faces(body: &Body, edge: usize, radius: f64) -> Result<Vec<CarriedFace>> {
+    carried_faces_impl(body, None, edge, radius)
+}
+
+/// [`carried_faces`] with the edge and the returned faces indexed by `order`.
+///
+/// # Errors
+/// As [`carried_faces`] and [`Body::copy_with_order`].
+pub fn carried_faces_ordered(
+    body: &Body,
+    order: &crate::Order,
+    edge: usize,
+    radius: f64,
+) -> Result<Vec<CarriedFace>> {
+    carried_faces_impl(body, Some(order), edge, radius)
+}
+
+fn carried_faces_impl(
+    body: &Body,
+    order: Option<&crate::Order>,
+    edge: usize,
+    radius: f64,
+) -> Result<Vec<CarriedFace>> {
+    if !size_ok(radius) {
+        return Err(Error::Argument);
+    }
+    if let Some(order) = order {
+        let (copy, mapped) = body.copy_with_order(order)?;
+        return with_body("carried_faces", &copy, |k, b| {
+            carried_face_indices(k, b, Some(&mapped), edge, radius)
+        })?;
+    }
+    measure_body("carried_faces", body, |k, b| {
+        carried_face_indices(k, b, None, edge, radius)
+    })?
+}
+
+fn carried_face_indices(
+    k: &mut Kernel,
+    b: &mut Brep,
+    order: Option<&crate::Order>,
+    edge: usize,
+    radius: f64,
+) -> solidcore::Result<Result<Vec<CarriedFace>>> {
+    let edges = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
+    let Some(&e) = edges.get(edge) else {
+        return Ok(Err(Error::Argument));
+    };
+    if !b.edge_list().contains(&e) {
+        return Ok(Err(Error::Argument));
+    }
+    let found = solidcore::blend::carried_face::carried_faces(k, b, e, radius)?;
+    // The supplied order is mapped through the measurement copy.
+    let face_order = order.map_or_else(|| b.face_list(), |o| o.faces.as_slice());
+    let mut out = Vec::new();
+    for c in found {
+        let Some(face) = face_order.iter().position(|&g| g == c.face) else {
+            return Ok(Err(Error::Exception));
+        };
+        out.push(CarriedFace {
+            face,
+            origin: [c.origin.x, c.origin.y, c.origin.z],
+            along: [c.along.x, c.along.y, c.along.z],
+            across: [c.across.x, c.across.y, c.across.z],
+            outline: c.outline,
+            depth: c.depth,
+            reach: c.reach,
+            other_side: c.other_side,
+        });
+    }
+    Ok(Ok(out))
 }
 
 /// The tangent chain of the edges of `body` at record indices `edges` (through `order`, its

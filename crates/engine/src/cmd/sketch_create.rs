@@ -13,16 +13,17 @@ macro_rules! text_style_doc {
     };
 }
 
-use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_parg, slot_parts};
+use super::sketch::{add_c, circumcircle, corner_arg, edit, ids_of, length_expr, mark_construction, place_point, req_parg, slot_parts};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list};
 use crate::schema::sketch_create::{
     ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BlendCurveParams, CenterlineParams, ConicParams,
     ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams, InfiniteLineParams, LineTypeResult,
-    MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineHandlesParams, SplineHandlesResult, SplineRemovePointParams,
-    SplineRemovePointResult, SplineResetHandlesParams, SplineResetHandlesResult, SplineReverseParams, SplineReverseResult, TextChange,
-    TextEditsResult, TextExpressions, TextResult, ThreeTangentCircleParams, TwoTangentCircleParams,
+    MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineHandlesParams, SplineHandlesResult, SplineInsertPointParams,
+    SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult, SplineResetHandlesParams, SplineResetHandlesResult,
+    SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions, TextResult, ThreeTangentCircleParams,
+    TwoTangentCircleParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -53,6 +54,7 @@ const TEXT_CONTRACT: TypedContract<SketchTextParams> = TypedContract::new();
 const EDIT_TEXT_CONTRACT: TypedContract<EditTextParams> = TypedContract::new();
 const SPLINE_REVERSE_CONTRACT: TypedContract<SplineReverseParams> = TypedContract::new();
 const SPLINE_REMOVE_POINT_CONTRACT: TypedContract<SplineRemovePointParams> = TypedContract::new();
+const SPLINE_INSERT_POINT_CONTRACT: TypedContract<SplineInsertPointParams> = TypedContract::new();
 const SPLINE_HANDLES_CONTRACT: TypedContract<SplineHandlesParams> = TypedContract::new();
 const SPLINE_RESET_HANDLES_CONTRACT: TypedContract<SplineResetHandlesParams> = TypedContract::new();
 
@@ -116,7 +118,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ELLIPSE_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!(
-        "center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius. Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
+        "center, major: end of the major axis [x,y] (a coordinate of either may be an expression over the design's parameters: the point follows them), minor: a point the ellipse passes through on the minor side [x,y] | minor_radius: number or expression (an expression naming a parameter is a dimension driven by it). Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
         created_doc!()
     )),
     CommandSpec::new("sketch.spline.fit_point", "Fit Point Spline", crate::checked!("sketch.spline.fit_point", spline_fit))
@@ -140,9 +142,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!("points: control points (2…500), degree 5", created_doc!())),
-    CommandSpec::new("sketch.spline.insert_point", "Add Spline Point", spline_insert_point)
+    CommandSpec::new("sketch.spline.insert_point", "Add Spline Point", crate::checked!("sketch.spline.insert_point", spline_insert_point))
         .icon("spline")
         .enabled(in_sketch)
+        .contract(&SPLINE_INSERT_POINT_CONTRACT)
+        .output(output_schema_for::<SplineInsertPointResult>)
         .params("curve: fit point spline id, at: [x,y]: a fit point is inserted where the curve passes nearest to it, between its neighbours (the curve still runs through it and all its old points; constraints on them stay); end?: start|end: `at` becomes the spline's new first or last point instead, and the curve runs on to it (refused when that end is joined to other geometry). Control point splines take no new points yet. Returns point: the new point's id"),
     CommandSpec::new("sketch.spline.remove_point", "Remove Spline Point", crate::checked!("sketch.spline.remove_point", spline_remove_point))
         .icon("spline")
@@ -719,10 +723,14 @@ fn infinite_line(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.ellipse";
-    let (c, m) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "major")?);
+    // The centre and the major end follow the parameters a coordinate typed as an expression
+    // names, and a minor radius typed as one is a dimension driven by them, as for a circle.
+    let ((c, ec), (m, em)) = (corner_arg(&s.doc, p, "center", cmd)?, corner_arg(&s.doc, p, "major", cmd)?);
     let u = (m - c).normalized().ok_or_else(|| bad(cmd, "the major axis end must differ from the centre"))?;
     let a = c.dist(m);
-    let r = match (num(p, "minor_radius"), p.get("minor").and_then(crate::params::vec2)) {
+    let typed = if p.get("minor_radius").is_some_and(Value::is_string) { Some(length_expr(s, p, "minor_radius", cmd)?) } else { None };
+    let size = typed.as_ref().and_then(|(_, e)| e.clone());
+    let r = match (typed.map(|(r, _)| r).or_else(|| num(p, "minor_radius")), p.get("minor").and_then(crate::params::vec2)) {
         (Some(r), _) => r,
         (None, Some(q)) => {
             // Minor radius so the ellipse passes through q.
@@ -744,13 +752,21 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Bool(b)) => *b,
         Some(_) => return Err(bad(cmd, "`axes` must be true or false")),
     };
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = sk.add_point(c, None)?;
         let mi = sk.add_point(m, None)?;
+        place_point(sk, Some(&ci), ec);
+        place_point(sk, Some(&mi), em);
         let e = sk.add_curve(CurveKind::Ellipse { c: ci, m: mi, r }, None)?;
         mark_construction(sk, &[e], p);
+        let mut cons = Vec::new();
+        if let Some(expr) = &size {
+            let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+            let pname = doc.new_model_param(expr, &unit);
+            cons.push(sk.add_constraint(ConstraintKind::Radius { c: e, value: r }, Some(pname))?);
+        }
         if !axes {
-            return Ok((ids_of(sk, &[e]), Vec::new()));
+            return Ok((ids_of(sk, &[e]), cons));
         }
         // Its major and minor axes, construction lines through the centre that bisects both:
         // the major one ends at the major end, the minor one is perpendicular to it and ends
@@ -764,12 +780,12 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
                 cu.construction = true;
             }
         }
-        let cons = vec![
+        cons.extend([
             add_c(sk, ConstraintKind::Midpoint { p: ci, l: major })?,
             add_c(sk, ConstraintKind::Midpoint { p: ci, l: minor })?,
             add_c(sk, ConstraintKind::Perpendicular { a: minor, b: major })?,
             add_c(sk, ConstraintKind::PointOnCurve { p: n1, c: e })?,
-        ];
+        ]);
         Ok((ids_of(sk, &[e]), cons))
     })?;
     drawn(out, info)
@@ -839,7 +855,7 @@ fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::String(e)) if e == "end" => Some(false),
         Some(_) => return Err(bad(cmd, "`end` must be start or end")),
     };
-    let (point, info) = edit(s, p, cmd, false, |sk, _| {
+    let ((point, curve), info) = edit(s, p, cmd, false, |sk, _| {
         let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?;
         let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
         let new = match end {
@@ -847,9 +863,11 @@ fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {
             Some(at_start) => sk.extend_spline(c, at, at_start),
         }
         .map_err(|e| bad(cmd, e.to_string()))?;
-        sk.points.get(new).map(|q| q.id.clone()).ok_or_else(|| bad(cmd, "the new point is missing"))
+        let point = sk.points.get(new).map(|q| q.id.clone()).ok_or_else(|| bad(cmd, "the new point is missing"))?;
+        Ok((point, id.to_string()))
     })?;
-    Ok(json!({"point": point, "curve": p.get("curve"), "sketch": info}))
+    let reply = SplineInsertPointResult { point, curve, sketch: info, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// One point taken out of a spline (#10783).

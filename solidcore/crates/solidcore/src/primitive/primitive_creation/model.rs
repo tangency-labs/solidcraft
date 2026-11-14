@@ -232,7 +232,14 @@ impl<'k> PrimitiveModel<'k> {
                 .get_mut(id.index() as usize)
                 .and_then(Option::as_mut)
                 .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
-            let mut state = ArenaNotifyState::new(b);
+            // (not upstream) The kernel's reused record map, as the stitch's glues and
+            // `p1::primitives::with_face_env` reuse it: a primitive that adds its faces one
+            // at a time (a revolve, a sweep) would otherwise give every object of the B-rep a
+            // default record for each face it adds, which is quadratic in the faces
+            // (solidcraft#15786). `reusing` leaves the records exactly as `new` leaves them.
+            let (tag, records) = crate::heal::stitch::p1::take_arena_records(self.k, b);
+            let serial = self.k.context.issued_brep_serial(b.notify_identity());
+            let mut state = ArenaNotifyState::reusing(records, b, serial);
             let attributes = &mut self.attributes;
             let run = |k: &mut Kernel, context: Option<&mut crate::geom::context::Context>| {
                 let mut env = NotifyEnv {
@@ -243,13 +250,16 @@ impl<'k> PrimitiveModel<'k> {
                 };
                 body(k, b, &mut env)
             };
-            if with_context {
+            let r = if with_context {
                 crate::geom::context::Context::with_notification_context(self.k, |k, context| {
                     run(k, Some(context))
                 })?
             } else {
                 run(self.k, None)
-            }
+            };
+            // the map goes back to the kernel for the next edit of this B-rep value
+            self.k.arena_notify_records = (tag, state.into_records());
+            r
         })();
         let left = self.leave_view(id, &notify_entity);
         let value = result?;
@@ -883,6 +893,51 @@ mod tests {
             )
             .unwrap();
         face.unwrap()
+    }
+
+    /// A primitive that adds its faces one at a time carries one notification record map
+    /// across its edits, so the work of readying the records does not grow with the faces
+    /// already in the B-rep. Seeding a map from scratch visits every object of the B-rep;
+    /// doing that once per added face is quadratic in the faces, which is what made a
+    /// revolve of a many-segment profile slow (solidcraft#15786).
+    #[test]
+    fn adding_many_faces_readies_the_records_without_reseeding_the_whole_brep() {
+        use crate::topology::brep::p2::seeded;
+        let faces_of = |n: usize| -> (u64, u64, usize) {
+            let mut kernel = Kernel::default();
+            let brep = crate::topology::brep::p3::new_brep(
+                &mut kernel,
+                crate::geom::tol::USE_DEFAULT,
+                crate::geom::tol::USE_DEFAULT,
+            )
+            .unwrap();
+            let mut model = PrimitiveModel::new(&mut kernel, brep);
+            let _ = seeded::take();
+            for _ in 0..n {
+                plane_face(&mut model, PrimitiveModel::MAIN);
+            }
+            let (calls, entities) = seeded::take();
+            let made = SweepAccess::faces(&mut model, PrimitiveModel::MAIN)
+                .unwrap()
+                .len();
+            (calls, entities, made)
+        };
+        // the faces are really made, so the counts below are not of an empty run
+        let (small_calls, small_entities, small_faces) = faces_of(8);
+        let (big_calls, big_entities, big_faces) = faces_of(32);
+        assert_eq!((small_faces, big_faces), (8, 32));
+        // Four times the faces must not cost about sixteen times the readying. A map seeded
+        // per face visits every object of the B-rep each time: here that is hundreds of
+        // visits for 8 faces and thousands for 32. Reusing the map seeds none.
+        assert!(
+            big_entities <= 4 * small_entities + 8 * big_faces as u64,
+            "readying grew faster than the faces: {small_entities} entities in {small_calls} seedings for {small_faces} faces, {big_entities} in {big_calls} for {big_faces}"
+        );
+        // and the work per face does not grow with the faces already there
+        assert!(
+            big_entities <= 8 * big_faces as u64,
+            "{big_faces} faces cost {big_entities} entity visits in {big_calls} seedings"
+        );
     }
 
     #[test]

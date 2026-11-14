@@ -9,9 +9,9 @@
 
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
-use solidcore::primitive::api_primitives::{create_box, create_cylinder};
+use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_plane};
 use solidcore::query::api_queries::{edge_closest_point, surface_closest_point};
-use solidcore::sweep::section_blend::{section_frames, FrameOptions};
+use solidcore::sweep::section_blend::{section_frames, section_frames_outward, FrameOptions};
 use solidcore::topology::{Brep, EdgeId};
 use solidcore::{Kernel, SolidError};
 
@@ -248,5 +248,106 @@ fn malformed_frame_queries_are_refused() {
     invalid(
         section_frames(&k, &b, &[top_front], Vec3::new(0.0, -1.0, 1.0), &strict),
         "the leave direction lies in no face at the chain",
+    );
+}
+
+/// A flat sheet's edges left outward: every frame leaves square to its edge, out of the sheet,
+/// and flat, whichever way the blend is to go (one face bounds the edge, so `toward` chooses
+/// nothing, even pointing back over the sheet).
+#[test]
+fn a_sheet_edge_is_left_outward_whatever_the_blend_s_direction() {
+    let mut k = Kernel::default();
+    // the sheet [0, 20] x [0, 10] in z = 0
+    let mut b = create_plane(&mut k, Point3::ZERO, 20.0, 10.0).unwrap();
+    let front = pick(&k, &b, [10.0, 0.0, 0.0]);
+    let right = pick(&k, &b, [20.0, 5.0, 0.0]);
+    for toward in [
+        Vec3::Y,
+        Vec3::new(0.0, -1.0, 0.0),
+        Vec3::Z,
+        Vec3::new(1.0, 1.0, -1.0),
+    ] {
+        // each edge, its outward direction, and the point of the edge's line nearest a station
+        for (edge, out, on_edge) in [
+            (front, Vec3::new(0.0, -1.0, 0.0), Point3::new(0.0, 0.0, 0.0)),
+            (right, Vec3::X, Point3::new(20.0, 0.0, 0.0)),
+        ] {
+            let frames = section_frames_outward(&k, &mut b, &[edge], toward, 5).unwrap();
+            assert_eq!(frames.len(), 5);
+            for f in &frames {
+                // the station lies on the edge's line: no part along the outward direction off it
+                let off = (f.p - on_edge).dot(out).abs();
+                assert!(off <= 1e-12 && f.p.z.abs() <= 1e-12, "{:?}", f.p);
+                assert!(near(f.leave, out, 1e-12), "{toward:?}: {:?}", f.leave);
+                assert!(f.bend.length() <= 1e-12 && f.bend_change.length() <= 1e-12);
+            }
+        }
+    }
+}
+
+/// A box's top front edge bounds two faces: `toward` breaks the tie. Leaving towards -y the top
+/// face is left (out across the edge, -y); leaving upwards the front face is (out across the
+/// edge, +z).
+#[test]
+fn between_two_faces_the_blend_s_direction_picks_the_face() {
+    let mut k = Kernel::default();
+    let mut b = create_box(&mut k, Point3::ZERO, 20.0, 10.0, 5.0).unwrap();
+    let e = pick(&k, &b, [10.0, 0.0, 5.0]);
+    for (toward, out) in [
+        (Vec3::new(0.0, -1.0, 0.1), Vec3::new(0.0, -1.0, 0.0)),
+        (Vec3::new(0.0, 0.1, 1.0), Vec3::Z),
+    ] {
+        let frames = section_frames_outward(&k, &mut b, &[e], toward, 5).unwrap();
+        for f in &frames {
+            assert!(near(f.leave, out, 1e-12), "{toward:?}: {:?}", f.leave);
+        }
+    }
+}
+
+/// A cylinder's top rim left outward up its wall's continuation: straight up at every station,
+/// with no bend (the wall's generators are straight), as `section_frames` reads the wall left
+/// along its axis.
+#[test]
+fn a_cylinder_rim_left_outward_up_its_wall_is_straight() {
+    let mut k = Kernel::default();
+    let mut b = create_cylinder(&mut k, Point3::ZERO, 5.0, 10.0).unwrap();
+    let rim = pick(&k, &b, [0.0, 5.0, 10.0]);
+    let frames = section_frames_outward(&k, &mut b, &[rim], Vec3::Z, 9).unwrap();
+    assert_eq!(frames.len(), 9);
+    for f in &frames {
+        assert!((f.p.z - 10.0).abs() <= 1e-9 && (f.p.x.hypot(f.p.y) - 5.0).abs() <= 1e-9);
+        assert!(near(f.leave, Vec3::Z, 1e-9), "{:?}", f.leave);
+        assert!(f.bend.length() <= 1e-9, "{:?}", f.bend);
+        assert!(f.bend_change.length() <= 1e-9, "{:?}", f.bend_change);
+    }
+}
+
+/// The refusals of the outward frames.
+#[test]
+fn malformed_outward_frame_queries_are_refused() {
+    let mut k = Kernel::default();
+    let mut b = create_box(&mut k, Point3::ZERO, 20.0, 10.0, 5.0).unwrap();
+    let e = pick(&k, &b, [10.0, 0.0, 5.0]);
+    let invalid = |r: solidcore::Result<Vec<_>>, why: &str| match r {
+        Err(SolidError::InvalidInput { reason, .. }) => {
+            assert!(reason.starts_with(why), "{reason:?} is not {why:?}");
+        }
+        other => panic!("{other:?}: expected {why:?}"),
+    };
+    invalid(
+        section_frames_outward(&k, &mut b, &[e], Vec3::Y, 1),
+        "a section's frames take 2 to 257 stations",
+    );
+    invalid(
+        section_frames_outward(&k, &mut b, &[e], Vec3::new(f64::NAN, 0.0, 0.0), 5),
+        "a direction towards the blend that is not finite",
+    );
+    invalid(
+        section_frames_outward(&k, &mut b, &[e], Vec3::new(0.0, 0.0, 0.0), 5),
+        "a direction towards the blend of no length",
+    );
+    invalid(
+        section_frames_outward(&k, &mut b, &[], Vec3::Y, 5),
+        "an empty chain",
     );
 }

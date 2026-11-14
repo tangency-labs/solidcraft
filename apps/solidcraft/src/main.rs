@@ -284,7 +284,7 @@ impl eframe::App for App {
         self.come_forward.tick(ctx, _frame);
         #[cfg(target_os = "macos")]
         for f in if self.solve.file_picker_busy() { Vec::new() } else { open_documents::take() } {
-            self.solve.open_path_async(&f);
+            self.solve.open_chosen_file(&f);
         }
         #[cfg(target_os = "macos")]
         if let Some(menu) = &mut self.native_menu {
@@ -337,6 +337,27 @@ impl eframe::App for App {
             let _language = self.solve.prepare_text(ui.ctx());
             self.setup.ui(ui);
             return;
+        }
+        if let Some(window) = frame.winit_window() {
+            self.solve.refresh_panel_monitors(|| {
+                let primary = window.primary_monitor();
+                window
+                    .available_monitors()
+                    .map(|monitor| {
+                        let position = monitor.position();
+                        let size = monitor.size();
+                        solidcraft_ui_egui::panel_runtime::NativeMonitor {
+                            name: monitor.name(),
+                            bounds: egui::Rect::from_min_size(
+                                egui::pos2(position.x as f32, position.y as f32),
+                                egui::vec2(size.width as f32, size.height as f32),
+                            ),
+                            scale: monitor.scale_factor() as f32,
+                            primary: primary.as_ref() == Some(&monitor),
+                        }
+                    })
+                    .collect()
+            });
         }
         content_ui(&mut self.solve, ui);
         // After the frame's UI, so a setting changed in it (Preferences' OK) is written now.
@@ -1425,7 +1446,7 @@ fn main() -> eframe::Result {
                     // the files given at launch included.
                     solidcraft_ui_egui::open_elsewhere::start(app);
                     for f in &files {
-                        app.open_path_async(f);
+                        app.open_chosen_file(f);
                     }
                     // No file and no sample: the empty design takes Units of new designs (#1205).
                     // An opened file and the sample part keep the units they were saved or built with.

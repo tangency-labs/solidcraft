@@ -23,14 +23,17 @@ use solidcraft_io::Format;
 use super::CommandSpec;
 use super::print_face;
 use crate::params::{bad, bool_, num, str_, string_list};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::schema::file::GpgKeyInfo;
 use crate::schema::file::{
-    ExportResult, NewerFileReport, OpenElsewhere, OpenResult, OpenedDesign, OpenedDrawing, OpenedFile, OpenedPointCloud, RecoverParams,
-    RecoverResult, RecoveredDesign, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams, RecoveryListResult,
+    ExportResult, GpgKeysParams, GpgKeysResult, NewerFileReport, OpenElsewhere, OpenResult, OpenedDesign, OpenedDrawing, OpenedFile,
+    OpenedPointCloud, RecoverParams, RecoverResult, RecoveredDesign, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams,
+    RecoveryListResult, SignatureRecord, SignatureReport, VerifyParams, VerifyResult,
 };
 use crate::schema::insert_mesh::{InsertMeshParams, MeshInserted};
 use crate::schema::insert_step::{InsertStepParams, StepInserted};
 use crate::schema::new_design::{NewDesignParams, NewDesignResult};
-use crate::schema::save::{SaveAsParams, SaveParams, SaveResult};
+use crate::schema::save::{SaveAsParams, SaveParams, SaveResult, SignedSave};
 use crate::schema::save_mesh::{SaveMeshResult, SlicerDelivery};
 use crate::schema::slicers::{SlicerInfo, SlicersParams, SlicersResult};
 use crate::schema::{TypedContract, output_schema_for};
@@ -53,13 +56,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&OPEN_CONTRACT)
         .output(output_schema_for::<OpenResult>)
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step))
         .at("SOLID", "INSERT")
         .icon("import")
         .contract(&INSERT_STEP_CONTRACT)
         .output(output_schema_for::<StepInserted>)
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -72,14 +75,26 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&SAVE_CONTRACT)
         .output(output_schema_for::<SaveResult>)
-        .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused)"),
+        .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused); sign?: bool (the app's own Save only: sign the save with GnuPG, appending a provenance record; container only; a script or agent is refused); signing_key?: fingerprint or user id (default: GnuPG's default signing key) → signature: {method, fingerprint, user_id?} when signed"),
     CommandSpec::new("file.save_as", "Save As", crate::checked!("file.save_as", save_as))
         .icon("save")
         .key("Ctrl+Shift+S")
         .noundo()
         .contract(&SAVE_AS_CONTRACT)
         .output(output_schema_for::<SaveResult>)
-        .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file)"),
+        .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file); sign?: bool and signing_key? (as file.save, and likewise only from the app's own Save)"),
+    CommandSpec::new("file.verify", "Verify Signature", crate::checked!("file.verify", verify))
+        .icon("shield")
+        .noundo()
+        .contract(&VERIFY_CONTRACT)
+        .output(output_schema_for::<VerifyResult>)
+        .params("path? (default: the design's current file) → {path, status, reason?, truncated, records: [{method, key_id, user_id?, author?, created?, format, covered}]}: status is unsigned, valid, not_covered (signed earlier, saved since without a key), invalid or unsupported"),
+    CommandSpec::new("file.gpg_keys", "Signing Keys", crate::checked!("file.gpg_keys", gpg_keys))
+        .icon("shield")
+        .noundo()
+        .contract(&GPG_KEYS_CONTRACT)
+        .output(output_schema_for::<GpgKeysResult>)
+        .params("→ {available, keys: [{fingerprint, key_id, user_id, on_card}]}: the GnuPG secret keys a save can sign with (desktop only)"),
     CommandSpec::new("doc.recovery_list", "Recoverable Designs", crate::checked!("doc.recovery_list", recovery_list)).icon("restore")
         .noundo()
         .contract(&RECOVERY_LIST_CONTRACT)
@@ -215,6 +230,8 @@ const NEW_DESIGN_CONTRACT: TypedContract<NewDesignParams> = TypedContract::new()
 const EXPORT_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportParams> = crate::schema::TypedContract::new();
 const SAVE_CONTRACT: TypedContract<SaveParams> = TypedContract::new();
 const SAVE_AS_CONTRACT: TypedContract<SaveAsParams> = TypedContract::new();
+const VERIFY_CONTRACT: TypedContract<VerifyParams> = TypedContract::new();
+const GPG_KEYS_CONTRACT: TypedContract<GpgKeysParams> = TypedContract::new();
 const EXPORT_STEP_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportStepParams> = crate::schema::TypedContract::new();
 const EXPORT_STL_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportStlParams> = crate::schema::TypedContract::new();
 const EXPORT_3MF_CONTRACT: crate::schema::TypedContract<crate::schema::file::Export3mfParams> = crate::schema::TypedContract::new();
@@ -262,6 +279,8 @@ struct StepOptions {
     /// `folder: true`: an import that brings more than one item gets a `Group #N` history folder
     /// (`import_folder`). `false` (the default) makes none, as before the option.
     folder: bool,
+    /// A FreeCAD file's feature history is rebuilt as features (else only its solids come in).
+    history: bool,
 }
 
 fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
@@ -283,14 +302,21 @@ fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
             ));
         }
     };
-    Ok(StepOptions { y_up, names, folder })
-}
 
-/// Read a STEP file as an Import feature.
-fn read_step(path: &str, names: solidcraft_io::StepNames) -> Result<(solidcraft_io::StepFeature, Vec<u8>)> {
-    let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let feature = solidcraft_io::step_import_feature_named(&bytes, path, names).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    Ok((feature, bytes))
+    let history = match p.get("history") {
+        None | Some(Value::Null) => true,
+        Some(v) => match v.as_str().map(|h| h.trim().to_ascii_lowercase()).as_deref() {
+            Some("features") => true,
+            Some("solids") => false,
+            _ => {
+                return Err(bad(
+                    cmd,
+                    "`history` must be \"features\" (a FreeCAD file's sketches and features are rebuilt) or \"solids\" (only its solids)",
+                ));
+            }
+        },
+    };
+    Ok(StepOptions { y_up, names, folder, history })
 }
 
 /// Which way is up in a STEP or IGES file, from the program its header names: `("y", name)` for
@@ -311,6 +337,31 @@ fn quarter_turn_x() -> solidcraft_doc::Mat {
     solidcraft_doc::rigid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X, std::f64::consts::FRAC_PI_2)
 }
 
+/// The design state a rebuilt-history insert may change: the document, its evaluated model, and
+/// the counters and editor state that go with them. When the insert fails they are put back, so
+/// the file's solids import into the design exactly as it was.
+struct DesignSnapshot {
+    doc: std::sync::Arc<Document>,
+    model: solidcraft_doc::Model,
+    revision: u64,
+    evaluations: usize,
+    active_sketch: Option<u64>,
+}
+
+impl DesignSnapshot {
+    fn of(s: &Session) -> Self {
+        Self { doc: s.doc.clone(), model: s.model.clone(), revision: s.revision, evaluations: s.evaluations, active_sketch: s.active_sketch }
+    }
+
+    fn restore(self, s: &mut Session) {
+        s.doc = self.doc;
+        s.model = self.model;
+        s.revision = self.revision;
+        s.evaluations = self.evaluations;
+        s.active_sketch = self.active_sketch;
+    }
+}
+
 /// Add an Import feature for a STEP file to the session's design, in a new component named
 /// after the file (#1386).
 ///
@@ -319,8 +370,43 @@ fn quarter_turn_x() -> solidcraft_doc::Mat {
 /// `diagnostics.profile` reports it.
 fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions) -> Result<Value> {
     let profiled = solidcraft_profile::enabled().then(solidcraft_profile::mark);
-    let (sf, bytes) = read_step(path, options.names)?;
-    add_read_step(s, path, name, options, sf, &bytes, profiled)
+    let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    add_step_bytes(s, path, name, options, &bytes, profiled)
+}
+
+/// Add a STEP, IGES or native CAD file's `bytes`. A FreeCAD file's sketches and features come in
+/// when they can all be rebuilt and build what the file holds; else its solids, saying why.
+fn add_step_bytes(
+    s: &mut Session,
+    path: &str,
+    name: Option<&str>,
+    options: &StepOptions,
+    bytes: &[u8],
+    profiled: Option<solidcraft_profile::Mark>,
+) -> Result<Value> {
+    let mut not_rebuilt = None;
+    if options.history && solidcraft_io::is_freecad_path(path) {
+        match solidcraft_io::native_cad_design(bytes, path) {
+            // Inserting the rebuilt design can still fail: the target design may be at its
+            // feature limit, or a rebuilt feature may not build beside what it holds. The
+            // file's solids then come in as before, with the reason, and the design stays as
+            // it was (the attempt is put back).
+            Ok(design) => {
+                let before = DesignSnapshot::of(s);
+                match add_rebuilt(s, path, name, options, &design, bytes) {
+                    Ok(out) => return Ok(out),
+                    Err(e) => {
+                        before.restore(s);
+                        not_rebuilt = Some(format!("the feature history was not rebuilt, so the file's solids were imported instead: {e}"));
+                    }
+                }
+            }
+            Err(why) => not_rebuilt = Some(format!("the feature history was not rebuilt, so the file's solids were imported instead: {why}")),
+        }
+    }
+    let mut sf = solidcraft_io::step_import_feature_named(bytes, path, options.names).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    sf.warnings.splice(0..0, not_rebuilt);
+    add_read_step(s, path, name, options, sf, bytes, profiled)
 }
 
 fn add_read_step(
@@ -337,7 +423,7 @@ fn add_read_step(
     let unchanged = matches!(&sf.kind, solidcraft_doc::FeatureKind::Import { step, .. } if step.as_bytes() == bytes);
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&sf.name).to_string();
     let cname = import::component_name(path, name);
-    let (id, placed) = import::add_in_component(s, sf.kind, &fname, sf.body_names, &cname, import::Tree::Step(&sf.import))?;
+    let (id, placed) = import::add_in_component(s, sf.kind, &fname, sf.body_names, &sf.invisible, &cname, import::Tree::Step(&sf.import))?;
     let content_sha256 = unchanged
         .then(|| {
             s.model.state().bodies.iter().filter(|b| b.feature == id).find_map(|b| {
@@ -368,6 +454,8 @@ fn add_read_step(
         bodies: created.clone(),
         created_bodies: created,
         warnings: sf.warnings,
+        history: None,
+        features_added: None,
         system: sf.import.system.clone(),
         content_sha256,
         exporter: known.map(|(_, exporter)| exporter.to_string()),
@@ -423,7 +511,13 @@ fn open_step(
     };
     let cache = cache.filter(|_| reuse && !solidcraft_io::is_native_cad_path(path) && solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none());
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let key = solidcraft_io::ImportCache::key(&bytes, path, &json!({"y_up": options.y_up, "names": format!("{:?}", options.names)}));
+    // Every `doc.open` option that changes the imported design is in the key: a reused import is
+    // the one this open asks for.
+    let key = solidcraft_io::ImportCache::key(
+        &bytes,
+        path,
+        &json!({"y_up": options.y_up, "names": format!("{:?}", options.names), "folder": options.folder}),
+    );
     let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
     if let Some((doc, saved, mut reply)) = cache.and_then(|cache| cache.read(&key)) {
         let mut fresh = Session::opened_validating(doc, Some(&saved), validation);
@@ -443,8 +537,7 @@ fn open_step(
     }
     let mut fresh = Session::new(Document::new(&stem));
     fresh.set_validation(validation);
-    let sf = solidcraft_io::step_import_feature_named(&bytes, path, options.names).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let mut reply = add_read_step(&mut fresh, path, None, &options, sf, &bytes, profiled)?;
+    let mut reply = add_step_bytes(&mut fresh, path, None, &options, &bytes, profiled)?;
     reply["import_reused"] = json!(false);
     if let Some(cache) = cache
         && let Some(saved) = saved_geometry(&fresh, &fresh.doc)
@@ -453,6 +546,52 @@ fn open_step(
         log::info!("import was not cached: {e}");
     }
     Ok((fresh, reply))
+}
+
+/// Add a FreeCAD file's rebuilt history (`design`) in a new component named after the file.
+fn add_rebuilt(
+    s: &mut Session,
+    path: &str,
+    name: Option<&str>,
+    options: &StepOptions,
+    design: &solidcraft_io::NativeDesign,
+    bytes: &[u8],
+) -> Result<Value> {
+    let cname = import::component_name(path, name);
+    let (ids, placed) = import::add_design(s, design, &cname)?;
+    let turned = if options.y_up { turn_up(s, &placed)? } else { None };
+    let created: Vec<String> = s.model.state().bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| b.name.clone()).collect();
+    let feature = *ids.first().ok_or_else(|| EngineError::Other(format!("{path}: the rebuilt history made no feature")))?;
+    let reply = StepInserted {
+        path: path.to_string(),
+        feature,
+        name: placed.name.clone(),
+        bodies: created.clone(),
+        created_bodies: created,
+        warnings: design.warnings.clone(),
+        history: Some("features".to_string()),
+        features_added: Some(ids),
+        // A rebuilt history has no restated STEP header to take it from: name the program the
+        // file was read from.
+        system: "FreeCAD".to_string(),
+        content_sha256: {
+            use sha2::{Digest, Sha256};
+            format!("{:x}", Sha256::digest(bytes))
+        },
+        exporter: None,
+        exporter_up: None,
+        component: placed.component,
+        component_name: placed.name.clone(),
+        occurrence: placed.occurrence,
+        subcomponents: None,
+        rigid_joints: None,
+        stand_up: turned,
+        group: None,
+        transform: None,
+        profile: None,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(format!("{path}: {e}")))
 }
 
 /// The bodies an import feature built, by name.
@@ -506,7 +645,7 @@ fn add_mesh(
         Some(p) if !p.places.is_empty() => import::Tree::Mesh(p),
         _ => import::Tree::Flat,
     };
-    let (id, placed) = import::add_in_component(s, mf.kind, &fname, mf.body_names, &cname, tree)?;
+    let (id, placed) = import::add_in_component(s, mf.kind, &fname, mf.body_names, &[], &cname, tree)?;
     let bodies = created_bodies(s, id);
     // The materials' looks, body by body (the bodies are built in the file's order).
     if looks.iter().any(Option::is_some) && bodies.len() == looks.len() {
@@ -649,6 +788,386 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
+/// The KiCad import options a command's parameters name.
+fn kicad_options(p: &Value, cmd: &str) -> Result<solidcraft_io::KicadOptions> {
+    let mut options = solidcraft_io::KicadOptions::default();
+    if let Some(v) = p.get("thickness").filter(|v| !v.is_null()) {
+        let value = v.as_f64().ok_or_else(|| bad(cmd, "`thickness` must be a finite number"))?;
+        if !value.is_finite() || value <= 0.0 || value > 1000.0 {
+            return Err(bad(cmd, "`thickness` must be greater than 0 and at most 1000 mm"));
+        }
+        options.thickness = Some(value);
+    }
+    for (key, slot) in [("components", &mut options.components), ("silkscreen", &mut options.silkscreen)] {
+        if let Some(v) = p.get(key).filter(|v| !v.is_null()) {
+            *slot = v.as_bool().ok_or_else(|| bad(cmd, format!("`{key}` must be true or false")))?;
+        }
+    }
+    if let Some(v) = p.get("copper").filter(|v| !v.is_null()) {
+        options.copper = match v.as_bool() {
+            Some(true) => solidcraft_io::KicadCopper::Mesh,
+            Some(false) => solidcraft_io::KicadCopper::None,
+            None => {
+                let name = v.as_str().ok_or_else(|| bad(cmd, "`copper` must be true, false, \"none\", \"overlay\" or \"mesh\""))?;
+                solidcraft_io::KicadCopper::parse(name).ok_or_else(|| bad(cmd, "`copper` must be \"none\", \"overlay\" or \"mesh\""))?
+            }
+        };
+    }
+    if let Some(v) = p.get("color").filter(|v| !v.is_null()) {
+        options.color = Some(parse_kicad_color(v).ok_or_else(|| bad(cmd, "`color` must be \"#rrggbb\" or [r, g, b] with values 0-255"))?);
+    }
+    if let Some(v) = p.get("representation").or(p.get("mode")).filter(|v| !v.is_null()) {
+        let name = v.as_str().ok_or_else(|| bad(cmd, "`representation` must be \"mesh\""))?;
+        options.representation = solidcraft_io::KicadRepresentation::parse(name).ok_or_else(|| bad(cmd, "`representation` must be \"mesh\""))?;
+        if options.representation == solidcraft_io::KicadRepresentation::Brep {
+            return Err(EngineError::Other("not supported yet: B-rep KiCad imports (choose mesh)".into()));
+        }
+    }
+    Ok(options)
+}
+
+fn parse_kicad_color(v: &Value) -> Option<[u8; 3]> {
+    if let Some(s) = v.as_str() {
+        let hex = s.trim().trim_start_matches('#');
+        let expand = |c: u8| c * 17;
+        return match hex.len() {
+            3 => Some([
+                expand(u8::from_str_radix(hex.get(0..1)?, 16).ok()?),
+                expand(u8::from_str_radix(hex.get(1..2)?, 16).ok()?),
+                expand(u8::from_str_radix(hex.get(2..3)?, 16).ok()?),
+            ]),
+            6 => Some([
+                u8::from_str_radix(hex.get(0..2)?, 16).ok()?,
+                u8::from_str_radix(hex.get(2..4)?, 16).ok()?,
+                u8::from_str_radix(hex.get(4..6)?, 16).ok()?,
+            ]),
+            _ => None,
+        };
+    }
+    let values = v.as_array()?;
+    if values.len() != 3 {
+        return None;
+    }
+    let mut out = [0u8; 3];
+    for (i, value) in values.iter().enumerate() {
+        let n = value.as_f64()?;
+        if !n.is_finite() || !(0.0..=255.0).contains(&n) {
+            return None;
+        }
+        out[i] = n.round() as u8;
+    }
+    Some(out)
+}
+
+fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcraft_io::KicadOptions) -> Result<Value> {
+    let board_path = solidcraft_io::kicad_board_path(std::path::Path::new(path)).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let board_path = board_path.to_string_lossy();
+    let bytes =
+        solidcraft_io::vfs::read(&board_path, solidcraft_io::MAX_KICAD_BYTES).map_err(|e| EngineError::Other(format!("{board_path}: {e}")))?;
+    let model_dir = std::path::Path::new(board_path.as_ref()).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    let paths = KicadPaths::current();
+    let mut load = |model: &str| {
+        let resolved = paths.resolve(model, &model_dir).map_err(|e| e.to_string())?;
+        // A board names its models; they follow the same rule as any other path a document names.
+        solidcraft_io::vfs::check_design_path(&resolved, Some(board_path.as_ref())).map_err(|e| e.to_string())?;
+        read_kicad_model(&resolved).map_err(|e| format!("{resolved}: {e}"))
+    };
+    let imported =
+        solidcraft_io::read_kicad(&bytes, &board_path, options, &mut load).map_err(|e| EngineError::Other(format!("{board_path}: {e}")))?;
+    let feature = imported.feature;
+    let feature_name = name.filter(|n| !n.trim().is_empty()).unwrap_or(&feature.name).to_string();
+    let component_name = import::component_name(path, name);
+    let tree = if imported.plan.places.is_empty() { import::Tree::Flat } else { import::Tree::Mesh(&imported.plan) };
+    // A board hides none of its own bodies; its layers are all wanted.
+    let (id, placed) = import::add_in_component(s, feature.kind, &feature_name, feature.body_names, &[], &component_name, tree)?;
+    // The board stands at the origin: its lower-left outline corner goes to X = Y = 0, not to the
+    // coordinates KiCad stores, which put a board anywhere on the project sheet.
+    if let Some(corner) = imported.corner {
+        at_origin(s, &placed, corner);
+    }
+    // A solid board is a STEP import of its own, in the board's component: the mesh feature holds
+    // the copper, silkscreen and models, this holds the substrate.
+    let mut features = vec![id];
+    if let Some(step) = imported.board_step {
+        features.push(import::add_step_in_component(s, placed.component, "board.step", step, &feature_name)?);
+    }
+    let bodies: Vec<String> = features.iter().flat_map(|feature| created_bodies(s, *feature)).collect();
+    let mut out = json!({"path": path, "board_path": board_path, "feature": id, "name": feature_name, "bodies": bodies, "created_bodies": bodies, "warnings": feature.warnings});
+    // The component the board was placed in, as the other imports report theirs.
+    out["component"] = json!(placed.component);
+    out["component_name"] = json!(placed.name);
+    out["occurrence"] = json!(placed.occurrence);
+    if placed.components > 0 {
+        out["subcomponents"] = json!(placed.components);
+        out["rigid_joints"] = json!(placed.joints.len());
+    }
+    if features.len() > 1 {
+        out["board_solid"] = json!(true);
+    }
+    Ok(out)
+}
+
+/// Move an import's component so that the board's lower-left corner `corner` sits at the origin,
+/// contents and all: the occurrence takes the shift, so the design's Z = 0 stays the board's top.
+fn at_origin(s: &mut Session, placed: &import::Placed, corner: [f64; 2]) {
+    let Some(occurrence) = placed.occurrence else { return };
+    let shift =
+        solidcraft_doc::rigid(solidcore_record::Vec3::new(-corner[0], -corner[1], 0.0), solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0);
+    if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occurrence) {
+        o.transform = shift;
+    }
+    s.refresh();
+}
+
+/// What a KiCad model reference's `${…}`/`%…%`/`$…` variables can resolve to on this machine.
+///
+/// The names are the board's, not ours: a board drawn in KiCad 8 says `${KICAD8_3DMODEL_DIR}`
+/// while KiCad 10 may be installed, so the version in a name decides nothing. A variable is
+/// looked up in the shell first (it wins), then in KiCad's own variable table (Preferences →
+/// Configure Paths, which is the only place KiCad defines them on Linux: it sets no environment
+/// variable), and any `KICAD<n>_3DMODEL_DIR`/`KISYS3DMOD` finally lands in the 3D library that is
+/// actually installed here.
+struct KicadPaths {
+    configured: Vec<(String, String)>,
+    library: Option<std::path::PathBuf>,
+}
+
+impl KicadPaths {
+    fn current() -> Self {
+        Self { configured: kicad_configured_variables(), library: installed_kicad_3dmodel_dir() }
+    }
+
+    fn get(&self, name: &str) -> Option<String> {
+        if let Ok(value) = std::env::var(name)
+            && !value.is_empty()
+        {
+            return Some(value);
+        }
+        if let Some((_, value)) = self.configured.iter().find(|(key, value)| key.eq_ignore_ascii_case(name) && !value.is_empty()) {
+            return Some(value.clone());
+        }
+        if is_kicad_3dmodel_variable(name) {
+            return self.library.as_ref().map(|dir| dir.to_string_lossy().into_owned());
+        }
+        None
+    }
+
+    fn resolve(&self, path: &str, model_dir: &std::path::Path) -> std::io::Result<String> {
+        let mut expanded = String::with_capacity(path.len());
+        let mut chars = path.chars().peekable();
+        while let Some(ch) = chars.next() {
+            let name = match ch {
+                '$' if chars.peek() == Some(&'{') => {
+                    chars.next();
+                    Some(read_kicad_env_name(&mut chars, '}')?)
+                }
+                '%' => Some(read_kicad_env_name(&mut chars, '%')?),
+                '$' => {
+                    let mut name = String::new();
+                    while chars.peek().is_some_and(|c| c.is_ascii_alphanumeric() || *c == '_') {
+                        if let Some(c) = chars.next() {
+                            name.push(c);
+                        }
+                    }
+                    if name.is_empty() {
+                        expanded.push('$');
+                        continue;
+                    }
+                    Some(name)
+                }
+                _ => None,
+            };
+            if let Some(name) = name {
+                if name.is_empty() {
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty environment variable in model path"));
+                }
+                if name == "KIPRJMOD" {
+                    expanded.push_str(&model_dir.to_string_lossy());
+                } else {
+                    expanded.push_str(
+                        &self
+                            .get(&name)
+                            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, format!("unresolved environment variable `{name}`")))?,
+                    );
+                }
+            } else {
+                expanded.push(ch);
+            }
+        }
+        let resolved = std::path::Path::new(&expanded);
+        let resolved = if resolved.is_absolute() { resolved.to_path_buf() } else { model_dir.join(resolved) };
+        Ok(resolved.to_string_lossy().into_owned())
+    }
+}
+
+/// KiCad's own variable table — `environment.vars` in `kicad_common.json` — from the newest
+/// KiCad configured here: `~/.config/kicad/<version>` on Linux (`$XDG_CONFIG_HOME` when set),
+/// `%APPDATA%\kicad\<version>` on Windows, `~/Library/Preferences/kicad/<version>` on macOS.
+#[cfg(target_arch = "wasm32")]
+fn kicad_configured_variables() -> Vec<(String, String)> {
+    // The browser has no KiCad installed and no folders to list.
+    Vec::new()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn kicad_configured_variables() -> Vec<(String, String)> {
+    let mut roots = Vec::new();
+    #[cfg(target_os = "windows")]
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        roots.push(std::path::PathBuf::from(app_data).join("kicad"));
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(home) = std::env::var_os("HOME") {
+        roots.push(std::path::PathBuf::from(home).join("Library").join("Preferences").join("kicad"));
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(config) = std::env::var_os("XDG_CONFIG_HOME").filter(|value| !value.is_empty()) {
+            roots.push(std::path::PathBuf::from(config).join("kicad"));
+        } else if let Some(home) = std::env::var_os("HOME") {
+            roots.push(std::path::PathBuf::from(home).join(".config").join("kicad"));
+        }
+    }
+    for root in roots {
+        // The newest configured version is the one whose paths apply; older ones are kept as a
+        // fallback for a variable the newest no longer defines.
+        let mut versions: Vec<(u32, u32, std::path::PathBuf)> = std::fs::read_dir(&root)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let mut pieces = name.split('.').map(|piece| piece.parse::<u32>().unwrap_or(u32::MAX));
+                let version = (pieces.next()?, pieces.next().unwrap_or(0));
+                (version.0 != u32::MAX && entry.path().is_dir()).then(|| (version.0, version.1, entry.path()))
+            })
+            .collect();
+        versions.sort_by_key(|a| std::cmp::Reverse((a.0, a.1)));
+        versions.push((0, 0, root));
+        let mut variables: Vec<(String, String)> = Vec::new();
+        for (_, _, dir) in versions {
+            let Ok(bytes) = solidcraft_io::vfs::read(&dir.join("kicad_common.json").to_string_lossy(), 16 << 20) else { continue };
+            for (key, value) in kicad_variables_of(&bytes) {
+                if !variables.iter().any(|(name, _)| name.eq_ignore_ascii_case(&key)) {
+                    variables.push((key, value));
+                }
+            }
+        }
+        if !variables.is_empty() {
+            return variables;
+        }
+    }
+    Vec::new()
+}
+
+/// The `environment.vars` table of a `kicad_common.json`, as text. Anything unexpected in the
+/// file (a missing table, a number or `null` where a path belongs) simply is not a variable.
+/// (The browser reads no KiCad settings, so there this is only the tests' entry point.)
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+fn kicad_variables_of(bytes: &[u8]) -> Vec<(String, String)> {
+    let Ok(json) = serde_json::from_slice::<Value>(bytes) else { return Vec::new() };
+    let Some(vars) = json.get("environment").and_then(|e| e.get("vars")).and_then(Value::as_object) else { return Vec::new() };
+    vars.iter()
+        .filter_map(|(name, value)| value.as_str().filter(|text| !text.is_empty()).map(|text| (name.clone(), text.to_string())))
+        .take(256)
+        .collect()
+}
+
+/// Read a footprint's model. KiCad's 3D library ships each model in one format at a time — the
+/// KiCad 10 packages have no VRML at all, while a board drawn with older footprints still names
+/// `….wrl` — so a reference to a file that is not here is answered by the model of the same name
+/// in another format we can read, which is what KiCad's own 3D viewer does.
+fn read_kicad_model(path: &str) -> std::io::Result<solidcraft_io::KicadModelFile> {
+    let named = std::path::Path::new(path);
+    let missing = match read_kicad_model_file(named) {
+        Ok(bytes) => return Ok(solidcraft_io::KicadModelFile { path: path.to_string(), bytes }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => error,
+        Err(error) => return Err(error),
+    };
+    let Some(stem) = named.file_stem() else { return Err(missing) };
+    let Some(dir) = named.parent() else { return Err(missing) };
+    let format = named.extension().and_then(|e| e.to_str()).unwrap_or("");
+    for other in ["step", "stp", "wrl"] {
+        if other.eq_ignore_ascii_case(format) {
+            continue;
+        }
+        // Not `with_extension`: a model named `DIP-14_W7.62mm` has `62mm` as its extension.
+        let mut name = stem.to_os_string();
+        name.push(".");
+        name.push(other);
+        let candidate = dir.join(name);
+        if let Ok(bytes) = read_kicad_model_file(&candidate) {
+            return Ok(solidcraft_io::KicadModelFile { path: candidate.to_string_lossy().into_owned(), bytes });
+        }
+    }
+    Err(missing)
+}
+
+fn read_kicad_model_file(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    let text = path.to_string_lossy();
+    let limit = if solidcraft_io::is_vrml_path(&text) { solidcraft_io::MAX_VRML_BYTES } else { solidcraft_io::MAX_STEP_BYTES };
+    solidcraft_io::vfs::read(&text, limit)
+}
+
+fn is_kicad_3dmodel_variable(name: &str) -> bool {
+    if name == "KISYS3DMOD" {
+        return true;
+    }
+    name.strip_prefix("KICAD")
+        .and_then(|version| version.strip_suffix("_3DMODEL_DIR"))
+        .is_some_and(|version| !version.is_empty() && version.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn installed_kicad_3dmodel_dir() -> Option<std::path::PathBuf> {
+    // Told, not inferred: none of the platforms below is the browser, and there it stays empty.
+    let mut candidates: Vec<((u32, u32), std::path::PathBuf)> = Vec::new();
+    #[cfg(target_os = "windows")]
+    {
+        for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
+            let Some(program_files) = std::env::var_os(variable) else { continue };
+            let install_root = std::path::PathBuf::from(program_files).join("KiCad");
+            let direct = install_root.join("share").join("kicad").join("3dmodels");
+            if direct.is_dir() {
+                candidates.push(((0_u32, 0_u32), direct));
+            }
+            let Ok(entries) = std::fs::read_dir(&install_root) else { continue };
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let version_text = name.to_string_lossy();
+                let mut pieces = version_text.split('.').map(|piece| piece.parse::<u32>().unwrap_or(0));
+                let version = (pieces.next().unwrap_or(0), pieces.next().unwrap_or(0));
+                let models = entry.path().join("share").join("kicad").join("3dmodels");
+                if version.0 > 0 && models.is_dir() {
+                    candidates.push((version, models));
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    candidates.push(((0, 0), std::path::PathBuf::from("/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels")));
+    #[cfg(all(unix, not(target_os = "macos")))]
+    candidates.extend([
+        ((0, 0), std::path::PathBuf::from("/usr/share/kicad/3dmodels")),
+        ((0, 0), std::path::PathBuf::from("/usr/local/share/kicad/3dmodels")),
+    ]);
+    candidates.sort_by_key(|(version, _)| *version);
+    candidates.into_iter().rev().map(|(_, path)| path).find(|path| path.is_dir())
+}
+
+fn read_kicad_env_name(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, delimiter: char) -> std::io::Result<String> {
+    let mut name = String::new();
+    for ch in chars.by_ref() {
+        if ch == delimiter {
+            if name.is_empty() {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty environment variable in model path"));
+            }
+            return Ok(name);
+        }
+        name.push(ch);
+    }
+    Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "unterminated environment variable in model path"))
+}
+
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, "doc.open")?;
     if !solidcraft_io::is_step_path(path) && p.get("names").is_some_and(|v| !v.is_null()) {
@@ -706,10 +1225,16 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             param_warnings: Vec::new(),
         }));
     }
-    if solidcraft_io::is_step_path(path) || solidcraft_io::is_mesh_path(path) {
+    if solidcraft_io::is_step_path(path) || solidcraft_io::is_mesh_path(path) || solidcraft_io::is_kicad_path(path) {
         // A new, unsaved design holding the file's bodies.
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
-        let (mut fresh, r) = if solidcraft_io::is_step_path(path) {
+        let (mut fresh, r) = if solidcraft_io::is_kicad_path(path) {
+            // KiCad is read into a fresh design here, as a mesh file is.
+            let mut fresh = Session::new(Document::new(&stem));
+            fresh.set_validation(s.validation());
+            let r = add_kicad(&mut fresh, path, None, &kicad_options(p, "doc.open")?)?;
+            (fresh, r)
+        } else if solidcraft_io::is_step_path(path) {
             open_step(path, p, import_cache().as_ref(), s.validation())?
         } else {
             let mut fresh = Session::new(Document::new(&stem));
@@ -745,15 +1270,22 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             moved_to_origin: r.moved_to_origin,
             content_sha256: r.content_sha256,
             import_reused: r.import_reused,
+            history: r.history,
+            board_path: r.board_path,
+            board_solid: r.board_solid,
             param_warnings: Vec::new(),
         }));
     }
     let read_only = bool_(p, "read_only").unwrap_or(false);
+    let verify = bool_(p, "verify").unwrap_or(false);
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
     let (doc, saved) = read_design(s, path)?;
+    // A file with provenance is evaluated from its timeline, never from a cache the signature
+    // does not cover.
+    let saved = if solidcraft_io::has_design_provenance(path) { None } else { saved };
     let opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
-    opened_design(s, opened, path, read_only, disk)
+    opened_design(s, opened, path, read_only, disk, verify, None)
 }
 
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
@@ -773,10 +1305,18 @@ fn opened_design(
     path: &str,
     read_only: bool,
     disk: Option<solidcraft_io::design_lock::FileStamp>,
+    verify: bool,
+    checked: Option<Option<solidcraft_io::ProvenanceReport>>,
 ) -> Result<Value> {
     s.replace_design(opened);
     s.disk = disk;
     s.read_only = read_only;
+    s.provenance_chain = solidcraft_io::read_design_provenance_chain_file(path);
+    // A staged open checks on its worker before it lands; the report is then just taken here.
+    s.provenance = match checked {
+        Some(report) => report,
+        None => verify.then(|| solidcraft_io::read_design_provenance_file(path)).flatten(),
+    };
     // A design saved with print faces (by an older version, or with them kept) opens without
     // them when they are not kept (#11512). The rest of it opens as saved, and dropping them is
     // neither an unsaved change nor a step to undo.
@@ -807,6 +1347,7 @@ fn opened_design(
             notice: file.notice(),
         }),
         warnings: s.doc.newer_file.as_ref().map(|file| file.warnings()),
+        signature: s.provenance.as_ref().map(signature_report),
         param_warnings: Vec::new(),
     }))
 }
@@ -871,6 +1412,13 @@ struct ImportedFile {
     content_sha256: Option<String>,
     #[serde(default)]
     import_reused: Option<bool>,
+    /// FreeCAD and `history: features` only: the rebuilt history came in.
+    #[serde(default)]
+    history: Option<String>,
+    #[serde(default)]
+    board_path: Option<String>,
+    #[serde(default)]
+    board_solid: Option<bool>,
 }
 
 /// The name a design never given one by its user is shown under.
@@ -971,7 +1519,18 @@ fn check_design_name(cmd: &str, path: &str) -> Result<()> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str, preview: bool, cache: bool, overwrite: bool) -> Result<Value> {
+fn write(
+    s: &mut Session,
+    cmd: &str,
+    path: &str,
+    format: &str,
+    compression: &str,
+    preview: bool,
+    cache: bool,
+    overwrite: bool,
+    sign: bool,
+    signing_key: Option<&str>,
+) -> Result<Value> {
     // A path outside the agent's folders says so first, whatever its name.
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
     check_design_name(cmd, path)?;
@@ -1001,7 +1560,7 @@ fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str
     if let Some((from, to)) = &renamed {
         rename_design(s, from, to);
     }
-    let r = write_file(s, path, format, compression, preview, cache);
+    let r = write_file(s, path, format, compression, preview, cache, sign, signing_key);
     if r.is_err()
         && let Some((from, to)) = &renamed
     {
@@ -1010,13 +1569,22 @@ fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str
     r
 }
 
-fn write_file(s: &mut Session, path: &str, format: &str, compression: &str, preview: bool, cache: bool) -> Result<Value> {
+fn write_file(
+    s: &mut Session,
+    path: &str,
+    format: &str,
+    compression: &str,
+    preview: bool,
+    cache: bool,
+    sign: bool,
+    signing_key: Option<&str>,
+) -> Result<Value> {
     let compression = match compression {
         "fast" => solidcraft_io::DesignCompression::Fast,
         "compact" => solidcraft_io::DesignCompression::Compact,
         _ => return Err(bad("file.save", "compression must be fast or compact")),
     };
-    write_bytes(s, path, format, compression, preview, cache)
+    write_bytes(s, path, format, compression, preview, cache, sign, signing_key)
 }
 
 fn write_bytes(
@@ -1026,11 +1594,43 @@ fn write_bytes(
     compression: solidcraft_io::DesignCompression,
     preview: bool,
     cache: bool,
+    sign: bool,
+    signing_key: Option<&str>,
 ) -> Result<Value> {
-    let bytes = match format {
-        "container" => s.design_container_at(Some(path), compression, preview, cache)?,
-        "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
-        _ => return Err(bad("file.save", "format must be container or json")),
+    let chain = s.provenance_chain.clone().unwrap_or_default();
+    let mut signature = None;
+    let bytes = if sign {
+        if !s.signing_allowed {
+            return Err(bad(
+                "file.save",
+                "signing is only available from the app's Save, with the key chosen in Preferences; a script or agent cannot sign",
+            ));
+        }
+        if format != "container" {
+            return Err(bad("file.save", "only a container can carry a signature: save as .sc (format container), not json"));
+        }
+        let (bytes, signed) = write_signed_container(s, &chain, path, compression, preview, cache, signing_key)?;
+        signature = signed;
+        bytes
+    } else if !chain.records.is_empty() {
+        // A save without a key keeps the history it opened with, so the newest record is reported
+        // as covering an earlier version instead of the chain being destroyed.
+        if format != "container" {
+            match format {
+                "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
+                _ => return Err(bad("file.save", "format must be container or json")),
+            }
+        } else {
+            let save =
+                solidcraft_io::ProvenanceSave { source: None, chain: &chain, author: None, tool: Some("SolidCraft"), note: None, created: None };
+            s.design_container_signed(Some(path), compression, preview, cache, &save).map_err(|e| EngineError::Other(format!("{path}: {e}")))?
+        }
+    } else {
+        match format {
+            "container" => s.design_container_at(Some(path), compression, preview, cache)?,
+            "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
+            _ => return Err(bad("file.save", "format must be container or json")),
+        }
     };
     // Cancelled while the design was being prepared (a watched save): nothing is written.
     if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
@@ -1042,6 +1642,8 @@ fn write_bytes(
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
+    s.provenance_chain = solidcraft_io::read_design_provenance_chain(&bytes);
+    s.provenance = None;
     s.mark_saved();
     let mut out = SaveResult {
         path: path.to_string(),
@@ -1051,6 +1653,7 @@ fn write_bytes(
         warnings: None,
         not_kept: None,
         param_warnings: Vec::new(),
+        signature,
     };
     // A newer SolidCraft's file keeps what this version can't read, and its format number. What
     // couldn't go back, because the design was changed around it, is said.
@@ -1066,6 +1669,130 @@ fn write_bytes(
         }
     }
     serde_json::to_value(out).map_err(|e| bad("file.save", e.to_string()))
+}
+
+/// Write the container with one GnuPG-signed provenance record appended to the session's chain.
+#[cfg(not(target_arch = "wasm32"))]
+fn write_signed_container(
+    s: &Session,
+    chain: &solidcraft_io::ProvenanceChain,
+    path: &str,
+    compression: solidcraft_io::DesignCompression,
+    preview: bool,
+    cache: bool,
+    signing_key: Option<&str>,
+) -> Result<(Vec<u8>, Option<SignedSave>)> {
+    let gpg = crate::gpg::Gpg::find().ok_or_else(|| bad("file.save", "signing needs GnuPG, which was not found on this computer"))?;
+    let signer = crate::gpg::Signer::new(&gpg, signing_key.map(str::trim).filter(|key| !key.is_empty()));
+    let save = solidcraft_io::ProvenanceSave {
+        source: Some(solidcraft_io::SignatureSource::OpenPgp(&signer)),
+        chain,
+        author: None,
+        tool: Some("SolidCraft"),
+        note: None,
+        created: Some(solidcraft_io::design_lock::now_secs()),
+    };
+    let bytes = s.design_container_signed(Some(path), compression, preview, cache, &save).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let info = signer.signing_info().ok_or_else(|| EngineError::Other(format!("{path}: GnuPG signed the design but named no key")))?;
+    Ok((bytes, Some(SignedSave { method: "gpg".to_owned(), fingerprint: info.fingerprint, user_id: info.user_id })))
+}
+
+/// The browser cannot run GnuPG.
+#[cfg(target_arch = "wasm32")]
+fn write_signed_container(
+    _s: &Session,
+    _chain: &solidcraft_io::ProvenanceChain,
+    _path: &str,
+    _compression: solidcraft_io::DesignCompression,
+    _preview: bool,
+    _cache: bool,
+    _signing_key: Option<&str>,
+) -> Result<(Vec<u8>, Option<SignedSave>)> {
+    Err(bad("file.save", "signing needs the desktop app and GnuPG; the browser cannot sign"))
+}
+
+/// `file.verify`: check a saved design's signature.
+fn verify(s: &mut Session, p: &Value) -> Result<Value> {
+    let path = match str_(p, "path") {
+        Some(path) if !path.trim().is_empty() => path.to_owned(),
+        _ => s.path.clone().ok_or_else(|| bad("file.verify", "the design has no file yet: give a `path`"))?,
+    };
+    let report = solidcraft_io::read_design_provenance_file_checked(&path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    // An explicit file that is not the design in front is checked without replacing the active
+    // design's report: a tab must not show another file's verification as its own.
+    if s.path.as_deref().is_some_and(|own| super::design_link::same_file(std::path::Path::new(own), std::path::Path::new(&path))) {
+        s.provenance = report.clone();
+    }
+    let signature = match &report {
+        Some(report) => signature_report(report),
+        None => SignatureReport { status: "unsigned".to_owned(), reason: None, truncated: false, records: Vec::new() },
+    };
+    serde_json::to_value(VerifyResult { path, signature }).map_err(|e| bad("file.verify", e.to_string()))
+}
+
+/// `file.gpg_keys`: the GnuPG keys a signed save can use.
+fn gpg_keys(_s: &mut Session, _p: &Value) -> Result<Value> {
+    gpg_keys_result()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn gpg_keys_result() -> Result<Value> {
+    let Some(gpg) = crate::gpg::Gpg::find() else {
+        return serde_json::to_value(GpgKeysResult { available: false, keys: Vec::new() }).map_err(|e| bad("file.gpg_keys", e.to_string()));
+    };
+    let keys = gpg.secret_keys().map_err(|e| EngineError::Other(format!("GnuPG: {e}")))?;
+    let keys = keys
+        .into_iter()
+        .map(|key| GpgKeyInfo { fingerprint: key.fingerprint, key_id: key.key_id, user_id: key.user_id, on_card: key.on_card })
+        .collect();
+    serde_json::to_value(GpgKeysResult { available: true, keys }).map_err(|e| bad("file.gpg_keys", e.to_string()))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn gpg_keys_result() -> Result<Value> {
+    serde_json::to_value(GpgKeysResult { available: false, keys: Vec::new() }).map_err(|e| bad("file.gpg_keys", e.to_string()))
+}
+
+/// A provenance report as the UI and scripts read it.
+fn signature_report(report: &solidcraft_io::ProvenanceReport) -> SignatureReport {
+    let (status, reason) = match &report.status {
+        solidcraft_io::ProvenanceStatus::Valid => ("valid", None),
+        solidcraft_io::ProvenanceStatus::NotCovered => ("not_covered", None),
+        solidcraft_io::ProvenanceStatus::Invalid(why) => ("invalid", Some(why.clone())),
+        solidcraft_io::ProvenanceStatus::Unsupported(version) => {
+            ("unsupported", Some(format!("a newer SolidCraft wrote this signature (format {version})")))
+        }
+    };
+    let records = report
+        .records
+        .iter()
+        .map(|record| {
+            let (method, key_id, user_id) = match &record.signer {
+                solidcraft_io::ProvenanceSigner::Ed25519 { key_id, .. } => ("ed25519", hex(key_id), None),
+                solidcraft_io::ProvenanceSigner::OpenPgp { fingerprint, user_id } => ("openpgp", fingerprint.clone(), user_id.clone()),
+            };
+            SignatureRecord {
+                method: method.to_owned(),
+                key_id,
+                user_id,
+                author: record.author.clone(),
+                created: record.created,
+                format: record.format.clone(),
+                covered: record.covered,
+            }
+        })
+        .collect();
+    SignatureReport { status: status.to_owned(), reason, truncated: report.chain.truncated, records }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        // Writing to a `String` cannot fail.
+        let _ = write!(&mut out, "{byte:02x}");
+    }
+    out
 }
 
 impl Session {
@@ -1090,6 +1817,9 @@ impl Session {
     pub(crate) fn located(self, path: Option<&str>) -> Self {
         let mut session = self;
         session.path = path.map(str::to_owned);
+        // A saved design keeps its provenance for the next save to append to, whichever path
+        // opened it (the UI, the CLI, recovery, a linked design).
+        session.provenance_chain = path.and_then(solidcraft_io::read_design_provenance_chain_file);
         // A design saved before body names were pinned (#6403) is pinned now, as its first
         // command would pin it: that command pinned them as part of itself, so undoing it went
         // back to the unpinned design, whose fingerprints no evaluated result matched, and the
@@ -1190,6 +1920,8 @@ impl Session {
         self.path.clone_from(&done.path);
         self.disk = done.disk;
         self.read_only = done.read_only;
+        self.provenance_chain.clone_from(&done.provenance_chain);
+        self.provenance.clone_from(&done.provenance);
         self.saved = done.saved.clone();
         self.saved_visibility = done.saved_visibility.clone();
     }
@@ -1231,11 +1963,46 @@ impl Session {
         preview: bool,
         cache: bool,
     ) -> solidcraft_io::Result<Vec<u8>> {
+        self.container_bytes(path, compression, preview, cache, None)
+    }
+
+    /// The container bytes with one signed provenance record appended to `save.chain`.
+    pub fn design_container_signed(
+        &self,
+        path: Option<&str>,
+        compression: solidcraft_io::DesignCompression,
+        preview: bool,
+        cache: bool,
+        save: &solidcraft_io::ProvenanceSave<'_>,
+    ) -> solidcraft_io::Result<Vec<u8>> {
+        self.container_bytes(path, compression, preview, cache, Some(save))
+    }
+
+    fn container_bytes(
+        &self,
+        path: Option<&str>,
+        compression: solidcraft_io::DesignCompression,
+        preview: bool,
+        cache: bool,
+        provenance: Option<&solidcraft_io::ProvenanceSave<'_>>,
+    ) -> solidcraft_io::Result<Vec<u8>> {
         let design = self.design_at(path);
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
         let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();
-        solidcraft_io::write_design_container_with_thumbnail(&design, compression, preview.as_ref(), geometry.as_ref(), thumbnail.as_deref())
+        match provenance {
+            Some(save) => solidcraft_io::write_design_container_with_provenance(
+                &design,
+                compression,
+                preview.as_ref(),
+                geometry.as_ref(),
+                thumbnail.as_deref(),
+                save,
+            ),
+            None => {
+                solidcraft_io::write_design_container_with_thumbnail(&design, compression, preview.as_ref(), geometry.as_ref(), thumbnail.as_deref())
+            }
+        }
     }
 }
 
@@ -1293,6 +2060,8 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
         bool_(p, "preview").unwrap_or(false),
         bool_(p, "cache").unwrap_or(true),
         bool_(p, "overwrite").unwrap_or(false),
+        bool_(p, "sign").unwrap_or(false),
+        str_(p, "signing_key"),
     )
 }
 
@@ -1311,6 +2080,8 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
         bool_(p, "preview").unwrap_or(false),
         bool_(p, "cache").unwrap_or(true),
         bool_(p, "overwrite").unwrap_or(false),
+        bool_(p, "sign").unwrap_or(false),
+        str_(p, "signing_key"),
     )
 }
 
@@ -1836,6 +2607,16 @@ mod tests {
         assert!(!has_thumbnail(&mut s, "part.stl"), "STL has no place for a picture");
     }
 
+    /// Three-digit hex colours expand one digit per channel, as CSS does: `#fff` is white.
+    #[test]
+    fn a_three_digit_colour_expands_each_digit() {
+        assert_eq!(parse_kicad_color(&json!("#fff")), Some([255, 255, 255]));
+        assert_eq!(parse_kicad_color(&json!("#1a9")), Some([17, 170, 153]));
+        assert_eq!(parse_kicad_color(&json!("#123456")), Some([0x12, 0x34, 0x56]));
+        assert_eq!(parse_kicad_color(&json!([1, 2, 3])), Some([1, 2, 3]));
+        assert_eq!(parse_kicad_color(&json!("#12")), None);
+    }
+
     /// While the profiler records, a STEP import's reply carries its own profile: the import's
     /// stages and the kernel's calls, as diagnostics.profile reports them.
     #[test]
@@ -2217,6 +2998,29 @@ mod tests {
         );
         assert_eq!(std::fs::read_dir(&cache_dir).unwrap().count(), 0, "disabled reuse never stores an import");
         assert_eq!(open_step(&path, &json!({}), Some(&cache), solidcraft_kernel::Validation::default()).unwrap().1["import_reused"], false);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// `doc.open` makes a `Group #N` history folder exactly when `folder: true` is given, whether
+    /// the import is fresh or reused from the cache, and whatever an earlier open asked for (#15870).
+    #[test]
+    fn a_reused_import_has_a_folder_exactly_when_asked() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-reuse-import-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache = solidcraft_io::ImportCache::new(dir.join("imports"));
+        // One cylinder placed twice: an Import feature and two rigid joints, so `folder: true` makes a folder.
+        let path = format!("{}/../../tests/step-conformance/cylinder_twice.step", env!("CARGO_MANIFEST_DIR"));
+        let open = |folder: bool| {
+            let (s, reply) = open_step(&path, &json!({"folder": folder}), Some(&cache), solidcraft_kernel::Validation::default()).unwrap();
+            let folders: Vec<_> = s.doc.timeline_groups.iter().map(|f| (f.id, f.name.clone(), f.features.len(), f.joints.len())).collect();
+            assert_eq!(reply.get("group").and_then(Value::as_u64), folders.first().map(|f| f.0), "the reply names the folder: {reply}");
+            (folders.into_iter().map(|(_, name, features, joints)| (name, features, joints)).collect::<Vec<_>>(), reply["import_reused"].clone())
+        };
+        let one = vec![("Group #1".to_string(), 1, 2)];
+        assert_eq!(open(false), (vec![], json!(false)), "no folder, fresh import");
+        assert_eq!(open(true), (one.clone(), json!(false)), "a folder, fresh import");
+        assert_eq!(open(true), (one, json!(true)), "a folder, reused import");
+        assert_eq!(open(false), (vec![], json!(true)), "no folder, reused import");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -3506,7 +4310,12 @@ mod tests {
         for f in formats::FORMATS {
             if let Some(import) = &f.import {
                 for o in import.options {
-                    for id in ["doc.open", if import.target == formats::ImportTarget::Mesh { "file.insert_mesh" } else { "file.insert_step" }] {
+                    let ids: &[&str] = match import.target {
+                        formats::ImportTarget::Mesh => &["doc.open", "file.insert_mesh"],
+                        formats::ImportTarget::Kicad => &["doc.open"],
+                        _ => &["doc.open", "file.insert_step"],
+                    };
+                    for id in ids {
                         assert!(params_of(id).contains(o.param), "{}: `{}` is not a documented parameter of {id}", f.id, o.param);
                     }
                 }
