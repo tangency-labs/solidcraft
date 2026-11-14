@@ -278,6 +278,27 @@ fn a_revolve_from_a_turned_sub_components_face_joins_and_cuts_it_from_the_top_le
     }
 }
 
+/// A fixed face revolve keeps no attachment to the face, so the Cut's scope takes the picked
+/// face's body as the sketch would have given it (#5679, as solid.extrude does): with the top
+/// level active, the turned part's whole top face swept 180 degrees symmetric about one of its
+/// edges cuts a quarter cylinder of radius 10 out of the part, and leaves the top level's body.
+#[test]
+fn a_fixed_face_revolve_from_the_top_level_cuts_the_picked_faces_body() {
+    let (mut s, placed) = turned_part(true);
+    let at = |x: f64, y: f64, z: f64| solidcraft_doc::apply_point(&placed, solidcore_record::Vec3::new(x, y, z));
+    let (top, origin, along) = (at(5.0, 5.0, 10.0), at(0.0, 0.0, 10.0), at(1.0, 0.0, 10.0));
+    let dir = along - origin;
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"face": [top.x, top.y, top.z], "fixed": true, "axis": {"origin": [origin.x, origin.y, origin.z], "dir": [dir.x, dir.y, dir.z]},
+               "angle": "180 deg", "direction": "symmetric", "operation": "cut"}),
+    );
+    let quarter = std::f64::consts::PI * 100.0 / 4.0 * 10.0;
+    assert!((body_volume(&s, "Stock") - (1000.0 - quarter)).abs() < 1e-3 * quarter, "Stock {}", body_volume(&s, "Stock"));
+    assert!((body_volume(&s, "Base") - 2000.0).abs() < 1e-6);
+}
+
 /// #5679 for Loft (and Sweep, through the same join target): with the top level active, a loft
 /// from a circle on the turned part's top face to one 5 mm above joins the part, in one piece.
 #[test]
@@ -2825,6 +2846,37 @@ fn a_converted_meshs_face_extrudes_on_a_fixed_plane_when_asked() {
     let not_a_bool =
         s.execute("solid.extrude", &json!({"face": [2, 2, 15], "distance": 5, "fixed": "yes"})).expect_err("fixed is a boolean").to_string();
     assert!(not_a_bool.contains("`fixed` must be true or false"), "{not_a_bool}");
+}
+
+/// #6612, revolve: a fixed plane keeps no attachment to the face, so the face's body can't be
+/// found from the sketch again. A Join that names no body still joins the picked face's body,
+/// as an extrude from a face does, and stores it as the target.
+#[test]
+fn a_converted_meshs_face_revolved_on_a_fixed_plane_joins_that_body() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-6612-revolve-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("Block.stl");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    run(&mut s, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    let [name] = names.as_slice() else { panic!("{names:?}") };
+    run(&mut s, "mesh.convert", json!({"body": name}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "body_name": "Other"}));
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"face": [10, 10, 10], "fixed": true, "axis": {"origin": [0, 0, 10], "dir": [1, 0, 0]}, "angle": "90 deg", "operation": "join"}),
+    );
+    let Some(solidcraft_doc::Feature { kind: solidcraft_doc::FeatureKind::Revolve { targets, .. }, .. }) = s.doc.features.last() else {
+        panic!("a revolve")
+    };
+    let targets: Vec<&str> = targets.iter().map(|t| t.0.as_str()).collect();
+    assert_eq!(targets, [name.as_str()], "the join keeps to the picked face's body");
 }
 
 /// A 40 x 10 stadium (two lines, two tangent arcs) extruded 10 mm. The top rim runs on smoothly

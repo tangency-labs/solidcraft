@@ -1374,13 +1374,13 @@ fn fixed_param(p: &Value, cmd: &str) -> Result<bool> {
 fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.revolve";
     // A planar body face revolves like a profile (its edges projected into a sketch on it).
-    let (sketch, face_profile) = match p.get("face").and_then(vec3) {
+    let (sketch, face_profile, face_body) = match p.get("face").and_then(vec3) {
         Some(fp) => {
-            let (id, inside, _) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
+            let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
             s.active_sketch = None;
-            (id, Some(ProfileSel::Points { points: vec![inside] }))
+            (id, Some(ProfileSel::Points { points: vec![inside] }), Some(body))
         }
-        None => (feature_sketch(s, p, cmd)?, None),
+        None => (feature_sketch(s, p, cmd)?, None, None),
     };
     let axis = axis_param(s, sketch, p, cmd)?;
     let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
@@ -1404,11 +1404,15 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
         Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "`convention` must be sketch_normal or legacy_axis_start"))?,
     };
     let operation = operation(p, cmd)?;
-    let targets = face_join_targets(s, p, operation, &[sketch], cmd)?;
+    let mut targets = face_join_targets(s, p, operation, &[sketch], cmd)?;
+    // A fixed plane keeps no attachment to the face, so its body is the one picked.
+    if targets.is_empty() && operation == Operation::Join && string_list(cmd, p, "participants")?.is_empty() {
+        targets.extend(face_body.clone().map(BodyName));
+    }
     // From a profile on a body's face in a component inside the active one, a cut changes that
     // body too, as an extrude's does (#5679).
     let mut p = std::borrow::Cow::Borrowed(p);
-    if let Some(parts) = cut_scope(s, &p, operation, sketch, None, cmd)? {
+    if let Some(parts) = cut_scope(s, &p, operation, sketch, face_body, cmd)? {
         p.to_mut()["participants"] = json!(parts);
     }
     let kind = FeatureKind::Revolve {
