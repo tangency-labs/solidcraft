@@ -620,13 +620,12 @@ fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
 /// A trim along its edge, its parameter moved onto the edge record's ([`TrimMap`]): one whose
 /// edgeuse runs against the edge (`same` false) reversed exactly (control points in reverse
 /// order, knots t ↦ a + b − t), then the knots mapped. SMLib keeps a trim on its edge's
-/// interval; where the two ends differ by the rounding of SMLib's own or this remap (within the
-/// schema's 10⁻⁹ of the interval's magnitude, at least 1), or by more but at one point of the edge
-/// within its tolerance (`on_edge`: a circle on its NURBS form whose end lies a rounding past the
-/// quarter line its trim stops on moves along it 10⁻⁷ of the form's parameter, a micron), every
-/// knot within that of an interval end is that end, and the end spans this leaves without length
-/// go with their control points, so the pcurve is a valid record defined on the edge; farther
-/// apart is an error.
+/// interval; where the two ends differ by the rounding of SMLib's own or this remap (10⁻⁹ of the
+/// interval's magnitude, with no floor: a micro edge on a curve whose knots span 10⁻⁷ lies on
+/// [0, 6e-12]), or by more but at one point of the edge within its tolerance (`on_edge`: a circle
+/// on its NURBS form whose end lies a rounding past the quarter line its trim stops on moves 10⁻⁷
+/// of the form's parameter, a micron), every knot within that of an interval end is that end,
+/// and the end spans this leaves without length go with their control points; farther is an error.
 fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2], on_edge: &dyn Fn(f64, f64) -> bool) -> Res<b::Curve2> {
     fn along<T: Clone>(knots: &[f64], points: &[T], same: bool) -> (Vec<f64>, Vec<T>) {
         if same {
@@ -657,7 +656,7 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
         let n = points.len();
         let degree = k.len().checked_sub(n + 1).ok_or_else(|| invalid("UV trim knots"))?;
         let (a, z) = (at(&k, degree, "UV trim knots")?, at(&k, n, "UV trim knots")?);
-        let rounding = 1e-9 * t0.abs().max(t1.abs()).max(1.0);
+        let rounding = 1e-9 * t0.abs().max(t1.abs());
         // Each end's slack: the rounding, or the gap where it is one point of the edge (less
         // than a quarter of the interval, so the two ends' slacks never meet).
         let end = |x: f64, t: f64| {

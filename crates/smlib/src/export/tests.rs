@@ -538,6 +538,34 @@ mod mapped_tests {
         same_curve_on(&out, &want, [3.0, 5.0]);
     }
 
+    /// A 1.26 µm edge at the start of a straight Bézier whose knots span 1.02e-7 (Siemens NX
+    /// writes both, solidcraft#15065) lies on [0, 6.4e-12], and the rest of the curve's edge
+    /// starts there, its trim a rounding before it (SMLib's, as handed over). A floor of 1 on the
+    /// rounding (10⁻⁹ absolute) snapped every knot of the micro edge's trim onto its start, an
+    /// empty domain the record refuses, and the solid was lost. Each trim maps onto its edge as
+    /// a valid record, unchanged on it.
+    #[test]
+    fn a_micro_edges_trim_on_a_tiny_interval_keeps_its_span() {
+        let (t, end) = (6.430814112915728e-12, 1.020781457822e-7);
+        let line = |a: f64, b: f64| b::Curve2::Spline { knots: vec![a, a, b, b], points: vec![[a, 0.0], [b, 0.0]] };
+        for (trim, edge) in [(line(0.0, t), [0.0, t]), (line(6.430814112910789e-12, end), [t, end])] {
+            let out = mapped(&trim, true, [1.0, 0.0], edge, &|_, _| false).unwrap();
+            check_curve2(&out, &mut Budget::input()).unwrap();
+            assert_eq!(out.interval(), Some(edge));
+            let at = |c: &b::Curve2, s: f64| eval(c, s).unwrap()[0];
+            for s in edge {
+                assert!((at(&out, s) - s).abs() <= 1e-9 * edge[1], "{out:?} at {s}");
+            }
+        }
+        // A trim genuinely off that edge is still refused, even where the caller finds its ends
+        // on the edge: SMLib's [0, 1] (the issue's message), and one on [0, 5e-10], which the
+        // floor took for a rounding of [0, 6.4e-12].
+        for z in [1.0, 5e-10] {
+            assert!(mapped(&line(0.0, z), true, [1.0, 0.0], [0.0, t], &|_, _| true).is_err(), "[0, {z}]");
+            assert!(mapped(&line(0.0, z), false, [1.0, 0.0], [0.0, t], &|_, _| false).is_err(), "[0, {z}]");
+        }
+    }
+
     /// A trim already on its edge is left as it is.
     #[test]
     fn a_trim_on_its_edge_is_unchanged() {

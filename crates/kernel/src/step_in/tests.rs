@@ -671,11 +671,11 @@ fn bezier_block(span: &str, split: f64) -> String {
     let size = [20.0, 30.0, 10.0];
     let corners = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)];
     let pts: Vec<[f64; 3]> = corners.iter().map(|&(x, y, z)| [x as f64 * size[0], y as f64 * size[1], z as f64 * size[2]]).collect();
-    let f = |x: f64| format!("{x:.17E}");
+    let xyz = |p: [f64; 3]| format!("({:.17E},{:.17E},{:.17E})", p[0], p[1], p[2]);
     let mut vertices: Vec<[f64; 3]> = pts.clone();
     vertices.push([split, 0.0, 0.0]);
     for (i, p) in vertices.iter().enumerate() {
-        s += &format!("#{}=CARTESIAN_POINT('',({},{},{}));\n#{}=VERTEX_POINT('',#{});\n", 200 + i, f(p[0]), f(p[1]), f(p[2]), 220 + i, 200 + i);
+        s += &format!("#{}=CARTESIAN_POINT('',{});\n#{}=VERTEX_POINT('',#{});\n", 200 + i, xyz(*p), 220 + i, 200 + i);
     }
     let edges = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)];
     for (k, &(a, b)) in edges.iter().enumerate() {
@@ -685,7 +685,7 @@ fn bezier_block(span: &str, split: f64) -> String {
             .map(|j| {
                 let t = j as f64 / 3.0;
                 let c = [p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1]), p[2] + t * (q[2] - p[2])];
-                s += &format!("#{}=CARTESIAN_POINT('',({},{},{}));\n", base + j, f(c[0]), f(c[1]), f(c[2]));
+                s += &format!("#{}=CARTESIAN_POINT('',{});\n", base + j, xyz(c));
                 format!("#{}", base + j)
             })
             .collect();
@@ -723,7 +723,7 @@ fn bezier_block(span: &str, split: f64) -> String {
             .collect();
         s += &format!("#{}=EDGE_LOOP('',({}));\n#{}=FACE_OUTER_BOUND('',#{},.T.);\n", base + 5, oes.join(","), base + 6, base + 5);
         let o = [o.0 as f64 * size[0], o.1 as f64 * size[1], o.2 as f64 * size[2]];
-        s += &format!("#{}=CARTESIAN_POINT('',({},{},{}));\n#{}=DIRECTION('',({}.,{}.,{}.));\n", base + 7, f(o[0]), f(o[1]), f(o[2]), base + 8, n.0, n.1, n.2);
+        s += &format!("#{}=CARTESIAN_POINT('',{});\n#{}=DIRECTION('',({}.,{}.,{}.));\n", base + 7, xyz(o), base + 8, n.0, n.1, n.2);
         s += &format!("#{}=AXIS2_PLACEMENT_3D('',#{},#{},$);\n#{}=PLANE('',#{});\n", base + 9, base + 7, base + 8, base + 10, base + 9);
         s += &format!("#{}=ADVANCED_FACE('',(#{}),#{},.T.);\n", base + 11, base + 6, base + 10);
         face_ids.push(format!("#{}", base + 11));
@@ -737,20 +737,21 @@ fn bezier_block(span: &str, split: f64) -> String {
 
 /// A 1.26 µm edge cut from the start of a straight cubic Bézier whose knots span 1.02e-7 (two
 /// things Siemens NX writes, here together on one edge of a 20 × 30 × 10 mm block): the micro
-/// edge covers 6.4e-15 of the curve's parameter, and the block once came in as no body ("a UV
-/// trim on [0, 1], its edge on [0, 6.5e-15]"). It imports as the closed 6000 mm³ block it is,
-/// as it does with the knots (0, 20).
+/// edge lies on [0, 6.4e-12] of the curve's parameter, and the block came in as no body (its
+/// trim's knots snapped onto one end, an empty domain). It imports as the closed 6000 mm³
+/// block it is, as it does with the knots (0, 20).
 #[test]
 fn a_micro_edge_on_a_bezier_with_a_tiny_knot_span_keeps_the_block() {
     for span in ["20.", "1.020781457822E-07"] {
-        let imp = step_import(&bezier_block(span, 1.26e-3)).unwrap_or_else(|e| panic!("knots (0, {span}): {e}"));
-        assert_eq!(imp.bodies.len(), 1, "knots (0, {span}): {:?}", imp.warnings);
+        let case = format!("knots (0, {span})");
+        let imp = step_import(&bezier_block(span, 1.26e-3)).unwrap_or_else(|e| panic!("{case}: {e}"));
+        assert_eq!(imp.bodies.len(), 1, "{case}: {:?}", imp.warnings);
         let b = &imp.bodies[0];
-        assert!(b.closed, "knots (0, {span}): open");
-        crate::validation::check_kept(&b.body).unwrap_or_else(|e| panic!("knots (0, {span}): {e}"));
+        assert!(b.closed, "{case}: open");
+        crate::validation::check_kept(&b.body).unwrap_or_else(|e| panic!("{case}: {e}"));
         let m = measure(&b.body).unwrap();
-        assert!(rel(m.volume, 6000.0) < 1e-9, "knots (0, {span}): volume {}", m.volume);
-        assert_eq!(m.faces, 6, "knots (0, {span})");
+        assert!(rel(m.volume, 6000.0) < 1e-9, "{case}: volume {}", m.volume);
+        assert_eq!(m.faces, 6, "{case}");
     }
 }
 
