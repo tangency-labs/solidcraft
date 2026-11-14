@@ -583,3 +583,21 @@ fn leaving_directions_match_one_to_one() {
     assert!(!super::loops::same_leaving(&[right, up], &[right, up, left]));
     assert!(super::loops::same_leaving(&[], &[]));
 }
+
+#[test]
+fn a_projected_circle_read_again_a_hair_away_takes_the_fresh_reading() {
+    // #12920: a hole's rim saved as it was fitted, 1.3e-6 small and off centre, read again as
+    // the hole's circle exactly. It is the same circle (the same curve and point, so whatever
+    // is drawn on it stays), now where the model puts it.
+    let mut sk = Sketch::new();
+    let edge = LinkSource::Edge { body: "Body3".into(), at: Vec3::ZERO };
+    let fitted = [LinkGeom::Circle(Vec2::new(25.962298020754407, 4.500001583499248), 1.6999986845754604)];
+    let link = sk.add_link(LinkKind::Project, edge, &fitted).unwrap();
+    let curves = sk.link_curves(&link);
+    let points = sk.link_points(&link);
+    let exact = Vec2::new(25.96229670532913, 4.5);
+    assert!(!sk.update_link(&link, &[LinkGeom::Circle(exact, 1.7)]).unwrap());
+    assert_eq!((sk.link_curves(&link), sk.link_points(&link)), (curves.clone(), points));
+    let Some(CurveKind::Circle { c, r }) = curves.first().map(|ci| sk.curves[*ci].kind.clone()) else { panic!("{:?}", sk.curves) };
+    assert_eq!((sk.points[c].pos, r), (exact, 1.7));
+}

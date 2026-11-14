@@ -1659,6 +1659,51 @@ fn a_rounded_slot_rim_projects_as_an_arc_of_its_circle() {
     assert!(profiles.iter().any(|p| (p.area - area).abs() < 1e-3), "{:?} vs {area}", profiles.iter().map(|p| p.area).collect::<Vec<_>>());
 }
 
+/// #12920: a hole of radius 1.7 drilled along X through a round bar, its rim on the bar's wall an
+/// intersection curve SMLib holds only approximately. Projected along the hole's axis the rim
+/// comes in as the hole's circle exactly; fitted to the rim's points it came in 1.3e-6 small and
+/// off centre, and an annulus cut round the hole from it left a wall 1.3e-6 off the hole's,
+/// which SMLib's check refused ("Face Near missing Seam").
+#[test]
+fn a_hole_rim_on_a_round_wall_projects_along_the_hole_as_its_circle() {
+    use solidcraft_sketch::CurveKind;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 11, "height": 20, "body_name": "Bar"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 1.7, "height": 30, "base": [-15, 0, 10], "axis": "X", "operation": "cut", "targets": ["Bar"]}));
+    let id = run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": -20, "project_edges": false}))["sketch"].as_u64().unwrap();
+    let rim_x = -(121f64 - 1.7 * 1.7).sqrt();
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Bar", "edge": [rim_x, 1.7, 10]}]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 10], "radius": 2.15}));
+    run(&mut s, "sketch.finish", json!({}));
+    {
+        let state = s.model.state();
+        let sk = &state.sketch(id).unwrap().sketch;
+        let center = solidcore_record::Vec2::new(0., 10.);
+        // One circle, as the rim fitted came in, so the sketch's curves and profiles keep their order.
+        let rims: Vec<(solidcore_record::Vec2, f64)> = sk
+            .curves
+            .iter()
+            .filter_map(|c| match c.kind {
+                CurveKind::Circle { c, r } if r < 2.0 => Some((sk.points[c].pos, r)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!((rims.len(), sk.curves.len()), (1, 2), "the rim projects as {:?}", sk.curves);
+        for (c, r) in rims {
+            assert!(c.dist(center) < 1e-9 && (r - 1.7).abs() < 1e-9, "the rim projects as centre {c:?}, radius {r}");
+        }
+    }
+    // The annulus between the rim and a circle of radius 2.15, cut 10 into the bar from x = -20.
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": id, "distance": 10, "operation": "cut", "exact_regions": true, "profiles": [{"point": [0, 11.9]}]}),
+    );
+    let state = s.model.state();
+    let bar = state.body("Bar").unwrap();
+    assert_eq!(bar.body.validity(), Vec::<String>::new());
+}
+
 /// A hook: a J of lines and two arcs about (-15, 0), of radii 7.5 and 15, extruded 20 with its
 /// top edges chamfered. Seen along the extrusion its outline is the J again. The walls are seen
 /// edge-on, but the triangles of a round wall join its two rims at slightly different angles

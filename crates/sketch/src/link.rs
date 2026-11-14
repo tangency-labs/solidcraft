@@ -442,21 +442,27 @@ fn same_nurbs(a: Option<&crate::Nurbs>, b: Option<&crate::Nurbs>, close: impl Fn
     }
 }
 
+/// Whether two readings of a linked point are the same point: within [`same_geometry`]'s tolerance.
+fn near_point(p: Vec2, q: Vec2) -> bool {
+    p.dist(q) <= SAME_TOL * (1.0 + p.len().max(q.len()))
+}
+
+/// How far (relative) a re-read link may move and still be the same geometry.
+const SAME_TOL: f64 = 1e-6;
+
 /// Do two curve sets describe the same geometry, regardless of the order the curves come in or
 /// the direction a loop was walked? Lines match with either end first; circles by centre and
 /// radius; arcs by centre and their (start, end) pair; conics by all their points and rho.
 fn same_geometry(a: &[(LCurve, Vec<Vec2>)], b: &[(LCurve, Vec<Vec2>)]) -> bool {
-    const TOL: f64 = 1e-6;
-    let near = |p: Vec2, q: Vec2| p.dist(q) <= TOL * (1.0 + p.len().max(q.len()));
-    let close = |x: f64, y: f64| (x - y).abs() <= TOL * (1.0 + x.abs().max(y.abs()));
+    let close = |x: f64, y: f64| (x - y).abs() <= SAME_TOL * (1.0 + x.abs().max(y.abs()));
     let matches = |(ca, pa): &(LCurve, Vec<Vec2>), (cb, pb): &(LCurve, Vec<Vec2>)| -> bool {
         if pa.len() != pb.len() {
             return false;
         }
-        let all = || pa.iter().zip(pb).all(|(p, q)| near(*p, *q));
+        let all = || pa.iter().zip(pb).all(|(p, q)| near_point(*p, *q));
         match (ca, cb) {
             (LCurve::Line(..), LCurve::Line(..)) => {
-                all() || matches!((pa.as_slice(), pb.as_slice()), ([a0, a1], [b0, b1]) if near(*a0, *b1) && near(*a1, *b0))
+                all() || matches!((pa.as_slice(), pb.as_slice()), ([a0, a1], [b0, b1]) if near_point(*a0, *b1) && near_point(*a1, *b0))
             }
             (LCurve::Circle(_, ra), LCurve::Circle(_, rb)) => all() && close(*ra, *rb),
             (LCurve::Arc(..), LCurve::Arc(..)) => all(),
@@ -972,6 +978,29 @@ impl Sketch {
                 && lone_old.len() == points.len()
                 && (points.len() == lay.pts.len() && same_geometry(&old, &fresh) || only_stations_gone(&old, &fresh))
             {
+                // Read with the same curves in the same order, each point where it was: the
+                // fresh reading is the same entities where the model puts them now, which a
+                // saved projection fitted near its curve (#12920: a hole's rim 1.3e-6 off) takes.
+                if same && points.len() == lay.pts.len() && points.len() == order.len() {
+                    let fresh_pos: Option<Vec<Vec2>> = order.iter().map(|li| lay.pts.get(*li).copied()).collect();
+                    if let Some(fresh_pos) = fresh_pos
+                        && points.iter().zip(&fresh_pos).all(|(pi, q)| self.points.get(*pi).is_some_and(|p| near_point(p.pos, *q)))
+                    {
+                        for (pi, q) in points.iter().zip(fresh_pos) {
+                            if let Some(p) = self.points.get_mut(*pi) {
+                                p.pos = q;
+                            }
+                        }
+                        for (ci, c) in curves.iter().zip(&lay.curves) {
+                            match (self.curves.get_mut(*ci).map(|c| &mut c.kind), c) {
+                                (Some(CurveKind::Circle { r, .. }), LCurve::Circle(_, value))
+                                | (Some(CurveKind::Ellipse { r, .. }), LCurve::Ellipse(.., value)) => *r = *value,
+                                (Some(CurveKind::Conic { rho, .. }), LCurve::Conic(.., value)) => *rho = *value,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
                 return Ok(false);
             }
         }
