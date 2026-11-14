@@ -193,7 +193,7 @@ pub fn trim_drag_end(app: &mut SolveApp) -> bool {
 fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     let Ok(v) = app.run(cmd, p) else { return };
     let mark = match cmd {
-        "inspect.center_of_mass" => v3(&v["center"]).map(|c| (c, "Center of mass".to_string())),
+        "inspect.center_of_mass" => v3(&v["center"]).map(|c| (c, center_label(app, c))),
         _ => v3(&v["at"]).zip(v["min_radius"].as_f64()).map(|(c, r)| (c, format!("R min {}", crate::prefs::show_mm(app, r, 1)))),
     };
     if let Some(m) = mark {
@@ -201,6 +201,14 @@ fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     } else if cmd == "inspect.minimum_radius" {
         app.set_status("Minimum radius: it is straight (no curvature)", false);
     }
+}
+
+/// Mass Center's marker label: the centre's coordinates in the design's units, written as
+/// Design Properties writes them.
+fn center_label(app: &SolveApp, c: Vec3) -> String {
+    let at = |v: f64| crate::prefs::show_mm_bare(app, v);
+    let unit = crate::prefs::unit_scale(&app.session.doc.units).1;
+    format!("Center of mass ({}, {}, {}) {unit}", at(c.x), at(c.y), at(c.z))
 }
 
 /// The message id of the class a seam whose highest order met is `order` reads as: a gap, a
