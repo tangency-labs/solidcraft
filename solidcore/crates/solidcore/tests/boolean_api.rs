@@ -7,11 +7,15 @@
 #![allow(clippy::unwrap_used)] // test helpers
 
 use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection, boolean_union};
+use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
+use solidcore::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::primitive::api_primitives as api;
+use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::Brep;
 use solidcore::Kernel;
@@ -675,4 +679,89 @@ fn sphere_box_edge_cutting_a_shallow_cap() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A closed ellipse of semi-axes `b` (along x) and `a` (along y) about `(0, a)`, as the one
+/// rational B-spline of its four quarters (nine control points, knots 0..4), starting at the
+/// end of the major axis on +y and running counter-clockwise.
+fn ellipse_spline(a: f64, b: f64) -> Curve {
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+    let control = [
+        p(0.0, 2.0 * a),
+        p(-b, 2.0 * a),
+        p(-b, a),
+        p(-b, 0.0),
+        p(0.0, 0.0),
+        p(b, 0.0),
+        p(b, a),
+        p(b, 2.0 * a),
+        p(0.0, 2.0 * a),
+    ];
+    let weights = [1.0, w, 1.0, w, 1.0, w, 1.0, w, 1.0];
+    Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &control,
+            form: BSplineCurveForm::default(),
+            knot_multiplicities: &[3, 2, 2, 2, 3],
+            knots: &[0.0, 1.0, 2.0, 3.0, 4.0],
+            knot_type: KnotType::default(),
+            weights: Some(&weights),
+            trim: None,
+        })
+        .unwrap(),
+    )
+}
+
+/// The volume of `brep` at the accuracy the other cases use.
+fn volume_of(k: &Kernel, brep: &mut Brep) -> f64 {
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    brep_volume(k, brep, 1e-7, &attrs).unwrap()
+}
+
+/// A long thin elliptic prism (semi-axes 67.5 and 5, 4 thick, swept against +z) is a solid
+/// facing out: its volume is the ellipse's area times the thickness, and a block cut by it is
+/// the block less the part of it the block holds. The ray that picks the region outside is
+/// aimed at an edge of the prism, where it meets the wall and the cap at one distance and no
+/// edge; the region it found was taken from the wall alone, which put the outside on the
+/// inside, and the prism came out with a negative volume.
+#[test]
+fn a_long_thin_elliptic_prism_faces_out_and_cuts_a_block() {
+    let (a, b, thick) = (67.5, 5.0, 4.0);
+    let want = PI * a * b * thick;
+    let mut k = Kernel::default();
+    let curve = ellipse_spline(a, b);
+    let mut prism = create_linear_sweep(
+        &mut k,
+        &[Some(&curve)],
+        Vec3::new(0.0, 0.0, -1.0),
+        thick,
+        true,
+    )
+    .unwrap();
+    let got = volume_of(&k, &mut prism);
+    assert!(
+        (got - want).abs() < 1e-4 * want,
+        "prism volume {got} vs {want}"
+    );
+    let check = check_brep(&mut k, &mut prism, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "{:?}", check.lines());
+
+    // A block whose bottom face cuts the prism through its middle: a groove, open below.
+    let block =
+        api::create_box(&mut k, Point3::new(-20.0, -20.0, -2.0), 40.0, 200.0, 22.0).unwrap();
+    let mut cut = boolean_difference(&mut k, block, prism).unwrap();
+    let got = volume_of(&k, &mut cut);
+    let want = 40.0 * 200.0 * 22.0 - PI * a * b * 2.0;
+    assert!(
+        (got - want).abs() < 1e-4 * want,
+        "block less prism {got} vs {want}"
+    );
 }
