@@ -8,6 +8,7 @@ use egui::{Pos2, Stroke, vec2};
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
 use solidcraft_engine::doc::canvas::Canvas;
+use solidcore_record::Plane;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
@@ -78,13 +79,18 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     m.distance = m.distance.clamp(0.001, 1e6);
                 }
             } else {
-                let (mut x, mut y, mut w, mut ang, mut op, mut flip) = (c.center.x, c.center.y, c.width, c.angle.to_degrees(), c.opacity, c.flip);
+                let (mut x, mut y, mut w, mut h, mut ang, mut op, mut flip) = (c.center.x, c.center.y, c.width, c.height(), c.angle.to_degrees(), c.opacity, c.flip);
                 let mut changed = false;
+                let mut height_changed = false;
                 changed |=
                     ui_kit::row(ui, solidcraft_ui_text::tr_label("Center X"), |ui| ui_kit::length_field(ui, &mut x, &units, decimals)).changed();
                 changed |=
                     ui_kit::row(ui, solidcraft_ui_text::tr_label("Center Y"), |ui| ui_kit::length_field(ui, &mut y, &units, decimals)).changed();
                 changed |= ui_kit::row(ui, solidcraft_ui_text::tr_label("Width"), |ui| ui_kit::length_field(ui, &mut w, &units, decimals)).changed();
+                if ui_kit::row(ui, solidcraft_ui_text::tr_label("Height"), |ui| ui_kit::length_field(ui, &mut h, &units, decimals)).changed() {
+                    changed = true;
+                    height_changed = true;
+                }
                 changed |= ui_kit::row(ui, solidcraft_ui_text::tr_label("Angle"), |ui| ui_kit::angle_field(ui, &mut ang)).changed();
                 changed |= ui_kit::row(ui, solidcraft_ui_text::tr_label("Opacity"), |ui| ui_kit::slider(ui, &mut op, 0.0..=1.0, Default::default()))
                     .changed();
@@ -93,7 +99,11 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     changed = true;
                 }
                 if changed {
-                    edit = Some(json!({ "canvas": name, "center": [x, y], "width": w.clamp(0.01, 1e6), "angle": ang, "opacity": op, "flip": flip }));
+                    let mut p = json!({ "canvas": name, "center": [x, y], "width": w.clamp(0.01, 1e6), "angle": ang, "opacity": op, "flip": flip });
+                    if height_changed || c.height.is_some() {
+                        p["height"] = json!(h.clamp(0.01, 1e6));
+                    }
+                    edit = Some(p);
                 }
             }
         });
@@ -120,6 +130,165 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     }
     app.tree.canvas_panel = if closed || action == ui_kit::Action::Cancel { None } else { Some(m) };
 }
+
+/// Screen positions of the direct Edit Canvas grips: centre/move, four corner/scale grips,
+/// rotation above the top edge, opacity along the bottom edge, and both flip buttons.
+fn edit_handles(c: &Canvas, plane: &Plane, proj: &Proj) -> Vec<(u8, Pos2)> {
+    let [bl, br, tr, tl] = c.corners();
+    let top = (tl + tr) * 0.5;
+    let outward = top - c.center;
+    let rotation = top + outward * 0.25;
+    let along = (tr - tl) * 0.12;
+    let flip_h = rotation - along;
+    let flip_v = rotation + along;
+    let opacity = bl + (br - bl) * c.opacity.clamp(0.0, 1.0);
+    [
+        (0, c.center), (1, bl), (1, br), (1, tr), (1, tl),
+        (2, rotation), (3, opacity), (4, flip_h), (5, flip_v),
+        (6, (br + tr) * 0.5), (6, (bl + tl) * 0.5), (7, top),
+    ]
+    .into_iter()
+    .filter_map(|(kind, point)| proj.to_screen(plane.to_world(point)).map(|screen| (kind, screen)))
+    .collect()
+}
+
+/// Whether a calibration marker or Edit Canvas grip owns the pointer.
+pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, screen: Pos2) -> bool {
+    let Some(panel) = app.tree.canvas_panel.as_ref() else { return false };
+    if panel.dragging.is_some() || panel.edit_drag.is_some() { return true; }
+    let doc = &app.session.doc;
+    let Some(c) = doc.canvases.iter().find(|c| c.id == panel.canvas) else { return false };
+    let (vals, _) = doc.param_values();
+    let Ok(plane) = doc.canvas_plane(&vals, c) else { return false };
+    if panel.calibrate {
+        [panel.a, panel.b].into_iter().any(|point| {
+            proj.to_screen(plane.to_world(Vec2::new(point[0], point[1])))
+                .is_some_and(|p| p.distance(screen) <= 12.0)
+        })
+    } else {
+        edit_handles(c, &plane, proj).into_iter().any(|(_, p)| p.distance(screen) <= 12.0)
+    }
+}
+
+/// Start or continue dragging a calibration marker or direct-edit grip.
+pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, pressed: bool, down: bool) -> bool {
+    let Some(mut panel) = app.tree.canvas_panel.clone() else { return false };
+    if !down {
+        let owned = panel.dragging.take().is_some() || panel.edit_drag.take().is_some();
+        if owned {
+            panel.depth = app.session.undo.len();
+        }
+        app.tree.canvas_panel = Some(panel);
+        return owned;
+    }
+    let doc = &app.session.doc;
+    let Some(c) = doc.canvases.iter().find(|c| c.id == panel.canvas).cloned() else { return false };
+    let (vals, _) = doc.param_values();
+    let Ok(plane) = doc.canvas_plane(&vals, &c) else { return false };
+    let Some(screen) = screen else { return panel.dragging.is_some() || panel.edit_drag.is_some() };
+
+    if panel.calibrate {
+        if pressed && panel.dragging.is_none() {
+            panel.dragging = [panel.a, panel.b].into_iter().enumerate().filter_map(|(i, point)| {
+                let marker = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1])))?;
+                Some((marker.distance(screen), i as u8))
+            }).filter(|(distance, _)| *distance <= 12.0)
+              .min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, i)| i);
+        }
+        let Some(index) = panel.dragging else { return false };
+        let (origin, direction) = proj.ray(screen);
+        if let Some(world) = plane.intersect_ray(origin, direction) {
+            let local = plane.to_local(world);
+            if on_image(&c, local) {
+                let point = [local.x, local.y];
+                if index == 0 { panel.a = point; } else { panel.b = point; }
+                panel.next = 1 - index;
+            }
+        }
+        app.tree.canvas_panel = Some(panel);
+        return true;
+    }
+
+    let (origin, direction) = proj.ray(screen);
+    let Some(world) = plane.intersect_ray(origin, direction) else { return panel.edit_drag.is_some() };
+    let local = plane.to_local(world);
+    if pressed && panel.edit_drag.is_none() {
+        let kind = edit_handles(&c, &plane, proj).into_iter()
+            .filter_map(|(kind, marker)| (marker.distance(screen) <= 12.0).then_some((marker.distance(screen), kind)))
+            .min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, kind)| kind);
+        if let Some(kind) = kind {
+            if kind == 4 || kind == 5 {
+                let mut params = json!({"canvas": c.id, "flip": !c.flip});
+                if kind == 5 { params["angle"] = json!(c.angle.to_degrees() + 180.0); }
+                panel.edit_drag = Some(crate::browser::CanvasEditDrag {
+                    kind, depth: app.session.undo.len(), pointer: [local.x, local.y], center: [c.center.x, c.center.y],
+                    width: c.width, height: c.height(), angle: c.angle,
+                });
+                app.tree.canvas_panel = Some(panel);
+                let _ = app.run("canvas.edit", params);
+                return true;
+            }
+            panel.edit_drag = Some(crate::browser::CanvasEditDrag {
+                kind, depth: app.session.undo.len(), pointer: [local.x, local.y], center: [c.center.x, c.center.y],
+                width: c.width, height: c.height(), angle: c.angle,
+            });
+        }
+    }
+    let Some(drag) = panel.edit_drag.as_ref() else { return false };
+    let start = Vec2::new(drag.pointer[0], drag.pointer[1]);
+    let centre = Vec2::new(drag.center[0], drag.center[1]);
+    let mut params = json!({"canvas": c.id});
+    match drag.kind {
+        0 => { let next = centre + (local - start); params["center"] = json!([next.x, next.y]); }
+        1 => {
+            let before = start.dist(centre); let after = local.dist(centre);
+            if before > 1e-9 && after.is_finite() {
+                params["width"] = json!((drag.width * after / before).clamp(1e-6, 1e7));
+                if c.height.is_some() {
+                    params["height"] = json!((drag.height * after / before).clamp(1e-6, 1e7));
+                }
+            }
+        }
+        2 => {
+            let before = (start.y - centre.y).atan2(start.x - centre.x);
+            let after = (local.y - centre.y).atan2(local.x - centre.x);
+            params["angle"] = json!((drag.angle + after - before).to_degrees());
+        }
+        3 => {
+            let (sin, cos) = drag.angle.sin_cos();
+            let sign = if c.flip { -1.0 } else { 1.0 };
+            let along = ((local.x - centre.x) * cos + (local.y - centre.y) * sin) * sign;
+            params["opacity"] = json!((along / drag.width + 0.5).clamp(0.0, 1.0));
+        }
+        4 | 5 => return true,
+        6 => {
+            let (sin, cos) = drag.angle.sin_cos();
+            let before = ((start.x - centre.x) * cos + (start.y - centre.y) * sin).abs();
+            let after = ((local.x - centre.x) * cos + (local.y - centre.y) * sin).abs();
+            if before > 1e-9 && after.is_finite() {
+                params["width"] = json!((drag.width * after / before).clamp(1e-6, 1e7));
+            }
+        }
+        7 => {
+            let (sin, cos) = drag.angle.sin_cos();
+            let before = (-(start.x - centre.x) * sin + (start.y - centre.y) * cos).abs();
+            let after = (-(local.x - centre.x) * sin + (local.y - centre.y) * cos).abs();
+            if before > 1e-9 && after.is_finite() {
+                params["height"] = json!((drag.height * after / before).clamp(1e-6, 1e7));
+            }
+        }
+        _ => return false,
+    }
+    let depth = drag.depth;
+    app.tree.canvas_panel = Some(panel);
+    if app.run("canvas.edit", params).is_ok() && app.session.undo.len() > depth + 1 {
+        let keep = app.session.undo.get(depth).cloned();
+        app.session.undo.truncate(depth);
+        app.session.undo.extend(keep);
+    }
+    true
+}
+
 
 /// The message id of the card's hint (and the status line) for what the user does next.
 pub(crate) fn hint(panel: &crate::browser::CanvasPanel) -> &'static str {
@@ -174,18 +343,47 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
 /// Markers for the two calibration or straightening points on the image. Straighten also draws
 /// the line A–B; while it waits for Point B, the line follows the pointer from Point A (#11989).
 pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    let Some(panel) = app.tree.canvas_panel.as_ref().filter(|p| p.picks_points()) else {
-        return;
-    };
+    let Some(panel) = app.tree.canvas_panel.as_ref() else { return };
     let doc = &app.session.doc;
-    let Some(c) = doc.canvases.iter().find(|c| c.id == panel.canvas) else {
-        return;
-    };
+    let Some(c) = doc.canvases.iter().find(|c| c.id == panel.canvas) else { return };
     let (vals, _) = doc.param_values();
-    let Ok(plane) = doc.canvas_plane(&vals, c) else {
-        return;
-    };
+    let Ok(plane) = doc.canvas_plane(&vals, c) else { return };
     let t = Tokens::get();
+    if !panel.picks_points() {
+        let screens = c.corners().map(|point| proj.to_screen(plane.to_world(point)));
+        if let [Some(bl), Some(br), Some(tr), Some(tl)] = screens {
+            let outline = Stroke::new(1.5, t.sel_edge);
+            painter.line_segment([bl, br], outline); painter.line_segment([br, tr], outline);
+            painter.line_segment([tr, tl], outline); painter.line_segment([tl, bl], outline);
+            for point in [bl, br, tr, tl] {
+                painter.rect_filled(egui::Rect::from_center_size(point, vec2(9.0, 9.0)), 1.0, t.manipulator);
+            }
+        }
+        for (kind, point) in edit_handles(c, &plane, proj) {
+            match kind {
+                0 => {
+                    painter.circle_stroke(point, 8.0, Stroke::new(2.0, t.manipulator));
+                    painter.line_segment([point - vec2(6.0, 0.0), point + vec2(6.0, 0.0)], Stroke::new(1.5, t.manipulator));
+                    painter.line_segment([point - vec2(0.0, 6.0), point + vec2(0.0, 6.0)], Stroke::new(1.5, t.manipulator));
+                }
+                2 => {
+                    painter.circle_stroke(point, 7.0, Stroke::new(2.0, t.accent));
+                    painter.text(point + vec2(10.0, -8.0), egui::Align2::LEFT_BOTTOM, "↻", egui::FontId::proportional(t.font_body), t.accent);
+                }
+                3 => {
+                    painter.circle_filled(point, 6.0, t.accent);
+                    painter.text(point + vec2(9.0, 10.0), egui::Align2::LEFT_TOP, format!("{:.0}%", c.opacity * 100.0), egui::FontId::proportional(t.font_body), t.text);
+                }
+                4 | 5 => {
+                    painter.circle_filled(point, 9.0, t.manipulator);
+                    painter.circle_stroke(point, 9.0, Stroke::new(1.5, t.text));
+                    painter.text(point, egui::Align2::CENTER_CENTER, if kind == 4 { "↔" } else { "↕" }, egui::FontId::proportional(t.font_body), t.text);
+                }
+                _ => {}
+            }
+        }
+        return;
+    }
     if panel.straighten {
         let a = proj.to_screen(plane.to_world(Vec2::new(panel.a[0], panel.a[1])));
         let b = if panel.next == 1 {
@@ -197,23 +395,25 @@ pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) 
         if let (Some(a), Some(b)) = (a, b) {
             painter.line_segment([a, b], Stroke::new(1.5, t.accent));
         }
+    } else {
+        let screens = [panel.a, panel.b].map(|point| proj.to_screen(plane.to_world(Vec2::new(point[0], point[1]))));
+        if let [Some(a), Some(b)] = screens {
+            painter.line_segment([a, b], Stroke::new(1.5, t.sel_edge));
+            let measured = Vec2::new(panel.a[0], panel.a[1]).dist(Vec2::new(panel.b[0], panel.b[1]));
+            if measured.is_finite() && measured > 1e-9 {
+                painter.text(a + (b - a) * 0.5 + vec2(0.0, -10.0), egui::Align2::CENTER_BOTTOM,
+                    crate::canvas::format_len(doc, measured), egui::FontId::proportional(t.font_body), t.text);
+            }
+        }
     }
     for (i, point) in [panel.a, panel.b].into_iter().enumerate() {
         let Some(screen) = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1]))) else {
             continue;
         };
         let active = panel.next as usize == i;
-        let stroke = Stroke::new(if active { 2.0 } else { 1.5 }, if active { t.accent } else { t.sel_edge });
-        painter.circle_stroke(screen, 7.0, stroke);
+        painter.circle_stroke(screen, 7.0, Stroke::new(if active { 2.0 } else { 1.5 }, if active { t.accent } else { t.sel_edge }));
         painter.circle_filled(screen, 2.5, if active { t.accent } else { t.sel_vertex });
-        let label = if i == 0 { "A" } else { "B" };
-        painter.text(
-            screen + vec2(10.0, -10.0),
-            egui::Align2::LEFT_BOTTOM,
-            label,
-            egui::FontId::proportional(t.font_body),
-            if active { t.accent } else { t.text },
-        );
+        painter.text(screen + vec2(10.0, -10.0), egui::Align2::LEFT_BOTTOM, if i == 0 { "A" } else { "B" }, egui::FontId::proportional(t.font_body), if active { t.accent } else { t.text });
     }
 }
 
@@ -371,5 +571,66 @@ mod tests {
             assert!(!super::click(&mut h.app, &proj, sm));
             assert_eq!(h.app.tree.canvas_panel.as_ref().unwrap().a, before);
         }
+    }
+
+    /// Direct viewport manipulation: gizmo handles, corner-scaling, drag, and flip buttons.
+    #[test]
+    fn edit_canvas_viewport_gizmo_scale_and_flip_handles() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let id = canvas(&mut h);
+
+        // Open Edit Canvas
+        h.app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(&h.app, id, false));
+        h.frames(6);
+
+        let rect = h.app.viewport.rect.expect("viewport");
+        let proj = crate::viewport::projection(&h.app, rect);
+        let c = h.app.session.doc.canvases[0].clone();
+        let (vals, _) = h.app.session.doc.param_values();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
+
+        // 1. Verify all edit handles exist (center cross, 4 corners, rotation, opacity, 2 flip buttons, 2 horizontal stretch, 1 vertical stretch)
+        let handles = super::edit_handles(&c, &plane, &proj);
+        assert_eq!(handles.len(), 12, "expected 12 edit handles: center, 4 corners, rotate, opacity, flip_h, flip_v, stretch_x x2, stretch_y");
+
+        // Verify kinds: 0 (center), 1 (corners x 4), 2 (rotate), 3 (opacity), 4 (flip_h), 5 (flip_v), 6 (stretch_x x 2), 7 (stretch_y)
+        let kinds: Vec<u8> = handles.iter().map(|(k, _)| *k).collect();
+        assert_eq!(kinds, vec![0, 1, 1, 1, 1, 2, 3, 4, 5, 6, 6, 7]);
+
+        // Pointer ownership over handles
+        let center_screen = handles[0].1;
+        assert!(super::owns_pointer(&h.app, &proj, center_screen), "pointer over center handle must own pointer");
+
+        // 2. Click Flip Horizontal button (kind 4)
+        let flip_h_screen = handles.iter().find(|(k, _)| *k == 4).unwrap().1;
+        assert!(!h.app.session.doc.canvases[0].flip);
+        assert!(super::drag(&mut h.app, &proj, Some(flip_h_screen), true, true));
+        assert!(super::drag(&mut h.app, &proj, Some(flip_h_screen), false, false));
+        assert!(h.app.session.doc.canvases[0].flip, "horizontal flip handle must toggle flip to true");
+
+        // Recompute handles after flip and click again to flip back
+        let c = h.app.session.doc.canvases[0].clone();
+        let handles = super::edit_handles(&c, &plane, &proj);
+        let flip_h_screen = handles.iter().find(|(k, _)| *k == 4).unwrap().1;
+        assert!(super::drag(&mut h.app, &proj, Some(flip_h_screen), true, true));
+        assert!(super::drag(&mut h.app, &proj, Some(flip_h_screen), false, false));
+        assert!(!h.app.session.doc.canvases[0].flip, "second horizontal flip click must toggle flip back to false");
+
+        // 3. Click Flip Vertical button (kind 5): toggles flip and adds 180 degrees
+        let c = h.app.session.doc.canvases[0].clone();
+        let handles = super::edit_handles(&c, &plane, &proj);
+        let flip_v_screen = handles.iter().find(|(k, _)| *k == 5).unwrap().1;
+        let orig_angle = h.app.session.doc.canvases[0].angle;
+        assert!(super::drag(&mut h.app, &proj, Some(flip_v_screen), true, true));
+        let flipped_c = &h.app.session.doc.canvases[0];
+        assert!(flipped_c.flip, "vertical flip must toggle flip");
+        let angle_diff = (flipped_c.angle - (orig_angle + std::f64::consts::PI)).abs();
+        assert!(angle_diff < 1e-6 || (angle_diff - 2.0 * std::f64::consts::PI).abs() < 1e-6, "vertical flip must add 180 degrees");
+
+        // Verify flip ownership is retained through pointer release
+        assert!(super::owns_pointer(&h.app, &proj, flip_v_screen), "pointer owned while flip drag active");
+        assert!(super::drag(&mut h.app, &proj, Some(flip_v_screen), false, false), "release must be owned");
+        assert!(h.app.tree.canvas_panel.as_ref().unwrap().edit_drag.is_none(), "drag cleared on release");
     }
 }

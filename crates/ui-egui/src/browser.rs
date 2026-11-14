@@ -2489,6 +2489,18 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
 /// image and the direction that edge should have, #11989). Live edits of one opening are one
 /// undo step.
 #[derive(Clone, Debug)]
+pub(crate) struct CanvasEditDrag {
+    /// 0 move, 1 scale, 2 rotate, 3 opacity, 4 flip_h, 5 flip_v, 6 stretch_x, 7 stretch_y.
+    pub(crate) kind: u8,
+    pub(crate) depth: usize,
+    pub(crate) pointer: [f64; 2],
+    pub(crate) center: [f64; 2],
+    pub(crate) width: f64,
+    pub(crate) height: f64,
+    pub(crate) angle: f64,
+}
+
+#[derive(Clone, Debug)]
 pub struct CanvasPanel {
     pub canvas: u64,
     pub calibrate: bool,
@@ -2504,6 +2516,10 @@ pub struct CanvasPanel {
     pub angle: f64,
     /// Next viewport click sets Point A (`0`) or Point B (`1`) (#9108).
     pub next: u8,
+    /// Calibration marker currently dragged with the primary pointer.
+    pub(crate) dragging: Option<u8>,
+    /// Direct manipulation active while Edit Canvas is open.
+    pub(crate) edit_drag: Option<CanvasEditDrag>,
     /// A click on the image has set Point B: Straighten's hint then asks for the direction and
     /// the Straighten button rather than for Point A again (#11989).
     pub picked_both: bool,
@@ -2531,6 +2547,8 @@ impl CanvasPanel {
             direction: 0,
             angle: 0.0,
             next: 0,
+            dragging: None,
+            edit_drag: None,
             picked_both: false,
         }
     }
