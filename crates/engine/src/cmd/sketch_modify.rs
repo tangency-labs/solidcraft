@@ -288,11 +288,30 @@ fn pin(sk: &mut Sketch, p: usize, cutter: usize) -> Result<()> {
     if let Some(e) = ends.into_iter().find(|e| sk.point(*e).is_some_and(|q| q.dist(at) < TOL * 10.0)) {
         if e != p {
             add_c(sk, ConstraintKind::Coincident { p, q: e })?;
+            drop_implied_point_on_curve(sk, p, e);
         }
         return Ok(());
     }
     add_c(sk, ConstraintKind::PointOnCurve { p, c: cutter })?;
     Ok(())
+}
+
+/// Points `p` and `q` were just made coincident: a Point On Curve holding either one on a curve
+/// the other ends is implied by that and goes. Two crossing lines trimmed back to a corner kept
+/// the first trim's end-on-line beside the second trim's end-to-end, a constraint that held
+/// nothing (#15619).
+fn drop_implied_point_on_curve(sk: &mut Sketch, p: usize, q: usize) {
+    let ends_at = |c: usize, x: usize| sk.curves.get(c).and_then(|c| c.kind.ends()).is_some_and(|(a, b)| a == x || b == x);
+    let implied: Vec<bool> = sk
+        .constraints
+        .iter()
+        .map(|k| match k.kind {
+            ConstraintKind::PointOnCurve { p: x, c } => (x == p && ends_at(c, q)) || (x == q && ends_at(c, p)),
+            _ => false,
+        })
+        .collect();
+    let mut drop = implied.into_iter();
+    sk.constraints.retain(|_| !drop.next().unwrap_or(false));
 }
 
 /// Split curve `ci` at interior parameters `ts` (sorted). Returns the pieces in parameter
@@ -418,15 +437,16 @@ fn release_extent(sk: &mut Sketch, ci: usize) {
 
 /// Tangencies tied to one of the curve's ends, through a shared point or Coincident
 /// constraints. Record them before splitting: keeping the curve ID alone would leave an
-/// end tangent on the wrong piece and lose the solver's endpoint tangency equation.
-fn endpoint_tangencies(sk: &Sketch, ci: usize) -> Vec<(usize, usize)> {
+/// end tangent on the wrong piece and lose the solver's endpoint tangency equation. Each is
+/// recorded by constraint id: the cuts in between can remove constraints (a Point On Curve made
+/// redundant at a corner) and shift the indices of those after it.
+fn endpoint_tangencies(sk: &Sketch, ci: usize) -> Vec<(String, usize)> {
     let Some((start, end)) = sk.curves.get(ci).and_then(|c| c.kind.ends()) else { return Vec::new() };
     let groups = coincident_points(sk);
     let root = |p: usize| groups.get(p).copied().unwrap_or(p);
     sk.constraints
         .iter()
-        .enumerate()
-        .filter_map(|(i, k)| {
+        .filter_map(|k| {
             let ConstraintKind::Tangent { a, b } = k.kind else { return None };
             let other = if a == ci {
                 b
@@ -438,8 +458,8 @@ fn endpoint_tangencies(sk: &Sketch, ci: usize) -> Vec<(usize, usize)> {
             let (a, b) = sk.curves.get(other)?.kind.ends()?;
             let joined = |p| root(p) == root(a) || root(p) == root(b);
             match (joined(start), joined(end)) {
-                (true, false) => Some((i, start)),
-                (false, true) => Some((i, end)),
+                (true, false) => Some((k.id.clone(), start)),
+                (false, true) => Some((k.id.clone(), end)),
                 _ => None,
             }
         })
@@ -448,11 +468,12 @@ fn endpoint_tangencies(sk: &Sketch, ci: usize) -> Vec<(usize, usize)> {
 
 /// Follow the original endpoints after the pieces have exchanged geometry to preserve the
 /// original curve ID. A tangent on the removed piece goes with it in `remove_curves`.
-fn rebind_endpoint_tangencies(sk: &mut Sketch, ci: usize, pieces: &[usize], tangencies: &[(usize, usize)]) {
-    for &(constraint, point) in tangencies {
+fn rebind_endpoint_tangencies(sk: &mut Sketch, ci: usize, pieces: &[usize], tangencies: &[(String, usize)]) {
+    for (constraint, point) in tangencies {
+        let point = *point;
         let owner = pieces.iter().copied().find(|i| sk.curves.get(*i).and_then(|c| c.kind.ends()).is_some_and(|(a, b)| a == point || b == point));
         if let Some(owner) = owner
-            && let Some(k) = sk.constraints.get_mut(constraint)
+            && let Some(k) = sk.constraints.iter_mut().find(|k| k.id == *constraint)
             && let ConstraintKind::Tangent { a, b } = &mut k.kind
         {
             if *a == ci {
