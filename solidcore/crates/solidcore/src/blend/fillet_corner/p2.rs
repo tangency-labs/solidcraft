@@ -2156,6 +2156,71 @@ mod tests {
         assert!(!r.unwrap());
         assert!(c.surfaces.is_empty());
         assert_eq!(corner_state(&pseudo, &c), before);
+
+        // the FALSE comes from the SER arm: the inner exit is an upstream status
+        let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, 3);
+        let inner = with_env(&mut pseudo, |env| {
+            env.with_patch_env(|env| c.analytic_corner_surface(env))
+        });
+        let e = inner.unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+        assert!(c.surfaces.is_empty());
+    }
+
+    /// After a failing analytic exit, `CreateCornerPatch` goes on to the Coons patch
+    /// (WR-254), which needs every side's 3D curve. The exits here leave a side
+    /// without one (an edge with no curve; a chamfer's arc whose curve was deleted to be
+    /// recomputed), so the patch refuses with `SM_ERR_NULL_POINTER` where upstream
+    /// reported success with no surface and no face.
+    #[test]
+    fn corner_patch_after_a_failing_analytic_exit_refuses_without_a_boundary_curve() {
+        use crate::error::blend::BlendFailure;
+        use crate::error::SM_ERR_NULL_POINTER;
+        let k = Kernel::default();
+        let arc_chamfer = || {
+            let (mut pseudo, c) = line_chamfer_corner(3);
+            let e = c.edges[0];
+            let circle = Curve::from(create_analytic_circle(&k, Point3::ZERO, 1.0).unwrap());
+            pseudo.brep_mut().edge_mut(e).unwrap().curve = Some(circle);
+            pseudo
+                .fillet_edge_mut(e)
+                .unwrap()
+                .set_fillet_edge_type(FilletEdgeType::RailRailInterpolation);
+            (pseudo, c)
+        };
+
+        // the chamfer's exit: NER on the missing original face, after the arc's curve
+        // was deleted
+        let (mut pseudo, mut c) = arc_chamfer();
+        let inner = with_env(&mut pseudo, |env| {
+            env.with_patch_env(|env| c.analytic_corner_surface(env))
+        });
+        let e = inner.unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::Missing(
+                "the interpolating edge's original face"
+            )),
+            "{e:?}"
+        );
+        assert!(pseudo.brep().edge(c.edges[0]).unwrap().curve.is_none());
+
+        for (name, (mut pseudo, mut c)) in [
+            ("curveless", loop_corner(FilletCornerKind::ConvexNByN, 3)),
+            ("arc chamfer", arc_chamfer()),
+        ] {
+            c.extended_surface_patch = false;
+            let r = with_env(&mut pseudo, |env| c.create_corner_patch_default(env));
+            let e = r.unwrap_err();
+            assert_eq!(
+                e.blend_failure(),
+                Some(&BlendFailure::Missing("a boundary curve")),
+                "{name}: {e:?}"
+            );
+            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{name}");
+            assert!(c.surfaces.is_empty(), "{name}");
+            assert!(c.surface_faces.is_empty(), "{name}");
+        }
     }
 
     #[test]
