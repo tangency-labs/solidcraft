@@ -84,6 +84,12 @@ fn merged_locales() -> Result<(), String> {
             }
         }
     }
+    // Serbian in Latin script is not a catalog of its own: it is the Cyrillic catalog (pending
+    // messages included) transliterated letter for letter, so the two scripts never drift apart.
+    if let Some(cyrillic) = catalogs.get("sr") {
+        let latin = cyrillic.iter().map(|(id, text)| (id.clone(), Value::String(serbian_latin(text.as_str().unwrap_or_default())))).collect();
+        catalogs.entry("sr-Latn".to_string()).or_insert(latin);
+    }
     let out = std::path::Path::new(&std::env::var("OUT_DIR").map_err(|e| e.to_string())?).join("locales");
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     for (id, catalog) in catalogs {
@@ -91,6 +97,50 @@ fn merged_locales() -> Result<(), String> {
         std::fs::write(out.join(format!("{id}.json")), text).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Serbian Cyrillic to Serbian Latin (gajica), letter for letter. Anything else (Latin brand
+/// names, units, `{placeholders}`) is kept. Љ, Њ and Џ become Lj, Nj and Dž, or LJ, NJ and DŽ
+/// inside a word written in capitals.
+fn serbian_latin(text: &str) -> String {
+    fn latin(c: char) -> Option<&'static str> {
+        Some(match c {
+            'а' => "a", 'б' => "b", 'в' => "v", 'г' => "g", 'д' => "d", 'ђ' => "đ", 'е' => "e", 'ж' => "ž",
+            'з' => "z", 'и' => "i", 'ј' => "j", 'к' => "k", 'л' => "l", 'љ' => "lj", 'м' => "m", 'н' => "n",
+            'њ' => "nj", 'о' => "o", 'п' => "p", 'р' => "r", 'с' => "s", 'т' => "t", 'ћ' => "ć", 'у' => "u",
+            'ф' => "f", 'х' => "h", 'ц' => "c", 'ч' => "č", 'џ' => "dž", 'ш' => "š",
+            _ => return None,
+        })
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    for (i, &c) in chars.iter().enumerate() {
+        let lower = c.to_lowercase().next().unwrap_or(c);
+        let Some(letters) = latin(lower) else {
+            out.push(c);
+            continue;
+        };
+        if c == lower {
+            out.push_str(letters);
+        } else if letters.chars().count() == 1 {
+            out.push_str(&letters.to_uppercase());
+        } else {
+            let next = chars.get(i + 1).copied();
+            let previous = i.checked_sub(1).map(|j| chars[j]);
+            let capitals = match next {
+                Some(n) if n.is_alphabetic() => n.is_uppercase(),
+                _ => previous.is_some_and(|p| p.is_alphabetic() && p.is_uppercase()),
+            };
+            let mut rest = letters.chars();
+            out.extend(rest.next().map(|first| first.to_ascii_uppercase()));
+            if capitals {
+                out.push_str(&rest.as_str().to_uppercase());
+            } else {
+                out.push_str(rest.as_str());
+            }
+        }
+    }
+    out
 }
 
 /// `$OUT_DIR/scenario_tests.rs`: a `#[test]` per scenario file, named after it; a scenario with
