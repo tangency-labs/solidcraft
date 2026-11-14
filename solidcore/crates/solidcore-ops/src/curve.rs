@@ -27,6 +27,7 @@ use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::from_parameters::{from_parameters, record_parameter, EdgeCurve};
 use solidcore::geom::certified::Verdict;
 use solidcore::geom::global_solver::SolverOperation;
+use solidcore::intersect::api_intersectors;
 use solidcore::intersect::views::{curves_from_views, views_do_not_meet};
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -831,7 +832,7 @@ pub fn crossings(
             Ok(m) => m,
             Err(e) => return Ok(Err(e)),
         };
-        let found = match solidcore::intersect::api_intersectors::curve_crossings(
+        let found = match api_intersectors::curve_crossings(
             k,
             &ka.curve,
             &ka.interval,
@@ -856,6 +857,48 @@ pub fn crossings(
             });
         }
         Ok(Ok(out))
+    })?
+}
+
+/// Isolated intersections of `curve` over the record's parameter `interval` with `plane`,
+/// in curve order and in the plane's local coordinates. The kernel solves the exact curve
+/// against the plane at its model tolerance; contacts at both interval endpoints count.
+/// A curve lying in the plane has no isolated intersections and gives an empty list.
+///
+/// # Errors
+/// [`Error::Argument`] for invalid curve data, a nonfinite or reversed interval, or a plane
+/// that is not finite and orthonormal; the kernel's status otherwise.
+pub fn plane_crossings(
+    curve: &Curve,
+    interval: [f64; 2],
+    plane: &solidcore_record::Plane,
+) -> Result<Vec<solidcore_record::Vec2>> {
+    if !interval.iter().all(|t| t.is_finite())
+        || ![plane.origin, plane.x, plane.y]
+            .iter()
+            .all(|p| coord_ok(&<[f64; 3]>::from(*p)))
+        || check_curve(curve, &mut Budget::input()).is_err()
+    {
+        return Err(Error::Argument);
+    }
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    let frame = solidcore_convert::plane(plane);
+    run("curve::plane_crossings", |k| {
+        let made = match from_parameters(k, &record, interval) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let found =
+            match api_intersectors::curve_plane_crossings(k, &made.curve, &made.interval, &frame) {
+                Ok(found) => found,
+                Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+                Err(e) => return Err(e),
+            };
+        Ok(Ok(found
+            .into_iter()
+            .map(|p| solidcore_record::Vec2::new(p.x, p.y))
+            .collect()))
     })?
 }
 
@@ -917,6 +960,63 @@ pub fn stretch_cvs(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plane_crossings_keep_line_endpoints_and_refuse_hostile_inputs() {
+        use solidcore_record::{Plane, Vec2, Vec3};
+
+        for (start, end, expected) in [
+            ([-1.0, -2.0, 0.0], [1.0, 0.0, 0.0], 1.0),
+            ([-1.0, 0.0, 0.0], [1.0, -2.0, 0.0], -1.0),
+            ([-1.0, -2.0, 0.0], [1.0, 2.0, 0.0], 0.0),
+        ] {
+            assert_eq!(
+                plane_crossings(&Curve::Line { start, end }, [0.0, 1.0], &Plane::XZ),
+                Ok(vec![Vec2::new(expected, 0.0)])
+            );
+        }
+        let line = Curve::Line {
+            start: [-1.0, -2.0, 0.0],
+            end: [1.0, 2.0, 0.0],
+        };
+        for interval in [[0.0, f64::NAN], [0.0, f64::INFINITY], [1.0, 0.0]] {
+            assert_eq!(
+                plane_crossings(&line, interval, &Plane::XZ),
+                Err(Error::Argument)
+            );
+        }
+        for plane in [
+            Plane {
+                origin: Vec3::new(f64::NAN, 0.0, 0.0),
+                ..Plane::XZ
+            },
+            Plane {
+                x: Vec3::ZERO,
+                ..Plane::XZ
+            },
+            Plane {
+                y: Vec3::X,
+                ..Plane::XZ
+            },
+            Plane {
+                x: Vec3::new(f64::INFINITY, 0.0, 0.0),
+                ..Plane::XZ
+            },
+        ] {
+            assert_eq!(
+                plane_crossings(&line, [0.0, 1.0], &plane),
+                Err(Error::Argument)
+            );
+        }
+        let invalid = Curve::Line {
+            start: [f64::NAN, 0.0, 0.0],
+            end: [1.0, 2.0, 0.0],
+        };
+        assert_eq!(
+            plane_crossings(&invalid, [0.0, 1.0], &Plane::XZ),
+            Err(Error::Argument)
+        );
+    }
 
     const SQUARE: [[f64; 3]; 4] = [
         [0.0, 0.0, 0.0],
