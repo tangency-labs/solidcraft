@@ -690,3 +690,100 @@ fn an_end_patch_off_its_support_is_refused() {
         assert!(why.contains("off its support face"), "{why}");
     }
 }
+
+/// A plate 2 thick whose top outline runs 50 along x and then 40 turning `kink` degrees
+/// (towards the plate for `convex`, away from it else), its other sides square to those two
+/// (the plate of solidcore-ops' `shallow_corner_plate`). The top edges are at (25, 0, 2) and
+/// halfway along the second; the corner's vertex at (50, 0, 2).
+fn kinked_plate(k: &mut Kernel, kink: f64, convex: bool) -> (Brep, [[f64; 3]; 2]) {
+    let t = if convex { -kink } else { kink }.to_radians();
+    let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+    let p = [
+        [0.0, 0.0],
+        [50.0, 0.0],
+        [50.0 + 40.0 * u[0], 40.0 * u[1]],
+        [50.0 + 40.0 * u[0] + 30.0 * n[0], 40.0 * u[1] + 30.0 * n[1]],
+        [0.0, -30.0],
+    ];
+    let curves: Vec<solidcore::curve::curve::Curve> = (0..p.len())
+        .map(|i| {
+            let (a, c) = (p[i], p[(i + 1) % p.len()]);
+            solidcore::curve::curve::Curve::from(
+                solidcore::primitive::api_curves::create_line_segment(
+                    Point3::new(a[0], a[1], 0.0),
+                    Point3::new(c[0], c[1], 0.0),
+                )
+                .unwrap(),
+            )
+        })
+        .collect();
+    let refs: Vec<Option<&solidcore::curve::curve::Curve>> = curves.iter().map(Some).collect();
+    let b = solidcore::sweep::api_brep::create_linear_sweep(k, &refs, Vec3::Z, 2.0, true).unwrap();
+    (
+        b,
+        [[25.0, 0.0, 2.0], [50.0 + 20.0 * u[0], 20.0 * u[1], 2.0]],
+    )
+}
+
+/// #16627: two rounds r 1 meeting at a corner a kink off straight join on one shared section
+/// only while their sections there stand closer than the B-rep's intersection tolerance, which
+/// the check holds the joint vertex to: 1 x kink < 2e-5 (the B-rep's tolerance is 1e-5). Just
+/// below that (1.14e-3 degrees, 1.99e-5 apart) the corner is the Join; just above (1.15e-3
+/// degrees, 2.007e-5 apart) it is the Turn. Both build and pass the check, concave and convex.
+/// The Join used to be allowed up to the corner's approximation tolerance (4e-5): a concave
+/// corner 1.5e-3 degrees off straight was joined and failed the check.
+#[test]
+fn a_near_straight_corner_joins_only_below_the_intersection_tolerance() {
+    for (kink, want) in [
+        (1.14e-3, BlendCornerEvent::Join),
+        (1.15e-3, BlendCornerEvent::Turn),
+        (1.5e-3, BlendCornerEvent::Turn),
+    ] {
+        for convex in [false, true] {
+            let mut k = all_fixes();
+            let (mut b, at_edges) = kinked_plate(&mut k, kink, convex);
+            assert_eq!(b.tolerance(), 1e-5);
+            let cs = corners(
+                &mut k,
+                &mut b.clone_standing_for_self().unwrap(),
+                &at_edges,
+                1.0,
+            );
+            assert_eq!(
+                at(&cs, [50.0, 0.0, 2.0]).1.map(|e| e.0),
+                Some(want),
+                "{kink} degrees (convex {convex})"
+            );
+            round(&mut k, &mut b, &at_edges, 1.0);
+            clean(&mut k, &mut b);
+        }
+    }
+}
+
+/// #16627: the Join is bounded by the B-rep's intersection tolerance, not by the solvers'
+/// approximation tolerance (four times the blended edges' tolerance). With the two top edges
+/// at tolerance 2.5e-4 (the solvers' tolerance 1e-3) and the B-rep's at 1e-5, a concave corner
+/// 0.01 degrees off straight (the sections 1.75e-4 apart) is the Turn and passes the check.
+/// Bounded by the solvers' tolerance it was the Join, its vertex 1.75e-4 off a round.
+#[test]
+fn a_near_straight_corner_s_join_is_bounded_by_the_brep_not_the_solvers() {
+    let mut k = all_fixes();
+    let (mut b, at_edges) = kinked_plate(&mut k, 0.01, false);
+    for p in at_edges {
+        let e = pick(&k, &b, p);
+        edge::set_tolerance(&mut b, e, 2.5e-4, true, true).unwrap();
+    }
+    assert_eq!(b.tolerance(), 1e-5);
+    let cs = corners(
+        &mut k,
+        &mut b.clone_standing_for_self().unwrap(),
+        &at_edges,
+        1.0,
+    );
+    assert_eq!(
+        at(&cs, [50.0, 0.0, 2.0]).1.map(|e| e.0),
+        Some(BlendCornerEvent::Turn)
+    );
+    round(&mut k, &mut b, &at_edges, 1.0);
+    clean(&mut k, &mut b);
+}

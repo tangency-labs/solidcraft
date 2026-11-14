@@ -1134,12 +1134,16 @@ impl FilletCorner {
                                 // one convexity among three or four edges are the blend
                                 // corner's (SmBlendCorner::Classify: a Turn or a Join), built
                                 // by the two-blend construction moved from SmFilletNx2Corner
-                                // the blends join only where their balls are one within
-                                // the corner's tolerance (`blend_corner::join_tolerance_deg`)
+                                // the blends join only where their sections at the joint
+                                // vertex stand strictly within the B-rep's intersection
+                                // tolerance, which the check holds every vertex to (#16627;
+                                // `blend_corner::join_within_xsect_tolerance_deg`)
                                 let mut size = 0.0_f64;
                                 for &eu in solver_eus {
                                     size = size.max(round_size(solver_of(eu)?)?);
                                 }
+                                let xsect_tol =
+                                    crate::topology::vertex::corner::xsect_tol_3d_of_brep(k, b);
                                 let blend = crate::blend::blend_corner::classify(
                                     k,
                                     b,
@@ -1147,9 +1151,9 @@ impl FilletCorner {
                                     solver_eus,
                                     &all_eus,
                                     tan_tol_deg,
-                                    crate::blend::blend_corner::join_tolerance_deg(
+                                    crate::blend::blend_corner::join_within_xsect_tolerance_deg(
                                         size,
-                                        approx_tol_3d,
+                                        xsect_tol,
                                         tan_tol_deg,
                                     ),
                                 )?;
