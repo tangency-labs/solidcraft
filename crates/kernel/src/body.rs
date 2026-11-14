@@ -767,6 +767,22 @@ impl Body {
         }
     }
 
+    /// The face in `faces` nearest `p` within `reach`, and its exact distance.
+    pub fn nearest_face_in(&self, p: Vec3, faces: &std::collections::BTreeSet<usize>, reach: f64) -> Option<(f64, usize)> {
+        let (ops, order) = self.ops_body()?;
+        let max_dist = if reach.is_finite() { reach.max(1e-6) } else { 1e12 };
+        let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], max_dist).ok()?;
+        dists
+            .into_iter()
+            .enumerate()
+            .filter(|(f, _)| faces.contains(f))
+            .filter_map(|(f, row)| {
+                let d = row.first().copied().flatten()?;
+                (d <= reach).then_some((d, f))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+    }
+
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
     pub fn with_cylinder_certificate(mut self, producer: u64) -> Result<Self> {
         if producer == 0 {
