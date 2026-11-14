@@ -80,8 +80,7 @@ fn by_kind(kind: ErrorKind) -> Option<Error> {
 
 /// The kernel's offset refusal `o` as the operation's error: walls that touch
 /// ([`Error::WallsTouch`]), a wall whose face's offset folds ([`Error::WallFolds`], with the
-/// largest wall the kernel names), a vertex moved past an edge's other end
-/// ([`Error::Unsupported`]), and every other reason as [`Error::OffsetRefused`] (#14783): why,
+/// largest wall the kernel names), and every other reason as [`Error::OffsetRefused`] (#14783): why,
 /// and the face the failure is about (`entity`, the reason's own unless the kernel set another)
 /// through `index` (`None` where it names none, or one `index` does not find). A reason this
 /// version does not name yet takes the error of its class where that has one ([`by_kind`]), as
@@ -103,7 +102,7 @@ fn offset_refused(
             }
         }
         OffsetFailure::WallsTouch { .. } => return Error::WallsTouch,
-        OffsetFailure::EdgeVanishes { .. } => return Error::Unsupported(EDGE_VANISHES),
+        OffsetFailure::EdgeVanishes { .. } => OffsetRefusal::EdgeVanishes,
         // (the kernel's fold kind also covers an offset not certified regular, which is no
         // fold: its own reason, #14783)
         OffsetFailure::NotCertified { distance, .. } => OffsetRefusal::NotCertified { distance },

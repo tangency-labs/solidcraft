@@ -22,6 +22,81 @@ fn block() -> Body {
 
 const ABC: f64 = 6000.0;
 
+/// A six-edge profile with three right walls separated by less than half a degree.
+/// Constructed independently of imported geometry.
+fn faceted_plate() -> Body {
+    let points = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 5.0, 0.0],
+        [10.002, 6.0, 0.0],
+        [10.008, 7.0, 0.0],
+        [0.0, 7.0, 0.0],
+    ];
+    let profile = (0..points.len())
+        .map(|i| crate::sweep::Curve::Line {
+            start: points[i],
+            end: points[(i + 1) % points.len()],
+        })
+        .collect::<Vec<_>>();
+    crate::sweep::extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        1.0,
+        0.0,
+        crate::sweep::DraftCorner::Curvature,
+        true,
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_faceted_plate_moves_a_wall_between_nearly_parallel_neighbours() {
+    all_fixes();
+    let body = faceted_plate();
+    let o = order(&body);
+    let at = face(&body, &o, |bx| {
+        (bx.min().y - 5.0).abs() < 1e-9 && (bx.max().y - 6.0).abs() < 1e-9
+    });
+    offset_faces(&body, &o, &[at], 0.001).unwrap();
+    // Intersect x=10, x-.002y=9.99+.001*sqrt(1.000004), and x-.006y=9.966.
+    // Shoelace area of those intersections and the three fixed corners, times height 1.
+    let got = volume(&body);
+    println!(
+        "faceted plate volume {got:.14}, topology {:?}",
+        body.counts().unwrap()
+    );
+    assert!((got - 70.007_375_003_5).abs() < 1e-8, "volume {got}");
+    assert_eq!(body.counts().unwrap(), [8, 18, 12]);
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+}
+
+#[test]
+fn a_faceted_plate_refuses_a_move_that_reverses_an_edge_saying_why() {
+    all_fixes();
+    let body = faceted_plate();
+    let o = order(&body);
+    let at = face(&body, &o, |bx| {
+        (bx.min().y - 5.0).abs() < 1e-9 && (bx.max().y - 6.0).abs() < 1e-9
+    });
+    let before = body.to_smb(false).unwrap();
+    // At 2 mm the moved wall's intersections pass the fixed neighbours' other ends.
+    let error = offset_faces(&body, &o, &[at], 2.0).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::OffsetRefused {
+                why: crate::OffsetRefusal::EdgeVanishes,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert!(error.to_string().contains("the edge would vanish"));
+    assert_eq!(body.to_smb(false).unwrap(), before);
+}
+
 fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1.0)
 }
@@ -363,7 +438,7 @@ fn the_offset_refusals_are_typed() {
         ),
         Error::WallsTouch
     );
-    assert!(matches!(
+    assert_eq!(
         super::status(
             refused(OffsetFailure::EdgeVanishes {
                 edge: None,
@@ -371,8 +446,11 @@ fn the_offset_refusals_are_typed() {
             }),
             &none,
         ),
-        Error::Unsupported(_)
-    ));
+        Error::OffsetRefused {
+            face: None,
+            why: crate::OffsetRefusal::EdgeVanishes,
+        }
+    );
     // an unresolved crossing says how it crosses (#14783), no longer a bare status
     assert_eq!(
         super::status(
