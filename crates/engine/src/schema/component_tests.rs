@@ -4,12 +4,12 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use super::{
-    ActivateParams, ActivateResult, CapturePositionParams, CapturePositionResult, CopyParams, CopyResult, CreateParams, CreateResult, DeleteParams,
-    DeleteResult, DragParams, DragResult, EditInPlaceParams, FinishEditParams, FromBodiesParams, FromBodiesResult, GroundParams, GroundResult,
-    ListParams, ListResult, MoveBodiesParams, MoveBodiesResult, MoveFeaturesParams, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult,
-    MoveSketchesToPartsParams, OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams, OccurrencePropertiesResult, PasteNewParams,
-    PasteNewResult, PropertiesParams, PropertiesResult, RenameParams, RenameResult, ReparentItemsParams, RevertPositionParams, RevertPositionResult,
-    UnlockParams, UnlockResult,
+    ActivateParams, ActivateResult, CapturePositionParams, CapturePositionResult, CopyParams, CopyResult, CreateParams, CreateResult,
+    CycleColorParams, CycleColorResult, DeleteParams, DeleteResult, DragParams, DragResult, EditInPlaceParams, FinishEditParams, FromBodiesParams,
+    FromBodiesResult, GroundParams, GroundResult, ListParams, ListResult, MoveBodiesParams, MoveBodiesResult, MoveFeaturesParams, MoveParams,
+    MoveResult, MoveSketchesParams, MoveSketchesResult, MoveSketchesToPartsParams, OccurrenceAlignParams, OccurrenceAlignResult,
+    OccurrencePropertiesParams, OccurrencePropertiesResult, PasteNewParams, PasteNewResult, PropertiesParams, PropertiesResult, RenameParams,
+    RenameResult, ReparentItemsParams, RevertPositionParams, RevertPositionResult, UnlockParams, UnlockResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -48,6 +48,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RenameParams>(), &["component", "name"]);
     assert_keys(input_schema_for::<DeleteParams>(), &["component"]);
     assert_keys(input_schema_for::<UnlockParams>(), &["component"]);
+    assert_keys(input_schema_for::<CycleColorParams>(), &["component"]);
     assert_keys(input_schema_for::<CapturePositionParams>(), &[]);
     assert_keys(input_schema_for::<RevertPositionParams>(), &["occurrences"]);
     assert_keys(input_schema_for::<GroundParams>(), &["grounded", "occurrence", "path"]);
@@ -131,6 +132,9 @@ fn strict_keeps_todays_errors() {
         ("component.unlock", json!({})),
         ("component.unlock", json!({"component": [0]})),
         ("component.unlock", json!({"component": 0})),
+        ("component.cycle_color", json!({})),
+        ("component.cycle_color", json!({"component": false})),
+        ("component.cycle_color", json!({"component": "no such part"})),
     ]);
 }
 
@@ -212,7 +216,18 @@ fn the_schemas_take_what_the_handlers_read() {
     let rename = input_schema_for::<RenameParams>();
     assert_eq!(rename.as_value()["$defs"]["ComponentName"]["pattern"], crate::schema::types::not_blank_pattern());
     takes(input_schema_for::<DeleteParams>(), &[(json!({"component": 2}), true), (json!({}), false)]);
-    takes(input_schema_for::<UnlockParams>(), &[(json!({"component": "rig"}), true), (json!({}), false)]);
+    takes(
+        input_schema_for::<CycleColorParams>(),
+        &[
+            (json!({"component": "Arm"}), true),
+            (json!({"component": 4}), true),
+            (json!({"component": 1.5}), true),
+            (json!({}), false),
+            (json!({"component": null}), false),
+            (json!({"component": [1]}), false),
+            (json!({"colour": "red"}), false),
+        ],
+    );
 }
 
 /// Keys the handlers read only in some cases are read only in those cases: `bodies` of
@@ -245,6 +260,8 @@ fn the_check_reads_keys_as_the_handlers_do() {
     assert_eq!(issues("component.properties", json!({"about": null})), none);
     assert_eq!(issues("component.properties", json!({"descendants": null})), ["`descendants` must be a boolean"]);
     assert_eq!(issues("component.properties", json!({"component": null})), ["`component` must be a component id or name"]);
+    assert_eq!(issues("component.cycle_color", json!({"component": null})), ["`component` must be a component id or name"]);
+    assert_eq!(issues("component.cycle_color", json!({"component": [1]})), ["`component` must be a component id or name"]);
     assert_eq!(issues("component.rename", json!({"component": 0, "name": ""})), ["`name` must be 1…128 characters"]);
 }
 
@@ -252,6 +269,43 @@ fn matches(schema: schemars::Schema, id: &str, reply: &Value) {
     let schema = schema.as_value();
     assert!(conforms(schema, schema, reply), "{id}: {reply} doesn't match {schema}");
     assert!(reply.get("param_warnings").is_none(), "{id}: {reply}");
+}
+
+/// #16559: `component.cycle_color` answers the component it changed and the colour it has now, as the
+/// three bytes the palette uses, and the published schema requires the one key it reads.
+#[test]
+fn cycle_color_answers_the_component_and_its_colour() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let made = s.execute("component.create", &json!({"name": "Arm"})).unwrap();
+    let id = made["component"].as_u64().unwrap();
+    let schema = output_schema_for::<CycleColorResult>().as_value().clone();
+    let described = s.execute("engine.describe", &json!({"command": "component.cycle_color"})).unwrap();
+    assert_eq!(described["input"]["required"], json!(["component"]), "the handler refuses a call without it");
+    assert_eq!(described["input"]["additionalProperties"], false);
+    let spec = crate::find_command("component.cycle_color").unwrap();
+    assert!(spec.contract.is_some() && spec.output.is_some() && spec.undoable, "the command describes itself and undoes");
+
+    // Both the name and the id the command answered are calls the command takes.
+    let mut previous = None;
+    for key in [json!("Arm"), json!(id)] {
+        let before = s.doc.component_identification_color(id);
+        let next = solidcraft_doc::component_color::next_color(before);
+        let r = s.execute("component.cycle_color", &json!({"component": key})).unwrap_or_else(|e| panic!("{key}: {e}"));
+        assert_eq!(r, json!({"component": id, "color": next}), "cycle_color changed the JSON it returned");
+        matches(output_schema_for::<CycleColorResult>(), "component.cycle_color", &r);
+        assert_eq!(crate::view::component_color(&s, id), Some(next), "the design holds the colour it answered");
+        assert_ne!(Some(next), previous, "a second call gives the next colour of the palette");
+        previous = Some(next);
+    }
+    assert!(s.colored_components.is_some(), "the Component Colors flag is on, as the window expects");
+    // The design itself has no colour to cycle, and a component that isn't there is refused.
+    for p in [json!({"component": 0}), json!({"component": "no such part"})] {
+        assert!(s.execute("component.cycle_color", &p).is_err(), "{p} should be refused");
+    }
+    // A key the command doesn't take is a warning, not a refusal, and the reply still matches.
+    let warned = s.execute("component.cycle_color", &json!({"component": id, "components": id})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(warned["param_warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("components")))), "{warned}");
+    assert!(conforms(&schema, &schema, &warned), "{warned} doesn't match {schema}");
 }
 
 /// A glTF file whose node `rig` holds a `Part` (one cube): imported, it is a component held

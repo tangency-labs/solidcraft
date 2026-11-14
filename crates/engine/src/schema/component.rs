@@ -1130,6 +1130,30 @@ pub struct UnlockResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Give a component the next colour of the Component Colors palette (`component.cycle_color`). The
+/// colour is shared by every instance of the component and is separate from its appearances.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct CycleColorParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+}
+
+/// What `component.cycle_color` returns: the component it changed and the colour it has now.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CycleColorResult {
+    /// The component, by id.
+    pub component: u64,
+    /// Its identification colour now, as red, green and blue.
+    pub color: [u8; 3],
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 // ---------------------------------------------------------------------------------------------
 // The occurrence commands, Capture and Revert Position, Move Bodies and Sketches to Component and
 // Paste New (#13186).

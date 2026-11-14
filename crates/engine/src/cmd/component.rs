@@ -14,12 +14,13 @@ use super::CommandSpec;
 use crate::params::{bad, bool_, name_or_id_values, str_, string_list, vec3};
 use crate::schema::component::{
     ActivateParams, ActivateResult, CapturePositionParams, CapturePositionResult, ChildEntry, CompactPlacement, ComponentNode, CopyParams,
-    CopyResult, CreateParams, CreateResult, DeleteParams, DeleteResult, DragParams, DragResult, EditInPlaceParams, EditInPlaceResult,
-    FinishEditParams, FinishEditResult, FromBodiesParams, FromBodiesResult, GroundParams, GroundResult, ListParams, ListResult, MoveBodiesParams,
-    MoveBodiesResult, MoveFeaturesParams, MoveFeaturesResult, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult,
-    MoveSketchesToPartsParams, MoveSketchesToPartsResult, NamesOrCount, OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams,
-    OccurrencePropertiesResult, PasteNewParams, PasteNewResult, PlacementEntry, PlacementInfo, PropertiesParams, PropertiesResult, RenameParams,
-    RenameResult, ReparentItemsParams, ReparentItemsResult, RevertPositionParams, RevertPositionResult, UnlockParams, UnlockResult,
+    CopyResult, CreateParams, CreateResult, CycleColorParams, CycleColorResult, DeleteParams, DeleteResult, DragParams, DragResult,
+    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, FromBodiesParams, FromBodiesResult, GroundParams, GroundResult,
+    ListParams, ListResult, MoveBodiesParams, MoveBodiesResult, MoveFeaturesParams, MoveFeaturesResult, MoveParams, MoveResult, MoveSketchesParams,
+    MoveSketchesResult, MoveSketchesToPartsParams, MoveSketchesToPartsResult, NamesOrCount, OccurrenceAlignParams, OccurrenceAlignResult,
+    OccurrencePropertiesParams, OccurrencePropertiesResult, PasteNewParams, PasteNewResult, PlacementEntry, PlacementInfo, PropertiesParams,
+    PropertiesResult, RenameParams, RenameResult, ReparentItemsParams, ReparentItemsResult, RevertPositionParams, RevertPositionResult, UnlockParams,
+    UnlockResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -32,6 +33,7 @@ const LIST_CONTRACT: TypedContract<ListParams> = TypedContract::new();
 const PROPERTIES_CONTRACT: TypedContract<PropertiesParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<RenameParams> = TypedContract::new();
 const UNLOCK_CONTRACT: TypedContract<UnlockParams> = TypedContract::new();
+const CYCLE_COLOR_CONTRACT: TypedContract<CycleColorParams> = TypedContract::new();
 const EDIT_IN_PLACE_CONTRACT: TypedContract<EditInPlaceParams> = TypedContract::new();
 const FINISH_EDIT_CONTRACT: TypedContract<FinishEditParams> = TypedContract::new();
 const MOVE_FEATURES_CONTRACT: TypedContract<MoveFeaturesParams> = TypedContract::new();
@@ -81,8 +83,8 @@ mod history_tests;
 mod occurrence_tests;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("component.cycle_color", "Cycle Component Color", cycle_color)
-        .icon("colored_components").doc_only()
+    CommandSpec::new("component.cycle_color", "Cycle Component Color", crate::checked!("component.cycle_color", cycle_color))
+        .icon("colored_components").doc_only().contract(&CYCLE_COLOR_CONTRACT).output(output_schema_for::<CycleColorResult>)
         .params("component: id or name; saves the next identification colour and turns Component Colors on; shared by every instance, separate from appearances"),
     CommandSpec::new("component.hide_history", "Hide Component History", hide_history)
         .icon("eye").doc_only()
@@ -1131,7 +1133,7 @@ fn cycle_color(s: &mut Session, p: &Value) -> Result<Value> {
     let c = s.doc_mut().components.iter_mut().find(|c| c.id == id).ok_or_else(|| bad(cmd, "choose a component below the design root"))?;
     c.identification_color = Some(next);
     s.colored_components = Some(());
-    Ok(json!({"component": id, "color": next}))
+    reply(CycleColorResult { component: id, color: next, param_warnings: Vec::new() })
 }
 
 /// Mark a component's features out of the History bar, or back in (#10393). The features still
