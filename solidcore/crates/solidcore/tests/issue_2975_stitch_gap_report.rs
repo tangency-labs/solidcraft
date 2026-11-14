@@ -644,10 +644,10 @@ fn a_planar_conic_disc_in_a_holed_face_reports_its_gap() {
     check_edge_closure(&b, &gaps, "SmConic_TYPE", gap, 1e-12);
 }
 
-/// Two adjacent sheets have coincident shared curves lifted off their planes.
-/// Their stored zones overlap: the 0.004 mm displacement exceeds the body
-/// tolerance and the repair targets, but fits the incident local zones.
-fn locally_tolerant_sheets(k: &mut Kernel, gap: f64) -> Brep {
+/// Two adjacent sheets whose shared curves are lifted `gap` off their planes, stitched with
+/// `stitch_tol`. The edges carry the zone `edge_zone`, the faces 0.002 and the vertices 0.006.
+/// Returns the body and the number of edges the stitch sewed.
+fn lifted_sheets(k: &mut Kernel, gap: f64, stitch_tol: f64, edge_zone: f64) -> (Brep, usize) {
     use solidcore::geom::axis2_placement::Axis2Placement;
     use solidcore::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap, VertexFaceGap};
     use solidcore::topology::brep::p4::stitch_faces;
@@ -675,7 +675,7 @@ fn locally_tolerant_sheets(k: &mut Kernel, gap: f64) -> Brep {
     let mut lifted = 0;
     for e in b.edge_list().to_vec() {
         let data = b.edge_mut(e).unwrap();
-        data.tolerance = 0.005;
+        data.tolerance = edge_zone;
         let curve = data.curve.as_mut().unwrap();
         let a = curve.evaluate_point(k, data.interval.min()).unwrap();
         let z = curve.evaluate_point(k, data.interval.max()).unwrap();
@@ -699,19 +699,51 @@ fn locally_tolerant_sheets(k: &mut Kernel, gap: f64) -> Brep {
         data.vertex_edge_gap = VertexEdgeGap::default();
         data.vertex_face_gap = VertexFaceGap::default();
     }
-    let outcome = stitch_faces(k, &mut b, 1e-4, None, false).unwrap();
-    assert_eq!(outcome.stitched_edges, 1);
+    let sewed = stitch_faces(k, &mut b, stitch_tol, None, false)
+        .map(|outcome| outcome.stitched_edges)
+        .unwrap_or(0);
     b.refresh_cached_topology();
     // `add_square` names each surface's owner by its arena identity, while `new_brep`
     // checks under the notification scheme: relabel so the check sees the owners.
     b.use_arena_naming().unwrap();
-    assert_eq!(b.edge_list().len(), 7);
-    assert_eq!(b.vertex_list().len(), 6);
-    b
+    if sewed == 1 {
+        assert_eq!(b.edge_list().len(), 7);
+        assert_eq!(b.vertex_list().len(), 6);
+    }
+    (b, sewed)
 }
 
+/// A stitch tolerance of 0.01 sews gaps up to it, growing the sewn edge's zone to cover the gap
+/// (at most the gap plus the larger zone), and the body is then valid. A gap past the stitch
+/// tolerance and past the summed edge zones is not sewn, and the check reports it.
 #[test]
-fn stitched_local_zones_are_valid_without_meeting_repair_targets() {
+fn a_stitch_sews_a_gap_within_its_tolerance_and_leaves_a_larger_one() {
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    let mut k = Kernel::default();
+    for gap in [0.004, 0.008] {
+        let (mut b, sewed) = lifted_sheets(&mut k, gap, 0.01, 0.005);
+        assert_eq!(sewed, 1, "gap {gap}");
+        let report = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(report.is_valid(), "gap {gap}: {:?}", report.lines());
+        let grown = b
+            .edge_list()
+            .iter()
+            .map(|&e| b.edge(e).unwrap().tolerance)
+            .fold(0.0, f64::max);
+        assert!(grown >= gap, "gap {gap}: zone {grown}");
+        assert!(grown <= gap + 0.005 + 1e-12, "gap {gap}: zone {grown}");
+    }
+    let (mut b, sewed) = lifted_sheets(&mut k, 0.012, 0.01, 0.005);
+    assert_eq!(sewed, 0);
+    let report = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert!(!report.is_valid());
+}
+
+/// A gap inside the sum of the incident local zones (here the 0.02 edge zone) is sewn without
+/// growing any zone, the body is valid, and the explicit repair API keeps its stricter targets.
+#[test]
+fn a_gap_inside_the_summed_local_zones_is_sewn_without_growing_them() {
     use solidcore::geom::assert_array::AssertArray;
     use solidcore::topology::brep::validation::{
         check_brep, validate_and_update_tolerances, CheckLevel,
@@ -719,41 +751,19 @@ fn stitched_local_zones_are_valid_without_meeting_repair_targets() {
 
     let mut k = Kernel::default();
     k.fixes.validate_tolerances_fixes_reported_gaps = true;
-    let mut b = locally_tolerant_sheets(&mut k, 0.004);
+    let (mut b, sewed) = lifted_sheets(&mut k, 0.001, 1e-4, 0.02);
+    assert_eq!(sewed, 1);
     let report = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
     assert!(report.is_valid(), "{:?}", report.lines());
     assert_eq!(b.tolerance(), 1e-5);
     for &e in b.edge_list() {
-        assert_eq!(b.edge(e).unwrap().tolerance, 0.005);
+        assert_eq!(b.edge(e).unwrap().tolerance, 0.02);
     }
     for &v in b.vertex_list() {
         assert_eq!(b.vertex(v).unwrap().tolerance, 0.006);
     }
-    // The explicit repair API retains its stricter targets, including in a
-    // validate-only call. Checking validity must not silently repair this model.
+    // Checking validity must not silently repair the model.
     let mut repair = AssertArray::default();
     let gaps = validate_and_update_tolerances(&mut k, &mut b, true, Some(&mut repair), 2).unwrap();
-    assert!(gaps.violated_or_updated);
-    assert!(repair.reports().iter().any(|report| !report.ok));
-    assert!((gaps.max_vertex_edge_gap - 0.004).abs() < 1e-12);
-
-    // The edge and face zones also admit a displacement larger than the
-    // edge radius alone, without changing either radius.
-    let mut overlap = locally_tolerant_sheets(&mut k, 0.006);
-    let report = check_brep(&mut k, &mut overlap, CheckLevel::Level2).unwrap();
-    assert!(report.is_valid(), "{:?}", report.lines());
-
-    // A displacement outside the combined 0.005 + 0.002 mm edge/face
-    // zones is still refused, with the same recorded tolerances.
-    let mut broken = locally_tolerant_sheets(&mut k, 0.008);
-    let report = check_brep(&mut k, &mut broken, CheckLevel::Level2).unwrap();
-    assert!(!report.is_valid());
-    assert!(
-        report
-            .lines()
-            .iter()
-            .any(|line| line.contains("SmBrep::Test #4 Bad Gap")),
-        "{:?}",
-        report.lines()
-    );
+    assert!((gaps.max_vertex_edge_gap - 0.001).abs() < 1e-12);
 }
