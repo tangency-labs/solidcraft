@@ -85,9 +85,11 @@ const MIN_SWEEP: f64 = 1e-9;
 /// when lone vertices land on the same point of it.
 const CUT_GAP: f64 = 1e-9;
 
-/// How far from perpendicular (the cosine between them) a section plane's axes may be, and how far
-/// from one their lengths.
-const AXES_TOL: f64 = 1e-6;
+/// How far a point of a section may move in space for its plane's axes being off (not quite
+/// perpendicular or not quite of unit length): the kernel's zone tolerance, as [`MIN_EDGE`]. A
+/// section is placed through its axes, so axes off by `skew` move its points by up to about
+/// `skew` times its extent ([`axes_fit`]).
+const AXES_ZONE: f64 = MIN_EDGE;
 
 const OP: &str = "sweep::loft_sections";
 
@@ -1844,6 +1846,63 @@ fn to_world(origin: Vec3, x: Vec3, y: Vec3, p: Point2) -> Vec3 {
     origin + x * p.x + y * p.y
 }
 
+/// Whether `e` is one of [`match_loft_sections`]'s size refusals
+/// ([`SweepFailure::LoftMatchTooLarge`], [`SweepFailure::LoftSectionsTooLarge`]): the sections are
+/// valid but their match is past the caller's bound or the pairing's.
+#[must_use]
+pub fn too_large(e: &SolidError) -> bool {
+    e.failure().is_some_and(|f| {
+        matches!(
+            f.reason,
+            crate::error::Reason::Sweep(
+                SweepFailure::LoftMatchTooLarge { .. } | SweepFailure::LoftSectionsTooLarge { .. }
+            )
+        )
+    })
+}
+
+/// How far a section's plane axes are from a frame of perpendicular unit vectors: the largest of
+/// the cosine between them (for unit axes) and how far each length is from one.
+fn axes_skew(x: Vec3, y: Vec3) -> f64 {
+    let (lx, ly) = (dot3(x, x).sqrt(), dot3(y, y).sqrt());
+    (dot3(x, y).abs())
+        .max((lx - 1.0).abs())
+        .max((ly - 1.0).abs())
+}
+
+/// The farthest a section's curve reaches from its plane's origin, in the plane's coordinates
+/// (bounded through its control points, an arc's centre and radius): a point at `p` moves by at
+/// most about `|p|` times the axes' skew when the axes are off.
+fn extent(segs: &[Seg2]) -> f64 {
+    // The larger, or NaN when either is: a point that is not finite has no extent.
+    let most = |m: f64, e: f64| {
+        if m.is_nan() || e.is_nan() {
+            f64::NAN
+        } else {
+            m.max(e)
+        }
+    };
+    let far = |pts: &[Point2]| pts.iter().map(|q| len(*q)).fold(0.0, most);
+    segs.iter()
+        .map(|s| match *s {
+            Seg2::Line { a, b } => far(&[a, b]),
+            Seg2::Arc { center, radius, .. } => len(center) + radius.abs(),
+            Seg2::Cubic { p0, p1, p2, p3 } => far(&[p0, p1, p2, p3]),
+            Seg2::Conic { a, apex, b, .. } => far(&[a, apex, b]),
+            Seg2::Bezier { n, p } => far(p.get(..usize::from(n)).unwrap_or(p.as_slice())),
+        })
+        .fold(0.0, most)
+}
+
+/// A section's plane axes are a frame its points can be placed through: finite, of skew
+/// ([`axes_skew`]) under one (not parallel, neither of no length), and moving no point of the
+/// section by more than [`AXES_ZONE`] (skew times [`extent`]). A large section needs axes closer
+/// to a frame than a small one does.
+fn axes_fit(s: &LoftSection) -> bool {
+    let skew = axes_skew(s.x, s.y);
+    skew < 1.0 && skew * extent(&s.segs) <= AXES_ZONE
+}
+
 /// The loft's closed sections, given in loft order, matched as its walls are built through them:
 /// each wound the way the one before it is, cut to the vertices it shares with the others, and
 /// started at the segment that joins the first segment of the section before it (see the module
@@ -1851,10 +1910,13 @@ fn to_world(origin: Vec3, x: Vec3, y: Vec3, p: Point2) -> Vec3 {
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for a section with no segments, no length or a point that is not
-/// finite, plane axes that are not finite orthogonal unit vectors, a circle whose centre, radius
-/// or angles are not finite or whose radius is not positive, or a match past `max_segments`;
-/// [`SolidError::Failed`] with [`SweepFailure::LoftSectionsTooLarge`] for two sections past
-/// [`LARGEST_BANDED`] segments; [`SolidError::PortInvariant`] when the pairing breaks down.
+/// finite, plane axes that move its points by more than the zone tolerance ([`axes_fit`]), or a
+/// circle whose centre, radius or angles are not finite or whose radius is not positive;
+/// [`SolidError::Failed`] with [`SweepFailure::LoftMatchTooLarge`] for a match past
+/// `max_segments`, or with [`SweepFailure::LoftSectionsTooLarge`] for two sections past
+/// [`LARGEST_BANDED`] segments (the size refusals: [`too_large`] tells them apart, and a caller
+/// can build such sections another way); [`SolidError::PortInvariant`] when the pairing breaks
+/// down.
 pub fn match_loft_sections(
     sections: &[LoftSection],
     max_segments: usize,
@@ -1869,14 +1931,8 @@ pub fn match_loft_sections(
             reason: "a loft section has no segments",
         });
     }
-    let unit_axis = |v: Vec3| {
-        let l = dot3(v, v).sqrt();
-        l.is_finite() && (l - 1.0).abs() <= AXES_TOL
-    };
     if sections.iter().any(|s| {
-        !unit_axis(s.x)
-            || !unit_axis(s.y)
-            || !(dot3(s.x, s.y).abs() <= AXES_TOL)
+        !axes_fit(s)
             || !(s.origin.x.is_finite() && s.origin.y.is_finite() && s.origin.z.is_finite())
     }) {
         return Err(SolidError::InvalidInput {
@@ -1909,9 +1965,14 @@ pub fn match_loft_sections(
             reason: "a loft section has no length or a point that is not finite",
         });
     }
-    let too_many = || SolidError::InvalidInput {
-        operation: OP,
-        reason: "matching loft sections would create too many segments",
+    let too_many = |segments: usize| {
+        SolidError::sweep(
+            OP,
+            SweepFailure::LoftMatchTooLarge {
+                segments,
+                most: max_segments,
+            },
+        )
     };
     let first_normal = cross3(first.x, first.y);
     // Each section wound as the one before it, and the frame the pairing compares sections in:
@@ -1959,7 +2020,7 @@ pub fn match_loft_sections(
         })?;
         let Some(&last) = paired.last() else {
             if l.segs.len() > max_segments {
-                return Err(too_many());
+                return Err(too_many(l.segs.len()));
             }
             *done.get_mut(k).ok_or_else(unpaired)? = Some(l);
             paired.push(k);
@@ -1978,7 +2039,7 @@ pub fn match_loft_sections(
         let mut next = l.cut(&c.b_cuts).ok_or_else(unpaired)?;
         next.rotate_left(c.b_start);
         if next.segs.len() > max_segments {
-            return Err(too_many());
+            return Err(too_many(next.segs.len()));
         }
         *done.get_mut(k).ok_or_else(unpaired)? = Some(next);
         paired.push(k);
@@ -2040,7 +2101,7 @@ pub fn match_loft_sections(
             .ok_or_else(unpaired)?
             .oriented(w.back);
         if r.segs.len() > max_segments {
-            return Err(too_many());
+            return Err(too_many(r.segs.len()));
         }
         // Start where every vertex lines up best with the followed one of the same number (the
         // largest sum of dot products of their directions from the centroids).
@@ -3180,10 +3241,12 @@ mod tests {
         );
     }
 
-    /// `max_segments` bounds every section: the first one on its own, and circles.
+    /// `max_segments` bounds every section: the first one on its own, and circles. The refusal
+    /// is a size refusal ([`too_large`]), which a caller can build another way.
     #[test]
     fn max_segments_bounds_every_section() {
-        assert!(refused(&match_loft_sections(&[at(0.0, gon(5, 10.0))], 3)));
+        let past = |r: &Result<Vec<MatchedSection>>| matches!(r, Err(e) if too_large(e));
+        assert!(past(&match_loft_sections(&[at(0.0, gon(5, 10.0))], 3)));
         let quarters: Vec<Seg2> = (0..4u8)
             .map(|k| Seg2::Arc {
                 center: p(0.0, 0.0),
@@ -3192,9 +3255,50 @@ mod tests {
                 sweep: PI / 2.0,
             })
             .collect();
-        assert!(refused(&match_loft_sections(
+        assert!(past(&match_loft_sections(
             &[at(0.0, quarters.clone()), at(10.0, quarters)],
             3
+        )));
+        // Sections refused for what they are, not their size, are not size refusals.
+        let r = match_loft_sections(&[at(0.0, gon(4, 10.0)), at(10.0, Vec::new())], 100);
+        assert!(refused(&r) && !past(&r));
+    }
+
+    /// Plane axes are refused by how far they move the section's points: skew (the cosine
+    /// between them, or a length's distance from one) times the section's extent past the zone
+    /// tolerance (1e-5). A 1000 mm square takes axes within 1e-8 of a frame and no further; a
+    /// 0.01 mm square takes axes off by 1e-3. A fixed bound on the skew alone (1e-6, as before)
+    /// accepted the large square's points moved by 1e-3 and refused the small one's moved by
+    /// 1e-8.
+    #[test]
+    fn plane_axes_are_refused_by_how_far_they_move_the_points() {
+        // Skew `s` in the y axis's length, or in the angle between the axes.
+        let long = |z: f64, r: f64, s: f64| {
+            let mut a = at(z, gon(4, r));
+            a.y = Vec3::new(0.0, 1.0 + s, 0.0);
+            a
+        };
+        let turned = |z: f64, r: f64, s: f64| {
+            let mut a = at(z, gon(4, r));
+            a.y = Vec3::new(s.asin().sin(), s.asin().cos(), 0.0);
+            a
+        };
+        for (r, line) in [(1000.0, 1e-8), (0.01, 1e-3)] {
+            for skewed in [long, turned] {
+                let near =
+                    match_loft_sections(&[at(0.0, gon(4, r)), skewed(10.0, r, 0.9 * line)], 100);
+                assert!(near.is_ok(), "radius {r}, skew {}: {near:?}", 0.9 * line);
+                let far =
+                    match_loft_sections(&[at(0.0, gon(4, r)), skewed(10.0, r, 1.1 * line)], 100);
+                assert!(refused(&far), "radius {r}, skew {}: {far:?}", 1.1 * line);
+            }
+        }
+        // Axes that are not a frame at all (parallel) are refused however small the section.
+        let mut parallel = at(10.0, gon(4, 1e-9));
+        parallel.y = parallel.x;
+        assert!(refused(&match_loft_sections(
+            &[at(0.0, gon(4, 1e-9)), parallel],
+            100
         )));
     }
 }

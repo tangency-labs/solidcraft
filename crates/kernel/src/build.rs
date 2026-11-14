@@ -1000,11 +1000,25 @@ pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: Ra
     let numbered = sections.iter().map(|(p, _)| *p).zip(numbered::number_loops(sections.iter().map(|(_, l)| l))).collect::<Vec<_>>();
     let loops = loft_numbered_loops(&numbered, reversed)?;
     let first = if reversed { loops.len().saturating_sub(1) } else { 0 };
-    let pieces: Vec<(Plane, Vec<crate::smlib_sweeps::Piece>)> = loops.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect();
-    if !rails.is_empty() {
-        return crate::smlib_sweeps::loft_rails(&pieces, first, rails, fit);
+    let pieces_of = |loops: &[(Plane, NumberedLoop)]| -> Vec<(Plane, Vec<crate::smlib_sweeps::Piece>)> {
+        loops.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect()
+    };
+    let mut pieces = pieces_of(&loops);
+    // The skin takes at most `MAX_CURVES` curves in all its sections (and stations): matching
+    // can give each section more segments than the largest has, so past that bound the sections
+    // are re-split instead, to no more than the largest has.
+    if rails.is_empty() {
+        if pieces.iter().map(|(_, p)| p.len()).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES {
+            pieces = pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
+        }
+        return crate::smlib_sweeps::loft(&pieces, first);
     }
-    crate::smlib_sweeps::loft(&pieces, first)
+    let mut all = crate::smlib_sweeps::rail_curves(&pieces, rails, fit)?;
+    if all.iter().map(Vec::len).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES {
+        pieces = pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
+        all = crate::smlib_sweeps::rail_curves(&pieces, rails, fit)?;
+    }
+    crate::smlib_sweeps::loft_curves(&pieces, first, &all)
 }
 
 /// A loft through regions with matching hole counts. Hole walls are built alongside the
@@ -1095,8 +1109,22 @@ pub fn loft_regions(sections: &[(Plane, Region2)]) -> Result<Body> {
 /// hole matched as above, every section's loops one profile, the holes turned against the
 /// outline. `outlines` are as given, `planes` and the holes of `numbered` in canonical order.
 fn smlib_loft_regions(outlines: &[(Plane, NumberedLoop)], planes: &[Plane], numbered: &[NumberedRegion], reversed: bool) -> Result<Body> {
+    smlib_loft_regions_by(outlines, planes, numbered, reversed, false)
+}
+
+/// [`smlib_loft_regions`], every loop re-split ([`resplit_numbered_loops`]) when `resplit`. The
+/// matched loops can have more segments than [`MAX_SEGS`] a section, or than the skin takes in
+/// all, where the re-split ones (the largest section's count of each loop) do not: those are
+/// re-split.
+fn smlib_loft_regions_by(
+    outlines: &[(Plane, NumberedLoop)],
+    planes: &[Plane],
+    numbered: &[NumberedRegion],
+    reversed: bool,
+    resplit: bool,
+) -> Result<Body> {
     let mut sections: Vec<(Plane, Vec<crate::smlib_sweeps::Piece>)> =
-        loft_numbered_loops(outlines, reversed)?.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect();
+        loft_numbered_loops_by(outlines, reversed, resplit)?.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect();
     let holes = numbered.first().map_or(0, |r| r.holes.len());
     for i in 0..holes {
         let secs = planes
@@ -1104,7 +1132,7 @@ fn smlib_loft_regions(outlines: &[(Plane, NumberedLoop)], planes: &[Plane], numb
             .zip(numbered)
             .map(|(p, r)| r.holes.get(i).cloned().map(|h| (*p, h)).ok_or_else(|| KernelError::Invalid("missing loft hole".into())))
             .collect::<Result<Vec<_>>>()?;
-        let hole = loft_numbered_loops(&secs, false)?;
+        let hole = loft_numbered_loops_by(&secs, false, resplit)?;
         if hole.len() != sections.len() {
             return Err(KernelError::Invalid("missing loft hole".into()));
         }
@@ -1112,9 +1140,14 @@ fn smlib_loft_regions(outlines: &[(Plane, NumberedLoop)], planes: &[Plane], numb
             pieces.extend(crate::smlib_sweeps::pieces([&h.reversed()]));
         }
     }
-    // Pairing can give a loop more segments than any of its sections has: bound the result too.
-    if sections.iter().any(|(_, pieces)| pieces.len() > MAX_SEGS) {
-        return Err(KernelError::Invalid("matching loft sections would create too many segments".into()));
+    // Pairing can give a loop more segments than any of its sections has: past the bound on a
+    // section, or on all the curves the skin takes, the loops are re-split instead, to the counts
+    // `loft_regions` bounded.
+    if !resplit
+        && (sections.iter().any(|(_, pieces)| pieces.len() > MAX_SEGS)
+            || sections.iter().map(|(_, pieces)| pieces.len()).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES)
+    {
+        return smlib_loft_regions_by(outlines, planes, numbered, reversed, true);
     }
     let first = if reversed { sections.len().saturating_sub(1) } else { 0 };
     crate::smlib_sweeps::loft(&sections, first)
@@ -1155,23 +1188,101 @@ pub(crate) fn loft_reversed(sections: &[(Plane, Loop2)]) -> Result<bool> {
 /// The loft's sections as the walls are built through them: in canonical order (`reversed`
 /// turns them round), each wound the way the one before it is, cut to the vertices it shares
 /// with the others and started at the segment that joins the first segment of the section before
-/// it, by solidcore's matching ([`solidcore_ops::sweep::match_loft_sections`]).
+/// it, by solidcore's matching ([`solidcore_ops::sweep::match_loft_sections`]). Sections whose
+/// match would have more than [`MAX_SEGS`] segments, or that are too large to pair, are
+/// re-split instead ([`resplit_numbered_loops`]), which needs no more segments than the largest
+/// section has; the builders re-split too where the matched sections are more curves in all than
+/// the skin takes ([`loft_with_rails`], [`loft_regions`]). So no loft is refused for its size
+/// that the re-splitting builds.
 pub(crate) fn loft_numbered_loops(sections: &[(Plane, NumberedLoop)], reversed: bool) -> Result<Vec<(Plane, NumberedLoop)>> {
+    loft_numbered_loops_by(sections, reversed, false)
+}
+
+/// [`loft_numbered_loops`], or with `resplit` always [`resplit_numbered_loops`].
+fn loft_numbered_loops_by(sections: &[(Plane, NumberedLoop)], reversed: bool, resplit: bool) -> Result<Vec<(Plane, NumberedLoop)>> {
     let most = sections.iter().map(|(_, l)| l.lp.segs.len()).max().unwrap_or(0);
     if most == 0 || most > MAX_SEGS {
         return Err(KernelError::Invalid("empty section".into()));
     }
     // The sections' segments are numbered in the order given.
-    let mut ordered = sections.to_vec();
+    let mut ordered: Vec<_> = sections.iter().map(|(p, l)| (*p, l.clone())).collect();
     if reversed {
         ordered.reverse();
     }
+    if resplit {
+        return resplit_numbered_loops(&ordered);
+    }
     let given: Vec<_> = ordered.iter().map(|(p, l)| solidcore_ops::sweep::LoftSection { plane: *p, segs: l.lp.segs.clone() }).collect();
     let matched = solidcore_ops::sweep::match_loft_sections(&given, MAX_SEGS).map_err(|e| match e {
-        solidcore_ops::Error::Argument => KernelError::Invalid("these loft sections cannot be matched (no length, or too many segments)".into()),
+        solidcore_ops::Error::Argument => {
+            KernelError::Invalid("these loft sections cannot be matched (no length, or plane axes that are not a frame)".into())
+        }
         e => KernelError::Failed(format!("loft sections could not be paired: {e}")),
     })?;
-    Ok(ordered.iter().zip(matched).map(|((p, l), m)| (*p, l.matched(m.segs, &m.from))).collect())
+    match matched {
+        Some(matched) => Ok(ordered.iter().zip(matched).map(|((p, l), m)| (*p, l.matched(m.segs, &m.from))).collect()),
+        None => resplit_numbered_loops(&ordered),
+    }
+}
+
+/// The sections (in canonical order) matched without pairing their vertices, for sections too
+/// large to pair within [`MAX_SEGS`]: every section re-split to the most segments any has (a
+/// loop that is not a full circle by splitting its longest segment in half until it has them,
+/// a full circle at the directions of the section before it), each wound as the section before it
+/// about the normal they share, and the numbering turned once to start where every vertex lines
+/// up best with the one of the same number in the section before it. The first section is
+/// matched to the one with the most segments.
+pub(crate) fn resplit_numbered_loops(ordered: &[(Plane, NumberedLoop)]) -> Result<Vec<(Plane, NumberedLoop)>> {
+    let n = ordered.iter().map(|(_, l)| l.lp.segs.len()).max().unwrap_or(0);
+    if n == 0 || n > MAX_SEGS {
+        return Err(KernelError::Invalid("empty section".into()));
+    }
+    let lead = ordered.iter().max_by_key(|(_, l)| l.lp.segs.len()).ok_or_else(|| KernelError::Invalid("no sections".into()))?;
+    let corners = |p: &Plane, l: &NumberedLoop| -> (Vec3, Vec<Vec3>) {
+        let c = p.to_world(l.lp.centroid());
+        (c, l.lp.segs.iter().map(|s| p.to_world(s.start()) - c).collect())
+    };
+    let first_normal = ordered.first().map(|(p, _)| p.normal()).ok_or_else(|| KernelError::Invalid("no sections".into()))?;
+    // What each section is matched to: the normal the windings share, and the corners' directions
+    // from the centre (the lead's for the first section, then the section before).
+    let (mut normal, mut dirs) = (first_normal, corners(&lead.0, &lead.1.oriented(lead.0.normal().dot(first_normal) < 0.0)).1);
+    // The share of the lead's perimeter before each of its vertices: where a circle section
+    // breaks when the matched directions do not go round in order.
+    let lead_len: f64 = lead.1.lp.segs.iter().map(Seg2::length).sum();
+    let fractions: Vec<f64> = lead
+        .1
+        .lp
+        .segs
+        .iter()
+        .scan(0.0, |before, s| {
+            let f = *before / lead_len;
+            *before += s.length();
+            Some(f)
+        })
+        .collect();
+    let mut out = Vec::with_capacity(ordered.len());
+    for (p, l) in ordered {
+        let back = p.normal().dot(normal) < 0.0;
+        let local: Vec<Vec2> = dirs.iter().map(|d| Vec2::new(d.dot(p.x), d.dot(p.y))).collect();
+        // Break angles: the matched corners seen in this plane. A re-split circle runs counter-
+        // clockwise in its plane; wound the other way when the plane faces back.
+        let angles: Vec<f64> = local.iter().map(|d| d.angle()).collect();
+        let mut r = l.oriented(back).resample(n, &angles, &fractions, false).oriented(back);
+        // Start where every vertex lines up best with the matched one of the same number (the
+        // largest sum of dot products of their directions from the centroids): the single vertex
+        // closest in direction twisted non-convex sections (#881).
+        let c = r.lp.centroid();
+        let m = r.lp.segs.len();
+        let fit =
+            |k: usize| -> f64 { local.iter().enumerate().filter_map(|(i, d)| r.lp.segs.get((i + k) % m).map(|s| (s.start() - c).dot(*d))).sum() };
+        if let Some(k) = (0..m).min_by(|a, b| fit(*b).total_cmp(&fit(*a))) {
+            r.rotate_left(k);
+        }
+        normal = if back { p.normal() * -1.0 } else { p.normal() };
+        dirs = corners(p, &r).1;
+        out.push((*p, r));
+    }
+    Ok(out)
 }
 
 /// A 3D path segment for sweeps.

@@ -975,18 +975,19 @@ pub struct MatchedSection {
 /// is, cut to the vertices it shares with the others (a corner pairs with the corner it lines up
 /// with, a vertex only one section has splits the others' segments where it lands, a full circle
 /// splits at the directions of the section it follows), and started at the segment that joins the
-/// first segment of the section before it. A section matched to more than `max_segments`
-/// segments is refused.
+/// first segment of the section before it. `None` when the match would give a section more than
+/// `max_segments` segments, or the sections are too large to pair: valid sections the caller
+/// builds another way.
 ///
 /// # Errors
 /// [`Error::Argument`] for a section with no segments, no length or a point that is not finite,
-/// plane axes that are not finite orthogonal unit vectors, a circle whose centre, radius or
-/// angles are not finite, or a match past `max_segments`; [`Error::Invariant`] when the pairing
-/// breaks down.
+/// plane axes that move its points by more than the zone tolerance (their skew from a frame of
+/// perpendicular unit vectors times the section's extent past 1e-5), or a circle whose centre,
+/// radius or angles are not finite; [`Error::Invariant`] when the pairing breaks down.
 pub fn match_loft_sections(
     sections: &[LoftSection],
     max_segments: usize,
-) -> Result<Vec<MatchedSection>> {
+) -> Result<Option<Vec<MatchedSection>>> {
     use solidcore::sweep::loft_sections as kl;
     let given: Vec<kl::LoftSection> = sections
         .iter()
@@ -997,14 +998,19 @@ pub fn match_loft_sections(
             segs: s.segs.iter().map(convert::seg2).collect(),
         })
         .collect();
-    let matched = kl::match_loft_sections(&given, max_segments).map_err(argument_or_status)?;
-    Ok(matched
-        .into_iter()
-        .map(|m| MatchedSection {
-            segs: m.segs.iter().map(convert::record_seg2).collect(),
-            from: m.from,
-        })
-        .collect())
+    let matched = match kl::match_loft_sections(&given, max_segments) {
+        Err(e) if kl::too_large(&e) => return Ok(None),
+        r => r.map_err(argument_or_status)?,
+    };
+    Ok(Some(
+        matched
+            .into_iter()
+            .map(|m| MatchedSection {
+                segs: m.segs.iter().map(convert::record_seg2).collect(),
+                from: m.from,
+            })
+            .collect(),
+    ))
 }
 
 /// A skin through `sections` (`SmApiCreateSkinPrimitive`), `degree` (1 to 3) across them.

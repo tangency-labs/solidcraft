@@ -2841,6 +2841,37 @@ fn loft_through_sections_too_large_to_pair_builds() {
     assert!(rel(m.volume, area * 10.0) < 1e-9, "{} vs {}", m.volume, area * 10.0);
 }
 
+/// A 40 x 0.001 strip whose bottom side is cut at `cuts` of the points 40 k / 8200 (k = 1 to
+/// 8199): each of `missing` left out.
+fn strip_cut_at(missing: &[usize]) -> Loop2 {
+    let mut pts = vec![Vec2::new(0.0, 0.0)];
+    pts.extend((1..8200).filter(|k| !missing.contains(k)).map(|k| Vec2::new(40.0 * k as f64 / 8200.0, 0.0)));
+    pts.extend([Vec2::new(40.0, 0.0), Vec2::new(40.0, 0.001), Vec2::new(0.0, 0.001)]);
+    Loop2::polygon(&pts)
+}
+
+/// Two sections of 8103 segments each, a 40 x 0.001 strip whose bottom side is cut at the same
+/// points except 100 that each leaves out where the other has one (30 points apart, so pairing
+/// them would shift 30 pairs a step along). Those 200 vertices do not pair: matching gives each
+/// section 8203 segments, 16 406 curves in all, past the 16 384 the skin takes, so the sections
+/// are re-split as before the matching (each to the most segments a section has, numbered from
+/// where they line up best), 16 206 curves, and the loft builds: the strip's prism, as the
+/// sections are the same strip. Main refuses no fewer: two sections of 12 000 segments are
+/// 24 000 curves, past the skin's bound whichever way they are matched.
+#[test]
+fn loft_through_sections_whose_match_is_past_the_skins_bound_builds() {
+    let left: Vec<usize> = (0..100).map(|i| 50 + 80 * i).collect();
+    let right: Vec<usize> = left.iter().map(|k| k + 30).collect();
+    let secs = [(Plane::XY, strip_cut_at(&left)), (Plane::XY.offset(10.0), strip_cut_at(&right))];
+    let given: Vec<_> = secs.iter().map(|(p, l)| solidcore_ops::sweep::LoftSection { plane: *p, segs: l.segs.clone() }).collect();
+    let matched: Vec<usize> = solidcore_ops::sweep::match_loft_sections(&given, 20_000).unwrap().unwrap().iter().map(|m| m.segs.len()).collect();
+    assert_eq!(matched, vec![8203, 8203], "the 200 lone vertices cut the other section");
+    assert!(matched.iter().sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES);
+    let m = measure(&loft(&secs).unwrap()).unwrap();
+    assert!(rel(m.volume, 40.0 * 0.001 * 10.0) < 1e-9, "{}", m.volume);
+    assert!(m.bbox.min.dist(Vec3::ZERO) < 1e-9 && m.bbox.max.dist(Vec3::new(40.0, 0.001, 10.0)) < 1e-9, "{:?}", m.bbox);
+}
+
 /// A plate 3 m long and 2 mm thick with ten holes of radius `r` along a diagonal, turned by
 /// `tilt` about the X axis and read back from STEP (each rim is then two half circles).
 fn long_plate_with_small_holes(r: f64, tilt: f64) -> (Body, Vec<Vec3>) {

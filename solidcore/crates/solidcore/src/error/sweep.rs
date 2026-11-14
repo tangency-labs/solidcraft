@@ -12,6 +12,7 @@
 //! |---------------------------------------|--------------------------|
 //! | [`SweepFailure::RailPastStationCap`]  | `SM_ERR`                 |
 //! | [`SweepFailure::LoftSectionsTooLarge`] | `SM_ERR`                |
+//! | [`SweepFailure::LoftMatchTooLarge`]   | `SM_ERR`                 |
 //! | [`SweepFailure::Failed`]              | `SM_ERR`                 |
 //! | [`SweepFailure::Missing`]             | `SM_ERR_NULL_POINTER`    |
 //!
@@ -47,6 +48,14 @@ pub enum SweepFailure {
         /// The most segments two sections of equal counts may have.
         largest: usize,
     },
+    /// Loft sections whose match ([`crate::sweep::loft_sections`]) would give a section
+    /// `segments` segments, more than the caller's bound `most`.
+    LoftMatchTooLarge {
+        /// The segments the section would get (at least).
+        segments: usize,
+        /// The caller's bound.
+        most: usize,
+    },
     /// A sweep routine could not continue, as the phrase says (for example "the swept edge
     /// has no trimming curves").
     Failed(&'static str),
@@ -61,6 +70,7 @@ impl SweepFailure {
         match self {
             Self::RailPastStationCap { .. }
             | Self::LoftSectionsTooLarge { .. }
+            | Self::LoftMatchTooLarge { .. }
             | Self::Failed(_) => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
         }
@@ -73,7 +83,9 @@ impl SweepFailure {
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::RailPastStationCap { .. } => ErrorKind::NotWithinTolerance,
-            Self::LoftSectionsTooLarge { .. } => ErrorKind::Unsupported,
+            Self::LoftSectionsTooLarge { .. } | Self::LoftMatchTooLarge { .. } => {
+                ErrorKind::Unsupported
+            }
             Self::Failed(_) | Self::Missing(_) => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -85,7 +97,9 @@ impl SweepFailure {
     #[must_use]
     pub const fn replaces_upstream_status(&self) -> bool {
         match self {
-            Self::RailPastStationCap { .. } | Self::LoftSectionsTooLarge { .. } => false,
+            Self::RailPastStationCap { .. }
+            | Self::LoftSectionsTooLarge { .. }
+            | Self::LoftMatchTooLarge { .. } => false,
             Self::Failed(_) | Self::Missing(_) => true,
         }
     }
@@ -111,6 +125,10 @@ impl core::fmt::Display for SweepFailure {
             } => write!(
                 f,
                 "loft sections of {first} and {second} segments are too large to pair; sections of equal counts up to {largest} segments pair"
+            ),
+            Self::LoftMatchTooLarge { segments, most } => write!(
+                f,
+                "matching loft sections would give a section {segments} segments, more than the {most} allowed"
             ),
         }
     }
