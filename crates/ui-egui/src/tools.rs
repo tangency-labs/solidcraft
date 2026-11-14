@@ -107,6 +107,10 @@ pub struct Tool {
     /// infinite construction line in one click, or a construction segment once a length is
     /// typed; the others always draw a segment. Each start of a tool begins at Infinite.
     pub line_type: u8,
+    /// A construction line tool works as before #15066 (`construction_line_classic`): the
+    /// Construction/Normal switch under the Length box sets `line_type`, and only a typed length
+    /// makes a segment. Kept in step with the preference while the tool runs.
+    pub classic: bool,
 }
 
 impl Tool {
@@ -161,6 +165,7 @@ impl Tool {
             lined: Vec::new(),
             chain: Default::default(),
             line_type: 3,
+            classic: false,
         })
     }
 }
