@@ -7053,25 +7053,19 @@ fn feature_tools_with_constructor(
             // A negative distance flips the side.
             let (mut lo, mut hi) = if a <= b { (a, b) } else { (b, a) };
             // To a curved (or slanted) face: run right through the target body, then keep what
-            // lies before its surface (the tool less the body, the piece at the start).
+            // lies before that face's surface, offset by the To offset along the travel
+            // (`trim_to_face`, #12617).
             let curved = curved_face(&tst, to_face, Some(n));
-            // The tool is cut back to that surface below, which removes the part a To offset adds
-            // past it: the offset would change nothing, so say so instead of cutting nothing (#12617).
-            if curved.is_some()
-                && matches!(operation, Operation::Join | Operation::Cut)
-                && let Some(e) = &extent.to_offset
-                && val(vals, e, Kind::Length)? > 1e-9
-            {
-                return Err(DocError::Invalid(
-                    "not supported yet: To Object with an offset past a curved or slanted face (the tool is cut back to that face, so the offset would do nothing); use a Distance, or an offset of 0 or less".into(),
-                ));
-            }
+            let to_offset = match (&extent.to, &extent.to_offset) {
+                (Some(_), Some(e)) => val(vals, e, Kind::Length)?,
+                _ => 0.0,
+            };
             if let Some(bi) = curved
                 && let Some(tb) = tst.bodies.get(bi)
             {
                 let m = tb.mesh();
                 let hs: Vec<f64> = m.positions.iter().map(|q| (*q - ss.plane.origin).dot(n) - off).collect();
-                let margin = tb.body.size() * 0.05 + 1.0;
+                let margin = tb.body.size() * 0.05 + 1.0 + to_offset.abs();
                 if hi > 0.0 {
                     hi = hs.iter().cloned().fold(hi, f64::max) + margin;
                 } else {
@@ -7103,9 +7097,10 @@ fn feature_tools_with_constructor(
                     tools = vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())];
                 }
             }
-            if let Some(tb) = curved.and_then(|bi| tst.bodies.get(bi)) {
+            if let (Some(tb), Some((_, fi)), Some(p)) = (curved.and_then(|bi| tst.bodies.get(bi)), to_face, extent.to) {
                 let start = if hi > 0.0 { lo + off } else { hi + off };
-                tools = trim_to_body(tools, tb, |q: Vec3| ((q - ss.plane.origin).dot(n) - start).abs())?;
+                let travel = if hi > 0.0 { n } else { n * -1.0 };
+                tools = trim_to_face(tools, tb, fi, p.0, travel, to_offset, |q: Vec3| ((q - ss.plane.origin).dot(n) - start).abs())?;
             }
             // A join's profile grows into the material it joins; its sketch plane and depth as drawn
             // still serve a join into sheet metal (`sheet_join`), which takes the sketch's regions.
@@ -9140,6 +9135,100 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
         return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
     }
     Ok(out)
+}
+
+/// Tools run through `target`, cut back to the surface of its face `face` offset by `offset`
+/// along `travel`, the direction the extent runs (a negative offset: that far short of the face):
+/// each tool split by that surface, extended, keeping the piece(s) that touch the start
+/// (`dist_to_start` 0 there). With no offset the surface is the face's own, and a face whose
+/// surface cannot split the tool (a sphere) trims it as the body less the target (`trim_to_body`,
+/// a near face only). With an offset the surface is the face's offset sheet (`offset_sheet`),
+/// which the kernel refuses for some surfaces (#8137): the feature then fails with that reason
+/// rather than ending somewhere else. `near` is a point on the face (the To pick).
+#[allow(clippy::too_many_arguments)]
+fn trim_to_face(
+    tools: Vec<Traced>,
+    target: &ModelBody,
+    face: usize,
+    near: Vec3,
+    travel: Vec3,
+    offset: f64,
+    dist_to_start: impl Fn(Vec3) -> f64,
+) -> Result<Vec<Traced>> {
+    let target_traced = target.traced();
+    let sheet = if offset.abs() > 1e-9 { Some(offset_sheet(target, face, near, travel, offset)?) } else { None };
+    let tool = match &sheet {
+        Some(sheet) => kernel::SplitTool::Face { body: sheet, face: 0 },
+        None => kernel::SplitTool::Face { body: &target.body, face },
+    };
+    let split: std::result::Result<Vec<_>, _> = tools.iter().map(|t| kernel::split_body(&t.body, &tool)).collect();
+    let split = match split {
+        Ok(split) => split,
+        Err(_) if sheet.is_none() => return trim_to_body(tools, target, dist_to_start),
+        Err(e) => {
+            return Err(DocError::Invalid(format!(
+                "not supported yet: To Object with an offset from this face: the extent cannot be cut by its offset surface ({e}); use a Distance, or an offset of 0"
+            )));
+        }
+    };
+    let mut out = Vec::new();
+    for (t, parts) in tools.iter().zip(split) {
+        for part in parts {
+            let tol = (part.size() * 1e-4).max(1e-6);
+            let touches = part
+                .mesh(&solidcraft_kernel::MeshTolerance::chord((part.size() * 1e-2).max(1e-2)))
+                .map(|m| m.positions.iter().any(|q| dist_to_start(*q) < tol))
+                .unwrap_or(false);
+            if touches {
+                out.push(Traced::step(part, &[t, &target_traced]));
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
+    }
+    Ok(out)
+}
+
+/// The surface of `target`'s face `face` as a sheet body `offset` past the face along `travel`
+/// (short of it when negative): the kernel's offset of that face, whose sign follows the face's
+/// surface normal, so the sheet is built on the side the face's normal at `near` suggests and
+/// rebuilt on the other side when it lands on the wrong one (measured on the sheet itself, as
+/// the normal of a face whose surface is reversed points the other way).
+fn offset_sheet(target: &ModelBody, face: usize, near: Vec3, travel: Vec3, offset: f64) -> Result<Body> {
+    let refused = |e: &dyn std::fmt::Display| {
+        DocError::Invalid(format!(
+            "not supported yet: To Object with an offset from this face: its offset surface cannot be built ({e}); use a Distance, or an offset of 0"
+        ))
+    };
+    let dir = travel.normalized().ok_or_else(|| DocError::Invalid("the extent has no direction".into()))?;
+    let outward = face_normal_near(target, face, near).unwrap_or(dir);
+    let tol = (target.body.size() * 1e-4).clamp(1e-4, 1.0);
+    let along = if outward.dot(dir) >= 0.0 { offset } else { -offset };
+    let sheet = kernel::offset_surface(&target.body, &[face], along, tol).map_err(|e| refused(&e))?;
+    // Where the sheet landed, along the travel from the pick (its point nearest the pick): past
+    // the face when positive.
+    let side = sheet
+        .mesh(&solidcraft_kernel::MeshTolerance::chord((offset.abs() * 0.1).clamp(1e-3, 1.0)))
+        .ok()
+        .and_then(|m| m.positions.iter().min_by(|a, b| a.dist(near).total_cmp(&b.dist(near))).map(|q| (*q - near).dot(dir)));
+    match side {
+        Some(side) if side * offset < 0.0 => kernel::offset_surface(&target.body, &[face], -along, tol).map_err(|e| refused(&e)),
+        _ => Ok(sheet),
+    }
+}
+
+/// The normal of `b`'s face `face` at its mesh vertex nearest `q`.
+fn face_normal_near(b: &ModelBody, face: usize, q: Vec3) -> Option<Vec3> {
+    let m = b.mesh();
+    m.triangles
+        .iter()
+        .zip(&m.tri_face)
+        .filter(|(_, f)| **f as usize == face)
+        .flat_map(|(t, _)| t.iter().copied())
+        .filter_map(|i| Some((m.positions.get(i as usize)?.dist(q), *m.normals.get(i as usize)?)))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .and_then(|(_, n)| n.normalized())
 }
 
 /// One point on each face of a body (a triangle centre, so it lies on the face).
