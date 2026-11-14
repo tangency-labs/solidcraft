@@ -375,13 +375,14 @@ enum Exact {
 
 /// `surface`'s class: its analytic label (a plane, cylinder, cone or sphere) with its NURBS
 /// form proved on that label's implicit equation ([`implicit::lies_on`], the owner's rule
-/// for an exact class at bound 0); a B-spline surface or extrusion with no label and no
-/// definition is a bare net where [`net::Net::of`] takes it, a plane stored as a NURBS among
-/// them. `None` for any other kind, a net [`net::Net::of`] turns away, a torus (its
+/// for an exact class at bound 0); a B-spline surface, extrusion or surface of revolution
+/// with no label and no definition is a bare net where [`net::Net::of`] takes it (a
+/// revolution's turn continued only within `tolerance` of its end), a plane stored as a NURBS
+/// among them. `None` for any other kind, a net [`net::Net::of`] turns away, a torus (its
 /// sections are quartics), or a form not proved on its label.
-fn exact_class(k: &Kernel, surface: &Surface) -> Result<Option<Exact>> {
+fn exact_class(k: &Kernel, surface: &Surface, tolerance: f64) -> Result<Option<Exact>> {
     let Some(support) = AnalyticSupport::of(surface) else {
-        return Ok(net::Net::of(k, surface)?.map(|n| Exact::Net(std::rc::Rc::new(n))));
+        return Ok(net::Net::of(k, surface, tolerance)?.map(|n| Exact::Net(std::rc::Rc::new(n))));
     };
     if matches!(support, AnalyticSupport::Torus { .. }) {
         return Ok(None);
@@ -2097,8 +2098,8 @@ fn kept_straight_edge_corner(
 /// ([`kept_straight_edge_corner`]). A surface at the vertex moved adds its distance from the
 /// vertex to the move.
 ///
-/// A plane and a bare B-spline net ([`net::Net`]: a B-spline surface or extrusion with no
-/// label and no definition): the plane's trace `x0 + τ u` meets the net, or the
+/// A plane and a bare B-spline net ([`net::Net`]: a B-spline surface, extrusion or surface
+/// of revolution with no label and no definition): the plane's trace `x0 + τ u` meets the net, or the
 /// extension the executive builds past its sides, at a `(u, v, τ)` proved by Krawczyk's
 /// operator for every section of a piece of the edge's parameters ([`plane_net_piece`],
 /// [`net::line_meets`]); the meeting is `√(|x0 − p|² + τ²)` from `p`, `|τ|` its arc length
@@ -2155,9 +2156,9 @@ pub fn local_extension_reach(
             .find(|(f, _)| *f == face)
             .map(|(_, s)| *s);
         let c = match given {
-            Some(s) => exact_class(k, s)?,
+            Some(s) => exact_class(k, s, tolerance)?,
             None => match crate::topology::face::p2::surface(b, face)? {
-                Some(s) => exact_class(k, s)?,
+                Some(s) => exact_class(k, s, tolerance)?,
                 None => None,
             },
         };
@@ -3103,7 +3104,7 @@ mod tests {
             assert!(bounds(&b, found.shift, 1.0), "{f:?}: {found:?}");
             assert!(found.apart.is_empty(), "{f:?}: {found:?}");
         }
-        let Some(Exact::Quadric(q)) = exact_class(&k, &wider).unwrap() else {
+        let Some(Exact::Quadric(q)) = exact_class(&k, &wider, 0.0).unwrap() else {
             panic!("the cylinder r 2 is a quadric");
         };
         let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
@@ -3132,7 +3133,7 @@ mod tests {
     fn an_edge_bound_is_reused_only_on_the_same_inputs() {
         let mut k = Kernel::default();
         let (b, side, _, seam, wider) = seamed_cylinder(&mut k, 2.0);
-        let c = exact_class(&k, &wider).unwrap().unwrap();
+        let c = exact_class(&k, &wider, 0.0).unwrap().unwrap();
         let Exact::Quadric(q) = c else {
             panic!("the cylinder r 2 is a quadric");
         };
@@ -3554,7 +3555,7 @@ mod tests {
         let mut k = Kernel::default();
         let (b, round, side, _) = rounded_cube(&mut k);
         let net = bare_net(&k, &b, round);
-        let Some(Exact::Net(net)) = exact_class(&k, &net).unwrap() else {
+        let Some(Exact::Net(net)) = exact_class(&k, &net, 0.0).unwrap() else {
             panic!("a bare net");
         };
         let tangent = crate::topology::face::p4::edges(&b, side, None, false, None)
@@ -3639,7 +3640,7 @@ mod tests {
         let mut k = Kernel::default();
         let (b, round, _, bottom) = rounded_cube(&mut k);
         let net = bare_net(&k, &b, round);
-        let Some(Exact::Net(net)) = exact_class(&k, &net).unwrap() else {
+        let Some(Exact::Net(net)) = exact_class(&k, &net, 0.0).unwrap() else {
             panic!("a bare net");
         };
         let arc = crate::topology::face::p4::edges(&b, bottom, None, false, None)
@@ -3829,7 +3830,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .find(|&f| {
-                matches!(exact_class(k, b.face(f).unwrap().surface.as_ref().unwrap()).unwrap(),
+                matches!(exact_class(k, b.face(f).unwrap().surface.as_ref().unwrap(), 0.0).unwrap(),
                 Some(Exact::Quadric(Implicit::Cone { radius, tan_angle, .. }))
                     if (radius - 1.0).abs() < 1e-10 && tan_angle.abs() < 1e-10)
             })
@@ -3931,14 +3932,14 @@ mod tests {
             .into_iter()
             .find(|&f| {
                 matches!(
-                    exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap()).unwrap(),
+                    exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap(), 0.0).unwrap(),
                     Some(Exact::Quadric(Implicit::Sphere { .. }))
                 )
             })
             .unwrap();
         let e = edge_between(&b, bore, sphere);
-        let cone = exact_class(&k, &drafted_bore(&k)).unwrap().unwrap();
-        let ball = exact_class(&k, b.face(sphere).unwrap().surface.as_ref().unwrap())
+        let cone = exact_class(&k, &drafted_bore(&k), 0.0).unwrap().unwrap();
+        let ball = exact_class(&k, b.face(sphere).unwrap().surface.as_ref().unwrap(), 0.0)
             .unwrap()
             .unwrap();
         let (Exact::Quadric(a), Exact::Quadric(c)) = (&cone, &ball) else {
@@ -4004,7 +4005,7 @@ mod tests {
             .into_iter()
             .find(|&f| {
                 matches!(
-                    exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap()).unwrap(),
+                    exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap(), 0.0).unwrap(),
                     Some(Exact::Quadric(Implicit::Cone { .. }))
                 )
             })
@@ -4051,7 +4052,7 @@ mod tests {
                     .any(|u| {
                         eu::face(&b, u).unwrap().is_some_and(|f| {
                             matches!(
-                                exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap())
+                                exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap(), 0.0)
                                     .unwrap(),
                                 Some(Exact::Quadric(Implicit::Sphere { .. }))
                             )
@@ -4075,7 +4076,7 @@ mod tests {
         let mut saw_corner = false;
         for f in bp1::faces(&b, None).unwrap() {
             if let Some(Exact::Plane(plane)) =
-                exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap()).unwrap()
+                exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap(), 0.0).unwrap()
             {
                 if plane.normal.y.abs() > 0.99 && plane.point.y.abs() < 1e-10 {
                     let found = reach_of(&k, &b, f, &[(bore, &cone)]);
@@ -4108,7 +4109,7 @@ mod tests {
                 );
                 if half {
                     let side = bp1::faces(&b, None).unwrap().into_iter().find(|&f| {
-                        matches!(exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap()).unwrap(),
+                        matches!(exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap(), 0.0).unwrap(),
                             Some(Exact::Plane(plane)) if plane.normal.y.abs() > 0.99 && plane.point.y.abs() < 1e-10)
                     }).unwrap();
                     assert_eq!(
