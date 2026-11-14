@@ -6,7 +6,85 @@ use super::{Draft, MAX_ANSWER, MAX_BODY, draft_url};
 use crate::{SolveApp, ui_kit};
 use solidcraft_ui_text::tr_label;
 
-const ALL_GUIDANCE: [&str; 4] = [
+fn copy_screenshot(draft: &mut Draft, ctx: &egui::Context) {
+    if let Some(image) = &draft.image {
+        ctx.copy_image((**image).clone());
+        draft.opened_github = false;
+    }
+}
+
+fn paste_instruction(os: egui::os::OperatingSystem) -> &'static str {
+    if os == egui::os::OperatingSystem::Mac { "ui.report_screenshot_paste_mac" } else { "ui.report_screenshot_paste" }
+}
+
+/// Keep reviewed diagnostics intact; change only the app's attachment prompt in the export.
+fn with_visual_context(body: &str, instruction: &str) -> String {
+    let prompt = "## Visual context\nAttach the reviewed screenshot or a short example showing the problem.";
+    let section = format!("## Visual context\n{instruction}");
+    if body.contains(prompt) { body.replacen(prompt, &section, 1) } else { format!("{body}\n\n{section}\n") }
+}
+
+fn screenshot_path(token: u64) -> String {
+    let name = format!("solidcraft-issue-{token}-{:.0}.png", crate::now_ms());
+    #[cfg(not(target_arch = "wasm32"))]
+    let name = std::env::temp_dir().join(name).to_string_lossy().into_owned();
+    // The web host downloads only writes under this prefix; other VFS paths stay in memory.
+    #[cfg(target_arch = "wasm32")]
+    let name = format!("/downloads/{name}");
+    name
+}
+
+/// The text and image share one clipboard. Decide with the final paste instruction included,
+/// so a report near the URL limit takes the file path too. The web host downloads VFS writes.
+pub(super) fn open_github(draft: &mut Draft, ctx: &egui::Context, path: &str) {
+    let mut body = draft.report_body();
+    let title = draft.report_title();
+    let english = solidcraft_ui_text::Locale::for_language("en");
+    if draft.image.is_some() {
+        let key = paste_instruction(ctx.os());
+        let paste_body = with_visual_context(&body, english.text(key));
+        let (url, copy_needed) = draft_url(&title, &paste_body);
+        if !copy_needed {
+            copy_screenshot(draft, ctx);
+            // The window's note names the GitHub form; the issue's own wording says "this box".
+            draft.note = solidcraft_ui_text::tr("ui.report_screenshot_copied").to_string();
+            ctx.open_url(egui::OpenUrl::new_tab(url));
+            draft.opened_github = true;
+            return;
+        }
+        if let Some(image) = &draft.image {
+            match crate::control::write_screenshot(image, path) {
+                Ok(()) => {
+                    #[cfg(target_arch = "wasm32")]
+                    let path = path.strip_prefix("/downloads/").unwrap_or(path);
+                    let key = "ui.report_screenshot_drag";
+                    // The issue is public: it names the file only, never the folder (which can hold the
+                    // user name). The window's note keeps the whole path so the reporter can find it.
+                    let file = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path);
+                    body = with_visual_context(&body, &english.format(key, &[("file", file)]));
+                    draft.note = solidcraft_ui_text::format(key, &[("file", path)]);
+                }
+                Err(error) => {
+                    draft.note = solidcraft_ui_text::format("ui.report_screenshot_save_failed", &[("error", &super::limited(&error, 1000))]);
+                }
+            }
+        }
+        // Always keep the full text on the clipboard once the image paste version exceeds
+        // the URL limit, even if the fallback wording would fit.
+        let url = format!("{}?title={}", super::ISSUE_URL, super::encode(&super::limited(&title, 160)));
+        ctx.copy_text(body);
+        ctx.open_url(egui::OpenUrl::new_tab(url));
+    } else {
+        let (url, _) = draft_url(&title, &body);
+        ctx.copy_text(body);
+        ctx.open_url(egui::OpenUrl::new_tab(url));
+    }
+    draft.opened_github = true;
+}
+
+const ALL_GUIDANCE: [&str; 6] = [
+    "ui.report_screenshot_copied",
+    "ui.report_screenshot_open",
     "Report text copied. Paste it into GitHub and submit your report there.",
     "Review your report on GitHub and click Submit new issue to publish it.",
     "Opens your browser and copies the report text for you to paste into GitHub.",
@@ -40,11 +118,8 @@ fn screenshot_actions(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) -> boo
     });
     if draft.image.is_some() {
         ui.horizontal_wrapped(|ui| {
-            if ui_kit::button(ui, tr_label("Copy screenshot"), ui_kit::Button::Normal).clicked()
-                && let Some(image) = draft.image.as_ref()
-            {
-                ui.ctx().copy_image((**image).clone());
-                draft.opened_github = false;
+            if ui_kit::button(ui, tr_label("Copy screenshot"), ui_kit::Button::Normal).clicked() {
+                copy_screenshot(draft, ui.ctx());
                 draft.note = "Paste the image into the GitHub draft, or save the PNG if image copying is unavailable.".into();
             }
             if ui_kit::button(ui, tr_label("Save screenshot…"), ui_kit::Button::Enabled(app.services.pick_save.is_some())).clicked()
@@ -146,16 +221,23 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                     .min_scrolled_height(scroll)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        let body = draft.report_body();
+                        let mut body = draft.report_body();
+                        if draft.image.is_some() {
+                            body = with_visual_context(&body, solidcraft_ui_text::Locale::for_language("en").text(paste_instruction(ctx.os())));
+                        }
                         let (_, copy_needed) = draft_url(&draft.report_title(), &body);
                         let guidance = if draft.opened_github {
                             if copy_needed {
                                 "Report text copied. Paste it into GitHub and submit your report there."
+                            } else if draft.image.is_some() {
+                                "ui.report_screenshot_copied"
                             } else {
                                 "Review your report on GitHub and click Submit new issue to publish it."
                             }
                         } else if copy_needed {
                             "Opens your browser and copies the report text for you to paste into GitHub."
+                        } else if draft.image.is_some() {
+                            "ui.report_screenshot_open"
                         } else {
                             "Opens your browser and copies the report text. Review and submit your report on GitHub."
                         };
@@ -258,13 +340,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
         ui_kit::Action::Ok => {
             draft.missing_description = draft.description.trim().is_empty();
             if !draft.missing_description {
-                let body = draft.report_body();
-                let (url, _) = draft_url(&draft.report_title(), &body);
-                // Keep a local fallback even for short reports: opening the browser may fail,
-                // be blocked by the web host, or lead to an offline page. No delivery is confirmed.
-                ctx.copy_text(body);
-                ctx.open_url(egui::OpenUrl::new_tab(url));
-                draft.opened_github = true;
+                open_github(draft, ctx, &screenshot_path(app.shots.token));
                 ctx.request_repaint();
             }
         }
