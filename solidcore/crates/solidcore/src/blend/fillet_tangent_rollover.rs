@@ -20,15 +20,18 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`tangent_rollover_supports`] | none (solidcore-native) |
+//! | [`rolled_edge_point`] | none (solidcore-native) |
+//! | `section_seeds`, `SectionSeed` (crate) | none (solidcore-native) |
 //!
 //! Deviations: none of upstream's; there is no recursion.
 //!
 //! [`FilletSolver::process_full_roll_over`]: crate::blend::fillet_solver::p1::FilletSolver::process_full_roll_over
 
-use crate::blend::fillet_solver::p1::test_manifold_tangent_rollover;
+use crate::blend::fillet_solver::p1::{test_manifold_tangent_rollover, FilletSolver};
 use crate::error::{Result, SolidError};
+use crate::geom::global_solver::SolverOperation;
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3};
+use crate::math::{Point3, Vec3, BIG_DOUBLE};
 use crate::nurbs::knots::Side as KnotSide;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
@@ -101,7 +104,7 @@ pub fn tangent_rollover_supports(
     let mut normals = [Vec3::UNDEF; 2];
     for (normal, &face) in normals.iter_mut().zip(&faces) {
         let surface = crate::topology::face::p2::surface(target, face)?
-            .ok_or_else(|| SolidError::sm_err(OP))?
+            .ok_or_else(|| SolidError::blend_failed(OP, "a face of the edge has no surface"))?
             .clone_for_evaluation()?;
         if !surface.is_planar(k, tol)?.is_planar {
             return Ok(none);
@@ -201,6 +204,116 @@ pub fn tangent_rollover_supports(
     Ok(out)
 }
 
+/// The nearest point to `point` on the smooth edge a rail rolled over: where a ball of radius 0
+/// rolling on the face beyond touches it, so the section of the rolled ball is searched from
+/// there (the filleted edge's point lies off the face beyond, and a drop onto that face's
+/// surface may land on another sheet of it, the far side of a cylinder). The edges are those
+/// `from` (the face the rail rolled off) and `onto` (the face beyond) share that meet tangentially
+/// within `tangency_tol_rad`; of these, the one whose nearest point is nearest `point` (two
+/// half cylinders share two seams), the first of equally near ones in `onto`'s edge order.
+/// `None` where they share no such edge, or the point drops onto none of them.
+///
+/// # Errors
+///
+/// Those of the topology queries, the tangency test and the drops.
+pub fn rolled_edge_point(
+    k: &Kernel,
+    target: &mut Brep,
+    from: FaceId,
+    onto: FaceId,
+    point: Point3,
+    tangency_tol_rad: f64,
+) -> Result<Option<Point3>> {
+    let mut best: Option<(Point3, f64)> = None;
+    for e in face_p4::edges(target, onto, None, false, None)? {
+        if !edge::faces(target, e, None)?.contains(&from) {
+            continue;
+        }
+        if !test_manifold_tangent_rollover(k, target, e, tangency_tol_rad)?.0 {
+            continue;
+        }
+        let Some(curve) = edge::curve(target, e)?.cloned() else {
+            continue;
+        };
+        let ivl = edge::interval(target, e)?;
+        let dropped = curve.drop_point(
+            k,
+            &ivl,
+            point,
+            None,
+            BIG_DOUBLE,
+            None,
+            SolverOperation::Minimize,
+        )?;
+        if !dropped.success {
+            continue;
+        }
+        let on = curve.evaluate_point(k, dropped.parameter)?;
+        let distance = (on - point).length();
+        if best.is_none_or(|(_, d)| distance < d) {
+            best = Some((on, distance));
+        }
+    }
+    Ok(best.map(|(p, _)| p))
+}
+
+/// A guess of a rolling ball's section: the point dropped onto a face's surface for it, and
+/// for a rail rolled over a smooth edge, the direction the ball rolls across that edge in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SectionSeed {
+    /// The point dropped onto the face's surface.
+    pub point: Point3,
+    /// For a rolled rail, the direction from the filleted edge's point to the rolled-over
+    /// edge's point: the side of a seam of the surface (a closed boss's, running up the
+    /// rolled-over edge) on which the face beyond lies, as the drop's
+    /// `DropPointOptions::tgt_seam_side`. `None` for every other rail.
+    pub seam_side: Option<Vec3>,
+}
+
+/// Where a ball of radius 0 touches each of `solver`'s faces at the point `point` of its
+/// filleted edge, the guesses of the ball's section there: the edge point, or for a rail
+/// rolled over a smooth far edge of its face (`solver.rolled_faces`) the point of that edge
+/// nearest it ([`rolled_edge_point`]), on the face beyond. The edge point lies off the face
+/// beyond, and dropped on its surface it may land where the section solve finds the ball
+/// rolling on another sheet of that surface (the far side of a boss). The rolled-over edge's
+/// point may lie on the surface's seam (a boss whose seam runs up that edge), where it has two
+/// parameters: the one on the side the ball rolls onto is the guess
+/// ([`SectionSeed::seam_side`]).
+///
+/// # Errors
+///
+/// Those of the topology queries and of [`rolled_edge_point`].
+pub(crate) fn section_seeds(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &FilletSolver,
+    point: Point3,
+) -> Result<[SectionSeed; 2]> {
+    let mut seeds = [SectionSeed {
+        point,
+        seam_side: None,
+    }; 2];
+    for (rail, seed) in seeds.iter_mut().enumerate() {
+        let Some(onto) = solver.rolled_faces.get(rail).copied().flatten() else {
+            continue;
+        };
+        let Some(own) = solver.edgeuse(rail)? else {
+            continue;
+        };
+        let Some(from) = crate::topology::edgeuse::p1::face(target, own)? else {
+            continue;
+        };
+        if let Some(p) = rolled_edge_point(k, target, from, onto, point, solver.tangency_tolerance)?
+        {
+            *seed = SectionSeed {
+                point: p,
+                seam_side: Some(p - point),
+            };
+        }
+    }
+    Ok(seeds)
+}
+
 /// Whether the offset of `face`'s surface by `offset` (along its surface normal) folds across the
 /// direction square to `along` at the point of the face nearest `at`: `1 - kappa offset <= 0`, with
 /// `kappa` the surface's normal curvature in that direction (`II(t, t) / I(t, t)`). A ball of that
@@ -215,7 +328,7 @@ fn offset_folds(
     offset: f64,
 ) -> Result<bool> {
     let surface = crate::topology::face::p2::surface(target, face)?
-        .ok_or_else(|| SolidError::sm_err(OP))?
+        .ok_or_else(|| SolidError::blend_failed(OP, "the face has no surface"))?
         .clone_for_evaluation()?;
     let domain = surface.natural_uv_domain_with_nurb(k)?;
     let dropped = surface.drop_point::<NoObject>(k, at, &domain, &DropPointOptions::default())?;

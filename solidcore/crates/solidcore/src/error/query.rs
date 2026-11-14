@@ -171,69 +171,8 @@ pub(super) mod tests {
 
     /// The files under `src/<area>` (and `src/<area>.rs`) whose library code builds bare
     /// statuses, with the number each builds, sorted by path; at least `least` files are
-    /// read. Test files (`tests.rs`, `*_tests.rs`) are skipped, and the library part of a
-    /// file ends at its test module: `#[cfg(test)]`, then any attributes (such as an
-    /// `#[allow(..)]` for the tests' unwraps), then `mod` with any visibility.
+    /// read. Kept for the ratchets that call it; the scan is [`super::super::bare_scan`].
     pub(in crate::error) fn bare_statuses_in(area: &str, least: usize) -> Vec<(String, usize)> {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = vec![root.join(format!("{area}.rs"))];
-        let mut dirs = vec![root.join(area)];
-        while let Some(dir) = dirs.pop() {
-            for entry in std::fs::read_dir(dir).expect("read dir") {
-                let path = entry.expect("entry").path();
-                if path.is_dir() {
-                    dirs.push(path);
-                } else if path.extension().is_some_and(|x| x == "rs") {
-                    files.push(path);
-                }
-            }
-        }
-        assert!(files.len() >= least, "{files:?}");
-        let mut found = Vec::new();
-        for path in files {
-            let relative = path
-                .strip_prefix(&root)
-                .expect("under src")
-                .to_string_lossy()
-                .replace('\\', "/");
-            if relative.ends_with("/tests.rs") || relative.ends_with("_tests.rs") {
-                continue;
-            }
-            let text = std::fs::read_to_string(&path)
-                .expect("read")
-                .replace("\r\n", "\n");
-            let library = text
-                .match_indices("\n#[cfg(test)]\n")
-                .find(|(at, _)| {
-                    let mut rest = text[at + "\n#[cfg(test)]\n".len()..].lines();
-                    rest.find(|line| {
-                        let line = line.trim_start();
-                        !(line.starts_with("#[") || line.starts_with("clippy::") || line == ")]")
-                    })
-                    .is_some_and(|line| {
-                        let line = line
-                            .strip_prefix("pub(crate) ")
-                            .or_else(|| line.strip_prefix("pub(super) "))
-                            .or_else(|| line.strip_prefix("pub "))
-                            .unwrap_or(line);
-                        line.starts_with("mod ")
-                    })
-                })
-                .map_or(text.as_str(), |(at, _)| &text[..at]);
-            let bare: usize = [
-                "SolidError::sm_err(",
-                "SolidError::null_pointer(",
-                "SolidError::Upstream {",
-                "SolidError::nl_ser(",
-            ]
-            .iter()
-            .map(|needle| library.matches(needle).count())
-            .sum();
-            if bare > 0 {
-                found.push((relative, bare));
-            }
-        }
-        found.sort();
-        found
+        super::super::bare_scan::bare_statuses_in(area, least)
     }
 }

@@ -288,84 +288,10 @@ mod tests {
         }
     }
 
-    /// The converted topology routines describe their failures: their library code
-    /// builds no bare `Upstream` status.
+    /// The topology routines describe their failures: their library code builds no bare
+    /// `Upstream` status, except the file listed (with the bare sites it may still hold).
     #[test]
     fn the_topology_routines_build_no_bare_statuses() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/topology");
-        for (rel, held) in [
-            "api_files.rs",
-            "api_projection.rs",
-            "brep/cutting.rs",
-            "brep/local_operation.rs",
-            "brep/mirror.rs",
-            "brep/p1.rs",
-            "brep/p10.rs",
-            "brep/p2.rs",
-            "brep/p3.rs",
-            "brep/p4.rs",
-            "brep/p5.rs",
-            "brep/p6.rs",
-            "brep/p7.rs",
-            "brep/p8.rs",
-            "brep/planar_section.rs",
-            "brep/validation/assert_valid.rs",
-            "brep/validation/assert_valid/seams.rs",
-            "brep/validation/pointers.rs",
-            "brep/validation/soundness.rs",
-            "brep/vertex_fans.rs",
-            "brep_cache.rs",
-            "brep_constructor.rs",
-            "brep_data.rs",
-            "brep_data_write.rs",
-            "database_io.rs",
-            "edge.rs",
-            "edgeuse/p1.rs",
-            "edgeuse/p2.rs",
-            "edgeuse/p3.rs",
-            "face/p1.rs",
-            "face/p2.rs",
-            "face/p3.rs",
-            "geometry_write.rs",
-            "loopuse.rs",
-            "part_file.rs",
-            "proto_topology.rs",
-            "proto_topology/p1.rs",
-            "proto_topology/p1/api_transform.rs",
-            "proto_topology/p1/assembly.rs",
-            "proto_topology/p1/copy_brep_map.rs",
-            "proto_topology/p1/owning_topology.rs",
-            "proto_topology/p1/proto.rs",
-            "proto_topology/p2.rs",
-            "proto_topology/p2/imprint_ends.rs",
-            "proto_topology/p3.rs",
-            "shell.rs",
-            "topology.rs",
-            "topology_traverser.rs",
-            "trimming_tools.rs",
-            "trimming_tools/curve_loops.rs",
-            "vertex/corner.rs",
-            "vertexuse.rs",
-        ]
-        .map(|rel| (rel, 0))
-        .into_iter()
-        // held back: the face-orientation repair's final status 1 (upstream `TRUE`)
-        .chain([("brep/p9.rs", 1)])
-        {
-            let text = std::fs::read_to_string(src.join(rel))
-                .expect("read")
-                .replace("\r\n", "\n");
-            let library = text
-                .find("\n#[cfg(test)]\nmod ")
-                .map_or(text.as_str(), |at| &text[..at]);
-            for needle in ["SolidError::sm_err(", "SolidError::null_pointer("] {
-                assert!(!library.contains(needle), "{needle} in {rel}");
-            }
-            assert_eq!(
-                library.matches("SolidError::Upstream {").count(),
-                held,
-                "bare Upstream statuses in {rel}"
-            );
-        }
+        super::super::bare_scan::assert_waiting("topology", 53, &[]);
     }
 }

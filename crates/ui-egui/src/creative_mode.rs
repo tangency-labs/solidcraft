@@ -161,11 +161,11 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
     // A modal window or the recovery prompt owns the view: the pill must not sit over it.
     let modal = ui.ctx().memory(|m| m.top_modal_layer().is_some()) || (!app.recoverable.is_empty() && !app.home.open);
     if modal || !wanted(app) {
-        crate::shell::register_panel(app, "creative:selection", None, None);
+        crate::shell::register_panel(app, "creative:selection", None);
         return;
     }
     let (Some(bounds), Some(viewport)) = (crate::viewport::selection_bounds(app), app.viewport.rect) else {
-        crate::shell::register_panel(app, "creative:selection", None, None);
+        crate::shell::register_panel(app, "creative:selection", None);
         return;
     };
     let t = solidcraft_theme::Tokens::get();
@@ -184,7 +184,7 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let items = pill_items(app);
     if !screen.is_positive() || !screen.intersects(free) || items.is_empty() {
-        crate::shell::register_panel(app, "creative:selection", None, None);
+        crate::shell::register_panel(app, "creative:selection", None);
         return;
     }
     let actions: Vec<_> = items
@@ -201,7 +201,7 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::selection_tools(ui, &name, &actions)
     });
     crate::scenario::publish_rect("creative:selection", pill.response.rect);
-    crate::shell::register_panel(app, "creative:selection", Some(pill.response.rect), None);
+    crate::shell::register_panel(app, "creative:selection", Some(pill.response.rect));
     let at = pill.response.rect.left_bottom();
     match pill.inner {
         Some(index) if index < items.len() => crate::context_menu::run_item(app, &items[index], at),

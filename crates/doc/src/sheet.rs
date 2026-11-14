@@ -45,6 +45,13 @@ const TOUCH_AREA: f64 = 1e-6;
 const FOLD_TABS_REJOIN: &str = "not supported yet: folding tabs that join again beyond the bend";
 pub const FOLD_FIXED_OFF_SHEET: &str = "the fold's fixed point is not on the sheet";
 
+/// A bend radius at or below this (mm) is a sharp bend. Its inner face has collapsed to the bend's
+/// inner edge, so the folded solid has only the outer cylindrical face there, as a press brake
+/// makes it with a sharp punch: no inner cylinder. Half the linear tolerance, so the inner arc's
+/// chord (at most √2 · radius) is below it and the end walls' inner edge collapses too; a larger
+/// radius keeps its inner cylinder and the shell stays closed.
+const SHARP_BEND: f64 = LINEAR_TOL / 2.0;
+
 /// The most bores one sheet keeps.
 const MAX_BORES: usize = 1000;
 
@@ -164,6 +171,76 @@ fn onto_seams(region: Region2, seams: &[(Vec2, Vec2)]) -> Region2 {
         lp
     };
     Region2 { outer: snap_loop(region.outer), holes: region.holes.into_iter().map(snap_loop).collect() }
+}
+
+/// `region` passing through each corner in `corners` (the panels' and bend zones' corners) that it
+/// passes within `reach` of, but not through: a corner of its own that near moves onto it, as
+/// [`onto_seams`] moves corners onto a bend line, and a straight edge that near is split there.
+/// Such a corner is a corner of the cut-out to the folded solid, which is sewn with a tolerance
+/// of `reach` (#15269): left apart, SMLib's 2D boolean took the two for one point and handed the
+/// panel's outline back open, or left an edge between them shorter than the sew's tolerance,
+/// which SMLib refused. The cut moves by under `reach`.
+fn onto_corners(region: Region2, corners: &[Vec2], reach: f64) -> Region2 {
+    if corners.is_empty() {
+        return region;
+    }
+    let snap_loop = |mut lp: Loop2| -> Loop2 {
+        let n = lp.segs.len();
+        if n < 2 {
+            return lp;
+        }
+        for j in 0..n {
+            let prev = (j + n - 1) % n;
+            let (Some(p), Some(q)) = (lp.segs.get(j).and_then(seg_start), lp.segs.get(prev).and_then(seg_end)) else { continue };
+            if p.dist(q) > LINEAR_TOL {
+                continue;
+            }
+            // A corner on one of the corners (to rounding) stays there, whatever other corner is
+            // near.
+            if corners.iter().any(|c| c.dist(p) <= NOISE) {
+                continue;
+            }
+            let near = corners.iter().filter(|c| c.dist(p) < reach);
+            let Some(&c) = near.min_by(|a, b| a.dist(p).total_cmp(&b.dist(p))) else { continue };
+            if let Some(segs) = shifted(&lp.segs, j, c - p) {
+                lp.segs = segs;
+            }
+        }
+        let mut segs = Vec::with_capacity(lp.segs.len());
+        for e in lp.segs {
+            let Seg2::Line { a, b } = e else {
+                segs.push(e);
+                continue;
+            };
+            let d = b - a;
+            let mut on: Vec<(f64, Vec2)> = corners
+                .iter()
+                .filter(|c| c.dist(a) >= reach && c.dist(b) >= reach)
+                .filter_map(|&c| {
+                    let t = (c - a).dot(d) / d.len2().max(1e-30);
+                    let off = (a + d * t).dist(c);
+                    ((0.0..=1.0).contains(&t) && off > NOISE && off < reach).then_some((t, c))
+                })
+                .collect();
+            on.sort_by(|x, y| x.0.total_cmp(&y.0));
+            let mut from = a;
+            for (_, c) in on {
+                if c.dist(from) >= reach {
+                    segs.push(Seg2::Line { a: from, b: c });
+                    from = c;
+                }
+            }
+            segs.push(Seg2::Line { a: from, b });
+        }
+        Loop2 { segs }
+    };
+    Region2 { outer: snap_loop(region.outer), holes: region.holes.into_iter().map(snap_loop).collect() }
+}
+
+/// The working tolerance (mm) of the record the kernel's sew builds a solid `size` mm across
+/// from: 10⁻⁶ of its size, at least 10⁻⁵ mm (`sew_impl` in `crates/kernel/src/sew.rs`).
+fn sew_tolerance(size: f64) -> f64 {
+    (size * 1e-6).max(1e-5)
 }
 
 /// `segs` (a closed loop) with the corner where segment `j` starts moved by `delta`: a line
@@ -398,7 +475,15 @@ impl<'a> NearHoles<'a> {
     }
 }
 
+// The planar booleans this thread ran, for the tests that count them.
+#[cfg(test)]
+thread_local! {
+    static MATERIAL_BOOLEANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(crate) fn material_boolean(a: &[Region2], b: &[Region2], op: kernel::BoolOp, work: &mut FlatWork) -> Result<Vec<Region2>> {
+    #[cfg(test)]
+    MATERIAL_BOOLEANS.with(|n| n.set(n.get() + 1));
     let (ae, ap) = region_complexity(a)?;
     let (be, bp) = region_complexity(b)?;
     let edges = ae.saturating_add(be);
@@ -1489,6 +1574,135 @@ fn curved_fold(outline: &Loop2, n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<Cu
     })
 }
 
+/// A panel's outline cut exactly across a fold whose zone falls apart into tabs (see
+/// `Sheet::fold_tabs`): the stretches of outline short of the zone, and between them each tab,
+/// as the outline runs into the zone, beyond it and back. Every curve stays as drawn.
+#[derive(Clone, Debug, PartialEq)]
+struct TabCut {
+    /// `near[k]` is followed by `tabs[k]`, which is followed by `near[k + 1]` (round the loop).
+    near: Vec<Vec<Seg2>>,
+    tabs: Vec<CutTab>,
+}
+
+/// One tab of a [`TabCut`]: into the zone, beyond it and back, and its span along the line.
+#[derive(Clone, Debug, PartialEq)]
+struct CutTab {
+    into: Vec<Seg2>,
+    far: Vec<Seg2>,
+    back: Vec<Seg2>,
+    u: (f64, f64),
+}
+
+impl TabCut {
+    /// The part that stays: the outline short of the zone, with the tabs that `fold` keeps
+    /// whole and each one that folds closed off along the zone's near line.
+    fn fixed(&self, fold: impl Fn(usize) -> bool) -> Loop2 {
+        let mut segs = Vec::new();
+        let count = self.near.len();
+        for (k, (near, tab)) in self.near.iter().zip(&self.tabs).enumerate() {
+            segs.extend_from_slice(near);
+            if fold(k) {
+                let (Some(a), Some(b)) = (near.last().map(Seg2::end), self.near.get((k + 1) % count).and_then(|n| n.first()).map(Seg2::start)) else {
+                    continue;
+                };
+                segs.push(Seg2::Line { a, b });
+            } else {
+                segs.extend(tab.into.iter().chain(&tab.far).chain(&tab.back).cloned());
+            }
+        }
+        Loop2 { segs }
+    }
+
+    /// Tab `k`'s material beyond the zone, closed off along the zone's far line.
+    fn moving(&self, k: usize) -> Option<Loop2> {
+        let far = &self.tabs.get(k)?.far;
+        let mut segs = far.clone();
+        segs.push(Seg2::Line { a: far.last()?.end(), b: far.first()?.start() });
+        Some(Loop2 { segs })
+    }
+}
+
+/// `outline` cut at the zone between the lines at `s0` and `s0 + ba` along `n` into the
+/// stretches short of it and the tabs that cross it: each tab goes into the zone on straight
+/// edges, out the far side, and back, once. Anything else (a notch into the zone, a tab that
+/// comes back into the zone beyond it, an edge along either line) is `None`.
+fn tab_cut(outline: &Loop2, n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<TabCut> {
+    const ON_LINE: f64 = 1e-6;
+    if outline.segs.len() > MAX_FLAT_POINTS {
+        return None;
+    }
+    let outline = outline.ccw();
+    let mut pieces = Vec::new();
+    for seg in &outline.segs {
+        let mut near = Vec::new();
+        cut_at_level(seg, n, s0, &mut near);
+        for piece in &near {
+            cut_at_level(piece, n, s0 + ba, &mut pieces);
+        }
+    }
+    let mut bands = Vec::with_capacity(pieces.len());
+    for piece in &pieces {
+        let v = piece.mid().dot(n);
+        if !v.is_finite() || (v - s0).abs() <= ON_LINE || (v - s0 - ba).abs() <= ON_LINE {
+            return None;
+        }
+        bands.push(if v < s0 {
+            0
+        } else if v > s0 + ba {
+            2
+        } else {
+            1
+        });
+    }
+    let count = pieces.len();
+    let first = (0..count).find(|&i| bands.get(i) == Some(&0) && bands.get((i + count - 1) % count) != Some(&0))?;
+    let mut runs: Vec<(i32, Vec<Seg2>)> = Vec::new();
+    for k in 0..count {
+        let i = (first + k) % count;
+        let (band, piece) = (*bands.get(i)?, *pieces.get(i)?);
+        match runs.last_mut() {
+            Some((b, run)) if *b == band => run.push(piece),
+            _ => runs.push((band, vec![piece])),
+        }
+    }
+    let on = |q: Vec2, s: f64| (q.dot(n) - s).abs() <= ON_LINE;
+    // Into the zone and back must be straight edges square across it, as the tabs' zone pieces
+    // are rectangles.
+    let square = |run: &[Seg2]| {
+        run.iter().all(|s| match *s {
+            Seg2::Line { a, b } => ((b - a).dot(d)).abs() <= ON_LINE,
+            _ => false,
+        })
+    };
+    let (mut near, mut tabs) = (Vec::new(), Vec::new());
+    for chunk in runs.chunks(4) {
+        let [(0, n0), (1, into), (2, far), (1, back)] = chunk else { return None };
+        let (Some(i0), Some(i1), Some(f0), Some(f1), Some(b0), Some(b1)) = (
+            into.first().map(Seg2::start),
+            into.last().map(Seg2::end),
+            far.first().map(Seg2::start),
+            far.last().map(Seg2::end),
+            back.first().map(Seg2::start),
+            back.last().map(Seg2::end),
+        ) else {
+            return None;
+        };
+        if !(on(i0, s0) && on(i1, s0 + ba) && on(f0, s0 + ba) && on(f1, s0 + ba) && on(b0, s0 + ba) && on(b1, s0) && square(into) && square(back)) {
+            return None;
+        }
+        let u = (i0.dot(d).min(b1.dot(d)), i0.dot(d).max(b1.dot(d)));
+        if u.1 - u.0 <= ON_LINE {
+            return None;
+        }
+        near.push(n0.clone());
+        tabs.push(CutTab { into: into.clone(), far: far.clone(), back: back.clone(), u });
+    }
+    if tabs.len() < 2 {
+        return None;
+    }
+    Some(TabCut { near, tabs })
+}
+
 /// Two counter-clockwise loops joined along a straight edge they share, running opposite ways:
 /// every curve of both exactly as it was, which the planar booleans wouldn't hand back.
 fn join_along_seam(a: &Loop2, b: &Loop2) -> Option<Loop2> {
@@ -2172,8 +2386,16 @@ impl SheetBody {
         let mut cuts = Vec::new();
         let mut cut_points = 0usize;
         let seams = self.seams();
+        // The folded solid is sewn with a tolerance of its size, which the flat pattern's size (and
+        // the thickness) bounds.
+        let flat_box = pieces.iter().try_fold(Aabb2::EMPTY, |b, (_, r)| loop_box(&r.outer).map(|r| b.union(&r)))?;
+        let reach = sew_tolerance(flat_box.diagonal() + self.t);
+        let corners: Vec<Vec2> =
+            pieces.iter().flat_map(|(_, r)| std::iter::once(&r.outer).chain(&r.holes)).flat_map(|l| l.segs.iter().map(Seg2::start)).collect();
         for hole in self.holes.iter().filter(|h| encloses_area(h)) {
-            let region = fitted_region(&onto_seams(planar_region(hole)?, &seams))?;
+            let hole_corners = hole.holes.iter().fold(hole.outer.segs.len(), |n, h| n.saturating_add(h.segs.len()));
+            work.charge(corners.len().saturating_mul(hole_corners))?;
+            let region = fitted_region(&onto_corners(onto_seams(planar_region(hole)?, &seams), &corners, reach))?;
             cut_points = cut_points.saturating_add(region_complexity(std::slice::from_ref(&region))?.1);
             if cut_points > MAX_FLAT_POINTS {
                 return Err(flat_budget_error());
@@ -2310,6 +2532,13 @@ impl SheetBody {
         };
         let mut faces = Vec::new();
         for (ci, c) in cells.iter().enumerate() {
+            // A sharp bend's inner surface has no area: it is the line where the base's and the
+            // flange's inner faces meet. The outer surface and the zone's end walls close the
+            // solid; the end walls lose their collapsed inner edge below.
+            let inner_sharp = match c.piece {
+                Piece::Zone(i) => self.flanges.get(i).filter(|f| f.radius <= SHARP_BEND).map(|f| if f.angle >= 0.0 { z1 } else { z0 }),
+                Piece::Panel(_) => None,
+            };
             // Top (z1, outward +z) and bottom (z0, outward −z, loops reversed).
             let loops = |z: f64, rev: bool| -> Result<Vec<Vec<EdgeSpec>>> {
                 std::iter::once(&c.outer)
@@ -2325,6 +2554,9 @@ impl SheetBody {
             };
             let centre = c.outer.iter().map(Seg2::start).fold(Vec2::default(), |a, b| a + b) * (1.0 / c.outer.len().max(1) as f64);
             for (z, rev, sign) in [(z1, false, 1.0), (z0, true, -1.0)] {
+                if inner_sharp == Some(z) {
+                    continue;
+                }
                 let surface = match c.piece {
                     Piece::Panel(_) => SurfSpec::Plane,
                     Piece::Zone(i) => {
@@ -2381,13 +2613,30 @@ impl SheetBody {
                     (Piece::Zone(_), _) if matches!(bottom, EdgeSpec::Chain { .. }) => SurfSpec::Ruled { a: bottom.clone(), b: top_ab.clone() },
                     _ => SurfSpec::Plane,
                 };
-                let top = rev_edge(top_ab);
+                // A sharp bend's inner edge is a point on the zone's end wall: drop that
+                // collapsed edge and let the wall end at the point (a three-edge loop). The inner
+                // face is z1 when the bend turns up and z0 when it turns down.
+                let collapsed = |e: &EdgeSpec| match e {
+                    EdgeSpec::Arc { a, b, .. } | EdgeSpec::Line { a, b } => a.dist(*b) < LINEAR_TOL,
+                    EdgeSpec::Chain { .. } => false,
+                };
+                let inner_bottom = inner_sharp == Some(z0) && collapsed(&bottom);
+                let inner_top = inner_sharp == Some(z1) && collapsed(&top_ab);
+                let mut edges = Vec::new();
+                if !inner_bottom {
+                    edges.push(bottom);
+                }
+                edges.push(up_b);
+                if !inner_top {
+                    edges.push(rev_edge(top_ab));
+                }
+                edges.push(down_a);
                 let mid = e.point_at(0.5);
                 let tdir = e.point_at(0.51) - e.point_at(0.49);
                 let right = Vec2::new(tdir.y, -tdir.x);
                 let pm = self.map3(c.piece, mid, (z0 + z1) / 2.0);
                 let outward = self.map3(c.piece, mid + right * 1e-3, (z0 + z1) / 2.0) - pm;
-                faces.push(FaceSpec { loops: vec![vec![bottom, up_b, top, down_a]], surface, probe: Some((pm, outward)) });
+                faces.push(FaceSpec { loops: vec![edges], surface, probe: Some((pm, outward)) });
             }
         }
         Ok(faces)
@@ -2884,7 +3133,9 @@ impl SheetBody {
             cuts.push(region);
         }
         cuts.extend(self.through_pocket_regions(&mut work)?);
-        let cuts = material_union(cuts, &mut work)?;
+        // One cut of them all: the planar boolean unites its operand's regions itself (in
+        // balanced rounds, as SMLib sheets), so uniting them first as regions only multiplied the
+        // booleans and their round trips (#13493).
         let regions = if cuts.is_empty() { regions } else { material_boolean(&regions, &cuts, kernel::BoolOp::Cut, &mut work)? };
         Ok(regions)
     }
@@ -3018,7 +3269,10 @@ impl SheetBody {
         if self.flanges.len().saturating_mul(2).saturating_add(1) > MAX_FLAT_PIECES {
             return Err(flat_budget_error());
         }
-        let mut polys: Vec<Vec<Vec2>> = vec![dedup(&flat_polyline(&self.base.outer.ccw())?).into_vec()];
+        let mut polys: Vec<Vec<Vec2>> = Vec::new();
+        if encloses_area(&self.base) {
+            polys.push(dedup(&flat_polyline(&self.base.outer.ccw())?).into_vec());
+        }
         for f in &self.flanges {
             polys.push(dedup(&flat_polyline(&self.zone(f).outer.ccw())?).into_vec());
             if f.leg > 1e-9 {
@@ -3311,8 +3565,12 @@ impl SheetBody {
             let transverse = volume * (3.0 * radius2 + self.t * self.t) / 12.0;
             let own = [[transverse, 0.0, 0.0], [0.0, transverse, 0.0], [0.0, 0.0, volume * radius2 / 2.0]];
             for hole in holes {
-                let world = if self.flat || panels.len() == 1 {
+                // One panel on its own is placed by its own transform: an arc-first contour
+                // has a single flange panel and no base, and that panel is folded.
+                let world = if self.flat {
                     &flat
+                } else if let [(panel_world, _)] = panels.as_slice() {
+                    panel_world
                 } else {
                     &panels.iter().find(|(_, region)| region.contains(hole)).ok_or_else(invalid)?.0
                 };
@@ -3351,9 +3609,13 @@ impl SheetBody {
         Ok((size.x, size.y))
     }
 
-    /// Panels with their regions and world placements: (flange index or None, region).
+    /// Panels with their regions and world placements: (flange index or None, region). A
+    /// profile that starts with an arc has no base panel.
     fn panels(&self) -> Vec<(Option<usize>, Region2)> {
-        let mut v = vec![(None, self.base.clone())];
+        let mut v = Vec::new();
+        if encloses_area(&self.base) {
+            v.push((None, self.base.clone()));
+        }
         for (i, f) in self.flanges.iter().enumerate() {
             if f.leg > 1e-9 {
                 v.push((Some(i), self.panel(f)));
@@ -5533,7 +5795,7 @@ impl SheetBody {
         if strips.len() > 1 {
             let span = (a2.dot(d).min(b2.dot(d)), a2.dot(d).max(b2.dot(d)));
             let angle = if flip { -angle } else { angle };
-            return self.fold_tabs(panel, &pts, (n, d), (s0, ba), span, (angle, radius), &strips);
+            return self.fold_tabs(panel, (&pts, &outline), (n, d), (s0, ba), span, (angle, radius), &strips);
         }
         // The bend zone is a rectangle across the panel, or straight edges of the sheet slant
         // across it, or curved ones do. Those ends fold to helices and curves, as torn ends and
@@ -5643,7 +5905,7 @@ impl SheetBody {
     fn fold_tabs(
         &mut self,
         panel: Option<usize>,
-        pts: &[Vec2],
+        (pts, outline): (&[Vec2], &Loop2),
         (n, d): (Vec2, Vec2),
         (s0, ba): (f64, f64),
         span: (f64, f64),
@@ -5710,13 +5972,28 @@ impl SheetBody {
             let leg = moving.iter().map(|q| q.dot(n) - s0 - ba).fold(0.0, f64::max);
             made.push((u0, u1, n * s0 + d * u0, leg, moving));
         }
-        // Flanges already on this panel: those beyond a folding tab move with it.
+        // Flanges already on this panel: those beyond a folding tab move with it. A flange wholly
+        // beyond the zone sits on one piece of the material beyond it, and goes where that piece
+        // goes, however long its bend is: a rim on a flared wall is longer than the wall's bend
+        // (#15519).
+        let piece_of = |f: &SheetFlange| {
+            let root = f.p + f.d * (f.len / 2.0);
+            beyond.iter().position(|part| near_outline(&Ring::new(part.clone()), root, 1e-6))
+        };
         let mut moves = Vec::new();
         for (k, f) in self.flanges.iter().enumerate() {
             if f.parent != panel {
                 continue;
             }
             let (e0, e1) = (f.p.dot(n) - s0, (f.p + f.d * f.len).dot(n) - s0);
+            if e0.min(e1) >= ba - 1e-9
+                && let Some(piece) = piece_of(f)
+            {
+                if let Some(j) = chosen.iter().position(|i| hangs.get(*i).is_some_and(|h| h.contains(&piece))) {
+                    moves.push((k, j));
+                }
+                continue;
+            }
             let fu = (f.p.dot(d).min((f.p + f.d * f.len).dot(d)), f.p.dot(d).max((f.p + f.d * f.len).dot(d)));
             let crosses = Err(DocError::Invalid("not supported yet: a fold through a flange's bend".into()));
             match made.iter().position(|m| fu.0 >= m.0 - 1e-9 && fu.1 <= m.1 + 1e-9) {
@@ -5732,17 +6009,53 @@ impl SheetBody {
             }
             v.into_iter().map(snap).collect::<Vec<_>>()
         };
+        // The same pieces cut from the exact outline, so its arcs and curves stay as drawn: cut
+        // from the chords, every arc came out as one flat face per chord (a hundred and more for
+        // a few rounded corners). Where the exact cut doesn't come out as the same pieces, the
+        // chords stay.
+        let exact = tab_cut(outline, n, d, s0, ba).and_then(|cut| {
+            if cut.tabs.len() != strips.len() {
+                return None;
+            }
+            let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() <= 1e-4 && (a.1 - b.1).abs() <= 1e-4;
+            let of = strip_u.iter().map(|&u| cut.tabs.iter().position(|t| near(t.u, u))).collect::<Option<Vec<usize>>>()?;
+            let folds = chosen.iter().map(|&i| of.get(i).copied()).collect::<Option<Vec<usize>>>()?;
+            // The chords cut off at most their sagitta (1e-3) along the outline.
+            let close = |exact: &Loop2, poly: &[Vec2]| {
+                let m = poly.len();
+                let perimeter: f64 = (0..m).filter_map(|i| Some(poly.get(i)?.dist(*poly.get((i + 1) % m)?))).sum();
+                (exact.signed_area().abs() - signed_area(poly).abs()).abs() <= 2e-3 * perimeter + 1e-6
+            };
+            let fixed_exact = cut.fixed(|k| folds.contains(&k));
+            if !close(&fixed_exact, &fixed) {
+                return None;
+            }
+            let mut moving = Vec::with_capacity(folds.len());
+            for (&k, m) in folds.iter().zip(&made) {
+                let lp = cut.moving(k)?;
+                if !close(&lp, &m.4) {
+                    return None;
+                }
+                moving.push(lp.ccw());
+            }
+            Some((fixed_exact.ccw(), moving))
+        });
+        let (fixed_exact, mut moving_exact) = match exact {
+            Some((f, m)) => (Some(f), m.into_iter().map(Some).collect()),
+            None => (None, Vec::new()),
+        };
+        moving_exact.resize(made.len(), None);
         match panel {
-            None => self.base = Region2 { outer: Loop2::polygon(&fixed).ccw(), holes: self.base.holes.clone() },
+            None => self.base = Region2 { outer: fixed_exact.unwrap_or_else(|| Loop2::polygon(&fixed).ccw()), holes: self.base.holes.clone() },
             Some(j) => {
                 if let Some(f) = self.flanges.get_mut(j) {
                     f.shape = Some(ccw(fixed));
-                    f.exact = None;
+                    f.exact = fixed_exact;
                 }
             }
         }
         let first = self.flanges.len();
-        for (u0, u1, p0, leg, moving) in made {
+        for ((u0, u1, p0, leg, moving), exact) in made.into_iter().zip(moving_exact) {
             self.flanges.push(SheetFlange {
                 parent: panel,
                 p: snap(p0),
@@ -5758,7 +6071,7 @@ impl SheetBody {
                 tear_curved: (false, false),
                 tear_ease: (0.0, 0.0),
                 shape: Some(ccw(moving)),
-                exact: None,
+                exact,
                 zone_shape: None,
                 tag: String::new(),
             });
@@ -6590,36 +6903,115 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
     if pts.len() < 2 {
         return Err(DocError::Invalid("a contour flange needs an open chain of lines".into()));
     }
+    let segs: Vec<Seg2> = pts.windows(2).map(|w| Seg2::Line { a: w[0], b: w[1] }).collect();
+    contour_flange_path(body, rule, rv, plane, &segs, width, flip)
+}
+
+/// A sheet from an open chain of lines and circular arcs (contour flange): `segs` in `plane`,
+/// the material on the right of the travel (or the left when `flip`), `width` along the plane
+/// normal. A line is a flat panel; an arc is a bend of its own radius. The arc is the profile
+/// surface: when the bend turns toward the material the sheet is outside that surface, so the
+/// bend's inner radius is the arc's less the thickness; when it turns away the arc is the inner
+/// surface and its radius is the bend's. A line-line corner is a sharp corner and gets a bend of
+/// the rule's radius, as a chain of lines always did.
+pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, segs: &[Seg2], width: f64, flip: bool) -> Result<SheetBody> {
+    if segs.is_empty() {
+        return Err(DocError::Invalid("a contour flange needs an open profile".into()));
+    }
+    if !(width.is_finite() && width > 0.0) {
+        return Err(DocError::Invalid("the contour flange distance must be positive".into()));
+    }
     let (t, r) = (rv.thickness, rv.bend_radius);
-    let seg_dir = |i: usize| -> Result<(Vec2, f64)> {
-        let (Some(a), Some(b)) = (pts.get(i), pts.get(i + 1)) else { return Err(DocError::Invalid("chain".into())) };
-        let l = a.dist(*b);
-        Ok(((*b - *a).normalized().ok_or_else(|| DocError::Invalid("zero-length line in the contour".into()))?, l))
-    };
+    // Material side in the sketch: right of travel, or left when flipped.
     let side = if flip { -1.0 } else { 1.0 };
-    // Material side in the sketch: right of travel.
-    let (d0, _) = seg_dir(0)?;
+    let first = segs.first().copied().ok_or_else(|| DocError::Invalid("a contour flange needs an open profile".into()))?;
+    let start = first.start();
+    let d0 = first.start_tangent();
+    let l0 = d0.len();
+    if !(l0.is_finite() && l0 > 1e-12) {
+        return Err(DocError::Invalid("the contour starts with a curve of no direction".into()));
+    }
+    let d0 = d0 / l0;
     let m0 = Vec2::new(d0.y, -d0.x) * side;
-    let start = pts.first().copied().unwrap_or_default();
     let (x, z) = (plane.dir_to_world(d0), plane.dir_to_world(m0));
     let frame = Plane::new(plane.to_world(start), x, z.cross(x)).ok_or_else(|| DocError::Invalid("contour frame".into()))?;
-    // Width along the sketch normal: +y or −y of the frame.
     let ysign = if frame.y.dot(plane.normal()) >= 0.0 { 1.0 } else { -1.0 };
-    let n = pts.len() - 1;
-    // Turn at each corner: angle and whether it bends toward the material (up).
-    let mut corners = Vec::new();
-    for i in 0..n.saturating_sub(1) {
-        let (da, _) = seg_dir(i)?;
-        let (db, _) = seg_dir(i + 1)?;
-        let cross = da.cross(db) * side;
-        let ang = da.dot(db).clamp(-1.0, 1.0).acos();
-        if ang < 1e-9 {
-            return Err(DocError::Invalid("straight corners in a contour flange".into()));
-        }
-        // Right-hand material: turning right (negative cross) bends toward it.
-        corners.push((ang, cross < 0.0));
-    }
+    let (y0, y1) = if ysign > 0.0 { (0.0, width) } else { (-width, 0.0) };
     let setback = |ang: f64, up: bool| if up { (r + t) * (ang / 2.0).tan() } else { r * (ang / 2.0).tan() };
+    // The junction after each segment: a sharp line-line corner (its unsigned turn and whether
+    // it bends toward the material), or none where a line meets an arc tangentially.
+    let mut sharp: Vec<Option<(f64, bool)>> = Vec::with_capacity(segs.len().saturating_sub(1));
+    for i in 0..segs.len().saturating_sub(1) {
+        let (Some(a), Some(b)) = (segs.get(i), segs.get(i + 1)) else { continue };
+        if a.end().dist(b.start()) > 1e-5 {
+            return Err(DocError::Invalid("the contour curves are not connected end to end".into()));
+        }
+        if matches!(a, Seg2::Line { .. }) && matches!(b, Seg2::Line { .. }) {
+            let (Some(da), Some(db)) = (a.end_tangent().normalized(), b.start_tangent().normalized()) else {
+                return Err(DocError::Invalid("zero-length line in the contour".into()));
+            };
+            let ang = da.dot(db).clamp(-1.0, 1.0).acos();
+            if ang < 1e-9 {
+                return Err(DocError::Invalid("straight corners in a contour flange".into()));
+            }
+            sharp.push(Some((ang, da.cross(db) * side < 0.0)));
+        } else {
+            let (Some(ta), Some(tb)) = (a.end_tangent().normalized(), b.start_tangent().normalized()) else {
+                return Err(DocError::Invalid("zero-length curve in the contour".into()));
+            };
+            if ta.dot(tb) < 1.0 - 1e-6 {
+                return Err(DocError::Invalid(
+                    "the contour arcs must be tangent to the curves beside them; a sharp corner beside an arc is not a bend of that arc's radius"
+                        .into(),
+                ));
+            }
+            sharp.push(None);
+        }
+    }
+    // Panels and bends in path order: every line is a panel, every arc a bend, every sharp
+    // line-line corner a bend of the rule's radius. A panel loses the tangent setback at each
+    // sharp corner it ends on.
+    enum Piece {
+        Panel { len: f64 },
+        Bend { angle: f64, radius: f64 },
+    }
+    let mut pieces: Vec<Piece> = Vec::with_capacity(segs.len().saturating_mul(2));
+    for (i, s) in segs.iter().enumerate() {
+        match *s {
+            Seg2::Line { a, b } => {
+                let l = a.dist(b);
+                if !(l.is_finite() && l > 1e-12) {
+                    return Err(DocError::Invalid("zero-length line in the contour".into()));
+                }
+                let before = if i == 0 { 0.0 } else { sharp.get(i - 1).copied().flatten().map(|(ang, up)| setback(ang, up)).unwrap_or(0.0) };
+                let after = sharp.get(i).copied().flatten().map(|(ang, up)| setback(ang, up)).unwrap_or(0.0);
+                let len = l - before - after;
+                if !len.is_finite() || len < -1e-9 {
+                    return Err(DocError::Invalid("a contour line is shorter than its bends".into()));
+                }
+                pieces.push(Piece::Panel { len: len.max(0.0) });
+            }
+            Seg2::Arc { center: _, radius, start: _, sweep } => {
+                if !(radius.is_finite() && radius > 0.0) {
+                    return Err(DocError::Invalid("a contour arc has no radius".into()));
+                }
+                if !(sweep.is_finite() && sweep.abs() > 1e-9 && sweep.abs() < std::f64::consts::TAU - 1e-9) {
+                    return Err(DocError::Invalid("a contour arc must be shorter than a full turn".into()));
+                }
+                let angle = -sweep * side;
+                let up = angle >= 0.0;
+                let inner = if up { radius - t } else { radius };
+                if !(inner.is_finite() && inner > 1e-9) {
+                    return Err(DocError::Invalid("a contour arc's radius is no larger than the sheet is thick".into()));
+                }
+                pieces.push(Piece::Bend { angle, radius: inner });
+            }
+            _ => return Err(DocError::Invalid("not supported yet: a contour flange profile is lines and circular arcs".into())),
+        }
+        if let Some((ang, up)) = sharp.get(i).copied().flatten() {
+            pieces.push(Piece::Bend { angle: if up { ang } else { -ang }, radius: r });
+        }
+    }
     let mut sheet = SheetBody {
         body: body.into(),
         rule: rule.into(),
@@ -6642,48 +7034,54 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
         base_curves: Vec::new(),
         altered_by: None,
     };
-    let (y0, y1) = if ysign > 0.0 { (0.0, width) } else { (-width, 0.0) };
-    // First segment: the base panel.
-    let (_, l0) = seg_dir(0)?;
-    let end0 = l0 - corners.first().map(|(a, u)| setback(*a, *u)).unwrap_or(0.0);
-    if end0 <= 0.0 {
-        return Err(DocError::Invalid("a contour line is shorter than its bends".into()));
-    }
-    sheet.base = rect(Vec2::new(0.0, y0), Vec2::new(end0, y0), Vec2::new(end0, y1), Vec2::new(0.0, y1));
-    let mut parent: Option<usize> = None;
-    let mut at = end0;
-    for (i, (ang, up)) in corners.iter().enumerate() {
-        let (_, l) = seg_dir(i + 1)?;
-        let before = setback(*ang, *up);
-        let after = corners.get(i + 1).map(|(a, u)| setback(*a, *u)).unwrap_or(0.0);
-        let leg = l - before - after;
-        if leg < -1e-9 {
+    // The first panel is the base; a profile that starts with an arc has no base panel.
+    let first_is_panel = matches!(pieces.first(), Some(Piece::Panel { .. }));
+    let mut at = 0.0;
+    if let Some(Piece::Panel { len }) = pieces.first() {
+        if *len <= 1e-9 {
             return Err(DocError::Invalid("a contour line is shorter than its bends".into()));
         }
-        // The material flips sides relative to the panel when the bend goes down.
-        let f = SheetFlange {
-            parent,
-            p: Vec2::new(at, y0),
-            d: Vec2::new(0.0, 1.0),
-            len: y1 - y0,
-            n: Vec2::new(1.0, 0.0),
-            angle: if *up { *ang } else { -*ang },
-            radius: r,
-            leg: leg.max(0.0),
-            ext: (0.0, 0.0),
-            slope: (0.0, 0.0),
-            tear: (false, false),
-            tear_curved: (false, false),
-            tear_ease: (0.0, 0.0),
-            shape: None,
-            exact: None,
-            zone_shape: None,
-            tag: String::new(),
-        };
-        let ba = sheet.allowance(&f);
-        sheet.flanges.push(f);
-        parent = Some(sheet.flanges.len() - 1);
-        at += ba + leg.max(0.0);
+        sheet.base = rect(Vec2::new(0.0, y0), Vec2::new(*len, y0), Vec2::new(*len, y1), Vec2::new(0.0, y1));
+        at = *len;
+    }
+    let mut parent: Option<usize> = None;
+    let mut pending: Option<usize> = None;
+    for piece in pieces.iter().skip(usize::from(first_is_panel)) {
+        match piece {
+            Piece::Panel { len } => {
+                let Some(i) = pending.take() else {
+                    return Err(DocError::Invalid("a contour panel has no bend before it".into()));
+                };
+                let Some(f) = sheet.flanges.get_mut(i) else { return Err(DocError::Invalid("contour bend".into())) };
+                f.leg = *len;
+                at += *len;
+            }
+            Piece::Bend { angle, radius } => {
+                let f = SheetFlange {
+                    parent,
+                    p: Vec2::new(at, y0),
+                    d: Vec2::new(0.0, 1.0),
+                    len: y1 - y0,
+                    n: Vec2::new(1.0, 0.0),
+                    angle: *angle,
+                    radius: *radius,
+                    leg: 0.0,
+                    ext: (0.0, 0.0),
+                    slope: (0.0, 0.0),
+                    tear: (false, false),
+                    tear_curved: (false, false),
+                    tear_ease: (0.0, 0.0),
+                    shape: None,
+                    exact: None,
+                    zone_shape: None,
+                    tag: String::new(),
+                };
+                at += sheet.allowance(&f);
+                sheet.flanges.push(f);
+                parent = Some(sheet.flanges.len() - 1);
+                pending = parent;
+            }
+        }
     }
     Ok(sheet)
 }
@@ -7230,6 +7628,27 @@ mod tests {
         assert_eq!(regions[0].holes.len(), 240);
         let area = 250.0 * 130.0 - 240.0 * std::f64::consts::PI * 2.0 * 2.0;
         assert!((regions[0].area() - area).abs() < 1e-6);
+    }
+
+    /// #13493: a flat with many cut-outs takes them all from the material in one planar boolean,
+    /// not after uniting them one pair at a time (63 more for 64 holes, each rebuilding both
+    /// operands in the kernel). Its holes are the same 64 circles.
+    #[test]
+    fn a_flat_with_many_cutouts_cuts_them_in_one_planar_boolean() {
+        let mut s = plate(250.0, 130.0);
+        for i in 0..8 {
+            for j in 0..8 {
+                s.holes.push(Region2 { outer: Loop2::circle(Vec2::new(15.0 + 30.0 * i as f64, 15.0 + 14.0 * j as f64), 2.0), holes: vec![] });
+            }
+        }
+        MATERIAL_BOOLEANS.with(|n| n.set(0));
+        let regions = s.flat_regions().unwrap();
+        let calls = MATERIAL_BOOLEANS.with(std::cell::Cell::get);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].holes.len(), 64);
+        let area = 250.0 * 130.0 - 64.0 * std::f64::consts::PI * 4.0;
+        assert!((regions[0].area() - area).abs() < 1e-6, "{}", regions[0].area());
+        assert_eq!(calls, 1, "planar booleans for one plate and 64 holes");
     }
 
     #[test]
@@ -8713,6 +9132,33 @@ mod tests {
 
     fn turned(x: f64, y: f64, turn: f64) -> Vec2 {
         Vec2::new(x * turn.cos() - y * turn.sin(), x * turn.sin() + y * turn.cos())
+    }
+
+    #[test]
+    fn a_cut_out_passes_through_a_corner_it_passes_a_hair_off() {
+        // Two corners 0.00008 apart, both within reach of each other (#15269).
+        let (a, b, reach) = (Vec2::new(0.0, 0.0), Vec2::new(8e-5, 0.0), 1.6e-4);
+        let square = |p: Vec2| Region2 {
+            outer: Loop2::polygon(&[p, p + Vec2::new(0.0, 1.0), p + Vec2::new(-1.0, 1.0), p + Vec2::new(-1.0, 0.0)]),
+            holes: vec![],
+        };
+        // A cut-out's corner on either corner stays there.
+        for p in [a, b] {
+            assert_eq!(onto_corners(square(p), &[a, b], reach), square(p));
+        }
+        // One a hair off moves onto the nearest corner.
+        let moved = onto_corners(square(Vec2::new(1.1e-4, 1e-5)), &[a, b], reach);
+        assert!(moved.outer.segs.iter().any(|e| e.start() == b), "{moved:?}");
+        // An edge passing a hair off a corner is split there.
+        let strip = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(-1.0, 1e-5), Vec2::new(1.0, 1e-5), Vec2::new(1.0, 1.0), Vec2::new(-1.0, 1.0)]),
+            holes: vec![],
+        };
+        let split = onto_corners(strip, &[a], reach);
+        assert_eq!(split.outer.segs.len(), 5, "{split:?}");
+        assert!(split.outer.segs.iter().any(|e| e.start() == a), "{split:?}");
+        // Corners beyond reach move nothing.
+        assert_eq!(onto_corners(square(Vec2::new(1e-3, 0.0)), &[a, b], reach), square(Vec2::new(1e-3, 0.0)));
     }
 
     #[test]

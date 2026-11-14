@@ -553,7 +553,11 @@ impl Cone {
     ///   [`Self::create_canonical`] (same `swap_uv` and `inside_out`), its NURB
     ///   reparameterised to the matching part of this NURB domain (upstream scales the
     ///   domain maximum, not its span), the generator's NURB interval set to match and
-    ///   the polar converter rebuilt;
+    ///   the polar converter rebuilt; the matching part is anchored at the end that
+    ///   survives (an inside-out
+    ///   cone's NURB runs the generator backwards, so its ends swap), so every point of
+    ///   the kept cone keeps its parameter and the face's UV trims lift onto the offset
+    ///   unchanged;
     /// * else a copy with the new base radius and origin, every NURB control point
     ///   moved by the offset of its generator row (computed from the next control
     ///   point at the apex) and the generator translated by the offset vector.
@@ -606,20 +610,22 @@ impl Cone {
 
         // only the BotRadius or TopRadius has gone negative
         if new_bot_radius < approx_tol_3d || new_top_radius < approx_tol_3d {
-            // compute BotOrigin, Height, Bot and Top radii for new truncated cone
-            let (new_height, bot_origin) = if new_bot_radius < approx_tol_3d {
-                let tan_ang = height / old_top_radius;
-                let new_height = new_top_radius * tan_ang;
+            // compute BotOrigin, Height, Bot and Top radii for new truncated cone.
+            // The kept cone runs between its new apex (where the offset radius reaches
+            // zero) and the surviving end, at the original's slope: the radius spans
+            // `old_top_radius - old_bot_radius` over `height`.
+            let (new_height, bot_origin, collapsed_at_base) = if new_bot_radius < approx_tol_3d {
+                let new_height = new_top_radius * height / old_top_radius;
                 new_bot_radius = 0.0;
                 (
                     new_height,
                     origin + (height + off_z_dist - new_height) * z_axis,
+                    true,
                 )
             } else {
-                let tan_ang = height / old_bot_radius;
-                let new_height = new_bot_radius * tan_ang;
+                let new_height = new_bot_radius * height / old_bot_radius;
                 new_top_radius = 0.0;
-                (new_height, origin + off_z_dist * z_axis)
+                (new_height, origin + off_z_dist * z_axis, false)
             };
 
             // New Cone Position - truncated at new apex position
@@ -637,21 +643,37 @@ impl Cone {
             )?;
 
             // compute the offsetSurf Nurb domain to be a properly trimmed subset of the
-            // input Nurb domain
-            let tgt_nurb_domain = if self.rev.swap_uv {
-                Extent2d::from_bounds(
-                    nurb_domain.min().x,
-                    nurb_domain.min().y,
-                    nurb_domain.min().x + new_height / height * nurb_domain.max().x,
-                    nurb_domain.max().y,
-                )
-            } else {
-                Extent2d::from_bounds(
-                    nurb_domain.min().x,
-                    nurb_domain.min().y,
-                    nurb_domain.max().x,
-                    nurb_domain.min().y + new_height / height * nurb_domain.max().y,
-                )
+            // input Nurb domain: the part the truncated cone stands for. Its span is the
+            // kept height's share of this domain's, anchored at the end that survives,
+            // so a point of the kept cone keeps its parameter: the offset's rim stays at
+            // the rim's parameter and the face's UV trims lift onto it unchanged (the
+            // offset of S is S + d n at the same parameters). An inside-out cone's NURB
+            // runs the generator backwards (`cone_convert_uv_from_nurbs_to_step`), so the
+            // surviving end is the domain's other end there.
+            let at_max_end = collapsed_at_base != self.inside_out;
+            let tgt_nurb_domain = {
+                let ratio = new_height / height;
+                if self.rev.swap_uv {
+                    let lo = nurb_domain.min().x;
+                    let hi = nurb_domain.max().x;
+                    let span = hi - lo;
+                    let (min_x, max_x) = if at_max_end {
+                        (hi - ratio * span, hi)
+                    } else {
+                        (lo, lo + ratio * span)
+                    };
+                    Extent2d::from_bounds(min_x, nurb_domain.min().y, max_x, nurb_domain.max().y)
+                } else {
+                    let lo = nurb_domain.min().y;
+                    let hi = nurb_domain.max().y;
+                    let span = hi - lo;
+                    let (min_y, max_y) = if at_max_end {
+                        (hi - ratio * span, hi)
+                    } else {
+                        (lo, lo + ratio * span)
+                    };
+                    Extent2d::from_bounds(nurb_domain.min().x, min_y, nurb_domain.max().x, max_y)
+                }
             };
 
             // update the pOffCone NurbDomain (status ignored)
@@ -2087,6 +2109,87 @@ mod tests {
         // one radius below the tolerance: truncated at the new apex
         let trunc = cone.create_offset_surface(&k, -1.2, 1e-6).unwrap().unwrap();
         assert!(trunc.top_radius().abs() < 1e-12);
+    }
+
+    /// The offset of a cone truncated at its new apex is reparameterised to the matching
+    /// part of this NURB domain, anchored at the end that survives (an inside-out cone's
+    /// NURB runs the generator backwards), so a point of the kept cone keeps its
+    /// parameter and the face's UV trims lift onto the offset unchanged
+    /// (tangency-labs/solidcraft#11774: the part sat at the domain's other end, the
+    /// rim's UV moved, and a shell's edge-use mapping could not pair the rim, so the
+    /// shell refused a cone with an apex).
+    #[test]
+    fn offset_truncation_keeps_the_surviving_ends_parameters() {
+        let k = kernel();
+        for inside in [false, true] {
+            // negated inside out: the shrinking offset is -1.2 there and 1.2 here
+            let d = if inside { 1.2 } else { -1.2 };
+            // full apex cones: (bot, top) = (0, 2) collapses at the bot end under the
+            // offset, (2, 0) at the top
+            for (bot, top) in [(0.0, 2.0), (2.0, 0.0)] {
+                let cone = canonical(&k, bot, top, 3.0, false, inside);
+                let off = cone.create_offset_surface(&k, d, 1e-6).unwrap().unwrap();
+                // the radii move by cos(semi) * d along the NURB normal (negated
+                // inside out); the kept cone runs from where that radius reaches zero
+                // to the surviving end, at the slope (top - bot) / 3
+                let semi = cone.semi_angle_deg() * PI / 180.0;
+                let moved = (if inside { -1.0 } else { 1.0 }) * d * semi.cos();
+                let (new_bot, new_top) = (bot + moved, top + moved);
+                let collapsed_bot = new_bot < new_top;
+                let (want_bot, want_top, want_height) = if collapsed_bot {
+                    (0.0, new_top, 3.0 * new_top / (top - bot))
+                } else {
+                    (new_bot, 0.0, 3.0 * new_bot / (bot - top))
+                };
+                assert!(
+                    (off.bot_radius() - want_bot).abs() < 1e-9
+                        && (off.top_radius() - want_top).abs() < 1e-9,
+                    "bot {bot} top {top} inside {inside}: radii {:?} {:?}",
+                    off.bot_radius(),
+                    off.top_radius()
+                );
+                assert!(
+                    (off.height(&k).unwrap() - want_height).abs() < 1e-9,
+                    "bot {bot} top {top} inside {inside}: height {:?}, the radius's span gives {want_height}",
+                    off.height(&k)
+                );
+
+                // The matching part of this NURB domain, anchored at the surviving end:
+                // the bot sits at the domain's minimum and the top at its maximum, and an
+                // inside-out cone's NURB runs that generator backwards, so the surviving
+                // end is the maximum one when the collapsed end is the bot's, and the
+                // minimum one when the collapsed end is the top's, and the other way
+                // round inside out.
+                let at_max_end = collapsed_bot != inside;
+                let dom0 = cone.rev().base().natural_uv_domain();
+                let dom = off.rev().base().natural_uv_domain();
+                let (lo, hi) = (dom0.min().y, dom0.max().y);
+                let span = hi - lo;
+                let kept = want_height / 3.0 * span;
+                let (want_min, want_max) = if at_max_end {
+                    (hi - kept, hi)
+                } else {
+                    (lo, lo + kept)
+                };
+                assert!(
+                    (dom.min().y - want_min).abs() < 1e-9 && (dom.max().y - want_max).abs() < 1e-9,
+                    "bot {bot} top {top} inside {inside}: domain {dom:?}, matching part [{want_min}, {want_max}]"
+                );
+
+                // the offset of S is S + d n at the same parameters: sampled points of
+                // the kept cone keep their distance from the original
+                for t in [0.3, 0.7] {
+                    let uv = Point2::new(0.37, want_min + t * (want_max - want_min));
+                    let s = cone.evaluate_point(&k, uv).unwrap();
+                    let o = off.evaluate_point(&k, uv).unwrap();
+                    assert!(
+                        (s.distance(o) - d.abs()).abs() < 1e-9,
+                        "bot {bot} top {top} inside {inside} at {uv:?}: {}",
+                        s.distance(o)
+                    );
+                }
+            }
+        }
     }
 
     #[test]

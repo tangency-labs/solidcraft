@@ -37,7 +37,8 @@ pub struct BoxParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PointExpr3")]
     pub corner: Option<PointExpr3>,
-    /// The box's centre, instead of `corner`.
+    /// The box's centre, instead of `corner`. The box stays centred there when its length, width
+    /// or height changes later.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PointExpr3")]
     pub center: Option<PointExpr3>,
@@ -101,6 +102,11 @@ pub struct ExtrudeParams {
     /// The body whose face to use, where faces of several bodies meet at `face` (or `faces`).
     #[serde(default)]
     pub face_body: Option<String>,
+    /// With `face` or `faces`: start on the face's plane as a fixed plane, which won't follow later
+    /// changes to the face (for a face whose history can't keep an attachment, such as a converted
+    /// mesh's).
+    #[serde(default)]
+    pub fixed: Option<bool>,
     /// With `face`, among placed instances: the body whose placement `face` is read in (read by
     /// the engine's frame mapping, before the command runs). Default: `face_body`, else the
     /// body nearest the point.
@@ -236,6 +242,9 @@ pub struct RevolveParams {
     /// The body whose face to use, where faces of several bodies meet at `face`.
     #[serde(default)]
     pub face_body: Option<String>,
+    /// With `face`: the face's plane as a fixed plane, as `solid.extrude`'s.
+    #[serde(default)]
+    pub fixed: Option<bool>,
     /// With `face`, among placed instances: the body whose placement `face` is read in (read by
     /// the engine's frame mapping, before the command runs). Default: `face_body`, else the
     /// body nearest the point.
@@ -1000,6 +1009,99 @@ pub enum PatternCircularResult {
         /// In the warn parameter-check mode: what the call's parameters got wrong.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         param_warnings: Vec<String>,
+    },
+}
+
+/// A rigid matrix, in row-major order, with translation in its last column.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum MoveMatrix {
+    Flat3([f64; 12]),
+    Flat4([f64; 16]),
+    Rows3([[f64; 4]; 3]),
+    Rows4([[f64; 4]; 4]),
+}
+
+/// Move or copy bodies, rotating about an origin before translating, in world coordinates.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MoveParams {
+    /// Bodies to move or copy. May be omitted when copying only components.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "StringList")]
+    pub bodies: Option<StringList>,
+    /// Component occurrence paths, root first, to copy independently. Requires `copy: true`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Vec<Vec<u64>>")]
+    pub occurrences: Option<Vec<Vec<u64>>>,
+    /// Translation after rotation; default zero. Coordinates are lengths.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PointExpr3")]
+    pub translate: Option<PointExpr3>,
+    /// Rotation pivot in world coordinates. Default: the moved body's component's origin, which
+    /// is the world origin for bodies at the root. Coordinates are lengths.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PointExpr3")]
+    pub origin: Option<PointExpr3>,
+    /// Non-zero rotation direction in world coordinates. Default: world Z when `origin` is given,
+    /// else the moved body's component's Z, which is world Z for bodies at the root.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Point3")]
+    pub axis: Option<Point3>,
+    /// Angle expression; default zero.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "AngleExpr")]
+    pub angle: Option<AngleExpr>,
+    /// Rigid matrix instead of translate, origin, axis and angle. Scales, shears and mirrors are refused.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "MoveMatrix")]
+    pub matrix: Option<MoveMatrix>,
+    /// With matrix: positive rotation tolerance, at most 1e-3; default 1e-9.
+    #[serde(default)]
+    #[schemars(with = "Option<super::component::MatrixTolerance>")]
+    pub tolerance: Option<f64>,
+    /// Keep the source bodies and transform new copies; default false.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub copy: Option<bool>,
+    /// Construction features (names or feature ids) moved with the bodies, such as a Center Pole
+    /// held by fixed points.
+    #[serde(default)]
+    pub carry: Option<Vec<ConstructionRef>>,
+    /// Construction features (names or feature ids) built on the bodies but left where they are.
+    #[serde(default)]
+    pub leave: Option<Vec<ConstructionRef>>,
+    #[serde(flatten, deserialize_with = "super::feature_common")]
+    pub common: super::FeatureCommon,
+}
+
+/// A construction feature, by name or by feature id.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ConstructionRef {
+    Name(String),
+    Id(u64),
+}
+
+/// Body features, component copies, or repeated placements moved together.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum MoveResult {
+    Feature {
+        #[serde(flatten)]
+        feature: FeatureResult,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        features: Option<Vec<u64>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        occurrences: Option<Vec<u64>>,
+    },
+    Copies {
+        occurrences: Vec<u64>,
+    },
+    Placements {
+        placements: Vec<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bodies: Option<FeatureResult>,
     },
 }
 

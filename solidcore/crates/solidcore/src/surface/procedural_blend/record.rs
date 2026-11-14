@@ -569,6 +569,44 @@ impl ExactRoundRecord {
     }
 }
 
+/// A face's blend definition without its net, which is the face's surface: what a body's
+/// record keeps of a procedural blend's face or of a round of an exact class's
+/// (`solidcore-record`'s `brep::blend::BlendDefinition` holds the same fields, and
+/// `solidcore-convert` copies them). [`super::convert::face_definition`] reads one off a face,
+/// [`super::convert::adopt_definitions`] gives it back, rebuilt and re-certified.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum FaceDefinition {
+    /// A procedural blend's definition S.
+    Procedural(Box<BlendDefinitionRecord>),
+    /// A round of an exact class's definition.
+    ExactRound(Box<ExactRoundDefinition>),
+}
+
+/// An [`ExactRoundRecord`] without its net's form, which is the face's surface: the definition
+/// and the net's analytic kind.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExactRoundDefinition {
+    /// The class.
+    pub class: ExactClassRecord,
+    /// The supports S1, S2, by value.
+    pub supports: [SupportRecord; 2],
+    /// The ball's radius (0 for the chord).
+    pub radius: f64,
+    /// The section's order: 1, the ball's circle; 0, the chord.
+    pub order: u32,
+    /// The leader (the centre line), where the class's construction makes one.
+    pub leader: Option<NurbsCurveRecord>,
+    /// What the class is read with beside the supports.
+    pub inputs: ClassInputsRecord,
+    /// A chamfer's sizes (the chord, #2486).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chamfer: Option<ChamferRecord>,
+    /// How the net's parameter runs along the leader.
+    pub leader_map: LeaderMapRecord,
+    /// The net's analytic kind.
+    pub net_kind: ExactNetKindRecord,
+}
+
 /// A face of a blend corner's (#2488): its corner kind's definition and its net.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CornerRecord {

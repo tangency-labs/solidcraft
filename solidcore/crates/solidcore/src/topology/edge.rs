@@ -2277,34 +2277,25 @@ pub fn set_orientation(b: &mut Brep, e: EdgeId, orientation: OrientType) -> Resu
 
 /// `ReverseOrientation`: reverses the curve's parameterisation, then installs the
 /// reversed interval, flips every edge use's orientation and deletes its UV trim.
-/// By default a failed curve reversal's status is ignored, as upstream: the edge
-/// gets the default interval and its uses are still flipped. With the opt-in
-/// [`crate::kernel::UpstreamFixes::edge_reversal_keeps_failed_edge`] (WR-260) a
-/// failed reversal returns before changing the interval or edge uses, and an edge
-/// without curve keeps its interval (upstream installs the default one; fork
-/// tangency-labs/smlib 47507b6).
+/// A failed curve reversal returns before changing the interval or edge uses, and an
+/// edge without curve keeps its interval (WR-260; fork tangency-labs/smlib 47507b6).
+/// Upstream ignores the failed reversal's status, installs the default interval and
+/// still flips the uses, and gives an edge without curve the default interval.
 ///
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] without edge uses (upstream walks a null list) and
-/// those of [`eu1::set_uv_trim_curve`]; [`SolidError::Unported`] from the curve (with
-/// the opt-in fix, every error of the curve reversal).
+/// those of [`eu1::set_uv_trim_curve`]; every error of the curve reversal.
 pub fn reverse_orientation(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
     // locals
     let old_ivl = b.edge(e)?.interval;
-    let mut new_ivl = Extent1d::new();
 
-    // reverse Curve Parameterization
-    if let Some(c) = b.edge_mut(e)?.curve.as_mut() {
-        match c.reverse_parameterization(k, &old_ivl) {
-            Ok(n) => new_ivl = n,
-            Err(err) if k.fixes.edge_reversal_keeps_failed_edge => return Err(err),
-            Err(err) => failed(err)?,
-        }
-    } else if k.fixes.edge_reversal_keeps_failed_edge {
-        // nothing reversed the interval: the edge keeps it (WR-260 addendum)
-        new_ivl = old_ivl;
-    }
+    // reverse Curve Parameterization; nothing reversed the interval without a curve,
+    // so the edge keeps it (WR-260 addendum)
+    let new_ivl = match b.edge_mut(e)?.curve.as_mut() {
+        Some(c) => c.reverse_parameterization(k, &old_ivl)?,
+        None => old_ivl,
+    };
     b.edge_mut(e)?.interval = new_ivl;
 
     // invert EU orientations, and any uv trim curves.
@@ -3721,8 +3712,7 @@ mod tests {
 
     #[test]
     fn issue_521_failed_reversal_preserves_edge_interval_uses_and_trims() {
-        let mut k = Kernel::default();
-        k.fixes.edge_reversal_keeps_failed_edge = true;
+        let k = Kernel::default();
         let (mut b, e, eus, _) = wire();
         let hermite = crate::curve::hermite_curve::HermiteCurve::new(
             Vec3::ZERO,
@@ -3755,45 +3745,15 @@ mod tests {
         assert_eq!(format!("{b:?}"), before);
     }
 
-    #[test]
-    fn failed_reversal_installs_default_interval_by_default() {
-        // WR-260: upstream ignores the failed reversal's status.
-        let k = Kernel::default();
-        let (mut b, e, eus, _) = wire();
-        b.edge_mut(e).unwrap().curve =
-            Some(C::from(crate::curve::hermite_curve::HermiteCurve::new(
-                Vec3::ZERO,
-                Vec3::X,
-                Vec3::X,
-                Vec3::Y,
-                3,
-            )));
-        for &eu in &eus {
-            b.edgeuse_mut(eu).unwrap().uv_trim_curve = b.edge(e).unwrap().curve.clone();
-        }
-        reverse_orientation(&k, &mut b, e).unwrap();
-        assert_eq!(b.edge(e).unwrap().interval, Extent1d::new());
-        for eu in eus {
-            assert!(b.edgeuse(eu).unwrap().uv_trim_curve.is_none());
-        }
-    }
-
     /// WR-260 addendum (fork tangency-labs/smlib 47507b6): reversing an edge without
-    /// curve installs the default interval upstream; with
-    /// `edge_reversal_keeps_failed_edge` the edge keeps its own.
+    /// curve keeps its interval, where upstream installs the default one.
     #[test]
-    fn reversing_an_edge_without_curve_keeps_its_interval_with_the_opt_in() {
-        let mut k = Kernel::default();
+    fn reversing_an_edge_without_curve_keeps_its_interval() {
+        let k = Kernel::default();
         let (mut b, e, _, _) = wire();
         b.edge_mut(e).unwrap().curve = None;
         let ivl = b.edge(e).unwrap().interval;
         assert_ne!(ivl, Extent1d::new());
-        reverse_orientation(&k, &mut b, e).unwrap();
-        assert_eq!(b.edge(e).unwrap().interval, Extent1d::new());
-
-        k.fixes.edge_reversal_keeps_failed_edge = true;
-        let (mut b, e, _, _) = wire();
-        b.edge_mut(e).unwrap().curve = None;
         reverse_orientation(&k, &mut b, e).unwrap();
         assert_eq!(b.edge(e).unwrap().interval, ivl);
     }

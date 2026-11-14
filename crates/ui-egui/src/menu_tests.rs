@@ -2484,6 +2484,9 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
     // A plane menu is for construction geometry only, not the box.
     let block = h.app.session.doc.features[0].id;
     let bad_plane = format!("no plane `{block}`");
+    // A construction axis is construction geometry, so its menu opens.
+    h.app.run("construct.axis.two_points", json!({"a": {"point": [0, 0, 0]}, "b": {"point": [0, 0, 30]}, "name": "Spin"})).unwrap();
+    let axis = h.app.session.doc.find_feature("Spin").map(|f| f.id).unwrap();
     // A part's folders are drawn under its placement, never under a `c<id>` row of its own.
     let part = h.app.run("component.create", json!({"name": "Part"})).unwrap()["component"].as_u64().unwrap();
     let placement = h.app.session.doc.occurrence_of(part).unwrap().id;
@@ -2511,6 +2514,7 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
     }
     for target in [
         json!({"type": "body", "name": "Blk"}),
+        json!({"type": "plane", "id": axis}),
         json!({"type": "folder", "component": 0, "folder": "bodies", "scope": "c0"}),
         json!({"type": "group", "id": group, "scope": "c0"}),
         json!({"type": "folder", "component": part, "folder": "bodies", "scope": format!("o:{placement}")}),
@@ -2585,4 +2589,65 @@ fn the_history_bar_feature_menu_is_reported_and_picked() {
     }
     h.frames(2);
     assert!(h.app.session.doc.feature(id).is_none(), "the features after the marker are deleted");
+}
+
+/// A right-click menu taller than the window (a spline with stored tangent handles in a short
+/// window) stays inside the window and scrolls: its last rows start below the window's bottom
+/// edge, and a click on the full-width bar at its bottom brings them into view. A window that
+/// has room shows the whole menu without scroll bars (#6511).
+#[test]
+fn a_menu_taller_than_the_window_scrolls_its_last_rows_into_view() {
+    let open = |height: f32| {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1024.0, "height": height}));
+        h.frames(2);
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        let curve = h.app.run("sketch.spline.fit_point", json!({"points": [[-40, 0], [-15, 20], [15, -10], [40, 10]]})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        h.app.run("sketch.spline.handles", json!({"curve": curve})).unwrap();
+        h.app.session.selection = vec![solidcraft_engine::Sel::SketchCurve { id: curve.clone(), sketch: None }];
+        h.call("ui.view", json!({"view": "top"}));
+        h.call("ui.view", json!({"view": "fit"}));
+        h.frames(3);
+        // A point of the spline between its second and third fit points: the menu opens over it.
+        let at = h.at(&json!({"sketch": [8.9077, -6.1787]})).unwrap();
+        h.call("ui.move", json!({"x": at[0], "y": at[1]}));
+        h.frames(2);
+        h.call("ui.menu", json!({"x": at[0], "y": at[1]}));
+        h.frames(2);
+        assert_eq!(h.call("ui.menu", json!({}))["result"]["open"], true, "the menu opens over the spline {curve}");
+        h.frames(4);
+        h
+    };
+    let area = |h: &crate::scenario::Harness| h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
+
+    let mut h = open(576.0);
+    let screen = h.ctx.content_rect();
+    let list = context_menu::items(&h.app, &Target::Viewport);
+    let ids: Vec<_> = list.iter().map(|i| i.id.as_str()).collect();
+    assert!(ids.contains(&"sketch.spline.reset_handles"), "the spline's menu offers Reset Tangent Handles: {ids:?}");
+    let last = list.iter().rev().find(|i| !i.is_sep()).unwrap().id.clone();
+    let menu = area(&h);
+    assert!(screen.contains_rect(menu), "the menu stays in the window: {menu:?} in {screen:?}");
+    let last_row = crate::scenario::rect_of(&format!("menu:{last}")).unwrap();
+    assert!(last_row.bottom() > menu.bottom(), "the last row starts out of view: {last_row:?} below {menu:?}");
+    let down = crate::scenario::rect_of("menu:scroll_down").expect("a menu taller than the window gets a bar to scroll down");
+    assert!(menu.contains_rect(down) && down.width() > menu.width() * 0.8, "the bar spans the menu: {down:?} in {menu:?}");
+    h.step(&json!({"click": {"handle": "menu:scroll_down"}})).unwrap();
+    h.frames(3);
+    assert!(h.app.viewport.context_menu.is_some(), "scrolling leaves the menu open");
+    let menu = area(&h);
+    let down = crate::scenario::rect_of("menu:scroll_down").unwrap();
+    let last_row = crate::scenario::rect_of(&format!("menu:{last}")).unwrap();
+    assert!(last_row.bottom() <= down.top() + 0.5 && last_row.top() >= menu.top(), "the last row is in view: {last_row:?} above {down:?}");
+    assert!(crate::scenario::rect_of("menu:scroll_up").is_some_and(|up| menu.contains_rect(up)), "and a bar scrolls back up");
+
+    let h = open(900.0);
+    assert!(crate::scenario::rect_of("menu:scroll_down").is_none(), "a menu with room has no scroll bars");
+    let menu = area(&h);
+    let last_row = crate::scenario::rect_of(&format!("menu:{last}")).unwrap();
+    assert!(menu.contains_rect(last_row), "and shows its last row: {last_row:?} in {menu:?}");
 }

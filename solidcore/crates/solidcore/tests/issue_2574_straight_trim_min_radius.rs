@@ -1,6 +1,5 @@
 //! Regression test for tangency-labs/solidcore#2574: the radius test of
-//! `SmBSplineCurve::AssertValid` (13 in 2D, 14 in 3D, read with
-//! `Kernel::fixes.bspline_check_min_radius`) reported a cusp on a trim that is a straight
+//! `SmBSplineCurve::AssertValid` (13 in 2D, 14 in 3D, WR-382) reported a cusp on a trim that is a straight
 //! line, because its `SM_CP_MINIMIZE_RADIUS_OF_CURVATURE` search returned a radius of 0
 //! where its objective cannot be evaluated.
 //!
@@ -180,9 +179,7 @@ impl SolutionObject for TrimCurve {
 /// minimum radius (WR-382). The search itself takes no value from a failed evaluation by
 /// default since #2574, so `oscillating_skips_failed_guesses` stays off here.
 fn check_kernel() -> Kernel {
-    let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.bspline_check_min_radius = true;
-    k
+    Kernel::new(&KernelOptions::default())
 }
 
 /// The radius test's reports of `curve`'s `AssertValid`: the failed test's index, value

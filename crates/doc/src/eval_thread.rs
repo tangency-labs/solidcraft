@@ -873,11 +873,27 @@ fn cut_with_flanks(
         let u = u.normalized().ok_or_else(|| DocError::Invalid("thread axis".into()))?;
         let plane = Plane { origin: t.axis_point + k * lo, x: u, y: k };
         let r_out = radius + 0.1 * t.pitch;
-        let pts = [Vec2::new(r_min, 0.0), Vec2::new(r_out, 0.0), Vec2::new(r_out, hi - lo), Vec2::new(r_min, hi - lo)];
-        let region = Region2 { outer: solidcore_record::Loop2::polygon(&pts), holes: Vec::new() };
-        let sleeve = kernel::revolve(&plane, &[region], Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), std::f64::consts::TAU)?
-            .pop()
-            .ok_or_else(|| DocError::Invalid("the narrowed bore".into()))?;
+        // A ring about the axis: radii r0 to r1, from a0 to a1 along it past `lo`.
+        let ring = |r0: f64, r1: f64, a0: f64, a1: f64| -> Result<Body> {
+            let pts = [Vec2::new(r0, a0), Vec2::new(r1, a0), Vec2::new(r1, a1), Vec2::new(r0, a1)];
+            let region = Region2 { outer: solidcore_record::Loop2::polygon(&pts), holes: Vec::new() };
+            kernel::revolve(&plane, &[region], Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), std::f64::consts::TAU)?
+                .pop()
+                .ok_or_else(|| DocError::Invalid("the narrowed bore".into()))
+        };
+        // The fill goes all the way round. Where the hole's wall is open along the thread (a cross
+        // hole, a cut through the side, a slanted end), it would close the opening and stand out of
+        // the part (#14191). So the part of the fill inside the wall, kept clear of the wall's
+        // faces, has to lie wholly in the material; otherwise the hole is refused, as before #11609.
+        let e = t.pitch * 1e-3;
+        if kernel::boolean(&ring(radius + e, r_out - e, e, hi - lo - e)?, &input.body, BoolOp::Cut)?.is_some() {
+            let (m, drill) = (&t.designation, show_mm(t.form.drill(t.major_diameter, t.pitch)));
+            return Err(DocError::Invalid(format!(
+                "this {} mm hole is too wide for a modelled {m} thread and can't be filled in to fit it: its wall is open along the thread (a cross hole, a cut through the side or a slanted end); drill {drill} mm for {m}",
+                show_mm(2.0 * radius)
+            )));
+        }
+        let sleeve = ring(r_min, r_out, 0.0, hi - lo)?;
         let faces = sleeve.face_count();
         let filled =
             kernel::boolean(&input.body, &sleeve, BoolOp::Union)?.ok_or_else(|| DocError::Invalid("narrowing the hole removed everything".into()))?;
@@ -960,7 +976,7 @@ fn cut_with_flanks(
     let nb = Traced { body: nb, lineage, recipe: None };
     let nb = if continuous_flanks { nb } else { chamfer(nb)? };
     if let Some(slot) = st.bodies.get_mut(i) {
-        *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+        *slot = mb.remade(nb);
     }
     Ok(note)
 }

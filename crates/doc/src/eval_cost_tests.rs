@@ -289,6 +289,24 @@ fn a_sketch_on_a_fixed_plane_costs_the_same_in_a_large_placed_design() {
     }
 }
 
+/// Construction geometry is an input of every feature: moving a construction plane moves the
+/// sketch on it, though the sketch itself is unchanged.
+#[test]
+fn moving_a_construction_plane_moves_the_sketch_on_it() {
+    let mut doc = Document::new("Datum");
+    let offset = |distance: &str| FeatureKind::ConstructionPlane {
+        plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: distance.into() },
+    };
+    let plane = doc.add_feature(offset("5 mm"), Some("Datum")).unwrap();
+    let sketch = doc.add_feature(line_sketch(PlaneRef::Construction { feature: plane.into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!((model.state().sketch(sketch).unwrap().plane.origin.z - 5.0).abs() < 1e-9);
+    doc.feature_mut(plane).unwrap().kind = offset("12 mm");
+    model.evaluate(&doc);
+    assert!((model.state().sketch(sketch).unwrap().plane.origin.z - 12.0).abs() < 1e-9, "the sketch follows its plane");
+}
+
 #[test]
 fn a_sketch_on_a_face_still_sees_the_placed_bodies() {
     let parts = 3;
@@ -574,6 +592,7 @@ fn plate_with_holes(doc: &mut Document, comp: u64, tools: u64, holes: usize) -> 
         width: "10".into(),
         height: "4".into(),
         operation: Operation::NewBody,
+        centred: false,
     };
     let plate = doc.add_feature(kind, None).unwrap();
     doc.feature_mut(plate).unwrap().component = comp;
@@ -582,7 +601,7 @@ fn plate_with_holes(doc: &mut Document, comp: u64, tools: u64, holes: usize) -> 
     let body = model.state().bodies.iter().find(|b| b.feature == plate).unwrap().name.clone();
     for k in 0..holes {
         let corner = point_expr(Vec3::new(10.0 * k as f64 + 4.0, 4.0, -1.0));
-        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut };
+        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut, centred: false };
         let id = doc.add_feature(kind, None).unwrap();
         let f = doc.feature_mut(id).unwrap();
         f.component = tools;
@@ -842,6 +861,7 @@ fn shared_evaluation_requires_its_actual_model_and_unmodified_geometry_inputs() 
                 width: "3".into(),
                 height: "4".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -987,7 +1007,8 @@ fn saved_states_read_back_their_sketch_keys() {
         doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(f64::from(i) + 1.0, 1.0)), None).unwrap();
         for j in 0..3 {
             let corner = point_expr(Vec3::new(f64::from(i) * 20.0, f64::from(j) * 20.0, 0.0));
-            let kind = FeatureKind::Box { corner, length: "5".into(), width: "5".into(), height: "5".into(), operation: Operation::NewBody };
+            let kind =
+                FeatureKind::Box { corner, length: "5".into(), width: "5".into(), height: "5".into(), operation: Operation::NewBody, centred: false };
             doc.add_feature(kind, None).unwrap();
         }
     }
@@ -1073,13 +1094,14 @@ fn blocks_with_cuts(doc: &mut Document, comp: u64, blocks: usize, cuts: usize) {
     let y = 100.0 * comp as f64;
     for k in 0..blocks {
         let corner = point_expr(Vec3::new(20.0 * k as f64, y, 0.0));
-        let kind = FeatureKind::Box { corner, length: "10".into(), width: "10".into(), height: "4".into(), operation: Operation::NewBody };
+        let kind =
+            FeatureKind::Box { corner, length: "10".into(), width: "10".into(), height: "4".into(), operation: Operation::NewBody, centred: false };
         let id = doc.add_feature(kind, None).unwrap();
         doc.feature_mut(id).unwrap().component = comp;
     }
     for k in 0..cuts {
         let corner = point_expr(Vec3::new(20.0 * k as f64 + 4.0, y + 4.0, -1.0));
-        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut };
+        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut, centred: false };
         let id = doc.add_feature(kind, None).unwrap();
         doc.feature_mut(id).unwrap().component = comp;
     }
@@ -1281,6 +1303,7 @@ fn block(doc: &mut Document, name: &str, corner: Vec3, size: [f64; 3]) {
                 width: size[1].to_string().into(),
                 height: size[2].to_string().into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -1344,6 +1367,7 @@ fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
         width: "40".into(),
         height: "10".into(),
         operation: Operation::Cut,
+        centred: false,
     };
     assert_eq!(cut_work(&mut doc, along).cut, 1);
     // A dome: a sphere's cap rising 10 mm above the circle it stands on. A thin tool drilled into
@@ -1357,6 +1381,7 @@ fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
         width: "60".into(),
         height: "40".into(),
         operation: Operation::Cut,
+        centred: false,
     };
     doc.add_feature(below, None).unwrap();
     let mut model = Model::new();
@@ -2026,6 +2051,7 @@ fn an_ambiguous_target_is_refused_before_a_sheet_is_machined() {
                 width: "10".into(),
                 height: "2".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -2040,6 +2066,7 @@ fn an_ambiguous_target_is_refused_before_a_sheet_is_machined() {
                 width: "5".into(),
                 height: "20".into(),
                 operation: Operation::Cut,
+                centred: false,
             },
             None,
         )

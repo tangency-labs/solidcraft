@@ -177,7 +177,7 @@ fn icon_button_presentation(
 }
 
 /// The pale tile behind artwork buttons on a dark card (the light theme's icon backdrop).
-const ARTWORK_TILE: egui::Color32 = egui::Color32::from_rgb(0xe9, 0xee, 0xf4);
+const ARTWORK_TILE: egui::Color32 = Tokens::light().nav_hover;
 
 /// An icon button that paints the icon's own palette artwork (outlines, shaded faces and accent),
 /// dimmed when disabled. The label is its tooltip and accessible name. The artwork always uses
@@ -833,7 +833,8 @@ fn selection_row(ui: &mut Ui, name: &str, actions: &[super::StageAction<'_>], ar
                         let (rect, _) = ui.allocate_exact_size(vec2(side, side), egui::Sense::hover());
                         artwork_button(ui, rect, icon, action.label, action.enabled)
                     } else {
-                        let (rect, _) = ui.allocate_exact_size(vec2(t.control_height - t.space_2, t.control_height - t.space_2), egui::Sense::hover());
+                        let (rect, _) =
+                            ui.allocate_exact_size(vec2(t.control_height - t.space_2, t.control_height - t.space_2), egui::Sense::hover());
                         icon_button_colored(ui, rect, icon, action.label, action.primary.then_some(accent.ink))
                     }
                 })

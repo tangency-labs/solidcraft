@@ -20,6 +20,43 @@ fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-12)
 }
 
+/// A body mirrored as a new body is made of what the body is: the copy takes its physical
+/// material and appearance. Before, the copy came out with neither.
+#[test]
+fn a_mirrored_copy_keeps_the_material_and_appearance_of_its_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Steel"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Block"], "color": "#d01c1c"}));
+    let r = run(&mut s, "solid.mirror", json!({"bodies": ["Block"], "plane": {"origin": [30, 0, 0], "normal": [1, 0, 0]}}));
+    let copy = r["created_bodies"][0].as_str().unwrap().to_string();
+    assert_ne!(copy, "Block");
+    assert_eq!(s.doc.materials.get(&copy).map(String::as_str), Some("Steel"));
+    let look = s.doc.appearances.bodies.get("Block");
+    assert!(look.is_some());
+    assert_eq!(s.doc.appearances.bodies.get(&copy), look);
+}
+
+/// Whether a mirrored copy meets its body, which the Mirror dialog sets Join or New Body from:
+/// apart, mirrored about its own face (touching) and through itself (overlapping), on the exact
+/// geometry. A Mirror of features has no answer, and asking makes nothing.
+#[test]
+fn a_mirror_meets_its_body_when_the_copy_touches_or_overlaps_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    let meets = |x: f64| s.mirror_meets(&json!({"bodies": ["Block"], "plane": {"origin": [x, 0, 0], "normal": [1, 0, 0]}})).unwrap();
+    assert_eq!(meets(30.0), Some(false), "apart");
+    assert_eq!(meets(10.0), Some(true), "about its own face");
+    assert_eq!(meets(7.0), Some(true), "through itself");
+    assert_eq!(meets(-30.0), Some(false), "apart, on the other side");
+    // A slanted plane, square to (1, 1, 0): the box reaches x + y = 20 at its far edge.
+    let slanted = |x: f64| s.mirror_meets(&json!({"bodies": ["Block"], "plane": {"origin": [x, 0, 0], "normal": [1, 1, 0]}})).unwrap();
+    assert_eq!(slanted(20.0), Some(true), "slanted, through its far edge");
+    assert_eq!(slanted(25.0), Some(false), "slanted, apart");
+    assert_eq!(s.mirror_meets(&json!({"features": ["Box1"], "plane": "YZ"})).unwrap(), None, "a Mirror of features");
+    assert_eq!(s.model.state().bodies.len(), 1, "nothing is made");
+}
+
 /// A 100 x 50 x 5 plate with a hole at the start of a straight path (10,10) → (90,10).
 fn plate_with_hole() -> Session {
     let mut s = Session::default();
@@ -1048,6 +1085,80 @@ fn mirror_of_a_boss_and_a_cut_from_its_face_makes_both_copies() {
     assert!(rel(both, want) < 1e-6, "ring {ring} mm³, lid {lid} mm³, mirrored {both} mm³ (expected {want})");
 }
 
+/// #14305: in a component, a pattern or mirror of two cuts makes the copies of both. The first
+/// cut's copies used to hand the plate back outside its component, so the second cut's copies
+/// found no body there ("there is no body to cut or intersect").
+#[test]
+fn copies_of_two_cuts_in_a_component_cut_its_body() {
+    for (command, params, copies) in [
+        ("solid.pattern.circular", json!({"features": ["CutA", "CutB"], "axis": "Z", "count": 4, "angle": 360}), 3.0),
+        ("solid.mirror", json!({"features": ["CutA", "CutB"], "plane": "YZ"}), 1.0),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Plate"}));
+        run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 5, "corner": [-50, -50, 0]}));
+        for (name, x, r) in [("A", 30, 3), ("B", 40, 2)] {
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": name}));
+            run(&mut s, "sketch.circle.center", json!({"center": [x, 0], "radius": r}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": name, "through_all": true, "operation": "cut", "name": format!("Cut{name}")}));
+        }
+        run(&mut s, command, params);
+        // The plate and each instance's two bores, radius 3 and 2, through its 5 mm.
+        let want = 100.0 * 100.0 * 5.0 - (1.0 + copies) * PI * (9.0 + 4.0) * 5.0;
+        let v = volume(&mut s);
+        assert!(rel(v, want) < 1e-6, "{command}: {v} mm³, expected {want}");
+    }
+}
+
+/// #14305: a copied cut that splits the plate leaves its pieces in the component, so the copies of
+/// holes after it still find the piece each falls on. The slot's copy splits the left part of the
+/// plate in two, and one hole's copy lands on each piece.
+#[test]
+fn copies_of_a_cut_that_splits_the_body_in_a_component_leave_its_pieces_there() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 5, "corner": [-50, -50, 0]}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Slot"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, -60], "p1": [24, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Slot", "through_all": true, "operation": "cut", "name": "CutSlot"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "B"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [40, 0], "radius": 2}));
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 0], "radius": 2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "B", "through_all": true, "operation": "cut", "name": "CutB"}));
+    run(&mut s, "solid.mirror", json!({"features": ["CutSlot", "CutB"], "plane": "YZ"}));
+    // The plate less two 4 × 100 slots across it and four bores of radius 2, through its 5 mm.
+    let want = 100.0 * 100.0 * 5.0 - 2.0 * 4.0 * 100.0 * 5.0 - 4.0 * PI * 4.0 * 5.0;
+    let v = volume(&mut s);
+    assert!(rel(v, want) < 1e-6, "{v} mm³, expected {want}");
+}
+
+/// #14305: a chamfer among the copied features hands the disc back in its component, so a hole
+/// copied after it still finds the disc there, as it does at the design's root.
+#[test]
+fn copies_of_a_chamfer_and_a_later_hole_in_a_component_cut_its_body() {
+    let pi = std::f64::consts::PI;
+    // Per instance: the bore, π·3²·10, one ring of the chamfer's triangle (Pappus, as below) and
+    // the pin hole, π·2²·10. The six instances do not meet.
+    let instance = pi * 9.0 * 10.0 + 2.0 * pi * (3.0 + 0.5 / 3.0) * 0.125 + pi * 4.0 * 10.0;
+    let want = pi * 900.0 * 10.0 - 6.0 * instance;
+    for in_component in [false, true] {
+        let mut s = Session::default();
+        if in_component {
+            run(&mut s, "component.create", json!({"name": "Part"}));
+        }
+        run(&mut s, "solid.cylinder", json!({"radius": 30, "height": 10, "name": "Disc"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 0, 10], "diameter": 6, "name": "Bore"}));
+        run(&mut s, "solid.chamfer", json!({"edges": [[23, 0, 10]], "distance": 0.5, "name": "TopChamfer"}));
+        run(&mut s, "solid.hole", json!({"position": [0, 10, 10], "diameter": 4, "name": "Pin"}));
+        run(&mut s, "solid.pattern.circular", json!({"features": ["Bore", "TopChamfer", "Pin"], "axis": "Z", "count": 6, "angle": 360}));
+        let v = volume(&mut s);
+        assert!((v - want).abs() < 4e-7 * want, "component {in_component}: {v} mm³, expected {want}");
+    }
+}
+
 /// A disc with an off-centre hole whose top and bottom edges are chamfered.
 fn disc_with_chamfered_hole() -> Session {
     let mut s = Session::default();
@@ -1294,6 +1405,39 @@ fn circular_pattern_of_a_moved_copy_adds_one_body_per_instance() {
     assert_eq!(s.world_state().unwrap().bodies.len(), 5);
     let far = s.world_state().unwrap().bodies.iter().map(|b| b.mesh().bounds().max.x).fold(f64::MIN, f64::max);
     assert!(far > 20.0, "the repeats follow the redefined Move: {far}");
+}
+
+/// A pattern of bodies makes copies that look and weigh like their sources (#12115): the same
+/// part in another place. Two bodies, three along X: each source's two copies take its own
+/// appearance or material, not the other source's and not the default.
+#[test]
+fn a_body_pattern_keeps_each_sources_appearance_and_material() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"center":[0,0,5],"operation":"new","body_name":"Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter":6,"height":20,"base":[0,0,10],"operation":"new","body_name":"Post"}));
+    run(&mut s, "appearance.assign", json!({"bodies":["Post"],"color":[200,30,30]}));
+    run(&mut s, "material.assign", json!({"bodies":["Base"],"material":"Steel"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies":["Base","Post"],"dir1":[1,0,0],"count1":3,"spacing1":30}));
+    let red = s.doc.appearances.bodies.get("Post").cloned().expect("Post is red");
+    for copy in ["Base (2)", "Base (3)"] {
+        assert_eq!(s.doc.materials.get(copy).map(String::as_str), Some("Steel"), "{copy}");
+        assert!(!s.doc.appearances.bodies.contains_key(copy), "{copy} was not painted");
+    }
+    for copy in ["Post (2)", "Post (3)"] {
+        assert_eq!(s.doc.appearances.bodies.get(copy), Some(&red), "{copy}");
+        assert!(!s.doc.materials.contains_key(copy), "{copy} has no material of its own");
+    }
+}
+
+/// A pattern of bodies that makes no copy (a count of 1) is still added: the copies' look is
+/// copied only where there are copies.
+#[test]
+fn a_body_pattern_with_no_copies_is_still_added() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"center":[0,0,5],"operation":"new","body_name":"Base"}));
+    run(&mut s, "material.assign", json!({"bodies":["Base"],"material":"Steel"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies":["Base"],"dir1":[1,0,0],"count1":1,"spacing1":30}));
+    assert_eq!(s.model.state().bodies.len(), 1);
 }
 
 /// #12199: a path whose curves are listed out of chain order is the same path as in chain order.

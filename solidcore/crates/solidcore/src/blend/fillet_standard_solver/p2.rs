@@ -214,7 +214,7 @@ fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
         | SolidError::Cancelled { .. }
         | SolidError::InvalidInput { .. }
         | SolidError::PortInvariant { .. } => e,
-        _ => SolidError::sm_err(op),
+        _ => SolidError::blend_failed(op, "a stage the solver calls failed"),
     }
 }
 
@@ -603,13 +603,18 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
                 &GlobalPointSolveOptions::<ObjectHandle>::default(),
             )?;
             if sols.len() != 1 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the point does not drop onto the other edge once",
+                ));
             }
 
             // get OtherFilletEdge Parameter
             let mut fillet_edge_t = sols
                 .get(0)
-                .ok_or_else(|| SolidError::sm_err(OP))?
+                .ok_or_else(|| {
+                    SolidError::blend_failed(OP, "the point does not drop onto the other edge once")
+                })?
                 .start
                 .param(0)?;
 
@@ -656,16 +661,12 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
                 non_zero_tangents: true,
             };
             let mat = base2.evaluate(k, uv_pnt, 1, 1, flags)?;
-            let du = mat
-                .get(1)
-                .and_then(|r| r.first())
-                .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
-            let dv = mat
-                .first()
-                .and_then(|r| r.get(1))
-                .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            let du = mat.get(1).and_then(|r| r.first()).copied().ok_or_else(|| {
+                SolidError::blend_failed(OP, "the second surface has no u derivative")
+            })?;
+            let dv = mat.first().and_then(|r| r.get(1)).copied().ok_or_else(|| {
+                SolidError::blend_failed(OP, "the second surface has no v derivative")
+            })?;
             let mut deg = du.angle_between(dv)?;
             deg *= 180.0 / PI;
             // (not a range test: a NaN angle keeps the guess, as upstream)
@@ -693,12 +694,17 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
                 EFF_ZERO_SQ,
             )?;
             if sols.len() != 1 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the point does not drop onto the other rail's surface once",
+                ));
             }
-            let s = sols
-                .first()
-                .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            let s = sols.first().copied().ok_or_else(|| {
+                SolidError::blend_failed(
+                    OP,
+                    "the point does not drop onto the other rail's surface once",
+                )
+            })?;
             srf2_guess_uv.x = s.x;
             srf2_guess_uv.y = s.y;
         }
@@ -728,10 +734,12 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
                 EFF_ZERO_SQ,
             )?;
             if sols.len() == 1 {
-                let s = sols
-                    .first()
-                    .copied()
-                    .ok_or_else(|| SolidError::sm_err(OP))?;
+                let s = sols.first().copied().ok_or_else(|| {
+                    SolidError::blend_failed(
+                        OP,
+                        "the point does not drop onto the other rail's surface once",
+                    )
+                })?;
                 srf2_guess_uv.x = s.x;
                 srf2_guess_uv.y = s.y;
             }
@@ -1207,7 +1215,10 @@ pub fn point_on_plane_solve(
         if norm.length_squared() < EFF_ZERO_SQ {
             norm = offset_evaluate_normal(k, rail_offset_mut(solver.solver_mut(), rail)?, uv)?;
             if norm.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the offset surface normal is zero",
+                ));
             }
         }
         // (the Unitize status is ignored: the normal is not zero here)
@@ -1682,7 +1693,8 @@ impl VariableRadiusFs {
 
         // pCurve = pOptRefCurve; NER(pCurve); (m_vFilletGeoms[0] is read before, but
         // first dereferenced in the rail loop)
-        let curve = ref_curve.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let curve =
+            ref_curve.ok_or_else(|| SolidError::blend_missing(OP, "the reference curve"))?;
         let fillet_geom = *self
             .curve_based
             .solver
@@ -1708,10 +1720,14 @@ impl VariableRadiusFs {
             // (m_vOtherRails1 / m_vOtherRails2 are not appended upstream)
             let all_rails = [pseudo.geom(fillet_geom)?.rail(i)];
             for rail in all_rails {
-                let rail = rail.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let rail = rail
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the fillet geometry's rail"))?;
                 let fil_eus = edge::edgeuses(pseudo.brep(), rail, None, None)?;
                 if fil_eus.len() != 2 {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::blend_failed(
+                        OP,
+                        "the rail does not have two edge uses",
+                    ));
                 }
                 for &eu in &fil_eus {
                     let vu = pseudo.brep().edgeuse(eu)?.vertexuse.ok_or_else(|| {
@@ -1743,11 +1759,19 @@ impl VariableRadiusFs {
                         &GlobalPointSolveOptions::<ObjectHandle>::default(),
                     )?;
                     if solutions.len() != 1 {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::blend_failed(
+                            OP,
+                            "the point does not drop onto the reference curve once",
+                        ));
                     }
                     let mut t = solutions
                         .get(0)
-                        .ok_or_else(|| SolidError::sm_err(OP))?
+                        .ok_or_else(|| {
+                            SolidError::blend_failed(
+                                OP,
+                                "the point does not drop onto the reference curve once",
+                            )
+                        })?
                         .start
                         .param(0)?;
                     if b3d_test && ivl.is_value_on_boundary(t, EFF_ZERO).0 && is_closed_solver_edge
@@ -1806,7 +1830,7 @@ impl VariableRadiusFs {
             .curve_based
             .original
             .clone()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's original curve"))?;
         let opts = LawIntersectionOptions {
             law_orient: self.law_orientation,
             point_curve: &original,
@@ -1839,7 +1863,10 @@ impl VariableRadiusFs {
         traced?;
         for &vu in tsect_pnts.iter().skip(1) {
             if pseudo.fillet_vertexuse(vu)?.tsect_pnt().curve_parameter < 0.0 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "an intersection point has a negative curve parameter",
+                ));
             }
         }
 
@@ -1926,7 +1953,10 @@ impl VariableRadiusFs {
             || sdug.length_squared() < EFF_ZERO_SQ
             || sdvg.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "an offset surface has a zero derivative",
+            ));
         }
 
         let diff1 = sf - sg;
@@ -2056,7 +2086,14 @@ impl VariableRadiusFs {
         )?;
         if sols.len() == 2 {
             // [B391]
-            let sol = |i: usize| sols.get(i).ok_or_else(|| SolidError::sm_err(OP));
+            let sol = |i: usize| {
+                sols.get(i).ok_or_else(|| {
+                    SolidError::blend_failed(
+                        OP,
+                        "the point solve has fewer solutions than it counted",
+                    )
+                })
+            };
             let t0 = sol(0)?.start.param(0)?;
             let t1 = sol(1)?.start.param(0)?;
             let dist0 = self.law_interval.distance_from(t0);
@@ -2080,11 +2117,16 @@ impl VariableRadiusFs {
             }
         }
         if sols.len() != 1 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the point does not drop onto the solver's curve once",
+            ));
         }
         let drop_t = sols
             .get(0)
-            .ok_or_else(|| SolidError::sm_err(OP))?
+            .ok_or_else(|| {
+                SolidError::blend_failed(OP, "the point does not drop onto the solver's curve once")
+            })?
             .start
             .param(0)?;
         let mut fillet_edge_t = drop_t;
@@ -2165,10 +2207,12 @@ impl VariableRadiusFs {
                     EFF_ZERO_SQ,
                 )?;
                 if sols.len() == 1 {
-                    let s = sols
-                        .first()
-                        .copied()
-                        .ok_or_else(|| SolidError::sm_err(OP))?;
+                    let s = sols.first().copied().ok_or_else(|| {
+                        SolidError::blend_failed(
+                            OP,
+                            "the point does not drop onto the second surface once",
+                        )
+                    })?;
                     s2d.x = s.x;
                     s2d.y = s.y;
                 }
@@ -2586,7 +2630,10 @@ fn scale_to_joint(joined: &BSplineSurface, piece: &mut BSplineSurface) -> Result
         if wa > 0.0 && wb > 0.0 && r.is_finite() {
             Ok(r)
         } else {
-            Err(SolidError::sm_err(OP_PIECEWISE))
+            Err(SolidError::blend_failed(
+                OP_PIECEWISE,
+                "a weight at the joint's ends is not positive",
+            ))
         }
     };
     let (r0, r1) = (ratio(0, 0)?, ratio(a.m(), b.m())?);
@@ -2687,7 +2734,10 @@ impl CircularCrossSectionFsg {
             {
                 let crate::surface::surface::SurfaceKind::ProceduralBlend(pb) = surface.kind()
                 else {
-                    return Err(SolidError::sm_err(OP_PIECEWISE));
+                    return Err(SolidError::blend_failed(
+                        OP_PIECEWISE,
+                        "a piece's definition is not a procedural blend",
+                    ));
                 };
                 let mut net = pb.net().copy();
                 // each definition's net is on its own homogeneous scale (its section's
@@ -2721,7 +2771,9 @@ impl CircularCrossSectionFsg {
             }
             joined = Some(next);
         }
-        let joined = joined.ok_or_else(|| SolidError::sm_err(OP_PIECEWISE))?;
+        let joined = joined.ok_or_else(|| {
+            SolidError::blend_failed(OP_PIECEWISE, "the law corner has no pieces")
+        })?;
         let kept = if ball_radius_varies {
             Some(LawCornerPieces::classify(
                 k,
@@ -2942,7 +2994,10 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
             for i in 0..lk {
                 let kk = if db > 0.0 { i } else { lk - 1 - i };
                 let (Some(&kn), Some(&m)) = (c.knots.get(kk), c.knot_multiplicities.get(kk)) else {
-                    return Err(SolidError::sm_err(OP_LAW));
+                    return Err(SolidError::blend_failed(
+                        OP_LAW,
+                        "the law curve's knots and multiplicities differ in number",
+                    ));
                 };
                 t_knots.push((kn - da) / db);
                 t_mult.push(m);
@@ -2953,7 +3008,10 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
             for i in 0..lc {
                 let kk = if db > 0.0 { i } else { lc - 1 - i };
                 let Some(&cp) = c.control_points.get(kk) else {
-                    return Err(SolidError::sm_err(OP_LAW));
+                    return Err(SolidError::blend_failed(
+                        OP_LAW,
+                        "the law curve lacks a control point",
+                    ));
                 };
                 t_cps.push(cp);
                 if rational {
@@ -3149,6 +3207,30 @@ impl CircularCrossSectionFsg {
                     return Ok(None);
                 }
                 let mut leader = edge.copy();
+                // The edge's curve cut to where the stations are: an unbounded line is held as a
+                // NURB a million times the part's size, whose control points round at about
+                // 1e-9 mm, and every move of the round's frame (its recertificate is taken in its
+                // own) carries that rounding into the leader, past the round's bound. Cut, its
+                // control points are of the part's size; the round is built on the cut curve.
+                let station_ts = points
+                    .iter()
+                    .filter_map(|p| p.user_doubles.first().copied())
+                    .filter(|t| t.is_finite());
+                let (lo, hi) = station_ts
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), t| {
+                        (lo.min(t), hi.max(t))
+                    });
+                let whole = leader.natural_interval();
+                if lo < hi {
+                    let mut cut = Extent1d::from_min_max(lo.max(whole.min()), hi.min(whole.max()));
+                    if cut.length() > 0.0 && cut != whole {
+                        leader.trim(
+                            k,
+                            &mut cut,
+                            crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+                        )?;
+                    }
+                }
                 leader.set_out_of_bounds_enabled(true);
                 let Some(mut law) = law_in_parameter(lb)? else {
                     return Ok(None);
@@ -3741,7 +3823,10 @@ impl SurfaceSurfaceFs {
         if self.calc_fillet_start(k)?.is_none() {
             return Ok(());
         }
-        Err(SolidError::null_pointer(OP_SS_CALC))
+        Err(SolidError::blend_missing(
+            OP_SS_CALC,
+            "the executive's pseudo-B-rep",
+        ))
     }
 
     /// `SmSurfaceSurfaceFS::CalcFilletGeom` up to `m_pExecutive->GetPseudoBrep()`: the
@@ -3780,7 +3865,10 @@ impl SurfaceSurfaceFs {
         let n2 = offset_evaluate_normal(k, self.base.surface_mut(1)?, g1)?;
         *curr.crv_deriv_mut() = n1.cross(n2);
         if curr.crv_deriv().length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the offset normals at the guesses are parallel",
+            ));
         }
 
         let mut step = 0.0001;
@@ -4136,10 +4224,14 @@ mod tests {
             g,
         )
         .expect("solver");
-        assert!(matches!(
-            fs.calc_fillet_geom(&k),
-            Err(SolidError::Upstream { .. })
-        ));
+        let e = fs.calc_fillet_geom(&k).unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Failed(
+                "the offset normals at the guesses are parallel"
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         let mut fs = SurfaceSurfaceFs::new(
             &k,
             &mut FilletBrep::new(),
@@ -4156,13 +4248,14 @@ mod tests {
             g,
         )
         .expect("solver");
-        assert!(matches!(
-            fs.calc_fillet_geom(&k),
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let e = fs.calc_fillet_geom(&k).unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the executive's pseudo-B-rep"
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     #[test]
@@ -4208,10 +4301,16 @@ mod tests {
         assert!(vr.is_kind_of(VARIABLE_RADIUS_FS_TYPE) && vr.is_kind_of(CURVE_BASED_FS_TYPE));
         assert!(!vr.is_kind_of(CONSTANT_RADIUS_FS_TYPE));
         let mut pseudo = FilletBrep::new();
-        assert!(matches!(
-            vr.re_calc_fillet_geom(&k, &mut pseudo, false, None, None),
-            Err(SolidError::Upstream { .. })
-        ));
+        let e = vr
+            .re_calc_fillet_geom(&k, &mut pseudo, false, None, None)
+            .unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the reference curve"
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
         // (no fillet geometry: upstream reads m_vFilletGeoms[0] out of bounds)
         assert!(matches!(
             vr.re_calc_fillet_geom(&k, &mut pseudo, false, None, Some(&centre)),

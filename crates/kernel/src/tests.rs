@@ -164,6 +164,22 @@ fn chamfer_and_step() {
     assert!(s.contains("MANIFOLD_SOLID_BREP") || s.contains("CLOSED_SHELL"));
 }
 
+/// A round of a cylinder's rim is the exact torus it lies on, and STEP says so: a
+/// TOROIDAL_SURFACE, not a rational B-spline net, whose bounding box and volume other readers
+/// get wrong. Pappus: the round takes off 2 pi (R - r (10 - 3 pi) / (3 (4 - pi))) (1 - pi / 4) r^2.
+#[test]
+fn a_cylinder_rim_round_goes_to_step_as_its_torus() {
+    let (big, height, r) = (10.0, 8.0, 2.5);
+    let puck = cylinder(Vec3::ZERO, Vec3::Z, big, height).unwrap();
+    let round = fillet(&puck, &[Vec3::new(0.0, big, height)], r).unwrap();
+    let text = step_export(&[&round], "puck").unwrap();
+    assert_eq!(text.matches("TOROIDAL_SURFACE").count(), 1, "{text}");
+    assert_eq!(text.matches("B_SPLINE_SURFACE").count(), 0, "{text}");
+    let back = step_import(&text).unwrap().bodies.remove(0).body;
+    let (a, b) = (measure(&round).unwrap().volume, measure(&back).unwrap().volume);
+    let pappus = PI * big * big * height - 2.0 * PI * (big - r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI))) * (1.0 - PI / 4.0) * r * r;
+    assert!(rel(a, pappus) < 1e-7 && rel(b, pappus) < 1e-7, "{a} {b} {pappus}");
+}
 #[test]
 fn hostile_inputs_are_errors() {
     assert!(extrude(&Plane::XY, &[rect(1.0, 1.0)], 0.0, 0.0).is_err());
@@ -722,26 +738,37 @@ fn polyhedra_shell_and_draft() {
     assert!(rel(measure(&cup).unwrap().volume, PI * (25.0 * 5.0 - 16.0 * 4.0)) < 1e-4, "cup");
 }
 
-/// #14346: a loft through three sections whose corners lie on straight lines has flat sides,
-/// which the skin builds as B-spline patches. Each is a planar face (an extrude can start on it,
-/// a sketch can lie on it), its plane through the face and facing out of the material. A loft
-/// turned between its ends has curved sides, which are not planar.
+/// #14346: a loft through three sections whose corners lie on straight lines has flat sides.
+/// Each is a planar face (an extrude can start on it, a sketch can lie on it), its plane through
+/// the face and facing out of the material, also when the face is recorded as a B-spline patch.
+/// A loft turned between its ends has curved sides, which are not planar.
 #[test]
 fn flat_loft_sides_are_planar_faces() {
     let rectangle = |x: f64, y: f64| Loop2::polygon(&[Vec2::new(-x, -y), Vec2::new(x, -y), Vec2::new(x, y), Vec2::new(-x, y)]);
     let flat =
         loft(&[(Plane::XY, rectangle(10.0, 6.0)), (Plane::XY.offset(10.0), rectangle(8.0, 5.0)), (Plane::XY.offset(20.0), rectangle(6.0, 4.0))])
             .unwrap();
-    let faces = flat.faces(0.01).unwrap();
-    assert_eq!(faces.len(), 6);
-    let centre = Vec3::new(0.0, 0.0, 10.0);
-    for face in &faces {
-        let plane = flat.planar_face(face.index).unwrap_or_else(|| panic!("face {} is flat", face.index));
-        assert!(plane.height(face.centroid).abs() < 1e-6, "face {}: its plane runs through it", face.index);
-        assert!((face.centroid - centre).dot(plane.normal()) > 0.0, "face {}: its plane faces out", face.index);
+    // The loft records its flat sides as planes (#13331); to reach the kernel's flatness test
+    // each side is recorded again as the same plane in B-spline form, a bilinear patch through
+    // the plane's points at its domain's corners, so its (u, v) and the trims stay as they were.
+    let mut record = flat.record().clone();
+    let mut splines = 0;
+    for face in &mut record.faces {
+        let solidcore_record::brep::Surface::Plane { origin: o, u_axis: u, v_axis: v } = face.surface else { continue };
+        if u[2].abs() < 1e-9 && v[2].abs() < 1e-9 {
+            continue; // an end
+        }
+        let [[u0, u1], [v0, v1]] = face.domain;
+        let at = |a: f64, b: f64| [o[0] + a * u[0] + b * v[0], o[1] + a * u[1] + b * v[1], o[2] + a * u[2] + b * v[2]];
+        face.surface = solidcore_record::brep::Surface::Spline {
+            u_knots: vec![u0, u0, u1, u1],
+            v_knots: vec![v0, v0, v1, v1],
+            points: vec![vec![at(u0, v0), at(u0, v1)], vec![at(u1, v0), at(u1, v1)]],
+        };
+        splines += 1;
     }
-    // The sides are B-spline patches, so this reaches the kernel's flatness test (were the loft
-    // to build planes here, another flat B-spline face would have to stand in).
+    assert_eq!(splines, 4, "the loft's sides are planes");
+    let flat = crate::smlib_sweeps::body_from_record(&record, "flat loft sides as B-splines").unwrap();
     let splines = flat
         .record()
         .faces
@@ -750,7 +777,15 @@ fn flat_loft_sides_are_planar_faces() {
             matches!(face.surface, solidcore_record::brep::Surface::Spline { .. } | solidcore_record::brep::Surface::RationalSpline { .. })
         })
         .count();
-    assert_eq!(splines, 4);
+    assert_eq!(splines, 4, "the sides read back as B-splines");
+    let faces = flat.faces(0.01).unwrap();
+    assert_eq!(faces.len(), 6);
+    let centre = Vec3::new(0.0, 0.0, 10.0);
+    for face in &faces {
+        let plane = flat.planar_face(face.index).unwrap_or_else(|| panic!("face {} is flat", face.index));
+        assert!(plane.height(face.centroid).abs() < 1e-6, "face {}: its plane runs through it", face.index);
+        assert!((face.centroid - centre).dot(plane.normal()) > 0.0, "face {}: its plane faces out", face.index);
+    }
     let (sin, cos) = std::f64::consts::FRAC_PI_6.sin_cos();
     let turned = Loop2::polygon(&[(-6.0, -6.0), (6.0, -6.0), (6.0, 6.0), (-6.0, 6.0)].map(|(x, y)| Vec2::new(cos * x - sin * y, sin * x + cos * y)));
     let twisted = loft(&[(Plane::XY, rectangle(10.0, 10.0)), (Plane::XY.offset(20.0), turned)]).unwrap();
@@ -2567,5 +2602,177 @@ fn a_round_on_a_boss_tilted_a_few_degrees_is_built() {
         // turned: to 1 % of the round's
         let bound = if deg == 0.0 { 1e-9 * before } else { 1e-2 * square };
         assert!((added - square).abs() <= bound, "{deg} degrees: adds {added}, square {square}");
+    }
+}
+
+/// The record edge passing nearest `p` (its exact curve sampled along its interval).
+fn edge_near(b: &Body, p: Vec3) -> usize {
+    let record = b.record();
+    let off = |e: &solidcore_record::brep::Edge| {
+        let c = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).unwrap();
+        let [t0, t1] = e.interval;
+        (0..=1024).filter_map(|k| c.point(t0 + (t1 - t0) * k as f64 / 1024.0)).map(|q| q.dist(p)).fold(f64::INFINITY, f64::min)
+    };
+    let (i, d) = record.edges.iter().map(off).enumerate().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+    assert!(d < 0.05, "no edge passes near {p:?} (nearest {i} at {d})");
+    i
+}
+
+/// A ball of radius 12.5 resting on the origin, a 10 wide slot cut from its top down to z = 15
+/// right through it: walls at x = ±5 (`walls_x`) or at y = ±5.
+fn slotted_ball(walls_x: bool) -> Body {
+    let ball = sphere(Vec3::new(0.0, 0.0, 12.5), 12.5).unwrap();
+    let (a, b) =
+        if walls_x { (Vec3::new(-5.0, -20.0, 15.0), Vec3::new(5.0, 20.0, 30.0)) } else { (Vec3::new(-20.0, -5.0, 15.0), Vec3::new(20.0, 5.0, 30.0)) };
+    let slotted = boolean(&ball, &box_solid(a, b).unwrap(), BoolOp::Cut).unwrap().unwrap();
+    assert!(slotted.validity().is_empty(), "{:?}", slotted.validity());
+    slotted
+}
+
+/// The ball's seam (its meridian at y = 0, x > 0) ends on the slot's rim, at the top of the x = +5
+/// wall's arc: that arc is two record edges, the x = -5 arc one (#16122). They are one edge each
+/// to the user; nothing else joins.
+#[test]
+fn a_slot_arc_split_by_a_balls_seam_is_one_whole_edge() {
+    let b = slotted_ball(true);
+    let mesh = b.mesh(&MeshTolerance::chord(1e-3)).unwrap();
+    let seams = seam_flags(&b, &mesh);
+    let (top, z) = (12.5 + (12.5f64 * 12.5 - 25.0).sqrt(), 21.5376);
+    let (plus_a, plus_b) = (edge_near(&b, Vec3::new(5.0, 7.0407, z)), edge_near(&b, Vec3::new(5.0, -7.0407, z)));
+    assert_ne!(plus_a, plus_b, "the seam splits the x = +5 arc");
+    let both = {
+        let mut v = vec![plus_a, plus_b];
+        v.sort_unstable();
+        v
+    };
+    assert_eq!(whole_edge(&b, plus_a), both);
+    assert_eq!(whole_edge(&b, plus_b), both);
+    let minus = edge_near(&b, Vec3::new(-5.0, 0.0, top));
+    assert_eq!(whole_edge(&b, minus), vec![minus]);
+    let seam = edge_near(&b, Vec3::new(12.5 * 0.5f64.sqrt(), 0.0, 12.5 - 12.5 * 0.5f64.sqrt()));
+    assert!(seams[seam], "the meridian at y = 0 is the seam");
+    for e in [
+        seam,
+        edge_near(&b, Vec3::new(0.0, 12.2474, 15.0)),
+        edge_near(&b, Vec3::new(0.0, -12.2474, 15.0)),
+        edge_near(&b, Vec3::new(5.0, 0.0, 15.0)),
+        edge_near(&b, Vec3::new(-5.0, 0.0, 15.0)),
+    ] {
+        assert_eq!(whole_edge(&b, e), vec![e], "edge {e}");
+    }
+    for e in [b.record().edges.len(), 10_000, usize::MAX] {
+        assert_eq!(whole_edge(&b, e), vec![e]);
+    }
+}
+
+/// The slot turned a quarter: the seam ends on the +x floor arc, whose two pieces are one edge;
+/// the wall arcs are whole. The -x floor arc comes in two pieces as well, at (-12.2474, 0, 15),
+/// a vertex no other edge reaches: two pieces of one edge, between the same faces, running on
+/// into each other, which are one edge too.
+#[test]
+fn a_floor_arc_split_by_a_balls_seam_is_one_whole_edge() {
+    let b = slotted_ball(false);
+    let y = 2.4774;
+    for x in [11.9943, -11.9943] {
+        let pieces = [edge_near(&b, Vec3::new(x, y, 15.0)), edge_near(&b, Vec3::new(x, -y, 15.0))];
+        assert_ne!(pieces[0], pieces[1], "the floor arc at x = {x} is two record edges");
+        let mut both = pieces.to_vec();
+        both.sort_unstable();
+        for e in pieces {
+            assert_eq!(whole_edge(&b, e), both, "x = {x}");
+        }
+    }
+    // Nothing but the two pieces meets at the -x floor arc's middle vertex.
+    let record = b.record();
+    let middle = record.vertices.iter().position(|v| Vec3::from(v.point).dist(Vec3::new(-12.5 * 0.96f64.sqrt(), 0.0, 15.0)) < 1e-6).unwrap();
+    assert_eq!(record.edges.iter().filter(|e| e.vertices.contains(&(middle as u32))).count(), 2);
+    let top = 12.5 + (12.5f64 * 12.5 - 25.0).sqrt();
+    for p in [Vec3::new(0.0, 5.0, top), Vec3::new(0.0, -5.0, top)] {
+        let e = edge_near(&b, p);
+        assert_eq!(whole_edge(&b, e), vec![e]);
+    }
+}
+
+/// A real corner, two tangent arcs of different radii, and an authored split keep their edges
+/// apart, each stopped by the edge that is not a seam at their vertex (the arcs' by the line
+/// between their two sides); a cylinder's rim, split by the side's seams, is gathered whole and
+/// the walk ends. No body built here reaches the face pair or the tangency rule alone: see
+/// `runs_on`.
+#[test]
+fn whole_edge_keeps_corners_tangent_arcs_and_authored_splits_apart() {
+    let block = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    for e in 0..block.record().edges.len() {
+        assert_eq!(whole_edge(&block, e), vec![e], "box edge {e}");
+    }
+    // An arc of radius 10 running on tangentially into one of radius 20 at (10, 0). Their sides
+    // are two surfaces, so the upright line between them is not a seam and stops the walk.
+    let outline = Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: -PI / 2.0, sweep: PI / 2.0 },
+            Seg2::Arc { center: Vec2::new(-10.0, 0.0), radius: 20.0, start: 0.0, sweep: PI / 2.0 },
+            Seg2::Line { a: Vec2::new(-10.0, 20.0), b: Vec2::new(-10.0, -10.0) },
+            Seg2::Line { a: Vec2::new(-10.0, -10.0), b: Vec2::new(0.0, -10.0) },
+        ],
+    };
+    let cam = extrude(&Plane::XY, &[Region2 { outer: outline, holes: vec![] }], 0.0, 5.0).unwrap().pop().unwrap();
+    let s = 0.5f64.sqrt();
+    let small = edge_near(&cam, Vec3::new(10.0 * s, -10.0 * s, 5.0));
+    let large = edge_near(&cam, Vec3::new(-10.0 + 20.0 * s, 20.0 * s, 5.0));
+    assert_ne!(small, large);
+    assert_eq!(whole_edge(&cam, small), vec![small]);
+    assert_eq!(whole_edge(&cam, large), vec![large]);
+    // Split Face on the block's +x side along z = 5 divides its vertical edges there.
+    let side = block.faces(0.01).unwrap().iter().position(|f| f.plane_normal.is_some_and(|n| n.dot(Vec3::X) > 0.99)).unwrap();
+    let split = split_faces(&block, &[side], &SplitTool::Plane(Plane { origin: Vec3::new(0.0, 0.0, 5.0), ..Plane::XY })).unwrap();
+    let (low, high) = (edge_near(&split, Vec3::new(10.0, 0.0, 2.5)), edge_near(&split, Vec3::new(10.0, 0.0, 7.5)));
+    assert_ne!(low, high);
+    assert_eq!(whole_edge(&split, low), vec![low]);
+    assert_eq!(whole_edge(&split, high), vec![high]);
+    // Split Face across a cylinder's side, through its axis: its rim's pieces stay apart at the
+    // authored line, though the side's pieces are one surface.
+    let pin = cylinder(Vec3::ZERO, Vec3::Z, 5.0, 10.0).unwrap();
+    let round: Vec<usize> = (0..pin.record().faces.len())
+        .filter(|f| !matches!(crate::offset::surf_of(pin.record(), *f), Some(crate::offset::Surf::Plane { .. })))
+        .collect();
+    let cut_pin = split_faces(&pin, &round, &SplitTool::Plane(Plane::YZ)).unwrap();
+    let rim = |b: &Body| -> Vec<usize> {
+        let r = b.record();
+        (0..r.edges.len())
+            .filter(|e| {
+                crate::heal::edge_points(r, *e as u32)
+                    .iter()
+                    .all(|p| (p.z - 10.0).abs() < 1e-6 && ((p.x * p.x + p.y * p.y).sqrt() - 5.0).abs() < 1e-6)
+            })
+            .collect()
+    };
+    for e in rim(&cut_pin) {
+        let whole = whole_edge(&cut_pin, e);
+        let pts: Vec<Vec3> = whole.iter().flat_map(|w| crate::heal::edge_points(cut_pin.record(), *w as u32)).collect();
+        assert!(pts.iter().all(|p| p.x >= -1e-6) || pts.iter().all(|p| p.x <= 1e-6), "rim piece {e} gathers {whole:?} across the split at x = 0");
+    }
+    // A whole rim is one closed edge, itself alone.
+    let whole_rim = rim(&pin);
+    assert_eq!(whole_rim.len(), 1);
+    assert_eq!(whole_edge(&pin, whole_rim[0]), whole_rim);
+    // A slot across the pin's top: the side's seam ends on one of the rim's two arcs, which is
+    // two edges and one to the user; the other arc is one edge.
+    let slotted = boolean(&pin, &box_solid(Vec3::new(-1.0, -10.0, 9.0), Vec3::new(1.0, 10.0, 12.0)).unwrap(), BoolOp::Cut).unwrap().unwrap();
+    let arcs = rim(&slotted);
+    assert_eq!(arcs.len(), 3, "{arcs:?}");
+    let mut split: Vec<usize> = arcs.iter().copied().filter(|e| whole_edge(&slotted, *e).len() == 2).collect();
+    split.sort_unstable();
+    assert_eq!(split.len(), 2, "{arcs:?}");
+    for e in &arcs {
+        assert_eq!(whole_edge(&slotted, *e), if split.contains(e) { split.clone() } else { vec![*e] });
+    }
+    // The ball with its top cut off level: its rim is a closed ring of pieces meeting where the
+    // seam ends. The walk gathers the ring and stops.
+    let ball = sphere(Vec3::new(0.0, 0.0, 12.5), 12.5).unwrap();
+    let capped = boolean(&ball, &box_solid(Vec3::new(-20.0, -20.0, 15.0), Vec3::new(20.0, 20.0, 30.0)).unwrap(), BoolOp::Cut).unwrap().unwrap();
+    let r = capped.record();
+    let ring: Vec<usize> = (0..r.edges.len()).filter(|e| crate::heal::edge_points(r, *e as u32).iter().all(|p| (p.z - 15.0).abs() < 1e-6)).collect();
+    assert!(ring.len() >= 2, "{ring:?}");
+    for &e in &ring {
+        assert_eq!(whole_edge(&capped, e), ring, "ring {ring:?}");
     }
 }

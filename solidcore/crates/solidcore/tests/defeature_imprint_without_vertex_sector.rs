@@ -106,7 +106,7 @@ fn defeature_goes_on_past_imprints_without_a_vertex_sector() {
                 ),
                 "{r:?}"
             );
-            assert!(matches!(f.entity, Some(EntityRef::Edge(_))), "{r:?}");
+            assert!(matches!(f.entity(), Some(EntityRef::Edge(_))), "{r:?}");
             assert_eq!(e.sm_status(), Some(SM_ERR), "{r:?}");
         }
         other => panic!("{other:?}"),

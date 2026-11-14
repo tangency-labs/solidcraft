@@ -284,24 +284,6 @@ impl Ord for Candidate {
     }
 }
 
-/// A quick hasher for welding by position (the keys are coordinates' bits).
-#[derive(Default)]
-struct BitsHasher(u64);
-
-impl std::hash::Hasher for BitsHasher {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-    fn write(&mut self, bytes: &[u8]) {
-        for b in bytes {
-            self.write_u64(u64::from(*b));
-        }
-    }
-    fn write_u64(&mut self, x: u64) {
-        self.0 = (self.0.rotate_left(5) ^ x).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
-    }
-}
-
 /// The lists a collapse works with, kept between collapses.
 #[derive(Default)]
 struct Scratch {
@@ -346,15 +328,12 @@ struct Collapser {
 impl Collapser {
     fn new(positions: &[Vec3], triangles: &[[u32; 3]]) -> Option<Collapser> {
         // Weld corners at the same position.
-        let mut index: std::collections::HashMap<
-            [u64; 3],
-            u32,
-            std::hash::BuildHasherDefault<BitsHasher>,
-        > = std::collections::HashMap::with_capacity_and_hasher(
-            // Proven: the divisor is the constant 2, not zero.
-            positions.len() / 2,
-            std::hash::BuildHasherDefault::default(),
-        );
+        let mut index: crate::hash::BitsMap<[u64; 3], u32> =
+            crate::hash::BitsMap::with_capacity_and_hasher(
+                // Proven: the divisor is the constant 2, not zero.
+                positions.len() / 2,
+                std::hash::BuildHasherDefault::default(),
+            );
         // Proven: capacity of allocated `positions`' length, its elements (24 bytes) larger.
         let mut remap: Vec<Option<u32>> = Vec::with_capacity(positions.len());
         let mut pos: Vec<[f64; 3]> = Vec::new();

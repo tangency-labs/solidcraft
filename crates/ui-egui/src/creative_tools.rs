@@ -160,6 +160,28 @@ pub(crate) fn booleans(app: &SolveApp) -> Vec<Item> {
     .collect()
 }
 
+thread_local! {
+    /// The last face middle worked out, with the model state it was measured in.
+    static FACE_MIDDLE: RefCell<Option<(std::sync::Arc<solidcraft_engine::doc::ModelState>, String, usize, Option<solidcore_record::Vec3>)>> = const { RefCell::new(None) };
+}
+
+/// The middle of a body face (its tessellated centroid), measured once per model state so the
+/// pill, which asks every frame, tessellates the face only when the model changes.
+fn face_middle(app: &SolveApp, body: &str, face: usize) -> Option<solidcore_record::Vec3> {
+    let st = crate::open_meshing::session_world(&app.session);
+    let known =
+        FACE_MIDDLE.with(|c| c.borrow().as_ref().filter(|(s, b, f, _)| std::sync::Arc::ptr_eq(s, &st) && b == body && *f == face).map(|x| x.3));
+    if let Some(found) = known {
+        return found;
+    }
+    let found = st.body(body).and_then(|b| {
+        let tol = (b.body.size() * 1e-3).max(1e-3);
+        b.body.faces(tol).ok()?.into_iter().find(|f| f.index == face).map(|f| f.centroid)
+    });
+    FACE_MIDDLE.with(|c| *c.borrow_mut() = Some((st.clone(), body.to_string(), face, found)));
+    found
+}
+
 /// A center pivot pole, made at once: a construction axis through the middle of the selection, to
 /// revolve, pattern or turn things round. One flat face gets a pole through its centroid, square
 /// to it; one body gets an upright pole (along Z) through the centre of its box. `None` for any
@@ -167,7 +189,8 @@ pub(crate) fn booleans(app: &SolveApp) -> Vec<Item> {
 pub(crate) fn pole(app: &SolveApp) -> Option<Item> {
     let (id, params, of) = match app.session.selection.as_slice() {
         [Sel::Face { body, index, point }] => {
-            let (centroid, _) = crate::dialogs::planar_face(&app.session, body, *index)?;
+            crate::dialogs::planar_face(&app.session, body, *index)?;
+            let centroid = face_middle(app, body, *index)?;
             let params = json!({
                 "face": {"face": [point.x, point.y, point.z]},
                 "point": {"point": [centroid.x, centroid.y, centroid.z]},

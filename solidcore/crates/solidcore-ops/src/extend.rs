@@ -1,21 +1,37 @@
-//! Extend: a one-face sheet continued past the side of its surface's box that one of its edges
-//! runs along, by a distance measured across that side, as the kernel's exact extension
-//! ([`Surface::extended_by_distance`]) makes it. Ops chooses the side the edge is, checks the
-//! sheet is its surface's whole box, sequences the kernel's calls and carries the face's and
-//! sides' attributes onto the new sheet; it computes nothing.
+//! Extend: a sheet continued past the side of its surface's box that one of its edges runs
+//! along, by a distance measured across that side, as the kernel's exact extension
+//! ([`Surface::extended_by_distance`]) makes it. One entry takes any sheet and routes it to the
+//! one path that fits it:
+//! - a sheet of one face: that face;
+//! - several faces that are the pieces of one surface (the kernel's [`one_surface`]): that
+//!   surface, extended once and cut again where the faces were ([`sheet_of`]);
+//! - plane faces that merge into one plane face (the kernel's [`merged_faces`]): that face;
+//! - otherwise one side across a curved face and the plane faces beside it (the kernel's
+//!   [`extended_side`]), which refuses any other sheet with its reason.
+//!
+//! Ops chooses the route and the side the edge is, checks each face is its surface's whole box,
+//! sequences the kernel's calls and carries the faces' and sides' attributes onto the new sheet;
+//! it computes nothing.
+//!
+//! A face on a surface that goes on past its trims (a plane: [`Surface::reaches_past_trims`])
+//! is extended by growing its trim within it instead, as the kernel's
+//! [`extend_trim`] makes it: the edge moved outward by the distance, its neighbours carried
+//! along their tangents to meet it, its holes kept; every continuation is the plane itself.
 //!
 //! The edge is a record index ([`Order`]); which edge a pick means is the application's.
 
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::kernel::Kernel;
 use solidcore::query::api_queries::edge_closest_point;
-use solidcore::surface::extend::{Continuity, ExtendRefusal};
+use solidcore::surface::extend::{Continuity, ExtendRefusal, Extended};
 use solidcore::surface::side::BoxSide;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::p1 as brep_p1;
-use solidcore::topology::brep::sheet::sheet_on;
+use solidcore::topology::brep::sheet::{merged_faces, one_surface, sheet_of, sheet_on, Pieces};
+use solidcore::topology::brep::side_extend::extended_side;
+use solidcore::topology::brep::trim_extend::extend_trim;
 use solidcore::topology::face::{p1 as face_p1, p2 as face_p2, p4 as face_p4};
-use solidcore::topology::{Brep, EdgeId};
+use solidcore::topology::{Brep, EdgeId, FaceId};
 use solidcore::{EntityRef, SolidError};
 use solidcore_convert::brep::Order;
 
@@ -134,20 +150,138 @@ fn refused(e: SolidError) -> Error {
     }
 }
 
-/// The one-face sheet `sheet` continued `distance` past the side of its surface's box that
-/// record edge `edge` runs along (all of it), as `how` says: a new sheet on the extended surface,
-/// its face and sides carrying the attributes of the face and sides they continue, facing the
-/// way the old face did. `sheet` is unchanged.
+/// How near a point must be to an edge to be on it: ten of the body's tolerance.
+#[allow(
+    clippy::float_arithmetic,
+    reason = "a tolerance ops chooses: ten of the body's"
+)]
+fn near(b: &Brep) -> f64 {
+    10.0 * b.tolerance().max(1e-9)
+}
+
+/// The side of `surf`'s face box `dom` that `picked` runs along all of, each side not collapsed
+/// a side of the face (on its `edges`).
+fn grown_side(
+    k: &Kernel,
+    b: &Brep,
+    surf: &Surface,
+    dom: &Extent2d,
+    edges: &[EdgeId],
+    picked: EdgeId,
+    on: f64,
+) -> solidcore::Result<Result<BoxSide>> {
+    let mut grow = None;
+    for s in BoxSide::ALL {
+        match collapsed(k, surf, dom, s, on)? {
+            Err(e) => return Ok(Err(e)),
+            Ok(true) => continue,
+            Ok(false) => {}
+        }
+        if !on_edges(k, b, surf, dom, s, edges, on)? {
+            return Ok(Err(Error::Unsupported(
+                "a side of the box that is not a side of the face",
+            )));
+        }
+        if on_edges(k, b, surf, dom, s, &[picked], on)? {
+            grow = Some(s);
+        }
+    }
+    Ok(grow.ok_or(Error::Unsupported(
+        "an edge that is not all of one side of the box",
+    )))
+}
+
+/// A face and what its sides are found on: its surface, its box, its edges and how near a point
+/// must be to an edge to be on it.
+struct Sides<'a> {
+    b: &'a Brep,
+    surf: &'a Surface,
+    dom: &'a Extent2d,
+    edges: &'a [EdgeId],
+    on: f64,
+}
+
+/// Each side of `was` (not collapsed) gives its edge's attributes to the edge on the side of
+/// `now` (a face of `r`) that `mapped` says it is on.
+fn carry_sides(
+    k: &Kernel,
+    was: &Sides<'_>,
+    r: &mut Brep,
+    now: (&Surface, &Extent2d, &[EdgeId]),
+    mapped: [BoxSide; 4],
+) -> solidcore::Result<()> {
+    let (surf, dom, made) = now;
+    let new_on = near(r);
+    for (s, to_s) in BoxSide::ALL.into_iter().zip(mapped) {
+        // a collapsed side has no edge of its own
+        if !matches!(collapsed(k, was.surf, was.dom, s, was.on)?, Ok(false)) {
+            continue;
+        }
+        let from = side_edge(k, was.b, was.surf, was.dom, s, was.edges, was.on)?;
+        // the side the kernel says side s is on in the result's parameters
+        let to = side_edge(k, r, surf, dom, to_s, made, new_on)?;
+        if let (Some(from), Some(to)) = (from, to) {
+            copy_attributes(was.b, EntityRef::Edge(from), r, EntityRef::Edge(to))?;
+        }
+    }
+    Ok(())
+}
+
+/// The kernel's extension as the operation's answer: the surface and where each side went, no
+/// effect, or the refusal.
+fn extension(
+    made: solidcore::Result<Option<Extended>>,
+) -> solidcore::Result<Result<(Surface, [BoxSide; 4])>> {
+    match made {
+        Ok(Some(e)) => {
+            let mapped = BoxSide::ALL.map(|s| e.side_of(s));
+            Ok(Ok((e.surface, mapped)))
+        }
+        // a distance below the side's resolution is no extension: the sheet would come back
+        // as it is, which is not what was asked
+        Ok(None) => Ok(Err(Error::NoEffect)),
+        Err(e) if e.is_unported() || e.is_cancelled() => Err(e),
+        Err(e) => Ok(Err(refused(e))),
+    }
+}
+
+/// The sheet `sheet` continued `distance` past the side of its surface's box that record edge
+/// `edge` runs along, as `how` says: a new sheet, `sheet` unchanged. Its faces and sides carry
+/// the attributes of the faces and sides they continue, each face facing the way it did.
+///
+/// - A sheet of one face: the edge all of one side of the face, its surface's whole box; the
+///   face continued on its surface extended. A face on a surface that goes on past its trims (a
+///   plane) is extended by growing its trim ([`extend_trim`]: the edge, on its outer loop, moved
+///   `distance` outward, its neighbours carried along their tangents), the same for every `how`.
+/// - A sheet of several faces that are the pieces of one surface, as the kernel splits a
+///   surface into faces ([`one_surface`]: a skin through a section with a double knot is two
+///   faces): the edge all of one side of its face, that side on the side of the surface's whole
+///   box. The surface is extended once, the distance met at the picked edge's face, and cut
+///   again where the faces were ([`sheet_of`]): the whole side grows, every face along it with
+///   it, and the faces stay as they were split, their seams one edge each.
+/// - A sheet of plane faces that merge into one plane face ([`merged_faces`]: a flat sheet the
+///   skin split into faces): that face, the edge the one it is now part of, its trim grown as a
+///   one-face plane's.
+/// - Any other sheet: one side across a curved face and the plane faces beside it
+///   ([`extended_side`]: an arch on straight legs), the edge the curved face's or a plane's
+///   beside it; the seams stay one edge each.
 ///
 /// # Errors
 /// - [`Error::Argument`]: a distance not finite and positive, an edge past the record's list or
-///   not the face's;
-/// - [`Error::Unsupported`] (with what): not one face with one loop that is its surface's whole box, the edge
-///   not all of one side, a side whose collapse is undecided, a surface with no exact extension;
+///   not the sheet's (on a plane, not on its face's outer loop);
+/// - [`Error::Unsupported`] (with what): a sheet with no faces, plane faces that do not merge
+///   into one, a face with holes or that is not its surface's whole box, the edge not all of one
+///   side, or between two faces, a side whose collapse is undecided, a surface with no exact
+///   extension; on a plane, the trim refused ([`extend_trim`]: a neighbour that never meets the
+///   moved edge, neighbours that cross, a moved edge crossing the others); across a curved face
+///   and the planes beside it, the sheet not that ([`extended_side`]'s refusals: a plane's edge
+///   that does not run on into a curved face, faces beyond the curved face and the planes beside
+///   it, a curved face that is not a B-spline);
 /// - [`Error::TooFar`]: a weight would vanish, a pole, the apex or a full turn be reached, or
 ///   the length not be measurable to the kernel's stop within the distance (with the longest
 ///   that works, when the kernel names one);
-/// - [`Error::NotExact`]: the distance not met to the kernel's stop, no shorter one named;
+/// - [`Error::NotExact`]: the distance not met to the kernel's stop, no shorter one named; on a
+///   plane, a spline edge's offset not within a tenth of the tolerance;
 /// - [`Error::NoEffect`]: the distance below the side's resolution (the shortest extension its
 ///   knot can carry is proved longer): no extension, the sheet would be returned as it is;
 /// - the kernel's errors.
@@ -170,96 +304,249 @@ pub fn extend_sheet(
     // the sheet is only read: the result is a new body, and the record's edge is the sheet's own
     read_body("extend_sheet", sheet, |k, b| {
         let faces = brep_p1::faces(b, None)?;
-        let [f] = faces.as_slice() else {
-            return Ok(Err(Error::Unsupported("a sheet of more than one face")));
-        };
-        let f = *f;
-        let Some(surf) = face_p2::surface(b, f)?.cloned() else {
-            return Ok(Err(Error::Unsupported("a face with no surface")));
-        };
-        if face_p2::loops(b, f, false, None)?.len() != 1 {
-            return Ok(Err(Error::Unsupported("a face with holes")));
+        match faces.as_slice() {
+            [] => return Ok(Err(Error::Unsupported("a sheet with no faces"))),
+            [f] => return one_face(k, b, *f, picked, how, distance),
+            _ => {}
         }
-        let edges = face_p4::edges(b, f, None, false, None)?;
-        if !edges.contains(&picked) {
+        if let Some(pieces) = one_surface(k, b)? {
+            return pieces_extended(k, b, &pieces, picked, how, distance);
+        }
+        let mut planes = true;
+        for &f in &faces {
+            planes = planes && face_p2::surface(b, f)?.is_some_and(Surface::reaches_past_trims);
+        }
+        if planes {
+            merged_extended(k, b, picked, how, distance)
+        } else {
+            side_extended(k, b, &faces, picked, how, distance)
+        }
+    })
+    .and_then(|r| r.map(Body::new))
+}
+
+/// [`extend_sheet`] on a sheet of one face `f`.
+fn one_face(
+    k: &mut Kernel,
+    b: &Brep,
+    f: FaceId,
+    picked: EdgeId,
+    how: Continuity,
+    distance: f64,
+) -> solidcore::Result<Result<Brep>> {
+    let Some(surf) = face_p2::surface(b, f)?.cloned() else {
+        return Ok(Err(Error::Unsupported("a face with no surface")));
+    };
+    // a surface that goes on past its trims (a plane) grows the trim within itself, the
+    // same for every continuation; its face's holes are kept
+    if surf.reaches_past_trims() {
+        // the trim grows past an edge of its outer loop, not of a hole
+        if !face_p4::edges(b, f, None, true, None)?.contains(&picked) {
             return Ok(Err(Error::Argument));
         }
-        #[allow(
-            clippy::float_arithmetic,
-            reason = "a tolerance ops chooses: ten of the body's"
-        )]
-        let on = 10.0 * b.tolerance().max(1e-9);
-        let dom = face_p2::uv_domain(b, f)?;
-        // the face is its surface's whole box, as the kernel's extension decides it
-        if !surf.is_whole_box(k, &dom)? {
-            return Ok(Err(Error::Unsupported(
-                "a face that is not its surface's whole box",
-            )));
-        }
-        let mut grow = None;
-        for s in BoxSide::ALL {
-            match collapsed(k, &surf, &dom, s, on)? {
-                Err(e) => return Ok(Err(e)),
-                Ok(true) => continue,
-                Ok(false) => {}
-            }
-            if !on_edges(k, b, &surf, &dom, s, &edges, on)? {
-                return Ok(Err(Error::Unsupported(
-                    "a side of the box that is not a side of the face",
-                )));
-            }
-            if on_edges(k, b, &surf, &dom, s, &[picked], on)? {
-                grow = Some(s);
-            }
-        }
-        let Some(grow) = grow else {
-            return Ok(Err(Error::Unsupported(
-                "an edge that is not all of one side of the box",
-            )));
-        };
-        // a distance below the side's resolution is no extension: the sheet would come back
-        // as it is, which is not what was asked
-        let (grown, mapped) = match surf.extended_by_distance(k, &dom, grow, how, distance) {
-            Ok(Some(e)) => {
-                let mapped = BoxSide::ALL.map(|s| e.side_of(s));
-                (e.surface, mapped)
-            }
-            Ok(None) => return Ok(Err(Error::NoEffect)),
+        let made = match extend_trim(k, b, f, picked, distance) {
+            Ok(made) => made,
             Err(e) if e.is_unported() || e.is_cancelled() => return Err(e),
             Err(e) => return Ok(Err(refused(e))),
         };
-        let grown_eval = grown.copy(k)?;
-        let (mut r, nf) = sheet_on(k, grown, b.tolerance())?;
-        // the face and each side stand for the face and side they continue
-        copy_attributes(b, EntityRef::Face(f), &mut r, EntityRef::Face(nf))?;
-        let made = face_p4::edges(&r, nf, None, false, None)?;
-        #[allow(
-            clippy::float_arithmetic,
-            reason = "a tolerance ops chooses: ten of the body's"
-        )]
-        let new_on = 10.0 * r.tolerance().max(1e-9);
-        let rdom = face_p2::uv_domain(&r, nf)?;
-        for (s, to_s) in BoxSide::ALL.into_iter().zip(mapped) {
-            // a collapsed side has no edge of its own
-            if !matches!(collapsed(k, &surf, &dom, s, on)?, Ok(false)) {
-                continue;
-            }
-            let from = side_edge(k, b, &surf, &dom, s, &edges, on)?;
-            // the side the kernel says side s is on in the result's parameters
-            let to = side_edge(k, &r, &grown_eval, &rdom, to_s, &made, new_on)?;
-            if let (Some(from), Some(to)) = (from, to) {
-                copy_attributes(b, EntityRef::Edge(from), &mut r, EntityRef::Edge(to))?;
-            }
+        let mut r = made.brep;
+        copy_attributes(b, EntityRef::Face(f), &mut r, EntityRef::Face(made.face))?;
+        for (from, to) in made.edges {
+            copy_attributes(b, EntityRef::Edge(from), &mut r, EntityRef::Edge(to))?;
         }
-        // the new face faces the way the old one did
-        if let (Some(was), Some(now)) = (upward(b, f)?, upward(&r, nf)?) {
+        return finish(k, r, Expect::FACES);
+    }
+    if face_p2::loops(b, f, false, None)?.len() != 1 {
+        return Ok(Err(Error::Unsupported("a face with holes")));
+    }
+    let edges = face_p4::edges(b, f, None, false, None)?;
+    if !edges.contains(&picked) {
+        return Ok(Err(Error::Argument));
+    }
+    let on = near(b);
+    let dom = face_p2::uv_domain(b, f)?;
+    // the face is its surface's whole box, as the kernel's extension decides it
+    if !surf.is_whole_box(k, &dom)? {
+        return Ok(Err(Error::Unsupported(
+            "a face that is not its surface's whole box",
+        )));
+    }
+    let grow = match grown_side(k, b, &surf, &dom, &edges, picked, on)? {
+        Ok(s) => s,
+        Err(e) => return Ok(Err(e)),
+    };
+    let (grown, mapped) = match extension(surf.extended_by_distance(k, &dom, grow, how, distance))?
+    {
+        Ok(made) => made,
+        Err(e) => return Ok(Err(e)),
+    };
+    let grown_eval = grown.copy(k)?;
+    let (mut r, nf) = sheet_on(k, grown, b.tolerance())?;
+    // the face and each side stand for the face and side they continue
+    copy_attributes(b, EntityRef::Face(f), &mut r, EntityRef::Face(nf))?;
+    let made = face_p4::edges(&r, nf, None, false, None)?;
+    let rdom = face_p2::uv_domain(&r, nf)?;
+    let was = Sides {
+        b,
+        surf: &surf,
+        dom: &dom,
+        edges: &edges,
+        on,
+    };
+    carry_sides(k, &was, &mut r, (&grown_eval, &rdom, &made), mapped)?;
+    // the new face faces the way the old one did
+    if let (Some(was), Some(now)) = (upward(b, f)?, upward(&r, nf)?) {
+        if was != now {
+            face_p1::flip_face_orientation(&mut r, nf)?;
+        }
+    }
+    finish(k, r, Expect::FACES)
+}
+
+/// [`extend_sheet`] on a sheet whose faces are the pieces of one surface (`pieces`).
+fn pieces_extended(
+    k: &mut Kernel,
+    b: &Brep,
+    pieces: &Pieces,
+    picked: EdgeId,
+    how: Continuity,
+    distance: f64,
+) -> solidcore::Result<Result<Brep>> {
+    // the face the picked edge bounds, and its side the edge is all of
+    let mut at = None;
+    for &(f, dom) in &pieces.faces {
+        let edges = face_p4::edges(b, f, None, false, None)?;
+        if edges.contains(&picked) {
+            at = Some((f, dom, edges));
+            break;
+        }
+    }
+    let Some((f, dom, edges)) = at else {
+        return Ok(Err(Error::Argument));
+    };
+    let Some(surf) = face_p2::surface(b, f)?.cloned() else {
+        return Ok(Err(Error::Unsupported("a face with no surface")));
+    };
+    let on = near(b);
+    let grow = match grown_side(k, b, &surf, &dom, &edges, picked, on)? {
+        Ok(s) => s,
+        Err(e) => return Ok(Err(e)),
+    };
+    // a side inside the whole box is a seam, which two faces share
+    if !pieces.on_side(&dom, grow) {
+        return Ok(Err(Error::Unsupported("an edge between two faces")));
+    }
+    // the one surface extended once, the distance met at the picked edge's face
+    let made = pieces
+        .surface
+        .extended_by_distance_at(k, &pieces.whole, &dom, grow, how, distance);
+    let (grown, mapped) = match extension(made)? {
+        Ok(made) => made,
+        Err(e) => return Ok(Err(e)),
+    };
+    // cut again where the faces were, each new face in the order of the old
+    let (mut r, made) = sheet_of(k, grown, &pieces.u_cuts, &pieces.v_cuts, b.tolerance())?;
+    if made.len() != pieces.faces.len() {
+        return Ok(Err(Error::Unsupported(
+            "the surface cut again is not as many faces",
+        )));
+    }
+    for (&(old, old_dom), &(new, new_dom)) in pieces.faces.iter().zip(&made) {
+        let (Some(old_surf), Some(new_surf)) = (
+            face_p2::surface(b, old)?.cloned(),
+            face_p2::surface(&r, new)?.cloned(),
+        ) else {
+            return Ok(Err(Error::Unsupported("a face with no surface")));
+        };
+        copy_attributes(b, EntityRef::Face(old), &mut r, EntityRef::Face(new))?;
+        let old_edges = face_p4::edges(b, old, None, false, None)?;
+        let new_edges = face_p4::edges(&r, new, None, false, None)?;
+        let was = Sides {
+            b,
+            surf: &old_surf,
+            dom: &old_dom,
+            edges: &old_edges,
+            on,
+        };
+        carry_sides(k, &was, &mut r, (&new_surf, &new_dom, &new_edges), mapped)?;
+        // each new face faces the way the old one did
+        if let (Some(was), Some(now)) = (upward(b, old)?, upward(&r, new)?) {
             if was != now {
-                face_p1::flip_face_orientation(&mut r, nf)?;
+                face_p1::flip_face_orientation(&mut r, new)?;
             }
         }
-        finish(k, r, Expect::FACES)
-    })
-    .and_then(|r| r.map(Body::new))
+    }
+    finish(k, r, Expect::FACES)
+}
+
+/// [`extend_sheet`] on a sheet of plane faces: merged where they are one face
+/// ([`merged_faces`]), and the one plane face they make extended as one face is, the picked edge
+/// the one it is now part of.
+fn merged_extended(
+    k: &mut Kernel,
+    b: &Brep,
+    picked: EdgeId,
+    how: Continuity,
+    distance: f64,
+) -> solidcore::Result<Result<Brep>> {
+    let merged = merged_faces(k, b)?;
+    let faces = brep_p1::faces(&merged.brep, None)?;
+    let [f] = faces.as_slice() else {
+        return Ok(Err(Error::Unsupported(
+            "plane faces that do not merge into one",
+        )));
+    };
+    let edge = match merged.edges.iter().find(|&&(was, _)| was == picked) {
+        None => return Ok(Err(Error::Argument)),
+        // removed between two faces merged into one
+        Some(&(_, None)) => return Ok(Err(Error::Unsupported("an edge between two faces"))),
+        Some(&(_, Some(now))) => now,
+    };
+    one_face(k, &merged.brep, *f, edge, how, distance)
+}
+
+/// [`extend_sheet`] on any other sheet of `faces`: one side across a curved face and the plane
+/// faces beside it ([`extended_side`]), each new face and edge standing for the one it continues.
+fn side_extended(
+    k: &mut Kernel,
+    b: &Brep,
+    faces: &[FaceId],
+    picked: EdgeId,
+    how: Continuity,
+    distance: f64,
+) -> solidcore::Result<Result<Brep>> {
+    // the face the picked edge bounds
+    let mut at = None;
+    for &f in faces {
+        if face_p4::edges(b, f, None, false, None)?.contains(&picked) {
+            at = Some(f);
+            break;
+        }
+    }
+    let Some(f) = at else {
+        return Ok(Err(Error::Argument));
+    };
+    let made = match extended_side(k, b, f, picked, how, distance) {
+        Ok(Some(made)) => made,
+        // a distance below the side's resolution is no extension
+        Ok(None) => return Ok(Err(Error::NoEffect)),
+        Err(e) if e.is_unported() || e.is_cancelled() => return Err(e),
+        Err(e) => return Ok(Err(refused(e))),
+    };
+    let mut r = made.brep;
+    for &(old, new) in &made.faces {
+        copy_attributes(b, EntityRef::Face(old), &mut r, EntityRef::Face(new))?;
+        // each new face faces the way the old one did
+        if let (Some(was), Some(now)) = (upward(b, old)?, upward(&r, new)?) {
+            if was != now {
+                face_p1::flip_face_orientation(&mut r, new)?;
+            }
+        }
+    }
+    for (old, new) in made.edges.iter().filter_map(|&(o, n)| n.map(|n| (o, n))) {
+        copy_attributes(b, EntityRef::Edge(old), &mut r, EntityRef::Edge(new))?;
+    }
+    finish(k, r, Expect::FACES)
 }
 
 #[cfg(test)]
