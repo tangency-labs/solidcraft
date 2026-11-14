@@ -952,6 +952,7 @@ copied into SolidCraft.
 
 | Directory | Source | Licence | Changes |
 |---|---|---|---|
+| vendor/gpu-allocator | gpu-allocator 0.28.0, https://github.com/Traverse-Research/gpu-allocator (Traverse Research and contributors) | MIT OR Apache-2.0 | Vulkan upload memory (`CpuToGpu`) prefers system RAM over BAR-mapped VRAM (vendor/README.md) |
 
 ## Vendored renderer compatibility fix
 
