@@ -183,7 +183,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             }
                             solidcraft_engine::plugin::UiSlot::Ribbon { name } => (
                                 "prefs.plugin_slot_ribbon",
-                                crate::toolbar::ribbon_label(app, crate::plugin_slots::ribbon_name(name).unwrap_or("MODEL")),
+                                // A tab the app doesn't have: the entry goes in the Plugins group.
+                                crate::plugin_slots::ribbon_name(name)
+                                    .map_or_else(|| tr("ui.plugins").to_string(), |tab| crate::toolbar::ribbon_label(app, tab)),
                             ),
                         };
                         ui_kit::text(ui, &format(key, &[("name", &name)]), ui_kit::Text::Hint("plugin_entry_slot"));
