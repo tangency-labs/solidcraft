@@ -2,8 +2,8 @@ use serde_json::{Value, json};
 
 use super::{
     ChainParams, ChainResult, ConstructionParams, ConstructionResult, CreateParams, CreateResult, DeleteParams, DeleteResult, DimensionTextParams,
-    DimensionTextResult, DragEndParams, DragEndResult, DragParams, DragResult, MovePointParams, MovePointResult, OptionsParams, OptionsReply,
-    OptionsResult, SketchOptions, SolveParams, SolveResult,
+    DimensionTextResult, DragEndParams, DragEndResult, DragParams, DragResult, MovePointParams, MovePointResult, MovePointsParams, MovePointsResult,
+    OptionsParams, OptionsReply, OptionsResult, SketchOptions, SolveParams, SolveResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, conforms};
@@ -52,6 +52,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ConstructionParams>(), &["curves", "sketch", "value"]);
     assert_keys(input_schema_for::<DeleteParams>(), &["entities", "sketch"]);
     assert_keys(input_schema_for::<MovePointParams>(), &["point", "sketch", "to"]);
+    assert_keys(input_schema_for::<MovePointsParams>(), &["moves", "sketch", "tolerance"]);
     assert_keys(input_schema_for::<DragParams>(), &["entity", "from", "live", "sketch", "to", "with"]);
     assert_keys(input_schema_for::<DragEndParams>(), &["constraint", "sketch"]);
     assert_keys(input_schema_for::<DimensionTextParams>(), &["at", "dimension", "reset", "sketch"]);
@@ -129,6 +130,25 @@ fn strict_keeps_todays_errors() {
         ("sketch.move_point", json!({"to": null, "point": "origin"})),
         ("sketch.move_point", json!({"to": [1], "point": "origin"})),
         ("sketch.move_point", json!({"to": [1, 2], "point": "nope"})),
+        ("sketch.move_points", json!({})),
+        ("sketch.move_points", json!({"moves": []})),
+        ("sketch.move_points", json!({"moves": null})),
+        ("sketch.move_points", json!({"moves": "origin"})),
+        ("sketch.move_points", json!({"moves": [{"point": "origin"}]})),
+        ("sketch.move_points", json!({"moves": [{"to": "x", "point": "origin"}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1], "point": "origin"}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2]}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": 5}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": null}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "near": null}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "near": [1]}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "near": [1, 2], "point": 5}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "nope"}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "origin"}], "tolerance": 0})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "origin"}], "tolerance": -1})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "origin"}], "tolerance": "a bit"})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "origin"}], "sketch": 99})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "origin"}], "sketch": "nope"})),
         ("sketch.drag", json!({})),
         ("sketch.drag", json!({"to": [1, 2]})),
         ("sketch.drag", json!({"to": [1, 2], "entity": 3})),
@@ -164,6 +184,14 @@ fn strict_keeps_todays_errors() {
         ("sketch.solve", json!({"sketch": true})),
         ("sketch.solve", json!({"sketch": 99})),
         ("sketch.solve", json!({"sketch": "nope"})),
+    ]);
+    // What only the design can tell keeps its message too: two points as close to `near`, none
+    // within `tolerance`, and more moves than the sketch has points. The last is not a length the
+    // schema could state: it is the number of points of the sketch being edited.
+    assert_strict_keeps_todays_errors(&[
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "near": [0, -10]}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "near": [0, -10]}], "tolerance": 10.5})),
+        ("sketch.move_points", json!({"moves": (0..9).map(|_| json!({"to": [1, 2], "point": "origin"})).collect::<Vec<_>>()})),
     ]);
 }
 
@@ -236,6 +264,28 @@ fn the_types_read_each_key_as_the_handler_does() {
     assert!(messages("sketch.drag", json!({"entity": "l1", "to": {"x": 1, "y": 2}, "from": [0, 0], "with": ["l2", "p3"], "live": false})).is_empty());
     assert_eq!(messages("sketch.drag", json!({"entity": "l1", "to": [1, 2], "live": 1})), ["`live` must be true or false"]);
 
+    // sketch.move_points: every entry needs `to`; the point is `near` when that key is there, and
+    // the handler never looks at `point` then.
+    assert!(messages("sketch.move_points", json!({"moves": [{"point": "origin", "to": [0, 0]}]})).is_empty());
+    assert!(
+        messages("sketch.move_points", json!({"moves": [{"near": [1, 2], "to": {"x": 3, "y": 4}}], "tolerance": null, "sketch": null})).is_empty()
+    );
+    assert!(messages("sketch.move_points", json!({"moves": [{"near": [1, 2], "to": [3, 4], "point": 5}], "tolerance": 0.2})).is_empty());
+    assert!(messages("sketch.move_points", json!({"moves": [{"point": "origin", "to": [0, 0], "bogus": 1}]})).is_empty());
+    assert_eq!(messages("sketch.move_points", json!({"moves": []})), ["`moves` must be a list of {point | near, to}"]);
+    assert_eq!(messages("sketch.move_points", json!({"moves": "origin"})), ["`moves` must be a list of {point | near, to}"]);
+    assert_eq!(messages("sketch.move_points", json!({"moves": [{"point": "origin"}]})), ["moves[0]: `to` must be a point [x, y]"]);
+    assert_eq!(messages("sketch.move_points", json!({"moves": [{"to": [1], "point": "origin"}]})), ["moves[0]: `to` must be a point [x, y]"]);
+    assert_eq!(messages("sketch.move_points", json!({"moves": [{"to": [1, 2], "near": null}]})), ["moves[0]: `near` must be a point [x, y]"]);
+    assert_eq!(messages("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": 5}]})), ["`point` must be a point reference"]);
+    assert_eq!(
+        messages("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "origin"}, {"to": [1, 2], "point": 5}]})),
+        ["`point` must be a point reference"],
+    );
+    assert_eq!(messages("sketch.move_points", json!({"moves": [{"to": [1, 2]}], "tolerance": 0})), ["`tolerance` must be a positive length (mm)"]);
+    assert_eq!(messages("sketch.move_points", json!({"moves": [{"to": [1, 2]}], "tolerance": 1e9})), ["`tolerance` must be a positive length (mm)"]);
+    assert!(messages("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "origin"}], "tolerance": 999_999_999.0})).is_empty());
+
     // sketch.drag_end: a constraint only when it is not `null`; its params are the command's own.
     assert!(messages("sketch.drag_end", json!({"constraint": null, "sketch": null})).is_empty());
     assert!(messages("sketch.drag_end", json!({"constraint": {"command": "sketch.constraint.fix", "params": {"point": "origin"}}})).is_empty());
@@ -269,6 +319,7 @@ fn what_the_types_accept_the_handlers_run() {
         ("sketch.options", json!({"show_points": null, "grid": null})),
         ("sketch.construction", json!({"curves": bottom, "value": null})),
         ("sketch.move_point", json!({"point": "origin", "to": {"x": 0, "y": 0}})),
+        ("sketch.move_points", json!({"moves": [{"point": "origin", "to": [0, 0]}, {"near": [10, -10], "to": [10, -10]}], "tolerance": null})),
         ("sketch.drag", json!({"entity": bottom, "to": [0, -10], "from": null, "with": null, "live": null})),
         ("sketch.drag_end", json!({"constraint": null})),
         ("sketch.create", json!({"plane": "XY", "frame": null, "flip": false, "project_edges": "ignored"})),
@@ -333,6 +384,21 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"to": [1, 2]}), false),
             (json!({"point": "p1"}), false),
             (json!({"point": 3, "to": [1, 2]}), false),
+        ],
+    );
+    takes(
+        input_schema_for::<MovePointsParams>(),
+        &[
+            (json!({"moves": [{"point": "p1", "to": [1, 2]}]}), true),
+            (json!({"moves": [{"near": [1, 2], "to": {"x": 3, "y": 4}}], "tolerance": 0.2, "sketch": "S"}), true),
+            (json!({"moves": [{"point": "p1", "to": [1, 2]}], "tolerance": null}), true),
+            (json!({"moves": [{"point": "p1", "to": [1, 2], "near": [1, 2]}]}), true),
+            (json!({}), false),
+            (json!({"moves": []}), false),
+            (json!({"moves": [{"point": "p1"}]}), false),
+            (json!({"moves": [{"to": [1, 2]}]}), false),
+            (json!({"moves": [{"point": "p1", "to": [1, 2]}], "tolerance": 0}), false),
+            (json!({"moves": [{"point": "p1", "to": [1, 2]}], "tolerance": -0.5}), false),
         ],
     );
     takes(
@@ -484,6 +550,21 @@ fn editing_replies_match_the_output_schema() {
     let r = run(&mut s, "sketch.construction", json!({"curves": bottom, "value": false, "sketch": sketch}));
     assert!(r["construction"] == false && r["changed"] == 1, "{r}");
     matches(output_schema_for::<ConstructionResult>(), "sketch.construction", &r);
+
+    let r = run(
+        &mut s,
+        "sketch.move_points",
+        json!({"moves": [{"point": "origin", "to": [0, 0]}, {"near": [10, -10], "to": [10, -10]}], "tolerance": 0.5}),
+    );
+    let moved = r["moved"].as_array().cloned().unwrap_or_default();
+    assert_eq!(moved.len(), 2, "{r}");
+    assert_eq!(moved[0]["point"], json!("origin"), "{r}");
+    assert!(moved[1]["point"].is_string(), "{r}");
+    assert!(moved.iter().all(|m| m["to"].is_array() && m["at"].is_array() && m["reached"].is_boolean()), "{r}");
+    assert!(r["sketch"].is_object(), "{r}");
+    matches(output_schema_for::<MovePointsResult>(), "sketch.move_points", &r);
+    let r = run(&mut s, "sketch.move_points", json!({"moves": [{"point": "origin", "to": [0, 0]}], "sketch": sketch}));
+    matches(output_schema_for::<MovePointsResult>(), "sketch.move_points", &r);
 
     let r = run(&mut s, "sketch.move_point", json!({"point": format!("{bottom}.start"), "to": [-12, -10]}));
     assert!(r["sketch"].is_object(), "{r}");

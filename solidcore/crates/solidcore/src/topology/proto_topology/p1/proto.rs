@@ -32,6 +32,8 @@ use crate::topology::{edge, vertex, vertexuse, Brep, EdgeId, VertexId};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 
 const OP: &str = "topology::proto_topology::p1";
+const OP_REMOVE_COINCIDENT: &str =
+    "topology::proto_topology::p1::remove_coincident_no_edge_proto_vertex";
 
 /// The factor of `CanCombineEdgeDefinitions`: the distance allowed between the curves of
 /// two combinable edge definitions, in units of their summed tolerances (upstream's).
@@ -3750,12 +3752,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// proto vertex is unlisted, not deleted). As upstream, `true` is also returned,
     /// with nothing removed, when the point solve fails or finds nothing (upstream
     /// returns `SM_SUCCESS` from its `SmBoolean` function there), unless
-    /// `Kernel::fixes.proto_vertex_miss_is_false` is set (WR-73, then `false`).
+    /// `Kernel::fixes.proto_vertex_miss_is_false` is set (WR-73, then `false`). With that
+    /// opt-in a proto vertex that has proto edges is `false` without its point solve (not
+    /// upstream: no outcome of the solve gives another answer).
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] for deleted objects or a missing curve;
-    /// [`SolidError::Unported`] from the point solve.
+    /// [`SolidError::Unported`] and [`SolidError::Cancelled`] from the point solve, where it
+    /// runs (it runs for every proto vertex under an already-fired cancel token).
     pub fn remove_coincident_no_edge_proto_vertex(
         &mut self,
         k: &Kernel,
@@ -3784,11 +3789,31 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let crv = curve_of(geometry, crv_handle)?;
         let crv_ivl = e.xsect_interval;
 
+        // (not upstream) a proto vertex with proto edges is never removed, and with
+        // `proto_vertex_miss_is_false` a miss is FALSE as well: the answer is FALSE whatever
+        // the point solve finds, so it is not run. (Without the opt-in a miss is TRUE, which
+        // ends the caller's loop over the proto edges, and the solve decides it.) A boolean
+        // of N tools in one call ran 4 N^2 - 2 N of these solves for nothing.
+        //
+        // Under an already-fired cancel token the solve runs as it did (it is where this
+        // test notices the cancel, when it builds a curve's cache; a line's or a circle's
+        // solve does not), so from the same caches the call returns what it returned. A
+        // skipped solve leaves its curve's cache cold, which a later cancelled call can
+        // show as another label or outcome; the boolean asks the token again after this
+        // step.
+        if k.fixes.proto_vertex_miss_is_false
+            && !p.proto_edges.is_empty()
+            && k.check_cancelled(OP_REMOVE_COINCIDENT).is_ok()
+        {
+            return Ok(false);
+        }
+
         // XSect ProtoEdgeCurve/ProtoVertexPosition
         let opts = GlobalPointSolveOptions {
             handle: Some(CurveHandle(crv.natural_interval())),
             ..GlobalPointSolveOptions::default()
         };
+        k.work_counters.add_proto_vertex_point_solve();
         let sols = ignored(crv.global_point_solve(
             k,
             &crv_ivl,

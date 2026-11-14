@@ -563,6 +563,80 @@ pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
     sliced(body, patch.flip, |sb| sb.split_body(&surface))
 }
 
+/// `tool`, a prism through the surface of `face` of `target` (run on past it), cut at that
+/// surface (extended), keeping the pieces that start at `start`: the planar faces square to
+/// `plane`'s normal at that height along it. Whether the start lies in air or inside the
+/// target's material does not matter, and a piece never passes the face.
+///
+/// The decision is the exact on-face test, made on the split itself: `Some(pieces)` when the
+/// profile's section lies wholly on the face (no kept piece has its own end cap at `far`, the
+/// section is not empty, and every edge of it lies on the face's surface and inside its trim,
+/// [`solidcore_ops::cap::edges_lie_on_face`]); those pieces are the result (empty: no piece
+/// starts at `start`). `None` when it does not, and the caller builds the body trim instead. It
+/// is not a failed attempt: one split is built, once, and answers both.
+///
+/// The two heights are told apart by a tolerance of the body's own, never more than a quarter of
+/// the distance between them.
+pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Option<Vec<Body>>> {
+    let (ops_target, order) = target.ops_body().ok_or_else(|| invalid("the To object is not a solid body"))?;
+    let n = plane.normal();
+    let mut out = Vec::new();
+    for part in split_body(tool, &SplitTool::Face { body: target, face })? {
+        let own = part.record().tolerance;
+        let cut = solidcore_ops::cap::PrismCut {
+            origin: a3(plane.origin),
+            normal: a3(n),
+            start,
+            far,
+            cap_tolerance: own.min(0.25 * (far - start).abs()),
+            section_tolerance: own.max(target.record().tolerance),
+        };
+        let planar: Vec<_> = (0..part.face_count())
+            .filter_map(|i| part.planar_face(i))
+            .map(|p| solidcore_ops::cap::PlanarFace { origin: a3(p.origin), normal: a3(p.normal()) })
+            .collect();
+        let (ops_part, part_order) = part.ops_body().ok_or_else(|| invalid("a piece of the prism is not a solid body"))?;
+        match solidcore_ops::cap::prism_part(ops_target, order, face, ops_part, part_order, &planar, &section_edges(&part), &cut)
+            .map_err(|e| KernelError::Failed(format!("split prism: {e}")))?
+        {
+            solidcore_ops::cap::PrismPart::Dropped => {}
+            solidcore_ops::cap::PrismPart::ReachesPast => return Ok(None),
+            solidcore_ops::cap::PrismPart::Kept => out.push(part),
+        }
+    }
+    Ok(Some(out))
+}
+
+/// Whether `body` has a planar face square to `plane`'s normal at `height` along it (a prism's
+/// cap there), by the body's own tolerance never over a quarter of `span`
+/// ([`solidcore_ops::cap::is_square_plane_at_height`]).
+pub fn has_cap_at(body: &Body, plane: &Plane, height: f64, span: f64) -> bool {
+    let tol = body.record().tolerance.min(0.25 * span.abs());
+    let n = a3(plane.normal());
+    (0..body.face_count())
+        .filter_map(|i| body.planar_face(i))
+        .any(|p| solidcore_ops::cap::is_square_plane_at_height(a3(p.origin), a3(p.normal()), a3(plane.origin), n, height, tol))
+}
+
+/// The record edges of the section a split made (the faces with no origin in the body it
+/// split).
+fn section_edges(part: &Body) -> Vec<usize> {
+    let Some(history) = part.history() else { return Vec::new() };
+    let record = part.record();
+    let mut edges = std::collections::BTreeSet::new();
+    for (face, prov) in history.faces.iter().enumerate() {
+        if !prov.origins.is_empty() {
+            continue;
+        }
+        for l in record.faces.get(face).map(|f| f.loops.as_slice()).unwrap_or_default() {
+            if let brep::Loop::Edges { edges: used } = l {
+                edges.extend(used.iter().map(|e| e.edge as usize));
+            }
+        }
+    }
+    edges.into_iter().collect()
+}
+
 const SPLIT_BODY: &str = "split body";
 
 /// `body` cut in two by `cut` (SMLib's slice of its tagged copy, giving the parts behind and in
