@@ -584,6 +584,30 @@ pub struct AmbientOcclusionResult {
     pub param_warnings: Vec<String>,
 }
 
+reads!(perspective_enabled -> bool, "enabled must be a boolean");
+
+/// `view.perspective`: draw the view in perspective or orthographic. A display setting the app
+/// keeps, not saved with the design; a sketch being edited is always drawn orthographic.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = enabled_required)]
+pub struct PerspectiveParams {
+    // Optional in the type and required in the schema (`enabled_required`), as `mode` above.
+    /// True draws the view in perspective, false orthographic.
+    #[serde(default, deserialize_with = "perspective_enabled", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub enabled: Option<bool>,
+}
+
+/// What `view.perspective` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PerspectiveResult {
+    /// Whether the view is drawn in perspective now.
+    pub enabled: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What a navigation turns the camera by.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

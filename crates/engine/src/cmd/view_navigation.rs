@@ -8,9 +8,9 @@ use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
     AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, DisplayToggleParams, DisplayToggleResult, GraphicsPreset, GraphicsPresetParams,
     GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams, LayoutResult, NavigateParams,
-    NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams, PresetQuality, RenderBrowser,
-    RenderFocus, RenderLive, RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult,
-    VisualStyle, VisualStyleParams, VisualStyleResult, ZoomTool,
+    NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams, PerspectiveParams, PerspectiveResult,
+    PresetQuality, RenderBrowser, RenderFocus, RenderLive, RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams, TabStep,
+    TabStepParams, ToolParams, ToolResult, VisualStyle, VisualStyleParams, VisualStyleResult, ZoomTool,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
@@ -30,6 +30,7 @@ const LAYOUT_CONTRACT: TypedContract<LayoutParams> = TypedContract::new();
 const HISTORY_LAYOUT_CONTRACT: TypedContract<HistoryLayoutParams> = TypedContract::new();
 const GRAPHICS_PRESET_CONTRACT: TypedContract<GraphicsPresetParams> = TypedContract::new();
 const AMBIENT_OCCLUSION_CONTRACT: TypedContract<AmbientOcclusionParams> = TypedContract::new();
+const PERSPECTIVE_CONTRACT: TypedContract<PerspectiveParams> = TypedContract::new();
 const NAVIGATE_CONTRACT: TypedContract<NavigateParams> = TypedContract::new();
 const TOOL_CONTRACT: TypedContract<ToolParams> = TypedContract::new();
 const VISUAL_STYLE_CONTRACT: TypedContract<VisualStyleParams> = TypedContract::new();
@@ -150,8 +151,8 @@ CommandSpec::new("view.ambient_occlusion", "Ambient Occlusion", crate::checked!(
     .icon("settings").noundo().doc_only().contract(&AMBIENT_OCCLUSION_CONTRACT).output(output_schema_for::<AmbientOcclusionResult>).params("enabled: bool → enabled; apply soft contact shading in the GPU viewport"),
 CommandSpec::new("view.origin_axes_across_view", "Origin Axes Across the Whole View", crate::checked!("view.origin_axes_across_view", origin_axes_across_view))
     .icon("origin").noundo().doc_only().contract(&ORIGIN_AXES_ACROSS_VIEW_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::OriginAxesAcrossViewResult>).params("enabled: bool → enabled; extend the origin axes across the view, or keep the short axes when false; display only, never opens a dialog"),
-CommandSpec::new("view.perspective", "Perspective view", perspective)
-    .icon("perspective").noundo().doc_only().params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
+CommandSpec::new("view.perspective", "Perspective view", crate::checked!("view.perspective", perspective))
+    .icon("perspective").noundo().doc_only().contract(&PERSPECTIVE_CONTRACT).output(output_schema_for::<PerspectiveResult>).params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
 CommandSpec::new("view.angle_readout", "View Angles", crate::checked!("view.angle_readout", angle_readout))
     .icon("camera").noundo().doc_only().contract(&ANGLE_READOUT_CONTRACT).output(crate::schema::output_schema_for::<crate::schema::view_navigation::AngleReadoutResult>).params("enabled: bool → enabled; show the view's pitch, yaw and roll (degrees, as view.apply's camera in radians) and Ortho or Persp under the orientation gizmo; display only, never opens a dialog"),
 CommandSpec::new("view.navigate", "Navigate View", crate::checked!("view.navigate", navigate))
@@ -1115,7 +1116,7 @@ fn ambient_occlusion(_s: &mut Session, p: &Value) -> Result<Value> {
 
 fn perspective(_s: &mut Session, p: &Value) -> Result<Value> {
     let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad("view.perspective", "enabled must be a boolean"))?;
-    Ok(json!({"enabled": enabled}))
+    typed_reply("view.perspective", PerspectiveResult { enabled, param_warnings: Vec::new() })
 }
 
 const ANGLE_READOUT_CONTRACT: crate::schema::TypedContract<crate::schema::view_navigation::AngleReadoutParams> = crate::schema::TypedContract::new();
