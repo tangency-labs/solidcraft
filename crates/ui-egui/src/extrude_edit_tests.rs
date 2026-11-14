@@ -1483,7 +1483,6 @@ fn editing_symmetric_extrude_toggles_symmetric_offset() {
     let mut h = make(json!({"direction": "symmetric", "start_offset": "4 mm"}));
     assert!(!extent(&h).symmetric_offset);
     open(&mut h);
-    h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
     h.frames(2);
     assert!(crate::scenario::handle_at("dialog:Symmetric Offset").is_some());
     h.step(&json!({"click":{"handle":"dialog:Symmetric Offset"}})).unwrap();
