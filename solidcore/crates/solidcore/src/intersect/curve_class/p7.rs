@@ -3915,8 +3915,7 @@ mod tests {
                 })
                 .collect();
             Curve::from(BSplineCurve::from_nurb(
-                NurbCurve::new(ctrl, 1, vec![0.0, 0.0, 0.125, 0.25, 0.5, 0.75, 1.0, 1.0])
-                    .unwrap(),
+                NurbCurve::new(ctrl, 1, vec![0.0, 0.0, 0.125, 0.25, 0.5, 0.75, 1.0, 1.0]).unwrap(),
                 3,
                 false,
             ))
