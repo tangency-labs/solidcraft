@@ -1604,9 +1604,8 @@ impl FilletCorner {
         Ok(())
     }
 
-    /// The start of the fork's `SmFilletNx1Corner::CalcCornerEdgeGeom` (not upstream; opt-in
-    /// `fixes.fillet_nx1_end_rib_global_merge`, WR-303, tangency-labs/solidcore#841;
-    /// tangency-labs/smlib `967f7ab`), outside a cliff overflow: see
+    /// The start of the fork's `SmFilletNx1Corner::CalcCornerEdgeGeom` (not upstream;
+    /// WR-303, tangency-labs/solidcore#841; tangency-labs/smlib `967f7ab`), outside a cliff overflow: see
     /// [`FilletCorner::drop_end_rib`]. Returns whether the rib was deleted for the global
     /// merge.
     ///
@@ -1625,9 +1624,8 @@ impl FilletCorner {
         )
     }
 
-    /// The start of the fork's `SmFilletNx1Corner::CalcCornerEdgeGeom` (not upstream; opt-in
-    /// `fixes.fillet_nx1_end_rib_global_merge`, WR-303, tangency-labs/solidcore#841;
-    /// tangency-labs/smlib `967f7ab`; in a cliff overflow, `fixes.fillet_cliff_overflow`,
+    /// The start of the fork's `SmFilletNx1Corner::CalcCornerEdgeGeom` (not upstream;
+    /// WR-303, tangency-labs/solidcore#841; tangency-labs/smlib `967f7ab`; in a cliff overflow, `fixes.fillet_cliff_overflow`,
     /// WR-631, tangency-labs/smlib `8ba4667` and `3f22e97`). At a corner of at most three
     /// edges the one corner edge is the end rib, from one rail's end on its side edge to
     /// the other's. When one rail missed its side edge (`SM_FV_NO_INT_RAIL_EU`) because
@@ -1667,8 +1665,7 @@ impl FilletCorner {
             return Ok(EndRibDrop::Kept);
         };
         let tangent_ends = tangent_ends && !cliff_overflow;
-        if !(k.fixes.fillet_nx1_end_rib_global_merge || cliff_overflow || tangent_ends)
-            || !matches!(self.kind, FilletCornerKind::NByOne | FilletCornerKind::Open)
+        if !matches!(self.kind, FilletCornerKind::NByOne | FilletCornerKind::Open)
             || pseudo.fillet_edge(end_rib)?.edge_type != FilletEdgeType::FilletXSideFace
         {
             return Ok(EndRibDrop::Kept);
@@ -1825,8 +1822,7 @@ impl FilletCorner {
         if runs_on {
             return Ok(EndRibDrop::Kept);
         }
-        // Not upstream (WR-674, `fixes.fillet_round_ends_at_tangent_continuation`,
-        // tangency-labs/solidcore#2176): the side edge the rail missed continues the filleted
+        // Not upstream (WR-674, tangency-labs/solidcore#2176): the side edge the rail missed continues the filleted
         // edge tangentially across the vertex and reaches past the fillet's width there (the
         // straight side of a plate's outline running on from a rounded corner arc): the rail
         // runs alongside it and never meets it, and no face of the body ends the round. The
@@ -1841,9 +1837,6 @@ impl FilletCorner {
                 pseudo.delete_wire_fillet_edge(k, end_rib)?;
                 self.edges.clear();
                 return Ok(EndRibDrop::OpenEnd);
-            }
-            if !k.fixes.fillet_nx1_end_rib_global_merge {
-                return Ok(EndRibDrop::Kept);
             }
         }
         if cliff_overflow {
@@ -1868,7 +1861,7 @@ impl FilletCorner {
             self.edges.clear();
             return Ok(EndRibDrop::OpenEnd);
         }
-        if both_miss || !k.fixes.fillet_nx1_end_rib_global_merge {
+        if both_miss {
             return Ok(EndRibDrop::Kept);
         }
         pseudo.delete_wire_fillet_edge(k, end_rib)?;
@@ -1879,8 +1872,7 @@ impl FilletCorner {
     /// Whether the side edge `side_edge` the rail of `miss_fv` missed at the corner's
     /// vertex `vertex` continues the filleted edge (of `fil_eu`) tangentially there, within
     /// the corner's tangency tolerance, and reaches past the fillet's width: its other vertex
-    /// lies farther from `vertex` than the other rail's end, and it is straight (WR-674,
-    /// `fixes.fillet_round_ends_at_tangent_continuation`). A side edge that ends within the
+    /// lies farther from `vertex` than the other rail's end, and it is straight (WR-674). A side edge that ends within the
     /// fillet's width or bends away (WR-303's short arc, past which the round runs onto
     /// another face) is left to the global merge.
     ///

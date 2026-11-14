@@ -4,7 +4,7 @@
 //! A 40 x 40 x 10 plate with an r2 through hole at x = 5 has its side face x = 0 moved to
 //! x = 3: the hole wall (x 3..7) is then tangent to the moved side at (3, 20), so the
 //! rebuilt top face has loops that touch without crossing. With
-//! `offset_resolve_crossing_loops` and `offset_walls_touch_refused` the extended offset
+//! `offset_resolve_crossing_loops` the extended offset
 //! fails with `SM_ERR_OFFSET_WALLS_TOUCH` (1042), and `LocalOperation` passes that on.
 #![allow(
     clippy::unwrap_used,
@@ -29,7 +29,6 @@ use solidcore::Kernel;
 fn move_side() -> solidcore::Result<()> {
     let mut k = Kernel::default();
     k.fixes.offset_resolve_crossing_loops = true;
-    k.fixes.offset_walls_touch_refused = true;
     let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 10.0).unwrap();
     let hole = create_cylinder(&mut k, Point3::new(5.0, 20.0, -1.0), 2.0, 12.0).unwrap();
     let mut part = boolean_difference(&mut k, plate, hole).unwrap();

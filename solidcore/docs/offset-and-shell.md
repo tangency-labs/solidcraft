@@ -189,7 +189,7 @@ named size an estimate in the sense of definitions-and-certificates.md §7, inva
 certifying it is open.
 
 **The analytic kinds** never reach these tests: a closed-form radius moved to zero or past it gives
-no surface (§3; `Surface::offset_collapses`), an `SM_ERR` with `offset_missing_surface_fails`, not
+no surface (§3; `Surface::offset_collapses`), an `SM_ERR`, not
 a refusal by name. `SheetClass` (`Regular`, `Inverted`, `Spine`, `sheets.rs`) names the three cases
 but nothing outside its tests calls it yet.
 
