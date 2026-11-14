@@ -68,8 +68,8 @@
   },
   {
     "case": "fillets/report-peg-front-and-concave-chamfers-together-d2",
-    "issue": "tangency-labs/solidcore#2849",
-    "reason": "the Mixed corner's chamfer face stands 7.2e-4 out of the front face y = 0 (its bilinear Coons patch bulges past the plane), past the case's 4e-5 box",
-    "fails": "volume 9383.450962465247 (rig 9383.4506602363)"
+    "issue": "tangency-labs/solidcraft#13755",
+    "reason": "the rig's volume is the body whose Mixed chamfer face, the bilinear Coons patch, stood 7.2e-4 out of the front face y = 0; that face now stays behind the plane, 0.0777 mm^3 less, and the corner has no closed form to grade a volume against",
+    "fails": "volume 9383.373309486477 (rig 9383.4506602363)"
   }
 ]
