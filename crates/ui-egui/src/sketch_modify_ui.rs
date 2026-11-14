@@ -163,7 +163,13 @@ impl Mod {
     pub fn previews(&self) -> bool {
         matches!(
             self,
-            Self::Mirror | Self::PatternRect { .. } | Self::PatternCirc { .. } | Self::Offset { .. } | Self::Corner { .. } | Self::Divide { .. }
+            Self::Mirror
+                | Self::PatternRect { .. }
+                | Self::PatternCirc { .. }
+                | Self::Offset { .. }
+                | Self::Corner { .. }
+                | Self::Divide { .. }
+                | Self::Move { .. }
         )
     }
 

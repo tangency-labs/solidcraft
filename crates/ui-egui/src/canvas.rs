@@ -547,6 +547,14 @@ fn offset_plane_quad(proj: &Proj, c: Vec3, n: Vec3, h: f64) -> Option<Vec<Pos2>>
     [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().map(|(a, b)| proj.to_screen(c + u * (a * h) + v * (b * h))).collect()
 }
 
+/// The way a sketch Move's Y Distance drags: the sketch plane's own y axis (#2031), the mate of
+/// the x axis `anchor` gives the X Distance arrow.
+pub(crate) fn sketch_move_y_dir(app: &SolveApp) -> Option<Vec3> {
+    let st = app.session.world_state().ok()?;
+    let ss = st.sketch(app.session.active_sketch?)?;
+    ss.plane.y.normalized()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog, base: Vec3, bs: Pos2, dir: Option<Vec3>) {
     let t = Tokens::get();
@@ -703,6 +711,29 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 0.0,
                 decimals,
                 spacing2,
+            );
+        }
+    }
+    // Sketch Move: Y gets its own arrow along the sketch's y axis, as X grows along its x
+    // (#2031), so a move drags in both in-plane directions instead of typing Y in the window.
+    if let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { y, .. }) = &mut d.kind
+        && let Some(ny) = sketch_move_y_dir(app)
+        && let Some(ly) = crate::length_input::eval(&app.session.doc, y, ValueKind::Length).ok().filter(|v| v.is_finite())
+    {
+        let before = y.clone();
+        if let Some(ts) =
+            drag_arrow(&app.session.doc, ui, painter, proj, base, bs, ny, ly, true, egui::Id::unique("sc_manipulator_move_y"), half_height, 0.0, y)
+        {
+            // Its own area and field, so it does not share X Distance's focus or text.
+            value_box_in(
+                ui,
+                (egui::Id::unique("sc_canvas_area_move_y"), egui::Id::unique("sc_canvas_value_move_y")),
+                "Y Distance",
+                y,
+                (ts + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
+                *y != before,
+                false,
+                box_place(app, proj),
             );
         }
     }
