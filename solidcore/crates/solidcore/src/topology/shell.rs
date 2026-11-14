@@ -2145,4 +2145,82 @@ mod tests {
         assert_eq!(brep.region(r).unwrap().shells, vec![s2]);
         assert_eq!(brep.region(q).unwrap().shells, vec![s1]);
     }
+
+    /// `IsInnerShellOf`'s ray (`ray_brep_solve`) along a face of a hollow box: the
+    /// overlap on the cavity's floor is classified on the live B-rep, where it was
+    /// "unported: SmFace::CurveOnClassify" (tangency-labs/solidcraft#15895, STEP solids
+    /// with voids).
+    #[test]
+    fn ray_along_a_cavity_floor_classifies_its_overlap() {
+        use crate::boolean::api_brep::boolean_difference;
+        use crate::curve::curve::Curve;
+        use crate::curve::line::{BoundedLineOptions, Line};
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::geom::extent1d::Extent1d;
+        use crate::geom::solution_array::SolutionType;
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        use crate::math::{Point3, Vec3};
+        use crate::primitive::api_primitives::create_box;
+        use crate::query::api_queries::face_bounding_box;
+        use crate::topology::brep::p1;
+        use crate::topology::brep_cache::CacheObject;
+
+        let mut k = Kernel::default();
+        let outer = create_box(&mut k, Point3::ZERO, 20.0, 20.0, 20.0).unwrap();
+        let cavity = create_box(&mut k, Point3::new(5.0, 5.0, 5.0), 10.0, 10.0, 10.0).unwrap();
+        let mut b = boolean_difference(&mut k, outer, cavity).unwrap();
+        assert_eq!(p1::faces(&b, None).unwrap().len(), 12);
+        assert_eq!(p1::edges(&b, None).unwrap().len(), 24);
+        assert_eq!(p1::vertices(&b, None).unwrap().len(), 16);
+        assert_eq!(p1::regions(&b, None).unwrap().len(), 3);
+        assert_eq!(p1::shells(&mut k, &b, None).unwrap().len(), 4);
+        let store = AttributeStore::default();
+        let key_of = |_: crate::EntityRef| ObjectKey(0);
+        let attributes = PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        let volume = brep_volume(&k, &mut b, 1e-9, &attributes).unwrap();
+        assert!((volume - 7000.0).abs() < 1e-6, "volume {volume}");
+
+        // from x = -1 along +x in the floor's plane z = 5, through the cavity's middle
+        let line = Curve::from(Line::bounded(
+            Point3::new(-1.0, 10.0, 5.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            &Extent1d::from_min_max(0.0, 22.0),
+            &BoundedLineOptions {
+                scale: 1.0,
+                dim: 3,
+                ..BoundedLineOptions::default()
+            },
+        ));
+        let solutions = ray_brep_solve(&k, &mut b, &line, 1e-6).unwrap();
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        let ranges: Vec<_> = solutions
+            .as_slice()
+            .iter()
+            .filter(|s| s.solution_type == SolutionType::RangeOfValues)
+            .collect();
+        assert_eq!(ranges.len(), 1, "{solutions:?}");
+        let range = ranges[0];
+        // x from 5 to 15, on the cavity's floor
+        assert!(near(range.start.param(0).unwrap(), 6.0), "{range:?}");
+        assert!(near(range.end.param(0).unwrap(), 16.0), "{range:?}");
+        let Some(CacheObject::Face(floor)) = range.objects[1] else {
+            panic!("the range names no face: {range:?}");
+        };
+        let floor_box = face_bounding_box(&k, &b, floor, true).unwrap();
+        assert!(near(floor_box.min.z, 5.0) && near(floor_box.max.z, 5.0));
+        assert!(near(floor_box.min.x, 5.0) && near(floor_box.max.x, 15.0));
+        // and the outer box's walls at x = 0 and x = 20
+        for t in [1.0, 21.0] {
+            assert!(
+                solutions.as_slice().iter().any(|s| {
+                    s.solution_type != SolutionType::RangeOfValues
+                        && near(s.start.param(0).unwrap(), t)
+                }),
+                "no crossing at {t}: {solutions:?}"
+            );
+        }
+    }
 }
