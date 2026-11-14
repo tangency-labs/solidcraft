@@ -560,10 +560,36 @@ fn end_face_runs_on_past_side_edge(
     side_eu: EdgeuseId,
     rail_face: FaceId,
 ) -> Result<bool> {
+    end_face_continuation_edge(
+        k,
+        target,
+        side_eu,
+        corner.vertex,
+        rail_face,
+        corner.tangency_tol_radians,
+    )
+    .map(|edge| edge.is_some())
+}
+
+/// The edge E2 bounding the rail's face F beyond a side edge F/G, where G
+/// continues tangentially as H at its far vertex. Exactly three edges must meet
+/// there: F/G, E2 (F/H), and E3 (G/H), with G/H tangent at that vertex. This is
+/// the same certificate by which the End leaves its trim to the global merge.
+///
+/// # Errors
+/// Missing side topology; those of the topology walks and the tangency test.
+pub(crate) fn end_face_continuation_edge(
+    k: &Kernel,
+    target: &mut Brep,
+    side_eu: EdgeuseId,
+    near_vertex: Option<VertexId>,
+    rail_face: FaceId,
+    tol_radians: f64,
+) -> Result<Option<EdgeId>> {
     let side_edge = eu1::edge(target, side_eu)?.ok_or_else(nul)?;
     let side_faces = [face_of(target, side_eu)?, radial_face(target, side_eu)?];
     if !side_faces.contains(&rail_face) {
-        return Ok(false);
+        return Ok(None);
     }
     let end_face = if side_faces[0] == rail_face {
         side_faces[1]
@@ -571,9 +597,9 @@ fn end_face_runs_on_past_side_edge(
         side_faces[0]
     };
     if end_face == rail_face {
-        return Ok(false);
+        return Ok(None);
     }
-    let far = if edge::start_vertex(target, side_edge)? == corner.vertex {
+    let far = if edge::start_vertex(target, side_edge)? == near_vertex {
         edge::end_vertex(target, side_edge)?
     } else {
         edge::start_vertex(target, side_edge)?
@@ -581,7 +607,7 @@ fn end_face_runs_on_past_side_edge(
     .ok_or_else(nul)?;
     let edges = vertex::edges(target, far, None)?;
     if edges.len() != 3 || !edges.contains(&side_edge) {
-        return Ok(false);
+        return Ok(None);
     }
     let mut on_rail_face = None;
     let mut on_end_face = None;
@@ -591,7 +617,7 @@ fn end_face_runs_on_past_side_edge(
         }
         let faces = edge::faces(target, e, None)?;
         if faces.len() != 2 {
-            return Ok(false);
+            return Ok(None);
         }
         let other = |f: FaceId| faces.iter().copied().find(|&x| x != f);
         if faces.contains(&rail_face) && !faces.contains(&end_face) {
@@ -600,14 +626,17 @@ fn end_face_runs_on_past_side_edge(
             on_end_face = other(end_face).map(|h| (e, h));
         }
     }
-    let (Some((_, h)), Some((e3, h3))) = (on_rail_face, on_end_face) else {
-        return Ok(false);
+    let (Some((e2, h)), Some((e3, h3))) = (on_rail_face, on_end_face) else {
+        return Ok(None);
     };
     if h != h3 || h == end_face || h == rail_face {
-        return Ok(false);
+        return Ok(None);
     }
     let eu = eu1::primary_edgeuse(target, e3)?.ok_or_else(nul)?;
-    check_tangential_edgeuse_at_vertex(k, target, eu, far, rad_to_deg(corner.tangency_tol_radians))
+    Ok(
+        check_tangential_edgeuse_at_vertex(k, target, eu, far, rad_to_deg(tol_radians))?
+            .then_some(e2),
+    )
 }
 
 /// Not the fork's (SolidCraft's `smooth_edges_and_unfinished_tangent_chains_are_refused_saying_why`,

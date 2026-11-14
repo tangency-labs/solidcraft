@@ -92,6 +92,171 @@ fn rounds_and_chamfers_take_their_closed_forms() {
     assert!(rel(volume(&b), ABC - (1.0 - PI / 4.0) * 4.0 * 30.0) < 1e-6);
 }
 
+/// A slab's convex outer top edge ends beside a rounded riser. The riser's cylindrical
+/// round meets the slab's top at a concave edge: this mixed-convexity end continues that
+/// cylinder naturally to cap the slab's round. Its quarter-circle chart cannot reach
+/// the requested 7.5 radii. The new round is twice as wide as the old one, so its rail
+/// passes the old arc onto the tangent continuation and the global merge cuts its end.
+#[test]
+fn a_round_ends_on_a_procedural_cylinder_beyond_its_rational_charts_reach() {
+    use solidcore::blend::fillet_executive::api::fillet_edges;
+    use solidcore::geom::extent2d::Extent2d;
+    use solidcore::nurbs::b_spline_curve::BSplineCurve;
+    use solidcore::surface::plane::Plane;
+    use solidcore::surface::procedural_blend::{order_is_valid, BlendDefinitionInput};
+    use solidcore::surface::surface::Surface;
+
+    all_fixes();
+    let (w, l, h, r) = (4.0, 3.0, 3.0, 0.4);
+    let old_radius = 0.2_f64;
+    let b = built(|k| {
+        let slab = create_box(k, Vec3::new(0.0, -l, 0.0), w, 2.0 * l, h)?;
+        let riser = create_box(k, Vec3::new(0.0, 0.0, h), w, l, h)?;
+        let mut b = boolean_union(k, slab, riser)?;
+        let upright = b
+            .edges()
+            .ids()
+            .min_by(|&a, &b_edge| {
+                let distance = |e| {
+                    edge_closest_point(k, &b, e, Vec3::new(0.0, 0.0, 1.5 * h))
+                        .unwrap()
+                        .closest
+                        .distance
+                };
+                distance(a).total_cmp(&distance(b_edge))
+            })
+            .unwrap();
+        fillet_edges(k, &mut b, &[upright], old_radius, 1, 1, 0.0)?;
+        let round = b
+            .face_list()
+            .iter()
+            .copied()
+            .find(|&f| {
+                matches!(b.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                    SurfaceKind::Cone(c) if c.is_cylinder())
+            })
+            .unwrap();
+        let source = b.face(round)?.surface.as_ref().unwrap();
+        let SurfaceKind::Cone(cylinder) = source.kind() else {
+            panic!("the first round is not a cylinder");
+        };
+        let mut net = cylinder.rev().base().clone();
+        let original_domain = net.natural_uv_domain();
+        net.reparameterize(&Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0))?;
+        let p00 = net.evaluate_point(Point2::new(0.0, 0.0))?;
+        let p10 = net.evaluate_point(Point2::new(1.0, 0.0))?;
+        let along_v = (p10.z - p00.z).abs() < h / 2.0;
+        let end = net.evaluate_point(if along_v {
+            Point2::new(0.0, 1.0)
+        } else {
+            Point2::new(1.0, 0.0)
+        })?;
+        let domain = Extent2d::from_bounds(-20.0, -20.0, 20.0, 20.0);
+        // Both supports use (u, v) = (z, the other horizontal coordinate).
+        let x_wall = Surface::from(Plane::new(
+            Vec3::ZERO,
+            Vec3::Z,
+            Vec3::Y,
+            Point2::new(1.0, 1.0),
+            &domain,
+        ));
+        let y_wall = Surface::from(Plane::new(
+            Vec3::ZERO,
+            Vec3::Z,
+            Vec3::X,
+            Point2::new(1.0, 1.0),
+            &domain,
+        ));
+        let (supports, sides) = if p00.x.abs() < 1e-10 {
+            ([&x_wall, &y_wall], [-1.0, 1.0])
+        } else {
+            assert!(p00.y.abs() < 1e-10, "{p00:?}");
+            ([&y_wall, &x_wall], [1.0, -1.0])
+        };
+        let leader = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(old_radius, old_radius, p00.z),
+            Vec3::new(old_radius, old_radius, end.z),
+        )?;
+        let seed = BSplineCurve::create_line_segment(
+            2,
+            Vec3::new(p00.z, old_radius, 0.0),
+            Vec3::new(end.z, old_radius, 0.0),
+        )?;
+        let mut procedural = ProceduralBlend::create(
+            k,
+            &net,
+            &BlendDefinitionInput {
+                supports,
+                sides,
+                offsets: [old_radius, old_radius],
+                law: None,
+                order: 1,
+                thumbweight: 0.0,
+                leader: &leader,
+                seeds: [&seed, &seed],
+                bound: 1e-12,
+                chamfer: None,
+            },
+            order_is_valid,
+        )?;
+        if along_v {
+            procedural.toggle_swap_uv_bit();
+        }
+        for i in 0..=4 {
+            for j in 0..=4 {
+                let uv = Point2::new(f64::from(i) / 4.0, f64::from(j) / 4.0);
+                let st = procedural.definition_parameters(uv);
+                let exact = procedural.evaluate_definition(k, st.x, st.y, 0, 0)?[0][0];
+                assert!(exact.distance(net.evaluate_point(uv)?) < 1e-10);
+            }
+        }
+        procedural.reparameterize(&original_domain)?;
+        // The same support that caps the second round cannot satisfy the old
+        // topology constructor's large continuation of its finite chart.
+        let finite_chart = Surface::from(procedural.clone());
+        assert!(matches!(
+            finite_chart
+                .extended_sides(
+                    k,
+                    &solidcore::surface::side::BoxSide::ALL,
+                    solidcore::surface::extend::Continuity::Natural,
+                    7.5 * r,
+                )
+                .unwrap_err()
+                .root_cause(),
+            solidcore::SolidError::ExtendRefused {
+                refusal: solidcore::surface::extend::ExtendRefusal::NotExact,
+                ..
+            }
+        ));
+        b.face_mut(round)?.surface = Some(Surface::from(procedural));
+        Ok(b)
+    });
+    let (_, before) = kernel_copy(&b);
+    assert!(before.face_list().iter().any(|&f| {
+        matches!(
+            before.face(f).unwrap().surface.as_ref().unwrap().kind(),
+            SurfaceKind::ProceduralBlend(_)
+        )
+    }));
+    let top = edge_at(&b, [0.0, -l / 2.0, h]);
+    blend(&b, Blend::Round, &[top], &[r], &[], Corners::Filled).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    // With old radius R and r=2R, the end removes the integral over x in [0,R]
+    // of [r-sqrt(r²-(x-r)²)]*[R-sqrt(R²-(x-R)²)]. The tangent continuation
+    // has y=0 beyond R. The integral is R³*J below (0.0020279853799082905 mm³).
+    // Add the independent upright and straight slab strips to obtain
+    // 107.86921091265856 mm³, without using a kernel measurement as the oracle.
+    let j = 2.0 - 7.0 * PI / 6.0 - 3.0 * 3.0_f64.sqrt() / 2.0 + 11.0 * 2.0_f64.sqrt() / 3.0
+        - 3.0 * (3.0_f64.acosh() - 2.0_f64.acosh()) / 2.0;
+    let expected = 3.0 * w * l * h
+        - (1.0 - PI / 4.0) * (old_radius * old_radius * h + r * r * l)
+        - old_radius.powi(3) * j;
+    let actual = b.volume(1e-10).unwrap();
+    assert!(rel(actual, expected) < 1e-8, "{actual} != {expected}");
+}
+
 #[test]
 fn three_rounds_meet_at_a_corner_filled_set_back_or_open() {
     all_fixes();

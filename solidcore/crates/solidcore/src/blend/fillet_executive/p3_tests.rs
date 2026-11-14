@@ -1222,3 +1222,30 @@ fn tag_merge_component_retains_allocated_markers_when_merge_fails() {
     assert_eq!(access.events, ["new_attr", "merge"]);
     assert_eq!(executive.topo_edges, [Some(Handle(20))]);
 }
+
+#[test]
+fn an_exact_extension_refusal_keeps_its_limit_at_corner_status_checks() {
+    use crate::surface::extend::ExtendRefusal;
+
+    for wrapped in [false, true] {
+        let refusal = SolidError::ExtendRefused {
+            operation: "surface::extend",
+            refusal: ExtendRefusal::NotExact,
+            distance: Some(1.0),
+        };
+        let error = if wrapped {
+            SolidError::failed_after(OP, "corner topology failed", refusal)
+        } else {
+            refusal
+        };
+        let kept = ignore::<()>(Err(error)).unwrap_err();
+        assert!(matches!(
+            kept.root_cause(),
+            SolidError::ExtendRefused {
+                refusal: ExtendRefusal::NotExact,
+                distance: Some(1.0),
+                ..
+            }
+        ));
+    }
+}

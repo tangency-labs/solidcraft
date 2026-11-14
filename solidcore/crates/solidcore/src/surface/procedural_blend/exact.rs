@@ -32,6 +32,8 @@
 use crate::blend::fillet_exact::{
     chord_implicit, class_surface, classify_supports, BlendSpine, ClassInputs, QuadricKind,
 };
+use crate::blend::fillet_section::series::Trunc;
+use crate::blend::fillet_section::station::gn_solve_station;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::are_same;
@@ -39,14 +41,253 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::b_spline_surface::{BSplineSurface, ControlPointNet, SurfParamType};
+use crate::nurbs::math::gamma;
+use crate::surface::cone::Cone;
 use crate::surface::implicit::{
     check_exact_net, lies_on, AnalyticSupport, ClassSurface, ExactNetCheck, Implicit, LeaderMap,
 };
 use crate::surface::procedural_blend::chamfer::ChamferDefinition;
-use crate::surface::surface::Surface;
+use crate::surface::procedural_blend::ProceduralBlend;
+use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP_TRANSFORM: &str = "surface::procedural_blend::exact::ExactRound::transform";
 const OP_CIRCLE: &str = "surface::procedural_blend::exact::ExactRound::supports_distance";
+
+fn finite_unit_direction(direction: Vec3) -> Option<Vec3> {
+    let squared = direction.length_squared();
+    if !(squared.is_finite() && squared > 0.0) {
+        return None;
+    }
+    let unit = direction.unitize().ok()?;
+    let squared = unit.length_squared();
+    (squared.is_finite() && (squared - 1.0).abs() <= gamma(32)).then_some(unit)
+}
+
+/// A tensor-product extrusion identity: `P_ij = Q_j + D_i A` and
+/// `w_ij w_00 = w_i0 w_0j`. Substitution in the rational basis factors the
+/// surface into a cross-section plus a scalar function times the fixed axis A.
+/// Only control arithmetic's rounding is allowed, independently of model tolerance.
+fn net_translation_axis(net: &ControlPointNet, along_u: bool) -> Option<Vec3> {
+    let (along, across) = if along_u {
+        (net.u_count, net.v_count)
+    } else {
+        (net.v_count, net.u_count)
+    };
+    if along < 2 || across < 2 {
+        return None;
+    }
+    let at = |i: usize, j: usize| {
+        let (u, v) = if along_u { (i, j) } else { (j, i) };
+        let index = u.checked_mul(net.v_count)?.checked_add(v)?;
+        let point = *net.points.get(index)?;
+        let weight = if net.weights.is_empty() {
+            1.0
+        } else {
+            *net.weights.get(index)?
+        };
+        (point.x.is_finite()
+            && point.y.is_finite()
+            && point.z.is_finite()
+            && weight.is_finite()
+            && weight > 0.0)
+            .then_some((point, weight))
+    };
+    let (p00, w00) = at(0, 0)?;
+    let mut direction = Vec3::ZERO;
+    for i in 1..along {
+        let candidate = at(i, 0)?.0 - p00;
+        if candidate.length() > direction.length() {
+            direction = candidate;
+        }
+    }
+    let axis = finite_unit_direction(direction)?;
+    for i in 0..along {
+        let (pi0, wi0) = at(i, 0)?;
+        let shift = pi0 - p00;
+        for j in 0..across {
+            let (p0j, w0j) = at(0, j)?;
+            let (pij, wij) = at(i, j)?;
+            let scale = p00.length() + pi0.length() + p0j.length() + pij.length();
+            let bound = gamma(64) * scale;
+            let lhs = wij * w00;
+            let rhs = wi0 * w0j;
+            if !(bound.is_finite()
+                && lhs.is_finite()
+                && rhs.is_finite()
+                && lhs > 0.0
+                && rhs > 0.0
+                && ((pij - p0j) - shift).length() <= bound
+                && shift.cross(axis).length() <= bound
+                && (lhs - rhs).abs() <= gamma(8) * lhs.abs() + gamma(8) * rhs.abs())
+            {
+                return None;
+            }
+        }
+    }
+    Some(axis)
+}
+
+fn spline_translation_axis(surface: &BSplineSurface) -> Result<Option<Vec3>> {
+    let net = surface.control_point_net()?;
+    Ok(net_translation_axis(&net, true).or_else(|| net_translation_axis(&net, false)))
+}
+
+/// The shared translation of two extrusion supports, including a plane containing
+/// that direction. The labelled constructions supply the identity; the angular
+/// comparisons allow only the rounding of normalising and taking dot/cross products.
+fn extrusion_support_axis(supports: [&Surface; 2]) -> Result<Option<Vec3>> {
+    let mut axes = [None, None];
+    for (slot, support) in axes.iter_mut().zip(supports) {
+        *slot = match support.kind() {
+            SurfaceKind::SurfOfExtrusion(e) => finite_unit_direction(e.extrusion_vector()),
+            SurfaceKind::BSpline(b) => spline_translation_axis(b)?,
+            _ => None,
+        };
+    }
+    let Some(axis) = axes.iter().copied().flatten().next() else {
+        return Ok(None);
+    };
+    let rounding = gamma(32);
+    for (support, direction) in supports.into_iter().zip(axes) {
+        if let Some(direction) = direction {
+            if axis.cross(direction).length() > rounding {
+                return Ok(None);
+            }
+            continue;
+        }
+        let invariant = match support.kind() {
+            SurfaceKind::Plane(p) => {
+                let normal = p.evaluate_normal();
+                let squared = normal.length_squared();
+                squared.is_finite()
+                    && squared > 0.0
+                    && axis.dot(normal).abs() <= rounding * squared.sqrt()
+            }
+            _ => false,
+        };
+        if !invariant {
+            return Ok(None);
+        }
+    }
+    Ok(Some(axis))
+}
+
+/// The complete cylinder carrying a constant circular blend whose supports' offsets
+/// meet in a line. The carrier is read from the definition, independently of the net's
+/// finite rational chart, for an end cap that continues the support past that chart.
+/// Returns `None` for every other blend class.
+///
+/// # Errors
+/// Those of the definition's station solve, support classification and cylinder construction.
+pub(crate) fn cylinder_support(
+    k: &Kernel,
+    pb: &ProceduralBlend,
+    tol: f64,
+) -> Result<Option<Surface>> {
+    let def = pb.definition();
+    let [r0, r1] = def.offsets;
+    if def.order != 1
+        || def.law.is_some()
+        || !(r0.is_finite() && r0 > 0.0 && r0 == r1 && tol.is_finite() && tol > 0.0)
+    {
+        return Ok(None);
+    }
+    let s = def.leader.natural_interval().evaluate(0.5);
+    let [seed0, seed1] = &def.seeds;
+    let (seed0, seed1) = (seed0.evaluate_point(s)?, seed1.evaluate_point(s)?);
+    let [support0, support1] = &def.supports;
+    let supports = [support0.as_ref(), support1.as_ref()];
+    let station = gn_solve_station(
+        k,
+        supports,
+        &def.leader,
+        s,
+        [seed0.x, seed0.y, seed1.x, seed1.y],
+        def.offsets,
+        def.sides,
+        Trunc::new(1, 0)?,
+        tol,
+    )?;
+    let [u0, v0, u1, v1] = station.x;
+    let [cx, cy, cz] = station.v.a;
+    let [side0, side1] = def.sides;
+    let inputs = ClassInputs {
+        uv: [
+            crate::math::Point2::new(u0.at(0, 0), v0.at(0, 0)),
+            crate::math::Point2::new(u1.at(0, 0), v1.at(0, 0)),
+        ],
+        offsets: [r0 * side0, r1 * side1],
+        centre: Point3::new(cx.at(0, 0), cy.at(0, 0), cz.at(0, 0)),
+        tol,
+        ball_on_collapsed: false,
+        radii_can_change: false,
+    };
+    if !inputs.centre.to_array().into_iter().all(f64::is_finite) {
+        return Ok(None);
+    }
+    let (origin, axis, radius) = if let Some(axis) = extrusion_support_axis(supports)? {
+        // Translating one solved ball preserves both support contacts and their
+        // offsets, so its section sweeps the cylinder about this centre line.
+        (inputs.centre, axis, r0)
+    } else {
+        // Two labelled planes have a straight offset intersection. Other classes
+        // need their own identity; a tolerance-based spine classification alone
+        // cannot certify an exact cylindrical continuation.
+        if !supports
+            .iter()
+            .all(|surface| matches!(surface.kind(), SurfaceKind::Plane(_)))
+        {
+            return Ok(None);
+        }
+        let blend = classify_supports(k, supports, &inputs)?;
+        if blend.spine != BlendSpine::Line {
+            return Ok(None);
+        }
+        (blend.point, blend.dir, blend.radius)
+    };
+    if !origin.to_array().into_iter().all(f64::is_finite) {
+        return Ok(None);
+    }
+    let Some(axis) = finite_unit_direction(axis) else {
+        return Ok(None);
+    };
+    let d = pb.evaluate_definition(k, s, 0.5, 1, 1)?;
+    let partial = |i: usize, j: usize| {
+        d.get(i).and_then(|row| row.get(j)).copied().ok_or_else(|| {
+            SolidError::surface_failed(OP_CIRCLE, "the circular section has no requested partial")
+        })
+    };
+    let radial = partial(0, 0)? - inputs.centre;
+    // Put the cylinder's periodic seam opposite the original circular section.
+    // Its end cap must not straddle an arbitrary seam through the contact arc.
+    let Some(phase) = finite_unit_direction(radial - axis * radial.dot(axis)) else {
+        return Ok(None);
+    };
+    let x = -phase;
+    let Some(y) = finite_unit_direction(axis.cross(x)) else {
+        return Ok(None);
+    };
+    let placement = Axis2Placement::new(origin, x, y);
+    let mut carrier = Surface::from(Cone::create_canonical_cylinder(k, &placement, radius)?);
+    let mut normal = partial(1, 0)?.cross(partial(0, 1)?);
+    let (_, map_b, swapped) = pb.definition_map();
+    let [bs, bt] = map_b;
+    if !(bs.is_finite() && bt.is_finite() && bs != 0.0 && bt != 0.0) {
+        return Ok(None);
+    }
+    if ((bs < 0.0) != (bt < 0.0)) != swapped {
+        normal = -normal;
+    }
+    let sense = normal.dot(radial);
+    if !sense.is_finite() || sense == 0.0 {
+        return Ok(None);
+    }
+    if sense < 0.0 {
+        carrier.reverse(k, SurfParamType::U)?;
+    }
+    Ok(Some(carrier))
+}
 
 /// The torus a round of the circle class is: a surface of revolution's, about its
 /// placement's axis, of the circle its generating arc is on (the centre of a rational quadratic
@@ -467,5 +708,56 @@ impl ExactRound {
         self.radius *= factor;
         self.chamfer = self.chamfer.map(|c| c.scaled(factor));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+    use crate::nurbs::b_spline_curve::KnotType;
+    use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, CanonicalSurfaceData};
+
+    /// A parabolic cylinder with a rational, degree-two axial parameter: the same
+    /// free B-spline representation retained when an extrusion support is recorded.
+    #[test]
+    fn a_free_spline_support_keeps_its_exact_translation_identity() {
+        let mut points = Vec::new();
+        let mut weights = Vec::new();
+        for (height, axial_weight) in [(0.0, 1.0), (1.0, 2.0), (2.0, 3.0)] {
+            for (x, y) in [(-1.0, 1.0), (0.0, -1.0), (1.0, 1.0)] {
+                points.push(Point3::new(x, y, height));
+                weights.push(axial_weight);
+            }
+        }
+        let form = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 2,
+            v_degree: 2,
+            control_points: &points,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[3, 3],
+            v_multiplicities: &[3, 3],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::PiecewiseBezierKnots,
+            weights: Some(&weights),
+            uv_domain: None,
+        })
+        .unwrap();
+        let axis = spline_translation_axis(&form).unwrap().unwrap();
+        assert!(axis.cross(Vec3::Z).length() < 1e-14);
+        let mut net = form.control_point_net().unwrap();
+        net.points[4].x += 0.01;
+        assert!(net_translation_axis(&net, true).is_none());
+        let mut net = form.control_point_net().unwrap();
+        net.weights[4] *= 1.01;
+        assert!(net_translation_axis(&net, true).is_none());
+        // The products remain finite at this scale, but adding them before
+        // multiplying by their rounding factor would overflow and accept any error.
+        let mut net = form.control_point_net().unwrap();
+        net.weights.fill(1e154);
+        assert!(net_translation_axis(&net, true).is_some());
+        net.weights[4] *= 1.01;
+        assert!(net_translation_axis(&net, true).is_none());
     }
 }
