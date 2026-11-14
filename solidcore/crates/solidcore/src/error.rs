@@ -1329,7 +1329,7 @@ pub enum ErrorKind {
     /// A fillet or chamfer is too large to build; the error names the largest size
     /// that builds.
     FilletTooLarge = 100,
-    // The blend's classes, 101 to 128 (the classes of the typed blend failure record,
+    // The blend's classes, 101 to 129 (the classes of the typed blend failure record,
     // `error::blend`), in their order: the record's numbers less 200, then the classes added
     // after them.
     /// The rolling ball does not fit a face it rolls on.
@@ -1395,6 +1395,9 @@ pub enum ErrorKind {
     /// blend the edge it runs on into with it
     /// ([`crate::blend::blend_refusal::BlendRefusal::ContinuesInto`]).
     TangentContinuationEnd = 128,
+    /// A blend past its faces keeps no length of its edge, no corner taking any of it: the
+    /// trim takes the whole of it.
+    OverflowKeepsNothing = 129,
     /// An offset face's offset folds: the wall is thicker than a radius of curvature.
     OffsetFolds = 200,
     /// Loops of an offset face touch without crossing: the offset walls would meet.
@@ -1478,6 +1481,7 @@ impl ErrorKind {
                 | Self::EndRollsIntoSmoothEnd
                 | Self::EndAtSeamVertex
                 | Self::TangentContinuationEnd
+                | Self::OverflowKeepsNothing
                 | Self::OffsetFolds
                 | Self::OffsetWallsTouch
                 | Self::OffsetLoopsCross
@@ -1550,6 +1554,7 @@ impl ErrorKind {
             Self::TrimLeaks => "trim_leaks",
             Self::StageFailed => "stage_failed",
             Self::TangentContinuationEnd => "tangent_continuation_end",
+            Self::OverflowKeepsNothing => "overflow_keeps_nothing",
             Self::OffsetFolds => "offset_folds",
             Self::OffsetWallsTouch => "offset_walls_touch",
             Self::OffsetLoopsCross => "offset_loops_cross",
@@ -2449,6 +2454,11 @@ mod tests {
                 128,
                 "tangent_continuation_end",
             ),
+            (
+                ErrorKind::OverflowKeepsNothing,
+                129,
+                "overflow_keeps_nothing",
+            ),
             (ErrorKind::OffsetFolds, 200, "offset_folds"),
             (ErrorKind::OffsetWallsTouch, 201, "offset_walls_touch"),
             (ErrorKind::OffsetLoopsCross, 202, "offset_loops_cross"),
@@ -2500,11 +2510,12 @@ mod tests {
                 ErrorKind::TrimLeaks => 40,
                 ErrorKind::StageFailed => 41,
                 ErrorKind::TangentContinuationEnd => 42,
-                ErrorKind::OffsetFolds => 43,
-                ErrorKind::OffsetWallsTouch => 44,
-                ErrorKind::OffsetLoopsCross => 45,
-                ErrorKind::OffsetEdgeVanishes => 46,
-                ErrorKind::OffsetCollapses => 47,
+                ErrorKind::OverflowKeepsNothing => 43,
+                ErrorKind::OffsetFolds => 44,
+                ErrorKind::OffsetWallsTouch => 45,
+                ErrorKind::OffsetLoopsCross => 46,
+                ErrorKind::OffsetEdgeVanishes => 47,
+                ErrorKind::OffsetCollapses => 48,
             }
         };
         for (i, &(kind, code, name)) in PINNED.iter().enumerate() {
@@ -2518,17 +2529,17 @@ mod tests {
             "codes are unique and ascending"
         );
         // the blend's classes: 101 to 127 are the record's numbers less 200, with no gap; 128
-        // follows them
+        // and 129 follow them
         let blend: Vec<u16> = PINNED
             .iter()
             .map(|r| r.1)
             .filter(|c| (101..200).contains(c))
             .collect();
-        assert_eq!(blend, (101..=128).collect::<Vec<u16>>());
+        assert_eq!(blend, (101..=129).collect::<Vec<u16>>());
         // defects, refusals and the sized ones
         let defects = [115, 125, 126, 127];
         let unsized_refusals = [102, 128];
-        for &(kind, code, _) in PINNED.iter().filter(|r| (101..=128).contains(&r.1)) {
+        for &(kind, code, _) in PINNED.iter().filter(|r| (101..=129).contains(&r.1)) {
             assert_eq!(kind.is_defect(), defects.contains(&code), "{kind:?}");
             assert_eq!(kind.is_refusal(), !defects.contains(&code), "{kind:?}");
             assert_eq!(

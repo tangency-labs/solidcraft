@@ -283,6 +283,7 @@ fn room_reason(r: NoRoomReason) -> Option<RoomReason> {
         NoRoomReason::BreaksThrough => R::BreaksThrough,
         NoRoomReason::OffsetCollapses => R::OffsetCollapses,
         NoRoomReason::CornersTakeWholeEdge => R::CornersTakeWholeEdge,
+        NoRoomReason::OverflowKeepsNothing => R::OverflowKeepsNothing,
         NoRoomReason::RoundIntoMaterial | NoRoomReason::RailRunsPastFaceIntoMaterial => {
             R::RunsIntoMaterial
         }

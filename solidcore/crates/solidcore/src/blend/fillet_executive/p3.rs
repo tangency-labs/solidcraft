@@ -218,6 +218,12 @@ pub enum NoRoomReason {
     /// for the typed failure record ([`crate::error::ErrorKind::EndAtSeamVertex`]); its refusal
     /// notes it once it moves onto the record.
     EndAtSeamVertex,
+    /// A blend past its faces keeps no length of its edge and no corner takes any of it: the
+    /// trim takes the whole of it, as a knife edge's chamfer wider than the body does (not
+    /// the fork's, #15250). The fit, where the kernel computes one, is the size beyond which
+    /// the blend keeps nothing (a knife edge's chamfer between a plane and a cylinder tangent
+    /// to it) or where its rails stay on their faces, less the fit margin.
+    OverflowKeepsNothing,
 }
 
 /// The initialized error-info members p3 reads or writes. Corner kinds use the
