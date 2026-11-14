@@ -324,7 +324,7 @@ fn the_offset_refusals_are_typed() {
     use solidcore::error::Failure;
     use solidcore::error::{SM_ERR_OFFSET_EDGE_VANISHES, SM_ERR_OFFSET_WALLS_TOUCH};
     use solidcore::{FaceId, SolidError};
-    let none = |_: FaceId| -> Option<usize> { None };
+    let none = |_: solidcore::EntityRef| -> Option<crate::RecordEntity> { None };
     let up = |code| SolidError::Upstream {
         operation: "test",
         code,
@@ -398,15 +398,17 @@ fn the_offset_refusals_are_typed() {
 /// in place of a reason (#15035): a routine's own failure keeps its kind and the kernel's phrase.
 #[test]
 fn every_other_offset_refusal_says_why_and_where() {
-    use crate::OffsetRefusal as R;
-    use solidcore::error::offset::{LoopCrossing, OffsetFailure as O, Unsoundness};
+    use crate::{OffsetRefusal as R, RecordEntity, Unsoundness};
+    use solidcore::error::offset::{LoopCrossing, OffsetFailure as O, Unsoundness as K};
     use solidcore::error::ErrorKind;
     use solidcore::error::Failure;
     use solidcore::FaceId;
     let named = FaceId::from_index(3);
     let other = FaceId::from_index(4);
     // the call's lookup: face 3 is record face 7, face 4 is not the body's
-    let index = |f: FaceId| -> Option<usize> { (f == named).then_some(7) };
+    let index = |e: solidcore::EntityRef| {
+        (e == solidcore::EntityRef::Face(named)).then_some(RecordEntity::Face(7))
+    };
     let refused = |o: O| super::status(Failure::new("test", o).into_error(), &index);
     let cases = [
         // (the kernel's fold kind, but no fold: its own reason, not `WallFolds`)
@@ -481,7 +483,7 @@ fn every_other_offset_refusal_says_why_and_where() {
         ),
         (
             O::Unsound {
-                what: Unsoundness::Check {
+                what: K::Check {
                     failures: 2,
                     first: Some((1, 4)),
                 },
@@ -496,7 +498,7 @@ fn every_other_offset_refusal_says_why_and_where() {
         ),
         (
             O::Unsound {
-                what: Unsoundness::VolumeUndecided,
+                what: K::VolumeUndecided,
             },
             None,
             R::Unsound {
@@ -689,6 +691,115 @@ fn a_kernel_offset_refusal_is_typed_for_a_caller_without_an_order() {
     for e in errors {
         let expected = super::refusal(&e).unwrap_or_else(|| crate::error::status(e.clone()));
         assert_eq!(super::status(e.clone(), &|_| None), expected, "{e:?}");
+    }
+}
+
+/// A built body that fails what its input did not names the entity the kernel's check names, by
+/// its index in the call's record order (#15035): an edge or vertex whose tolerance grew past
+/// its certificate's bound is record edge or vertex `i`, with both numbers; an entity the order
+/// does not hold, or a caller without an order, leaves it unnamed. The reasons that name no
+/// entity pass as the kernel gives them.
+#[test]
+fn an_unsound_body_names_its_entity_by_record_index() {
+    use crate::{OffsetRefusal as R, RecordEntity, Unsoundness};
+    use solidcore::error::offset::{OffsetFailure as O, Unsoundness as K};
+    use solidcore::error::{EntityRef, Failure};
+    use solidcore::{EdgeId, FaceId, LoopId, VertexId};
+    // record face 1 is kernel face 0, record edge 1 kernel edge 4, record vertex 2 kernel vertex 3
+    let order = Order {
+        faces: vec![FaceId::from_index(2), FaceId::from_index(0)],
+        edges: vec![EdgeId::from_index(9), EdgeId::from_index(4)],
+        vertices: vec![
+            VertexId::from_index(1),
+            VertexId::from_index(6),
+            VertexId::from_index(3),
+        ],
+    };
+    let failed = |what| Failure::new("test", O::Unsound { what }).into_error();
+    let grown = |entity| K::ToleranceBeyondBound {
+        entity,
+        tolerance: 2e-4,
+        bound: 1e-5,
+    };
+    let named = |face, entity| Error::OffsetRefused {
+        face,
+        why: R::Unsound {
+            what: Unsoundness::ToleranceBeyondBound {
+                entity,
+                tolerance: 2e-4,
+                bound: 1e-5,
+            },
+        },
+    };
+    let in_order = |what| super::status(failed(what), &super::in_order(&order));
+    let edge = in_order(grown(EntityRef::Edge(EdgeId::from_index(4))));
+    assert_eq!(edge, named(None, Some(RecordEntity::Edge(1))));
+    assert_eq!(
+        edge.to_string(),
+        "the offset is refused: the tolerance of edge 1 grew to 0.0002, past the 0.00001 \
+         its certificate allows"
+    );
+    assert_eq!(
+        in_order(grown(EntityRef::Vertex(VertexId::from_index(3)))),
+        named(None, Some(RecordEntity::Vertex(2)))
+    );
+    // a face is also the face the refusal is at
+    assert_eq!(
+        in_order(grown(EntityRef::Face(FaceId::from_index(0)))),
+        named(Some(1), Some(RecordEntity::Face(1)))
+    );
+    // an edge the order does not hold, and an entity no record index names
+    assert_eq!(
+        in_order(grown(EntityRef::Edge(EdgeId::from_index(7)))),
+        named(None, None)
+    );
+    assert_eq!(
+        in_order(grown(EntityRef::Loop(LoopId::from_index(0)))),
+        named(None, None)
+    );
+    let unnamed = named(None, None);
+    assert_eq!(
+        unnamed.to_string(),
+        "the offset is refused: the tolerance of an edge or vertex grew to 0.0002, past the \
+         0.00001 its certificate allows"
+    );
+    // a caller without an order names none
+    assert_eq!(
+        super::refusal(&failed(grown(EntityRef::Edge(EdgeId::from_index(4))))),
+        Some(unnamed)
+    );
+    // the reasons without an entity, each as the kernel says it
+    let cases = [
+        (
+            K::Check {
+                failures: 2,
+                first: Some((1, 4)),
+            },
+            Unsoundness::Check {
+                failures: 2,
+                first: Some((1, 4)),
+            },
+        ),
+        (K::GeometryUnchecked, Unsoundness::GeometryUnchecked),
+        (
+            K::LoopOrientationUndecided,
+            Unsoundness::LoopOrientationUndecided,
+        ),
+        (K::LoopGapNotClosable, Unsoundness::LoopGapNotClosable),
+        (K::NotManifoldSolid, Unsoundness::NotManifoldSolid),
+        (K::VolumeNotPositive, Unsoundness::VolumeNotPositive),
+        (K::VolumeUndecided, Unsoundness::VolumeUndecided),
+    ];
+    for (kernel, ops) in cases {
+        let e = in_order(kernel);
+        assert_eq!(
+            e,
+            Error::OffsetRefused {
+                face: None,
+                why: R::Unsound { what: ops },
+            }
+        );
+        assert_eq!(e.to_string(), format!("the offset is refused: {kernel}"));
     }
 }
 

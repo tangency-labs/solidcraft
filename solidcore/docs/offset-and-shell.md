@@ -200,7 +200,9 @@ away, as upstream does (`offset_face_prefix`, `p2.rs`).
 **In ops**, `Folds` becomes `Error::WallFolds { largest }` (`solidcore-ops/src/offset.rs`,
 `offset_refused`), the touching walls and the vanishing edge their own errors, and every other
 named reason a named `OffsetRefusal` with the face it names: `Collapses` passes on the distance
-and the radius. `OffsetFailure` is `#[non_exhaustive]`, so ops matches it with a wildcard: a
+and the radius, and `Unsound` becomes ops' own `Unsoundness`, the edge, vertex or face its check
+names given by its index in the call's record `Order` (`RecordEntity`; a call without an order
+names no edge or vertex). `OffsetFailure` is `#[non_exhaustive]`, so ops matches it with a wildcard: a
 reason ops does not name yet takes the error of its class where that has one (walls that touch,
 a fold, a vanishing edge); it and the routines' phrase causes (`OffsetFailure::is_phrase`)
 otherwise arrive as the transitional `OffsetRefusal::Phrase`, with the kernel's class, whether it
