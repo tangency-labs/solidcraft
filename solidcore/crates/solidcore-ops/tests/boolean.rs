@@ -193,6 +193,87 @@ fn two_large_cylinders_touching_along_a_line_union() {
     }
 }
 
+/// The area two circles of radius `r` whose centres are `d` apart have in common.
+fn lens_area(r: f64, d: f64) -> f64 {
+    2.0 * r * r * (d / (2.0 * r)).acos() - 0.5 * d * (4.0 * r * r - d * d).sqrt()
+}
+
+/// A drill of radius 2.5 into the box face y = 0 along +y, centred at (x, z): its wall `depth`
+/// deep, then a 118° point; it starts 1 outside the face.
+fn drill(x: f64, z: f64, depth: f64) -> Body {
+    let (r, top) = (2.5, -1.0);
+    let tip = r / 59f64.to_radians().tan();
+    let p = |u: f64, y: f64| [x, y, z + u];
+    let profile = [
+        Curve::Line {
+            start: p(0.0, top),
+            end: p(r, top),
+        },
+        Curve::Line {
+            start: p(r, top),
+            end: p(r, depth),
+        },
+        Curve::Line {
+            start: p(r, depth),
+            end: p(0.0, depth + tip),
+        },
+        Curve::Line {
+            start: p(0.0, depth + tip),
+            end: p(0.0, top),
+        },
+    ];
+    revolve(&profile, [x, 0.0, z], [0.0, 1.0, 0.0], TAU, true).unwrap()
+}
+
+/// Two parallel holes of radius 2.5 whose axes are 5 − ε apart, a hair less than tangent: their
+/// walls cross in two lines 2√(2.5 ε) apart and lie within ε of each other between them. The
+/// sketch solver of tangency-labs/solidcraft#15429 left two drill centres 2.3e-9 closer than
+/// their diameter, the upper one with its wall on the plate's top face; the second cut failed
+/// in the merge, and through holes, and the two cylinders' union, failed as not a solid for ε
+/// from 1e-9 to 1e-5. Within the faces' tolerance the walls touch along one line, as at ε = 0:
+/// each cut is one valid solid of the counts the touching holes give, and the volume less the
+/// overlap (the lens of the two circles; the points' overlap is below 1e-12), in either order.
+/// The two cylinders unite to two solids touching along the line.
+#[test]
+fn parallel_holes_a_hair_less_than_tangent_cut_as_touching() {
+    all_fixes();
+    let plate = || make_box([0.0, 0.0, 0.0], [20.0, 20.0, 10.0]).unwrap();
+    let cylinder = |y: f64| solidcore_ops::make_cylinder([10.0, y, -1.0], 2.5, 12.0).unwrap();
+    let cut_twice = |one: Body, two: Body| {
+        let first = boolean(plate(), one, BooleanOp::Subtract).unwrap().unwrap();
+        boolean(first, two, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let (r, depth) = (2.5, 5.0);
+    let tip = r / 59f64.to_radians().tan();
+    for eps in [0.0, 1e-9, 2.3e-9, 1e-7, 1e-6, 1e-5] {
+        let d = 5.0 - eps;
+        let lens = if eps > 0.0 { lens_area(r, d) } else { 0.0 };
+        let through = 4000.0 - (2.0 * PI * r * r - lens) * 10.0;
+        let drilled = 4000.0 - 2.0 * PI * r * r * (depth + tip / 3.0) + lens * depth;
+        for swap in [false, true] {
+            let at = |a: f64, b: f64| if swap { (b, a) } else { (a, b) };
+            let (y1, y2) = at(10.0, 10.0 - d);
+            let c = cut_twice(cylinder(y1), cylinder(y2));
+            one_valid_solid(&c, [10, 23, 14], through);
+            let (z1, z2) = at(7.5, 7.5 - d);
+            let c = cut_twice(drill(5.0, z1, depth), drill(5.0, z2, depth));
+            one_valid_solid(&c, [13, 27, 16], drilled);
+        }
+        let u = boolean(cylinder(10.0), cylinder(10.0 - d), BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let report = u.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{eps}: {}", report.text);
+        assert_eq!(u.solid_count().unwrap(), 2, "{eps}");
+        let want = (2.0 * PI * r * r - lens) * 12.0;
+        assert!(
+            near(volume(&u), want),
+            "{eps}: {}, closed form {want}",
+            volume(&u)
+        );
+    }
+}
+
 #[test]
 fn an_imprint_cuts_the_faces_the_tool_crosses() {
     all_fixes();
