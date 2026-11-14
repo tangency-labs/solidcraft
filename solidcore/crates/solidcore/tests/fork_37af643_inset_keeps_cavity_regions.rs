@@ -27,16 +27,13 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::boolean::api_brep::boolean_difference;
-use solidcore::error::offset::{OffsetFailure, Unsoundness};
-use solidcore::error::Reason;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::brep_is_manifold_solid;
-use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::{Brep, Kernel};
 
 /// The frame, the ring cut's top at `ring_top` (2.5: a 0.5 floor under the recess).
 fn frame(k: &mut Kernel, ring_top: f64) -> Brep {

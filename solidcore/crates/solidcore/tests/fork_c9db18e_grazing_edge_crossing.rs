@@ -169,4 +169,3 @@ fn fork_a8caccd_grazing_join_edges_reach_their_vertices_with_the_extension() {
     assert_eq!(failures, 0, "the check");
     assert!(gap < 1e-5, "an edge ends {gap} from its vertex");
 }
-

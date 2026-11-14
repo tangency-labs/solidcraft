@@ -449,8 +449,8 @@ fn off_ball(
 /// What grading a case found.
 #[derive(Debug)]
 enum Graded {
-    /// The body before the round did not build.
-    Body(String),
+    /// The body before the round did not build (why: shown by `Debug` in failures).
+    Body(#[allow(dead_code)] String),
     /// The round returned an error.
     Round(String),
     /// The round built: what's wrong with it and how far it lies off the ball.

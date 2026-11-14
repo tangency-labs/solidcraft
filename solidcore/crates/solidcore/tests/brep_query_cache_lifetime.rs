@@ -208,7 +208,6 @@ fn a_face_edited_mid_session_classifies_against_its_new_trims() {
     );
 }
 
-
 /// While editing, a face whose loop does not close has no boundary to implant: with the
 /// fix, a classification whose ray meets it is refused naming the face, not answered
 /// against its untrimmed surface.
