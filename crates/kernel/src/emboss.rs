@@ -134,12 +134,11 @@ pub fn infer_cylinder_emboss(body: &Body, plane: &Plane, regions: &[Region2], de
                 return Err(fail("target search exceeds face work limit"));
             }
             if let Some(Surf::Cylinder { o, a, r, convex }) = surf_of(&rec, face) {
-                let w = plane.origin - o;
-                let normal = plane.normal();
-                let signed = w.dot(normal);
-                if normal.dot(a).abs() < 1e-8 && (signed.abs() - r).abs() <= tol * 10.0 {
-                    let radial = if signed < 0.0 { -normal } else { normal };
-                    let wrap_x = if convex { a.cross(radial) } else { radial.cross(a) };
+                // The sketch plane touches this wall from either side: take the wall's frame
+                // as seen from the plane's side (the bore's form), then turn the tangent for
+                // an exterior wall so the wrap runs the same way round as the face.
+                if let Some((radial, bore_x)) = wall_frame(plane.normal(), plane.origin - o, a, r, false, tol) {
+                    let wrap_x = if convex { -bore_x } else { bore_x };
                     // Every supported uninterrupted wall uses one angle interval
                     // around this tangent normal, contained in (-pi,pi). A remote
                     // footprint entirely outside even that global interval cannot
