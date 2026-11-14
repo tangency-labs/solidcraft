@@ -584,6 +584,44 @@ pub(crate) fn status_text(name: &str, ty: &str, error: Option<&str>, warning: Op
     text
 }
 
+/// The text of a feature's tooltip: name and translated type, the error and warning, why a
+/// rolled-back feature isn't shown, a sketch's state, the time it took and the edit hint. The
+/// bottom and left Histories both use it, so the two stay identical.
+pub(crate) fn feature_tooltip_text(
+    name: &str,
+    ty: &str,
+    result: Option<&FeatureResult>,
+    rolled: bool,
+    sketch_state: Option<crate::sketch_state::SketchState>,
+    ms: Option<f64>,
+) -> String {
+    // The type as a user reads it, translated, without the programmatic `Feature` suffix: a
+    // user sees "Fillet", not "FilletFeature" (#14027).
+    let kind = solidcraft_ui_text::tr_label(ty.strip_suffix("Feature").unwrap_or(ty));
+    let mut tip = feature_status_text(name, kind, result);
+    // Greyed out says only "not shown": say why (#8100).
+    if rolled {
+        tip.push('\n');
+        tip.push_str(solidcraft_ui_text::tr("timeline.feature_rolled_back"));
+    }
+    if let Some(state) = sketch_state {
+        tip.push('\n');
+        tip.push_str(&state.text());
+    }
+    if let Some(ms) = ms {
+        tip += &format!("\n{ms:.1} ms");
+    }
+    tip.push('\n');
+    tip.push_str(solidcraft_ui_text::tr("timeline.feature_hint"));
+    tip
+}
+
+/// Draw a feature's tooltip with the standard wrapping, as both Histories show it.
+pub(crate) fn feature_tooltip(ui: &mut egui::Ui, text: &str) {
+    ui.set_max_width(ui.spacing().tooltip_width);
+    ui.add(egui::Label::new(text));
+}
+
 /// A feature's mark: an error, else a warning; none while it is suppressed or rolled back, as
 /// it isn't built then.
 pub(crate) fn feature_status(app: &SolveApp, id: u64) -> Option<Status> {
@@ -1220,6 +1258,7 @@ struct BarSteps<'a> {
 }
 
 impl history_bar::Contents for BarSteps<'_> {
+    /// Draws the bar's chips: each feature, and the folded runs, folders, joints and trays around it.
     fn entries(&mut self, s: &mut history_bar::Strip<'_, '_>) {
         let t = Tokens::get();
         let app = &mut *self.app;
@@ -1284,24 +1323,7 @@ impl history_bar::Contents for BarSteps<'_> {
             let sketch_state = matches!(kind, TimelineKind::Sketch).then(|| sketch_states.get(*id)).flatten();
             let res = results.get(&app.session.model, at, *id);
             let rolled = i >= self.marker_view;
-            let tip = || {
-                let mut tip = feature_status_text(name, ty, res);
-                // Greyed out says only "not shown": say why (#8100).
-                if rolled {
-                    tip.push('\n');
-                    tip.push_str(solidcraft_ui_text::tr("timeline.feature_rolled_back"));
-                }
-                if let Some(state) = sketch_state {
-                    tip.push('\n');
-                    tip.push_str(&state.text());
-                }
-                if let Some(ms) = res.map(|r| r.ms) {
-                    tip += &format!("\n{ms:.1} ms");
-                }
-                tip.push('\n');
-                tip.push_str(solidcraft_ui_text::tr("timeline.feature_hint"));
-                tip
-            };
+            let tip = || feature_tooltip_text(name, ty, res, rolled, sketch_state, res.map(|r| r.ms));
             let rect = s.step(&history_bar::Step {
                 id: *id,
                 slot: i,
