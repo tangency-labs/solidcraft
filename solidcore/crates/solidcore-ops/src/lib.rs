@@ -55,6 +55,7 @@ pub mod measure;
 pub mod network;
 pub mod offset;
 pub mod order;
+pub mod path_export;
 pub mod pcurve;
 pub mod prism;
 pub mod provenance;

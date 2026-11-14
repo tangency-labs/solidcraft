@@ -61,6 +61,7 @@ log = { workspace = true }
 web-time = { workspace = true }
 
 [dev-dependencies]
+solidcore-ops = { workspace = true }
 solidcraft-profile = { workspace = true, features = ["enabled"] }
 # Model-cache tests also run in a source tarball build (no git commit).
 solidcraft-io = { workspace = true, features = ["trust-unknown-source"] }

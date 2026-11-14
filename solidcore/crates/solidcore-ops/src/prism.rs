@@ -393,3 +393,72 @@ pub fn region_area(region: &Region2) -> Result<kp::Area> {
 pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
 }
+
+/// The directed parameter interval of a recognized ellipse arc, in the input plane.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EllipseArc {
+    /// The centre in the input plane.
+    pub center: Vec2,
+    /// The directed major semiaxis.
+    pub major: Vec2,
+    /// The positive minor-to-major axis ratio.
+    pub ratio: f64,
+    /// The starting parameter in radians.
+    pub start: f64,
+    /// The ending parameter in radians, retaining direction.
+    pub end: f64,
+}
+
+/// Recognize the supporting ellipse of the given rational quadratic, or refuse.
+pub fn conic_ellipse(a: Vec2, apex: Vec2, b: Vec2, w: f64) -> Option<EllipseArc> {
+    let arc = solidcore::prism::recognition::conic_ellipse(
+        convert::vec2(a),
+        convert::vec2(apex),
+        convert::vec2(b),
+        w,
+    )?;
+    Some(EllipseArc {
+        center: convert::record_vec2(arc.center),
+        major: convert::record_vec2(arc.major),
+        ratio: arc.ratio,
+        start: arc.start,
+        end: arc.end,
+    })
+}
+
+/// Recognize one directed turn of arcs with the same stored support.
+pub fn loop_circle(lp: &Loop2) -> Option<(Vec2, f64)> {
+    if lp.segs.len() > 200_000 {
+        return None;
+    }
+    let (center, radius) = solidcore::prism::recognition::loop_circle(&convert::loop2(lp))?;
+    Some((convert::record_vec2(center), radius))
+}
+
+/// Recognize one ellipse turn without changing any input control point.
+pub fn loop_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
+    if lp.segs.len() > 200_000 {
+        return None;
+    }
+    let (center, major, ratio) = solidcore::prism::recognition::loop_ellipse(&convert::loop2(lp))?;
+    Some((
+        convert::record_vec2(center),
+        convert::record_vec2(major),
+        ratio,
+    ))
+}
+
+/// Read the signed single winding of ordered points already admitted on one round wall.
+pub fn certified_round_wall_turn(points: &[Vec2], center: Vec2) -> Option<f64> {
+    if points.len() > 200_000 {
+        return None;
+    }
+    solidcore::prism::recognition::certified_round_wall_turn(
+        &points
+            .iter()
+            .copied()
+            .map(convert::vec2)
+            .collect::<Vec<_>>(),
+        convert::vec2(center),
+    )
+}
