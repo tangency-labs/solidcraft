@@ -676,3 +676,92 @@ fn sphere_box_edge_cutting_a_shallow_cap() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+// ---- an arc grazing a coplanar box face -----------------------------------------------
+
+/// The profile of #16640 extruded 10 along z, then joined with the 5 x 25 x 10 box at
+/// (5, -5, 0): `(0, 0)`, `(10, 0)`, `(10, 10)`, an arc about `(cx, cy)` of radius `r` from
+/// `(10, 10)` counter-clockwise to `(px, py)`, `(0, py)`. The arc's end `(10, 10)` lies on the
+/// box face `x = 10`, which also holds the profile's side from `(10, 0)` to `(10, 10)`.
+/// The union is the box plus the part of the profile left of `x = 5`, so its volume is
+/// `10 (5 py + 125)`: only a sliver of the arc past `x = 10` (in the grazing
+/// case, 0.26 micron wide over 1.6 mm, 0.003 mm3 in all) is added.
+fn arc_graze_union(
+    k: &mut Kernel,
+    centre: (f64, f64),
+    r: f64,
+    start_deg: f64,
+    end_deg: f64,
+    top: (f64, f64),
+) -> solidcore::Result<Brep> {
+    use solidcore::curve::curve::Curve;
+    use solidcore::primitive::api_curves as curves;
+    use solidcore::sweep::api_brep::create_linear_sweep;
+    let p = Point3::new;
+    let line = |a: Point3, b: Point3| Curve::from(curves::create_line_segment(a, b).unwrap());
+    let profile = [
+        line(p(0.0, 0.0, 0.0), p(10.0, 0.0, 0.0)),
+        line(p(10.0, 0.0, 0.0), p(10.0, 10.0, 0.0)),
+        Curve::from(curves::create_arc(p(centre.0, centre.1, 0.0), r, start_deg, end_deg).unwrap()),
+        line(p(top.0, top.1, 0.0), p(0.0, top.1, 0.0)),
+        line(p(0.0, top.1, 0.0), p(0.0, 0.0, 0.0)),
+    ];
+    let refs: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+    let body = create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 10.0, true)?;
+    let boxed = api::create_box(k, Point3::new(5.0, -5.0, 0.0), 5.0, 25.0, 10.0)?;
+    boolean_union(k, body, boxed)
+}
+
+fn assert_closed_with_volume(k: &mut Kernel, mut brep: Brep, want: f64, slack: f64) {
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    let v = brep_volume(k, &mut brep, 1e-9, &attrs).unwrap();
+    assert!(
+        (v - want).abs() <= slack,
+        "volume {v} vs {want} (slack {slack})"
+    );
+    let check = check_brep(k, &mut brep, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "Level2 {:?}", check.lines());
+}
+
+/// #16640: an arc, three-point as drawn, that crosses the plane of a coplanar box face
+/// 0.26 micron past a shared vertex, 1.6 mm along, and stays within the tolerance of the
+/// face's edge for as long again beyond the crossing. The definition of that second
+/// stretch ended on no vertex, so its two edges were related whole to each other and to the
+/// edges the crossing had already related: "another entity is already related". It makes
+/// no relation of its own now; the union is closed and has the volume of the box and the
+/// profile left of it.
+#[test]
+fn an_arc_grazing_a_coplanar_box_face_joins() {
+    let mut k = Kernel::default();
+    let (py, centre) = (12.941, (5.003_150_514_408_299, 10.001_605_029_505_038));
+    let brep = arc_graze_union(
+        &mut k,
+        centre,
+        4.996_849_743_366_094,
+        -0.018_403_879_031_201_775,
+        36.032_894_179_707_97,
+        (9.044, py),
+    )
+    .unwrap();
+    // the added sliver is about 0.003 mm3
+    assert_closed_with_volume(&mut k, brep, 10.0 * (5.0 * py + 125.0), 0.01);
+}
+
+/// The control of #16640: the same profile with the arc exactly tangent to the face's plane
+/// (centre `(5, 10)`, radius 5), which joined before.
+#[test]
+fn an_arc_tangent_to_a_coplanar_box_face_joins() {
+    let mut k = Kernel::default();
+    let theta = 36.0_f64;
+    let (px, py) = (
+        5.0 + 5.0 * theta.to_radians().cos(),
+        10.0 + 5.0 * theta.to_radians().sin(),
+    );
+    let brep = arc_graze_union(&mut k, (5.0, 10.0), 5.0, 0.0, theta, (px, py)).unwrap();
+    assert_closed_with_volume(&mut k, brep, 10.0 * (5.0 * py + 125.0), 1e-6 * 2000.0);
+}
