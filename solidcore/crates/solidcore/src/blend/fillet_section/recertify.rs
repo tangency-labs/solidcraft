@@ -8,7 +8,7 @@
 //! none, so the round's own certificate is run again.
 //!
 //! The net is the construction's (`Build`): along s, on each span between two stations, the
-//! cubic Hermite interpolant of the section's rows at its stations; across, the section's
+//! quintic Hermite interpolant of the section's rows at its stations; across, the section's
 //! exact rational form. The stations are the seeds' knots (the seeds are the feet's
 //! Hermite curves on them, and are never cut). So for each piece of B:
 //!
@@ -42,11 +42,12 @@ use core::cmp::Ordering;
 
 use super::certificate::{gn_certify_span, gn_certify_span_reusing, GnLaw, NurbsCurve, SpanReuse};
 use super::continuation::{growth, section_degree, section_weight_range};
+use super::form::HERMITE_DEGREE;
 use super::section::{
-    certificate_faces, crosses_knot, inner_knots, net_of_spans, param, varying, NetForm,
-    StationSystem, GN_THUMBWEIGHT_EQUAL_AREA,
+    certificate_faces, crosses_knot, inner_knots, net_of_spans, param, station_trunc, varying,
+    NetForm, StationSystem, GN_THUMBWEIGHT_EQUAL_AREA,
 };
-use super::series::Trunc;
+use super::series::HERMITE;
 use super::station::{as_b_spline, GnStation, Nurbs, STATION_STEP};
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
@@ -267,9 +268,9 @@ fn derivative_bounds(n: &Nurbs) -> (f64, f64) {
 ///   order;
 /// - `gamma_K M`, the rows: each control point of the net is a sum of at most `2 (n + 1)`
 ///   products of the section's coefficients with the jets (or the arc's rows), then a
-///   Hermite point (two operations), its division by its weight and the weight's scale (two
-///   more): `K = 2 (n + 1) + 6` operations on coordinates of at most M, the net's largest
-///   coordinate;
+///   quintic Hermite point (at most six operations: `v + d (2 h / 5) + a (h^2 / 20)`), its
+///   division by its weight and the weight's scale (two more): `K = 2 (n + 1) + 10`
+///   operations on coordinates of at most M, the net's largest coordinate;
 /// - G, the rows' weights: a homogeneous error becomes a Euclidean one divided by the
 ///   weight, at most the net's weight ratio `w_max / w_min` times its size.
 ///
@@ -309,7 +310,7 @@ pub fn precision_floor(
         d = d.max(lu * eu + lv * ev);
     }
     let n = order as usize;
-    let floor = g * (d + gamma(2 * (n + 1) + 6) * m);
+    let floor = g * (d + gamma(2 * (n + 1) + 10) * m);
     if floor.is_finite() {
         Ok(floor)
     } else {
@@ -386,7 +387,7 @@ fn frame_rounding(net: &BSplineSurface) -> Result<f64> {
 
 /// A span's Hermite rows ([`NetForm::span`]) as a grid `[i along s][j across]`.
 fn span_grid(homog: &[Vec3], w: &[f64], ld: usize) -> Vec<Vec<Hpt>> {
-    (0..4)
+    (0..HERMITE)
         .map(|i| {
             (0..ld)
                 .map(|j| {
@@ -415,17 +416,17 @@ pub(crate) fn stored_net_distance(
     ld: usize,
 ) -> Result<f64> {
     let (nu, nv, stored) = net.control_points()?;
-    if nv != ld || nu != 3 * spans.len() + 1 {
+    if nv != ld || nu != HERMITE_DEGREE * spans.len() + 1 {
         return Err(SolidError::sm_err(OP));
     }
     let mut d = 0.0_f64;
     for (k, (h, w)) in spans.iter().enumerate() {
-        let b: Vec<Vec<Hpt>> = (0..4)
+        let b: Vec<Vec<Hpt>> = (0..HERMITE)
             .map(|i| {
                 (0..ld)
                     .map(|j| {
                         stored
-                            .get((3 * k + i) * ld + j)
+                            .get((HERMITE_DEGREE * k + i) * ld + j)
                             .map_or((Vec3::ZERO, f64::NAN), |c| {
                                 (Vec3::new(c.x, c.y, c.z), if c.w == NOW { 1.0 } else { c.w })
                             })
@@ -451,7 +452,7 @@ fn pieces(pb: &ProceduralBlend, ld: usize) -> Result<Vec<Piece>> {
             let (p, q) = patch.degrees();
             // (p, q) along (u, v); s is u unless the map is swapped
             let (ds, dt) = if d.swapped { (q, p) } else { (p, q) };
-            if ds != 3 || dt + 1 != ld {
+            if ds != HERMITE_DEGREE || dt + 1 != ld {
                 return Err(not_its());
             }
             let (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) = (
@@ -583,10 +584,7 @@ fn recertify_in_frame(
         }
         None => d.offsets,
     };
-    let tr = Trunc::new(
-        if law.is_some() { 2 } else { 1 },
-        if n >= 2 { n } else { 0 },
-    )?;
+    let tr = station_trunc(n, law.is_some())?;
     let system = StationSystem {
         faces,
         leader: &d.leader,
@@ -688,7 +686,7 @@ fn recertify_in_frame(
             }
             let beyond = piece.t[0] < room_lo || piece.t[1] > room_hi;
             let mut rounding = 0.0_f64;
-            for i in 0..4 {
+            for i in 0..HERMITE {
                 let row: Vec<Hpt> = columns
                     .iter()
                     .map(|c| c.get(i).copied().unwrap_or((Vec3::ZERO, f64::NAN)))
@@ -1074,10 +1072,7 @@ fn spans_of_definition(
         }
         None => d.offsets,
     };
-    let tr = Trunc::new(
-        if law.is_some() { 2 } else { 1 },
-        if n >= 2 { n } else { 0 },
-    )?;
+    let tr = station_trunc(n, law.is_some())?;
     let system = StationSystem {
         faces,
         leader: &d.leader,

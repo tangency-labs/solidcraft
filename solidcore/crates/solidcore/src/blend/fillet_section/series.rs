@@ -11,14 +11,24 @@ use super::interval::Ivl;
 use crate::error::{Result, SolidError};
 use crate::math::Vec3;
 
-/// `SM_GN_MAXS`: the highest power of sigma a series holds.
-pub const MAX_S: usize = 7;
+/// The order of the section's Hermite spans along s (not the fork's, whose spans are cubic,
+/// order 4): a span is the polynomial of degree `HERMITE - 1` through its two stations'
+/// values and first `HERMITE / 2 - 1` s-derivatives (quintic: values, first and second
+/// derivatives), and is off the function it interpolates by at most
+/// `(h / 2)^HERMITE / HERMITE!` times the function's largest `HERMITE`-th s-derivative over
+/// the span (the remainder `f^(m)(xi) / m! (s - a)^(m/2) (s - b)^(m/2)`, `m = HERMITE`),
+/// which the certificate bounds.
+pub const HERMITE: usize = 6;
+/// `SM_GN_TAYLOR`: the Taylor form's order of the certificate's `HERMITE`-th s-derivatives
+/// (their Taylor polynomial of degree `TAYLOR - 1` at the span's middle, and the remainder
+/// bound over the span).
+pub const TAYLOR: usize = 2;
+/// `SM_GN_MAXS`: the highest power of sigma a series holds: the certificate's
+/// `HERMITE + TAYLOR`, and one more for a varying ball's touch circle (the fork's 7, with
+/// its cubic spans).
+pub const MAX_S: usize = HERMITE + TAYLOR + 1;
 /// `SM_GN_MAXE`: the highest power of eps a series holds.
 pub const MAX_E: usize = 4;
-/// `SM_GN_TAYLOR`: the Taylor form's order of the certificate's fourth s-derivatives (their
-/// Taylor polynomial of degree `TAYLOR - 1` at the span's middle, and the remainder bound
-/// over the span).
-pub const TAYLOR: usize = 2;
 /// `SM_GN_MAXK`: the highest order of a face's partial derivatives the series need.
 pub const MAX_K: usize = MAX_S + MAX_E + 2;
 /// The highest power of eps a series stores: one past [`MAX_E`], for the one truncation
@@ -26,6 +36,9 @@ pub const MAX_K: usize = MAX_S + MAX_E + 2;
 /// `c[SM_GN_MAXS + 1][SM_GN_MAXE + 1]` has no room for `c[0][5]` and writes it over
 /// `c[1][0]`, which a series truncated at sigma^0 never reads; this column holds it instead.
 pub const STORE_E: usize = MAX_E + 1;
+
+// every coefficient has its bit in a [`Trunc::skipping`] mask
+const _: () = assert!((MAX_S + 1) * (STORE_E + 1) <= 64);
 
 /// The number type of the fork's templates (`double` or `sm_Ivl`).
 pub trait GnScalar:

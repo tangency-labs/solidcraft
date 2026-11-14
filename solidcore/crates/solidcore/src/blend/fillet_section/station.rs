@@ -1129,6 +1129,9 @@ pub struct GnStation {
     pub w: f64,
     /// `dWds`: and its s-derivative (NaN: not resolved).
     pub wds: f64,
+    /// Not the fork's: and its second s-derivative, which a quintic Hermite span takes (NaN:
+    /// not resolved).
+    pub wd2: f64,
     /// `lSteps`: the Newton steps the feet took (014f66f).
     pub steps: u32,
     /// `aiBefore` (3bc54a4): the series above are the station's on the pieces after it
@@ -1147,6 +1150,8 @@ pub struct GnStation {
     pub vl: VSer<f64>,
     /// `dWdsL`: the equal area thumbweight's s-derivative on them.
     pub wdsl: f64,
+    /// Not the fork's: and its second s-derivative on them.
+    pub wd2l: f64,
 }
 
 impl GnStation {
@@ -1177,6 +1182,16 @@ impl GnStation {
             self.wdsl
         } else {
             self.wds
+        }
+    }
+
+    /// The thumbweight's second s-derivative as the span ending here takes it.
+    #[must_use]
+    pub const fn in_wd2(&self) -> f64 {
+        if self.sided {
+            self.wd2l
+        } else {
+            self.wd2
         }
     }
 }
@@ -1501,6 +1516,7 @@ fn solve_station_body(
             v,
             w: f64::NAN,
             wds: f64::NAN,
+            wd2: f64::NAN,
             steps: *steps,
             before: [0; 4],
             sided: false,
@@ -1508,6 +1524,7 @@ fn solve_station_body(
             fl: [VSer::constant(zero); 2],
             vl: VSer::constant(zero),
             wdsl: f64::NAN,
+            wd2l: f64::NAN,
         },
         curves,
     ))

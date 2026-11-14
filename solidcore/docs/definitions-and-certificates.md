@@ -147,8 +147,8 @@ itself be a blend, at most `BLEND_MAX_DEPTH` (3) deep.
 S is evaluated by solving one station per point (Newton from the seeds; the stop is
 `station::STATION_STEP` = 1e-12 relative in each foot parameter) and the section in closed form
 along it; derivatives come order by order from the implicit function theorem
-(`ProceduralBlend::evaluate_definition`). B is built span by span: along s, the cubic Hermite
-interpolant of the section's rows at two stations; across, the section's exact rational form.
+(`ProceduralBlend::evaluate_definition`). B is built span by span: along s, the quintic Hermite
+interpolant of the section's rows at two stations (their values and first and second s-derivatives); across, the section's exact rational form.
 Stations stand at the rails' and leader's knots and wherever a foot crosses a support's knot line
 (`blend/fillet_section/section.rs`). Knots are inserted until each span's bound is at most a tenth
 of the zone tolerance (`target = 0.1 * tol`).
@@ -229,7 +229,7 @@ An enclosure is an interval guaranteed to contain a quantity. The kernel uses th
   / (min w · min v) for any point c (`blend::fillet_section::recertify::net_distance`).
 - **Taylor forms.** Where plain intervals over-estimate, a function is enclosed by its Taylor
   coefficients over the box with a remainder; the blend's certificate carries the feet's series to
-  order 4 in s and n in the section parameter (`blend::fillet_section::series`, `tay`), and uses the
+  order 6 + 2 in s (the quintic spans' sixth derivative in its Taylor form) and n in the section parameter (`blend::fillet_section::series`, `tay`), and uses the
   centred form where one order more is held (`definition_box`). The remedy for an over-estimate is a
   tighter enclosure [8, 10], never a sampled check.
 
@@ -293,7 +293,7 @@ about 1e-10, nearly all of it the stations' term; the rows' is about 1e-14.
 `blend::fillet_section::certificate::gn_certify_span` certifies one span between two stations
 against a target. It tries levels 0 to 6: at level L the span is cut into 2^L pieces, each piece's
 end stations solved, each piece enclosed (§4.3) and its Hermite remainder bounded by
-h⁴/384 · max |c''''|. A level whose bound is under the target certifies the span. Once the least
+(h/2)⁶/6! · max |c⁽⁶⁾| = h⁶/46080 · max |c⁽⁶⁾| (quintic spans; a cubic span's h⁴/384 · max |c''''| needs spans several times shorter at the same bound). A level whose bound is under the target certifies the span. Once the least
 possible value at the pieces' middles is over the target no finer level helps, and the bound so far
 is returned so the caller halves the span (`section.rs`, #2312).
 
