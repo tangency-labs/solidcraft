@@ -41,6 +41,16 @@ fn manifest_is_inert_bounded_and_refuses_unknown_capabilities() {
     assert!(parse_manifest(&vec![b' '; MAX_MANIFEST_BYTES + 1], "sample").is_err());
 }
 #[test]
+fn plugin_entries_cannot_shadow_host_commands() {
+    let mut m = manifest();
+    m["id"] = json!("solid");
+    m["runtime"]["entries"] = json!(["box"]);
+    let error = parse_manifest(&serde_json::to_vec(&m).unwrap(), "solid").unwrap_err();
+    assert!(matches!(&error, EngineError::Plugin(HostError::InvalidManifest { field, .. }) if field == "runtime.entries"), "{error}");
+    assert!(error.to_string().contains("solid.box"));
+}
+
+#[test]
 fn capability_refusals_are_plain_and_name_solidcraft() {
     let refusal = |capabilities: Value| {
         let mut m = manifest();
@@ -161,6 +171,17 @@ mod native {
         fn run(&self, s: &mut Session) -> crate::Result<Value> {
             let approval = s.execute("plugin.inspect", &json!({"path":self.path()}))?["approval"].clone();
             s.execute("plugin.run", &json!({"path":self.path(),"approval":approval,"entry":"make","params":{}}))
+        }
+        fn install(&self, s: &mut Session, approve: Value) -> String {
+            let bytes = solidcraft_io::safe_zip::write(&[
+                ("plugin.json", &std::fs::read(self.0.join("sample/plugin.json")).unwrap()),
+                ("plugin.wasm", &std::fs::read(self.0.join("sample/plugin.wasm")).unwrap()),
+            ])
+            .unwrap();
+            let zip = self.0.join("package.zip");
+            std::fs::write(&zip, bytes).unwrap();
+            s.plugin_state.plugins_dir = Some(self.0.join("installed"));
+            s.execute("plugin.install", &json!({"path":zip,"replace":true,"approve":approve})).unwrap()["folder"].as_str().unwrap().into()
         }
     }
     impl Drop for Fixture {
@@ -587,6 +608,14 @@ mod native {
                 std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
                 let mut s = Session::default();
                 s.plugin_state.file_grants.push(FileGrant { name: "project".into(), folder: f.0.join("sample"), read: true, write: true });
+                s.plugin_state.grants.insert(
+                    "sample".into(),
+                    Grants {
+                        package_hash: Some(read_package(&f.path()).unwrap().approval),
+                        command_groups: BTreeSet::new(),
+                        folders: s.plugin_state.file_grants.clone(),
+                    },
+                );
                 let scope = solidcraft_io::vfs::PathScope::default().with_design_folder(&f.0);
                 assert!(scope.check(&f.path()).is_ok());
                 for scope in [None, Some(scope)] {
@@ -603,6 +632,163 @@ mod native {
                 });
             }
         }
+    }
+
+    #[test]
+    fn hand_installed_plugins_get_no_legacy_or_other_plugins_folder_grants() {
+        let f = Fixture::new("call $box");
+        std::fs::write(f.0.join("sample/plugin.wasm"), file_component(false)).unwrap();
+        std::fs::write(f.0.join("sample/secret.txt"), "test data").unwrap();
+        let mut m = manifest();
+        m["runtime"]["permissions"] = json!({"files":[{"name":"project","read":true,"write":false}]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        let grant = FileGrant { name: "project".into(), folder: f.0.join("sample"), read: true, write: false };
+        s.plugin_state.file_grants.push(grant.clone());
+        s.plugin_state.grants.insert("another-plugin".into(), Grants { folders: vec![grant], ..Default::default() });
+        let error = f.run(&mut s).unwrap_err();
+        assert!(matches!(error, EngineError::Plugin(HostError::PermissionDenied { .. })), "{error}");
+        assert!(s.doc.features.is_empty());
+    }
+
+    #[test]
+    fn only_the_running_plugins_stored_command_groups_authorize_sensitive_calls() {
+        let f = Fixture::new("call $box");
+        let command = "settings.profile.list";
+        let source = component_template();
+        let arguments = r#"{\22length\22:2,\22width\22:3,\22height\22:4}"#;
+        assert!(source.contains(arguments));
+        let source = source
+            .replace("\"solid.box\"", &format!("\"{command}\""))
+            .replace(
+                "i32.const 9\n      i32.const 1024\n      i32.const 33",
+                &format!("i32.const {}\n      i32.const 1024\n      i32.const 2", command.len()),
+            )
+            .replace(arguments, "{}");
+        std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(&source).unwrap()).unwrap();
+        let mut m = manifest();
+        m["runtime"]["commands"] = json!([command]);
+        m["runtime"]["permissions"] = json!({"command_groups":["app"]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        s.plugin_state.command_groups.insert("app".into());
+        s.plugin_state.grants.insert("another-plugin".into(), Grants { command_groups: BTreeSet::from(["app".into()]), ..Default::default() });
+        let error = f.run(&mut s).unwrap_err();
+        assert!(matches!(&error, EngineError::Plugin(HostError::PermissionDenied { permission }) if permission.contains("app")), "{error}");
+        let bytes =
+            solidcraft_io::safe_zip::write(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", &wat::parse_str(&source).unwrap())])
+                .unwrap();
+        let zip = f.0.join("package.zip");
+        std::fs::write(&zip, bytes).unwrap();
+        s.plugin_state.plugins_dir = Some(f.0.join("installed"));
+        s.execute("plugin.install", &json!({"path":zip,"approve":{"command_groups":["app"]}})).unwrap();
+        assert_eq!(f.run(&mut s).unwrap()["result"], json!({}));
+        s.plugin_state.grants.remove("sample");
+        assert!(matches!(f.run(&mut s), Err(EngineError::Plugin(HostError::PermissionDenied { .. }))));
+        assert!(s.doc.features.is_empty());
+    }
+
+    #[test]
+    fn installed_plugins_run_with_only_the_approved_folders() {
+        let f = Fixture::new("call $box");
+        std::fs::write(f.0.join("secret.txt"), "{}").unwrap();
+        let mut m = manifest();
+        m["runtime"]["permissions"] = json!({"files":[{"name":"project","read":true,"write":false}]});
+        let bytes =
+            solidcraft_io::safe_zip::write(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", &file_component(false))]).unwrap();
+        let zip = f.0.join("package.zip");
+        std::fs::write(&zip, bytes).unwrap();
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = Some(f.0.join("installed"));
+        let installed = s.execute("plugin.install", &json!({"path":zip})).unwrap();
+        let path = installed["folder"].clone();
+        let approval = s.execute("plugin.inspect", &json!({"path":path})).unwrap()["approval"].clone();
+        let params = json!({"path":path,"approval":approval,"entry":"make"});
+        assert!(matches!(s.execute("plugin.run", &params), Err(EngineError::Plugin(HostError::PermissionDenied { .. }))));
+        s.execute(
+            "plugin.install",
+            &json!({"path":zip,"replace":true,"approve":{"folders":[{"name":"project","path":f.0,"read":true,"write":false}]}}),
+        )
+        .unwrap();
+        assert_eq!(s.plugin_state.grants["sample"].folders[0].folder, f.0);
+        assert!(s.execute("plugin.run", &params).is_ok());
+        s.execute("plugin.remove", &json!({"id":"sample"})).unwrap();
+        assert!(!s.plugin_state.grants.contains_key("sample"));
+        assert!(s.execute("plugin.run", &params).is_err());
+    }
+
+    #[test]
+    fn stored_grants_refuse_same_id_packages_with_different_manifest_or_component() {
+        let f = Fixture::new("call $box");
+        let mut m = manifest();
+        m["runtime"]["permissions"] = json!({"command_groups":["app"],"files":[{"name":"project","read":true,"write":true}]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        let installed = f.install(&mut s, json!({"command_groups":["app"],"folders":[{"name":"project","path":f.0,"read":true,"write":true}]}));
+        let trusted = read_package(&installed).unwrap();
+        assert_eq!(s.plugin_state.grants["sample"].package_hash.as_deref(), Some(trusted.approval.as_str()));
+        let other = Fixture::new("call $box");
+        m["version"] = json!("0.2.0");
+        std::fs::write(other.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let grants = s.plugin_state.grants.clone();
+        assert!(grants["sample"].command_groups.contains("app"));
+        assert_eq!(grants["sample"].folders.len(), 1);
+        for change_component in [false, true] {
+            if change_component {
+                std::fs::copy(f.0.join("sample/plugin.json"), other.0.join("sample/plugin.json")).unwrap();
+                std::fs::write(other.0.join("sample/plugin.wasm"), component("call $box call $box")).unwrap();
+            }
+            let error = other.run(&mut s).unwrap_err();
+            assert!(
+                matches!(&error, EngineError::Plugin(HostError::PermissionDenied { permission }) if permission.contains("re-approval")),
+                "{error}"
+            );
+            assert!(s.doc.features.is_empty(), "refuse before even non-sensitive plugin edits");
+            assert!(s.plugin_state.file_grants.is_empty() && s.plugin_state.command_groups.is_empty());
+            assert_eq!(s.plugin_state.grants, grants, "inspection cannot change approved grants");
+        }
+        s.execute("plugin.run", &json!({"path":installed,"approval":trusted.approval,"entry":"make"})).unwrap();
+        assert_eq!(s.doc.features.len(), 1, "the installed package still runs");
+    }
+
+    #[test]
+    fn stored_grants_require_reapproval_after_installed_package_changes() {
+        let f = Fixture::new("call $box");
+        let mut s = Session::default();
+        let installed = f.install(&mut s, json!({}));
+        let old_hash = s.plugin_state.grants["sample"].package_hash.clone();
+        let mut m = manifest();
+        m["version"] = json!("0.2.0");
+        for path in [f.0.join("sample/plugin.json"), Path::new(&installed).join("plugin.json")] {
+            std::fs::write(path, m.to_string()).unwrap();
+        }
+        let inspected = s.execute("plugin.inspect", &json!({"path":installed})).unwrap();
+        let args = json!({"path":installed,"approval":inspected["approval"],"entry":"make"});
+        let error = s.execute("plugin.run", &args).unwrap_err();
+        assert!(matches!(&error, EngineError::Plugin(HostError::PermissionDenied { permission }) if permission.contains("re-approval")), "{error}");
+        assert!(s.doc.features.is_empty());
+        assert_eq!(s.plugin_state.grants["sample"].package_hash, old_hash);
+        f.install(&mut s, json!({}));
+        assert_ne!(s.plugin_state.grants["sample"].package_hash, old_hash);
+        s.execute("plugin.run", &args).unwrap();
+        assert_eq!(s.doc.features.len(), 1);
+    }
+
+    #[test]
+    fn legacy_stored_grants_require_reapproval_instead_of_trusting_an_inspection() {
+        let f = Fixture::new("call $box");
+        let mut s = Session::default();
+        let legacy: Grants = serde_json::from_value(json!({"command_groups":["app"],"folders":[]})).unwrap();
+        assert_eq!(legacy.package_hash, None);
+        s.plugin_state.grants.insert("sample".into(), legacy.clone());
+        let error = f.run(&mut s).unwrap_err();
+        assert!(matches!(&error, EngineError::Plugin(HostError::PermissionDenied { permission }) if permission.contains("re-approval")), "{error}");
+        assert_eq!(s.plugin_state.grants["sample"], legacy);
+        assert!(s.doc.features.is_empty() && s.plugin_state.file_grants.is_empty());
+        f.install(&mut s, json!({}));
+        f.run(&mut s).unwrap();
+        assert!(s.plugin_state.grants["sample"].command_groups.is_empty());
+        assert_eq!(s.doc.features.len(), 1);
     }
 
     #[test]
@@ -799,7 +985,28 @@ mod install_zip {
         let path = put(&root, "gears.zip", &gears("0.1.0"));
         let dry = s.execute("plugin.install", &json!({"path": path, "dry_run": true})).unwrap();
         assert_eq!((dry["installed"].clone(), root.join("plugins/gears").exists()), (json!(false), false));
-        let reply = s.execute("plugin.install", &json!({"path": path})).unwrap();
+        // A changed auxiliary file keeps the manifest-and-component hash but not the archive's:
+        // installing with the reviewed archive hash refuses it and publishes nothing.
+        let (m, w) = (
+            serde_json::to_vec(&{
+                let mut m: Value = serde_json::from_slice(&manifest_bytes("gears", json!(["commands@0.1"]))).unwrap();
+                m["version"] = json!("0.1.0");
+                m
+            })
+            .unwrap(),
+            b"\0asm",
+        );
+        let reviewed = zip(&[("gears-0.1.0/plugin.json", &m[..]), ("gears-0.1.0/plugin.wasm", w), ("gears-0.1.0/data.txt", b"reviewed")]);
+        let changed = zip(&[("gears-0.1.0/plugin.json", &m[..]), ("gears-0.1.0/plugin.wasm", w), ("gears-0.1.0/data.txt", b"changed")]);
+        let aux = put(&root, "aux.zip", &reviewed);
+        let aux_dry = s.execute("plugin.install", &json!({"path": aux, "dry_run": true})).unwrap();
+        std::fs::write(&aux, &changed).unwrap();
+        let error = s.execute("plugin.install", &json!({"path": aux, "approval": aux_dry["approval"], "archive": aux_dry["archive"]})).unwrap_err();
+        assert!(error.to_string().contains("archive"), "{error}");
+        assert!(!root.join("plugins/gears").exists() && s.plugin_state.grants.is_empty());
+        let reply = s.execute("plugin.install", &json!({"path": path, "approval": dry["approval"], "archive": dry["archive"]})).unwrap();
+        assert_eq!(reply["approval"], dry["approval"]);
+        assert_eq!(reply["archive"], dry["archive"]);
         assert_eq!(reply["id"], "gears");
         assert_eq!(reply["name"], "Gears");
         assert_eq!(reply["version"], "0.1.0");
@@ -815,6 +1022,26 @@ mod install_zip {
         assert_eq!(list["plugins"][0]["commands"], json!(["gears.make"]));
         let only = std::fs::read_dir(root.join("plugins")).unwrap().count();
         assert_eq!(only, 1, "no staging folders are left behind");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_zip_replaced_after_review_is_refused_before_files_or_grants_are_written() {
+        let (mut s, root) = session("swapped-after-review");
+        let path = requested_package(&root);
+        let dry = s.execute("plugin.install", &json!({"path":path,"dry_run":true})).unwrap();
+        assert!(dry["approval"].as_str().is_some_and(|hash| !hash.is_empty()));
+        // The same manifest with different component bytes must also invalidate the review.
+        let mut replacement = unpack(&std::fs::read(&path).unwrap()).unwrap();
+        replacement.files.iter_mut().find(|file| file.path == "plugin.wasm").unwrap().bytes = b"replaced component".to_vec();
+        let files: Vec<_> = replacement.files.iter().map(|file| (file.path.as_str(), file.bytes.as_slice())).collect();
+        std::fs::write(&path, zip(&files)).unwrap();
+        let approve = json!({"command_groups":["file"],"folders":[{"name":"project","path":root,"read":true,"write":false}]});
+        let error = s.execute("plugin.install", &json!({"path":path,"approval":dry["approval"],"approve":approve})).unwrap_err();
+        assert!(matches!(error, crate::EngineError::Plugin(HostError::InvalidInput { field, .. }) if field == "approval"));
+        assert!(!root.join("plugins").exists(), "even the plugins root and staging folders stay unwritten");
+        assert!(s.plugin_state.grants.is_empty());
+        assert!(s.plugin_state.packages.is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -835,6 +1062,143 @@ mod install_zip {
         assert_eq!(read_package(&dir.join("gears").to_string_lossy()).unwrap().manifest.version, "0.2.0");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "the old folder is gone");
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn requested_package(root: &Path) -> String {
+        let mut m = manifest();
+        m["runtime"]["permissions"] = json!({"command_groups":["app","file"],"files":[{"name":"project","read":true,"write":true}]});
+        m["runtime"]["entries"] = json!([{"name":"make","slots":[{"kind":"menu","name":"File"},{"kind":"ribbon","name":"Model"}]}]);
+        put(root, "requested.zip", &zip(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", b"inert bytes")]))
+    }
+
+    #[test]
+    fn install_approvals_are_validated_before_writing_and_dry_run_never_stores_them() {
+        let (mut s, root) = session("approval");
+        let path = requested_package(&root);
+        let approve = json!({"command_groups":["file"],"folders":[{"name":"project","path":root,"read":true,"write":false}]});
+        let dry = s.execute("plugin.install", &json!({"path":path,"dry_run":true,"approve":approve})).unwrap();
+        assert_eq!(dry["entry_points"][0]["slots"].as_array().unwrap().len(), 2);
+        assert!(s.plugin_state.grants.is_empty() && !root.join("plugins").exists());
+        for unasked in [
+            json!({"command_groups":["plugin"]}),
+            json!({"folders":[{"name":"unasked","path":root,"read":true,"write":false}]}),
+            json!({"folders":[{"name":"project","path":"relative","read":true,"write":false}]}),
+            json!({"folders":[{"name":"project","path":root,"read":false,"write":false}]}),
+            json!({"folders":[{"name":"project","path":root,"read":true,"write":false},{"name":"project","path":root,"read":true,"write":false}]}),
+        ] {
+            for dry_run in [false, true] {
+                let error = s.execute("plugin.install", &json!({"path":path,"dry_run":dry_run,"approve":unasked})).unwrap_err();
+                assert!(matches!(error, EngineError::Plugin(HostError::PermissionDenied { .. })), "{error}");
+                assert!(s.plugin_state.grants.is_empty() && !root.join("plugins").exists());
+            }
+        }
+        // Reject a write escalation even when the folder's name is requested.
+        let mut m = manifest();
+        m["runtime"]["permissions"] = json!({"files":[{"name":"project","read":true,"write":false}]});
+        let read_only = put(&root, "read-only.zip", &zip(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", b"x")]));
+        let error = s
+            .execute("plugin.install", &json!({"path":read_only,"approve":{"folders":[{"name":"project","path":root,"read":true,"write":true}]}}))
+            .unwrap_err();
+        assert!(matches!(error, EngineError::Plugin(HostError::PermissionDenied { .. })));
+        s.execute("plugin.install", &json!({"path":path,"approve":approve})).unwrap();
+        let granted = s.plugin_state.grants["sample"].clone();
+        assert_eq!(granted.package_hash.as_deref(), Some(read_package(&root.join("plugins/sample").to_string_lossy()).unwrap().approval.as_str()));
+        assert_eq!(granted.command_groups, BTreeSet::from(["file".into()]));
+        assert_eq!(granted.folders, vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: false }]);
+        // A refused replacement cannot discard the original grants or package.
+        assert!(s.execute("plugin.install", &json!({"path":path})).is_err());
+        assert_eq!(s.plugin_state.grants["sample"], granted);
+        assert!(s.execute("plugin.remove", &json!({"id":"../outside"})).is_err());
+        s.disabled_plugins.insert("sample".into());
+        let removed = s.execute("plugin.remove", &json!({"id":"sample"})).unwrap();
+        assert_eq!(removed["removed"], true);
+        assert!(!root.join("plugins/sample").exists());
+        assert!(
+            !s.plugin_state.grants.contains_key("sample")
+                && !s.plugin_state.packages.contains_key("sample")
+                && !s.disabled_plugins.contains("sample")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installs_without_approval_grant_nothing_and_replacement_drops_stale_grants() {
+        let (mut s, root) = session("stale");
+        let path = requested_package(&root);
+        s.execute("plugin.install", &json!({"path":path})).unwrap();
+        assert_eq!(s.plugin_state.grants["sample"].command_groups, BTreeSet::new());
+        assert!(s.plugin_state.grants["sample"].folders.is_empty());
+        assert!(s.plugin_state.grants["sample"].package_hash.is_some());
+        s.execute("plugin.install", &json!({"path":path,"replace":true,"approve":{"command_groups":["app","file"],"folders":[{"name":"project","path":root,"read":true,"write":true}]}})).unwrap();
+        let mut m = manifest();
+        m["runtime"]["permissions"] = json!({"command_groups":["app"]});
+        let newer = put(&root, "newer.zip", &zip(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", b"new bytes")]));
+        s.execute("plugin.install", &json!({"path":newer,"replace":true,"approve":{"command_groups":["app"]}})).unwrap();
+        let package_hash = Some(read_package(&root.join("plugins/sample").to_string_lossy()).unwrap().approval);
+        assert_eq!(
+            s.plugin_state.grants["sample"],
+            Grants { package_hash: package_hash.clone(), command_groups: BTreeSet::from(["app".into()]), ..Default::default() }
+        );
+        s.execute("plugin.install", &json!({"path":newer,"replace":true})).unwrap();
+        assert_eq!(s.plugin_state.grants["sample"], Grants { package_hash, ..Default::default() });
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn hostile_install_approvals_and_remove_scopes_leave_the_package_unchanged() {
+        let (mut s, root) = session("hostile");
+        let path = requested_package(&root);
+        for approve in [
+            json!(false),
+            json!([]),
+            json!([["file"], []]),
+            json!({"folders":[["project",root,true,true]]}),
+            json!({"extra":true}),
+            json!({"folders":[{"name":"project","folder":root,"read":true,"write":true}]}),
+            json!({"folders":[{"name":"project","path":root,"read":"yes","write":true}]}),
+        ] {
+            assert!(
+                s.execute("plugin.install", &json!({"path":path,"approve":approve})).is_err(),
+                "refuse non-object or invalid approval: {approve}"
+            );
+            assert!(!root.join("plugins").exists());
+        }
+        let approve = json!({"folders":[{"name":"project","path":root,"read":true,"write":true}]});
+        assert!(s.execute("plugin.install", &json!([path, false, false, approve])).is_err(), "install parameters must be an object");
+        assert!(!root.join("plugins").exists());
+        solidcraft_io::vfs::scoped(Some(Default::default()), || {
+            assert!(s.execute("plugin.install", &json!({"path":path,"approve":approve})).is_err());
+        });
+        solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.join("zips")])), || {
+            assert!(s.execute("plugin.install", &json!({"path":path,"approve":approve})).is_err(), "folder approval retains caller scope");
+        });
+        assert!(!root.join("plugins").exists());
+        s.execute("plugin.install", &json!({"path":path,"approve":approve})).unwrap();
+        let hidden = root.join("plugins/sample/.private");
+        std::fs::write(&hidden, "private").unwrap();
+        solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::default().with_design_folder(&root)), || {
+            assert!(s.execute("plugin.remove", &json!({"id":"sample"})).is_err());
+        });
+        // Replacement must not erase hidden descendants that this caller cannot remove.
+        let prior_grants = s.plugin_state.grants["sample"].clone();
+        solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::default().with_design_folder(&root)), || {
+            assert!(s.execute("plugin.install", &json!({"path":path,"replace":true})).is_err());
+        });
+        assert_eq!(s.plugin_state.grants["sample"], prior_grants);
+        assert!(hidden.exists() && s.plugin_state.grants.contains_key("sample"));
+        solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.join("plugins")])), || {
+            s.execute("plugin.remove", &json!({"id":"sample"})).unwrap();
+        });
+        let hidden_zip = put(
+            &root,
+            "hidden.zip",
+            &zip(&[("plugin.json", &serde_json::to_vec(&manifest()).unwrap()), ("plugin.wasm", b"x"), (".private", b"new private data")]),
+        );
+        solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::default().with_design_folder(&root)), || {
+            assert!(s.execute("plugin.install", &json!({"path":hidden_zip})).is_err());
+        });
+        assert!(!root.join("plugins/sample").exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

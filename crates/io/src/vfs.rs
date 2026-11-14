@@ -297,6 +297,16 @@ impl PathScope {
 
     /// Whether `path` lies inside one of the folders, after following symlinks and `..`.
     pub fn check(&self, path: &str) -> Result<()> {
+        self.check_path(path, false)
+    }
+
+    /// Check a destination whose parent directories may not exist yet, without creating them.
+    /// Existing ancestors still resolve through symlinks; missing components must be normal names.
+    pub fn check_new(&self, path: &str) -> Result<()> {
+        self.check_path(path, true)
+    }
+
+    fn check_path(&self, path: &str, new: bool) -> Result<()> {
         let refused = || {
             let roots: Vec<String> = self.roots.iter().chain(&self.design_roots).map(|r| r.display().to_string()).collect();
             Error::new(
@@ -315,8 +325,11 @@ impl PathScope {
         {
             return Err(windows(why));
         }
+        if new && cfg!(windows) && path.split(['/', '\\']).any(|part| !matches!(part, "." | "..") && part.ends_with(['.', ' '])) {
+            return Err(windows("trailing dots or spaces in a future path"));
+        }
         touched();
-        let resolved = match resolve(std::path::Path::new(path)) {
+        let resolved = match if new { resolve_new(std::path::Path::new(path)) } else { resolve(std::path::Path::new(path)) } {
             Ok(r) => r,
             Err(e) if e.kind() == ErrorKind::NotFound => return Err(self.missing_folder(path).unwrap_or_else(refused)),
             Err(_) => return Err(refused()),
@@ -675,6 +688,25 @@ fn resolve(path: &std::path::Path) -> Result<std::path::PathBuf> {
     }
 }
 
+/// Resolve a future destination without following a dangling symlink or normalizing missing `..`.
+fn resolve_new(path: &std::path::Path) -> Result<std::path::PathBuf> {
+    let mut at = path;
+    let mut missing = Vec::new();
+    loop {
+        match std::fs::canonicalize(at) {
+            Ok(root) => return Ok(missing.iter().rev().fold(root, |root, name| root.join(name))),
+            Err(error) if error.kind() == ErrorKind::NotFound && std::fs::symlink_metadata(at).is_err() => {
+                let (Some(parent), Some(std::path::Component::Normal(name))) = (at.parent(), at.components().next_back()) else {
+                    return Err(error);
+                };
+                missing.push(name);
+                at = if parent.as_os_str().is_empty() { std::path::Path::new(".") } else { parent };
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 /// Run `f` with file access confined to `scope` on this thread (`None`: unconfined).
 pub fn scoped<T>(scope: Option<PathScope>, f: impl FnOnce() -> T) -> T {
     struct Restore(Option<PathScope>);
@@ -705,6 +737,14 @@ pub fn check(path: &str) -> Result<()> {
         return Ok(());
     }
     SCOPE.with(|s| s.borrow().as_ref().map_or(Ok(()), |scope| scope.check(path)))
+}
+
+/// Authorize a destination before creating its missing parents. This grants no additional roots.
+pub fn check_new(path: &str) -> Result<()> {
+    if cfg!(target_arch = "wasm32") {
+        return Ok(());
+    }
+    SCOPE.with(|s| s.borrow().as_ref().map_or(Ok(()), |scope| scope.check_new(path)))
 }
 
 /// A file's text, at most `max` bytes.
@@ -1021,6 +1061,43 @@ mod tests {
         assert!(PathScope::new([]).with_design(Some("/part.solidcraft")).design_roots().is_empty());
         assert!(PathScope::new([]).with_design(Some(&s(base.join("missing/p.solidcraft")))).design_roots().is_empty());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn future_destinations_preserve_scope_and_do_not_create_directories() {
+        let root = super::temp_dir().join(format!("solidcraft-vfs-new-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("plugins/sample/data/value.json");
+        let scope = super::PathScope::new([root.clone()]);
+        assert!(scope.check(&path.to_string_lossy()).is_err(), "ordinary I/O still requires its parent");
+        assert!(scope.check_new(&path.to_string_lossy()).is_ok());
+        super::scoped(Some(scope.clone()), || {
+            assert!(super::check_new(&path.to_string_lossy()).is_ok());
+            assert!(super::check_new(&root.join("../outside/value.json").to_string_lossy()).is_err());
+        });
+        assert!(!root.join("plugins").exists());
+        let design = super::PathScope::default().with_design_folder(&root);
+        assert!(design.check_new(&path.to_string_lossy()).is_ok());
+        assert!(design.check_new(&root.join("plugins/sample/.private/value").to_string_lossy()).is_err());
+        assert!(scope.check_new(&root.join("missing/../../outside").to_string_lossy()).is_err());
+        assert!(super::PathScope::default().check_new(&path.to_string_lossy()).is_err());
+        #[cfg(windows)]
+        for alias in ["plugins/new/.. /.. /outside", "plugins/new/../outside.", "plugins/new/data "] {
+            assert!(scope.check_new(&root.join(alias).to_string_lossy()).is_err(), "{alias}");
+        }
+        #[cfg(unix)]
+        {
+            let outside = root.with_extension("outside");
+            std::fs::create_dir_all(&outside).unwrap();
+            std::os::unix::fs::symlink(&outside, root.join("escape")).unwrap();
+            std::os::unix::fs::symlink(root.join("absent"), root.join("dangling")).unwrap();
+            assert!(scope.check_new(&root.join("escape/new/file").to_string_lossy()).is_err());
+            assert!(scope.check_new(&root.join("dangling/new/file").to_string_lossy()).is_err());
+            std::fs::remove_dir_all(outside).unwrap();
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// Folders an agent opened or saved a design in (#7181) count as the open design's folder

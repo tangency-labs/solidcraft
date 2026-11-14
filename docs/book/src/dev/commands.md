@@ -28,6 +28,50 @@ Only the registry's own dotted ids name commands (matched ignoring case); any ot
 with `unknown command`, which names up to three close ids: a typo's (`solid.extrud`), or one
 ending in the same word (`file.open`: did you mean `doc.open`?).
 
+## Plugin package commands
+
+Installation, discovery and removal use the command surface. Programmatic calls never open
+file pickers or permission dialogs. The commands expose input and output schemas through
+`engine.describe`:
+
+| Command | Input | Output |
+|---|---|---|
+| `plugin.install` | `{path, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}]}}` | `{id, name, version, description, capabilities, permissions, commands, entries, entry_points, replaces?, installed, folder}` |
+| `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
+| `plugin.remove` | `{id}` | `{id, removed: true}` |
+
+`plugin.install` reads one bounded zip through `solidcraft_io::safe_zip` and publishes it through
+the existing hidden-folder-and-rename pipeline. `dry_run: true` checks and describes the package,
+including supplied approvals, without changing files or grants. `entry_points` contains the declared
+`craft_plugin::Entry` objects with names, effects, input schemas and slots; `entries` contains
+namespaced command ids. Replacing an installed plugin requires `replace: true`.
+
+Approval grants may only narrow manifest requests. An unrequested group, folder name or access mode
+returns a typed error. Each folder approval contains `name`, an absolute local `path`, `read` and `write`.
+Omitting `approve` grants nothing, including on replacement. Providing `approve` replaces that plugin's
+stored set; stale grants cannot survive replacement. The engine stores grants after publication and
+`plugin.run` checks them against the manifest. Desktop preferences persist the grants per plugin id.
+Removal validates the id, confines deletion to the host's plugin directory and removes its stored
+grants. These operations do not edit the design.
+
+On desktop, `plugin.install` and `plugin.remove` require separate `engine.execute` requests.
+`engine.batch` and `engine.script` reject them during preflight, before any earlier step runs.
+Direct calls use the package worker. The Preferences install action and Plugins menu both call
+`plugin_install::start(app)` for file selection and the single confirmation screen.
+There is no separate package review command or permission screen.
+
+Preferences, the Plugins menu and host slots share `plugins::inventory`.
+`plugin_menu::list` adds the current enabled state; Preferences reuses slot discovery's snapshot.
+File, Help and ribbon clicks resolve a namespaced entry against that
+list and call `plugin_menu::open_entry(app, p, e)`, as the Plugins menu does. The shared dialog draws
+the entry's `input_schema`, checks its enabled state and grants, and submits through the existing
+worker path. Unknown menu names draw no host rows; every entry remains in the Plugins menu.
+Unknown ribbon names use the Plugins ribbon tab. Opening a dialog never executes an entry.
+Execution still requires explicit approval and the package identity checked by `plugin.run`.
+
+See [Plugins](../../../plugins.md) for placement, package limits and integration contracts, and
+[the runtime reference](../../../plugin-runtime.md) for execution and file scope.
+
 ## Adding a command
 
 1. Add a `CommandSpec` to the right file in `crates/engine/src/cmd/` and implement `run`.

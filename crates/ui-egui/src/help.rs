@@ -135,6 +135,7 @@ fn connect(app: &mut SolveApp, ctx: &egui::Context) {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
     if app.help.menu {
         let mut pick: Option<&str> = None;
+        let mut plugin_picked = false;
         let resp = Container::new(ctx, Surface::Popup)
             .area(egui::Id::unique("sc_help_menu"))
             .fixed_pos(anchor)
@@ -176,8 +177,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                             pick = Some(link.id);
                         }
                     }
+
+                    plugin_picked = crate::plugin_slots::menu_rows(app, ui, "Help");
                 })
             });
+        if plugin_picked {
+            app.help.menu = false;
+        }
         if let Some(p) = pick {
             run(app, ctx, p);
         } else if ctx.input(|i| i.pointer.any_pressed() || i.key_pressed(egui::Key::Escape)) && !resp.response.contains_pointer() {

@@ -249,6 +249,52 @@ fn ribbon(h: &mut Harness, requested: &mut BTreeMap<String, bool>) {
     }
 }
 
+/// Discover an inert package and traverse the host's actual plugin menus and ribbon groups.
+fn plugin_slot_menus_and_ribbon(requested: &mut BTreeMap<String, bool>) {
+    let mut h = harness();
+    let root = h.dir.join("plugins");
+    let package = root.join("icon-audit-helper");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("entry.wasm"), []).unwrap();
+    std::fs::write(
+        package.join("plugin.json"),
+        json!({
+            "id":"icon-audit-helper","name":"Icon audit helper","version":"1.0","capabilities":["commands@0.1"],
+            "runtime":{"module":"entry.wasm","commands":[],"entries":[{
+                "name":"inspect","effect":"read","slots":[
+                    {"kind":"menu","name":"File"},{"kind":"menu","name":"Help"},
+                    {"kind":"ribbon","name":"Model"},{"kind":"ribbon","name":"Audit tools"}
+                ]
+            }]}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    h.app.session.plugin_state.plugins_dir = Some(root);
+    h.app.home.open = false;
+    h.app.preferences.ribbon_tabs_only = false;
+    h.app.ui.tab = "MODEL".into();
+    h.call("ui.resize", json!({"width":2400,"height":1400}));
+    // Discovery runs on a worker. Use the shared bounded scenario wait for this fixture's
+    // unique group, so an earlier scan of the user's data directory cannot satisfy the wait.
+    h.step(&json!({"until":{"shown_handles":["panel:MODEL:plugin:icon-audit-helper","tab:PLUGINS"]}})).unwrap();
+    let label = "Icon audit helper · inspect";
+    for (handle, surface) in [("appbar:file", "plugin File slot"), ("appbar:help", "plugin Help slot")] {
+        click(&mut h, handle);
+        assert!(h.widget(label).is_some(), "{surface}: the host item must show the plugin's name");
+        collect(&mut h, surface, requested);
+        escape(&mut h);
+    }
+    for tab in ["MODEL", "PLUGINS"] {
+        click(&mut h, &format!("tab:{tab}"));
+        click(&mut h, &format!("panel:{tab}:plugin:icon-audit-helper"));
+        assert!(h.widget(label).is_some(), "{tab}: the host group menu must show the plugin's name");
+        collect(&mut h, &format!("plugin {tab} ribbon slot"), requested);
+        escape(&mut h);
+    }
+    assert_eq!(requested.get("prefs_plugins"), Some(&false), "the host plugin badge must resolve to real artwork");
+}
+
 fn assistant(h: &mut Harness, requested: &mut BTreeMap<String, bool>) {
     use solidcraft_ui_egui::agent_chat::{Item, backend::ToolStatus};
     h.call("ui.agent_chat", json!({"features":true,"open":true,"picker":false,"width":440}));
@@ -656,6 +702,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         collect(&mut scenario, name, &mut requested);
     }
     universal_panel_host_menus(&mut requested);
+    plugin_slot_menus_and_ribbon(&mut requested);
     icon_svg::audit::stop();
     let manifest = requested.iter().map(|(name, placeholder)| format!("{name}\t{placeholder}\n")).collect::<String>();
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../look/icons/design/requested_icons.txt");
