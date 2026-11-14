@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn canvases_on_model_planes_follow_rebuilds_and_reopen() {
         use solidcore_record::Vec3;
-        use solidcraft_geom::prelude::*;
+        use solidcraft_geom::PlaneGeom as _;
 
         let mut s = Session::default();
         for (command, params) in [
@@ -312,22 +312,37 @@ mod tests {
         let check = |s: &Session, station: f64| {
             let (vals, _) = s.doc.param_values();
             let state = s.model.state();
-            for (name, origin, normal) in [
-                ("XY", Vec3::ZERO, Vec3::Z),
-                ("Numeric", Vec3::new(0.0, 0.0, 5.0), Vec3::Z),
-                ("Points", Vec3::ZERO, Vec3::Z),
-                ("Along", Vec3::new(station, 0.0, 0.0), Vec3::X),
-                ("AlongOffset", Vec3::new(station + 2.0, 0.0, 0.0), Vec3::X),
-                ("Angled", Vec3::new(0.0, -5.0, 0.0), -Vec3::Y),
-                ("Derived", Vec3::new(0.0, -7.0, 0.0), -Vec3::Y),
+            for (name, origin, normal, expected_corners) in [
+                ("XY", [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [[-20.0, -10.0, 0.0], [20.0, -10.0, 0.0], [20.0, 10.0, 0.0], [-20.0, 10.0, 0.0]]),
+                ("Numeric", [0.0, 0.0, 5.0], [0.0, 0.0, 1.0], [[-20.0, -10.0, 5.0], [20.0, -10.0, 5.0], [20.0, 10.0, 5.0], [-20.0, 10.0, 5.0]]),
+                ("Points", [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [[-20.0, -10.0, 0.0], [20.0, -10.0, 0.0], [20.0, 10.0, 0.0], [-20.0, 10.0, 0.0]]),
+                (
+                    "Along",
+                    [station, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [[station, -20.0, -10.0], [station, 20.0, -10.0], [station, 20.0, 10.0], [station, -20.0, 10.0]],
+                ),
+                (
+                    "AlongOffset",
+                    [station + 2.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [[station + 2.0, -20.0, -10.0], [station + 2.0, 20.0, -10.0], [station + 2.0, 20.0, 10.0], [station + 2.0, -20.0, 10.0]],
+                ),
+                ("Angled", [0.0, -5.0, 0.0], [0.0, -1.0, 0.0], [[-20.0, -5.0, -10.0], [20.0, -5.0, -10.0], [20.0, -5.0, 10.0], [-20.0, -5.0, 10.0]]),
+                ("Derived", [0.0, -7.0, 0.0], [0.0, -1.0, 0.0], [[-20.0, -7.0, -10.0], [20.0, -7.0, -10.0], [20.0, -7.0, 10.0], [-20.0, -7.0, 10.0]]),
             ] {
                 let c = s.doc.canvases.iter().find(|c| c.name == name).unwrap();
                 let plane = s.doc.canvas_plane(&vals, c, &state).unwrap_or_else(|e| panic!("{name}: {e}"));
-                assert!(plane.origin.dist(origin) < 1e-9, "{name}: {:?}", plane.origin);
-                assert!(plane.normal().dist(normal) < 1e-9, "{name}: {:?}", plane.normal());
-                let corners = c.world_corners(&plane);
-                assert!((corners[0].dist(corners[1]) - 40.0).abs() < 1e-9, "{name}");
-                assert!((corners[1].dist(corners[2]) - 20.0).abs() < 1e-9, "{name}");
+                let assert_components = |actual: Vec3, expected: [f64; 3], context: &str| {
+                    for ((axis, actual), expected) in ["x", "y", "z"].into_iter().zip([actual.x, actual.y, actual.z]).zip(expected) {
+                        assert!((actual - expected).abs() < 1e-9, "{name} {context}.{axis}: expected {expected}, got {actual}");
+                    }
+                };
+                assert_components(plane.origin, origin, "origin");
+                assert_components(plane.normal(), normal, "normal");
+                for (index, (actual, expected)) in c.world_corners(&plane).into_iter().zip(expected_corners).enumerate() {
+                    assert_components(actual, expected, &format!("corner {index}"));
+                }
             }
         };
         check(&s, 5.0);
