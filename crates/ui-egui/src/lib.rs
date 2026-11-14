@@ -36,6 +36,7 @@ pub mod deferred;
 pub mod delete;
 pub mod design_properties;
 mod dialog_descriptor;
+use solidcraft_ui_kit::dialog_focus;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
@@ -3704,6 +3705,8 @@ impl SolveApp {
         // off is the old behaviour, so the kit default and this preference default agree.
         ui_kit::set_dialog_mnemonics(self.preferences.dialog_first_letter_buttons);
         recent_colors::share(ui.ctx(), &mut self.ui.recent_colors);
+        dialogs::prepare_tab(self, ui.ctx());
+        dialog_focus::prepare_active(ui.ctx());
         let t0 = now_ms();
         let _language = self.prepare_text(ui.ctx());
         let mut report_input = None;

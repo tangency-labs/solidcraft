@@ -1,8 +1,9 @@
 //! Panel elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
-use super::{actions::icon_button_at, metrics::*, text::paint_text};
+use super::{metrics::*, text::paint_text};
 use crate::BackingTooltipExt as _;
 use egui::{Ui, vec2};
 use solidcraft_theme::Tokens;
+use solidcraft_ui_registry as registry;
 
 const WINDOW_PAGES_NARROW_WIDTH: f32 = 150.0;
 const WINDOW_PAGES_NARROW_AT: f32 = 700.0;
@@ -69,8 +70,8 @@ fn header_actions(
         vec2(t.form_close_size, t.form_close_size),
     );
     if closeable {
-        let close = icon_button_at(ui, close_rect, "close", "Close");
-        solidcraft_ui_registry::publish_handle("dialog:close", close.rect.center());
+        let close = super::icon_button_at_with_sense(ui, close_rect, "close", "Close", egui::Sense::CLICK);
+        registry::publish_handle("dialog:close", close.rect.center());
         if close.clicked() {
             on_close();
         }
@@ -176,8 +177,8 @@ impl<'a> TopHeader<'a> {
             solidcraft_ui_registry::publish_handle("dialog:close", cancel_rect.center());
         } else {
             let close_rect = target(right);
-            let response = icon_button_at(ui, close_rect, "close", "Close");
-            solidcraft_ui_registry::publish_handle("dialog:close", response.rect.center());
+            let response = super::icon_button_at_with_sense(ui, close_rect, "close", "Close", egui::Sense::CLICK);
+            registry::publish_handle("dialog:close", response.rect.center());
             if response.clicked() {
                 *close = true;
             }
@@ -738,6 +739,13 @@ impl<'a> Panel<'a> {
         self.joined.map_or(container, |edges| container.joined(edges)).tool_frame(self.frame, right >= self.viewport.right() - 0.5)
     }
 
+    /// Show a feature/manager dialog with its native Tab order confined to the card.
+    pub fn show<R>(&self, ctx: &egui::Context, open: Option<&mut bool>, add: impl FnOnce(&mut Ui) -> R) -> Option<egui::InnerResponse<Option<R>>> {
+        let window = self.window(ctx);
+        let window = if let Some(open) = open { window.open(open) } else { window };
+        window.show(ctx, |ui| crate::dialog_focus::scope(ui, self.id, add))
+    }
+
     pub fn window(&self, ctx: &egui::Context) -> super::container::FeatureWindow<'a> {
         self.window_placed(ctx, None)
     }
@@ -1291,7 +1299,7 @@ impl<'a> Window<'a> {
                 .frame(frame)
                 .show(ctx, |ui| {
                     ui.set_width(inner_width);
-                    let result = add(ui);
+                    let result = crate::dialog_focus::scope(ui, self.id, add);
                     super::Container::finish_content(ui, frame);
                     result
                 });
@@ -1317,7 +1325,7 @@ impl<'a> Window<'a> {
             (None, None) => window.pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center() - vec2(0.0, row_height() * 2.5)),
         };
         let shown = super::container::FeatureWindow::new(window, self.id, frame).show(ctx, |ui| {
-            let result = add(ui);
+            let result = crate::dialog_focus::scope(ui, self.id, add);
             super::Container::finish_content(ui, frame);
             result
         });

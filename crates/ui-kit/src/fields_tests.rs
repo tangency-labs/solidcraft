@@ -1164,3 +1164,28 @@ fn a_track_number_adds_up_and_a_sign_adds_to_the_value_now() {
     assert_eq!(typed("1e-3+1", 0.0), Some(1.001));
     assert_eq!(typed("abc", 1.0), None);
 }
+
+#[test]
+fn count_arrows_keep_keyboard_activation_without_dialog_navigation() {
+    let ctx = crate::test_support::context();
+    crate::dialog_focus::configure(&ctx, false, None);
+    let mut quantity = "123".to_string();
+    let arrow = std::cell::Cell::new(egui::Id::NULL);
+    let mut draw = |ui: &mut Ui| {
+        crate::dialog_focus::scope(ui, egui::Id::unique("native_counts"), |ui| {
+            row(ui, "Quantity", |ui| {
+                arrow.set(ui.scope_id().with(("sc_count_step", "Quantity", "up")));
+                count_field(ui, &mut quantity, &Count { min: 1, max: 1000, eval: &|text| text.parse().ok() });
+            });
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let at = registry::handle_at("dialog:Quantity").unwrap();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    frame(&ctx, key(egui::Key::Tab), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(ctx.memory(|m| m.has_focus(arrow.get())));
+    frame(&ctx, key(egui::Key::Space), &mut draw);
+    assert_eq!(quantity, "124");
+}

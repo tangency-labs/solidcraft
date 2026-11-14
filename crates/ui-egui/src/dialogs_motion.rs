@@ -610,7 +610,8 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
                 *playing = false;
             }
             ui.add_space(t.space_6);
-            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Loop"), looping);
+            let response = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Loop"), looping);
+            crate::scenario::publish_target("dialog:motion:loop", response.rect);
             let names: Vec<String> = SPEEDS.iter().map(|x| format!("{x}×")).collect();
             let refs: Vec<&str> = names.iter().map(String::as_str).collect();
             ui.allocate_ui(vec2(t.form_label_width, t.control_height), |ui| combo(ui, "ms_speed", &refs, speed));

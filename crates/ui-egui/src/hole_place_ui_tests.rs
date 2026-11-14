@@ -673,3 +673,31 @@ fn holes_made_together_share_a_closed_folder_when_preferences_say_so() {
     assert_eq!(h.app.session.doc.timeline_groups.len(), 1, "still the one folder");
     assert_eq!(h.app.session.doc.timeline_groups[0].features, made, "holding the same holes");
 }
+
+#[test]
+fn preview_dropdown_hole_type_uses_pending_arrows_space_and_tab_exit() {
+    let mut h = block_as_installed();
+    let features = h.app.session.doc.features.len();
+    h.step(&json!({"start":"solid.hole"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"dialog:Hole Type"}})).unwrap();
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.step(&json!({"key":"Space"})).unwrap();
+    assert!(egui::Popup::is_any_open(&h.ctx));
+    h.step(&json!({"key":"ArrowDown"})).unwrap();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole { kind: 0, .. }));
+    h.step(&json!({"key":"Space"})).unwrap();
+    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole { kind: 1, .. }));
+    h.step(&json!({"key":"Space"})).unwrap();
+    h.step(&json!({"key":"ArrowDown"})).unwrap();
+    h.step(&json!({"key":"Tab"})).unwrap();
+    h.frames(2);
+    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole { kind: 1, .. }));
+    let response = h.ctx.read_response(h.ctx.memory(|m| m.focused()).unwrap()).unwrap();
+    assert!(response.rect.contains(handle_at("dialog:Hole Tap Type").unwrap()));
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.features.len(), features);
+}

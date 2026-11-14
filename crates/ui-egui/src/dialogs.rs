@@ -546,6 +546,7 @@ pub struct Dialog {
     /// Selection inputs, in order; clicks in the viewport go to the active one.
     pub inputs: Vec<SelInput>,
     pub active: usize,
+    tab_through: crate::dialog_focus::TabThrough,
     pub error: Option<String>,
     /// Editing an existing feature (its id, and the timeline marker to restore afterwards).
     pub editing: Option<(u64, Option<usize>)>,
@@ -853,6 +854,7 @@ impl Dialog {
             kind,
             inputs,
             active: 0,
+            tab_through: Default::default(),
             error: None,
             editing: None,
             edit_source_bodies: Vec::new(),
@@ -2994,6 +2996,31 @@ fn objects_label(accept: Accept) -> &'static str {
 const SKETCH_NOT_OBJECT: &str =
     "Pick bodies or features: a sketch is neither. Repeat its curves with the sketch's own Pattern or Mirror, or extrude it first.";
 
+/// Selection chips join the value fields for Pattern and Mirror dialogs.
+fn selection_tab_order(k: &Kind) -> bool {
+    use crate::sketch_modify_ui::Mod;
+    is_pattern(k) || matches!(k, Kind::SketchModify(Mod::Mirror | Mod::PatternRect { .. } | Mod::PatternCirc { .. }))
+}
+
+/// Called before layout so egui traverses from the active canvas input, not the toolbar.
+pub(crate) fn prepare_tab(app: &SolveApp, ctx: &egui::Context) {
+    crate::dialog_focus::configure(
+        ctx,
+        app.preferences.dialog_tab_navigation,
+        app.dialog.as_ref().filter(|d| d.collapsed).map(|d| egui::Id::unique(("sc_dialog", title(&d.kind)))),
+    );
+    if app.issue_report.draft.is_some() || app.file_picker.is_some() || app.applying.is_some() || app.home.open {
+        return;
+    }
+    if let Some(d) = &app.dialog
+        && !d.collapsed
+        && app.preferences.dialog_tab_navigation
+        && selection_tab_order(&d.kind)
+    {
+        d.tab_through.begin(ctx, d.active, egui::Id::unique("sc_canvas_value"));
+    }
+}
+
 fn is_pattern(k: &Kind) -> bool {
     matches!(k, Kind::PatternRect { .. } | Kind::PatternCirc { .. } | Kind::PathPattern { .. } | Kind::Mirror)
 }
@@ -3315,6 +3342,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let t = Tokens::get();
     let mut clear: Option<usize> = None;
     let mut activate: Option<usize> = None;
+    let tab_order = selection_tab_order(&d.kind) && crate::dialog_focus::navigation_enabled(ui.ctx());
     let mut remove = None;
     // Only one field may look active at a time (#10066): while a text editor holds the keyboard,
     // no pick field draws its accent ring, and clicking a pick field takes the keyboard back.
@@ -3324,6 +3352,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
         let stored_reference = stored_input_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
+        let selected_item = inp.items.first().filter(|_| !inp.multi).map(|item| selection_label(s, names, d, inp, item)).unwrap_or_default();
         form_row(ui, inp.label, |ui| {
             ui.horizontal(|ui| {
                 let active = i == d.active && !text_focus;
@@ -3336,7 +3365,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     } else if custom_axis || stored_reference.is_some() {
                         solidcraft_ui_text::tr("dialog.custom_axis").into()
                     } else if !inp.multi {
-                        inp.items.first().map(|item| selection_label(s, names, d, inp, item)).unwrap_or_default()
+                        selected_item
                     } else {
                         let count = if i == 0 { shell_count.unwrap_or(inp.items.len()) } else { inp.items.len() };
                         solidcraft_ui_text::format("dialog.selected_count", &[("count", &count.to_string())])
@@ -3347,7 +3376,11 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 };
                 let selected_text = text.text().strip_prefix("↖ ").unwrap_or_else(|| text.text());
                 let prompt = if !filled && inp.label == "Edges" { tr("Select edges") } else { selected_text };
-                let chip = crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled });
+                let sense = egui::Sense::click();
+                let chip = crate::ui_kit::selection_field_with_sense(ui, prompt, crate::ui_kit::Selection { active, filled }, sense);
+                if d.tab_through.selection(i, &chip) {
+                    activate = Some(i);
+                }
                 if matches!(d.kind, Kind::Shell { .. }) && i == 0 {
                     chip.widget_info(|| {
                         let mut info = egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tr(inp.label));
@@ -3377,8 +3410,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 } else {
                     format!("{} (click to pick into this input)", hint(inp))
                 };
-                if chip.backing_on_hover_text(tooltip).clicked() {
-                    activate = Some(i);
+                if chip.backing_on_hover_text(tooltip).clicked() && text_focus {
                     surrender_keyboard_focus(ui);
                 }
                 if !inp.items.is_empty() || stored_reference.is_some() {
@@ -3386,7 +3418,13 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                         egui::pos2(chip_rect.right() - t.space_24 / 2.0, chip_rect.center().y),
                         vec2(t.space_24, t.space_24),
                     );
-                    let button = crate::ui_kit::icon_button_at(ui, rect, "close", "Clear the selection");
+                    let button = crate::ui_kit::icon_button_at_with_sense(
+                        ui,
+                        rect,
+                        "close",
+                        "Clear the selection",
+                        if tab_order { egui::Sense::CLICK } else { egui::Sense::click() },
+                    );
                     crate::scenario::publish_handle(&format!("dialog:clear:{}", inp.label), button.rect.center());
                     if button.clicked() {
                         clear = Some(i);
@@ -3399,7 +3437,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                         let open = d.listed == Some(i);
                         let at = rect.translate(vec2(-t.space_24, 0.0));
                         let label = solidcraft_ui_text::tr_label(if open { "Hide the picked items" } else { "Show the picked items" });
-                        let arrow = crate::ui_kit::disclosure_button_at(ui, at, open, label);
+                        let sense = if tab_order { egui::Sense::CLICK } else { egui::Sense::click() };
+                        let arrow = crate::ui_kit::disclosure_button_at_with_sense(ui, at, open, label, sense);
                         crate::scenario::publish_handle(&format!("dialog:list_toggle:{}", inp.label), arrow.rect.center());
                         if arrow.clicked() {
                             toggle_list = Some(i);
@@ -3412,7 +3451,13 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
             let rows = d.listed_items(s, i);
             egui::ScrollArea::vertical().id_salt(("picked_items", i)).max_height(t.control_height * 6.5).show(ui, |ui| {
                 for (index, item) in rows.into_iter().enumerate() {
-                    let row = crate::ui_kit::list_row(ui, &format!("{}:{index}", inp.label), &selection_label(s, names, d, inp, &item));
+                    let key = format!("{}:{index}", inp.label);
+                    let label = selection_label(s, names, d, inp, &item);
+                    let row = if tab_order {
+                        crate::ui_kit::list_row_with_sense(ui, &key, &label, egui::Sense::CLICK)
+                    } else {
+                        crate::ui_kit::list_row(ui, &key, &label)
+                    };
                     if row.hovered() {
                         hovered = Some((i, item.clone()));
                     }
@@ -4175,7 +4220,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let reset_scroll = d.reset_scroll;
     let panel =
         panel.reset_scroll(reset_scroll && matches!(d.kind, Kind::Appearance(_) | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })));
-    let window = panel.window(ctx);
     let repeatable =
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
     let mut painted = false;
@@ -4198,7 +4242,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         cancel = closed || action == crate::ui_kit::Action::Cancel;
         app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window").filter(|_| painted);
     } else {
-        let response = window.open(&mut keep).show(ctx, |ui| {
+        let enter_applies = enter_applies(&d);
+        let mut draw_dialog = |ui: &mut egui::Ui| {
             painted = ui.is_visible() && !ui.is_sizing_pass();
             // A Press Pull's extrude shows the Press Pull command, not Extrude (#11705).
             let spec = if press_pull_extrude(&d) {
@@ -4260,7 +4305,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::ui_kit::Action::None => {}
                 }
             }
-        });
+        };
+        let response =
+            panel.show(ctx, Some(&mut keep), |ui| if enter_applies { crate::ui_kit::with_feature_form(ui, draw_dialog) } else { draw_dialog(ui) });
         app.viewport.dialog_rect = response.filter(|_| painted).map(|r| r.response.rect);
         // OK and Cancel in the view's corner do what the dialog's own do (#6709).
         if app.issue_report.draft.is_none() {
@@ -4293,7 +4340,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let pointer_busy = ctx.input(|i| i.pointer.any_down() || i.pointer.any_pressed() || i.pointer.any_released());
     if d.restore_value_focus && !pointer_busy {
         d.restore_value_focus = false;
-        let target = value_fields.iter().find(|(id, _)| Some(*id) == d.value_focus).or_else(|| value_fields.first());
+        // With dialog navigation on, Pattern/Mirror resume Tab from the active selection
+        // after a canvas pick unless a value editor already owned focus.
+        let resume_selection = app.preferences.dialog_tab_navigation && selection_tab_order(&d.kind);
+        let target =
+            value_fields.iter().find(|(id, _)| Some(*id) == d.value_focus).or_else(|| if resume_selection { None } else { value_fields.first() });
         if let Some(&(id, length)) = target {
             d.focus = false;
             ctx.memory_mut(|memory| memory.request_focus(id));
@@ -4323,7 +4374,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ok = false;
         cancel = false;
     }
-    // Keyboard: Enter applies (from a value field, or with nothing focused), Esc cancels.
+    // Keyboard: Enter applies from a value field, a Pattern/Mirror selection, or with no focus; Esc cancels.
     let (enter_free, esc) = ctx.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
     let nothing_focused = ctx.memory(|m| m.focused().is_none());
     let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::unique("sc_canvas_value")));

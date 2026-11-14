@@ -14,18 +14,22 @@ pub fn disclosure(painter: &Painter, center: Pos2, open: bool, ink: Color32) {
 /// Fold action in existing chrome. Stable identity across state changes, with the caller's
 /// translated tooltip and scenario handles. Tokens: control_radius, hover, form_ink/dim.
 pub fn disclosure_button_at(ui: &mut Ui, rect: Rect, open: bool, label: &str) -> Response {
-    disclosure_button_with_hover(ui, rect, open, label, false)
+    disclosure_button_at_with_sense(ui, rect, open, label, egui::Sense::click())
+}
+
+pub fn disclosure_button_at_with_sense(ui: &mut Ui, rect: Rect, open: bool, label: &str, sense: egui::Sense) -> Response {
+    disclosure_button_with_hover(ui, rect, open, label, false, sense)
 }
 
 /// Panel fold action with the browser's shared blue hover tint.
 pub fn panel_disclosure_button_at(ui: &mut Ui, rect: Rect, open: bool, label: &str) -> Response {
-    disclosure_button_with_hover(ui, rect, open, label, true)
+    disclosure_button_with_hover(ui, rect, open, label, true, egui::Sense::click())
 }
 
-fn disclosure_button_with_hover(ui: &mut Ui, rect: Rect, open: bool, label: &str, panel: bool) -> Response {
+fn disclosure_button_with_hover(ui: &mut Ui, rect: Rect, open: bool, label: &str, panel: bool, sense: egui::Sense) -> Response {
     let t = Tokens::get();
-    let response = ui.interact(rect, ui.make_persistent_id("disclosure_button"), egui::Sense::click());
-    if response.clicked() {
+    let response = ui.interact(rect, ui.make_persistent_id("disclosure_button"), sense);
+    if response.clicked() && sense.is_focusable() {
         response.request_focus();
     }
     if response.hovered() {

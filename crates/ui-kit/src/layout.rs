@@ -3,6 +3,7 @@ use super::{metrics::*, text::paint_text};
 use crate::BackingTooltipExt as _;
 use egui::{Response, RichText, Ui, vec2};
 use solidcraft_theme::Tokens;
+use solidcraft_ui_registry as registry;
 
 pub(super) const FORM: &str = "sc_dense_form";
 
@@ -393,7 +394,8 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control:
     // beside the label keeps its own hover and click.
     let scrub_width = if help.is_some() { (label_width - t.space_16 - t.space_4).max(0.0) } else { label_width };
     let scrub_rect = egui::Rect::from_min_size(label_rect.min, vec2(scrub_width, rect.height()));
-    let drag = (scrub && scrub_width > 0.0).then(|| ui.interact(scrub_rect, ui.scope_id().with(("sc_row_scrub", text)), egui::Sense::drag()));
+    let sense = if crate::dialog_focus::in_scope(ui.ctx()) { egui::Sense::DRAG } else { egui::Sense::drag() };
+    let drag = (scrub && scrub_width > 0.0).then(|| ui.interact(scrub_rect, ui.scope_id().with(("sc_row_scrub", text)), sense));
     let gutter = if label_width > 0.0 { label_gap(ui, width) } else { 0.0 };
     let control_rect = egui::Rect::from_min_max(egui::pos2((label_rect.right() + gutter).min(rect.right()), rect.top()), rect.max);
     let result = ui
@@ -606,7 +608,7 @@ fn section_with_badge<R>(
                 row_height()
             },
         ),
-        egui::Sense::click(),
+        if crate::dialog_focus::in_scope(ui.ctx()) { egui::Sense::CLICK } else { egui::Sense::click() },
     );
     super::settings_search::follow(ui, title, rect);
     if response.hovered() || response.has_focus() {
@@ -756,14 +758,19 @@ pub fn search_fold<R>(ui: &mut Ui, title: &str, count: usize, add: impl FnOnce(&
 /// Tokens: control_height, space_8, font_label, text and icon-button tokens.
 /// Picked-item row with a remove action. Tokens: `control_height, space_8, font_label, text; icon-button tokens`.
 pub fn list_row(ui: &mut Ui, key: &str, text: &str) -> Response {
+    list_row_with_sense(ui, key, text, egui::Sense::click())
+}
+
+/// Picked-item row with explicit keyboard participation for its remove action.
+pub fn list_row_with_sense(ui: &mut Ui, key: &str, text: &str, sense: egui::Sense) -> Response {
     let t = Tokens::get();
     let (rect, row) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::hover());
     let remove = egui::Rect::from_min_max(egui::pos2((rect.right() - row_height()).max(rect.left()), rect.top()), rect.max);
     let label = egui::Rect::from_min_max(rect.min, egui::pos2((remove.left() - t.space_8).max(rect.left()), rect.bottom()));
     paint_text(ui, label, text, egui::FontId::proportional(t.font_label), t.form_ink, false);
-    let response = ui.push_id(key, |ui| super::icon_button_at(ui, remove, "close", "Remove")).inner;
-    solidcraft_ui_registry::publish_rect(&format!("dialog:list:{key}"), rect);
-    solidcraft_ui_registry::publish_handle(&format!("dialog:list:{key}:remove"), remove.center());
+    let response = ui.push_id(key, |ui| super::icon_button_at_with_sense(ui, remove, "close", "Remove", sense)).inner;
+    registry::publish_rect(&format!("dialog:list:{key}"), rect);
+    registry::publish_handle(&format!("dialog:list:{key}:remove"), remove.center());
     response.union(row)
 }
 
