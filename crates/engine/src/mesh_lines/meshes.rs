@@ -147,7 +147,7 @@ pub(crate) fn prepare(s: &Session, cmd: &str, tolerance: f64, shown: impl Fn(&Mo
         let mesh = if item.keep {
             // These are owned export buffers, not the document's cached mesh. Picking and
             // shading data are unused by vector occlusion; edge choices were captured above.
-            mesh.normals = Vec::new();
+            // The normals stay: silhouettes skip surfaces seen exactly side on (#16814).
             mesh.tri_face = Vec::new();
             mesh.seams = Vec::new();
             mesh.smooth_edges = Vec::new();

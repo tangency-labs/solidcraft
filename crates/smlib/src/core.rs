@@ -97,7 +97,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
     f.local_operation_refuses_loose_tangent_edges = true;
-    f.fillet_nx1_opposite_continuation_side_edge = true;
     f.internal_pole_row_through_knot = true;
     f.extrusion_origin_scaled_zero = true;
     f.transform_scales_each_tolerance = true;
@@ -122,7 +121,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_extension_from_base = true;
     f.fillet_cleanup_keeps_target_faces = true;
     f.fillet_nx1_tangent_side_edge = true;
-    f.fillet_3x2_mixed_concave_side_edge = true;
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.shell_empty_cavity_fails = true;

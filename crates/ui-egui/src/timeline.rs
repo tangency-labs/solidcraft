@@ -1,6 +1,6 @@
 //! The timeline (bottom): features in order, the rollback marker, errors and warnings.
 
-use crate::ui_kit::Status;
+use crate::ui_kit::{Status, StatusTip};
 use egui::{Rect, pos2};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{
@@ -573,16 +573,11 @@ pub(crate) fn clipboard_buttons(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) 
 
 /// A feature tooltip's (and its copied message's) name, type, error and warning: an import's
 /// summary as it is (the mark already says it is a warning), any other warning labelled.
-pub(crate) fn feature_status_text(name: &str, ty: &str, result: Option<&FeatureResult>) -> String {
+pub(crate) fn feature_status_tip(name: &str, ty: &str, result: Option<&FeatureResult>) -> StatusTip {
     let error = result.and_then(|r| r.error.as_deref());
     match result.and_then(|r| r.import_report.as_deref()).filter(|r| !r.issues.is_empty()) {
-        Some(report) => {
-            let mut text = status_text(name, ty, error, None);
-            text.push('\n');
-            text.push_str(&import_summary(report));
-            text
-        }
-        None => status_text(name, ty, error, result.and_then(|r| r.warning.as_deref())),
+        Some(report) => StatusTip { warning: Some(import_summary(report)), ..status_tip(name, ty, error, None) },
+        None => status_tip(name, ty, error, result.and_then(|r| r.warning.as_deref())),
     }
 }
 
@@ -592,18 +587,16 @@ pub(crate) fn result_index(results: &[solidcraft_engine::doc::FeatureResult]) ->
     results.iter().enumerate().rev().map(|(k, r)| (r.id, k)).collect()
 }
 
-/// The common prefix of a feature tooltip and its copied status message.
-pub(crate) fn status_text(name: &str, ty: &str, error: Option<&str>, warning: Option<&str>) -> String {
-    let mut text = format!("{name}  ({ty})");
-    if let Some(error) = error {
-        text.push('\n');
-        text.push_str(&solidcraft_ui_text::format("timeline.feature_error", &[("message", &crate::i18n::tr_diagnostic(error))]));
+/// The common start of a feature tooltip and its copied status message: its name and type,
+/// then its error and its warning, each labelled.
+pub(crate) fn status_tip(name: &str, ty: &str, error: Option<&str>, warning: Option<&str>) -> StatusTip {
+    let line = |key: &str, message: &str| solidcraft_ui_text::format(key, &[("message", &crate::i18n::tr_diagnostic(message))]);
+    StatusTip {
+        head: format!("{name}  ({ty})"),
+        error: error.map(|error| line("timeline.feature_error", error)),
+        warning: warning.map(|warning| line("timeline.feature_warning", warning)),
+        tail: String::new(),
     }
-    if let Some(warning) = warning {
-        text.push('\n');
-        text.push_str(&solidcraft_ui_text::format("timeline.feature_warning", &[("message", &crate::i18n::tr_diagnostic(warning))]));
-    }
-    text
 }
 
 /// A feature's mark: an error, else a warning; none while it is suppressed or rolled back, as
@@ -624,7 +617,7 @@ pub(crate) fn status_at<'a>(app: &SolveApp, index: usize, result: impl FnOnce() 
 }
 
 /// The worst mark among `ids`, with the message of the first feature that has it.
-pub(crate) fn worst_status(app: &SolveApp, ids: &[u64]) -> (Option<Status>, Option<String>) {
+pub(crate) fn worst_status(app: &SolveApp, ids: &[u64]) -> (Option<Status>, Option<StatusTip>) {
     let mark = |status: Option<Status>, id: &u64| status.map(|status| (status, *id));
     // A long folder finds each feature's place and result in tables built once: a search per
     // feature made a folded long history cost the square of its length every frame. A short
@@ -642,30 +635,36 @@ pub(crate) fn worst_status(app: &SolveApp, ids: &[u64]) -> (Option<Status>, Opti
     };
     let worst = marks.into_iter().reduce(|a, b| if b.0 > a.0 { b } else { a });
     match worst {
-        Some((status, id)) => (Some(status), feature_message(app, id)),
+        Some((status, id)) => (Some(status), feature_tip(app, id)),
         None => (None, None),
     }
 }
 
 /// What a feature's error or warning mark says, as its tooltip shows it (name and type, then
-/// the error and the warning), for the clipboard, and an import's every warning as the kernel
-/// words them. `None` when it has neither.
-pub(crate) fn feature_message(app: &SolveApp, id: u64) -> Option<String> {
+/// the error and the warning), and an import's every warning as the kernel words them. `None`
+/// when it has neither.
+pub(crate) fn feature_tip(app: &SolveApp, id: u64) -> Option<StatusTip> {
     let result = app.session.model.result(id)?;
     if result.error.is_none() && result.warning.is_none() {
         return None;
     }
     let feature = app.session.doc.features.iter().find(|f| f.id == id)?;
-    let mut text = feature_status_text(&feature.name, feature.kind.type_name(), Some(result));
+    let mut tip = feature_status_tip(&feature.name, feature.kind.type_name(), Some(result));
     if let Some(report) = result.import_report.as_ref().filter(|r| !r.issues.is_empty()) {
-        text.push_str("\n\n");
-        text.push_str(solidcraft_ui_text::tr("import_report.details"));
+        // A blank line before the details.
+        tip.tail.push('\n');
+        tip.tail.push_str(solidcraft_ui_text::tr("import_report.details"));
         for issue in &report.issues {
-            text.push('\n');
-            text.push_str(&issue.detail);
+            tip.tail.push('\n');
+            tip.tail.push_str(&issue.detail);
         }
     }
-    Some(text)
+    Some(tip)
+}
+
+/// [`feature_tip`] as plain text, for the clipboard.
+pub(crate) fn feature_message(app: &SolveApp, id: u64) -> Option<String> {
+    feature_tip(app, id).map(|tip| tip.plain())
 }
 
 /// What a feature's warning mark says: an import's warnings summed up in words, else the
@@ -1307,22 +1306,15 @@ impl history_bar::Contents for BarSteps<'_> {
             let res = results.get(&app.session.model, at, *id);
             let rolled = i >= self.marker_view;
             let tip = || {
-                let mut tip = feature_status_text(name, ty, res);
+                let mut lines = Vec::new();
                 // Greyed out says only "not shown": say why (#8100).
                 if rolled {
-                    tip.push('\n');
-                    tip.push_str(solidcraft_ui_text::tr("timeline.feature_rolled_back"));
+                    lines.push(solidcraft_ui_text::tr("timeline.feature_rolled_back").to_string());
                 }
-                if let Some(state) = sketch_state {
-                    tip.push('\n');
-                    tip.push_str(&state.text());
-                }
-                if let Some(ms) = res.map(|r| r.ms) {
-                    tip += &format!("\n{ms:.1} ms");
-                }
-                tip.push('\n');
-                tip.push_str(solidcraft_ui_text::tr("timeline.feature_hint"));
-                tip
+                lines.extend(sketch_state.map(|state| state.text()));
+                lines.extend(res.map(|r| format!("{:.1} ms", r.ms)));
+                lines.push(solidcraft_ui_text::tr("timeline.feature_hint").to_string());
+                StatusTip { tail: lines.join("\n"), ..feature_status_tip(name, ty, res) }
             };
             let rect = s.step(&history_bar::Step {
                 id: *id,
@@ -1543,17 +1535,20 @@ mod tests {
         let translated = crate::i18n::tr_diagnostic(diagnostic);
         assert_ne!(translated, diagnostic);
         assert_eq!(
-            super::status_text("My feature", "ExtrudeFeature", Some(diagnostic), Some(diagnostic)),
+            super::status_tip("My feature", "ExtrudeFeature", Some(diagnostic), Some(diagnostic)).plain(),
             format!("My feature  (ExtrudeFeature)\nエラー: {translated}\n警告: {translated}")
         );
-        assert_eq!(super::status_text("My feature", "ExtrudeFeature", None, None), "My feature  (ExtrudeFeature)");
+        assert_eq!(super::status_tip("My feature", "ExtrudeFeature", None, None).plain(), "My feature  (ExtrudeFeature)");
         // Unknown diagnostics remain intact, including names and measured values.
         assert_eq!(
-            super::status_text("My feature", "ExtrudeFeature", None, Some("Custom part: 1.25 mm")),
+            super::status_tip("My feature", "ExtrudeFeature", None, Some("Custom part: 1.25 mm")).plain(),
             "My feature  (ExtrudeFeature)\n警告: Custom part: 1.25 mm"
         );
         let _english = solidcraft_ui_text::scope("en");
-        assert_eq!(super::status_text("Box", "BoxFeature", Some("error"), Some("warning")), "Box  (BoxFeature)\nError: error\nWarning: warning");
+        assert_eq!(
+            super::status_tip("Box", "BoxFeature", Some("error"), Some("warning")).plain(),
+            "Box  (BoxFeature)\nError: error\nWarning: warning"
+        );
     }
 
     /// An import's warnings read as a summary for a CAD user: parts counted by what became of
@@ -2767,14 +2762,14 @@ mod tests {
         }
         let own = |h: &Harness, ids: &[u64]| {
             let worst = ids.iter().filter_map(|id| super::feature_status(&h.app, *id).map(|s| (s, *id))).reduce(|a, b| if b.0 > a.0 { b } else { a });
-            (worst.map(|w| w.0), worst.and_then(|w| super::feature_message(&h.app, w.1)))
+            (worst.map(|w| w.0), worst.and_then(|w| super::feature_tip(&h.app, w.1)))
         };
         // Every folder short enough to be searched, then the same repeated past the length that
         // builds the tables.
         let check = |h: &Harness, folder: &[u64], status: Option<Status>, of: Option<u64>, why: &str| {
             for ids in [folder.to_vec(), folder.repeat(16)] {
                 let found = super::worst_status(&h.app, &ids);
-                assert_eq!(found, (status, of.and_then(|id| super::feature_message(&h.app, id))), "{why}, {} ids", ids.len());
+                assert_eq!(found, (status, of.and_then(|id| super::feature_tip(&h.app, id))), "{why}, {} ids", ids.len());
                 assert_eq!(found, own(h, &ids), "{why}, {} ids", ids.len());
             }
         };

@@ -5214,7 +5214,7 @@ mod tests {
             for (key, label, labels) in [
                 ("size", "Size", &["Compact", "Regular"][..]),
                 ("buttons", "Buttons", &["Icons", "Icons + labels"][..]),
-                ("idle", "When idle", &["Always", "Fade", "Hover"][..]),
+                ("idle", "When idle", &["Always visible", "Fade", "Hide until hovered"][..]),
             ] {
                 let body = crate::scenario::rect_of("prefs:page_body").unwrap();
                 let row = crate::scenario::rect_of(&format!("prefs:navbar:{key}")).unwrap();
@@ -5326,6 +5326,8 @@ mod tests {
                 let stage = crate::scenario::rect_of("prefs:navbar:stage").unwrap();
                 let count = crate::scenario::rect_of("prefs:navbar:count").unwrap();
                 assert!(status.bottom() <= stage.top(), "Show and Reset belong above the shared stage");
+                let idle = crate::scenario::rect_of("prefs:navbar:idle").unwrap();
+                assert!(status.bottom() <= idle.top() && idle.bottom() <= stage.top(), "When idle belongs with Show, before the preview");
                 let bar = crate::scenario::rect_of("prefs:navbar:bar").unwrap();
                 assert!(stage.contains_rect(count), "the real slot count sits in the stage");
                 assert!(!count.intersects(bar), "the count never covers the bar");
