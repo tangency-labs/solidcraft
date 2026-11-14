@@ -360,17 +360,28 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
     let limit = depth.unwrap_or(reach * 2.0 + 1.0);
     let step = (limit.min(reach * 2.0 + 1.0) / 400.0).max(1e-3);
     let overlap = (len / samples as f64 * 2.0).max(step * 2.0).min(t);
+    // An end of the curves often sits exactly on a wall (a rib from wall to wall), where the
+    // body's inside is ambiguous; walk from just inside the curve there, so the end does not
+    // read the wall it touches as the body ahead and the end face stays square.
+    let nudge = len / samples as f64 * 0.01;
     let mut far = Vec::with_capacity(along.len());
-    for q in &along {
+    for (i, q) in along.iter().enumerate() {
+        let from = if i == 0 {
+            point_on_polyline(&pts, nudge)
+        } else if i == samples {
+            point_on_polyline(&pts, len - nudge)
+        } else {
+            *q
+        };
         let mut hit = None;
         let mut k = 1;
         while (k as f64) * step <= limit + step && k < 100_000 {
-            if inside(*q + n * (k as f64 * step)) {
+            if inside(from + n * (k as f64 * step)) {
                 // Refine between the last outside and the first inside sample.
                 let (mut lo, mut hi) = ((k - 1) as f64 * step, k as f64 * step);
                 for _ in 0..30 {
                     let m = 0.5 * (lo + hi);
-                    if inside(*q + n * m) { hi = m } else { lo = m }
+                    if inside(from + n * m) { hi = m } else { lo = m }
                 }
                 hit = Some(hi);
                 break;
