@@ -215,6 +215,20 @@ pub fn release_press_taken_by_os(ctx: &egui::Context, raw: &mut egui::RawInput) 
     }
 }
 
+/// Make the window set its pointer cursor again when focus returns or the pointer comes back
+/// into the window. egui-winit sends a cursor to the window only when the requested icon
+/// changes, but on Wayland the compositor shows the previous program's cursor after the pointer
+/// enters until the client sets its own. `CursorVisible(true)` makes winit apply its current
+/// cursor with the latest enter serial. A native app calls this in its raw-input hook; the web
+/// build has no window cursor to refresh.
+pub fn reapply_cursor_on_return(ctx: &egui::Context, raw: &egui::RawInput) {
+    let focus_back = raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(true)));
+    let pointer_back = ctx.input(|i| i.pointer.latest_pos().is_none()) && raw.events.iter().any(|e| matches!(e, egui::Event::PointerMoved(_)));
+    if focus_back || pointer_back {
+        ctx.send_viewport_cmd(ViewportCommand::CursorVisible(true));
+    }
+}
+
 /// Minimize, Maximize/Restore and Close at the right end of `bar`, full bar height, flush with
 /// the window's edge so a maximized window's corner hits Close. The one clicked, as the action
 /// for the app to run.
@@ -532,5 +546,22 @@ mod tests {
         assert_eq!(dpi_scaled_size((1001, 777), 96, 96), Some((1001, 777)));
         assert_eq!(dpi_scaled_size((1001, 777), 0, 96), None);
         assert_eq!(dpi_scaled_size((0, 777), 96, 144), None);
+    }
+
+    #[test]
+    fn focus_or_pointer_return_asks_the_window_to_set_its_cursor_again() {
+        let ctx = crate::test_support::context();
+        let run = |events: Vec<Event>| {
+            let raw =
+                RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))), time: Some(0.1), events, ..Default::default() };
+            reapply_cursor_on_return(&ctx, &raw);
+            let mut out = ctx.run_ui(raw, |_| {});
+            out.viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default()
+        };
+        let reapplies = |cmds: &[ViewportCommand]| cmds.iter().any(|c| matches!(c, ViewportCommand::CursorVisible(true)));
+        assert!(reapplies(&run(vec![Event::WindowFocused(true)])), "focus regained");
+        assert!(reapplies(&run(vec![Event::PointerMoved(pos2(5.0, 5.0))])), "pointer back in the window");
+        assert!(!reapplies(&run(vec![Event::PointerMoved(pos2(6.0, 6.0))])), "an ordinary move changes nothing");
+        assert!(!reapplies(&run(vec![Event::WindowFocused(false)])), "focus lost");
     }
 }
