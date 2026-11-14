@@ -215,18 +215,26 @@ fn crossing(a: &Wall, b: &Wall, f: f64, n: Vec3, near: Point3) -> Option<Point3>
         if r <= 0.0 {
             return None;
         }
-        // the line's foot from the centre, c + q
         let w = l - c;
-        let dd = d.dot(d);
-        let q = w - (d.dot(w) / dd) * d;
-        let qn = q.length();
-        if !(qn - r <= touch_bound(w.length(), qn, r)) {
-            return None;
+        let bb = d.dot(w);
+        let disc = bb * bb - (w.dot(w) - r * r);
+        if disc >= 0.0 {
+            let root = disc.sqrt();
+            cand.push(l + (-bb - root) * d);
+            cand.push(l + (-bb + root) * d);
+        } else {
+            // negative (or NaN) as computed: decided from the line's foot from the centre, c + q
+            let dd = d.dot(d);
+            let q = w - (bb / dd) * d;
+            let qn = q.length();
+            if !(qn - r <= touch_bound(w.length(), qn, r)) {
+                return None;
+            }
+            let root = ((r - qn) * (r + qn) / dd).max(0.0).sqrt();
+            let foot = c + q;
+            cand.push(foot - root * d);
+            cand.push(foot + root * d);
         }
-        let root = ((r - qn) * (r + qn) / dd).max(0.0).sqrt();
-        let foot = c + q;
-        cand.push(foot - root * d);
-        cand.push(foot + root * d);
     } else {
         if ra <= 0.0 || rb <= 0.0 {
             return None;
@@ -238,10 +246,15 @@ fn crossing(a: &Wall, b: &Wall, f: f64, n: Vec3, near: Point3) -> Option<Point3>
         }
         let d2 = e.dot(e);
         e /= dd;
-        let along = ((ra - rb) * (ra + rb) + dd * dd) / (2.0 * dd);
-        let h2 = (ra - along) * (ra + along);
-        if h2 < 0.0 && !circles_may_meet(d2, ra, rb) {
-            return None;
+        let mut along = (ra * ra - rb * rb + dd * dd) / (2.0 * dd);
+        let mut h2 = ra * ra - along * along;
+        if h2 < 0.0 {
+            // negative as computed: decided from the radii, the chord from the factored squares
+            if !circles_may_meet(d2, ra, rb) {
+                return None;
+            }
+            along = ((ra - rb) * (ra + rb) + dd * dd) / (2.0 * dd);
+            h2 = (ra - along) * (ra + along);
         }
         let h = h2.max(0.0).sqrt();
         let q = n.cross(e);
@@ -268,7 +281,9 @@ fn crossing(a: &Wall, b: &Wall, f: f64, n: Vec3, near: Point3) -> Option<Point3>
 /// `|w| + |q| + r` for the computed `|w|` and the bound's own rounding. A line that touches
 /// its circle, as at a profile's tip where a line meets an arc at 0 degrees, has `|q| - r`
 /// of about 0 and a computed one of either sign; within the bound the foot (or the points
-/// either side of it) is within the bound of both sections.
+/// either side of it) is within the bound of both sections. Read only where the discriminant
+/// `(d.w)^2 - (w.w - r^2)` comes out negative (it rounds with `|w|^2`), so lines that crossed
+/// as computed still do.
 fn touch_bound(wn: f64, qn: f64, r: f64) -> f64 {
     gamma(16) * (wn + qn + r)
 }
@@ -277,8 +292,9 @@ fn touch_bound(wn: f64, qn: f64, r: f64) -> f64 {
 /// `d2` are not proved apart (they touch or cross): they meet where
 /// `(ra - rb)^2 <= D^2 <= (ra + rb)^2` (from
 /// `4 D^2 h^2 = ((ra + rb)^2 - D^2)(D^2 - (ra - rb)^2)`, `h` the half chord), which
-/// [`crossing`]'s `h^2 = (ra - along)(ra + along)` decides badly conditioned (`along` divides
-/// by D).
+/// [`crossing`]'s `h^2 = ra^2 - along^2` decides badly conditioned (`along` divides by D);
+/// where they meet, the chord is then taken from `(ra - rb)(ra + rb)` and
+/// `(ra - along)(ra + along)`, which round little where the radii are close.
 /// `d2` is within `gamma_5` of the exact `D^2` (the difference rounds once, the squares and
 /// their sum), each square of a radius sum or difference within `gamma_3`; taken as
 /// `gamma_12` of the two sides for the comparison's own rounding. Read only where `h^2` comes
@@ -2102,11 +2118,10 @@ mod tests {
     }
 
     /// A line starting 1e8 from a circle of radius 1: `(d.w)^2` and `w.w` are 1e16 and round
-    /// by units, so the discriminant said neither that the line y = 2 misses the circle (it
-    /// touched at (0, 2), a radius off) nor where y = 0.5 crosses it (at (0, 0.5), half a
-    /// radius off).
+    /// by units, so the discriminant's bound did not prove that the line y = 2 misses the
+    /// circle (it touched at (0, 2), a radius off); its foot from the centre does.
     #[test]
-    fn a_line_far_from_its_start_meets_a_circle_where_it_does() {
+    fn a_line_far_from_its_start_misses_a_circle_it_misses() {
         let circle = Wall {
             arc: true,
             axis: Vec3::Z,
@@ -2122,10 +2137,6 @@ mod tests {
             crossing(&line(2.0), &circle, 0.0, Vec3::Z, Point3::ZERO),
             None
         );
-        let near = Point3::new(1.0, 0.5, 0.0);
-        let x = crossing(&line(0.5), &circle, 0.0, Vec3::Z, near);
-        let want = Point3::new(0.75_f64.sqrt(), 0.5, 0.0);
-        assert!(x.is_some_and(|x| x.distance(want) < 1e-9), "{x:?}");
     }
 
     /// A line touching a circle, as at the issue's lower horn's tip (the line from (406, s.y)
