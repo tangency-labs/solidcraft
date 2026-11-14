@@ -10744,7 +10744,8 @@ pub fn face_point_state<'a>(doc: &Document, st: &'a ModelState, kind: &FeatureKi
 pub fn face_point_names(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64) -> Result<Vec<String>> {
     let pts = kind.face_points();
     if !matches!(kind, FeatureKind::Extrude { .. } | FeatureKind::Revolve { .. }) {
-        let named = kind.face_body().map(|n| ModelState { bodies: st.bodies.iter().filter(|b| b.name == n).cloned().collect(), ..ModelState::default() });
+        let named =
+            kind.face_body().map(|n| ModelState { bodies: st.bodies.iter().filter(|b| b.name == n).cloned().collect(), ..ModelState::default() });
         let on_named: Vec<String> = match &named {
             Some(one) if !one.bodies.is_empty() => crate::naming::face_names_at(one, &pts),
             _ => vec![String::new(); pts.len()],
