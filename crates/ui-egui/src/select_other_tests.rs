@@ -478,6 +478,28 @@ fn a_click_picks_the_sketchs_own_curve_over_a_projected_one_under_it() {
     assert_eq!(curves(&h), [projected]);
 }
 
+/// While a sketch is being edited, a click inside the closed zone of ANOTHER sketch of the same
+/// design must not select that zone: the zone keeps its pale tint instead of turning into a
+/// solid blue shape (#16197).
+#[test]
+fn a_click_in_sketch_mode_does_not_select_the_closed_zone_of_another_sketch() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Other"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let other = h.app.session.doc.find_feature("Other").unwrap().id;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Editing"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.step(&json!({"click":{"world":[20,15,0]}})).unwrap();
+    assert!(
+        !h.app.session.selection.contains(&Sel::Profile { sketch: other, index: 0 }),
+        "a click in sketch mode must not select the closed zone of another sketch: {:?}",
+        h.app.session.selection
+    );
+}
+
 /// Three plates stacked along Z (made bottom, top, middle, so model order isn't depth order),
 /// the top one smallest, held over the top plate's edge from above.
 fn stacked_plates() -> Harness {
