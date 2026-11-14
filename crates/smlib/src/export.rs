@@ -618,15 +618,14 @@ fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
 }
 
 /// A trim along its edge, its parameter moved onto the edge record's ([`TrimMap`]): one whose
-/// edgeuse runs against the edge (`same` false) reversed exactly (control points in reverse
-/// order, knots t ↦ a + b − t), then the knots mapped. SMLib keeps a trim on its edge's
-/// interval; where the two ends differ by the rounding of SMLib's own or this remap (within the
-/// schema's 10⁻⁹ of the interval's magnitude, at least 1), or by more but at one point of the edge
-/// within its tolerance (`on_edge`: a circle on its NURBS form whose end lies a rounding past the
-/// quarter line its trim stops on moves along it 10⁻⁷ of the form's parameter, a micron), every
-/// knot within that of an interval end is that end, and the end spans this leaves without length
-/// go with their control points, so the pcurve is a valid record defined on the edge; farther
-/// apart is an error.
+/// edgeuse runs against the edge (`same` false) reversed exactly (points reversed, knots
+/// t ↦ a + b − t), then the knots mapped. SMLib keeps a trim on its edge's interval; where the
+/// ends differ by the rounding of SMLib's own or this remap (10⁻⁹ of the interval's magnitude,
+/// no floor: a micro edge on knots spanning 10⁻⁷ lies on [0, 6e-12]), or by more but at one point
+/// of the edge within its tolerance (`on_edge`: a circle on its NURBS form ending a rounding past
+/// its trim's quarter line), every knot within that of an end is that end, and the end spans left
+/// without length go with their control points. Farther is an error, as is an interval of at most
+/// `SM_EFF_ZERO` (10⁻¹², SMLib's absolute knot resolution: no trim fits on it).
 fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2], on_edge: &dyn Fn(f64, f64) -> bool) -> Res<b::Curve2> {
     fn along<T: Clone>(knots: &[f64], points: &[T], same: bool) -> (Vec<f64>, Vec<T>) {
         if same {
@@ -657,7 +656,7 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
         let n = points.len();
         let degree = k.len().checked_sub(n + 1).ok_or_else(|| invalid("UV trim knots"))?;
         let (a, z) = (at(&k, degree, "UV trim knots")?, at(&k, n, "UV trim knots")?);
-        let rounding = 1e-9 * t0.abs().max(t1.abs()).max(1.0);
+        let rounding = 1e-9 * t0.abs().max(t1.abs());
         // Each end's slack: the rounding, or the gap where it is one point of the edge (less
         // than a quarter of the interval, so the two ends' slacks never meet).
         let end = |x: f64, t: f64| {
@@ -670,8 +669,8 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
                 None
             }
         };
-        let (Some(s0), Some(s1)) = (end(a, t0), end(z, t1)) else {
-            return Err(invalid(format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}]")));
+        let (Some(s0), Some(s1), false) = (end(a, t0), end(z, t1), t1 - t0 <= 1e-12) else {
+            return Err(invalid(format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}] (SMLib's knot resolution is 1e-12)")));
         };
         // A knot within the rounding of an end is that end, and so is one past the end on the
         // side the trim runs over it, up to the trim's end; a knot inside the edge's interval
