@@ -47,6 +47,9 @@ pub struct Read {
     pub region: usize,
     /// The record; each of its faces' origin is that face's index in the model's faces.
     pub solid: Solid,
+    /// Where the body's placement puts the record (column-major 4 × 4, millimetres), when it
+    /// moves it. Only a rigid placement is kept: another leaves the record where it is, noted.
+    pub placement: Option<[[f64; 4]; 4]>,
 }
 
 /// A body region that could not be read, and why.
@@ -93,6 +96,18 @@ pub fn read_bodies(ir: &CadIr, trims: Option<&dyn Trims>) -> Bodies {
             BodyKind::Wire => None,
         };
         let Some(kind) = kind else { continue };
+        let (placement, placement_note) = match body
+            .transform
+            .map(|t| geometry::Similarity::of(geometry::Rows3::rows3(&t)))
+        {
+            None => (None, None),
+            Some(Ok(s)) if s.is_rigid() => (s.column_major(), None),
+            Some(Ok(_)) => (
+                None,
+                Some("its placement scales it, and is left out".to_string()),
+            ),
+            Some(Err(m)) => (None, Some(format!("its placement is left out: {m}"))),
+        };
         for (k, region) in body.regions.iter().enumerate() {
             let name = body.name.clone().unwrap_or_default();
             match model.region(
@@ -103,11 +118,15 @@ pub fn read_bodies(ir: &CadIr, trims: Option<&dyn Trims>) -> Bodies {
                 trims,
                 &mut budget,
             ) {
-                Ok(solid) => out.read.push(Read {
-                    body: id.clone(),
-                    region: k,
-                    solid,
-                }),
+                Ok(mut solid) => {
+                    solid.notes.extend(placement_note.clone());
+                    out.read.push(Read {
+                        body: id.clone(),
+                        region: k,
+                        solid,
+                        placement,
+                    });
+                }
                 Err(message) => out.failures.push(Failure {
                     body: id.clone(),
                     region: k,

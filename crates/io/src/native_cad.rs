@@ -1,12 +1,13 @@
 //! Other CAD formats read through [cadmpeg](https://github.com/cadmpeg/cadmpeg): FreeCAD
-//! `.FCStd` and Rhino `.3dm`. cadmpeg decodes the file into its neutral model and writes that as
-//! STEP, which the Import feature then reads and keeps like any STEP file.
+//! `.FCStd` and Rhino `.3dm`. cadmpeg decodes the file into its neutral model (CADIR), which is
+//! read straight into B-rep records (`solidcraft_kernel::cadir_records`); the Import feature keeps
+//! those records, with no STEP text in between.
 //!
 //! Only codecs for open formats are compiled in (the workspace enables cadmpeg-registry's
 //! `fcstd`, `rhino` and `step` features alone). cadmpeg's codecs for commercial formats, and its
 //! `sat` codec (a ShapeManager stream decoder that reads ACIS as one dialect), are not built.
 //!
-//! This module is the importer seam: the one place cadmpeg is called, returning STEP text plus
+//! This module is the importer seam: the one place cadmpeg is called, returning the records plus
 //! warnings. A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
 //! compare with our own STEP reader, without changing that reader.
 
@@ -30,11 +31,12 @@ pub fn detects_freecad(bytes: &[u8]) -> bool {
     matches!(solidcraft_kernel::guard("cadmpeg detect", || Ok(convert::contents_are_freecad(bytes))), Ok(true))
 }
 
-/// Restate a FreeCAD or Rhino file (`file` is its name) as STEP text, with the losses
-/// and warnings cadmpeg reported. Panics inside cadmpeg become errors.
-pub fn native_cad_to_step(bytes: &[u8], file: &str) -> Result<(String, Vec<String>), String> {
+/// Read a FreeCAD or Rhino file (`file` is its name) into an import kept as B-rep records,
+/// with what cadmpeg could not bring over, and whether its contents are a FreeCAD design. Panics
+/// inside cadmpeg or the reader become errors.
+pub fn native_cad_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
     let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
-    solidcraft_kernel::guard("cadmpeg import", || convert::to_step(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
+    solidcraft_kernel::guard("cadmpeg import", || convert::records(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
         |e| match e {
             solidcraft_kernel::KernelError::Invalid(m) => m,
             e => e.to_string(),
@@ -45,7 +47,7 @@ pub fn native_cad_to_step(bytes: &[u8], file: &str) -> Result<(String, Vec<Strin
 /// A FreeCAD file's design history rebuilt as features (sketches, Pad and Pocket, Revolution and
 /// Groove, Fillet and Chamfer), checked against the file's own solids: each rebuilt body has the
 /// volume and extent of one of them. The error says why the history was not rebuilt; the file's
-/// solids then import as before ([`native_cad_to_step`]). Rhino files carry no such history.
+/// solids then import as before ([`native_cad_records`]). Rhino files carry no such history.
 pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, String> {
     let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
     let design = solidcraft_kernel::guard("cadmpeg design", || convert::design(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid))
@@ -67,33 +69,17 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
 mod design;
 pub use design::NativeDesign;
 
-/// The STEP items a FreeCAD restatement marks invisible: a body's intermediate shapes (each Pad
-/// and Pocket, the tool shapes, sketch wires), which FreeCAD hides and only its body's own shape
-/// shows. Their bodies are left out of the import ([`crate::StepFeature`]'s `skip`).
-pub(crate) fn invisible_items(step: &str) -> std::collections::HashSet<u64> {
-    let mut out = std::collections::HashSet::new();
-    let mut rest = step;
-    while let Some(at) = rest.find("INVISIBILITY(") {
-        let after = rest.get(at + "INVISIBILITY(".len()..).unwrap_or_default();
-        let list = after.split_once(';').map_or(after, |(l, _)| l);
-        out.extend(list.split('#').skip(1).filter_map(|n| n.split(|c: char| !c.is_ascii_digit()).next()?.parse::<u64>().ok()));
-        rest = after;
-    }
-    out
-}
-
 mod convert {
     use std::io::Cursor;
 
     use cadmpeg_core::decode::WorkBudget;
     use cadmpeg_core::decode::{DecodeArena, DecodeContext, DecodeDepth, DecodeMode, DecodePolicy, ResourceLimits, View};
-    use cadmpeg_ir::codec::write::{EncodeInput, target::TargetRequest};
     use cadmpeg_ir::codec::{Codec, DecodeFailure, DecodeOptions, DecodeResult};
     use cadmpeg_ir::document::CadIr;
     use cadmpeg_ir::eval::{admission::EvaluationAdmission, finite_or_refusal, model_curve_point_by_id};
     use cadmpeg_ir::index::ModelIndex;
     use cadmpeg_ir::validate::validate_neutral_for_decode;
-    use cadmpeg_registry::{DETECTION_PREFIX_LEN, Format, InputCatalog, ResolveSourceError, ResolvedSource, build_encoder, forced_input};
+    use cadmpeg_registry::{DETECTION_PREFIX_LEN, InputCatalog, ResolveSourceError, ResolvedSource, forced_input};
 
     /// The codecs we accept (cadmpeg codec ids), whatever else the registry recognises.
     const ACCEPTED: [&str; 2] = ["fcstd", "rhino"];
@@ -154,8 +140,8 @@ mod convert {
             return Err(format!("{name}: {format} files are not supported (FreeCAD .FCStd and Rhino .3dm only)"));
         }
 
-        // Decode in memory under the caps, at the depth the caller chose: the STEP writer reads
-        // solids and products; a FreeCAD history rebuild reads the design too.
+        // Decode in memory under the caps, at the depth the caller chose: the records read the
+        // bodies; a FreeCAD history rebuild reads the design too.
         let options = DecodeOptions { depth, policy };
         let decoded = codec.decode(&mut Cursor::new(bytes), &options).map_err(|e| match e {
             DecodeFailure::Codec(e) => format!("{name}: could not read this {format} file: {e}"),
@@ -216,8 +202,7 @@ mod convert {
     /// Mark hidden what FreeCAD shows only through its body: the shapes of the features inside a
     /// PartDesign body that has a shape of its own (a file saved from FreeCAD's window keeps the
     /// tip feature's shape visible beside the body's identical one), and binders, which are
-    /// reference copies of other geometry. The STEP writer marks them invisible, and the import
-    /// leaves them out.
+    /// reference copies of other geometry. The import leaves them out.
     fn hide_body_members(ir: &mut CadIr) {
         use serde_json::Value;
         let Ok(Value::Array(features)) = serde_json::to_value(&ir.model.features) else { return };
@@ -265,14 +250,16 @@ mod convert {
         Some(solidcore_record::Vec3::new(p.x, p.y, p.z))
     }
 
-    pub(super) fn to_step(name: &str, bytes: &[u8]) -> Result<(String, Vec<String>), String> {
+    /// A FreeCAD or Rhino file (`name`) read into an import kept as records, with what cadmpeg
+    /// could not bring over, and whether the contents are a FreeCAD design.
+    pub(super) fn records(name: &str, bytes: &[u8]) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
         let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
         if !super::NATIVE_CAD_EXTS.contains(&ext.as_str()) {
             return Err(format!("{name}: not supported (FreeCAD .FCStd and Rhino .3dm only)"));
         }
         let (format, decoded) = decode_at(name, &ext, bytes, &ACCEPTED, DecodeDepth::Full)?;
         let policy = policy();
-        let (mut ir, report, fidelity) = decoded.into_parts();
+        let (mut ir, report, _) = decoded.into_parts();
         hide_body_members(&mut ir);
         if !report.geometry_transferred() {
             return Err(format!("{name}: no geometry could be read from this {format} file"));
@@ -289,31 +276,19 @@ mod convert {
             return Err(format!("{name}: the {format} model is invalid ({} errors)", validation.error_count()));
         }
 
-        // Write it as STEP AP214.
-        let plan = build_encoder(Format::Step)
-            .plan(EncodeInput::new(&ir, Some(&fidelity)), TargetRequest::Explicit("ap214"))
-            .map_err(|e| format!("{name}: could not restate as STEP: {e}"))?;
-        let losses = &plan.report().losses;
-        if losses.iter().any(|l| l.code.to_string() == "step/export.no-exportable-solids") {
-            return Err(format!("{name}: this {format} file has no solids that can be imported"));
+        let product = std::path::Path::new(name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| name.to_string());
+        let system = match format.as_str() {
+            "fcstd" => "FreeCAD",
+            "rhino" => "Rhino",
+            other => other,
+        };
+        let records = solidcraft_kernel::cadir_records(&ir, &product, system);
+        if records.bodies.is_empty() {
+            let why = records.warnings.first().map(|w| format!(" ({w})")).unwrap_or_default();
+            return Err(format!("{name}: this {format} file has no solids that can be imported{why}"));
         }
-        warnings.extend(losses.iter().map(|l| format!("{}: {}", l.code, l.message)));
-        let mut out = Vec::new();
-        plan.write_to(&mut out).map_err(|e| e.to_string())?;
-        let step = String::from_utf8(out).map_err(|e| e.to_string())?;
-        Ok((super::name_unnamed_products(step, name), warnings))
+        Ok((records, warnings, format == "fcstd"))
     }
-}
-
-/// cadmpeg's STEP writer calls a product it has no name for `cadmpeg_model`; name it after the
-/// file instead (as plain STEP text: letters, digits, spaces, `-`, `_` and `.` only).
-fn name_unnamed_products(step: String, file: &str) -> String {
-    const PLACEHOLDER: &str = "'cadmpeg_model'";
-    let stem: String = std::path::Path::new(file)
-        .file_stem()
-        .map(|s| s.to_string_lossy().chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.')).collect())
-        .unwrap_or_default();
-    if stem.trim().is_empty() || !step.contains(PLACEHOLDER) { step } else { step.replace(PLACEHOLDER, &format!("'{stem}'")) }
 }
 
 #[cfg(test)]

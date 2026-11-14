@@ -37,7 +37,7 @@ pub mod limits;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
-pub use native_cad::{NATIVE_CAD_EXTS, NativeDesign, detects_freecad, is_freecad_path, is_native_cad_path, native_cad_design, native_cad_to_step};
+pub use native_cad::{NATIVE_CAD_EXTS, NativeDesign, detects_freecad, is_freecad_path, is_native_cad_path, native_cad_design, native_cad_records};
 pub mod paper;
 mod pat;
 mod ply;
@@ -316,14 +316,6 @@ fn step_text(bytes: &[u8]) -> String {
     encoding.decode_without_bom_handling(bytes).0.into_owned()
 }
 
-/// The STEP items of a native CAD file that its solids import leaves out: a FreeCAD body's
-/// hidden intermediate shapes. A Rhino file's hidden objects are its own visibility, which the
-/// file's user asked to keep, so none are left out; the format is the one cadmpeg detects in
-/// the bytes, not the file's name (a Rhino file can be called `.FCStd`).
-fn hidden_items(file: &str, bytes: &[u8], step: &str) -> std::collections::HashSet<u64> {
-    if is_native_cad_path(file) && native_cad::detects_freecad(bytes) { native_cad::invisible_items(step) } else { Default::default() }
-}
-
 /// Read STEP bytes (`file` is the source file name) into an Import base feature. The file is
 /// read once here to fail early and collect names; the feature holds the STEP text.
 pub fn step_import_feature(bytes: &[u8], file: &str) -> Result<StepFeature> {
@@ -334,14 +326,14 @@ pub fn step_import_feature(bytes: &[u8], file: &str) -> Result<StepFeature> {
 pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> Result<StepFeature> {
     let _span = solidcraft_profile::span("import", "step_import_feature_named");
     limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
-    // STEP is 7-bit text with escapes; tolerate stray 8-bit bytes. IGES and the cadmpeg formats
-    // are restated as STEP (the feature keeps that STEP text).
-    let (text, iges_warnings) = if is_native_cad_path(file) {
-        native_cad_to_step(bytes, file).map_err(IoError::Invalid)?
-    } else {
-        let text = step_text(bytes);
-        if is_iges_path(file) { solidcraft_kernel::iges_to_step(&text).map_err(IoError::Invalid)? } else { (text, Vec::new()) }
-    };
+    // STEP is 7-bit text with escapes; tolerate stray 8-bit bytes. IGES is restated as STEP (the
+    // feature keeps that STEP text); the cadmpeg formats are read into records.
+    if is_native_cad_path(file) {
+        return native_import_feature(bytes, file, names);
+    }
+    let text = step_text(bytes);
+    let (text, iges_warnings) =
+        if is_iges_path(file) { solidcraft_kernel::iges_to_step(&text).map_err(IoError::Invalid)? } else { (text, Vec::new()) };
     // The limit of a file being imported is the limit of its format, not the design file's
     // (#2721): the restated text is checked against the import limit, and the design file
     // limit applies to the design that is saved, which refuses it there.
@@ -353,10 +345,7 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "Import".into());
     let body_names: Vec<String> = imp.bodies.iter().map(|b| body_name(b, names)).collect();
-    // A FreeCAD body's hidden intermediate shapes are not built (unless nothing else is).
-    let hidden = hidden_items(file, bytes, &text);
-    let skip: Vec<u64> = imp.bodies.iter().zip(0u64..).filter(|(b, _)| hidden.contains(&b.source_item)).map(|(_, i)| i).collect();
-    let skip = if skip.len() == imp.bodies.len() { Vec::new() } else { skip };
+    let skip = Vec::new();
     // A body the STEP file itself marks invisible is still built, and starts hidden.
     let invisible: Vec<bool> = imp.bodies.iter().map(|b| b.hidden).collect();
     // The root product's name; else the only body's name; else the file name.
@@ -372,6 +361,49 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
         invisible,
         kind: solidcraft_doc::FeatureKind::Import { file: file_name, step: text.into(), components: imp.tree.clone(), skip, records: None },
         warnings: iges_warnings.into_iter().chain(imp.warnings.iter().cloned()).collect(),
+        import: imp,
+    })
+}
+
+/// A FreeCAD or Rhino file read into an Import feature that keeps the B-rep records cadmpeg's
+/// neutral model was read into (no STEP text). A FreeCAD body's hidden intermediate shapes (each
+/// pad and pocket, the tool shapes, sketch faces, which FreeCAD shows only through its body's
+/// own shape) are not built, unless nothing else is; a Rhino file's hidden objects are its user's
+/// own choice, so they are built and start hidden. The format is the one cadmpeg detects in the
+/// contents, not the file's name.
+fn native_import_feature(bytes: &[u8], file: &str, names: StepNames) -> Result<StepFeature> {
+    let (records, decode_warnings, freecad) = native_cad_records(bytes, file).map_err(IoError::Invalid)?;
+    let text = solidcraft_kernel::records_text(&records)?;
+    design::check_step_importable(&text)?;
+    let imp = solidcraft_kernel::records_import_shared(&records)?;
+    let stem = std::path::Path::new(file)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "Import".into());
+    let body_names: Vec<String> = imp.bodies.iter().map(|b| body_name(b, names)).collect();
+    let skip: Vec<u64> = if freecad { imp.bodies.iter().zip(0u64..).filter(|(b, _)| b.hidden).map(|(_, i)| i).collect() } else { Vec::new() };
+    let skip = if skip.len() == imp.bodies.len() { Vec::new() } else { skip };
+    let invisible: Vec<bool> = imp.bodies.iter().map(|b| b.hidden).collect();
+    // As a STEP import's: the root product's name; else the only body's name; else the file name.
+    let name = match (imp.tree.as_slice(), body_names.as_slice()) {
+        ([root], _) if !generic_name(&root.name) => root.name.clone(),
+        (_, [only]) if !generic_name(only) => only.clone(),
+        _ => stem,
+    };
+    let file_name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    Ok(StepFeature {
+        name,
+        body_names,
+        invisible,
+        kind: solidcraft_doc::FeatureKind::Import {
+            file: file_name,
+            step: "".into(),
+            components: imp.tree.clone(),
+            skip,
+            records: Some(std::sync::Arc::new(records)),
+        },
+        warnings: decode_warnings.into_iter().chain(imp.warnings.iter().cloned()).collect(),
         import: imp,
     })
 }

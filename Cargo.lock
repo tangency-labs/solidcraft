@@ -5859,6 +5859,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-cadir"
+version = "0.1.0"
+dependencies = [
+ "cadmpeg-ir",
+ "solidcore",
+ "solidcore-ops",
+ "solidcore-record",
+ "solidcore-step",
+]
+
+[[package]]
 name = "solidcore-convert"
 version = "0.1.0"
 dependencies = [
@@ -6176,11 +6187,13 @@ dependencies = [
 name = "solidcraft-kernel"
 version = "0.45.0-rc.1"
 dependencies = [
+ "cadmpeg-ir",
  "log",
  "proptest",
  "rayon",
  "serde",
  "serde_json",
+ "solidcore-cadir",
  "solidcore-ops",
  "solidcore-record",
  "solidcore-step",

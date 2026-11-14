@@ -61,6 +61,8 @@ solidcore-record = { path = "solidcore/crates/solidcore-record" }
 solidcore-ops = { path = "solidcore/crates/solidcore-ops" }
 # STEP import and export (vendored with solidcore): the Part 21 parser is solidcore-record's.
 solidcore-step = { path = "solidcore/crates/solidcore-step" }
+# CADIR (cadmpeg's neutral CAD model) read into B-rep records, as the STEP reader assembles them.
+solidcore-cadir = { path = "solidcore/crates/solidcore-cadir" }
 # Geometry made drawable (solidcore's layers §3): the one mesher, SolidCraft's, moved into the
 # subtree (RFC 0003, item 1.1), with the display mesh and its levels of detail, the types
 # SolidCraft's meshes are. Vendored with solidcore, in the same subtree.

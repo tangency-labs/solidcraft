@@ -7,3 +7,5 @@ solidcore-tess
 solidcore-record
 # STEP import and export, until its build is kernel primitives under an ops recipe (RFC 0003, 1.6).
 solidcore-step
+# FreeCAD and Rhino import: CADIR read into records, assembled as STEP solids are (solidcore-step's assembly).
+solidcore-cadir

@@ -25,6 +25,7 @@ mod boundary;
 mod boundary_network;
 mod bridge;
 mod build;
+mod cadir_in;
 #[cfg(test)]
 mod chamfer_sides_curved_tests;
 mod continuity;
@@ -181,6 +182,7 @@ pub use build::{
     PathSeg, box_solid, canonical_revolve_axis, cylinder, extrude, extrude_tapered, extrude_tapered_between, extrude_whole_sides, loft, loft_regions,
     loft_with_rails, path_polyline, planar_face_record, revolve, revolve_whole, sphere, sweep, sweep_with, torus,
 };
+pub use cadir_in::cadir_records;
 pub use continuity::{
     ContinuityReport, ContinuityTolerances, DEFAULT_SAMPLES, EdgePick, MAX_SAMPLES, MIN_SAMPLES, SeamReport, SeamStation, SeamVerdict, SeamWorst,
     pick_edges, seam_diagnostics,

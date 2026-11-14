@@ -16,6 +16,9 @@ solidcraft-geom = { workspace = true }
 solidcraft-smlib = { workspace = true }
 solidcraft-profile = { workspace = true }
 solidcore-step = { workspace = true }
+# FreeCAD and Rhino files read through cadmpeg into records (src/cadir_in.rs).
+solidcore-cadir = { workspace = true }
+cadmpeg-ir = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
