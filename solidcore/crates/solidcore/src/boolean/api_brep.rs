@@ -383,11 +383,26 @@ fn coincidence_bound(
 ///
 /// # Errors
 ///
-/// Those of the topology walk and of `GlueEdgesGeneral`. They fail the boolean: the pairs
-/// passed meet `GlueEdgesGeneral`'s precondition (both vertices shared, both on faces), so
-/// its remaining errors are broken links in the operand's topology (an edge use without
-/// mate, radial, shell or vertex use) or its notifications' failures, and an operand left
-/// half glued could not be merged "as given" anyway.
+/// Those of the topology walk and the coincidence checks; those of `GlueEdgesGeneral` that
+/// stand for no upstream status ([`crate::error::native_failure`]: a port invariant, a stale
+/// id, an unported call, cancellation).
+///
+/// **A gluing that fails leaves the operand as given.** The glue is all or nothing: the
+/// operand is snapshotted ([`Brep::snapshot`]) before the first pair, and any other failure
+/// of `GlueEdgesGeneral` restores it exactly, so the merge then runs on the operand as main
+/// does (0 is returned). `GlueEdgesGeneral` can fail on a valid operand, both before its
+/// first change to the topology (`b.remove_from_edge_list(del)`) and after it:
+/// - before: the notifications (`PreEdit`, `MergeInBrep`, each face's `PreEdit`), the
+///   intervals and `curve_max_distance_between` of the same-geometry test (orientation
+///   `Same`, equal intervals), the vertex reads and the shared-vertex precondition;
+/// - after: `edge_remove` and `add_oriented_eu_pair` of each moved use pair, the surviving
+///   edge's `set_tolerance`, `destroy` of the deleted edge, `merge_shells`, and
+///   `test_closure_split_region_attempt` / `test_closure_split_region_edge` (whose statuses
+///   pass on with `brep_edit_statuses_pass_on`).
+///
+/// A failure at an "after" site would leave the operand half glued, so a check up front
+/// cannot replace the snapshot. A snapshot the B-rep cannot take (a cleared surface owner,
+/// or nesting past the copy bound) means no gluing at all.
 fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
     use std::collections::BTreeMap;
 
@@ -468,8 +483,12 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
     if pairs.is_empty() {
         return Ok(0);
     }
+    // all or nothing: a failed gluing puts the operand back as it came in
+    let Ok(saved) = b.snapshot() else {
+        return Ok(0);
+    };
     let mut state = ArenaNotifyState::with_attributes_of(b);
-    let mut result = Ok(());
+    let mut failure = None;
     for &(surviving, to_delete, orientation) in &pairs {
         if let Err(e) = glue_edges_general(
             k,
@@ -482,12 +501,19 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
             None,
             &mut state.env(None),
         ) {
-            result = Err(e);
+            failure = Some(e);
             break;
         }
     }
+    if let Some(e) = failure {
+        // the snapshot holds the attributes too: the store moved out is dropped
+        drop(state);
+        b.restore(saved);
+        // a port defect or a cancellation goes on; an ordinary failure merges as given
+        crate::error::native_failure::<()>(Err(e))?;
+        return Ok(0);
+    }
     state.restore_attributes(b)?;
-    result?;
     b.refresh_cached_topology();
     Ok(pairs.len())
 }
