@@ -335,11 +335,11 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
         let w = ss.plane.to_world(q);
         meshes.iter().any(|m| m.contains(w))
     };
-    // Where the body begins from `q` along `d` (a unit direction in the plane), up to `limit`:
-    // the ray's crossings of the bodies' surfaces, with the first beyond `limit`, each span
-    // between two tested at its middle. Fixed steps passed over thin walls or landed on their
-    // faces, so whether a rib found the floor of a long tray hung on its length (#16874).
-    let entry = |q: Vec2, d: Vec2, limit: f64| -> Option<f64> {
+    // Where the body begins and ends again from `q` along `d` (a unit direction in the plane),
+    // up to `limit`: the ray's crossings of the bodies' surfaces, with the first beyond `limit`,
+    // each span between two tested at its middle. Fixed steps passed over thin walls or landed
+    // on their faces, so whether a rib found the floor of a long tray hung on its length (#16874).
+    let entry = |q: Vec2, d: Vec2, limit: f64| -> Option<(f64, f64)> {
         let (o, dir) = (ss.plane.to_world(q), ss.plane.dir_to_world(d));
         let mut cuts = Vec::new();
         for m in &meshes {
@@ -354,7 +354,7 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
                 from += tol;
             }
         }
-        ray_entry(cuts, tol, |s| inside(q + d * s)).filter(|h| *h <= limit)
+        ray_entry(cuts, tol, |s| inside(q + d * s)).filter(|(h, _)| *h <= limit)
     };
     let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
     let samples = ((len / (t.min(len) * 0.25).max(len / 400.0)).ceil() as usize).clamp(2, 400);
@@ -365,7 +365,7 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
     let probe = |side: Vec2| {
         let (mut reached, mut nearest) = (0usize, f64::INFINITY);
         for q in along.iter().step_by((along.len() / 24).max(1)) {
-            if let Some(h) = entry(*q, side, reach * 2.0 + 1.0) {
+            if let Some((h, _)) = entry(*q, side, reach * 2.0 + 1.0) {
                 reached += 1;
                 nearest = nearest.min(h);
             }
@@ -380,7 +380,9 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
         n = n * -1.0;
     }
     // From each point of the curves, across the plane until the body begins (or `depth`);
-    // walls that reach the body go a little into it so they merge with it.
+    // walls that reach the body go a little into it so they merge with it, never more than
+    // half through the material there, so a rib on a floor thinner than the overlap does not
+    // come out below it (#16874).
     let limit = depth.unwrap_or(reach * 2.0 + 1.0);
     let step = (limit.min(reach * 2.0 + 1.0) / 400.0).max(1e-3);
     let overlap = (len / samples as f64 * 2.0).max(step * 2.0).min(t);
@@ -388,8 +390,8 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
     for q in &along {
         let hit = entry(*q, n, limit);
         let h = match (hit, depth) {
-            (Some(h), Some(d)) if h >= d => d,
-            (Some(h), _) => h + overlap,
+            (Some((h, _)), Some(d)) if h >= d => d,
+            (Some((h, out)), _) => h + overlap.min(0.5 * (out - h)),
             (None, Some(d)) => d,
             (None, None) => return Err(DocError::Invalid("the rib curves do not face a body (give a depth)".into())),
         };
@@ -426,7 +428,7 @@ fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, d
     // so no thin wall is stepped over (#16874).
     let limit = reach * 2.0 + 1.0;
     let step = (limit / 400.0).max(1e-3);
-    let hits = |sign: f64| -> Vec<f64> {
+    let hits = |sign: f64| -> Vec<(f64, f64)> {
         let dir = normal * sign;
         let mut out = Vec::new();
         for q in &along {
@@ -443,7 +445,7 @@ fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, d
                     from += tol;
                 }
             }
-            if let Some(h) = ray_entry(cuts, tol, |s| inside(*q + dir * s)).filter(|h| *h <= limit) {
+            if let Some(h) = ray_entry(cuts, tol, |s| inside(*q + dir * s)).filter(|(h, _)| *h <= limit) {
                 out.push(h);
             }
         }
@@ -460,11 +462,12 @@ fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, d
     let h = match depth {
         Some(d) => d,
         None => {
-            let far = reached.iter().copied().fold(f64::NAN, f64::max);
-            if !far.is_finite() {
+            // The farthest entry, and into its material at most half way through it, so the
+            // wall does not come out beyond a plate thinner than the overlap (#16874).
+            let Some((far, out)) = reached.iter().copied().max_by(|a, b| a.0.total_cmp(&b.0)) else {
                 return Err(DocError::Invalid("the rib curves do not face a body along the sketch normal (give a depth)".into()));
-            }
-            far + (t * 0.5).max(step)
+            };
+            far + (t * 0.5).max(step).min(0.5 * (out - far))
         }
     };
     // The curves widened to `t`: each point offset by half the thickness along the miter of its
@@ -497,19 +500,19 @@ fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, d
     tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))
 }
 
-/// Where the material begins along a ray, from where the ray crosses the bodies' surfaces
-/// (`cuts`, distances from its start, in any order) and whether the point at a distance lies
-/// inside: the start of the first span between crossings whose middle is inside, 0 when the
-/// ray starts in the material. Crossings within `tol` of each other are one; a span is only
-/// tested at its middle, clear of the faces at its ends.
-fn ray_entry(mut cuts: Vec<f64>, tol: f64, inside: impl Fn(f64) -> bool) -> Option<f64> {
+/// Where the material begins and ends along a ray, from where the ray crosses the bodies'
+/// surfaces (`cuts`, distances from its start, in any order) and whether the point at a
+/// distance lies inside: the start and end of the first span between crossings whose middle is
+/// inside, starting at 0 when the ray starts in the material. Crossings within `tol` of each
+/// other are one; a span is only tested at its middle, clear of the faces at its ends.
+fn ray_entry(mut cuts: Vec<f64>, tol: f64, inside: impl Fn(f64) -> bool) -> Option<(f64, f64)> {
     cuts.retain(|c| c.is_finite() && *c > 0.0);
     cuts.sort_by(f64::total_cmp);
     cuts.dedup_by(|c, prev| *c - *prev <= tol);
     let mut start = 0.0;
     for c in cuts {
         if c - start > tol && inside(0.5 * (start + c)) {
-            return Some(start);
+            return Some((start, c));
         }
         start = c;
     }

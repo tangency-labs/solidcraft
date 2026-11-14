@@ -463,7 +463,8 @@ fn rib_finds_a_tray_floor_whatever_the_tray_length() {
         run(&mut s, "sketch.line", json!({"points": [[5, 8], [25, 8]], "closed": false}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.rib", json!({"sketch": "R", "curves": ["l1"], "thickness": t}));
-        // 20 long, 6 from the line down to the floor.
+        // 20 long, 6 from the line down to the floor; it goes into the 2 mm floor to merge
+        // but not out below it, however thick the rib.
         assert!(rel(volume(&mut s), tray + 20.0 * 6.0 * t) < 1e-6, "L = {l}, t = {t}: {}", volume(&mut s));
         assert_eq!(measure(&mut s)["body_count"], 1, "L = {l}, t = {t}");
     }
@@ -514,7 +515,8 @@ fn rib_along_the_sketch_normal_reaches_the_body() {
 fn rib_along_the_sketch_normal_stops_at_a_thin_plate() {
     // A 0.5 thick plate 3.8 behind the sketch (y = -6.2..-5.7) and a 300 long block far
     // beyond it. Steps of the block's size (about 1.5) passed over the plate and ran the rib
-    // on to the block, 310 away (#16874); it stops at the plate.
+    // on to the block, 310 away (#16874); it stops at the plate, going into it but not out
+    // beyond it.
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 20, "width": 0.5, "height": 10, "corner": [0, -6.2, 0], "operation": "new", "body_name": "Plate"}));
     run(&mut s, "solid.box", json!({"length": 20, "width": 300, "height": 10, "corner": [0, 300, 0], "operation": "new", "body_name": "Block"}));
@@ -524,9 +526,9 @@ fn rib_along_the_sketch_normal_stops_at_a_thin_plate() {
     run(&mut s, "sketch.line", json!({"points": [[2, 5], [18, 5]], "ids": ["l1"]}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.rib", json!({"sketch": "Front", "curves": ["l1"], "thickness": 2, "direction": "normal"}));
-    // 16 long, 2 thick, at least the 3.8 to the plate, ending a little past it.
+    // 16 long, 2 thick, the 3.8 to the plate; what goes into the plate adds nothing.
     let added = volume(&mut s) - before;
-    assert!(added > 32.0 * 3.8 && added < 32.0 * 6.0, "{added}");
+    assert!(rel(added, 32.0 * 3.8) < 1e-6, "{added}");
 }
 
 #[test]
