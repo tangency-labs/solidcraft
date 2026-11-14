@@ -2009,6 +2009,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .collect();
     let more_text = solidcraft_ui_text::tr("tab_strip.more");
     let plus_menu = crate::design_view_ui::plus_menu(solidcraft_theme::is_dark());
+    let layout_menu = crate::design_view_ui::layout_menu();
+    let layout_current = if app.docs.views.is_tiled() { "" } else { "layout.single" };
     let actions = {
         let mut strip = crate::app_bar::TabStrip {
             tabs: info
@@ -2058,6 +2060,9 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 .zip(view_place)
                 .map(|(r, place)| (place, crate::app_bar::TabRename { text: &mut r.text, focused: &mut r.focused, max: solidcraft_views::MAX_NAME })),
             plus_menu: &plus_menu,
+            layout_menu: &layout_menu,
+            layout_current,
+            layout_tip: solidcraft_ui_text::tr_label("Show views together"),
             switcher_menu: &SWITCHER_MENU,
             tear_off_below: TEAR_OFF_BELOW,
         };
