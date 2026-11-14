@@ -30,13 +30,16 @@ use std::sync::atomic::{AtomicIsize, Ordering};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use solidcraft_ui_egui::titlebar;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
+use windows_sys::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmExtendFrameIntoClientArea, DwmSetWindowAttribute};
 use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::UI::Controls::MARGINS;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, GCLP_HICON, GCLP_HICONSM, GWL_STYLE, GWLP_WNDPROC, GetClientRect, GetWindowLongPtrW, GetWindowRect, HTBOTTOM, HTBOTTOMLEFT,
     HTBOTTOMRIGHT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, IMAGE_ICON, IsIconic, IsZoomed, LR_DEFAULTCOLOR, LoadImageW, SM_CXICON,
-    SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON, SetWindowLongPtrW, WM_GETDPISCALEDSIZE, WM_NCDESTROY, WM_NCHITTEST, WNDPROC, WS_THICKFRAME,
+    SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW,
+    SetWindowPos, WM_GETDPISCALEDSIZE, WM_NCCALCSIZE, WM_NCDESTROY, WM_NCHITTEST, WNDPROC, WS_THICKFRAME,
 };
 // windows-sys has SetClassLongPtrW only on 64-bit targets; on 32-bit Windows it is SetClassLongW.
 #[cfg(target_pointer_width = "64")]
@@ -128,6 +131,15 @@ pub fn install(window: &impl HasWindowHandle) -> bool {
         return false;
     }
     PREVIOUS.store(previous as _, Ordering::SeqCst);
+    // A 1 px DWM frame keeps the shadow now that there is no non-client area.
+    let margins = MARGINS { cxLeftWidth: 1, cxRightWidth: 1, cyTopHeight: 1, cyBottomHeight: 1 };
+    let corners = DWMWCP_ROUND;
+    // SAFETY: `hwnd` is the live window; the pointers are to locals that outlive the calls.
+    unsafe {
+        DwmExtendFrameIntoClientArea(hwnd, &margins);
+        DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE as u32, (&raw const corners).cast(), std::mem::size_of_val(&corners) as u32);
+        SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
     true
 }
 
@@ -150,6 +162,8 @@ unsafe extern "system" fn frame_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
             // The border, else what winit and the system say (`HTCLIENT` everywhere else).
             border_hit(hwnd, x, y).map_or(default, |hit| hit as LRESULT)
         }
+        // Client area = window. winit's 1 px shift makes Windows squash each frame, blurring text (#3927).
+        WM_NCCALCSIZE if wparam != 0 && !zoomed(hwnd) => 0,
         WM_GETDPISCALEDSIZE => {
             let new_dpi = wparam as u32;
             // SAFETY: for this message lParam points to a SIZE the system reads back.
@@ -186,8 +200,13 @@ fn resizable(hwnd: HWND) -> bool {
     // SAFETY: plain queries on a window handle the system passed in.
     unsafe {
         let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
-        style & WS_THICKFRAME != 0 && IsZoomed(hwnd) == 0 && IsIconic(hwnd) == 0
+        style & WS_THICKFRAME != 0 && !zoomed(hwnd) && IsIconic(hwnd) == 0
     }
+}
+
+fn zoomed(hwnd: HWND) -> bool {
+    // SAFETY: a plain query on a window handle the system passed in.
+    unsafe { IsZoomed(hwnd) != 0 }
 }
 
 /// The client area's size in pixels (the whole window: winit gives it no frame).
