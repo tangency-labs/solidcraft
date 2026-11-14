@@ -4619,6 +4619,8 @@
   "sketch.error.nothing_to_break": "niente da spezzare qui",
   "sketch.error.offset_fillet_chamfer": "`{id}` è un offset e i suoi angoli seguono le curve di origine: raccorda o smussa gli angoli di origine prima dell'offset, oppure interrompi prima l'associazione dell'offset",
   "sketch.error.offset_trim": "`{id}` è un offset e le sue estremità seguono le curve di origine: modifica invece le curve di origine, oppure interrompi prima l'associazione dell'offset",
+  "sketch.error.point_is_fixed": "Il punto `{id}` è fisso e non può essere spostato",
+  "sketch.error.point_is_projected": "Il punto `{id}` è proiettato e non può essere spostato",
   "sketch.hint.arc.center_point": "Arco: fai clic sul centro e sull'inizio, gira in uno dei due versi e fai clic sulla fine, oppure digita un'ampiezza con segno",
   "sketch.hint.arc.three_point": "Arco: fai clic su inizio, fine, poi su un punto dell'arco",
   "sketch.hint.arc3d": "Arco 3D: fai clic su inizio, fine, poi su un punto dell'arco (i punti possono uscire dal piano dello schizzo)",
