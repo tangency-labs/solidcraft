@@ -473,6 +473,10 @@ fn a_different_line_in_its_place_asks_to_reselect_and_a_point_pick_repairs_it() 
     replace_first_side(&mut s, [[0.0, 0.0], [40.0, 6.0]]);
     let error = shell_error(&s, shell).unwrap_or_default();
     assert!(error.contains("reselect"), "{error}");
+    // An edit that sends no point leaves the stored name alone: it still fails.
+    let stored = s.doc.feature(shell).map(|f| f.face_names.clone()).unwrap_or_default();
+    s.execute("timeline.edit", &json!({"feature": shell, "set": {"thickness": 1}})).ok();
+    assert_eq!(s.doc.feature(shell).map(|f| f.face_names.clone()), Some(stored));
     // Picking the face now on the other line stores its name ...
     run(&mut s, "timeline.edit", json!({"feature": shell, "set": {"faces": [[20, 3, 5]]}}));
     assert_eq!(shell_error(&s, shell), None);

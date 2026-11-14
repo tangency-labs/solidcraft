@@ -875,19 +875,17 @@ fn side_line_name(name: &str) -> Option<(&str, &str)> {
 /// anywhere else leaves the point on no side face, and the name finds nothing, as before.
 fn replaced_side_line(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
     let (stem, _) = side_line_name(name)?;
+    if !p.is_finite() {
+        return None;
+    }
     let mut found: Option<FaceHit> = None;
-    for (bi, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()) {
+    for (bi, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh() && b.body.face_count() <= MAX_PROJECTION_RECOVERY_FACES) {
         let names = naming::names(b);
-        let mesh = b.mesh();
-        let reach = (b.body.size() * 1e-3).max(1e-3);
         for (face, own) in names.faces.iter().enumerate() {
             if side_line_name(own).is_none_or(|(s, _)| s != stem) {
                 continue;
             }
-            let Some((distance, point)) = nearest_on_face(&mesh, face, p) else { continue };
-            if distance > reach {
-                continue;
-            }
+            let Some((_, point)) = on_face(b, face, p) else { continue };
             if found.is_some() {
                 return None;
             }
@@ -1089,6 +1087,13 @@ fn recover_numbered_projected_face(body: &ModelBody, name: &str, pick: Vec3) -> 
         return None;
     }
 
+    on_face(body, face, pick)
+}
+
+/// The point of face `face` nearest `pick`, when `pick` lies on that face itself: the face is
+/// isolated so a point on another face of the same surface cannot pass the trim test.
+fn on_face(body: &ModelBody, face: usize, pick: Vec3) -> Option<(usize, Vec3)> {
+    let count = body.body.face_count();
     let record = body.body.record().faces.get(face)?;
     let [[u0, u1], [v0, v1]] = record.domain;
     let surface = SurfaceEval::new(record.parameters()).ok()?;

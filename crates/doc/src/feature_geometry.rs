@@ -53,6 +53,35 @@ impl FeatureKind {
         v
     }
 
+    /// The fields of this kind that hold face points (a feature's `faces`, a hole's `position`):
+    /// the fields whose names an edit that sends them stores fresh, even when the point sent is
+    /// the stored one (#16661). A field this lists but the kind has no point in is harmless.
+    pub fn face_point_fields(&self) -> &'static [&'static str] {
+        match self {
+            FeatureKind::Shell { .. }
+            | FeatureKind::Draft { .. }
+            | FeatureKind::OffsetFace { .. }
+            | FeatureKind::DeleteFace { .. }
+            | FeatureKind::ReplaceFace { .. }
+            | FeatureKind::SurfaceOffset { .. }
+            | FeatureKind::SurfaceMatch { .. }
+            | FeatureKind::SurfaceFair { .. } => &["faces"],
+            FeatureKind::SplitFace { .. } => &["faces", "tool"],
+            FeatureKind::Split { .. } | FeatureKind::SurfaceTrim { .. } => &["tool"],
+            FeatureKind::Hole { .. } => &["position", "to"],
+            FeatureKind::Boss { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => &["position"],
+            FeatureKind::Thread { .. } => &["face", "up_to"],
+            FeatureKind::SheetConvert { .. } | FeatureKind::Lip { .. } | FeatureKind::SurfaceUntrim { .. } | FeatureKind::SurfaceRuled { .. } => {
+                &["face"]
+            }
+            FeatureKind::Emboss { .. } => &["face"],
+            FeatureKind::Revolve { .. } => &["to"],
+            FeatureKind::Extrude { .. } | FeatureKind::SurfaceExtrude { .. } => &["extent"],
+            FeatureKind::SurfaceExtend { .. } => &["up_to"],
+            _ => &[],
+        }
+    }
+
     /// The body a feature that works on one body's faces names (shell, draft, split, offset,
     /// delete and replace face, surface offset, the placed plastic features, sheet metal
     /// conversion, ruled surface, untrim, Split Body's tool face): its face points pick faces of
