@@ -16,7 +16,7 @@ use solidcore::kernel::Kernel;
 use solidcore::math::Point2;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::CPoint;
-use solidcore::surface::implicit::{AnalyticSupport, SupportKind};
+use solidcore::surface::implicit::{lies_on, AnalyticSupport, Implicit, SupportKind};
 
 /// A frame tilted off every world axis: its axis along (1, 2, 3), its x square to it.
 fn tilted() -> (Vec3, Vec3, Vec3) {
@@ -192,4 +192,54 @@ fn the_pleated_cases_cylinder_supports_round_trip() {
         assert_eq!(form.kind, "Cylinder");
         round_trips(&k, SupportKind::Cylinder, &form.surface(), 300.0);
     }
+}
+
+/// A shallow circular strip amplifies rounding when its centre is recovered from the
+/// sagitta. Recovering the radius independently then leaves its endpoints on opposite
+/// sides of the reconstructed cylinder (#16172).
+#[test]
+fn a_shallow_cylinders_endpoints_stay_on_the_derived_support() {
+    let k = Kernel::default();
+    let (x, y, z) = tilted();
+    let radius = 1000.0;
+    let start = 2.0;
+    let sweep = 0.001_f64;
+    let weight = (sweep * 0.5).cos();
+    let rows = [0.0, 12.0]
+        .into_iter()
+        .map(|height| {
+            [
+                (start, 1.0),
+                (start + sweep * 0.5, weight),
+                (start + sweep, 1.0),
+            ]
+            .into_iter()
+            .map(|(angle, w)| {
+                let p = (x * angle.cos() + y * angle.sin()) * (radius / w) + z * height;
+                CPoint::new(p.x * w, p.y * w, p.z * w, w)
+            })
+            .collect()
+        })
+        .collect();
+    let nurb = solidcore::nurbs::srf_basic::Surface::new(
+        rows,
+        1,
+        2,
+        vec![0.0, 0.0, 1.0, 1.0],
+        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    )
+    .unwrap();
+    let form = BSplineSurface::from_nurb(nurb, true);
+    let support = AnalyticSupport::derive(&k, SupportKind::Cylinder, &form).unwrap();
+    assert_eq!(support.kind(), SupportKind::Cylinder);
+    if let AnalyticSupport::Cylinder { placement, radius } = support {
+        let implicit = Implicit::Cone {
+            origin: placement.origin(),
+            axis: placement.x_axis().cross(placement.y_axis()),
+            radius,
+            tan_angle: 0.0,
+        };
+        assert!(lies_on(&form, &implicit).unwrap());
+    }
+    round_trips(&k, SupportKind::Cylinder, &form, radius);
 }

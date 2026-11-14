@@ -1199,8 +1199,29 @@ impl AnalyticSupport {
     fn on_form(&self, k: &Kernel, form: &BSplineSurface) -> Result<Surface> {
         let form = form.copy();
         let mut surface = recognise(k, self.kind(), &form)?.ok_or_else(not_form)?;
+        // Recover the generator's height interval from its actual endpoints. The
+        // recogniser supplies the swap and inside-out conventions, but its fitted
+        // height datum and span can retain amplified circle-centre rounding.
+        let axial_anchors = match (self, surface.kind()) {
+            (Self::Cylinder { .. } | Self::Cone { .. }, SurfaceKind::Cone(c)) => {
+                let d = form.natural_uv_domain();
+                let end = if c.rev.swap_uv {
+                    Vec2::new(d.u_max(), d.v_min())
+                } else {
+                    Vec2::new(d.u_min(), d.v_max())
+                };
+                let anchor = |uv| -> Result<(Vec3, f64)> {
+                    Ok((
+                        form.evaluate_point(uv)?,
+                        surface.convert_uv_from_nurbs_to_step(k, uv)?.y,
+                    ))
+                };
+                Some([anchor(d.min())?, anchor(end)?])
+            }
+            _ => None,
+        };
         // the recognised surface gives its conventions only (its frame turn, sweep, generator
-        // range and swap), as in `derive`: the kind and the numbers are this support's. The
+        // direction and swap), as in `derive`: the kind and the numbers are this support's. The
         // numbers recognition recomputed are not compared with the support's, because it
         // recomputes them from the control points and so reproduces a support's own numbers
         // only to rounding (#2554), and far from the world origin it reads a cylinder as a cone
@@ -1211,7 +1232,7 @@ impl AnalyticSupport {
         // and the sweep converter carry, so that `of` reads the support back unchanged
         match (surface.kind_mut(), *self) {
             (SurfaceKind::Cone(c), Self::Cylinder { placement, radius }) => {
-                on_axis_from(&mut c.rev, placement)?;
+                on_axis_from(&mut c.rev, placement, axial_anchors.ok_or_else(not_form)?)?;
                 c.base_radius = radius;
                 c.semi_angle_deg = 0.0;
                 c.cylinder = true;
@@ -1225,7 +1246,7 @@ impl AnalyticSupport {
                     semi_angle_deg,
                 },
             ) => {
-                on_axis_from(&mut c.rev, placement)?;
+                on_axis_from(&mut c.rev, placement, axial_anchors.ok_or_else(not_form)?)?;
                 c.base_radius = base_radius;
                 c.semi_angle_deg = semi_angle_deg;
                 c.rev.base = form.copy();
@@ -1262,25 +1283,41 @@ fn not_form() -> SolidError {
     )
 }
 
-/// A cylinder's or cone's recognised parametrisation carried by the support's own
-/// `placement`: its heights are measured along the axis from the placement's origin, so the
-/// recognised heights move by how far along the axis the recognised origin lies from it.
-/// The record puts a frame's origin anywhere on the axis (a hole's at the solid's floor, its
-/// form from the face's own bottom); the point at each parameter is then unchanged, which
-/// [`evaluates_as`] proves. A placement off the axis or turned about it is not the form's
-/// parametrisation, and is refused there.
-///
-/// The generator line's parameters are the heights too, so it moves with them: its STEP
-/// interval stays the surface's v interval, as the kernel's check requires
-/// (`SmSurfOfRevolution::Test` #2, `SmCone::Test` #1), and its points stay where they are.
+/// Carry the recognised generator's conventions onto the support's own axis. Its
+/// endpoint heights are projected from the form, avoiding a fitted circle centre's
+/// axial rounding in either the height datum or span. The original converted heights
+/// determine their order for inside-out surfaces. The generator line is reparameterised
+/// with the same affine map, keeping its NURBS points and matching the surface interval.
+/// A placement off the axis or turned about it is still refused by `evaluates_as`.
 fn on_axis_from(
     rev: &mut crate::surface::surf_of_revolution::SurfOfRevolution,
     placement: Axis2Placement,
+    anchors: [(Vec3, f64); 2],
 ) -> Result<()> {
     use crate::curve::curve::CurveKind;
-    let h = (rev.position.origin() - placement.origin()).dot(placement.z_axis());
+    use crate::geom::extent1d::Extent1d;
+    let [(p0, h0), (p1, h1)] = anchors;
+    let project = |p: Vec3| (p - placement.origin()).dot(placement.z_axis());
+    let (lo, hi) = if h0 < h1 {
+        (project(p0), project(p1))
+    } else {
+        (project(p1), project(p0))
+    };
     let d = rev.anal_uv_domain;
-    rev.anal_uv_domain = Extent2d::from_bounds(d.u_min(), d.v_min() + h, d.u_max(), d.v_max() + h);
+    let old_length = d.v_max() - d.v_min();
+    let new_length = hi - lo;
+    if old_length <= 0.0 || new_length <= 0.0 {
+        return Err(not_form());
+    }
+    let scale = new_length / old_length;
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(not_form());
+    }
+    let offset = lo - scale * d.v_min();
+    if !offset.is_finite() {
+        return Err(not_form());
+    }
+    rev.anal_uv_domain = Extent2d::from_bounds(d.u_min(), lo, d.u_max(), hi);
     rev.position = placement;
     match rev
         .gen_curve
@@ -1288,7 +1325,13 @@ fn on_axis_from(
         .map(crate::curve::curve::Curve::kind_mut)
     {
         Some(CurveKind::Line(line)) => {
-            line.shift_step_parameter(h);
+            let line_scale = line.line_scale() / scale;
+            if !line_scale.is_finite() || line_scale == 0.0 {
+                return Err(not_form());
+            }
+            line.set_line_scale(line_scale);
+            line.shift_step_parameter(offset);
+            line.set_analytic_domain(Extent1d::from_min_max(lo, hi));
             Ok(())
         }
         _ => Err(SolidError::invalid_input(
@@ -1813,19 +1856,20 @@ impl AnalyticSupport {
 
     /// A cylinder's or cone's numbers read straight off its NURBS form's control structure
     /// (#15010): the form's circles are its rows across the generator, each a rational arc
-    /// whose first quadratic segment gives its centre from the endpoint tangents and chord,
-    /// keeping its centre and radius consistent at the endpoint. The axis follows a cylinder's
-    /// columns (its generators), or a cone's circular row-plane normal, through the first
-    /// row's centre.
-    /// The origin is the point of it nearest the recogniser's; the x axis is the recogniser's
-    /// made square to it; the cone's angle is the radii's change along it. No fitting and no
-    /// long chains: the numbers are the stored control points' to their rounding, where the
+    /// whose endpoint tangent and chord recover its centre and radius together. A cylinder
+    /// keeps that pair from the first row; averaging independently recovered radii breaks
+    /// their correlated rounding on shallow arcs. The axis is a cylinder's columns' direction
+    /// (its generators) through the first row's centre, or a cone's circular-row normal. The
+    /// origin is the point of the axis nearest the recogniser's, the x axis the recogniser's
+    /// made square to it, and the cone's angle the radii's change along it. No fitting and
+    /// no long chains: the numbers are the stored control points' to their rounding. The
     /// recognisers' chained computations tilt the axis by about 1e-13 (an ulp of the origin's
-    /// size), which a form far from the world origin turns into a parametrisation `build`
-    /// refuses. The recogniser's frame turn, sweep, generator range and swap are kept: they are
+    /// size), which a form
+    /// far from the world origin turns into a parametrisation `build` refuses. The
+    /// recogniser's frame turn, sweep, generator direction and swap are kept: they are
     /// conventions, not numbers. A row collapsed to one point (a cone's apex) is the axis's
     /// point of radius 0. `None` where the form gives no such rows (fewer than two circles,
-    /// or a degenerate first quadratic segment).
+    /// or a degenerate tangent and chord).
     fn revolved_from_rows(
         recognised: Self,
         cylinder: bool,
@@ -1951,9 +1995,13 @@ impl AnalyticSupport {
             return None;
         }
         if cylinder {
-            #[allow(clippy::cast_precision_loss)] // a few rows
-            let radius = circles.iter().map(|(_, r, _)| r).sum::<f64>() / circles.len() as f64;
-            return Some(Self::Cylinder { placement, radius });
+            // Keep the first row's centre and radius together. On a shallow arc their
+            // rounding is correlated: averaging radii from other rows while retaining c0
+            // moves the cylinder off its own endpoints, even with joint circle recovery.
+            return Some(Self::Cylinder {
+                placement,
+                radius: r0,
+            });
         }
         // the radius changes by tan(angle) per unit along the axis
         let tan = (r1 - r0) / along.dot(axis);
