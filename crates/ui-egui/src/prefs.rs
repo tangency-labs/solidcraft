@@ -1837,6 +1837,12 @@ preference_settings! {
     /// User ceilings, not automatic increases to a package's approved execution budget.
     plugin_max_fuel: u64 = solidcraft_engine::plugin::HostLimits::default().max_fuel, PAGE_PLUGINS;
     plugin_max_memory_mib: usize = solidcraft_engine::plugin::HostLimits::default().max_memory_mib, PAGE_PLUGINS;
+    /// Keep a parametric snapshot with each save. Off: the save records the revision and stores no model.
+    revision_history: bool = false, PAGE_GENERAL;
+    /// Megabytes of snapshot payload kept. 1–128; the default and the ceiling are 128.
+    revision_history_mb: u32 = 128, PAGE_GENERAL, accept(1..=128);
+    /// Newest revisions that keep a snapshot. 1–64; the default is 16.
+    revision_history_versions: u32 = 16, PAGE_GENERAL, accept(1..=64);
 }
 
 /// What a middle-button double-click in the view does.
@@ -2393,6 +2399,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
         0 => {
             app.autosave_minutes = 5.0;
             set_autosave(app);
+            apply_revision_history(app);
         }
         PAGE_APPEARANCE => {
             app.prefs_window.follow.launch = None;
@@ -2483,6 +2490,7 @@ fn sync_window_theme(app: &mut SolveApp, ctx: &egui::Context, follows_system: bo
 }
 
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
+    apply_revision_history(app);
     sync_surface_analysis(app);
     crate::plugins::sync_policy(app);
     apply_network(&app.preferences);
@@ -2599,6 +2607,18 @@ pub(crate) fn apply_new_design_units(app: &mut SolveApp, units: &str) {
             }
         }
     }
+}
+
+/// Copy the revision-history preference onto the session. Off by default. The size cap is
+/// 1–128 MB (default 128) and the revision cap is 1–64 (default 16).
+pub fn apply_revision_history(app: &mut SolveApp) {
+    let mb = app.preferences.revision_history_mb.clamp(1, 128);
+    let versions = app.preferences.revision_history_versions.clamp(1, 64);
+    app.session.revision_limits = solidcraft_engine::doc::document_history::RevisionHistoryOptions {
+        enabled: app.preferences.revision_history,
+        max_bytes: (mb as usize) << 20,
+        max_versions: versions as usize,
+    };
 }
 
 /// The autosave interval follows `app.autosave_minutes` (0: off).
@@ -4281,6 +4301,13 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     if !accepted::max_sketch_points(&p) {
         p.max_sketch_points = Prefs::default().max_sketch_points;
     }
+    // A hand-edited save history size or count out of range reads as the default.
+    if !accepted::revision_history_mb(&p) {
+        p.revision_history_mb = Prefs::default().revision_history_mb;
+    }
+    if !accepted::revision_history_versions(&p) {
+        p.revision_history_versions = Prefs::default().revision_history_versions;
+    }
     p.disabled_plugins.retain(|id| crate::plugins::valid_id(id));
     if p.disabled_plugins.len() > crate::plugins::MAX_DISABLED {
         p.disabled_plugins = p.disabled_plugins.into_iter().take(crate::plugins::MAX_DISABLED).collect();
@@ -4520,6 +4547,9 @@ fn prepare_preferences(
         use solidcraft_engine::sketch::limits::{CEILING_POINTS, DEFAULT_POINTS};
         return Err(format!("`max_sketch_points` must be {DEFAULT_POINTS}…{CEILING_POINTS}"));
     }
+    if !accepted::revision_history_mb(&new) || !accepted::revision_history_versions(&new) {
+        return Err("`revision_history_mb` must be 1…128 and `revision_history_versions` 1…64".into());
+    }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());
     }
@@ -4564,6 +4594,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     crate::render_workspace::apply_memory_policy(app);
     apply_file_limits(&app.preferences);
     apply_sketch_limit(&app.preferences);
+    apply_revision_history(app);
     if units_changed {
         default_units_changed(app);
     }
@@ -6875,6 +6906,9 @@ mod tests {
             ("signing_key", json!("0123456789ABCDEF0123456789ABCDEF01234567"), PAGE_SECURITY),
             ("trusted_signing_keys", json!("0123456789ABCDEF0123456789ABCDEF01234567"), PAGE_SECURITY),
             ("verify_opened_designs", json!(true), PAGE_SECURITY),
+            ("revision_history", json!(true), PAGE_GENERAL),
+            ("revision_history_mb", json!(32), PAGE_GENERAL),
+            ("revision_history_versions", json!(4), PAGE_GENERAL),
         ];
         let defaults = serde_json::to_value(Prefs::default()).unwrap();
         for (field, value, owner) in fields {
@@ -9497,6 +9531,33 @@ mod tests {
         h.call("ui.prefs", json!({"button": "defaults"}));
         assert_eq!(h.app.preferences.max_sketch_points, DEFAULT_POINTS);
         h.call("ui.prefs", json!({"button": "cancel"}));
+    }
+
+    /// Keeping a snapshot with each save is off by default; turning it on, and its size and
+    /// revision caps, reach the session, an out-of-range cap is refused, and a hand-edited one
+    /// reads back as the default.
+    #[test]
+    fn save_history_preferences_reach_the_session_and_refuse_out_of_range() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        assert!(!h.app.preferences.revision_history);
+        assert!(!h.app.session.revision_limits.enabled);
+        let out = h.call("ui.prefs", json!({"revision_history": true, "revision_history_mb": 32, "revision_history_versions": 4}));
+        assert!(out["error"].is_null(), "{out}");
+        let limits = h.app.session.revision_limits;
+        assert!(limits.enabled);
+        assert_eq!((limits.max_bytes, limits.max_versions), (32 << 20, 4));
+        for bad in [
+            json!({"revision_history_mb": 0}),
+            json!({"revision_history_mb": 129}),
+            json!({"revision_history_versions": 0}),
+            json!({"revision_history_versions": 65}),
+        ] {
+            assert!(h.call("ui.prefs", bad.clone())["error"].is_string(), "{bad}");
+        }
+        assert_eq!(h.app.session.revision_limits.max_versions, 4, "a refused value changes nothing");
+        let read = super::lenient(&json!({"revision_history_mb": 4096, "revision_history_versions": 1000}));
+        assert_eq!((read.revision_history_mb, read.revision_history_versions), (128, 16));
     }
 
     #[test]

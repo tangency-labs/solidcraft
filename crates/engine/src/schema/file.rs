@@ -2,7 +2,8 @@
 //! export command of each format (`file.export_step`, `file.export_stl`, `file.export_3mf`,
 //! `file.export_obj`, `file.export_urdf`), which take what `file.export` takes for that format,
 //! without `format`, and `doc.open` and the recovery commands (`doc.recovery_list`,
-//! `doc.recover`, `doc.recovery_discard`), and local import-cache maintenance.
+//! `doc.recover`, `doc.recovery_discard`), the save history (`doc.revisions`, `doc.restore`), and local
+//! import-cache maintenance.
 
 use std::borrow::Cow;
 use std::path::PathBuf;
@@ -920,6 +921,83 @@ pub struct ImportCacheClearParams {}
 pub struct ImportCacheClearResult {
     /// Number of cached imports removed. Open designs and stand-up answers are retained.
     pub removed: usize,
+}
+
+/// List the open design's save history: its save count, the format it was saved in, and each
+/// recorded open or save, oldest first, with whether that revision kept a restorable snapshot.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RevisionsParams {}
+
+/// One recorded open or save in `doc.revisions`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RevisionEntry {
+    /// The save count this entry records.
+    pub revision: u64,
+    /// The `solidcraft/N` format number the file was written in.
+    pub format_version: u32,
+    /// `saved` for a save, `opened` for a file that had no history yet; a later build's own
+    /// short token is kept as it wrote it.
+    pub action: String,
+    /// Whether this revision kept a snapshot that `doc.restore` can bring back.
+    pub snapshot: bool,
+}
+
+/// What `doc.revisions` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RevisionsResult {
+    /// The design's save count: the number of the last save, 0 before the first.
+    pub revision: u64,
+    /// The `solidcraft/N` format number the design's file was last saved in.
+    pub format_version: u32,
+    /// The revision open read-only (`doc.restore` with mode `readonly`), if any.
+    pub readonly: Option<u64>,
+    /// Every recorded open or save, oldest first.
+    pub entries: Vec<RevisionEntry>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// How `doc.restore` brings a revision back.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RestoreMode {
+    /// Replace the working model with the revision. The save count stays, so the next save is
+    /// the next revision. Undo history is cleared.
+    Working,
+    /// Open the revision read-only: edits and Save are refused until Save As or another restore.
+    Readonly,
+}
+
+/// Bring back a revision of the open design that kept a snapshot (`doc.revisions`). A revision
+/// with no snapshot (pruned, or saved before snapshots were turned on) is refused.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RestoreParams {
+    /// The save count of the revision to restore, from `doc.revisions`.
+    pub revision: u64,
+    /// Default: working.
+    #[serde(default)]
+    pub mode: Option<RestoreMode>,
+}
+
+/// What `doc.restore` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RestoreResult {
+    /// The revision restored.
+    pub revision: u64,
+    /// `working` or `readonly`, as asked.
+    pub mode: String,
+    /// The restored design's name.
+    pub name: String,
+    /// How many features the restored design has.
+    pub features: usize,
+    /// Whether the revision is open read-only.
+    pub readonly: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 #[cfg(test)]

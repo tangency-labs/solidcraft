@@ -685,6 +685,7 @@ mod tests {
             include_str!("sketch_palette.rs"),
             include_str!("design_properties.rs"),
             include_str!("home.rs"),
+            include_str!("revisions_panel.rs"),
         ] {
             for call in [".tr(\"", "i18n::tr(\"", "i18n::format(\"", "ui_text::tr(\"", "ui_text::format(\""] {
                 for tail in source.split(call).skip(1) {

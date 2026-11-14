@@ -494,10 +494,12 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("file.insert_mesh", &format!("{}…", app.tr_label("Insert Mesh")), "", "import", shown));
     rows.push(row("pointcloud.insert", &format!("{}…", app.tr_label("Insert Point Cloud")), "", "import", shown));
     rows.push(row("component.insert_design", &format!("{}…", app.tr_label("Insert Design")), "", "component", shown));
-    rows.push(row("save", app.tr("ui.save"), "Ctrl+S", "save", shown));
+    // A revision open read-only refuses Save; Save As still writes a copy.
+    rows.push(row("save", app.tr("ui.save"), "Ctrl+S", "save", shown && app.session.revision_view.is_none()));
     // Save As shows the shortcut of the command it runs, from the app's own registry.
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
     rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown));
+    rows.push(row("doc.revisions", app.tr("home.revisions"), "", "restore", shown));
     rows.push(row("save_json", app.tr_label("Save As JSON…"), "", "save", true));
     rows.push(row("file.verify", app.tr("cmd.file.verify"), "", "shield", shown && app.session.path.is_some()));
     // The browser build: a copy as a downloaded file, whatever Save does.
@@ -563,6 +565,7 @@ fn run_file_row(app: &mut SolveApp, id: &str) {
         "file.export_obj" => FileAction::Command("file.export_obj").run(app),
         "file.export_urdf" => FileAction::Command("file.export_urdf").run(app),
         "document.metadata" => FileAction::Command("document.metadata").run(app),
+        "doc.revisions" => FileAction::Command("doc.revisions").run(app),
         "pointcloud.insert" | "file.send_to_slicer" => app.start(id),
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),
@@ -2997,7 +3000,10 @@ mod header_report_tests {
         let saved = h.app.session.path.clone().unwrap();
         let bytes = std::fs::read(&saved).unwrap();
         assert!(!solidcraft_engine::io::is_design_container(&bytes));
-        assert_eq!(solidcraft_engine::io::read_design(&bytes).unwrap(), *h.app.session.doc);
+        // The file is the open design plus the save history the session keeps.
+        let mut file = solidcraft_engine::io::read_design(&bytes).unwrap();
+        assert_eq!(std::mem::take(&mut file.document_history), *h.app.session.document_history);
+        assert_eq!(file, *h.app.session.doc);
         h.app.session.doc_mut().name = "Exported copy".into();
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:folder"}})).unwrap();
@@ -4434,7 +4440,10 @@ mod app_bar_tests {
         h.step(&json!({"click":{"handle":"titlebar:save"}})).unwrap();
         wait_for_save(&mut h);
         assert_eq!(h.app.session.path.as_deref(), Some(path.as_str()));
-        let saved = solidcraft_engine::io::read_design(&std::fs::read(path).unwrap()).unwrap();
+        let mut saved = solidcraft_engine::io::read_design(&std::fs::read(path).unwrap()).unwrap();
+        // The file is the open design plus the save history the session keeps: two saves.
+        assert_eq!(std::mem::take(&mut saved.document_history), *h.app.session.document_history);
+        assert_eq!(h.app.session.document_history.revision, 2);
         assert_eq!(saved, *h.app.session.doc);
     }
 }

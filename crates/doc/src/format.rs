@@ -1101,32 +1101,70 @@ const MAX_REAL: f64 = 1e9;
 /// alone: it is other tools' data, kept as it is and never read as a number (#1015); parsing
 /// already bounds its nesting. Engineering SI constants have their own bounded admission
 /// (e.g. E in Pa): only the exact root user-material card field bypasses the coordinate bound.
+/// A revision snapshot (`document_history.entries[].snapshot`) nests a document, so its root is
+/// checked by the same rules: its `metadata` is skipped and its user-material cards are admitted
+/// the same way.
 fn check_design_numbers(v: &Value) -> Result<()> {
-    let Some(root) = v.as_object() else { return check_numbers(v, "design", 0) };
+    check_design_root(v, 0)
+}
+
+/// [`check_design_numbers`] for a design's root object at `depth`: the file itself (0), or a
+/// revision snapshot inside its `document_history`.
+fn check_design_root(v: &Value, depth: usize) -> Result<()> {
+    let Some(root) = v.as_object() else { return check_numbers(v, "design", depth) };
     for (key, value) in root {
-        if key == "metadata" {
+        match key.as_str() {
+            "metadata" => {}
+            "user_materials" => check_user_material_numbers(value, depth + 1)?,
+            "document_history" if depth == 0 => check_history_numbers(value, depth + 1)?,
+            _ => check_numbers(value, "design", depth + 1)?,
+        }
+    }
+    Ok(())
+}
+
+fn check_user_material_numbers(value: &Value, depth: usize) -> Result<()> {
+    let Some(materials) = value.as_array() else { return check_numbers(value, "design", depth) };
+    if materials.len() > crate::MAX_USER_MATERIALS {
+        return Err(DocError::Invalid("document exceeds 1000 user materials".into()));
+    }
+    for material in materials {
+        let Some(fields) = material.as_object() else {
+            check_numbers(material, "design", depth + 1)?;
             continue;
+        };
+        for (field, data) in fields {
+            // SI engineering constants have separate typed bounds. No other field,
+            // including nested fields with this name, bypasses coordinate limits.
+            if field == "physical_card" && !data.is_null() {
+                crate::physical_material::validate_card(data)?;
+            } else {
+                check_numbers(data, "design", depth + 2)?;
+            }
         }
-        if key != "user_materials" {
-            check_numbers(value, "design", 1)?;
+    }
+    Ok(())
+}
+
+/// A design's `document_history`: each entry's `snapshot` is a design root; everything else is
+/// checked as plain numbers.
+fn check_history_numbers(value: &Value, depth: usize) -> Result<()> {
+    let Some(history) = value.as_object() else { return check_numbers(value, "design", depth) };
+    for (key, value) in history {
+        let Some(entries) = value.as_array().filter(|_| key == "entries") else {
+            check_numbers(value, "design", depth + 1)?;
             continue;
-        }
-        let Some(materials) = value.as_array() else { return check_numbers(value, "design", 1) };
-        if materials.len() > crate::MAX_USER_MATERIALS {
-            return Err(DocError::Invalid("document exceeds 1000 user materials".into()));
-        }
-        for material in materials {
-            let Some(fields) = material.as_object() else {
-                check_numbers(material, "design", 2)?;
+        };
+        for entry in entries {
+            let Some(fields) = entry.as_object() else {
+                check_numbers(entry, "design", depth + 2)?;
                 continue;
             };
             for (field, data) in fields {
-                // SI engineering constants have separate typed bounds. No other field,
-                // including nested fields with this name, bypasses coordinate limits.
-                if field == "physical_card" && !data.is_null() {
-                    crate::physical_material::validate_card(data)?;
+                if field == "snapshot" {
+                    check_design_root(data, depth + 3)?;
                 } else {
-                    check_numbers(data, "design", 3)?;
+                    check_numbers(data, "design", depth + 3)?;
                 }
             }
         }
