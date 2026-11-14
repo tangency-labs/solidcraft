@@ -1760,17 +1760,15 @@ impl OffsetGeometryCreation {
             .face_surface(face)?
             .ok_or(dangling("face without surface"))?;
 
-        // `Kernel::fixes.offset_missing_surface_fails` (WR-464, #1072; the fork's 758829c): an
+        // WR-464 (#1072; the fork's 758829c): an
         // offset that shrinks the surface onto its spine or past it is no surface, as the
         // surface says, asked before the offset is made (an exact offset that refuses to pass
         // its centre, a ball patch's, is never asked for); any other miss has failed.
-        if k.fixes.offset_missing_surface_fails
-            && brep.surface(sur)?.offset_collapses(
-                k,
-                sign * self.offset_distance,
-                self.this_approx_tol_3d / 10.0,
-            )?
-        {
+        if brep.surface(sur)?.offset_collapses(
+            k,
+            sign * self.offset_distance,
+            self.this_approx_tol_3d / 10.0,
+        )? {
             return Ok((None, self_intersections));
         }
 
@@ -1783,10 +1781,7 @@ impl OffsetGeometryCreation {
             self.this_approx_tol_3d / 10.0,
         )?
         else {
-            if k.fixes.offset_missing_surface_fails {
-                return Err(sm_err(OP_FACEUSE));
-            }
-            return Ok((None, self_intersections));
+            return Err(sm_err(OP_FACEUSE));
         };
         let offset_h = brep.insert_surface(offset)?;
         let mut new_surface: Option<O> = Some(offset_h);

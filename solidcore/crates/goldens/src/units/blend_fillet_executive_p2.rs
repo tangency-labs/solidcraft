@@ -2371,17 +2371,17 @@ mod tests {
         let solver = Handle::Solver(0);
         let side = Handle::Edgeuse(EdgeuseId::from_index(0));
         let expected = missing_error();
-        // The additive API keeps the existing constructor's pinned default.
-        assert!(TemporaryRadiusChange::new(&mut access, solver, 0, side).is_ok());
+        let error = TemporaryRadiusChange::new(&mut access, solver, 0, side).unwrap_err();
+        assert_eq!(error, expected);
         let mut default_body_called = false;
-        // Revert can fail for this intentionally absent solver; the body still ran.
-        let _ = with_temporary_radius_change(&mut access, solver, 0, side, |_| {
+        let error = with_temporary_radius_change(&mut access, solver, 0, side, |_| {
             default_body_called = true;
             Ok(())
-        });
-        assert!(default_body_called);
-        let mut fixes = solidcore::kernel::UpstreamFixes::default();
-        fixes.temporary_radius_setup_errors = true;
+        })
+        .unwrap_err();
+        assert_eq!(error, expected);
+        assert!(!default_body_called);
+        let fixes = solidcore::kernel::UpstreamFixes::default();
         let error =
             TemporaryRadiusChange::new_with_fixes(&mut access, solver, 0, side, &fixes).unwrap_err();
         assert_eq!(error, expected);

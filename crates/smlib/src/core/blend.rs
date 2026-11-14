@@ -61,8 +61,7 @@ use super::{Body, answer};
 use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result, Turn};
 
 /// Why solidcore refuses the 3x2 mixed-convexity corner whose rails cross
-/// (`fixes.fillet_refuse_mixed_corner_crossing_rails`, [`MIXED_CORNER_RAILS_CROSS`]): it builds no
-/// corner for it yet.
+/// ([`MIXED_CORNER_RAILS_CROSS`]): it builds no corner for it yet.
 pub(crate) const MIXED_CORNER_UNSUPPORTED: &str = "a fillet corner where a convex and a concave round leave the vertex along one \
 tangent, so that their contact lines cross before the corner (https://github.com/tangency-labs/solidcore/issues/2256)";
 use solidcore::topology::brep::p3::brep_copy;
