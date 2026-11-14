@@ -764,8 +764,9 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             return;
         }
         let count = commands.len();
-        // Keep registry order within each real registry group; no command is lost because it
-        // has no ribbon placement. Such commands use their registry id's namespace.
+        // Topics stay in the order the registry first mentions them. Within a topic the
+        // rows follow the name on the page, then the command id (#11217). A command with
+        // no ribbon tab uses its id's namespace and is not dropped.
         let mut groups: Vec<(String, Vec<_>)> = Vec::new();
         for (c, keys, label, group) in commands {
             if let Some((_, rows)) = groups.iter_mut().find(|(name, _)| name == &group) {
@@ -773,6 +774,9 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             } else {
                 groups.push((group, vec![(c, keys, label)]));
             }
+        }
+        for (_, rows) in &mut groups {
+            rows.sort_by(|a, b| a.2.to_lowercase().cmp(&b.2.to_lowercase()).then_with(|| a.0.id.cmp(b.0.id)));
         }
         let shortcut_title = app.tr("prefs.shortcuts").to_string();
         let mut paint = |ui: &mut egui::Ui| {
@@ -1650,7 +1654,10 @@ mod tests {
             previous = action;
         }
         let commands = command_specs();
-        let first = commands.first().unwrap().id;
+        let first_group = shortcut_group(commands.first().unwrap());
+        let mut in_group: Vec<_> = commands.iter().copied().filter(|c| shortcut_group(c) == first_group).collect();
+        in_group.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()).then_with(|| a.id.cmp(b.id)));
+        let first = in_group.first().unwrap().id;
         let last = commands.last().unwrap().id;
         let handle = |id| format!("keymap:capture:{id}");
         assert!(crate::scenario::handle_at(&handle(first)).is_some());
@@ -1660,6 +1667,21 @@ mod tests {
         h.frames(3);
         assert!(crate::scenario::handle_at(&handle(last)).is_some(), "filtering brings the last command into view");
         assert!(crate::scenario::handle_at(&handle(first)).is_none());
+    }
+
+    /// #11217: within a topic, commands are listed by the name on the row. 2-Point Circle
+    /// is registered after 2-Point Rectangle and is shown above it.
+    #[test]
+    fn shortcut_groups_list_commands_by_name() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1400, "height": 900}));
+        h.app.keymap.filter = "2-Point".into();
+        h.call("ui.prefs", json!({"open": "Keyboard Shortcuts"}));
+        h.frames(3);
+        let circle = crate::scenario::rect_of("keymap:capture:sketch.circle.two_point").expect("2-Point Circle is on the page");
+        let rectangle = crate::scenario::rect_of("keymap:capture:sketch.rectangle.two_point").expect("2-Point Rectangle is on the page");
+        assert!(circle.top() < rectangle.top(), "2-Point Circle is listed before 2-Point Rectangle: {circle:?} {rectangle:?}");
     }
 
     #[test]
