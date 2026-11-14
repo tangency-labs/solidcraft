@@ -114,22 +114,35 @@ pub struct Export3mfParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ExportUrdfParams {
-    /// The `.urdf` file to write; the meshes go in its folder.
+    /// The `.urdf` file to write; the meshes go in its folder unless `mesh_prefix` names another.
     pub path: String,
-    /// Put before each mesh file name in the URDF, such as `package://robot/meshes/`. Default: none.
+    /// Put before each mesh file name in the URDF, such as `meshes/` or
+    /// `package://robot/meshes/`; a folder in it is where the meshes are written, made if missing.
+    /// Default: none.
     #[serde(default)]
     pub mesh_prefix: Option<String>,
-    /// Each joint's effort limit, a positive number. Default: 1000.
+    /// Write the meshes where `mesh_prefix` points, making its folder if missing; false keeps
+    /// every mesh next to the `.urdf` whatever the prefix says. Default: false.
+    #[serde(default)]
+    pub place_meshes: Option<bool>,
+    /// The effort limit of joints with none saved (`joint.dynamics`), a positive number. Default: 1000.
     #[serde(default)]
     pub effort: Option<f64>,
-    /// Each joint's velocity limit, a positive number. Default: 10.
+    /// The velocity limit of joints with none saved (`joint.dynamics`), a positive number. Default: 10.
     #[serde(default)]
     pub velocity: Option<f64>,
+    /// Write motion links as `<mimic>`. Default: false (each joint free).
+    #[serde(default)]
+    pub mimic: Option<bool>,
+    /// What a body with no collision shape of its own (`body.collision`) becomes: `mesh` or
+    /// `convex_hull`. Default: mesh.
+    #[serde(default)]
+    pub collision: Option<String>,
 }
 
 /// Export bodies, or the whole design, to a file. `format` names the format; without it the
 /// path's extension does. STL, OBJ and 3MF take `quality` (and 3MF `objects`); URDF takes
-/// `mesh_prefix`, `effort` and `velocity` and exports the whole assembly; design JSON the
+/// `mesh_prefix`, `effort`, `velocity`, `mimic`, `place_meshes` and `collision` and exports the whole assembly; design JSON the
 /// complete document.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = export_required)]
@@ -168,6 +181,17 @@ pub struct ExportParams {
     /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// URDF only: write motion links as `<mimic>`. Default: false, each joint free.
+    #[serde(default)]
+    pub mimic: Option<bool>,
+    /// URDF only: write the meshes where `mesh_prefix` points, making the folder. Default: false,
+    /// next to the `.urdf` whatever the prefix says.
+    #[serde(default)]
+    pub place_meshes: Option<bool>,
+    /// URDF only: what a body with no collision shape of its own becomes: `mesh` or
+    /// `convex_hull`. Default: mesh.
+    #[serde(default)]
+    pub collision: Option<String>,
 }
 
 fn export_required(schema: &mut Schema) {
@@ -217,6 +241,9 @@ impl<'de> Deserialize<'de> for ExportParams {
             effort: None,
             velocity: None,
             lay_on_print_faces: None,
+            mimic: None,
+            place_meshes: None,
+            collision: None,
         };
         // The handler reads `path` first and refuses anything but a name it can write to; the
         // other keys are read only once it has one, and the format is known.
@@ -246,9 +273,24 @@ impl<'de> Deserialize<'de> for ExportParams {
             };
             out.effort = positive("effort")?;
             out.velocity = positive("velocity")?;
+            out.mimic = match m.get("mimic") {
+                None | Some(Value::Null) => None,
+                Some(Value::Bool(b)) => Some(*b),
+                Some(_) => return Err(refuse("`mimic` must be true or false")),
+            };
+            out.place_meshes = match m.get("place_meshes") {
+                None | Some(Value::Null) => None,
+                Some(Value::Bool(b)) => Some(*b),
+                Some(_) => return Err(refuse("`place_meshes` must be true or false")),
+            };
+            out.collision = match m.get("collision") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(c)) if c == "mesh" || c == "convex_hull" => Some(c.clone()),
+                Some(_) => return Err(refuse("`collision` must be mesh or convex_hull")),
+            };
             return Ok(out);
         }
-        // `mesh_prefix`, `effort` and `velocity` are not read for the other formats.
+        // The URDF keys are not read for the other formats.
         out.quality = match m.get("quality") {
             None | Some(Value::Null) => None,
             Some(v) => Some(match v.as_str().and_then(solidcraft_io::MeshQuality::from_name) {

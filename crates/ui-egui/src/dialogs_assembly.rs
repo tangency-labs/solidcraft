@@ -89,6 +89,7 @@ const MOVES: &[&str] = &[
     "joint.drive",
     "joint.edit",
     "joint.limits",
+    "joint.dynamics",
     "joint.rigid_group",
     "joint.gear",
     "joint.rack_pinion",
@@ -110,6 +111,8 @@ pub enum Asm {
     },
     Joint(Box<JointForm>),
     JointOrigin {
+        /// Robot exports write it as a frame of its own.
+        frame: bool,
         name: String,
         hover: Hover,
     },
@@ -215,6 +218,9 @@ pub struct JointForm {
     pub searched: Option<Searched>,
     /// Edit Joint Limits: open the Limits section when the dialog first draws.
     pub show_limits: bool,
+    /// Per joint value: effort, velocity, damping, friction, as typed (empty: not set). Shown
+    /// when editing: a joint being created has no id to set them on yet.
+    pub dynamics: Vec<[String; 4]>,
     pub animate: bool,
     /// Animation phase, 0…1.
     pub phase: f64,
@@ -239,6 +245,7 @@ impl JointForm {
             found_note: None,
             searched: None,
             show_limits: false,
+            dynamics: Vec::new(),
             animate: false,
             phase: 0.0,
             hover: None,
@@ -262,6 +269,7 @@ impl JointForm {
             });
         }
         self.limits.truncate(n);
+        self.dynamics.resize_with(n, Default::default);
     }
 }
 
@@ -305,7 +313,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             Asm::Joint(Box::new(JointForm::new(true, &app.session.doc))),
             vec![SelInput::new("Components", BODIES, true), SelInput::new("Position", SNAPS, false)],
         ),
-        "joint.origin" => (Asm::JointOrigin { name: String::new(), hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
+        "joint.origin" => (Asm::JointOrigin { name: String::new(), frame: false, hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
         "joint.rigid_group" => (Asm::RigidGroup, vec![SelInput::new("Components", BODIES, true)]),
         "joint.drive" => {
             let joint = picked_joint(app, true);
@@ -578,6 +586,12 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
         if let Some(Some((lo, hi))) = j.limits.get(i) {
             let fmt = |v: f64| if j.kind.is_angle(i) { num(v.to_degrees(), "deg") } else { crate::length_input::model(&app.session.doc, v) };
             *l = (true, fmt(*lo), fmt(*hi));
+        }
+    }
+    for (i, row) in f.dynamics.iter_mut().enumerate() {
+        if let Some(Some(d)) = j.dynamics.get(i) {
+            let fmt = |v: Option<f64>| v.map(|x| x.to_string()).unwrap_or_default();
+            *row = [fmt(d.effort), fmt(d.velocity), fmt(d.damping), fmt(d.friction)];
         }
     }
     Some(Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), inputs))
@@ -1318,6 +1332,19 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                         find_limits_row(app, ui, f, id, inputs);
                     }
                 });
+                if f.editing.is_some() {
+                    crate::ui_kit::section(ui, "joint_dynamics", "Dynamics", false, |ui| {
+                        for (i, row) in f.dynamics.iter_mut().enumerate() {
+                            let angle = kind.is_angle(i);
+                            let name = kind.dofs().get(i).copied().unwrap_or("value");
+                            crate::ui_kit::text(ui, &capital(name), crate::ui_kit::Text::Note(&format!("dynamics_{i}")));
+                            let units = if angle { ["N m", "rad/s", "N m s/rad", "N m"] } else { ["N", "m/s", "N s/m", "N"] };
+                            for ((label, value), unit) in ["Effort", "Velocity", "Damping", "Friction"].into_iter().zip(row.iter_mut()).zip(units) {
+                                enter |= text_row(ui, label, value, unit).0;
+                            }
+                        }
+                    });
+                }
             } else {
                 f.animate = false;
             }
@@ -1328,8 +1355,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
             }
         }
-        Asm::JointOrigin { name, .. } => {
+        Asm::JointOrigin { name, frame, .. } => {
             enter |= text_row(ui, "Name", name, solidcraft_ui_text::tr_label("Joint Origin1")).0;
+            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Export as a robot frame"), frame);
         }
         Asm::RigidGroup => {}
         Asm::Drive { joint, values, focus } => {
@@ -1604,10 +1632,14 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
 }
 
 /// The commands OK would run for the joint as the dialog has it (its sides as picked in
-/// `inputs`), but its limits (what Find Limits fills in).
+/// `inputs`), but its limits (what Find Limits fills in) and dynamics (Find Limits doesn't use them).
 fn edit_commands(app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
-    let edit = Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f.clone()))), inputs.to_vec());
-    Ok(crate::dialogs::apply_commands(app, &edit)?.into_iter().filter(|(id, _)| id != "joint.limits").collect())
+    // Without the Dynamics fields: Find Limits doesn't use them, so a half-typed value there
+    // must not stop it.
+    let mut f = f.clone();
+    f.dynamics.clear();
+    let edit = Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), inputs.to_vec());
+    Ok(crate::dialogs::apply_commands(app, &edit)?.into_iter().filter(|(id, _)| id != "joint.limits" && id != "joint.dynamics").collect())
 }
 
 /// Find Limits: on a copy of the design, the joint as the dialog has it now (its type and
@@ -1981,6 +2013,21 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                     };
                     out.push(("joint.limits".into(), p));
                 }
+                let saved = app.session.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.dynamics.as_slice()).unwrap_or_default();
+                for (i, row) in f.dynamics.iter().enumerate().take(jk.dofs().len()) {
+                    if row.iter().all(|x| x.trim().is_empty()) && !saved.get(i).is_some_and(Option::is_some) {
+                        continue;
+                    }
+                    let mut p = json!({"joint": id, "index": i});
+                    for (key, text) in ["effort", "velocity", "damping", "friction"].into_iter().zip(row) {
+                        if !text.trim().is_empty() {
+                            let x = text.trim().parse::<f64>().ok().filter(|x| x.is_finite());
+                            let x = x.ok_or_else(|| format!("{}: {text}", solidcraft_ui_text::tr_label("Not a number")))?;
+                            p[key] = json!(x);
+                        }
+                    }
+                    out.push(("joint.dynamics".into(), p));
+                }
                 return Ok(out);
             }
             if f.as_built {
@@ -2013,10 +2060,13 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             }
             cmd("joint.create", p)
         }
-        Asm::JointOrigin { name, .. } => {
+        Asm::JointOrigin { name, frame, .. } => {
             let mut p = snap(0, "a snap")?.param;
             if !name.trim().is_empty() {
                 p["name"] = json!(name.trim());
+            }
+            if *frame {
+                p["export_frame"] = json!(true);
             }
             cmd("joint.origin", p)
         }

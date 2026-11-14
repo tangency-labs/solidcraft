@@ -688,6 +688,10 @@ pub(crate) fn download_design(app: &mut SolveApp) {
 }
 
 pub(crate) fn export(app: &mut SolveApp, ext: &str) {
+    if ext == "urdf" {
+        crate::dialogs_urdf::open(app);
+        return;
+    }
     export_as(app, ext, None);
 }
 

@@ -22,6 +22,7 @@ appearance.replace                appearance only: colours and textures
 assembly.bom                      a bill of materials report
 assembly.constraint.create        assembly placement: tested in joints_relations_tests.rs
 assembly.constraint.edit          assembly placement: tested in joints_relations_tests.rs
+body.collision                    URDF collision shape: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
 body.rename                       a body name
 browser.collapse_all              the browser tree: order, groups and folding
 browser.expand_all                the browser tree: order, groups and folding
@@ -49,6 +50,7 @@ component.list                    a listing
 component.metadata                component metadata
 component.metadata.set            component metadata
 component.paste_from_design       pastes the app's clipboard from another window, which no command fills (engine tests place it)
+component.physical_override       URDF mass and inertia: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
 component.properties              component properties
 component.relink                  component links
 component.rename                  a component name
@@ -104,6 +106,8 @@ inspect.environment_map           display analysis: shading
 inspect.parameter_variants        inspect: independent rebuilds and regressions in crates/engine/src/cmd/parameter_sweep_tests.rs
 inspect.silhouette                display analysis: outline
 inspect.zebra                     display analysis: shading
+joint.dynamics                    URDF joint dynamics: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
+joint.origin_frame                URDF frame flag on a joint origin: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
 layout.apply                      application panel layout; no geometry (engine/UI/MCP tests)
 layout.get                        application panel layout; no geometry (engine/UI/MCP tests)
 layout.reset                      application panel layout; no geometry (engine/UI/MCP tests)

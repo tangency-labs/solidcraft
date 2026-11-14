@@ -1,0 +1,74 @@
+{
+  "en": {
+    "Couple motion links": "Couple motion links",
+    "Export URDF": "Export URDF",
+    "Mesh file prefix": "Mesh file prefix",
+    "Joint effort": "Joint effort",
+    "Joint velocity": "Joint velocity",
+    "urdf.fallback_help": "Effort and velocity apply to joints with no saved dynamics. Leave empty for 1000 and 10.",
+    "urdf.positive_number": "enter a number above 0",
+    "urdf.place_meshes": "Write meshes where the prefix points",
+    "prefs.urdf_place_meshes": "URDF export: write meshes where the mesh prefix points",
+    "prefs.urdf_export_dialog": "URDF export: ask for options before saving"
+  },
+  "ar": {
+    "Couple motion links": "ربط وصلات الحركة",
+    "Export URDF": "تصدير URDF",
+    "Mesh file prefix": "بادئة ملف الشبكة",
+    "Joint effort": "قوة المفصل",
+    "Joint velocity": "سرعة المفصل",
+    "urdf.fallback_help": "تنطبق القوة والسرعة على المفاصل التي لا تحتوي على ديناميكيات محفوظة. اتركها فارغة لاستخدام 1000 و10.",
+    "urdf.positive_number": "أدخل رقمًا أكبر من 0",
+    "urdf.place_meshes": "اكتب الشبكات حيث تشير البادئة",
+    "prefs.urdf_place_meshes": "تصدير URDF: اكتب الشبكات حيث تشير بادئة الشبكة",
+    "prefs.urdf_export_dialog": "تصدير URDF: اطلب الخيارات قبل الحفظ"
+  },
+  "he": {
+    "Couple motion links": "צימוד קישורי תנועה",
+    "Export URDF": "ייצוא URDF",
+    "Mesh file prefix": "קידומת קובץ רשת",
+    "Joint effort": "כוח מפרק",
+    "Joint velocity": "מהירות מפרק",
+    "urdf.fallback_help": "כוח ומהירות חלים על מפרקים ללא דינמיקה שמורה. השאירו ריק עבור 1000 ו-10.",
+    "urdf.positive_number": "הזינו מספר גדול מ-0",
+    "urdf.place_meshes": "כתיבת רשתות למקום שהקידומת מציינת",
+    "prefs.urdf_place_meshes": "ייצוא URDF: כתיבת רשתות למקום שקידומת הרשת מציינת",
+    "prefs.urdf_export_dialog": "ייצוא URDF: בקשת אפשרויות לפני השמירה"
+  },
+  "ja": {
+    "Couple motion links": "モーションリンクを連結",
+    "Export URDF": "URDF をエクスポート",
+    "Mesh file prefix": "メッシュファイルの接頭辞",
+    "Joint effort": "ジョイントの力",
+    "Joint velocity": "ジョイントの速度",
+    "urdf.fallback_help": "力と速度は、保存された動力学のないジョイントに適用されます。空欄の場合は 1000 と 10 です。",
+    "urdf.positive_number": "0 より大きい数値を入力してください",
+    "urdf.place_meshes": "接頭辞が示す場所にメッシュを書き出す",
+    "prefs.urdf_place_meshes": "URDF エクスポート: メッシュの接頭辞が示す場所にメッシュを書き出す",
+    "prefs.urdf_export_dialog": "URDF エクスポート: 保存前にオプションを確認する"
+  },
+  "vi": {
+    "Couple motion links": "Ghép các liên kết chuyển động",
+    "Export URDF": "Xuất URDF",
+    "Mesh file prefix": "Tiền tố tệp lưới",
+    "Joint effort": "Lực khớp",
+    "Joint velocity": "Vận tốc khớp",
+    "urdf.fallback_help": "Lực và vận tốc áp dụng cho các khớp không có động lực học đã lưu. Để trống để dùng 1000 và 10.",
+    "urdf.positive_number": "nhập một số lớn hơn 0",
+    "urdf.place_meshes": "Ghi lưới vào nơi tiền tố chỉ đến",
+    "prefs.urdf_place_meshes": "Xuất URDF: ghi lưới vào nơi tiền tố lưới chỉ đến",
+    "prefs.urdf_export_dialog": "Xuất URDF: hỏi tùy chọn trước khi lưu"
+  },
+  "zh": {
+    "Couple motion links": "耦合运动链接",
+    "Export URDF": "导出 URDF",
+    "Mesh file prefix": "网格文件前缀",
+    "Joint effort": "关节力",
+    "Joint velocity": "关节速度",
+    "urdf.fallback_help": "力和速度适用于未保存动力学的关节。留空则使用 1000 和 10。",
+    "urdf.positive_number": "请输入大于 0 的数字",
+    "urdf.place_meshes": "将网格写入前缀所指的位置",
+    "prefs.urdf_place_meshes": "URDF 导出：将网格写入网格前缀所指的位置",
+    "prefs.urdf_export_dialog": "URDF 导出：保存前询问选项"
+  }
+}

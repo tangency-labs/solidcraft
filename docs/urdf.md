@@ -5,7 +5,11 @@ Description Format), the format ROS, Gazebo, Isaac Sim, PyBullet and MuJoCo read
 becomes a link with its mesh, mass and inertia. Each joint becomes a URDF joint, or a short
 chain of them, that moves the parts the way SolidCraft does.
 
-- **Desktop:** **File → Export URDF…**
+- **Desktop:** **File → Export URDF…** goes straight to the save picker and writes the URDF older
+  versions wrote. Turn on **URDF export: ask for options before saving** (`urdf_export_dialog`, in
+  Preferences › General) to choose the options below first. The dialog remembers **Couple motion
+  links** (`urdf_mimic`) and **Write meshes where the prefix points** (`urdf_place_meshes`, also in
+  Preferences › General) for the next export. All three are off by default.
 - **Commands:** `file.export {"path": "robot.urdf"}` (or `"format": "urdf"`)
 - **MCP:** the `export` tool with a `.urdf` path or `format: "urdf"`
 - **CLI:** `solidcraft-cli run script.json --out robot.urdf`
@@ -14,12 +18,19 @@ URDF always exports the whole assembly, so `bodies` is refused.
 
 ## Files
 
-Next to `robot.urdf` the export writes one binary STL per component, in metres:
+The export writes binary STLs in metres, next to `robot.urdf`. `mesh_prefix` goes before each
+name in the URDF; with `place_meshes` the files are also written where it points (see
+[Parameters](#parameters)):
 
-- `robot-<component>.stl` holds all of the component's bodies. The root component's bodies go
-  in `robot-base.stl`.
-- `robot-<component>-collision.stl` appears only when a component mixes closed solids with
-  open surfaces: it holds the closed ones, which are the collision geometry.
+- `robot-<component>.stl` holds all of the component's bodies, as drawn. The root component's
+  bodies go in `robot-base.stl`. When every body collides as drawn (`mesh`), this file is also
+  the collision mesh.
+- `robot-<component>-collision.stl` holds the bodies that collide as their mesh, written
+  separately whenever the component's collision is not the same as its drawing: some bodies
+  are open surfaces, or other bodies have another collision shape (a hull, a fitted shape or
+  none).
+- `robot-<component>-<body>-collision.stl` is the convex hull of one body, one file per body
+  set to `convex_hull` (or left on `auto` with `collision: convex_hull`).
 
 Every path is checked before anything is written, including against the folders an agent may
 use (`allow_paths`). The meshes are written first and the `.urdf` last. If a write fails part
@@ -29,12 +40,36 @@ way, the error names the files already written and the one that failed.
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `mesh_prefix` | none | Put before each mesh file name. Leave it empty for loaders that resolve against the URDF's folder (Isaac Sim, PyBullet, MuJoCo, yourdfpy). RViz and other ROS tools need `package://<pkg>/meshes/` or an absolute folder. |
-| `effort` | 1000 | Joint effort limit, in N (sliding) or N m (turning). |
-| `velocity` | 10 | Joint velocity limit, in m/s or rad/s. |
+| `mesh_prefix` | none | Put before each mesh file name, and with `place_meshes` where the meshes are written (see below). Leave it empty for loaders that resolve against the URDF's folder (Isaac Sim, PyBullet, MuJoCo, yourdfpy). RViz and other ROS tools need `package://<pkg>/meshes/` or an absolute folder. |
+| `effort` | 1000 | Effort limit for joint values with none saved, in N (sliding) or N m (turning). |
+| `velocity` | 10 | Velocity limit for joint values with none saved, in m/s or rad/s. |
+| `collision` | mesh | What a body left on `auto` becomes: `mesh` or `convex_hull`. See [Collision shapes](#collision-shapes). |
+| `mimic` | false | Write `<mimic>` for motion links. `false` leaves each joint free, as older versions did. The desktop dialog's **Couple motion links** (`urdf_mimic`). |
+| `place_meshes` | false | Write the meshes where `mesh_prefix` points, making the folder. `false` writes them next to the URDF whatever the prefix says, as older versions did; copy them where the prefix points yourself. The desktop dialog's **Write meshes where the prefix points** (`urdf_place_meshes`). |
 
-URDF requires `effort` and `velocity` on every moving joint. When they are not given, the
-defaults are written and a warning says so. A value that is not a positive number is refused.
+URDF requires `effort` and `velocity` on every moving joint. A joint's own values come first, then
+these parameters, then the defaults, with a warning naming the joints that used them. A value that
+is not a positive number is refused.
+
+With `place_meshes: true` the meshes go where the URDF says they are, and a missing folder is
+created:
+
+| `mesh_prefix` | Written to |
+|---|---|
+| `meshes/` | `meshes/` next to the URDF |
+| `../meshes/` | `meshes/` beside the URDF's folder |
+| `v1_` | Next to the URDF, with names starting `v1_` |
+| `package://robot/meshes/` | `robot/meshes/` when the URDF is in `robot/` or `robot/urdf/`, otherwise `meshes/` next to the URDF |
+| `file:///opt/robot/meshes/` | That folder (`%20` and the like are decoded; `file:///C:/robot/meshes/` is `C:/robot/meshes/` on Windows) |
+| `https://…` | Next to the URDF, with a warning: copy them there yourself |
+
+## Joint dynamics
+
+`joint.dynamics {joint, index?, effort?, velocity?, damping?, friction?}` saves what a simulator
+reads for one joint value, in the design, in SI units: effort in N or N m, velocity in m/s or rad/s,
+damping in N s/m or N m s/rad, friction in N or N m. Editing a joint shows them under **Dynamics**.
+The joint solver does not use them. `damping` and `friction` are written as `<dynamics>` only where
+set. In a chain, each step uses the values of the joint value it follows.
 
 ## Links
 
@@ -51,11 +86,24 @@ defaults are written and a warning says so. A value that is not a positive numbe
 - **Mass and inertia** come from each body's mesh and material density: the mass in kg, the
   centre of mass and the inertia tensor about it in the link frame, in kg m². Bodies of the
   same link combine with the parallel-axis theorem.
+- **Mass override:** `component.physical_override {component, mass?, com?, inertia?}` replaces the
+  values of a component's own bodies, for a bought motor modelled as a solid block. With only `mass`,
+  the centre of mass stays and the inertia is scaled. Nested components are links of their own and keep
+  theirs. The root design can't take one: move those bodies into a component. Properties and the bill
+  of materials keep showing the mass worked out from the bodies.
 - **Open surfaces** are drawn but add no mass or collision, with a warning naming them.
 - **A link with no mass** (only surfaces, no bodies, or a chain's in-between link) gets a token
   mass of 1e-6 kg and inertia of 1e-12 kg m², because Gazebo drops massless links and breaks
   the chain there.
 - **Colour:** the first body's colour, as the visual's material.
+
+## Frames
+
+A named joint origin marked as a frame (`joint.origin {..., export_frame: true}`, `joint.origin_frame`, or
+**Export as a robot frame** in the Joint Origin dialog) becomes an empty link named after it, on a
+`fixed` joint to its part's link: a tool tip, a camera or a mount point. It has no mass, because a
+`fixed` joint needs none. An origin that no longer resolves is skipped with a warning. On a component
+placed several times, the frame appears on the first placement.
 
 ## Joints
 
@@ -80,7 +128,11 @@ defaults are written and a warning says so. A value that is not a positive numbe
   reversed, so the values still match.
 - **Limits** are written as `lower <= upper` in radians or metres. A sliding step without a
   limit gets ±1000 m, since URDF requires one, with a warning.
-- **Motion links** are not written as `<mimic>`. Each joint's own value is free in the URDF.
+- **Motion links** (gears, racks, screws and plain links) are written, with `mimic: true`, as `<mimic>` on the driven
+  joint, converted to metres and radians. A chain of links is composed down to its first driver,
+  since many tools accept only a mimic of a joint that is not one itself. A warning names a driven
+  joint left free: a cam (not linear), a cycle, or a driver that is not in the URDF. A driver whose
+  range can exceed the driven joint's limit also gets a warning.
 
 The URDF is written at the design's current joint values, with every part where it is shown,
 including moves not captured yet. The exception is a part the joints place: it exports where its
@@ -108,10 +160,35 @@ parent at their current pose, with a warning when the copied part has a joint. (
 the copies move together, which a URDF could only express with `<mimic>`.) The export stops copying past
 64 levels or 100 000 placements, with a warning.
 
+## Collision shapes
+
+`body.collision {body | component, shape}` saves what a body looks like to a simulator, or use
+**Collision Shape** in its menu:
+
+| Shape | Written as |
+|---|---|
+| `auto` | What the `collision` parameter says (the default) |
+| `mesh` | The body's full mesh. A component whose bodies are all this shares its visual STL |
+| `convex_hull` | One closed STL per body. Split a part into bodies to get one hull per body |
+| `box` | A `<box>` along the body's principal axes |
+| `cylinder` | A `<cylinder>` along whichever principal axis gives the least volume |
+| `sphere` | A `<sphere>` around the body |
+| `none` | No `<collision>`: a screw, a cosmetic part |
+
+The `collision` parameter of `file.export` is `mesh` (the default) or `convex_hull`, and applies to bodies
+left on `auto`. An open surface collides only with a shape that gives it a volume. It still adds no
+mass. A flat body has no convex hull, so it gets no collision, with a warning.
+
+## Warnings about implausible values
+
+The export still writes the file, and warns about:
+
+- an inertia that is not physically possible, usually from a mass override;
+- a moving part with no mass;
+- a collision mesh of more than 50 000 triangles.
+
 ## Not covered
 
-- `<mimic>` for motion links.
-- Simplified collision shapes: the collision mesh is the visual mesh.
+- Automatic convex decomposition of a concave part.
 - SDF and MJCF export, and URDF import.
 - Joint motion inside the copies of a component placed several times.
-- Drive dynamics: `effort` and `velocity` are limits you choose.

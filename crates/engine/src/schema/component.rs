@@ -1018,9 +1018,27 @@ pub struct PropertiesResult {
     pub name: String,
     #[serde(flatten)]
     pub properties: PhysicalProperties,
+    /// What robot exports use instead of the measured values (`component.physical_override`),
+    /// when one is saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physical_override: Option<PhysicalOverrideSaved>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// A component's saved physical override (`component.physical_override`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, JsonSchema)]
+pub struct PhysicalOverrideSaved {
+    /// The mass, in kg.
+    pub mass: f64,
+    /// The centre of mass in the component's frame, in mm; left out for the measured one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub com: Option<[f64; 3]>,
+    /// The inertia [xx, yy, zz, xy, xz, yz] about the centre of mass along the component's axes,
+    /// in kg m²; left out for the measured one scaled to the mass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inertia: Option<[f64; 6]>,
 }
 
 /// The new name `component.rename` reads: text of 1 to 128 bytes once trimmed.
@@ -2058,3 +2076,62 @@ pub struct MoveSketchesResult {
 #[cfg(test)]
 #[path = "component_tests.rs"]
 mod tests;
+
+/// Set or clear the mass values robot exports use for a component's own bodies (a bought motor
+/// modelled as a solid block). Its nested components keep theirs. Give none to clear them.
+/// Properties and the bill of materials keep the mass worked out from the bodies.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PhysicalOverrideParams {
+    /// The component, by id or name. Not the root design.
+    pub component: IdOrName,
+    /// Mass in kg. Required with `com` or `inertia`.
+    #[serde(default)]
+    pub mass: Option<f64>,
+    /// Centre of mass in mm, in the component's frame. Default: worked out from its bodies.
+    #[serde(default)]
+    pub com: Option<[f64; 3]>,
+    /// Inertia about the centre of mass, kg m², along the component's axes: xx, yy, zz, xy, xz, yz.
+    /// Default: worked out from its bodies, scaled by the mass.
+    #[serde(default)]
+    pub inertia: Option<[f64; 6]>,
+}
+
+/// What `component.physical_override` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PhysicalOverrideResult {
+    /// The component, by id.
+    pub component: u64,
+    /// The mass now saved in kg. Absent when cleared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mass: Option<f64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Set what a body, or every body of a component, looks like to a simulator.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BodyCollisionParams {
+    /// The body, by name. Give this or `component`.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// The component whose bodies to set, by id or name. Give this or `body`.
+    #[serde(default)]
+    pub component: Option<IdOrName>,
+    /// `auto` (the export decides), `mesh`, `convex_hull`, `box`, `cylinder`, `sphere` or `none`.
+    pub shape: String,
+}
+
+/// What `body.collision` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BodyCollisionResult {
+    /// The bodies set.
+    pub bodies: Vec<String>,
+    /// The shape they now have.
+    pub shape: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

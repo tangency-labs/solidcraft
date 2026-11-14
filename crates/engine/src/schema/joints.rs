@@ -985,6 +985,21 @@ pub struct NamedValue {
     pub unit: ValueUnit,
     /// Its limits [min, max] in `unit`, or `null` for none.
     pub limits: Option<[f64; 2]>,
+    /// What a simulator reads for it (`joint.dynamics`), or `null` for none saved.
+    pub dynamics: Option<ValueDynamics>,
+}
+
+/// A joint value's saved dynamics, in SI (`joint.dynamics`); each `null` when not set.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, JsonSchema)]
+pub struct ValueDynamics {
+    /// The most force or torque, in N or N m.
+    pub effort: Option<f64>,
+    /// The highest speed, in m/s or rad/s.
+    pub velocity: Option<f64>,
+    /// Damping, in N s/m or N m s/rad.
+    pub damping: Option<f64>,
+    /// Friction, in N or N m.
+    pub friction: Option<f64>,
 }
 
 /// A joint's type as the replies name it.
@@ -1953,6 +1968,10 @@ pub struct MakeJointOriginParams {
     /// Blank text gives the default. A name already taken is refused.
     #[serde(default)]
     pub name: Option<String>,
+    /// Robot exports write the origin as a frame of its own: an empty link on a fixed joint.
+    /// Default false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_frame: Option<bool>,
     /// The occurrence the origin is on, by id or name. Default: found from the point, or the
     /// named face's component.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2103,7 +2122,10 @@ fn origin_point(v: Option<&Value>, message: &str) -> Result<(), String> {
 impl MakeJointOriginParams {
     /// The keys `origin_param` reads, in the cases it reads them, in the order it reads them.
     fn check(m: &Map<String, Value>) -> Result<(), String> {
-        // The path is read first, by the same rule `occurrence.move` uses; `null` is left out.
+        if !matches!(m.get("export_frame"), None | Some(Value::Null | Value::Bool(_))) {
+            return Err("`export_frame` must be true or false".into());
+        }
+        // Then the path, by the same rule `occurrence.move` uses; `null` is left out.
         if let Some(path) = m.get("path").filter(|p| !p.is_null()) {
             OccurrencePath::deserialize(path).map_err(|_| "`path` must list 1..64 occurrence ids")?;
         }
@@ -2195,6 +2217,7 @@ impl<'de> Deserialize<'de> for MakeJointOriginParams {
         // The name is read last, once the origin is made.
         Ok(MakeJointOriginParams {
             name: text(&m, "name")?,
+            export_frame: m.get("export_frame").and_then(Value::as_bool),
             occurrence: m.get("occurrence").and_then(|v| OccurrenceKey::read(v).ok()),
             // Read by the handler's path parser, which `occurrence.move` shares.
             path: raw("path"),
@@ -2768,3 +2791,70 @@ pub struct CamResult {
 #[cfg(test)]
 #[path = "joints_tests.rs"]
 mod tests;
+
+/// Set or clear what a simulator reads for one value of a joint. URDF export writes these; the
+/// joint solver does not use them. Give none of the four to clear the value's dynamics.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct JointDynamicsParams {
+    /// The joint, by id or name.
+    pub joint: IdOrName,
+    /// Which of the joint's values. Default: 0.
+    #[serde(default)]
+    pub index: Option<usize>,
+    /// The most force or torque, in N or N m. Above 0.
+    #[serde(default)]
+    pub effort: Option<f64>,
+    /// The highest speed, in m/s or rad/s. Above 0.
+    #[serde(default)]
+    pub velocity: Option<f64>,
+    /// Damping, in N s/m or N m s/rad. 0 or more.
+    #[serde(default)]
+    pub damping: Option<f64>,
+    /// Friction, in N or N m. 0 or more.
+    #[serde(default)]
+    pub friction: Option<f64>,
+}
+
+/// What `joint.dynamics` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct JointDynamicsResult {
+    /// The joint, by id.
+    pub joint: u64,
+    /// The value set.
+    pub index: usize,
+    /// The effort now saved.
+    pub effort: Option<f64>,
+    /// The velocity now saved.
+    pub velocity: Option<f64>,
+    /// The damping now saved.
+    pub damping: Option<f64>,
+    /// The friction now saved.
+    pub friction: Option<f64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Mark a named joint origin as a frame of its own in robot exports (a tool tip, a sensor mount),
+/// or stop marking it.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct OriginFrameParams {
+    /// The named joint origin.
+    pub origin: String,
+    /// Whether robot exports write it.
+    pub frame: bool,
+}
+
+/// What `joint.origin_frame` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OriginFrameResult {
+    /// The joint origin.
+    pub origin: String,
+    /// Whether robot exports now write it.
+    pub frame: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

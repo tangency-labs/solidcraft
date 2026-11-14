@@ -152,6 +152,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     });
                 });
             });
+            // URDF export (docs/urdf.md): off gives the export as it was before these options.
+            setting::urdf_export_dialog(app, ui);
+            setting::urdf_place_meshes(app, ui);
         });
         ui_kit::settings_section(ui, "freecad", app.tr("prefs.freecad_files"), |ui| {
             setting::freecad_history(app, ui);
