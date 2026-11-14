@@ -2604,7 +2604,18 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Sol
             (Ok(fa), Ok(fb)) => {
                 frames.insert(j.id, JointFrames::new(fa, fb));
             }
-            (Err(e), _) | (_, Err(e)) => sol.errors.push((j.id, j.name.clone(), e.to_string())),
+            (Err(e), _) | (_, Err(e)) => {
+                sol.errors.push((j.id, j.name.clone(), e.to_string()));
+                // A rigid joint whose origin is lost (its face is gone) still holds its two
+                // parts as they are now: leaving it out would cut every part joined through it
+                // from the grounded ones, and driving a joint on the far side would move nothing.
+                if j.kind == JointKind::Rigid {
+                    let held = mat_inverse(&occurrence_world(doc, j.a.occurrence)).map(|inv| mat_mul(&inv, &occurrence_world(doc, j.b.occurrence)));
+                    if let Some(held) = held {
+                        frames.insert(j.id, JointFrames::new(held, IDENTITY));
+                    }
+                }
+            }
         }
     }
     // Fixed: the root, grounded occurrences; with neither involved, the first joint's A side.

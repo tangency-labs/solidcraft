@@ -3539,3 +3539,37 @@ fn cloned_joints_remap_datum_paths_into_the_copy() {
     }
     assert!(r["notices"].as_array().is_some_and(|n| n.iter().any(|n| n.as_str().unwrap_or_default().contains("Jout"))), "{:?}", r["notices"]);
 }
+
+/// Driving a joint turns the side that is not held by a grounded part: a leaf on a grounded base
+/// (#16139), the whole chain of parts rigidly joined to it, and nothing when both sides are
+/// grounded, which the reply says precisely.
+#[test]
+fn driving_a_joint_moves_the_ungrounded_side() {
+    let mut s = Session::default();
+    for (name, corner) in [("Base", [0.0, 0.0, 0.0]), ("Mid", [10.0, 0.0, 0.0]), ("Tip", [20.0, 0.0, 0.0]), ("Post", [40.0, 0.0, 0.0])] {
+        part(&mut s, name, corner);
+    }
+    for name in ["Base", "Post"] {
+        let g = occ(&s, name);
+        run(&mut s, "occurrence.ground", json!({"occurrence": g, "grounded": true}));
+    }
+    // A leaf: Mid turns on the base about +Z through (10, 1, 1); Tip is welded to Mid.
+    pin(&mut s, "revolute", "Hinge", "Base", "Mid", Vec3::new(10.0, 1.0, 1.0), Vec3::Z);
+    pin(&mut s, "rigid", "Weld", "Mid", "Tip", Vec3::new(20.0, 1.0, 1.0), Vec3::Z);
+    let (mid, tip) = (Vec3::new(11.0, 1.0, 1.0), Vec3::new(21.0, 1.0, 1.0));
+    let (mid0, tip0, base0) = (place(&s, "Mid", mid), place(&s, "Tip", tip), place(&s, "Base", Vec3::new(1.0, 1.0, 1.0)));
+    let r = run(&mut s, "joint.drive", json!({"joint": "Hinge", "value": 90, "quiet": true}));
+    assert_eq!(r["moved"], true, "{r}");
+    assert!(r["reason"].is_null(), "{r}");
+    // Mid swings about the hinge axis; its chain (Tip) goes with it as one rigid piece.
+    let (mid1, tip1) = (place(&s, "Mid", mid), place(&s, "Tip", tip));
+    assert!(!near(mid1, mid0) && !near(tip1, tip0), "the leaf and its welded part move: {mid1:?} {tip1:?}");
+    assert!((mid1.dist(Vec3::new(10.0, 1.0, 1.0)) - mid0.dist(Vec3::new(10.0, 1.0, 1.0))).abs() < 1e-6);
+    assert!((mid1.dist(tip1) - mid0.dist(tip0)).abs() < 1e-6, "Tip keeps its place against Mid");
+    assert!(near(place(&s, "Base", Vec3::new(1.0, 1.0, 1.0)), base0));
+    // A joint between two grounded parts: nothing to move, and the reply names both.
+    pin(&mut s, "revolute", "Stuck", "Base", "Post", Vec3::new(40.0, 1.0, 1.0), Vec3::Z);
+    let r = run(&mut s, "joint.drive", json!({"joint": "Stuck", "value": 30, "quiet": true}));
+    assert_eq!(r["moved"], false, "{r}");
+    assert_eq!(r["reason"], "both sides are held by grounded parts: Base:1, Post:1", "{r}");
+}
