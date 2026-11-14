@@ -76,7 +76,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "curve_loop_start_after_previous_end",
     "curve_sweep_closed_path_joins_ends",
     "cylinder_rebuild_mean_radius",
-    "database_io_byte_swaps_read_boolean_and_u16",
     "degenerate_proto_edge_in_one_vertex",
     "degen_param_tiebreak_uses_actual_param",
     "delete_vertex_joins_seam_iso_curve",

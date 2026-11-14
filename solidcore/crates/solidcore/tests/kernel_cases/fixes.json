@@ -92,7 +92,6 @@
   "cone_iso_circle_at_axial_height",
   "cone_unbounded_parameterized_as_nurb",
   "fillet_statuses_pass_on",
-  "database_io_byte_swaps_read_boolean_and_u16",
   "cover_refuses_folded_continuation",
   "cover_wraps_across_closed_seam",
   "boolean2d_plane_covers_far_faces",

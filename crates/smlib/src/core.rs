@@ -241,7 +241,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.curve_sweep_closed_path_joins_ends = true;
     f.validate_tolerances_fixes_reported_gaps = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
-    f.database_io_byte_swaps_read_boolean_and_u16 = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.offset_updates_result_tolerances = true;
