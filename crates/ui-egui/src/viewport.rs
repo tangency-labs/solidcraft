@@ -415,9 +415,19 @@ impl Proj {
         ))
     }
     pub fn ray(&self, p: Pos2) -> (Vec3, Vec3) {
-        self.cam.ray((p.x - self.rect.left()) as f64, (p.y - self.rect.top()) as f64, self.rect.width() as f64, self.rect.height() as f64)
+        let (o, d) =
+            self.cam.ray((p.x - self.rect.left()) as f64, (p.y - self.rect.top()) as f64, self.rect.width() as f64, self.rect.height() as f64);
+        if self.cam.fov > 0.0 {
+            return (o, d);
+        }
+        // Orthographic: start the ray far behind everything, so a target that has moved along the view
+        // direction can never leave visible geometry unpickable (#16601).
+        (o - d * ORTHO_RAY_BACKOFF, d)
     }
 }
+
+/// How far behind the camera plane an orthographic pick ray starts (the farthest camera distance is 1e7).
+const ORTHO_RAY_BACKOFF: f64 = 1e8;
 
 /// A projected 3D face (convex): an unfeathered triangle fan, outlined one edge at a time (no
 /// joins between the edges). Unlike `Shape::convex_polygon`, it stays inside its outline when

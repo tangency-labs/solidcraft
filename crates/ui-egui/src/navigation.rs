@@ -3313,6 +3313,43 @@ mod view_key_tests {
         assert!(crate::keymap::RESERVED.contains(&crate::keymap::key_name(egui::Key::Num8, egui::Modifiers::COMMAND).as_str()));
     }
 
+    /// #16601: in an orthographic view, zooming to the cursor and orbiting around it never move the target along
+    /// the view direction, and a pick still finds the model when the target has been placed far along it.
+    #[test]
+    fn orthographic_navigation_keeps_the_depth_and_picks_still_hit() {
+        use super::*;
+        let mut h = crate::scenario::Harness::new();
+        h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
+        h.settle();
+        h.app.cam = Camera::default();
+        assert!(h.app.cam.fov <= 0.0);
+        let rect = h.app.viewport.rect.expect("the viewport");
+        let back = h.app.cam.back();
+        let depth0 = h.app.cam.target.dot(back);
+        let anchors = [Vec3::new(20.0, 20.0, 20.0), Vec3::new(-20.0, -20.0, -20.0), Vec3::new(20.0, -20.0, 0.0)];
+        for i in 0..400 {
+            let a = anchors[i % anchors.len()];
+            h.app.cam.zoom_at(if i % 2 == 0 { 0.8 } else { 1.0 / 0.8 }, Some(a));
+            h.app.cam.orbit_about(3.0, -1.0, a);
+            let back = h.app.cam.back();
+            assert!(h.app.cam.target.dot(back).abs() < 1e3, "step {i}: the target drifted to {:?}", h.app.cam.target);
+        }
+        // A pure zoom keeps the target's depth exactly.
+        h.app.cam = Camera::default();
+        for i in 0..50 {
+            h.app.cam.zoom_at(0.9, Some(anchors[i % anchors.len()]));
+        }
+        assert!((h.app.cam.target.dot(back) - depth0).abs() < 1e-6);
+        // The target (and so the camera plane) deep inside or in front of the model still picks it.
+        for shift in [0.0, 100.0, 5000.0, -5000.0] {
+            h.app.cam = Camera::default();
+            h.app.cam.target = h.app.cam.target - h.app.cam.back() * shift;
+            let proj = projection(&h.app, rect);
+            let hits = pick_cached(&mut h.app, &proj, rect.center());
+            assert!(hits.iter().any(|hit| matches!(hit, Hit::Face { .. })), "shift {shift}: no pick");
+        }
+    }
+
     /// #717: PageUp/PageDown and +/− zoom the view; the keys are reserved like the arrows, OS
     /// repeat does nothing, and a focused text field keeps them for typing.
     #[test]

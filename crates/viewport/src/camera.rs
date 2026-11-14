@@ -381,7 +381,17 @@ impl Camera {
         let f = if factor.is_finite() { factor.clamp(0.05, 20.0) } else { 1.0 };
         let nd = (self.distance * f).clamp(1e-3, 1e7);
         if let Some(a) = anchor {
-            self.target = a + (self.target - a) * (nd / self.distance);
+            if self.fov > 0.0 {
+                self.target = a + (self.target - a) * (nd / self.distance);
+            } else {
+                // Orthographic: the view scale changes, the depth does not. The target moves only within the
+                // view plane, so zooming at a point nearer or farther than the target never drifts it along the
+                // view direction (#16601).
+                let (_, _, b) = self.basis();
+                let d = a - self.target;
+                let plane = d - b * d.dot(b);
+                self.target = self.target + plane * (1.0 - nd / self.distance);
+            }
         }
         self.distance = nd;
     }
