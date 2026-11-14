@@ -190,6 +190,11 @@ pub struct ViewportState {
     /// Each shown body whose edges the model draws: the block holding its edge lines and their
     /// range there (a whole lit body's edges are drawn again from them, `highlight_edges`).
     body_lines: std::sync::Mutex<std::collections::HashMap<String, (u64, std::ops::Range<u32>)>>,
+    /// The same with the body's hidden edge lines too: what an edge layer replaces
+    /// ([`crate::exact_edges`]).
+    pub(crate) body_edges: std::sync::Mutex<std::collections::HashMap<String, crate::gpu::ReplacedLines>>,
+    /// The model's edges worked out from the exact faces while the camera stands still.
+    pub(crate) exact_edges: crate::exact_edges::ExactEdges,
     /// The stable palette slots of the model scene (body faces, edges, placements).
     pub(crate) palette: std::sync::Mutex<crate::scene_palette::PaletteArena>,
     /// Each body's resolved look, kept while its geometry and the design's appearance state are
@@ -1028,11 +1033,11 @@ fn carried_mesh(
 }
 
 /// How long (ms) the camera must stand still before display refinements are chosen and swapped in.
-const REFINE_STILL_MS: f64 = 200.0;
+pub(crate) const REFINE_STILL_MS: f64 = 200.0;
 
 /// The camera the last frame had and when it last differed from the one before (ms).
 #[derive(Default)]
-struct CameraRest {
+pub(crate) struct CameraRest {
     camera: u64,
     moved_at: f64,
 }
@@ -1040,7 +1045,7 @@ struct CameraRest {
 impl CameraRest {
     /// Notes this frame's camera (a hash of the view) at `now` (ms); how much longer (ms) the
     /// camera has to stand still, 0 once it has for [`REFINE_STILL_MS`].
-    fn wait(&mut self, camera: u64, now: f64) -> f64 {
+    pub(crate) fn wait(&mut self, camera: u64, now: f64) -> f64 {
         if camera != self.camera {
             *self = CameraRest { camera, moved_at: now };
         }
@@ -1125,6 +1130,18 @@ fn update_refinement(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
     if busy {
         ctx.request_repaint_after(std::time::Duration::from_millis(30));
     }
+}
+
+/// The shown bodies the model scene draws see-through, all or some of their faces (their body
+/// or a face look under full opacity), by name, as the last scene resolved their looks.
+pub(crate) fn see_through_bodies(app: &SolveApp) -> std::collections::HashSet<String> {
+    let appearance = app.viewport.appearance.lock().unwrap_or_else(|e| e.into_inner());
+    appearance
+        .bodies
+        .iter()
+        .filter(|(_, (_, r))| r.opacity < 0.999 || r.face_looks.values().any(|l| l.opacity < 0.999))
+        .map(|(name, _)| name.clone())
+        .collect()
 }
 
 /// A body's look as the scene resolves it: the component/body colours, the body opacity and the
@@ -1282,6 +1299,8 @@ struct BodyRange {
     face_classes: Vec<crate::gpu::TriClass>,
     /// Its edge lines in the block's `lines` (none when the view draws no edges).
     lines: std::ops::Range<u32>,
+    /// Its edge lines in the block's `hidden` lines (none unless the view shows hidden edges).
+    hidden: std::ops::Range<u32>,
 }
 
 /// [`ViewportState::mesh_bounds`]: each box by the shared mesh it was measured on (held, so its
@@ -1510,23 +1529,25 @@ fn build_block(draws: &[BodyDraw], shaded: bool, build: &impl Fn(&BodyDraw, &mut
     let at = |i: usize| u32::try_from(i).unwrap_or(u32::MAX);
     let mut spans = Vec::with_capacity(draws.len());
     for d in draws {
-        let (v0, l0) = (builder.vertices_len(), builder.lines_len());
+        let (v0, l0, h0) = (builder.vertices_len(), builder.lines_len(), builder.hidden_len());
         // Its box goes with its triangles, so a view without it leaves them out.
         builder.begin_body();
         build(d, &mut builder);
         let l1 = builder.edges_end().unwrap_or_else(|| builder.lines_len());
+        let h1 = builder.hidden_edges_end().unwrap_or_else(|| builder.hidden_len());
         builder.end_body();
-        spans.push((at(v0)..at(builder.vertices_len()), l0..l1));
+        spans.push((at(v0)..at(builder.vertices_len()), l0..l1, h0..h1));
     }
     let ranges = draws
         .iter()
         .zip(spans)
-        .map(|(d, (vertices, lines))| BodyRange {
+        .map(|(d, (vertices, lines, hidden))| BodyRange {
             name: d.name.clone(),
             opaque: builder.runs_within(crate::gpu::TriClass::Opaque, vertices.clone()),
             vertices,
             face_classes: d.face_classes.clone(),
             lines,
+            hidden,
         })
         .collect();
     CachedBlock { bytes: builder.freeze(), meshes: draws.iter().map(|d| d.mesh.clone()).collect(), ranges }
@@ -1571,6 +1592,7 @@ fn reindex_block(block: CachedBlock, draws: &[BodyDraw]) -> CachedBlock {
             opaque: crate::gpu::runs_within(&opaque, range.vertices.clone()),
             face_classes: d.face_classes.clone(),
             lines: range.lines.clone(),
+            hidden: range.hidden.clone(),
         })
         .collect();
     let old = block.bytes;
@@ -1810,6 +1832,7 @@ fn continuity_seams(sc: &mut GpuScene, app: &SolveApp) {
 fn keep_body_tris(app: &SolveApp, made: &std::collections::HashMap<u64, CachedBlock>) {
     let mut body_tris = std::collections::HashMap::new();
     let mut body_lines = std::collections::HashMap::new();
+    let mut body_edges = std::collections::HashMap::new();
     for (key, c) in made {
         for range in &c.ranges {
             if !range.vertices.is_empty() {
@@ -1818,6 +1841,8 @@ fn keep_body_tris(app: &SolveApp, made: &std::collections::HashMap<u64, CachedBl
             }
             if !range.lines.is_empty() {
                 body_lines.insert(range.name.clone(), (*key, range.lines.clone()));
+                body_edges
+                    .insert(range.name.clone(), crate::gpu::ReplacedLines { block: *key, lines: range.lines.clone(), hidden: range.hidden.clone() });
             }
         }
     }
@@ -1826,6 +1851,9 @@ fn keep_body_tris(app: &SolveApp, made: &std::collections::HashMap<u64, CachedBl
     }
     if let Ok(mut m) = app.viewport.body_lines.lock() {
         *m = body_lines;
+    }
+    if let Ok(mut m) = app.viewport.body_edges.lock() {
+        *m = body_edges;
     }
 }
 
@@ -5924,6 +5952,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::gpu::paint_background_picture(app, &painter, rect);
 
     // ---- model ----
+    let mut edge_layer = None;
     crate::frame_watch::step(app, "viewport before the model");
     // A drag drawn as a layer keeps the refinements it began with.
     if !layered {
@@ -5948,6 +5977,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.viewport.key = key;
             app.viewport.build_ms = crate::now_ms() - t0;
             crate::frame_watch::step(app, "model scene");
+        }
+        // The model's edges as the exact faces hide them, once the view has stood still.
+        if !layered {
+            edge_layer = crate::exact_edges::update(app, ui.ctx(), &proj);
         }
         refresh_sketch_scene(app, &proj);
         if app.viewport.wireframe.busy() {
@@ -6017,6 +6050,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }),
             sky: sky_uniform(app.preferences.dark_parts_shading, app.preferences.viewport_material_finish, proj.cam.up),
             moving,
+            edge_layer,
         });
         crate::blur::viewport(&painter, rect, cb, rect, [t.viewport_top, t.viewport_bottom]);
         // The graphics card had no memory for the view's frame (#7296): say once why it looks
@@ -10334,6 +10368,7 @@ mod tests {
                     selection_tint: [0.0; 3],
                     hatch: Default::default(),
                     moving: None,
+                    edge_layer: None,
                 };
                 let t0 = std::time::Instant::now();
                 let mut encoder = device.create_command_encoder(&Default::default());

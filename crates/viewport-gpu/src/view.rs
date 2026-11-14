@@ -855,9 +855,21 @@ pub struct BlockBuilder {
     spanning: Option<(u32, [[f32; 3]; 2])>,
     /// Where the body being written ended its edge lines ([`BlockBuilder::end_edges`]).
     edges_end: Option<u32>,
+    /// The same for its hidden lines.
+    hidden_edges_end: Option<u32>,
 }
 
 impl BlockBuilder {
+    /// How many hidden lines the block has so far.
+    pub fn hidden_len(&self) -> u32 {
+        u32::try_from(self.hidden.len() / LINE_SIZE).unwrap_or(u32::MAX)
+    }
+
+    /// Where the body being written ended its hidden edge lines ([`BlockBuilder::end_edges`]).
+    pub fn hidden_edges_end(&self) -> Option<u32> {
+        self.hidden_edges_end
+    }
+
     /// How many lines the block has so far (a body's lines are those added while it was built).
     pub fn lines_len(&self) -> u32 {
         u32::try_from(self.lines.len() / LINE_SIZE).unwrap_or(u32::MAX)
@@ -867,6 +879,7 @@ impl BlockBuilder {
     /// is not an edge.
     pub fn end_edges(&mut self) {
         self.edges_end = Some(self.lines_len());
+        self.hidden_edges_end = Some(self.hidden_len());
     }
 
     /// Where the body being written ended its edge lines, when it said so
@@ -879,6 +892,7 @@ impl BlockBuilder {
     /// it can be left out of a view it is not in).
     pub fn begin_body(&mut self) {
         self.edges_end = None;
+        self.hidden_edges_end = None;
         let at = u32::try_from(self.vertices.len() / TRI_SIZE).unwrap_or(u32::MAX);
         self.spanning = Some((at, [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]]));
     }
@@ -1240,6 +1254,103 @@ pub struct Frame {
     pub sky: [f32; 4],
     /// Bodies being dragged (a component's Move triad), drawn moved; `None`: none.
     pub moving: Option<MovingLayer>,
+    /// Some bodies' edges as the view sees them, drawn in place of their lines in the model
+    /// scene's blocks while it is the scene they were made for; `None`: the blocks' lines.
+    pub edge_layer: Option<Arc<EdgeLayer>>,
+}
+
+/// Model edges whose visible and hidden stretches were worked out for one view (from the exact
+/// faces, off the window thread): drawn instead of the lines the model scene's blocks hold for
+/// the same bodies, while [`Frame::key`] is [`EdgeLayer::scene_key`].
+#[derive(Debug, Default)]
+pub struct EdgeLayer {
+    /// The model scene the replaced ranges index ([`Frame::key`]).
+    pub scene_key: u64,
+    /// Line records ([`LINE_SIZE`] bytes each) of the visible stretches.
+    pub lines: Vec<u8>,
+    /// Line records of the hidden stretches, for a style that shows hidden edges.
+    pub hidden: Vec<u8>,
+    /// The block lines these replace: by block, ranges of its lines and of its hidden lines.
+    pub replaced: Vec<ReplacedLines>,
+}
+
+impl EdgeLayer {
+    /// A visible stretch's line.
+    pub fn line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32) {
+        self.lines.extend_from_slice(&line_record(a, b, c, width.to_bits()));
+    }
+
+    /// A hidden stretch's line.
+    pub fn hidden_line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32) {
+        self.hidden.extend_from_slice(&line_record(a, b, c, width.to_bits()));
+    }
+}
+
+/// One body's share of a block's lines that an [`EdgeLayer`] draws instead.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReplacedLines {
+    /// The block's key ([`SceneBlock::key`]).
+    pub block: u64,
+    /// Its range of the block's lines and of its hidden lines (by line).
+    pub lines: std::ops::Range<u32>,
+    pub hidden: std::ops::Range<u32>,
+}
+
+/// An [`EdgeLayer`] on the GPU: its lines, and the block ranges it replaces by block (sorted).
+struct EdgeLayerGpu {
+    layer: Arc<EdgeLayer>,
+    lines: Option<Batch>,
+    hidden: Option<Batch>,
+    skip_lines: std::collections::HashMap<u64, Vec<std::ops::Range<u32>>>,
+    skip_hidden: std::collections::HashMap<u64, Vec<std::ops::Range<u32>>>,
+}
+
+impl EdgeLayerGpu {
+    fn new(device: &wgpu::Device, layer: Arc<EdgeLayer>) -> EdgeLayerGpu {
+        let mut skip_lines: std::collections::HashMap<u64, Vec<std::ops::Range<u32>>> = std::collections::HashMap::new();
+        let mut skip_hidden: std::collections::HashMap<u64, Vec<std::ops::Range<u32>>> = std::collections::HashMap::new();
+        for r in &layer.replaced {
+            skip_lines.entry(r.block).or_default().push(r.lines.clone());
+            skip_hidden.entry(r.block).or_default().push(r.hidden.clone());
+        }
+        for list in skip_lines.values_mut().chain(skip_hidden.values_mut()) {
+            list.retain(|r| !r.is_empty());
+            list.sort_by_key(|r| r.start);
+        }
+        EdgeLayerGpu {
+            lines: upload(device, "sc_edge_layer", &layer.lines, LINE_SIZE),
+            hidden: upload(device, "sc_edge_layer_hidden", &layer.hidden, LINE_SIZE),
+            layer,
+            skip_lines,
+            skip_hidden,
+        }
+    }
+}
+
+/// Draw `b`'s lines (instances) except those in `skip` (sorted, by line).
+fn lines_except(pass: &mut wgpu::RenderPass<'static>, b: &Batch, skip: &[std::ops::Range<u32>], tally: &Tally) {
+    let mut at = 0u32;
+    for (buffer, count) in &b.parts {
+        let end = at.saturating_add(*count);
+        let mut from = at;
+        let mut bound = false;
+        let mut draw = |pass: &mut wgpu::RenderPass<'static>, a: u32, z: u32| {
+            if a < z {
+                if !bound {
+                    pass.set_vertex_buffer(0, buffer.slice(..));
+                    bound = true;
+                }
+                pass.draw(0..6, a - at..z - at);
+                tally.segments(z - a);
+            }
+        };
+        for r in skip.iter().filter(|r| r.end > at && r.start < end) {
+            draw(pass, from, r.start.max(from).min(end));
+            from = from.max(r.end.min(end));
+        }
+        draw(pass, from, end);
+        at = end;
+    }
 }
 
 /// The bodies a component's Move triad drags: a scene of their own, built once where the drag
@@ -2003,6 +2114,9 @@ struct Batches {
     blocks_culled_for: Option<[[f32; 4]; 4]>,
     lines: Option<Batch>,
     hidden: Option<Batch>,
+    /// The scene's own lines and hidden lines (`lines` and `hidden` without the blocks').
+    own_lines: Option<Batch>,
+    own_hidden: Option<Batch>,
     overlays: Option<Batch>,
     ghost: Option<Batch>,
     xray: Option<Batch>,
@@ -2174,8 +2288,10 @@ impl Batches {
             self.guide_trans = own("sc_guide_trans", &sc.guide_trans, TRI_SIZE);
             self.guide_lines = own("sc_guide_lines", &sc.guide_lines, LINE_SIZE);
             let blocks: Vec<&BlockGpu> = self.block_order.iter().filter_map(|k| self.blocks.get(k)).collect();
-            self.lines = joined(blocks.iter().map(|b| &b.lines), own_lines);
-            self.hidden = joined(blocks.iter().map(|b| &b.hidden), own_hidden);
+            self.lines = joined(blocks.iter().map(|b| &b.lines), own_lines.clone());
+            self.hidden = joined(blocks.iter().map(|b| &b.hidden), own_hidden.clone());
+            self.own_lines = own_lines;
+            self.own_hidden = own_hidden;
             // Without order-independent transparency one global glass stream is sorted per view,
             // so cross-body blend order is kept; the blocks' glass triangles join it here. With
             // OIT the blocks draw their own runs and nothing is sorted. A stream made of the same
@@ -2548,6 +2664,8 @@ pub struct Renderer {
     line: wgpu::RenderPipeline,
     /// Lines behind the model (depth test >).
     line_hidden: wgpu::RenderPipeline,
+    /// [`EdgeLayer::hidden`]'s lines: drawn without a depth test.
+    line_hidden_known: wgpu::RenderPipeline,
     /// The scene's own lines in another colour and width ([`LitEdges`], `vs_line_lit`), where
     /// they are seen and where the model hides them.
     line_lit: wgpu::RenderPipeline,
@@ -2569,6 +2687,8 @@ pub struct Renderer {
     moving_uniform: wgpu::Buffer,
     moving_bind: wgpu::BindGroup,
     moving_on: bool,
+    /// [`Frame::edge_layer`] on the GPU, kept while the frames bring the same layer.
+    edge_layer: Option<EdgeLayerGpu>,
     product: Batches,
     empty: Batches,
     sketch: Batches,
@@ -3504,6 +3624,9 @@ impl Renderer {
                 pipeline("sc_lines_hidden", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
                 pipeline("sc_lines_lit", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
                 pipeline("sc_lines_lit_hidden", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
+                // An edge layer's hidden stretches: known hidden from the exact faces, so drawn
+                // whatever the depth buffer holds there.
+                pipeline("sc_lines_hidden_known", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
             )
         };
         let lines_all = || {
@@ -3554,7 +3677,7 @@ impl Renderer {
                 tri_hl_planned,
             ) = see_through_tris.join();
             let ((glass_far_flat, glass_near_flat, trans_flat), tri_hl_instanced_flat) = see_through_flat.join();
-            let (line, line_hidden, line_lit, line_lit_hidden) = lines.join();
+            let (line, line_hidden, line_lit, line_lit_hidden, line_hidden_known) = lines.join();
             let (overlay, guide_line) = lines_all.join();
             let (ss_blit, copy_blit, ss_filter) = blits.join();
             let (depth_reset, section_stencil) = resets.join();
@@ -3633,6 +3756,7 @@ impl Renderer {
                 xray,
                 line,
                 line_hidden,
+                line_hidden_known,
                 line_lit,
                 line_lit_hidden,
                 overlay,
@@ -3647,6 +3771,7 @@ impl Renderer {
                 moving_uniform,
                 moving_bind,
                 moving_on: false,
+                edge_layer: None,
                 product: Batches::default(),
                 empty: Batches::default(),
                 sketch: Batches::default(),
@@ -3973,6 +4098,8 @@ pub fn frame_key(cb: &Frame) -> u64 {
     cb.ao_radius.to_bits().hash(&mut h);
     cb.ao_samples.hash(&mut h);
     cb.ssaa.to_bits().hash(&mut h);
+    // The edges worked out for the view, while they are drawn.
+    cb.edge_layer.as_ref().filter(|l| l.scene_key == cb.key).map(|l| Arc::as_ptr(l) as usize).hash(&mut h);
     // A drag's layer: the scene it holds and where it is drawn.
     match &cb.moving {
         Some(m) => {
@@ -4089,6 +4216,14 @@ impl Renderer {
             None => {}
         }
         uploads.push(res.sketch.take(device, queue, &res.uniform, &res.uniform_bgl, cb.sketch_key, &cb.sketch_slot, None, oit));
+        // The edge layer, uploaded once for as long as frames bring it for this scene.
+        if !cb.product {
+            match cb.edge_layer.as_ref().filter(|l| l.scene_key == cb.key) {
+                Some(l) if res.edge_layer.as_ref().is_some_and(|g| Arc::ptr_eq(&g.layer, l)) => {}
+                Some(l) => res.edge_layer = Some(EdgeLayerGpu::new(device, l.clone())),
+                None => res.edge_layer = None,
+            }
+        }
         // The highlight evaluates plans of its own where the model has none to draw again (in
         // Wireframe, a whole lit body's faces).
         let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
@@ -4515,13 +4650,34 @@ impl Renderer {
         // under part of its own width; drawn after, its light hidden copy covered the visible
         // edge beside it there with a light line.
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
-        lines(pass, &res.line_hidden, &m.hidden);
+        // The model's edges: the blocks' lines, but for the bodies an edge layer made for this
+        // scene draws as the view sees them.
+        let layer = res.edge_layer.as_ref().filter(|g| !cb.product && g.layer.scene_key == cb.key);
+        let model_lines = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, hidden: bool| {
+            let Some(g) = layer else {
+                lines(pass, p, if hidden { &m.hidden } else { &m.lines });
+                return;
+            };
+            pass.set_pipeline(p);
+            for key in &m.block_order {
+                let Some(batch) = m.blocks.get(key).and_then(|b| if hidden { b.hidden.as_ref() } else { b.lines.as_ref() }) else { continue };
+                let skip = if hidden { &g.skip_hidden } else { &g.skip_lines };
+                lines_except(pass, batch, skip.get(key).map_or(&[][..], Vec::as_slice), tally);
+            }
+            lines(pass, p, if hidden { &m.own_hidden } else { &m.own_lines });
+            if hidden {
+                lines(pass, &res.line_hidden_known, &g.hidden);
+            } else {
+                lines(pass, p, &g.lines);
+            }
+        };
+        model_lines(pass, &res.line_hidden, true);
         in_moving(pass, &|pass, mv| lines(pass, &res.line_hidden, &mv.hidden));
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
         lit_lines(pass, &res.line_lit_hidden, &m.blocks, &h.lit_edges, |e| e.hidden, tally);
         lines(pass, &res.line_hidden, &h.hidden);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
-        lines(pass, &res.line, &m.lines);
+        model_lines(pass, &res.line, false);
         in_moving(pass, &|pass, mv| lines(pass, &res.line, &mv.lines));
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         lines(pass, &res.line, &sk.lines);
@@ -5363,6 +5519,7 @@ mod tests {
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,
+            edge_layer: None,
             outline: false,
             eye: [0.0; 4],
             ao_radius: 0.0,
@@ -5957,6 +6114,7 @@ mod glass_tests {
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,
+            edge_layer: None,
         };
         let texture = |format, usage, sample_count| {
             device.create_texture(&wgpu::TextureDescriptor {
@@ -6151,6 +6309,7 @@ mod glass_tests {
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,
+            edge_layer: None,
             outline: false,
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,

@@ -110,6 +110,11 @@ impl PlacedMesh {
         Some(Arc::new(self.moved(&source)))
     }
 
+    /// The definition's exact body (shared by every placement of it) and this placement.
+    pub(super) fn source_body(&self) -> (&Body, crate::Mat) {
+        (&self.body, self.transform)
+    }
+
     /// The definition's reference mesh (shared by every placement of it) and this placement.
     pub(super) fn source_mesh(&self) -> (Arc<Mesh>, crate::Mat) {
         (reference_mesh(&self.body, &self.mesh, self.tolerance), self.transform)

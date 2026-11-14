@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex};
 
 use egui_wgpu::wgpu;
 pub use solidcraft_viewport_gpu::view::{
-    AccessMap, BlockBuilder, BlockBytes, BlockTris, DrawStats, DrawStatsHandle, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook,
-    InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_PALETTE, Material, MovingLayer, PBR_SIZE, Palette, PaletteIndex, PlannedBody, Renderer,
-    SHARED_SIZE, SceneBlock, SceneSlot, SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width, lit_line_style,
-    placement_scale, runs_within, supersampled_size,
+    AccessMap, BlockBuilder, BlockBytes, BlockTris, DrawStats, DrawStatsHandle, EdgeLayer, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE,
+    InstanceLook, InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_PALETTE, Material, MovingLayer, PBR_SIZE, Palette, PaletteIndex, PlannedBody,
+    Renderer, ReplacedLines, SHARED_SIZE, SceneBlock, SceneSlot, SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width,
+    lit_line_style, placement_scale, runs_within, supersampled_size,
 };
 
 /// The part of a picture (as texture coordinates) that `rect` shows in a window `window`: the
@@ -702,6 +702,7 @@ fn offscreen(
         selection_tint: [0.0; 3],
         hatch: Default::default(),
         moving: None,
+        edge_layer: None,
     });
     let texture = |format, usage| {
         device.create_texture(&wgpu::TextureDescriptor {

@@ -3706,6 +3706,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             },
             hatch: Default::default(),
             moving: None,
+            edge_layer: None,
         };
         if feedback {
             ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, solidcraft_viewport_egui::ProductHighlightCallback(frame)));

@@ -2870,3 +2870,102 @@ fn a_traced_rim_is_drawn_on_the_true_intersection_or_refused() {
     let off = prepare(&traced(11.), &o).err();
     assert!(matches!(off, Some(HlrError::Unsupported("surface intersection curve"))), "{off:?}");
 }
+
+/// The visible and hidden stretches of edge `edge` of placement `placement` seen from `eye`,
+/// sampled every `step` millimetres, with every placement's faces hiding.
+fn seen_pieces(defs: &[Prepared], scene: &[Placement], placement: usize, edge: usize, eye: occlusion::Eye, step: f64) -> occlusion::EdgePieces {
+    let defs: Vec<&Prepared> = defs.iter().collect();
+    let occluders = occlusion::Occluders::new(&defs, scene, &vec![true; scene.len()], &never).unwrap();
+    occluders.edge_pieces(placement, edge, eye, &|_| step, &never).unwrap()
+}
+
+/// Total parameter length of some ranges.
+fn spanned(ranges: &[[f64; 2]]) -> f64 {
+    ranges.iter().map(|r| r[1] - r[0]).sum()
+}
+
+#[test]
+fn a_box_in_front_hides_the_middle_of_an_edge_from_an_interactive_view_and_is_seen_whole() {
+    let back = prepare(&cuboid([0.; 3], [1.; 3]), &Options::default()).unwrap();
+    let front = prepare(&cuboid([0.5, -2., 0.25], [1.5, -1., 0.75]), &Options::default()).unwrap();
+    let defs = [back, front];
+    let scene = [identity(0, [0.; 3]), identity(1, [0.; 3])];
+    // Looking along +y, from far away and from an eye in line with the edge.
+    // From the eye the front box's near face (y = -2, z from 0.25 to 0.75) covers 50/48 as much
+    // of the edge (at y = 0) about the eye's height.
+    let wide = 0.25 * 50. / 48.;
+    for (eye, half) in [(occlusion::Eye::Along(Vec3::new(0., 1., 0.)), 0.25), (occlusion::Eye::At(Vec3::new(1., -50., 0.5)), wide)] {
+        // Edge 9 of the back box runs from (1,0,0) to (1,0,1): its parameter is z.
+        let back = seen_pieces(&defs, &scene, 0, 9, eye, 0.01);
+        assert_eq!(back.hidden.len(), 1, "{eye:?}: {back:?}");
+        let [a, b] = back.hidden[0];
+        assert!((a - (0.5 - half)).abs() < 1e-3 && (b - (0.5 + half)).abs() < 1e-3, "{eye:?}: {back:?}");
+        assert!(back.visible.len() == 2 && (spanned(&back.visible) - (1. - 2. * half)).abs() < 1e-3, "{eye:?}: {back:?}");
+        // The front box's edges on its face toward the viewer (y = -2): 0, 2, 8 and 9.
+        for edge in [0, 2, 8, 9] {
+            let front = seen_pieces(&defs, &scene, 1, edge, eye, 0.01);
+            assert!(front.hidden.is_empty() && front.visible == vec![[0., 1.]], "{eye:?}, edge {edge}: {front:?}");
+        }
+    }
+}
+
+#[test]
+fn an_edge_just_under_another_bodys_face_is_hidden() {
+    // A part whose top lies 0.4 mm under a wider panel, seen from above.
+    let part = prepare(&cuboid([0., 0., 0.], [10., 10., 1.]), &Options::default()).unwrap();
+    let panel = prepare(&cuboid([-5., -5., 1.4], [15., 15., 2.4]), &Options::default()).unwrap();
+    let defs = [part, panel];
+    let scene = [identity(0, [0.; 3]), identity(1, [0.; 3])];
+    let d = Vec3::new(0.3, 0.2, -1.);
+    // The part's edges round its top face: 2, 3, 6 and 7.
+    for edge in [2, 3, 6, 7] {
+        let got = seen_pieces(&defs, &scene, 0, edge, occlusion::Eye::Along(d), 0.05);
+        assert!(got.visible.is_empty() && got.hidden == vec![[0., 1.]], "edge {edge}: {got:?}");
+    }
+    // Without the panel they are seen.
+    let alone = seen_pieces(&defs[..1], &scene[..1], 0, 3, occlusion::Eye::Along(d), 0.05);
+    assert!(alone.hidden.is_empty(), "{alone:?}");
+}
+
+#[test]
+fn an_edge_behind_a_small_round_face_of_its_own_body_is_hidden_to_its_silhouette() {
+    // A rod of radius 2 seen from slightly above: its own exact round side hides the far half of
+    // its bottom circle (edge 0, angle 0 to 2π, the far half from 0 to π), however finely the
+    // side would be drawn.
+    let rod = prepare(&cylinder(2., 10.), &Options::default()).unwrap();
+    let defs = [rod];
+    let scene = [identity(0, [0.; 3])];
+    let pi = std::f64::consts::PI;
+    for eye in [occlusion::Eye::Along(Vec3::new(0., 1., -0.3)), occlusion::Eye::At(Vec3::new(0., -200., 60.))] {
+        let got = seen_pieces(&defs, &scene, 0, 0, eye, 0.02);
+        assert_eq!(got.hidden.len(), 1, "{eye:?}: {got:?}");
+        let [a, b] = got.hidden[0];
+        // Near the silhouette the side is less than the touch tolerance above the circle.
+        assert!(a > 0. && a < 0.05 * pi && b < pi && b > 0.95 * pi, "{eye:?}: {got:?}");
+        assert!(spanned(&got.visible) > pi, "{eye:?}: {got:?}");
+    }
+}
+
+#[test]
+fn an_edge_resting_on_another_bodys_face_is_seen() {
+    // A small block sunk 5 µm into a plate, seen from above at an angle: its bottom edges toward
+    // the viewer lie on the plate's top face and are drawn; those behind it are hidden by the
+    // block itself.
+    let plate = prepare(&cuboid([-10., -10., -1.], [10., 10., 0.]), &Options::default()).unwrap();
+    let block = prepare(&cuboid([0., 0., -0.005], [2., 2., 1.995]), &Options::default()).unwrap();
+    let defs = [plate, block];
+    let scene = [identity(0, [0.; 3]), identity(1, [0.; 3])];
+    let d = Vec3::new(1., 1., -1.);
+    for eye in [occlusion::Eye::Along(d), occlusion::Eye::At(Vec3::new(-40., -40., 40.))] {
+        // Bottom edges 0 (y = 0) and 4 (x = 0) face the viewer.
+        for edge in [0, 4] {
+            let got = seen_pieces(&defs, &scene, 1, edge, eye, 0.01);
+            assert!(got.hidden.is_empty() && got.visible == vec![[0., 1.]], "{eye:?}, edge {edge}: {got:?}");
+        }
+        // Bottom edges 1 (y = 2) and 5 (x = 2) are behind the block, all but their near ends.
+        for edge in [1, 5] {
+            let got = seen_pieces(&defs, &scene, 1, edge, eye, 0.01);
+            assert!(spanned(&got.hidden) > 0.95, "{eye:?}, edge {edge}: {got:?}");
+        }
+    }
+}

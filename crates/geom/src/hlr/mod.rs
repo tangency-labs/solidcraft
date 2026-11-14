@@ -15,6 +15,7 @@
 //! [`crate::section`]. See `docs/drawing-hlr.md` for the contract and its measured limits.
 
 pub(crate) mod curve;
+pub mod occlusion;
 mod silhouette;
 pub(crate) mod surface;
 mod trim;
@@ -80,7 +81,8 @@ impl Placement {
     fn local(&self, p: Vec3) -> Vec3 {
         self.local_dir(p - self.translation)
     }
-    fn rigid(&self) -> bool {
+    /// Whether the placement is a rotation and a translation (the only ones hidden lines take).
+    pub fn rigid(&self) -> bool {
         let [a, b, c] = self.rotation;
         [a, b, c].iter().all(|v| v.is_finite() && (v.len() - 1.).abs() < 1e-9)
             && a.dot(b).abs() < 1e-9
@@ -148,6 +150,13 @@ pub struct PrepareReport {
     pub max_trim_chord: f64,
     /// Faces outside the supported subset (see [`Options::freeform`]).
     pub freeform_faces: Vec<usize>,
+}
+
+impl Prepared {
+    /// The body's box where it was modelled (its faces' boxes, curved faces by their surfaces').
+    pub fn bounds(&self) -> (Vec3, Vec3) {
+        (self.lo + self.offset, self.hi + self.offset)
+    }
 }
 
 /// Whether two recognised surfaces are the same quadric or torus (planes never: coplanar

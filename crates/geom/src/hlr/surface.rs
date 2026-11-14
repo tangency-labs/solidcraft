@@ -37,7 +37,16 @@ pub(crate) struct Nurbs {
     g: usize,
     /// `(g+1)²` samples, u fastest.
     grid: Vec<Vec3>,
+    /// Each grid cell's corners' box grown by a quarter of its largest side (cells row by row,
+    /// u fastest): where a ray is looked for in the cell.
+    cells: Vec<(Vec3, Vec3)>,
+    /// Blocks of [`CELL_BLOCK`] by [`CELL_BLOCK`] cells: their cells' boxes' box, and the first
+    /// cell's grid position.
+    blocks: Vec<(Vec3, Vec3, [usize; 2])>,
 }
+
+/// Cells to a side of a [`Nurbs::blocks`] block.
+const CELL_BLOCK: usize = 8;
 
 #[derive(Clone, Debug)]
 pub(crate) enum S3 {
@@ -1115,7 +1124,7 @@ impl Nurbs {
         let s = NurbsSurface::from_homogeneous([pu, pv], [u.to_vec(), v.to_vec()], ctrl).map_err(|_| HlrError::Unsupported("spline surface"))?;
         let dom = s.domain();
         let g = (4 * nu.max(nv)).clamp(16, 64);
-        let mut n = Nurbs { s, dom, g, grid: Vec::new() };
+        let mut n = Nurbs { s, dom, g, grid: Vec::new(), cells: Vec::new(), blocks: Vec::new() };
         let mut grid = Vec::with_capacity((g + 1) * (g + 1));
         for j in 0..=g {
             for i in 0..=g {
@@ -1125,7 +1134,34 @@ impl Nurbs {
         if grid.iter().any(|p| !p.is_finite()) {
             return Err(HlrError::Unsupported("spline surface evaluation"));
         }
+        let mut cells = Vec::with_capacity(g * g);
+        for j in 0..g {
+            for i in 0..g {
+                let corners = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)].map(|(a, b)| grid.get(b * (g + 1) + a).copied().unwrap_or(Vec3::ZERO));
+                let (lo, hi) = corners.iter().fold((corners[0], corners[0]), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+                let d = hi - lo;
+                let pad = 0.25 * d.x.max(d.y).max(d.z);
+                cells.push((lo - Vec3::new(pad, pad, pad), hi + Vec3::new(pad, pad, pad)));
+            }
+        }
+        let mut blocks = Vec::new();
+        for bj in (0..g).step_by(CELL_BLOCK) {
+            for bi in (0..g).step_by(CELL_BLOCK) {
+                let (mut lo, mut hi) = (Vec3::new(f64::MAX, f64::MAX, f64::MAX), Vec3::new(f64::MIN, f64::MIN, f64::MIN));
+                for j in bj..(bj + CELL_BLOCK).min(g) {
+                    for i in bi..(bi + CELL_BLOCK).min(g) {
+                        if let Some((a, b)) = cells.get(j * g + i) {
+                            lo = lo.min(*a);
+                            hi = hi.max(*b);
+                        }
+                    }
+                }
+                blocks.push((lo, hi, [bi, bj]));
+            }
+        }
         n.grid = grid;
+        n.cells = cells;
+        n.blocks = blocks;
         Ok(n)
     }
 
@@ -1196,53 +1232,54 @@ impl Nurbs {
         let q2 = |p: Vec3| [(p - p0).dot(ep), (p - p0).dot(eq)];
         let g = self.g;
         let start = out.len();
-        let proj: Vec<[f64; 2]> = self.grid.iter().map(|p| q2(*p)).collect();
-        for j in 0..g {
-            for i in 0..g {
-                let corners = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)];
-                let pts: Vec<[f64; 2]> = corners.iter().filter_map(|(a, b)| proj.get(b * (g + 1) + a).copied()).collect();
-                let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
-                for p in &pts {
-                    lo = [lo[0].min(p[0]), lo[1].min(p[1])];
-                    hi = [hi[0].max(p[0]), hi[1].max(p[1])];
-                }
-                let pad = 0.25 * ((hi[0] - lo[0]).max(hi[1] - lo[1]));
-                if lo[0] - pad > 0. || hi[0] + pad < 0. || lo[1] - pad > 0. || hi[1] + pad < 0. {
-                    continue;
-                }
-                let (a, b) = (self.grid_uv(i, j), self.grid_uv(i + 1, j + 1));
-                let mut uv = [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])];
-                let mut ok = false;
-                for _ in 0..40 {
-                    let p = self.point(uv);
-                    let f = q2(p);
-                    let (su, sv) = self.partials(uv);
-                    let (j11, j12, j21, j22) = (su.dot(ep), sv.dot(ep), su.dot(eq), sv.dot(eq));
-                    let det = j11 * j22 - j12 * j21;
-                    if det.abs() <= 1e-300 {
-                        break;
-                    }
-                    let du = (f[0] * j22 - f[1] * j12) / det;
-                    let dv = (f[1] * j11 - f[0] * j21) / det;
-                    uv = self.clamp([uv[0] - du, uv[1] - dv]);
-                    if du.abs() + dv.abs() <= 1e-14 * (1. + uv[0].abs() + uv[1].abs()) {
-                        let r = q2(self.point(uv));
-                        ok = r[0].abs() + r[1].abs() <= 1e-9 * (1. + self.size_hint());
-                        break;
+        // Only cells whose grown box the ray passes through within `range`, found block by block.
+        let meets = |lo: &Vec3, hi: &Vec3| super::slab(p0, d, *lo, *hi).is_some_and(|[a, b]| a <= range[1] && b >= range[0]);
+        let mut candidates = Vec::new();
+        for (blo, bhi, [bi, bj]) in &self.blocks {
+            if !meets(blo, bhi) {
+                continue;
+            }
+            for j in *bj..(bj + CELL_BLOCK).min(g) {
+                for i in *bi..(bi + CELL_BLOCK).min(g) {
+                    if self.cells.get(j * g + i).is_some_and(|(lo, hi)| meets(lo, hi)) {
+                        candidates.push((i, j));
                     }
                 }
-                // Keep roots inside this cell (with slack) so neighbouring cells don't repeat them.
-                let slack = [(b[0] - a[0]) * 1e-6, (b[1] - a[1]) * 1e-6];
-                if !ok || uv[0] < a[0] - slack[0] || uv[0] > b[0] + slack[0] || uv[1] < a[1] - slack[1] || uv[1] > b[1] + slack[1] {
-                    continue;
-                }
+            }
+        }
+        for (i, j) in candidates {
+            let (a, b) = (self.grid_uv(i, j), self.grid_uv(i + 1, j + 1));
+            let mut uv = [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])];
+            let mut ok = false;
+            for _ in 0..40 {
                 let p = self.point(uv);
-                let lam = (p - p0).dot(d);
-                if lam >= range[0] && lam <= range[1] && !out.iter().skip(start).any(|h| (h.lam - lam).abs() <= 1e-9 * (1. + lam)) {
-                    let (su, sv) = self.partials(uv);
-                    let grazing = su.cross(sv).normalized().is_none_or(|n| n.dot(d).abs() < 1e-6);
-                    out.push(Hit { lam, uv, grazing });
+                let f = q2(p);
+                let (su, sv) = self.partials(uv);
+                let (j11, j12, j21, j22) = (su.dot(ep), sv.dot(ep), su.dot(eq), sv.dot(eq));
+                let det = j11 * j22 - j12 * j21;
+                if det.abs() <= 1e-300 {
+                    break;
                 }
+                let du = (f[0] * j22 - f[1] * j12) / det;
+                let dv = (f[1] * j11 - f[0] * j21) / det;
+                uv = self.clamp([uv[0] - du, uv[1] - dv]);
+                if du.abs() + dv.abs() <= 1e-14 * (1. + uv[0].abs() + uv[1].abs()) {
+                    let r = q2(self.point(uv));
+                    ok = r[0].abs() + r[1].abs() <= 1e-9 * (1. + self.size_hint());
+                    break;
+                }
+            }
+            // Keep roots inside this cell (with slack) so neighbouring cells don't repeat them.
+            let slack = [(b[0] - a[0]) * 1e-6, (b[1] - a[1]) * 1e-6];
+            if !ok || uv[0] < a[0] - slack[0] || uv[0] > b[0] + slack[0] || uv[1] < a[1] - slack[1] || uv[1] > b[1] + slack[1] {
+                continue;
+            }
+            let p = self.point(uv);
+            let lam = (p - p0).dot(d);
+            if lam >= range[0] && lam <= range[1] && !out.iter().skip(start).any(|h| (h.lam - lam).abs() <= 1e-9 * (1. + lam)) {
+                let (su, sv) = self.partials(uv);
+                let grazing = su.cross(sv).normalized().is_none_or(|n| n.dot(d).abs() < 1e-6);
+                out.push(Hit { lam, uv, grazing });
             }
         }
     }

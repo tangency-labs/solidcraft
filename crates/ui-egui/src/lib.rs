@@ -205,6 +205,7 @@ mod blend_dialog_tests;
 mod boundary_dialog_tests;
 pub(crate) mod display_lod;
 pub(crate) mod edge_detail;
+pub(crate) mod exact_edges;
 #[cfg(test)]
 mod file_load_ui_tests;
 #[cfg(test)]

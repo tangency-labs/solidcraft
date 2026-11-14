@@ -369,6 +369,16 @@ impl ModelBody {
         Some(crate::mat_mul(&now, &crate::mat_inverse(&was)?))
     }
 
+    /// The exact body [`ModelBody::mesh_in_place`]'s mesh is made from and the move that places
+    /// it here: a rigidly placed copy's definition (shared by every placement of it, its edges
+    /// numbered as the mesh's), else this body where it stands.
+    pub fn body_in_place(&self) -> (&Body, crate::Mat) {
+        match self.mesh_placement.as_deref() {
+            Some(placed) => placed.source_body(),
+            None => (&self.body, crate::IDENTITY),
+        }
+    }
+
     /// [`ModelBody::mesh`] as a shared mesh and the move that places it: for a rigid placement
     /// of a definition, the definition's own mesh (the same one for every placement of it) and
     /// the placement; for any other body its own mesh, unmoved. The mesh moved by the matrix is
