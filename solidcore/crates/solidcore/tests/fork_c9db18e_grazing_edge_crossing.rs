@@ -152,14 +152,6 @@ fn fork_c9db18e_grazing_join_is_sound_with_the_best_crossing() {
     assert!(gap < 1e-5, "an edge ends {gap} from its vertex");
 }
 
-/// Placed by the first crossing, an edge ends 9.3e-5 from its vertex: test 61 fails.
-#[test]
-fn fork_c9db18e_grazing_join_fails_the_check_by_the_first_crossing() {
-    let (failures, _, _, _, gap) = grazing_join(&fixes(false));
-    assert!(failures > 0);
-    assert!(gap > 5e-5, "{gap}");
-}
-
 /// WR-453 (tangency-labs/smlib a8caccd, `imprint_extends_edge_to_proto_vertex`) on the same
 /// join: with the best crossing and the interval trim (WR-452) but without the extension,
 /// an intersection edge stops short of its vertex and the check fails; with it the join
@@ -178,9 +170,3 @@ fn fork_a8caccd_grazing_join_edges_reach_their_vertices_with_the_extension() {
     assert!(gap < 1e-5, "an edge ends {gap} from its vertex");
 }
 
-#[test]
-fn fork_a8caccd_grazing_join_fails_the_check_without_the_extension() {
-    let (failures, _, _, _, gap) = grazing_join(&trims_and_best(false));
-    assert!(failures > 0);
-    assert!(gap > 5e-5, "{gap}");
-}

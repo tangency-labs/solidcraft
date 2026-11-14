@@ -10,7 +10,8 @@
 //! `offset_extension_as_itself` (the least set under which it shows; any one of them off and the
 //! round builds), the arc's round followed by the front edge's fails in the rollover
 //! (`SM_ERR_NULL_POINTER` from `blend::fillet_solver::p5`) and noted nothing: code 0 and no
-//! comment. It now notes `SM_FILERR_EDGE_PROBLEM` (4) with what failed.
+//! comment. It noted `SM_FILERR_EDGE_PROBLEM` (4) with what failed; with every correction on
+//! (the default) that round builds, so the pair no longer fails.
 //!
 //! A round that fails after it has edited the body puts the body back as it came in: two of the
 //! three join edges of two cylinders joined at an angle.
@@ -308,22 +309,6 @@ fn every_failure_notes_its_status() {
             );
         }
     }
-}
-
-/// With the three fixes the arc's round followed by the front edge's fails in the rollover and
-/// notes it: `SM_FILERR_EDGE_PROBLEM` with what failed, not code 0.
-#[test]
-fn the_rollover_failure_notes_its_status() {
-    let failed = failures(arc_top(), LONG);
-    let (which, code, comment, _) = failed
-        .first()
-        .expect("the second round fails with the three fixes");
-    assert_eq!(*which, "second");
-    assert_eq!(*code, 4, "{comment}");
-    assert!(
-        comment.starts_with("Fillet Surface Computation Failure: "),
-        "{comment}"
-    );
 }
 
 /// Every vertex's point and tolerance; every edge's tolerance, its curve's points at the start,

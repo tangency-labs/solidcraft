@@ -49,8 +49,9 @@ fn half_arc(k: &Kernel, start: f64, end: f64) -> Curve {
     Curve::from(Ellipse::create_canonical_circle(k, &frame, R, Some(&interval), None).unwrap())
 }
 
-/// A cylinder r 30, z -6..0, joined to a disc r 30, z 0..5 extruded from two half arcs,
-/// with the slit between the halves left (`boolean_cleanup_removes_slits` off).
+/// A cylinder r 30, z -6..0, joined to a disc r 30, z 0..5 extruded from two half arcs. The
+/// union removes the slit between the halves itself (`boolean_cleanup_removes_slits`, on by
+/// default, #1120), so the merged wall keeps only its seam.
 fn joined(k: &mut Kernel) -> Brep {
     let flange = create_cylinder(k, Point3::new(0.0, 0.0, -6.0), R, 6.0).unwrap();
     let a = half_arc(k, 0.0, 180.0);
@@ -106,12 +107,12 @@ fn cleaned() -> ((usize, usize), (usize, usize), f64) {
 }
 
 #[test]
-fn wr602_input_slit_removed_seam_kept() {
+fn wr602_clean_up_keeps_the_seam_the_union_left() {
     let (before, after, v) = cleaned();
-    // The merged wall has its seam and the slit.
-    assert!(before.0 >= 2, "{before:?}");
-    assert_eq!(after.0, before.0 - 1, "the slit goes, the seam stays");
-    assert_eq!(after.1, before.1 - 1, "no other edge goes");
+    // The union left the merged wall its seam alone (the slit already removed): the clean-up
+    // that keeps the input keeps it and every other edge.
+    assert_eq!(before.0, 1, "{before:?}");
+    assert_eq!(after, before, "the seam stays, no edge goes");
     let want = core::f64::consts::PI * R * R * 11.0;
     assert!((v - want).abs() <= 1e-6 * want, "volume {v}, want {want}");
 }

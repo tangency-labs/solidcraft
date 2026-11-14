@@ -208,17 +208,10 @@ fn a_face_edited_mid_session_classifies_against_its_new_trims() {
     );
 }
 
-/// The classification of `p` in `b`, its region or face and whether it failed.
-fn classified(k: &Kernel, b: &mut Brep, p: Point3, boundaries: bool) -> String {
-    match BrepQuery::of_brep(b).point_3d_classify(k, b, p, 1e-6, boundaries) {
-        Ok(pc) => format!("{:?} {:?}", pc.point_class(), pc.object()),
-        Err(e) => format!("error {e:?}"),
-    }
-}
 
 /// While editing, a face whose loop does not close has no boundary to implant: with the
 /// fix, a classification whose ray meets it is refused naming the face, not answered
-/// against its untrimmed surface. Without the fix, upstream's answer is unchanged.
+/// against its untrimmed surface.
 #[test]
 fn an_open_loop_mid_edit_is_refused_naming_its_face() {
     let broken = |k: &mut Kernel| {
@@ -245,9 +238,7 @@ fn an_open_loop_mid_edit_is_refused_naming_its_face() {
         (b, side)
     };
     let mut k = kernel();
-    let mut upstream = Kernel::default();
     let (mut b, side) = broken(&mut k);
-    let (mut c, _) = broken(&mut upstream);
     // the region's ray fires and the boundary solve
     for boundaries in [false, true] {
         let p = Point3::new(0.0, 0.0, 5.0);
@@ -259,8 +250,6 @@ fn an_open_loop_mid_edit_is_refused_naming_its_face() {
             ),
             "{refused:?}"
         );
-        let unflagged = classified(&upstream, &mut c, p, boundaries);
-        assert!(!unflagged.starts_with("error"), "{unflagged}");
     }
 }
 

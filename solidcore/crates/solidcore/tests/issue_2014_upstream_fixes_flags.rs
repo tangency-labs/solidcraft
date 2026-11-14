@@ -5,8 +5,9 @@
 //! struct definition, so a new field cannot be left out.
 //!
 //! The issue's input and expected values: `UpstreamFixes::default().flags()` yields one
-//! entry per field, all `false` (207 at 9dde25e97), and setting one flag makes exactly
-//! that entry `true`. The count grows with every new flag, so the tests compare against
+//! entry per field, every one on but the held-back ones ([`UpstreamFixes::HELD_BACK`]: the
+//! corrections are the kernel's default), and setting one flag makes exactly that entry
+//! change. The count grows with every new flag, so the tests compare against
 //! the struct itself (its size, one byte per `bool` field, and its derived `Debug`, which
 //! only a test reads this way), never against a number.
 #![allow(clippy::expect_used)] // test helpers
@@ -47,8 +48,26 @@ fn turned_on(fixes: &UpstreamFixes) -> Vec<&'static str> {
         .collect()
 }
 
+/// The names of the flags that are off, in declaration order.
+fn turned_off(fixes: &UpstreamFixes) -> Vec<&'static str> {
+    fixes
+        .flags()
+        .filter(|&(_, on)| !on)
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// Every flag off: the starting point for setting one alone.
+fn none_on() -> UpstreamFixes {
+    let mut fixes = UpstreamFixes::all();
+    for &name in UpstreamFixes::NAMES {
+        *fixes.flag_mut(name).expect("a field name") = false;
+    }
+    fixes
+}
+
 #[test]
-fn default_lists_every_field_off_in_declaration_order() {
+fn default_lists_every_field_on_but_the_held_back_in_declaration_order() {
     let fixes = Kernel::default().fixes;
     assert_eq!(fixes, UpstreamFixes::default());
     // Every field is a one-byte `bool` (the generating macro accepts no other type), so
@@ -57,7 +76,14 @@ fn default_lists_every_field_off_in_declaration_order() {
     assert!(count > 0);
     assert_eq!(UpstreamFixes::NAMES.len(), count);
     assert_eq!(fixes.flags().count(), count);
-    assert!(turned_on(&fixes).is_empty());
+    // every correction on, but the held-back ones, in declaration order
+    let held: Vec<&str> = UpstreamFixes::NAMES
+        .iter()
+        .copied()
+        .filter(|n| UpstreamFixes::HELD_BACK.contains(n))
+        .collect();
+    assert_eq!(held.len(), UpstreamFixes::HELD_BACK.len());
+    assert_eq!(turned_off(&fixes), held);
     // The same names in the same order as the struct's fields, each with its value.
     assert_eq!(listed(&fixes), debug_fields(&fixes));
     assert!(fixes
@@ -68,12 +94,12 @@ fn default_lists_every_field_off_in_declaration_order() {
 
 #[test]
 fn one_flag_on_is_exactly_that_entry() {
-    let mut newest = UpstreamFixes::default();
+    let mut newest = none_on();
     newest.face_points_span_domain = true;
     assert_eq!(turned_on(&newest), ["face_points_span_domain"]);
     assert_eq!(listed(&newest), debug_fields(&newest));
 
-    let mut first = UpstreamFixes::default();
+    let mut first = none_on();
     first.plane_recognition_origin_after_axes = true;
     assert_eq!(turned_on(&first), ["plane_recognition_origin_after_axes"]);
     assert_eq!(listed(&first), debug_fields(&first));
@@ -83,7 +109,7 @@ fn one_flag_on_is_exactly_that_entry() {
 #[test]
 fn flag_mut_sets_exactly_the_named_field() {
     for &name in UpstreamFixes::NAMES {
-        let mut fixes = UpstreamFixes::default();
+        let mut fixes = none_on();
         *fixes.flag_mut(name).expect("a field name") = true;
         assert_eq!(turned_on(&fixes), [name]);
         assert_eq!(fixes.flag_mut(name).copied(), Some(true));

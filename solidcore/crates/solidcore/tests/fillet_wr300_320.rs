@@ -203,43 +203,33 @@ fn cylinder_rim(k: &mut Kernel, size: f64, xsect: u32) -> Outcome {
 
 /// Blends as wide as the face they roll on: the chamfer's cone would end in a point at the
 /// top's centre, where SMLib goes on (the fork's `FacesOutlastTheirBlends`, WR-320). With
-/// `fillet_refuse_face_consuming_blends` a chamfer of 10 on the top rim of a cylinder of
-/// radius 10 is refused (`NoRoom`). A round of 10 closes the top as a hemisphere
+/// `fillet_refuse_face_consuming_blends` (the default) a chamfer of 10 on the top rim of a
+/// cylinder of radius 10 is refused (`NoRoom`). A round of 10 closes the top as a hemisphere
 /// tangent to it, as the fork's amendment (tangency-labs/smlib `8bffb23`) lets it, and
-/// builds either way, as does everything below the full width.
+/// builds, as does everything below the full width.
 #[test]
 fn chamfer_as_wide_as_its_face_is_refused() {
-    let mut k = kernel(|f| f.fillet_refuse_face_consuming_blends = true);
+    let mut k = Kernel::default();
     assert_eq!(
         cylinder_rim(&mut k, 10.0, 0),
         Outcome::Refused { code: NO_ROOM }
     );
-    let mut k = Kernel::default();
-    assert!(!matches!(
-        cylinder_rim(&mut k, 10.0, 0),
-        Outcome::Refused { code: NO_ROOM }
-    ));
 
     // the round of 10: the cylinder (pi 100 10) and a hemisphere (2/3 pi 1000)
     let hemisphere = std::f64::consts::PI * (1000.0 + 2000.0 / 3.0);
-    for on in [false, true] {
-        let mut k = kernel(|f| f.fillet_refuse_face_consuming_blends = on);
-        let Outcome::Built { volume, manifold } = cylinder_rim(&mut k, 10.0, 1) else {
-            panic!("on {on}: refused");
-        };
+    let mut k = Kernel::default();
+    let Outcome::Built { volume, manifold } = cylinder_rim(&mut k, 10.0, 1) else {
+        panic!("the round of 10: refused");
+    };
+    assert!(manifold && near(volume, hemisphere, 5e-3), "{volume}");
+    for xsect in [0, 1] {
         assert!(
-            manifold && near(volume, hemisphere, 5e-3),
-            "on {on}: {volume}"
+            matches!(
+                cylinder_rim(&mut k, 9.99, xsect),
+                Outcome::Built { manifold: true, .. }
+            ),
+            "xsect {xsect}"
         );
-        for xsect in [0, 1] {
-            assert!(
-                matches!(
-                    cylinder_rim(&mut k, 9.99, xsect),
-                    Outcome::Built { manifold: true, .. }
-                ),
-                "on {on} xsect {xsect}"
-            );
-        }
     }
 }
 
@@ -305,3 +295,4 @@ fn no_room_refusals_are_named() {
     let e = edge_between(&k, &b, [0.0, 0.0, 20.0], [20.0, 0.0, 20.0]);
     assert_eq!(no_room_reason(&mut k, &mut b, &[e], 25.0), None);
 }
+

@@ -137,9 +137,9 @@ fn assert_plate_and_boss(k: &mut Kernel, b: &mut Brep) {
 }
 
 #[test]
-fn ring_fillet_removal_is_off_by_default() {
+fn ring_fillet_removal_is_on_by_default() {
     let k = Kernel::default();
-    assert!(!k.fixes.fillet_removal_takes_ring_fillets);
+    assert!(k.fixes.fillet_removal_takes_ring_fillets);
 }
 
 #[test]

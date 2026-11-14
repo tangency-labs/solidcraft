@@ -20,8 +20,11 @@ use solidcore::Kernel;
 /// The top rim of a cylinder of radius 10 and height 20 chamfered (`xsect` 0) by 10,
 /// continuity 1, thumb weight 1: the chamfer surface collapses onto the axis and its
 /// rail, a single cubic, ends away from its start until the ends are matched. SMLib
-/// then still fails the fillet (`SM_ERR`), but with no error recorded in the executive
-/// (`ec=0`); the unfixed port failed earlier, in the corner edges, with code 3.
+/// then still fails the fillet (`SM_ERR`), with no error recorded in the executive
+/// (`ec=0`); the unfixed port failed earlier, in the corner edges, with code 3. With every
+/// correction on (the default) the chamfer, as wide as the top it rolls on, is refused as
+/// consuming that face (`NoRoom`, `fillet_refuse_face_consuming_blends`): past the corner
+/// edges' closure check, never its code 3.
 #[test]
 fn top_rim_chamfer_passes_the_corner_edge_closure_check() {
     let mut k = Kernel::default();
@@ -41,5 +44,8 @@ fn top_rim_chamfer_passes_the_corner_edge_closure_check() {
         .prepare_constant_radius_edges(&mut k, &[rim], 10.0, 0, 1, 1.0)
         .unwrap();
     assert!(session.do_fillet(&mut k).is_err());
-    assert_eq!(session.error_info().code, 0);
+    assert_eq!(
+        session.error_info().code,
+        solidcore::blend::fillet_geom::p1::FilletErrorType::NoRoom as i32
+    );
 }

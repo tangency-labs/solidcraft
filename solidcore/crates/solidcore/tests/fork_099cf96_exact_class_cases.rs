@@ -658,16 +658,6 @@ fn with_solidcraft_s_fixes_the_fitted_round_is_its_definition() {
     );
 }
 
-#[test]
-fn the_pipes_join_only_with_wr77() {
-    let case = cases().into_iter().find(|c| c.name == PIPES).unwrap();
-    let got = grade(&case, &mut Kernel::default());
-    assert!(
-        matches!(&got, Graded::Body(e) if e.contains("status: 1001")),
-        "{got:?}"
-    );
-}
-
 /// The grading sees what it's for: on a case that passes, a volume one part in 1e5 off and
 /// each wrong surface kind are refused, and the fork's marks on it don't hold.
 /// The ball's rim with one of its two edges picked, as the case was before #2441: the half
