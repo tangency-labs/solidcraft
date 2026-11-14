@@ -1129,6 +1129,7 @@ fn main() -> eframe::Result {
             "--max-file-size" => max_file_size = Some(args.next()),
             s if s.starts_with("--max-file-size=") => max_file_size = Some(s.strip_prefix("--max-file-size=").map(str::to_string)),
             "--safe-mode" => safe_mode = true,
+            "--view" => solidcraft_ui_egui::new_window::set_start_view(&args.next().unwrap_or_default()),
             "--version" | "-V" => {
                 println!("solidcraft {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
@@ -1148,7 +1149,7 @@ fn main() -> eframe::Result {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--max-file-size SIZE] [design.sc | part.step]"
+                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
                 );
                 return Ok(());
             }

@@ -215,6 +215,7 @@ pub use solidcraft_ui_kit::navigation_bar;
 mod navigation_bar_tests;
 mod navigation_bar_view;
 pub mod navigation_slots;
+pub mod new_window;
 pub use navigation::WebWheelGestures;
 pub mod network_prompt;
 pub mod op_auto;
