@@ -13,9 +13,9 @@ import pytest
 
 DESIGN = Path(__file__).parent / "design.json"
 BODY = "Body"
-# SolidCraft measures a tessellation, and its volume and area error depends on the shape. Measure it
-# for this design: run.py's BODY volume against the OCCT volume compare_step.py prints for the
-# design's own STEP export (compared with itself). Set REL to about 3 times that error.
+# SolidCraft integrates volume and area on B-rep surfaces and measures mesh bodies from their
+# triangles. Choose REL for the accuracy the design needs. Check volume against the analytic
+# value or the OCCT volume from compare_step.py on the design's STEP export compared with itself.
 REL = 2e-4
 
 
@@ -52,7 +52,7 @@ def inspections() -> dict:
         script = Path(tmp) / "script.json"
         script.write_text(json.dumps({"commands": commands}))
         done = subprocess.run(
-            ["solidcraft-cli", "run", script, "--in", DESIGN, "--results"], capture_output=True, text=True
+            ["solidcraft-cli", "run", script, "--in", DESIGN, "--results"], capture_output=True, encoding="utf-8"
         )
     assert done.returncode == 0, done.stderr
     results = json.loads(done.stdout)
@@ -69,7 +69,7 @@ def body(inspection: dict) -> Measures:
 def assert_matches(actual: Measures, expected: Measures) -> None:
     assert actual.volume == pytest.approx(expected.volume, rel=REL)
     assert actual.area == pytest.approx(expected.area, rel=REL)
-    # Centre of mass and bounding box come out up to about 5e-5 of the part size off; allow 3 times that
+    # Set the position tolerance for the design. This default scales with the body size.
     tolerance = max(1e-3, 1.5e-4 * dist(expected.bbox_min, expected.bbox_max))
     for point in ("center_of_mass", "bbox_min", "bbox_max"):
         assert getattr(actual, point) == pytest.approx(getattr(expected, point), abs=tolerance), point
