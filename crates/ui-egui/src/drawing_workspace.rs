@@ -189,11 +189,10 @@ pub(crate) fn sheets_visibility_choice(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::scenario::publish_target("prefs:drawing_sheets_visibility", response.rect);
     if selected != current
         && let Some((key, _)) = SHEETS_VISIBILITY.get(selected)
+        && app.preferences.drawing_sheets_visibility != *key
     {
-        if app.preferences.drawing_sheets_visibility != *key {
-            app.drawing_workspace.sheets_override = None;
-            app.preferences.drawing_sheets_visibility = (*key).into();
-        }
+        app.drawing_workspace.sheets_override = None;
+        app.preferences.drawing_sheets_visibility = (*key).into();
     }
 }
 
