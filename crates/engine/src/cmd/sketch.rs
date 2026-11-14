@@ -1607,9 +1607,10 @@ fn rect_result(sk_out: (Vec<String>, Vec<String>), (sides, corners): (RectSides,
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-/// A rectangle corner: `[x, y]` of numbers, or with a coordinate typed as an expression (as a
-/// `sketch.line` point is): where it is now and the expressions that place it.
-fn corner_arg(doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str) -> Result<(Vec2, PointExprs)> {
+/// A rectangle corner (or an ellipse's centre and major end): `[x, y]` of numbers, or with a
+/// coordinate typed as an expression (as a `sketch.line` point is): where it is now and the
+/// expressions that place it.
+pub(super) fn corner_arg(doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str) -> Result<(Vec2, PointExprs)> {
     let v = p.get(k).ok_or_else(|| bad(cmd, format!("`{k}` must be a point [x, y]")))?;
     match expr_point(doc, v, cmd)? {
         Some((at, exprs)) => Ok((at, exprs.unwrap_or_default())),
@@ -1618,7 +1619,7 @@ fn corner_arg(doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str) -> 
 }
 
 /// Holds sketch point `i` where `exprs` place it, when it has any (see [`add_placed_point`]).
-fn place_point(sk: &mut Sketch, i: Option<&usize>, exprs: PointExprs) {
+pub(super) fn place_point(sk: &mut Sketch, i: Option<&usize>, exprs: PointExprs) {
     if exprs.x.is_none() && exprs.y.is_none() {
         return;
     }
@@ -1830,14 +1831,22 @@ fn circle_size(s: &Session, p: &Value, cmd: &str) -> Result<(f64, Option<(String
     if !p.get(key).is_some_and(Value::is_string) {
         return Ok((radius_arg(p, cmd)?, None));
     }
-    let e = s.doc.with_design_unit(req_expr(cmd, p, key)?.as_str(), Kind::Length);
-    let v = s.doc.eval(&e, Kind::Length).map_err(|e| bad(cmd, format!("{key}: {e}")))?;
+    let (v, e) = length_expr(s, p, key, cmd)?;
     let r = if key == "diameter" { v / 2.0 } else { v };
     if !(r > 1e-9 && r < 1e8) {
         return Err(bad(cmd, "radius must be positive"));
     }
+    Ok((r, e.map(|e| (e, key == "diameter"))))
+}
+
+/// A length `key` typed as an expression over the design's parameters: what it comes to, and
+/// the expression when it names a parameter (then a dimension driven by them). A bare number
+/// reads in the design's unit, and an expression naming no parameter is just the number.
+pub(super) fn length_expr(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<(f64, Option<String>)> {
+    let e = s.doc.with_design_unit(req_expr(cmd, p, key)?.as_str(), Kind::Length);
+    let v = s.doc.eval(&e, Kind::Length).map_err(|e| bad(cmd, format!("{key}: {e}")))?;
     let driven = !solidcraft_doc::expr::references(&e).is_empty();
-    Ok((r, driven.then_some((e, key == "diameter"))))
+    Ok((v, driven.then_some(e)))
 }
 
 fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
