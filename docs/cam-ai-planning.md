@@ -134,7 +134,7 @@ What the assistant needs before it plans, and where each answer comes from:
 | Material | the person (the guide skill asks); default from the tool kit |
 | Machine and its options (4th axis, laser) | the person; presets in `cam.machine.list` |
 | Stock: size, already square or not | the person; else a relative box around the part |
-| Workholding: vise, clamps, tape, chuck | the person |
+| Workholding: vise, clamps, tape, chuck | the person, or compared by `cam.workholding` from the part |
 | What matters most: finish, accuracy of named features, run time | the person |
 | How many parts | the person (one part favours fewer tools; a batch favours run time) |
 
@@ -189,7 +189,13 @@ step in it has a `why` and the feature ids it covers:
 - the fewest setups that reach every feature;
 - tools chosen from the limits;
 - workholding first: how the part is held decides the setups, the stock size and the frame or
-  web of stock left to hold it until the last cut. The web cut follows the part's outline at
+  web of stock left to hold it until the last cut. `cam.workholding` (built) compares the ways to
+  hold the part before any operation is planned: a frame with tabs or sprues, a pin through a
+  hole of the part with its boss clamped, a vise on parallel walls, a stub of stock in a vise or
+  a rotary chuck. Each is checked against the geometry and costed (hand finishing, setups, stock
+  cut only to hold it, how far a part held at one end bends under the cut, how it is found again
+  when turned over, the fixture to make); the plan follows the recommended one unless the
+  person says otherwise. The web cut follows the part's outline at
   the web's own height (`geometry: {source: silhouette, within_heights: true}`): a part
   narrower there than at its widest would otherwise be cut round in air, and its tabs would
   hold nothing (`tabs_placed` 0, `tabs_unsupported`). A part with no flat waist (a rounded
