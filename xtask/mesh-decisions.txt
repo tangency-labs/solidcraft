@@ -121,7 +121,6 @@ crates/engine/src/cmd/sketch_face.rs:capture_impl captures a face for a sketch b
 crates/engine/src/cmd/sketch_inspect.rs:face_at picks the face at a point by the nearest mesh triangle
 crates/engine/src/cmd/sketch_inspect.rs:face_min_radius measures a face's least radius from mesh normals
 crates/engine/src/cmd/sketch_inspect.rs:minimum_radius measures a face's least radius by the display mesh
-crates/engine/src/frames.rs:frame_at picks the body a point lies on by the display mesh
 crates/kernel/src/blend_smlib.rs:imp::corner_vertices finds the vertices nearest points by a mesh
 crates/kernel/src/blend_smlib.rs:imp::reblend finds a blend's new edges by a mesh
 crates/kernel/src/blend_smlib.rs:imp::resolve resolves edge picks for SMLib by a mesh

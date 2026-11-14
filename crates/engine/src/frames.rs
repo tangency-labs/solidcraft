@@ -12,6 +12,7 @@
 use serde_json::{Map, Value};
 use solidcore_record::Vec3;
 use solidcraft_doc::{Mat, apply_point, apply_vector, is_identity, map_point_expr, map_vector_expr, mat_inverse};
+use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::prelude::*;
 
 use crate::Session;
@@ -172,8 +173,7 @@ fn frame_at(s: &Session, world: &solidcraft_doc::ModelState, f: &Frames, p: Vec3
     let mut best: Option<(f64, Mat, Vec<String>)> = None;
     for wb in &world.bodies {
         let Some((_, own, m)) = f.bodies(s).iter().find(|(w, _, _)| *w == wb.name) else { continue };
-        let mesh = wb.mesh();
-        let bb = mesh.bounds();
+        let bb = wb.body.exact_bounds().unwrap_or_else(|_| wb.outline_bounds());
         let tol = (bb.diagonal() * 1e-3).max(1e-3);
         if p.x < bb.min.x - tol
             || p.y < bb.min.y - tol
@@ -184,7 +184,7 @@ fn frame_at(s: &Session, world: &solidcraft_doc::ModelState, f: &Frames, p: Vec3
         {
             continue;
         }
-        let d = mesh.triangles.iter().filter_map(|t| mesh.tri(t)).map(|[a, b, c]| tri_dist(p, a, b, c)).fold(f64::INFINITY, f64::min);
+        let Some(d) = body_surface_dist(wb, p, tol) else { continue };
         if d > tol {
             continue;
         }
@@ -204,13 +204,83 @@ fn frame_at(s: &Session, world: &solidcraft_doc::ModelState, f: &Frames, p: Vec3
     best.map(|(_, m, names)| (m, names))
 }
 
-fn tri_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
-    let n = (b - a).cross(c - a);
-    let Some(nn) = n.normalized() else { return p.dist_to_segment(a, b).min(p.dist_to_segment(b, c)) };
-    let h = (p - a).dot(nn);
-    let q = p - nn * h;
-    let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= -1e-12);
-    if inside { h.abs() } else { [(a, b), (b, c), (c, a)].iter().map(|(u, v)| p.dist_to_segment(*u, *v)).fold(f64::INFINITY, f64::min) }
+fn body_surface_dist(wb: &solidcraft_doc::ModelBody, p: Vec3, tol: f64) -> Option<f64> {
+    if matches!(wb.body.classify_point(p), Ok(solidcraft_kernel::PointClass::OnBoundary)) {
+        return Some(0.0);
+    }
+    let mut min_d = f64::INFINITY;
+    if let Ok(Some((_, de))) = wb.body.nearest_edge(p, tol) {
+        min_d = min_d.min(de);
+    }
+    let rec = wb.body.record();
+    for (i, face) in rec.faces.iter().enumerate() {
+        if let Some(plane) = wb.body.planar_face(i) {
+            let h = plane.height(p).abs();
+            if h <= tol && h < min_d {
+                let local = plane.to_local(p);
+                let mut corners = Vec::new();
+                for lp in &face.loops {
+                    let solidcore_record::brep::Loop::Edges { edges } = lp else { continue };
+                    for u in edges {
+                        let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+                        let Ok(eval) = CurveEval::new(edge.parameters()) else { continue };
+                        let [t0, t1] = edge.interval;
+                        let n = match &eval {
+                            CurveEval::Line { .. } => 2,
+                            CurveEval::Conic { .. } => 8,
+                            _ => 16,
+                        };
+                        for s in 0..=n {
+                            let t = t0 + (t1 - t0) * (s as f64 / n as f64);
+                            if let Some(pt) = eval.point(t) {
+                                let q = plane.to_local(pt);
+                                corners.push((q.x, q.y));
+                            }
+                        }
+                    }
+                }
+                corners.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+                corners.dedup();
+                if !corners.is_empty() && inside_hull(&corners, (local.x, local.y)) {
+                    min_d = min_d.min(h);
+                }
+            }
+        } else if let Ok(s_eval) = SurfaceEval::new(&face.surface) {
+            if let Some(uv) = s_eval.project(p, None, tol)
+                && let Some(pt) = s_eval.point(uv)
+            {
+                min_d = min_d.min(pt.dist(p));
+            }
+        }
+    }
+    if min_d <= tol {
+        Some(min_d)
+    } else if matches!(wb.body.classify_point(p), Ok(solidcraft_kernel::PointClass::Inside)) {
+        Some(0.0)
+    } else {
+        None
+    }
+}
+
+fn inside_hull(sorted: &[(f64, f64)], q: (f64, f64)) -> bool {
+    let cross = |o: (f64, f64), a: (f64, f64), b: (f64, f64)| (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0);
+    let chain = |points: &mut dyn Iterator<Item = &(f64, f64)>| {
+        let mut h: Vec<(f64, f64)> = Vec::new();
+        for &pt in points {
+            while h.len() >= 2 && cross(h[h.len() - 2], h[h.len() - 1], pt) <= 0.0 {
+                h.pop();
+            }
+            h.push(pt);
+        }
+        h
+    };
+    let mut hull = chain(&mut sorted.iter());
+    hull.pop();
+    let mut upper = chain(&mut sorted.iter().rev());
+    upper.pop();
+    hull.extend(upper);
+    let eps = 1e-9;
+    hull.len() >= 3 && (0..hull.len()).all(|i| cross(hull[i], hull[(i + 1) % hull.len()], q) >= -eps)
 }
 
 struct Mapper<'a> {
