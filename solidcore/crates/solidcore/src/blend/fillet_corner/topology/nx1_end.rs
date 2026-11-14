@@ -717,8 +717,153 @@ impl FilletCorner {
 
 #[cfg(test)]
 mod tests {
-    use super::turns_back;
-    use crate::math::Vec3;
+    use super::{rolled_rail_turns_back, tangent_leaving, turns_back, TurnedBack};
+    use crate::blend::fillet_solver::p1::test_manifold_tangent_rollover;
+    use crate::boolean::api_brep::boolean_union;
+    use crate::curve::curve::Curve;
+    use crate::kernel::Kernel;
+    use crate::math::{Point3, Vec3};
+    use crate::primitive::api_curves::create_line_segment;
+    use crate::sweep::api_brep::create_linear_sweep;
+    use crate::topology::{edge, Brep, EdgeId, VertexId};
+
+    /// The prism `height` tall along z on the closed polygon `pts` (in z = 0).
+    fn prism(k: &mut Kernel, pts: &[(f64, f64)], height: f64) -> Brep {
+        let p = |i: usize| {
+            let (x, y) = pts[i % pts.len()];
+            Point3::new(x, y, 0.0)
+        };
+        let sides: Vec<Curve> = (0..pts.len())
+            .map(|i| Curve::from(create_line_segment(p(i), p(i + 1)).unwrap()))
+            .collect();
+        let refs: Vec<Option<&Curve>> = sides.iter().map(Some).collect();
+        create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), height, true).unwrap()
+    }
+
+    /// The one vertex of `b` at `at`.
+    fn vertex_at(b: &Brep, at: Point3) -> VertexId {
+        let found: Vec<VertexId> = b
+            .vertex_list()
+            .iter()
+            .copied()
+            .filter(|&v| b.vertex(v).unwrap().point.distance(at) < 1e-9)
+            .collect();
+        assert_eq!(found.len(), 1, "vertices at {at:?}: {found:?}");
+        found[0]
+    }
+
+    /// The one edge of `b` between the vertices `p` and `q`.
+    fn edge_between(b: &Brep, p: VertexId, q: VertexId) -> EdgeId {
+        let found: Vec<EdgeId> = b
+            .edge_list()
+            .iter()
+            .copied()
+            .filter(|&e| {
+                let ends = (
+                    edge::start_vertex(b, e).unwrap(),
+                    edge::end_vertex(b, e).unwrap(),
+                );
+                ends == (Some(p), Some(q)) || ends == (Some(q), Some(p))
+            })
+            .collect();
+        assert_eq!(found.len(), 1, "edges between {p:?} and {q:?}: {found:?}");
+        found[0]
+    }
+
+    /// An arm 5 thick (`[-20, 0] x [-25, 5]` in plan) joined to a boss 20 tall whose wall X is
+    /// the vertical plane through the line x = y = 0, at `crease_deg` to the arm's side wall S
+    /// (x = 0) and turned convexly from it: in plan the boss is the strip `s w + t l`
+    /// (s in [-15, 15], t in [0, 10]), `w = (sin c, cos c)`, `l` a quarter turn left of `w`.
+    /// At V = (0, 0, 5) meet E (S and the arm's top P, arriving from (0, -25, 5) along +y), T
+    /// (S and X, the vertical edge below V, a crease of c) and N (X and P, the boss's foot on
+    /// the arm, leaving V along -w): N's tangent lies c from antiparallel to E's. #16027's
+    /// taller boss, its foot tangent to S, with the tangency opened to a crease of c.
+    fn arm_and_creased_boss(k: &mut Kernel, crease_deg: f64) -> Brep {
+        let arm = prism(
+            k,
+            &[(-20.0, -25.0), (0.0, -25.0), (0.0, 5.0), (-20.0, 5.0)],
+            5.0,
+        );
+        let c = crease_deg.to_radians();
+        let (w, l) = ((c.sin(), c.cos()), (-c.cos(), c.sin()));
+        let at = |s: f64, t: f64| (s * w.0 + t * l.0, s * w.1 + t * l.1);
+        let boss = prism(
+            k,
+            &[
+                at(-15.0, 0.0),
+                at(15.0, 0.0),
+                at(15.0, 10.0),
+                at(-15.0, 10.0),
+            ],
+            20.0,
+        );
+        boolean_union(k, arm, boss).unwrap()
+    }
+
+    /// #16354's 45 degree turn-back band, old to new, on a body: a round rolled from S over T
+    /// onto X, its corner at (0, -25, 5) and its side edge E ([`arm_and_creased_boss`]). T
+    /// counts as smooth (the tolerance, 1.45 rad, lies above every crease here; E and N do
+    /// not), so whether the rolled rail turns back at V is decided by N's tangent against E's.
+    /// At a crease of 30 degrees it does: `TurnedBack` at V, along N, on X. At 60 and 80
+    /// degrees N lies past 45 degrees from antiparallel but still at a negative dot product
+    /// (before #16354 both were turned back, the same `TurnedBack`); it does not, and the
+    /// vertex keeps the type it had before #16027.
+    #[test]
+    fn a_rolled_rail_turns_back_only_within_45_degrees_of_antiparallel() {
+        let tol = 1.45;
+        for (crease_deg, turned) in [(30.0, true), (60.0, false), (80.0, false)] {
+            let mut k = Kernel::default();
+            let mut b = arm_and_creased_boss(&mut k, crease_deg);
+            let c = f64::to_radians(crease_deg);
+            let corner = vertex_at(&b, Point3::new(0.0, -25.0, 5.0));
+            let far = vertex_at(&b, Point3::new(0.0, 0.0, 5.0));
+            let foot = vertex_at(&b, Point3::new(-15.0 * c.sin(), -15.0 * c.cos(), 5.0));
+            let below = vertex_at(&b, Point3::new(0.0, 0.0, 0.0));
+            let e = edge_between(&b, corner, far);
+            let n = edge_between(&b, far, foot);
+            let t = edge_between(&b, far, below);
+            // V holds just E, N and T; T is smooth within the tolerance, E and N are not
+            let mut at_far = crate::topology::vertex::edges(&b, far, None).unwrap();
+            at_far.sort();
+            let mut want = vec![e, n, t];
+            want.sort();
+            assert_eq!(at_far, want, "crease {crease_deg}");
+            for (x, smooth) in [(t, true), (e, false), (n, false)] {
+                assert_eq!(
+                    test_manifold_tangent_rollover(&k, &mut b, x, tol)
+                        .unwrap()
+                        .0,
+                    smooth,
+                    "crease {crease_deg}: {x:?}"
+                );
+            }
+            // S: T's face that E shares; X: T's other face, which N lies on too
+            let e_faces = edge::faces(&b, e, None).unwrap();
+            let t_faces = edge::faces(&b, t, None).unwrap();
+            let s = *t_faces.iter().find(|f| e_faces.contains(f)).unwrap();
+            let x = *t_faces.iter().find(|&&f| f != s).unwrap();
+            assert!(edge::faces(&b, n, None).unwrap().contains(&x));
+            // N's tangent leaving V lies the crease from antiparallel to E's arriving there,
+            // at a negative dot product (the test before #16354)
+            let te = if edge::end_vertex(&b, e).unwrap() == Some(far) {
+                crate::topology::vertex::edge_end_tangent(&k, &b, e, false).unwrap()
+            } else {
+                -crate::topology::vertex::edge_end_tangent(&k, &b, e, true).unwrap()
+            };
+            let tn = tangent_leaving(&k, &b, n, far).unwrap().unwrap();
+            let off = (-te.dot(tn) / (te.length() * tn.length())).acos();
+            assert!((off - c).abs() < 1e-9, "crease {crease_deg}: {off}");
+            assert!(te.dot(tn) < 0.0, "crease {crease_deg}");
+            let side = edge::edgeuses(&b, e, None, None).unwrap()[0];
+            let got = rolled_rail_turns_back(&k, &mut b, side, corner, x, tol).unwrap();
+            let expected = turned.then_some(TurnedBack {
+                far,
+                edge: n,
+                face: x,
+            });
+            assert_eq!(got, expected, "crease {crease_deg}");
+        }
+    }
 
     /// The turn-back test takes N's tangent within 45 degrees of E's reversed, and nothing
     /// short of it: a tangent merely past square to E (a negative dot product, the old test) is
