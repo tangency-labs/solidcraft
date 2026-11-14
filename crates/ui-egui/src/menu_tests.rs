@@ -1040,6 +1040,28 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     assert!(app.session.doc.canvases.is_empty());
 }
 
+/// The toolbar's Edit Canvas edits the canvas the user picked in the Browser, not just the
+/// first one in the design (#16518).
+#[test]
+fn edit_canvas_from_the_toolbar_edits_the_picked_canvas() {
+    let mut app = sample_app();
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(400u32.to_be_bytes());
+    png.extend(200u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
+    let first = app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    let second = app.run("canvas.insert", json!({"data": data, "plane": "XZ", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    app.tree.picked_canvases = vec![second];
+    assert!(!crate::sketch_tools::start_hook(&mut app, "canvas.edit"));
+    let panel = app.tree.canvas_panel.clone().unwrap();
+    assert_eq!(panel.canvas, second, "the picked canvas is edited, not the first one");
+    app.tree.picked_canvases.clear();
+    assert!(!crate::sketch_tools::start_hook(&mut app, "canvas.edit"));
+    let panel = app.tree.canvas_panel.clone().unwrap();
+    assert_eq!(panel.canvas, first, "with nothing picked, the first canvas is edited");
+}
+
 /// The canvas and browser menus keep their items in a fixed order.
 #[test]
 fn menus_follow_fusion_order() {
