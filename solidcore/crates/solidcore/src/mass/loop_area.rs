@@ -202,15 +202,85 @@ fn ends(cn: &NurbsCurve) -> Result<([Ivl; 2], [Ivl; 2])> {
     Ok((point(k0, a)?, point(k1, b)?))
 }
 
+/// [`LoopAreaMemo`]'s cap on the words its keys hold (8 bytes each): past it the memo
+/// starts again. A guard on memory only: clearing the memo changes no result.
+const LOOP_AREA_MEMO_WORDS: usize = 1 << 20;
+
+/// The memo of loop area signs a kernel keeps (not upstream): [`loop_area_sign`]'s result
+/// for each loop it certified, by every bit of the loop's input (each curve's degree,
+/// knots and homogeneous control points, and its sense). The certificate is a function of
+/// that input alone (the kernel is read only for its cancel token), so a hit returns, to
+/// the bit, what certifying the loop again returns. A body's check certifies each face's
+/// loops twice (both of its pointer checks), and the checks of a body and of the bodies
+/// made from it meet the same loops again; each is certified once. Only a certificate that
+/// finished is kept (a cancelled one is not). [`Kernel::memoize_curve_caches`] turns it
+/// off, with the curve cache memo.
+#[derive(Debug, Default)]
+pub struct LoopAreaMemo {
+    signs: std::collections::HashMap<Vec<u64>, LoopAreaSign>,
+    words: usize,
+}
+
+impl LoopAreaMemo {
+    /// The loops the memo keeps.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.signs.len()
+    }
+
+    /// Whether it keeps none.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.signs.is_empty()
+    }
+}
+
+/// The memo key of a loop: every bit of its input, each curve's sense, degree and counts
+/// first so that no two inputs share a key.
+fn memo_key(curves: &[(&NurbsCurve, bool)]) -> Vec<u64> {
+    let mut key = Vec::new();
+    for &(cn, forwards) in curves {
+        key.push(u64::from(forwards));
+        key.push(cn.p as u64);
+        key.push(cn.n as u64);
+        key.push(cn.u.len() as u64);
+        key.push(cn.pw.len() as u64);
+        key.extend(cn.u.iter().map(|x| x.to_bits()));
+        key.extend(cn.pw.iter().map(|x| x.to_bits()));
+    }
+    key
+}
+
 /// The certified signed area of the closed loop of `curves` (each `(curve, forwards)`) and
 /// the straight segments joining each curve's end to the next one's start, and its sign
-/// (see the module).
+/// (see the module). A loop the kernel certified before is answered from its memo
+/// ([`LoopAreaMemo`]), to the bit as certifying it again.
 ///
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for no curves or a curve with no knot span;
 /// [`SolidError::Cancelled`] when the kernel's cancel token fires.
 pub fn loop_area_sign(k: &Kernel, curves: &[(&NurbsCurve, bool)]) -> Result<LoopAreaSign> {
+    if !k.memoize_curve_caches || curves.is_empty() {
+        return certify(k, curves);
+    }
+    let key = memo_key(curves);
+    if let Some(&hit) = k.loop_area_memo.borrow().signs.get(&key) {
+        return Ok(hit);
+    }
+    let sign = certify(k, curves)?;
+    let mut memo = k.loop_area_memo.borrow_mut();
+    if memo.words + key.len() > LOOP_AREA_MEMO_WORDS {
+        memo.signs.clear();
+        memo.words = 0;
+    }
+    memo.words += key.len();
+    memo.signs.insert(key, sign);
+    Ok(sign)
+}
+
+/// [`loop_area_sign`] computed: the certificate itself.
+fn certify(k: &Kernel, curves: &[(&NurbsCurve, bool)]) -> Result<LoopAreaSign> {
     if curves.is_empty() {
         return Err(SolidError::invalid_input(OP, "a loop with no curves"));
     }
@@ -485,5 +555,60 @@ mod tests {
         let c = segment([f64::NAN, 1.0], [0.0, 0.0]);
         let r = loop_area_sign(&k, &[(&a, true), (&b, true), (&c, true)]).unwrap();
         assert!(matches!(r, LoopAreaSign::Undecided(_)), "{r:?}");
+    }
+
+    /// The kernel's memo answers a loop it certified before with the certificate itself, to
+    /// the bit (the enclosure and its cell count too): a positive, a negative and an
+    /// undecided loop, each certified with the memo off, then twice with it on. A loop and
+    /// its reverse are two entries; with the memo off nothing is kept.
+    #[test]
+    fn a_remembered_loop_area_is_the_certificate() {
+        let (r, t) = (1e4, 1e-3);
+        let outer = quarter_arc(0.0, 0.0, r + t);
+        let inner = quarter_arc(0.0, 0.0, r);
+        let bottom = segment([r, 0.0], [r + t, 0.0]);
+        let left = segment([0.0, r + t], [0.0, r]);
+        let arc = quarter_arc(1e4, 0.0, 3.0);
+        let loops: [Vec<(&NurbsCurve, bool)>; 3] = [
+            vec![
+                (&bottom, true),
+                (&outer, true),
+                (&left, true),
+                (&inner, false),
+            ],
+            vec![
+                (&inner, true),
+                (&left, false),
+                (&outer, false),
+                (&bottom, false),
+            ],
+            vec![(&arc, true), (&arc, false)],
+        ];
+        let off = Kernel {
+            memoize_curve_caches: false,
+            ..Kernel::default()
+        };
+        let on = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        for (i, lp) in loops.iter().enumerate() {
+            let fresh = format!("{:?}", loop_area_sign(&off, lp).unwrap());
+            let first = format!("{:?}", loop_area_sign(&on, lp).unwrap());
+            assert_eq!(on.loop_area_memo.borrow().len(), i + 1);
+            let again = format!("{:?}", loop_area_sign(&on, lp).unwrap());
+            assert_eq!(
+                on.loop_area_memo.borrow().len(),
+                i + 1,
+                "a hit adds nothing"
+            );
+            assert_eq!(first, fresh);
+            assert_eq!(again, fresh);
+        }
+        assert!(off.loop_area_memo.borrow().is_empty());
+        assert!(matches!(
+            loop_area_sign(&on, &loops[2]).unwrap(),
+            LoopAreaSign::Undecided(_)
+        ));
     }
 }

@@ -1374,6 +1374,11 @@ pub struct Kernel {
     /// stations and the definition solve through `&Kernel`; it is never borrowed across a
     /// solve, and a hit returns what a fresh solve of the same order and u gives.
     pub blend_w_memo: RefCell<crate::blend::fillet_section::section::ThumbweightMemo>,
+    /// Not upstream: the memo of the loop area signs this kernel certified
+    /// ([`crate::mass::loop_area::LoopAreaMemo`]), on with [`Kernel::memoize_curve_caches`].
+    /// A [`RefCell`]: the certificate runs through `&Kernel`; it is never borrowed across a
+    /// certificate, and a hit returns what certifying the loop again returns.
+    pub loop_area_memo: RefCell<crate::mass::loop_area::LoopAreaMemo>,
     /// Not upstream: the fork's `thread_local` count of open blend operation scopes
     /// (`t_lOperationScopes`; [`crate::blend::fillet_section::section::OperationScope`]).
     /// Shared, so that a scope can outlive a borrow of the kernel (a fillet session holds
@@ -1430,6 +1435,7 @@ impl Kernel {
                 crate::topology::topology::NotifyRecords::new(),
             ),
             blend_w_memo: RefCell::default(),
+            loop_area_memo: RefCell::default(),
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),
             blend_face_log: None,
