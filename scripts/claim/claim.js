@@ -116,6 +116,48 @@ function recordedClaimant(timeline) {
   return found ? found.who : null;
 }
 
+// For release checks only: the open PRs that claim the issue (linkedPulls), plus the claimant's
+// own open PRs that name it with "Part of #N". Such a PR doesn't claim a free issue (handlePull),
+// but it keeps the claimant's claim alive while the rest of the work goes on.
+function holdingPulls(timeline, context, number, claimant) {
+  const pulls = linkedPulls(timeline, context, number);
+  if (!claimant) return pulls;
+  const repo = `${context.repo.owner}/${context.repo.repo}`.toLowerCase();
+  const partOf = new RegExp(`\\bpart of\\s+#${number}\\b`, 'i');
+  const seen = new Set(pulls.map((p) => p.number));
+  for (const ev of timeline) {
+    const src = ev.event === 'cross-referenced' && ev.source && ev.source.issue;
+    if (src && src.pull_request && src.state === 'open' && !seen.has(src.number) &&
+        src.user && src.user.login === claimant &&
+        src.repository?.full_name?.toLowerCase() === repo &&
+        partOf.test(`${src.title || ''}\n${src.body || ''}`)) {
+      seen.add(src.number);
+      pulls.push(src);
+    }
+  }
+  return pulls.sort((a, b) => a.number - b.number);
+}
+
+// The issue as it is right before a release, or null if it no longer needs one: closed, gone, or
+// the label already off (another run released it). With `who`, also null unless the assignees are
+// none or exactly `who`: someone else took it, or a maintainer reassigned it. A run that releases
+// between this read and ours can still double up; the window is one API round trip.
+async function freshForRelease(github, context, number, who) {
+  let issue;
+  try {
+    ({ data: issue } = await github.rest.issues.get({ ...repoArgs(context), issue_number: number }));
+  } catch (e) {
+    if (e.status === 404 || e.status === 410) return null;
+    throw e;
+  }
+  if (issue.state === 'closed' || !hasLabel(issue)) return null;
+  if (who !== undefined) {
+    const assignees = (issue.assignees || []).map((a) => a.login);
+    if (assignees.length > 1 || (assignees.length === 1 && assignees[0] !== who)) return null;
+  }
+  return issue;
+}
+
 // What the bot says when it frees an issue because its claiming PR #P closed.
 function closedMessage(number, merged) {
   return merged
@@ -136,11 +178,11 @@ async function lastPush(github, context, pr) {
 async function claimStatus(github, context, issue, now) {
   const timeline = await getTimeline(github, context, issue.number);
   const since = await labeledAt(github, context, issue, timeline);
-  const pulls = linkedPulls(timeline, context, issue.number);
+  const recorded = recordedClaim(timeline);
+  const pulls = holdingPulls(timeline, context, issue.number, recorded && recorded.who);
   if (pulls.length === 0) {
     // The claim may name its PR even when the PR no longer reads as a claim (it closed or merged,
     // or it says "Part of #N"). A closed one frees the issue now; an open one still holds it.
-    const recorded = recordedClaim(timeline);
     if (recorded && recorded.pr) {
       let pr = null;
       try {
@@ -403,7 +445,8 @@ async function handlePullClosed({ github, context }) {
   const pull = context.payload.pull_request;
   if (!pull || pull.state !== 'closed') return [];
   const merged = Boolean(pull.merged || pull.merged_at);
-  const closing = merged ? closingIssues(pull.body) : new Set();
+  // Closing keywords in the title close the issue too (a squash merge puts the title in the commit).
+  const closing = merged ? closingIssues(`${pull.title || ''}\n${pull.body || ''}`) : new Set();
   const cache = new Map();
   const released = [];
   for (const n of mentionedIssues(pull.title, pull.body)) {
@@ -411,7 +454,7 @@ async function handlePullClosed({ github, context }) {
     const timeline = await getTimeline(github, context, n);
     const recorded = recordedClaim(timeline);
     if (!recorded || recorded.pr !== pull.number) continue;
-    if (linkedPulls(timeline, context, n).some((p) => p.number !== pull.number)) continue;
+    if (holdingPulls(timeline, context, n, recorded.who).some((p) => p.number !== pull.number)) continue;
     let issue;
     try {
       ({ data: issue } = await github.rest.issues.get({ ...repoArgs(context), issue_number: n }));
@@ -424,7 +467,9 @@ async function handlePullClosed({ github, context }) {
     let maintained = false;
     for (const a of assignees) maintained = maintained || (await isMaintainer(github, context, a, cache));
     if (maintained) continue;
-    await release(github, context, issue, assignees);
+    const fresh = await freshForRelease(github, context, n, recorded.who);
+    if (!fresh) continue;
+    await release(github, context, fresh, (fresh.assignees || []).map((a) => a.login));
     await github.rest.issues.createComment({
       ...repoArgs(context),
       issue_number: n,
@@ -453,6 +498,7 @@ async function sweep({ github, context, now = Date.now() }) {
     if (skip) continue;
     const status = await claimStatus(github, context, issue, now);
     if (!status.release) continue;
+    if (!(await freshForRelease(github, context, issue.number))) continue;
     await release(github, context, issue, assignees);
     await github.rest.issues.createComment({
       ...repoArgs(context),
