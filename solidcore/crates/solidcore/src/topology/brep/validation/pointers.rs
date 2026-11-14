@@ -1043,7 +1043,7 @@ fn vertex_neighbourhood_edges(k: &Kernel, b: &Brep, v: VertexId) -> Result<Verte
             false,
         ))?
         .and_then(|bounds| bounds.normal)
-        .filter(|bounds| bounds.is_defined());
+        .filter(crate::geom::extent3d::Extent3d::is_defined);
         for &(point, zone) in &anchors {
             let limit = tol::xsect_tol_3d_from_zones(k, zone, tol::zone_tol3d(k, data.tolerance));
             if bbox.is_some_and(|bbox| !bbox.contains_point(point, limit)) {
@@ -1082,7 +1082,7 @@ fn exclusion_probe<T>(result: Result<T>) -> Result<Option<T>> {
 
 /// A geometric refusal remains a normal numbered pointer report. In particular,
 /// callers doing local operations must retain their Unsound refusal and rollback,
-/// rather than receiving an unrelated InvalidInput error that loses the reports.
+/// rather than receiving an unrelated `InvalidInput` error that loses the reports.
 fn report_vertex_exclusion(
     b: &Brep,
     r: &mut Reports<'_>,
@@ -1212,7 +1212,7 @@ fn check_vertex_exclusion(k: &Kernel, b: &mut Brep, r: &mut Reports<'_>) -> Resu
         let bbox = exclusion_probe(crate::query::face::p1::calculate_bounding_box(
             k, &mut *b, f, false,
         ))?
-        .filter(|bounds| bounds.is_defined());
+        .filter(crate::geom::extent3d::Extent3d::is_defined);
         for &v in &vertices {
             k.check_cancelled("topology::brep::validation::vertex_exclusion")?;
             if incident.contains(&v) || excluded.contains(&v) {
@@ -1312,7 +1312,7 @@ fn check_vertex_exclusion(k: &Kernel, b: &mut Brep, r: &mut Reports<'_>) -> Resu
             false,
         ))?
         .and_then(|bounds| bounds.normal)
-        .filter(|bounds| bounds.is_defined());
+        .filter(crate::geom::extent3d::Extent3d::is_defined);
         let first = edge::vertex(b, e)?;
         let last = edge::other_vertex(b, e, first)?;
         let data = b.edge(e)?;
