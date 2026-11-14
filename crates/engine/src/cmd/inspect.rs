@@ -64,11 +64,16 @@ pub static COMMANDS: &[CommandSpec] = &[
              timeline?: true (default) | \"summary\" (each feature as id, name, type, with error, warning, suppressed and rolled_back only when set) | false (left out); \
              bodies?: true (default) | \"names\" (only the body names, nothing measured) | false (left out)",
         ),
-    CommandSpec::new("document.revision", "Design Revision", revision).icon("inspect").noundo().params(
-        "→ document_id (this open design's id: kept while it stays open, another for each design started or opened), \
-         revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
-         never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
-    ),
+        CommandSpec::new("document.revision", "Design Revision", crate::checked!("document.revision", revision))
+        .icon("inspect")
+        .noundo()
+        .contract(&crate::schema::inspect::REVISION_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::inspect::DocumentRevisionResult>)
+        .params(
+            "→ document_id (this open design's id: kept while it stays open, another for each design started or opened), \
+             revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
+             never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
+        ),
     CommandSpec::new("sketch.inspect", "Inspect Sketch", crate::checked!("sketch.inspect", sketch_inspect))
         .at("SKETCH", "INSPECT")
         .icon("inspect")
@@ -561,7 +566,13 @@ impl Session {
 /// `document.revision`: the design's id and [`Session::design_revision`].
 fn revision(s: &mut Session, _p: &Value) -> Result<Value> {
     let revision = s.design_revision();
-    Ok(json!({"document_id": s.document_id, "revision": revision}))
+    typed_reply(
+        "document.revision",
+        crate::schema::inspect::DocumentRevisionResult {
+            document_id: s.document_id.clone(),
+            revision,
+        },
+    )
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {

@@ -63,6 +63,22 @@ pub struct BodyListParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ModelThreadsParams {}
+/// `document.revision` takes no parameters.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DocumentRevisionParams {}
+
+pub static REVISION_CONTRACT: crate::schema::TypedContract<DocumentRevisionParams> =
+    crate::schema::TypedContract::new();
+
+/// What `document.revision` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DocumentRevisionResult {
+    /// This open design's persistent document id.
+    pub document_id: String,
+    /// The monotonically increasing revision number.
+    pub revision: u64,
+}
 
 /// List the timeline features that built each body (#11945).
 #[derive(Debug, Deserialize, JsonSchema)]

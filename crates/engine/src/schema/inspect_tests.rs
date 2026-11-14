@@ -2,6 +2,7 @@ use serde_json::{Value, json};
 
 use super::{
     BodyFeaturesParams, BodyListParams, CommandEntry, CommandsParams, DescribeParams, DocumentInspectParams, DocumentInspectResult,
+    DocumentRevisionParams, DocumentRevisionResult,
     MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams, MeasureResult, ModelBodyFeatures, ModelEdges,
     ModelFaces, ModelThreads, ModelThreadsParams, SketchInspectParams, SketchInspected,
 };
@@ -15,6 +16,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<BodyListParams>(), &["body"]);
     assert_keys(input_schema_for::<ModelThreadsParams>(), &[]);
     assert_keys(input_schema_for::<BodyFeaturesParams>(), &["body"]);
+    assert_keys(input_schema_for::<DocumentRevisionParams>(), &[]);
 }
 
 #[test]
@@ -646,4 +648,15 @@ fn body_features_list_what_built_each_body() {
     let warned = run(&mut s, "model.body_features", json!({"bdy": "A"}));
     assert!(warned.get("param_warnings").is_some(), "{warned}");
     assert!(s.execute("model.body_features", &json!({"body": "Nope"})).is_err());
+}
+
+
+#[test]
+fn document_revision_matches_its_schema() {
+    let mut s = Session::default();
+    let r = s.execute("document.revision", &json!({})).unwrap_or_else(|e| panic!("{e}"));
+    let schema = output_schema_for::<DocumentRevisionResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &r), "{r} doesn't match schema");
+    assert!(r["document_id"].is_string());
+    assert!(r["revision"].is_number());
 }
