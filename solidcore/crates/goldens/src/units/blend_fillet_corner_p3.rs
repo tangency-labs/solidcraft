@@ -1988,4 +1988,23 @@ mod tests {
             let _: Inputs = serde_json::from_value(v).unwrap();
         }
     }
+
+    /// The eight cases whose status went from 0 to 1006 when a failing analytic corner
+    /// exit started to read as `FALSE` (WR-254): each corner has an edge with no 3D curve
+    /// in its input model, so no Coons patch can be bounded there.
+    #[test]
+    fn analytic_exit_cases_have_a_curveless_corner_edge() {
+        for idx in [60usize, 89, 104, 145, 170, 189, 282, 326] {
+            let seed = CaseContext::seed_for("blend.fillet_corner_p3", idx);
+            let v = Runner.generate(&mut Rng::new(seed)).unwrap();
+            let i: Inputs = serde_json::from_value(v).unwrap();
+            let Inputs::Corner { model, corner, .. } = &i else {
+                panic!("gen{idx:04} is not a corner case");
+            };
+            assert!(
+                corner.edges.iter().any(|&e| model.edges[e].curve.is_none()),
+                "gen{idx:04}: every corner edge has a curve"
+            );
+        }
+    }
 }
