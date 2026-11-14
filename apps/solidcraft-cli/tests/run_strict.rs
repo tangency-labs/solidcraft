@@ -1,5 +1,6 @@
 //! A timeline feature that fails fails `run`, and nothing is written: the bodies lack what the
-//! feature should have made, and handing them out with exit 0 hides the failure.
+//! feature should have made, and handing them out with exit 0 hides the failure. `eval` still
+//! prints its report, and fails on the same rule (#11225).
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -76,9 +77,56 @@ fn allow_errors_writes_anyway_and_a_saved_design_keeps_failing() {
     assert_eq!(output.status.code(), Some(1));
     assert!(!again.exists());
     let output = cli().arg("eval").arg(&saved).output().unwrap();
-    assert!(output.status.success());
+    assert_eq!(output.status.code(), Some(1));
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(report["timeline"].as_array().unwrap().iter().any(|f| f["error"].is_string()), "{}", report["timeline"]);
+}
+
+/// #11225: a parameter change that breaks a feature made `eval` exit 0 where `run` exits 1, so
+/// a script checking the status took the broken rebuild for a good one. `eval` (and its alias
+/// `inspect`) now fails too, after printing the whole report; `--allow-errors` exits 0.
+#[test]
+fn eval_reports_a_failing_feature_and_fails_like_run() {
+    let dir = Scratch::new();
+    let script = dir.0.join("repro.json");
+    let commands = json!({"commands": [
+        {"command": "parameters.add", "params": {"name": "Size", "expression": "10 mm"}},
+        {"command": "solid.box", "params": {"length": "Size", "width": 10, "height": 10, "body_name": "Block"}},
+        {"command": "parameters.change", "params": {"name": "Size", "expression": "0 mm"}},
+    ]});
+    std::fs::write(&script, commands.to_string()).unwrap();
+    let failed = |report: &Value| {
+        let timeline = report["timeline"].as_array().unwrap();
+        timeline.iter().any(|f| f["name"] == "Box1" && f["error"].as_str().is_some_and(|e| e.contains("positive size")))
+    };
+    // Both inputs as one, and `--in` alone, are the same design.
+    for command in ["eval", "inspect"] {
+        for input in [&[][..], &["--in"][..]] {
+            let output = cli().arg(command).args(input).arg(&script).output().unwrap();
+            assert_eq!(output.status.code(), Some(1), "{command} {input:?}");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains("1 timeline feature(s) failed") && stderr.contains("Box1: invalid input"), "{stderr}");
+            assert!(!stderr.contains("nothing was written"), "eval writes nothing anyway: {stderr}");
+            let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(report["body_count"], 0, "{command} {input:?}");
+            assert!(failed(&report), "{}", report["timeline"]);
+        }
+    }
+    // The report still goes to `--json-out`, then the status says the timeline failed.
+    let file = dir.0.join("eval.json");
+    let output = cli().arg("eval").arg(&script).arg("--json-out").arg(&file).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(failed(&serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap()));
+    // Asked to inspect a broken design on purpose: the report and status 0, as before.
+    let output = cli().arg("eval").arg(&script).arg("--allow-errors").output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(failed(&serde_json::from_slice(&output.stdout).unwrap()));
+    // `run` fails the same input on the same rule.
+    let output = cli().arg("run").arg(&script).arg("--quiet").output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Box1: invalid input"));
 }
 
 #[test]
