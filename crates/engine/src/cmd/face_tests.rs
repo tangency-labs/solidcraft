@@ -639,3 +639,16 @@ fn replace_face_moves_the_named_body_of_a_flush_face_and_warns_for_an_unnamed_on
     assert!((body_volume(&mut s, "Small") - 350.0).abs() < 1e-6, "{}", body_volume(&mut s, "Small"));
     assert!((body_volume(&mut s, "Big") - 24000.0).abs() < 1e-6);
 }
+
+/// Planar face checks and normal evaluations use exact B-rep analytical surfaces.
+#[test]
+fn planar_face_normal_and_planarity_use_exact_brep() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "name": "Block"}));
+    let n = super::face_normal(&s, Vec3::new(10.0, 10.0, 10.0));
+    assert_eq!(n, Some(Vec3::Z));
+    assert_eq!(super::face_is_planar(&s, Vec3::new(10.0, 10.0, 10.0)), Some(true));
+    run(&mut s, "solid.cylinder", json!({"base": [50, 0, 0], "axis": [0, 0, 1], "radius": 5, "height": 10, "operation": "new", "body_name": "Cyl"}));
+    assert_eq!(super::face_is_planar(&s, Vec3::new(55.0, 0.0, 5.0)), Some(false));
+    assert_eq!(super::face_normal(&s, Vec3::new(55.0, 0.0, 5.0)), None);
+}
