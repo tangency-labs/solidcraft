@@ -2386,3 +2386,59 @@ fn a_cap_whose_arcs_leave_a_ring_along_its_sides_closes_a_profile() {
         }
     }
 }
+
+/// A ring with rounded top corners (radius 6) under two caps over one top line: a wide cap of
+/// radius 15 and a narrow one of radius 9 resting on the ring's top line. At the top line's left
+/// end both caps' arcs leave along the line, as a solved sketch leaves them: the wide arc's
+/// tangent `tilt` rad down from the line, the narrow arc starting 2e-5 mm past the line's end,
+/// as near the line's end as the wide arc's start, so it is neither's unique nearest end.
+/// The region under the narrow cap must close, and so must the slivers between the caps.
+#[test]
+fn two_caps_leaving_one_line_along_its_direction_each_close_a_profile() {
+    for tilt in [0.0, 1e-7, 5e-6] {
+        let mut sk = Sketch::new();
+        let p = |sk: &mut Sketch, x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
+        // The ring: sides from y = -50 to 0, corners of radius 6, top line at y = 6.
+        let (bl, left, left_top) = (p(&mut sk, 0.0, -50.0), p(&mut sk, 0.0, 0.0), p(&mut sk, 6.0, 6.0));
+        let (right_top, right, br) = (p(&mut sk, 94.0, 6.0), p(&mut sk, 100.0, 0.0), p(&mut sk, 100.0, -50.0));
+        sk.add_line_pts(bl, left, None).unwrap();
+        sk.add_arc(v(6.0, 0.0), v(6.0, 6.0), v(0.0, 0.0), [None, Some(left_top), Some(left)], None).unwrap();
+        let ring_top = sk.add_line_pts(left_top, right_top, None).unwrap();
+        sk.add_arc(v(94.0, 0.0), v(100.0, 0.0), v(94.0, 6.0), [None, Some(right), Some(right_top)], None).unwrap();
+        sk.add_line_pts(right, br, None).unwrap();
+        sk.add_line_pts(br, bl, None).unwrap();
+        // The caps' top line at y = 15. On the right it runs 1.8e-4 mm past the narrow arc's
+        // end, which lies on it, and the wide arc ends 1e-5 mm short of the line's end.
+        let (top_left, top_right) = (p(&mut sk, 15.0, 15.0), p(&mut sk, 85.0 + 1.8e-4, 15.0));
+        sk.add_line_pts(top_right, top_left, None).unwrap();
+        let wide_right_end = v(85.0 + 1.7e-4, (225.0 - 1.7e-4_f64 * 1.7e-4).sqrt());
+        let wide_right = p(&mut sk, wide_right_end.x, wide_right_end.y);
+        sk.add_arc(v(85.0, 0.0), v(100.0, 0.0), wide_right_end, [None, Some(right), Some(wide_right)], None).unwrap();
+        let narrow_right = p(&mut sk, 85.0, 15.0);
+        sk.add_arc(v(85.0, 6.0), v(94.0, 6.0), v(85.0, 15.0), [None, Some(right_top), Some(narrow_right)], None).unwrap();
+        // The wide arc on the left: its centre `d` right of and below the round one, so that it
+        // still passes through the line's end and the ring's side top, with its tangent at the
+        // line's end `tilt` down from the line. It starts at a point of its own on the line's end
+        // (held there by a coincidence), as drawn in the app.
+        let d = tilt * 15.0;
+        let wide_start = p(&mut sk, 15.0, 15.0);
+        sk.add_arc(v(15.0 + d, -d), v(15.0, 15.0), v(0.0, 0.0), [None, Some(wide_start), Some(left)], None).unwrap();
+        // The narrow arc on the left starts 2e-5 mm past the line's end, on its line.
+        let (narrow_start, narrow_end) = (p(&mut sk, 15.0 - 2e-5, 15.0), p(&mut sk, 6.0 - 2e-5, 6.0));
+        let narrow =
+            sk.add_arc(v(15.0 - 2e-5, 6.0), v(15.0 - 2e-5, 15.0), v(6.0 - 2e-5, 6.0), [None, Some(narrow_start), Some(narrow_end)], None).unwrap();
+        let ps = find_profiles(&sk);
+        let (ring_top, narrow) = (&sk.curves[ring_top].id, &sk.curves[narrow].id);
+        let under = ps.iter().find(|p| p.outer_curves.contains(ring_top) && p.outer_curves.contains(narrow));
+        let all = || ps.iter().map(|p| (&p.outer_curves, p.area)).collect::<Vec<_>>();
+        let Some(under) = under else { panic!("tilt {tilt}: no profile under the narrow cap: {:?}", all()) };
+        // 70 x 9 and two quarter discs of radius 9 (the line past the narrow arc adds nothing).
+        let want = 70.0 * 9.0 + PI * 81.0 / 2.0;
+        assert!((under.area - want).abs() < 1e-3, "tilt {tilt}: {} vs {want}", under.area);
+        // The ring, the region under the narrow cap and the two slivers between the caps.
+        assert_eq!(ps.len(), 4, "tilt {tilt}: {:?}", all());
+        for p in &ps {
+            assert!(p.region.outer.is_closed(1e-6), "tilt {tilt}: {:?}", p.outer_curves);
+        }
+    }
+}
