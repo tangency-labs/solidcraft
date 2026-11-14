@@ -113,3 +113,15 @@ SolidCraft changes:
   (the `wp::pointer_gestures` module); drop the example and test targets.
 - `src/event.rs`, `src/changelog/unreleased.md`: the platform notes of both events and the
   changelog entry.
+- `src/platform_impl/windows/event_loop.rs`, `window_state.rs`: Windows' modal move and size
+  loop (`WM_ENTERSIZEMOVE` … `WM_EXITSIZEMOVE`, entered when the title bar is dragged) no longer
+  makes the app render once per move step. While the window only moves (its size unchanged):
+  `Moved` is coalesced and sent once, with the final position, at `WM_EXITSIZEMOVE`; `WM_PAINT`
+  is validated without `RedrawRequested`, and one paint is requested when the loop ends; relative
+  raw mouse motion is not sent as device events. Before, every `WM_WINDOWPOSCHANGED` became
+  `Moved`, egui-winit asks for a repaint on `Moved`, and the redraw arrived as `WM_PAINT` inside
+  the loop, so each step ran a full frame that blocked on the swapchain (acquire waits of
+  50-110 ms were measured on D3D12), and a frame that asked for the next one (eframe repaints on
+  raw motion while it believes the press that started the drag is still held) kept a paint loop
+  spinning for the whole drag: the window moved at 10-40 fps. A resize, a snap or a DPI change
+  inside the loop (a size change) paints live, as before.

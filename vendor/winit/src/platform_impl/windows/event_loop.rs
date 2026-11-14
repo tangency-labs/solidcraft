@@ -1199,20 +1199,45 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_ENTERSIZEMOVE => {
-            userdata
-                .window_state_lock()
-                .set_window_flags_in_place(|f| f.insert(WindowFlags::MARKER_IN_SIZE_MOVE));
+            {
+                let mut state = userdata.window_state_lock();
+                // Each window counts once, even if a second `WM_ENTERSIZEMOVE` comes first.
+                if !state.window_flags().contains(WindowFlags::MARKER_IN_SIZE_MOVE) {
+                    WINDOWS_IN_SIZE_MOVE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                state.size_changed_in_loop = false;
+                state.paint_deferred_in_loop = false;
+                state.set_window_flags_in_place(|f| f.insert(WindowFlags::MARKER_IN_SIZE_MOVE));
+            }
             result = ProcResult::Value(0);
         },
 
         WM_EXITSIZEMOVE => {
-            let mut state = userdata.window_state_lock();
-            if state.dragging {
-                state.dragging = false;
-                unsafe { PostMessageW(window, WM_LBUTTONUP, 0, lparam) };
-            }
+            let pending_moved = {
+                let mut state = userdata.window_state_lock();
+                if state.dragging {
+                    state.dragging = false;
+                    unsafe { PostMessageW(window, WM_LBUTTONUP, 0, lparam) };
+                }
 
-            state.set_window_flags_in_place(|f| f.remove(WindowFlags::MARKER_IN_SIZE_MOVE));
+                if state.window_flags().contains(WindowFlags::MARKER_IN_SIZE_MOVE) {
+                    leave_size_move();
+                }
+                state.set_window_flags_in_place(|f| f.remove(WindowFlags::MARKER_IN_SIZE_MOVE));
+                state.size_changed_in_loop = false;
+                if std::mem::take(&mut state.paint_deferred_in_loop) {
+                    unsafe { RedrawWindow(window, ptr::null(), 0, RDW_INTERNALPAINT) };
+                }
+                state.pending_moved.take()
+            };
+            // SolidCraft: the position the window ended at, coalesced during the loop
+            // (see `WM_WINDOWPOSCHANGED`). Sent with the state lock released.
+            if let Some(position) = pending_moved {
+                userdata.send_event(Event::WindowEvent {
+                    window_id: RootWindowId(WindowId(window)),
+                    event: WindowEvent::Moved(position),
+                });
+            }
             result = ProcResult::Value(0);
         },
 
@@ -1268,11 +1293,33 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_NCDESTROY => {
+            // SolidCraft: a window destroyed inside the move/size loop gets no
+            // `WM_EXITSIZEMOVE`. Its count is released here, or relative raw mouse motion would
+            // stay held back for the rest of the process.
+            {
+                let mut state = userdata.window_state_lock();
+                if state.window_flags().contains(WindowFlags::MARKER_IN_SIZE_MOVE) {
+                    leave_size_move();
+                    state.set_window_flags_in_place(|f| f.remove(WindowFlags::MARKER_IN_SIZE_MOVE));
+                }
+            }
             unsafe { super::set_window_long(window, GWL_USERDATA, 0) };
             userdata.userdata_removed.set(true);
             result = ProcResult::Value(0);
         },
 
+        // SolidCraft: during a pure move (modal move loop, size unchanged) the compositor moves
+        // the window's pixels, so paints are validated without a frame: a frame here would block
+        // the loop on the swapchain. One paint is requested when the loop ends.
+        WM_PAINT if {
+            let state = userdata.window_state_lock();
+            state.window_flags().contains(WindowFlags::MARKER_IN_SIZE_MOVE)
+                && !state.size_changed_in_loop
+        } =>
+        {
+            userdata.window_state_lock().paint_deferred_in_loop = true;
+            result = ProcResult::Value(unsafe { DefWindowProcW(window, msg, wparam, lparam) });
+        },
         WM_PAINT => {
             userdata.window_state_lock().redraw_requested =
                 userdata.event_loop_runner.should_buffer();
@@ -1381,13 +1428,30 @@ unsafe fn public_window_callback_inner(
             use crate::event::WindowEvent::Moved;
 
             let windowpos = lparam as *const WINDOWPOS;
-            if unsafe { (*windowpos).flags & SWP_NOMOVE != SWP_NOMOVE } {
+            let flags = unsafe { (*windowpos).flags };
+            if flags & SWP_NOMOVE != SWP_NOMOVE {
                 let physical_position =
                     unsafe { PhysicalPosition::new((*windowpos).x, (*windowpos).y) };
-                userdata.send_event(Event::WindowEvent {
-                    window_id: RootWindowId(WindowId(window)),
-                    event: Moved(physical_position),
-                });
+                // SolidCraft: a pure move inside the modal move/size loop is sent once, at
+                // `WM_EXITSIZEMOVE`. A move that also resizes (a snap, a DPI change) is sent at once.
+                let coalesce = {
+                    let mut state = userdata.window_state_lock();
+                    let in_loop =
+                        state.window_flags().contains(WindowFlags::MARKER_IN_SIZE_MOVE);
+                    if in_loop && flags & SWP_NOSIZE == SWP_NOSIZE {
+                        state.pending_moved = Some(physical_position);
+                        true
+                    } else {
+                        state.pending_moved = None;
+                        false
+                    }
+                };
+                if !coalesce {
+                    userdata.send_event(Event::WindowEvent {
+                        window_id: RootWindowId(WindowId(window)),
+                        event: Moved(physical_position),
+                    });
+                }
             }
 
             // This is necessary for us to still get sent WM_SIZE.
@@ -1396,6 +1460,12 @@ unsafe fn public_window_callback_inner(
 
         WM_SIZE => {
             use crate::event::WindowEvent::Resized;
+            {
+                let mut state = userdata.window_state_lock();
+                if state.window_flags().contains(WindowFlags::MARKER_IN_SIZE_MOVE) {
+                    state.size_changed_in_loop = true;
+                }
+            }
             let w = super::loword(lparam as u32) as u32;
             let h = super::hiword(lparam as u32) as u32;
 
@@ -2556,6 +2626,17 @@ unsafe extern "system" fn thread_event_target_callback(
     result
 }
 
+/// SolidCraft: windows of this process inside the modal move/size loop. Meanwhile relative raw
+/// mouse motion is not sent: an app repainting on it would render once per mouse report.
+static WINDOWS_IN_SIZE_MOVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// SolidCraft: a window left the modal move/size loop, or was destroyed inside it.
+fn leave_size_move() {
+    // Only the window thread enters and leaves the loop: no race to guard.
+    let n = WINDOWS_IN_SIZE_MOVE.load(std::sync::atomic::Ordering::Relaxed);
+    WINDOWS_IN_SIZE_MOVE.store(n.saturating_sub(1), std::sync::atomic::Ordering::Relaxed);
+}
+
 unsafe fn handle_raw_input(userdata: &ThreadMsgTargetData, data: RAWINPUT) {
     use crate::event::DeviceEvent::{Button, Key, Motion, MouseMotion, MouseWheel};
     use crate::event::ElementState::{Pressed, Released};
@@ -2566,7 +2647,9 @@ unsafe fn handle_raw_input(userdata: &ThreadMsgTargetData, data: RAWINPUT) {
     if data.header.dwType == RIM_TYPEMOUSE {
         let mouse = unsafe { data.data.mouse };
 
-        if util::has_flag(mouse.usFlags as u32, MOUSE_MOVE_RELATIVE) {
+        let moving_window =
+            WINDOWS_IN_SIZE_MOVE.load(std::sync::atomic::Ordering::Relaxed) > 0;
+        if util::has_flag(mouse.usFlags as u32, MOUSE_MOVE_RELATIVE) && !moving_window {
             let x = mouse.lLastX as f64;
             let y = mouse.lLastY as f64;
 
