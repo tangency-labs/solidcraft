@@ -1269,9 +1269,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// unsupported corner, so the opt-in `fixes.fillet_vertex_error_diagnostics` can
     /// retain the fields written by the fork's corrected vertex `NoteError` overload.
     ///
-    /// With the fix off (the default), an unsupported corner records nothing and keeps
-    /// its pending entry, exactly as [`Self::create_fillet_corners`] and the pinned
-    /// `CreateFilletCorners` do. With it on, the executive records the vertex, its
+    /// With the fix off, an unsupported corner records nothing and keeps its pending
+    /// entry, as the pinned `CreateFilletCorners` does. With it on (the default), the
+    /// executive records the vertex, its
     /// location, `SM_FIL_FAILURE`, `FilletErrorType::CornerUnsupported` and
     /// `"Corner case not implemented"` (the fork's note) and still keeps the pending
     /// entry: retaining the note does not change the operation's result or topology.
@@ -2359,7 +2359,10 @@ mod tests {
             executive.vertex_corner_map.get(&Some(H(3))),
             Some(&VertexEntry::Corner(H(30)))
         );
-        assert_eq!(info.code, 17);
+        // the unsupported corner at H(2) is noted (vertex diagnostics), and the error info
+        // assigned after the loop carries that note's code, not the one before
+        assert_eq!(info.code, executive.error.code);
+        assert_ne!(info.code, 17);
     }
 
     #[test]

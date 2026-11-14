@@ -1245,6 +1245,107 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         allow_spine_edges: bool,
     ) -> Result<StitchAttempt>;
 
+    // The corrections' checks, for an implementor driven without a live fillet session (the
+    // adapters over this trait delegate to these). Each judges a solver's geometry, which only
+    // the implementor can read; the defaults refuse, so an implementor that does not judge a
+    // check stops the run instead of passing it.
+
+    /// [`BrepCreationAccess::creation_extend_trace_to_its_rails`] for this implementor.
+    ///
+    /// # Errors
+    /// [`SolidError::InvalidInput`] by default: the trace reach needs a live fillet session.
+    fn extend_trace_to_its_rails(&mut self, k: &mut Kernel, solver: O) -> Result<()> {
+        let _ = (k, solver);
+        Err(invalid("the trace reach needs a live fillet session"))
+    }
+    /// [`SolverGeometryAccess::geometry_rails_fit`] for this implementor.
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] by default.
+    fn rails_fit(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        executive: &FilletExecutive<O>,
+    ) -> Result<bool> {
+        let _ = (k, solver, executive);
+        Err(SolidError::unported(
+            "SmFilletSolver::RailsFitTheirFaces (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
+    /// [`SolverGeometryAccess::geometry_rails_fit_judged`] for this implementor.
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] by default.
+    fn rails_fit_judged(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        executive: &FilletExecutive<O>,
+    ) -> Result<RailsFit> {
+        let _ = (k, solver, executive);
+        Err(SolidError::unported(
+            "SmFilletSolver::RailsFitTheirFaces (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
+    /// [`SolverGeometryAccess::geometry_end_sections_fit`] for this implementor.
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] by default.
+    fn end_sections_fit(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        executive: &FilletExecutive<O>,
+    ) -> Result<bool> {
+        let _ = (k, solver, executive);
+        Err(SolidError::unported(
+            "SmFilletSolver::EndSectionsFitTheirFaces (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
+    /// [`SolverGeometryAccess::geometry_faces_outlast`] for this implementor.
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] by default.
+    fn faces_outlast(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        let _ = (k, solvers);
+        Err(SolidError::unported(
+            "SmFilletExecutive::FacesOutlastTheirBlends (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
+    /// [`SolverGeometryAccess::geometry_bands_clear_other_rails`] for this implementor.
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] by default.
+    fn bands_clear_other_rails(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        let _ = (k, solvers);
+        Err(SolidError::unported(
+            "SmFilletExecutive::BandsClearOtherRails (fork)",
+            "blend.fillet_executive_p3",
+        ))
+    }
+    /// [`FaceStitchAccess::stitch_body_keeping_fillet_edges`] for this implementor.
+    ///
+    /// # Errors
+    /// [`SolidError::Unported`] by default.
+    fn stitch_faces_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        tolerance: f64,
+        corners: &[O],
+    ) -> Result<StitchAttempt> {
+        let _ = (k, brep, tolerance, corners);
+        Err(SolidError::Unported {
+            upstream: "SmFilletPatchStitchCallback",
+            unit: "blend.fillet_executive_p3",
+        })
+    }
+
     /// `SmFilletExecutive::DoPiecewiseMerge` on the implementor's bodies (the live
     /// session's port is `FilletSession`'s piecewise merge).
     fn piecewise_merge(&mut self, k: &mut Kernel, executive: &mut FilletExecutive<O>)
@@ -2286,8 +2387,8 @@ where
         ExecutiveAccess::process_smooth_edge_sequences(self, k, executive)
     }
 
-    fn creation_extend_trace_to_its_rails(&mut self, _k: &mut Kernel, _solver: O) -> Result<()> {
-        Err(invalid("the trace reach needs a live fillet session"))
+    fn creation_extend_trace_to_its_rails(&mut self, k: &mut Kernel, solver: O) -> Result<()> {
+        ExecutiveAccess::extend_trace_to_its_rails(self, k, solver)
     }
 
     fn creation_ball_is_regular(
@@ -2462,6 +2563,15 @@ where
     }
     fn stitch_body(&mut self, k: &mut Kernel, body: O, tolerance: f64) -> Result<StitchAttempt> {
         ExecutiveAccess::stitch_faces(self, k, body, tolerance, None, false)
+    }
+    fn stitch_body_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        body: O,
+        tolerance: f64,
+        corners: &[O],
+    ) -> Result<StitchAttempt> {
+        ExecutiveAccess::stitch_faces_keeping_fillet_edges(self, k, body, tolerance, corners)
     }
 }
 
@@ -2737,6 +2847,36 @@ where
     }
     fn geometry_edge(&self, solver: O) -> Result<O> {
         ExecutiveAccess::solver_edge(self, solver)
+    }
+    fn geometry_rails_fit(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        executive: &FilletExecutive<O>,
+    ) -> Result<bool> {
+        ExecutiveAccess::rails_fit(self, k, solver, executive)
+    }
+    fn geometry_rails_fit_judged(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        executive: &FilletExecutive<O>,
+    ) -> Result<RailsFit> {
+        ExecutiveAccess::rails_fit_judged(self, k, solver, executive)
+    }
+    fn geometry_end_sections_fit(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        executive: &FilletExecutive<O>,
+    ) -> Result<bool> {
+        ExecutiveAccess::end_sections_fit(self, k, solver, executive)
+    }
+    fn geometry_faces_outlast(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        ExecutiveAccess::faces_outlast(self, k, solvers)
+    }
+    fn geometry_bands_clear_other_rails(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<bool> {
+        ExecutiveAccess::bands_clear_other_rails(self, k, solvers)
     }
 }
 
@@ -4329,8 +4469,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// this returns, on every result (upstream `SmObjsDelete`).
     ///
     /// # Errors
-    /// Deletion, stitching (after the last try), removal and post-process failures;
-    /// ordinary notification and orientation failures are ignored as upstream.
+    /// Deletion, stitching (after the last try), removal, post-process and orientation
+    /// failures (the last passed on with `fixes.fillet_statuses_pass_on`, the default);
+    /// ordinary notification failures are ignored as upstream.
     pub fn finish_merged_fillet(
         &mut self,
         k: &mut Kernel,

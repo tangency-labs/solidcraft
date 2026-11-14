@@ -62,12 +62,63 @@ struct Access {
     /// A hand-built target body: `edges(Handle(0))` lists its edges as
     /// `Handle(BODY_EDGE + i)` and the manifold check runs on its records.
     body: Option<Brep>,
+    /// The corrections' face check: the blends take the whole of a face they roll on.
+    faces_consumed: bool,
 }
 const BODY_EDGE: u8 = 100;
 fn absent<T>() -> Result<T> {
     Err(invalid("test handle has no geometry"))
 }
 impl ExecutiveAccess<Handle> for Access {
+    // The corrections' checks, judged by this harness as its scenario says: its blends fit
+    // their faces and leave each face some of it, unless `faces_consumed`; its trace needs no
+    // reach; its stitch keeps every edge (it builds no corner patches).
+    fn extend_trace_to_its_rails(&mut self, _: &mut Kernel, _: Handle) -> Result<()> {
+        Ok(())
+    }
+    fn rails_fit(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &FilletExecutive<Handle>,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+    fn rails_fit_judged(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &FilletExecutive<Handle>,
+    ) -> Result<RailsFit> {
+        Ok(RailsFit {
+            fit: true,
+            rolls_over: false,
+            into_material: false,
+        })
+    }
+    fn end_sections_fit(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &FilletExecutive<Handle>,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+    fn faces_outlast(&mut self, _: &mut Kernel, _: &[Handle]) -> Result<bool> {
+        Ok(!self.faces_consumed)
+    }
+    fn bands_clear_other_rails(&mut self, _: &mut Kernel, _: &[Handle]) -> Result<bool> {
+        Ok(true)
+    }
+    fn stitch_faces_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        brep: Handle,
+        tolerance: f64,
+        _: &[Handle],
+    ) -> Result<StitchAttempt> {
+        ExecutiveAccess::stitch_faces(self, k, brep, tolerance, None, false)
+    }
     fn solver_base(&self, _: Handle) -> Result<&crate::blend::fillet_solver::p1::FilletSolver> {
         Err(SolidError::invalid_input(
             "test::executive_access",
@@ -444,7 +495,7 @@ impl ExecutiveAccess<Handle> for Access {
                 "orientation must see temporary attributes"
             );
         }
-        self.orient_error.clone().map_or(Ok(()), Err) // ordinary errors are ignored
+        self.orient_error.clone().map_or(Ok(()), Err)
     }
     fn calc_corner_vertices(
         &mut self,
@@ -885,12 +936,11 @@ fn piecewise_return_restores_both_temporary_flags_on_success_and_error() {
 }
 
 #[test]
-fn stitching_retries_exactly_five_times_doubles_tolerance_and_ignores_orientation_error() {
+fn stitching_retries_exactly_five_times_and_doubles_tolerance() {
     let mut executive = state();
     executive.options.trimming = true;
     let mut access = Access {
         stitch_lamina: 1,
-        orient_error: Some(failure()),
         ..Access::default()
     };
     let mut k = Kernel::default();
@@ -1135,10 +1185,8 @@ fn temporary_attributes_survive_orientation_and_are_cleaned_on_errors_or_deferra
             ..Access::default()
         };
         let result = executive.do_filleting(&mut Kernel::default(), &mut access, None);
-        assert_eq!(
-            result.is_err(),
-            error.as_ref().is_some_and(SolidError::is_unported)
-        );
+        // an orientation failure is passed on (fork 873c7c9), ordinary or not
+        assert_eq!(result.is_err(), error.is_some());
         assert_eq!(access.created_attributes, 1);
         assert!(access.attributes.is_empty());
         assert_eq!(access.events.last(), Some(&"delete_attr"));
@@ -1371,20 +1419,6 @@ fn fillet_body(body: Brep) -> (FilletExecutive<Handle>, Access, Result<()>) {
 }
 
 #[test]
-fn open_result_is_accepted_without_the_opt_in_check() {
-    // Upstream (the default): DoFillet returns success for an open target.
-    let mut executive = state();
-    let mut access = Access {
-        body: Some(tetrahedron(&[0, 1, 2]).0),
-        ..Access::default()
-    };
-    let mut k = Kernel::default();
-    executive.do_fillet(&mut k, &mut access).unwrap();
-    assert_eq!(executive.error.code, 0);
-    assert!(executive.error.edge.is_none());
-}
-
-#[test]
 fn hand_built_tetrahedron_is_a_closed_manifold_solid() {
     let (body, _) = tetrahedron(&[0, 1, 2, 3]);
     assert_eq!(body.edge_list().len(), 6);
@@ -1493,4 +1527,23 @@ fn tag_merge_component_retains_allocated_markers_when_merge_fails() {
     assert_eq!(access.attributes.get(&Handle(30)), Some(&vec![Handle(11)]));
     assert_eq!(access.events, ["new_attr", "merge"]);
     assert_eq!(executive.topo_edges, [Some(Handle(20))]);
+}
+
+/// The corrections' checks run through the adapter over `ExecutiveAccess` and their verdicts
+/// stand: blends that take the whole of a face are refused (no room), not built.
+#[test]
+fn blends_that_consume_a_face_are_refused_through_the_adapter() {
+    let mut executive = state();
+    executive.solvers.push(Handle(3));
+    let mut access = Access {
+        faces_consumed: true,
+        ..Access::default()
+    };
+    let result = executive.do_filleting(&mut Kernel::default(), &mut access, None);
+    assert!(result.is_err(), "{result:?}");
+    assert!(
+        executive.error.comment.contains("take the whole of a face"),
+        "{:?}",
+        executive.error.comment
+    );
 }

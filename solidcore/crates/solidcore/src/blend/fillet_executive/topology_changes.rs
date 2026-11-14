@@ -142,31 +142,6 @@ mod tests {
             Ok(())
         }
     }
-    #[test]
-    fn ordered_updates_ignore_ordinary_errors_then_visit_corners() {
-        let mut changes = Changes {
-            users: vec![Some(8), None, Some(3), Some(9)],
-            ..Changes::default()
-        };
-        update_topology_changes(&Kernel::default(), &[2, 1], &[7, 6], &mut changes, 0, 3).unwrap();
-        assert_eq!(
-            changes.events,
-            vec![
-                (false, 20, 8),
-                (false, 20, 9),
-                (false, 21, 8),
-                (false, 21, 9),
-                (false, 10, 8),
-                (false, 10, 9),
-                (false, 11, 8),
-                (false, 11, 9),
-                (true, 7, 8),
-                (true, 7, 9),
-                (true, 6, 8),
-                (true, 6, 9)
-            ]
-        );
-    }
     /// Fork 873c7c9 (`UpdateTopologyChanges`: `SER( pFilGeom->UpdateSplitFace(..) )`):
     /// with `fillet_statuses_pass_on` the first failed geometry update is returned,
     /// before the other geometries and the corners; without it every update runs.
@@ -189,17 +164,19 @@ mod tests {
         update_topology_changes(&k, &[2, 1], &[7], &mut changes, 0, 3).unwrap();
         assert_eq!(changes.events.len(), 5);
     }
+    /// A genuine missing update (the first geometry's) stops the run before the other
+    /// geometries and the corners, and is the error returned.
     #[test]
     fn genuine_missing_update_retains_prefix_and_stops_before_corners() {
         let mut changes = Changes {
             users: vec![Some(3), Some(8)],
-            stop: Some(21),
+            stop: Some(20),
             ..Changes::default()
         };
-        assert!(
-            update_topology_changes(&Kernel::default(), &[2, 1], &[7], &mut changes, 0, 3).is_err()
-        );
-        assert_eq!(changes.events, vec![(false, 20, 8), (false, 21, 8)]);
+        let e = update_topology_changes(&Kernel::default(), &[2, 1], &[7], &mut changes, 0, 3)
+            .unwrap_err();
+        assert!(e.is_unported(), "{e:?}");
+        assert_eq!(changes.events, vec![(false, 20, 8)]);
     }
     #[test]
     fn single_user_returns_before_any_object_projection() {
