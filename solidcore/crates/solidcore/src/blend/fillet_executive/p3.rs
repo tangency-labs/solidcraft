@@ -3054,8 +3054,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 overflowing.push(edge);
             }
             if access.geometry_blend_adds_material(k, solver)? {
+                // the event's only where its rails leave across the cliff's rim at V and its
+                // end sections stay on their end faces (an end section's overflow is not
+                // located, so it is never taken for the event's)
                 if self.roll_over_pass
                     && access.geometry_overflows_at_roll_over(k, solver, &judged.left_across)?
+                    && access.geometry_end_sections_fit(k, solver, self)?
                 {
                     rolled_overflow = true;
                 } else {

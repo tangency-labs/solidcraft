@@ -918,6 +918,65 @@ mod tests {
         assert!(steep.is_none());
     }
 
+    /// The cliff profile whose round's other face is a circle (a cylinder of radius 2 about
+    /// (-3, 0) in local coordinates, touching the round's circle, radius 1, at (-1, 0)), with
+    /// r1 = r2 = 1 (the rim rho = 2), and the wall tangent to the cylinder at the seam. With
+    /// the seam at 30 degrees round the cylinder (rho 1.6, inside the rim) the rail leaves the
+    /// end face across the wall: a segment from the rim to the seam, then the arc from the
+    /// tangent point to the seam. With the seam at 90 degrees (rho 3.6, outside the rim) it
+    /// leaves across the cylinder: one arc from the tangent point to the rim, on the seam's
+    /// side. Each arc lies on the cylinder and is certified.
+    #[test]
+    fn a_profile_whose_round_face_is_a_cylinder_has_its_arc_to_the_rim() {
+        let k = Kernel::default();
+        let radii = Radii { r1: 1.0, r2: 1.0 };
+        let frame = TorusFrame::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            radii,
+        )
+        .unwrap();
+        let (c, rb) = ([-3.0, 0.0], 2.0);
+        let on_cylinder = |q: [f64; 2]| (norm2(sub2(q, c)) - rb).abs() < 1e-12;
+        for (deg, pieces_n) in [(30.0_f64, 2), (90.0, 1)] {
+            let t = deg.to_radians();
+            let seam = [c[0] + rb * t.cos(), c[1] + rb * t.sin()];
+            let profile = Profile {
+                seam,
+                wall_dir: [-t.sin(), t.cos()],
+                round_face: CliffShape::Circle {
+                    centre: c,
+                    radius: rb,
+                },
+            };
+            let pieces = profile.pieces(radii, 1e-12).unwrap();
+            assert_eq!(pieces.len(), pieces_n, "{deg}");
+            let Some(CreasePiece {
+                piece: Piece::Arc { a, b, .. },
+                on_wall: false,
+            }) = pieces.last().copied()
+            else {
+                panic!("the last piece is the arc on the cylinder: {pieces:?}");
+            };
+            assert!((a[0] + 1.0).abs() < 1e-12 && a[1].abs() < 1e-12, "{a:?}");
+            assert!(on_cylinder(b), "{b:?}");
+            if pieces_n == 2 {
+                let Piece::Segment { a: exit, b: to } = pieces[0].piece else {
+                    panic!("the wall piece is a segment");
+                };
+                assert!((norm2(exit) - 2.0).abs() < 1e-12, "{exit:?}");
+                assert!(norm2(sub2(to, seam)) < 1e-12 && norm2(sub2(b, seam)) < 1e-12);
+            } else {
+                assert!((norm2(b) - 2.0).abs() < 1e-12, "{b:?}");
+                assert!(b[1] > 0.0, "on the seam's side: {b:?}");
+            }
+            let last = pieces.last().unwrap();
+            let (_, bound) = certified_crease(&k, &frame, &last.piece, 1e-10).unwrap();
+            assert!(bound <= 1e-10);
+        }
+    }
+
     /// A cylinder of radius 2 along the axis (y), its axis at x = -2, z = -1 (3 from the
     /// round's axis: touching the round's circle from outside at (0, -1)), placed at y = 50:
     /// its two arcs from the tangent point to the rim, on each side of the centre plane,
