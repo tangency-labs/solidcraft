@@ -407,11 +407,13 @@
       }
     },
     {
-      "error": "the offset is refused: the local operation's body fails its check where its input did not (6 failure lines more, the first test #59 of type 16011)",
       "inputs": [
         "b25"
       ],
       "op": "draft",
+      "outputs": [
+        "b26"
+      ],
       "params": {
         "angle": -0.05235987755982989,
         "faces": {
@@ -459,15 +461,21 @@
       "tangency-labs/solidcraft#16727"
     ],
     "tolerance": {
-      "rel": 1e-7
+      "rel": 1e-8
     },
     "volume_mm3": 1323.003389,
     "what": "a ring between the cylinder r 18 and the cone r(z) = 15 + (12 - z) tan 1.5 deg about the vertical axis through (2, 0, 0), z 0..9, cut to x >= 0; its flat bottom drafted -3 deg about the neutral plane x = 0 (pull -x), a hinge through both ends of the bottom's inner arc"
   },
   "expressible": true,
+  "gallery_note": "the bottom turns about the hinge x = 0, through both ends of its inner arc: the ends stay, and the arc between them is replaced by the turned plane's section of the cone, not kept",
   "operation_expressible": true,
   "records": "16727-draft-ring-bottom-about-its-inner-arcs-ends.bodies.json.gz",
-  "result": [],
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b26"
+    }
+  ],
   "sources": [
     "tangency-labs/solidcraft#16727"
   ],
