@@ -5,12 +5,13 @@
 //! the form's Greville points, at most 1 where the label stands.
 //!
 //! - The corpus labels #3137's parity run refused under the old constant `gamma(16 (p + q +
-//!   2)) size`, each pinned to its margin as measured under the derived bound: the three tori
-//!   of b6 and b85 (0.02 to 0.50) stand; b46's torus (1.69) and the four cylinders (b94 1.23,
-//!   b43 1.40, the 2903 rims 1.52 and 2.03) do not: their frames are off their forms past
-//!   the rounding at their size. Since #3199 the kernel's recognised sweep frame is the form's
-//!   own (its end meridians), so a label is measured against the form, not against a fit
-//!   that shared the label's error.
+//!   2)) size`, pinned to their margins under the derived bound. The four torus labels
+//!   stand (0.01 to 0.49); the cylinders (b94 1.23, b43 1.40, the 2903 rims 1.52 and 2.03)
+//!   do not. Since #16297 a stored torus support supplies both converters' circles and
+//!   their angular intervals, as well as the analytic evaluator's circles. Previously
+//!   recognition's independently fitted generator and polar converter remained installed:
+//!   b46's margin 1.69 measured their disagreement with the label, not a bad label.
+//!   These are stored-label checks, not measurements of `AnalyticSupport::derive`.
 //! - A torus the kernel makes at the groove's sizes stands on its own form, and the same label
 //!   turned about its axis by four times what the bound allows is refused.
 #![allow(
@@ -112,34 +113,41 @@ fn label_and_form(
     (support, form.copy())
 }
 
-/// (case, body, face, the margin measured at #3185, whether the label stands)
+/// (case, body, face, margin with the stored support's converters, whether the label stands).
+///
+/// Test change (#16297): installing the support's circles in both converters changes the
+/// four torus margins without changing their labels, forms or the rounding bound. A separate
+/// 60-digit rational evaluation of 1089 points on each recorded face gives maximum distance
+/// to its labelled torus of 1.65e-14 mm (b6), 3.20e-15 (b46), 2.22e-13 (b85/15) and 2.46e-13
+/// (b85/21). The b85 labels retain their small geometric discrepancies; their changed
+/// margins still stand. The deliberately turned label below must still be refused.
 const CASES: &[(&str, &str, usize, f64, bool)] = &[
     (
         "sweeps/3897-sweep-ring-along-a-short-arc-joined-to-a-collar",
         "b6",
         1,
-        0.0201,
+        0.0163, // formerly 0.0201 with the independently fitted converters
         true,
     ),
     (
         "sweeps/4280-circular-pattern-of-sweep-cut-groove-on-hub",
         "b46",
         1,
-        1.6943,
-        false,
+        0.0098, // formerly 1.6943: the stored label now keeps its own converters
+        true,
     ),
     (
         "sweeps/4280-circular-pattern-of-sweep-cut-groove-on-hub",
         "b85",
         15,
-        0.4995,
+        0.4881, // formerly 0.4995; this face's label still stands
         true,
     ),
     (
         "sweeps/4280-circular-pattern-of-sweep-cut-groove-on-hub",
         "b85",
         21,
-        0.4245,
+        0.4154, // formerly 0.4245; checked separately from face 15
         true,
     ),
     (
@@ -162,7 +170,7 @@ const CASES: &[(&str, &str, usize, f64, bool)] = &[
     ("fillets/2903-original-rim-round", "b0", 3, 2.0275, false),
 ];
 
-/// Each corpus label's margin, pinned to 1 % of what #3185 measured, on its side of 1, and
+/// Each corpus label's margin, pinned to 1 % of its measured value, on its side of 1, and
 /// `build` agreeing with it.
 #[test]
 fn the_corpus_labels_stand_or_fall_by_the_derived_bound() {

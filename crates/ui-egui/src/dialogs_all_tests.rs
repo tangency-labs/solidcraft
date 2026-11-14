@@ -115,6 +115,27 @@ fn command_dialog_remembers_values_for_the_same_command_only_in_this_session() {
 }
 
 #[test]
+fn extrude_recall_keeps_a_from_object_offset_visible_without_reusing_its_pick() {
+    for (value, shown) in [("", false), ("0 mm", true), ("5 mm", true)] {
+        let mut h = Harness::new();
+        h.app.preferences.remember_dialog_values = true;
+        let mut extrude = Dialog::for_command(&h.app, "solid.extrude").unwrap();
+        let Kind::Extrude { start, offset_start, .. } = &mut extrude.kind else { panic!("extrude") };
+        *start = value.into();
+        *offset_start = false;
+        set_object(&mut extrude.inputs, &mut extrude.active, FROM_OBJECT, true);
+        remember(&mut h.app, &extrude);
+
+        let recalled = Dialog::for_command(&h.app, "solid.extrude").unwrap();
+        assert!(!object_on(&recalled.inputs, FROM_OBJECT));
+        assert!(matches!(&recalled.kind, Kind::Extrude { start, .. } if start == value));
+        h.app.dialog = Some(recalled);
+        h.frames(4);
+        assert_eq!(scenario::handle_at("dialog:Offset").is_some(), shown, "offset {value:?}");
+    }
+}
+
+#[test]
 fn primitive_dialog_remembers_values_without_reusing_its_picked_placement() {
     let mut h = Harness::new();
     h.app.preferences.remember_dialog_values = true;

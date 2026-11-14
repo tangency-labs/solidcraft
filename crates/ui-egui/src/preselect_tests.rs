@@ -3971,6 +3971,29 @@ fn coincident_takes_a_selected_point_and_origin_axis() {
     }
 }
 
+/// #15461: a selected line or circle and an origin axis, either way round, go to Collinear and
+/// Tangent from the toolbar: the line lands on the axis, the circle touches it.
+#[test]
+fn curve_constraints_take_a_selected_origin_axis() {
+    for reverse in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[5, 8], [25, 11]], "infer": false, "connect": false})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center": [-20, 9], "radius": 3})).unwrap();
+        for (command, curve) in [("sketch.constraint.collinear", "l1"), ("sketch.constraint.tangent", "c1")] {
+            let (picked, axis) = (Sel::SketchCurve { id: curve.into(), sketch: None }, Sel::Axis { name: "X".into() });
+            h.app.session.selection = if reverse { vec![axis, picked] } else { vec![picked, axis] };
+            h.app.start(command);
+            assert!(h.app.tool.is_none(), "reverse {reverse}: {command} applied from the selection, no tool left waiting ({:?})", h.app.status);
+        }
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let y = |id: &str| sk.point(sk.resolve_point(id).unwrap()).unwrap().y;
+        assert!(y("l1.start").abs() < 1e-6 && y("l1.end").abs() < 1e-6, "reverse {reverse}: line at y {} / {}", y("l1.start"), y("l1.end"));
+        let r = sk.radius(sk.curve_index("c1").unwrap()).unwrap();
+        assert!((y("c1.center").abs() - r).abs() < 1e-6, "reverse {reverse}: circle centre at y {} with radius {r}", y("c1.center"));
+    }
+}
+
 /// #10311: a selected line midpoint and another line, either way round, go to Coincident from the
 /// toolbar and from the context menu: the line's middle lands on the other line.
 #[test]
@@ -4467,4 +4490,37 @@ fn split_face_dialog_keeps_a_sketch_split_and_its_loops() {
     assert_eq!(p["loops"], json!(true));
     let (_, p) = commands_for("ByPlane");
     assert!(p.get("sketch").is_none() && p.get("loops").is_none(), "{p}");
+}
+
+/// #16400: Plane Through Three Points takes a point on a mesh body's surface, the exact point of
+/// the triangle under the pointer.
+#[test]
+fn three_point_plane_dialog_takes_points_on_a_mesh_body() {
+    let mut h = crate::scenario::Harness::new();
+    let path = h.dir.join("box.stl");
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0]})).unwrap();
+    h.app.run("file.save_mesh", json!({"path": path})).unwrap();
+    h.app.run("file.new", json!({})).unwrap();
+    h.app.run("file.insert_mesh", json!({"path": path})).unwrap();
+    h.app.fit_view();
+    h.app.start("construct.plane.three_points");
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0));
+    let proj = crate::viewport::projection(&h.app, rect);
+    for point in [[20.0, 15.0, 20.0], [10.0, 5.0, 20.0], [30.0, 5.0, 20.0]] {
+        let pos = proj.to_screen(Vec3::new(point[0], point[1], point[2])).unwrap();
+        let hits = crate::viewport::pick(&h.app, &proj, pos);
+        let mut d = h.app.dialog.take().unwrap();
+        let sel = hits.iter().find_map(|hit| d.candidate(&h.app.session, hit)).expect("a point on the mesh is accepted");
+        d.pick(&h.app.session, sel);
+        h.app.dialog = Some(d);
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    for key in ["a", "b", "c"] {
+        let p = commands[0].1[key]["point"].as_array().unwrap_or_else(|| panic!("{key} is a free point: {:?}", commands[0].1[key]));
+        assert!((p[2].as_f64().unwrap() - 20.0).abs() < 1e-6, "{key} lies on the top triangles: {p:?}");
+    }
+    for (cmd, params) in commands {
+        h.app.run(&cmd, params).unwrap();
+    }
+    assert_eq!(solidcraft_engine::view::construction_planes(&h.app.session).len(), 1);
 }

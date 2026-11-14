@@ -116,7 +116,9 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              after a delete (undo rewinds the counters with the design), usable right away \
              in sketch.dimension, sketch.constraint.* and sketch.delete. Feature commands return the feature's id \
              and name, every body (bodies) and the bodies the feature created, changed and removed (created_bodies, changed_bodies, removed_bodies). \
-             view.pick {pixels: [[x,y]…]} answers the body, face, exact world point, normal and depth under pixels of a screenshot (read-only; docs/control-protocol.md). \
+             When connected to the running SolidCraft app, view.pick {pixels: [[x,y]…]} answers the body, face, exact world point, normal and depth under pixels of a screenshot. \
+             view.pick is unavailable in headless MCP, including with frame: \"model\". It is handled by the app and absent from list_commands and describe_command \
+             (read-only; docs/control-protocol.md). \
              `expect` {volume_mm3, tol, bodies, bbox} checks the design after the command (as `batch` does) and flags a mismatch.",
             object(
                 json!({
@@ -218,8 +220,8 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             object(
                 json!({
                     "name": string("Parameter name"),
-                    "value": {"type": ["number", "string"], "description": "Number or expression (or give it as `expression`)"},
-                    "expression": {"type": ["number", "string"], "description": "Same as `value` (the parameters.change name); give one of the two"},
+                    "value": {"anyOf": [{"type": "number"}, {"type": "string"}], "description": "Number or expression (or give it as `expression`)"},
+                    "expression": {"anyOf": [{"type": "number"}, {"type": "string"}], "description": "Same as `value` (the parameters.change name); give one of the two"},
                     "unit": string("mm, deg or \"\" (unitless); default from the expression"),
                     "comment": string("Comment shown in the parameters table"),
                 }),
@@ -244,7 +246,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "set": {
                         "type": "object",
                         "description": "Values to try, by parameter name: a number (mm) or an expression (\"140 mm\", \"wall * 2\"), as set_parameter's `value`",
-                        "additionalProperties": {"type": ["number", "string"]},
+                        "additionalProperties": {"anyOf": [{"type": "number"}, {"type": "string"}]},
                     },
                     "report": {
                         "type": "array",
@@ -465,7 +467,7 @@ fn inspect_design_tool(opts: Options) -> Value {
                     "sketches": {"type": "boolean", "description": "Full sketch contents (default true; false = summary only)"},
                     "joints": {"type": "boolean", "description": "Joint definitions as joint.inspect gives them, when the design has joints (default true)"},
                     "timeline": timeline_arg(),
-                    "bodies": {"type": ["boolean", "string"], "enum": [true, false, "names"], "description": BODIES_ARG},
+                    "bodies": {"anyOf": [{"type": "boolean"}, {"type": "string"}], "description": BODIES_ARG},
                 }),
                 &[],
             ),
@@ -488,13 +490,15 @@ fn inspect_design_tool(opts: Options) -> Value {
             json!({
                 "measure": {"type": "boolean", "description": "Measure bodies (default true)"},
                 "sketches": {
-                    "type": ["boolean", "string", "array"],
-                    "items": {"type": ["string", "integer"]},
+                    "anyOf": [
+                        {"type": "boolean"},
+                        {"type": "string"},
+                        {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "integer"}]}},
+                    ],
                     "description": "Which sketches in full: a list of sketch names or ids, true (all of them), or false / \"summary\" (none: summaries only, the default)",
                 },
                 "bodies": {
-                    "type": ["array", "boolean", "string"],
-                    "items": {"type": "string"},
+                    "anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "boolean"}, {"type": "string"}],
                     "description": "Only these bodies, by name (default: all); or \"names\" (only the body names, nothing measured) or false (no bodies)",
                 },
                 "joints": {"type": "boolean", "description": "Joint definitions as joint.inspect gives them, when the design has joints (default true)"},
@@ -506,13 +510,26 @@ fn inspect_design_tool(opts: Options) -> Value {
     )
 }
 
-/// `inspect_design`'s `timeline` argument, as `document.inspect` takes it.
+/// `inspect_design`'s `timeline` argument, as `document.inspect` takes it. No `enum`: Moonshot
+/// refuses every tool when an argument of two types has one (#15306), so [`inspect_words`] checks
+/// the word. The two types are an `anyOf`, not a list of types, which Gemini refuses (#16257).
 fn timeline_arg() -> Value {
     json!({
-        "type": ["boolean", "string"],
-        "enum": [true, false, "summary"],
+        "anyOf": [{"type": "boolean"}, {"type": "string"}],
         "description": "true (default): every feature with its state and timing; \"summary\": each feature as id, name and type, with error, warning, suppressed and rolled_back only when set; false: no timeline",
     })
+}
+
+/// `inspect_design`'s words, checked before anything is sent: `timeline` takes "summary", and
+/// `bodies` (when `bodies_word`) "names". Their schemas list no values (see [`timeline_arg`]).
+fn inspect_words(a: &Map<String, Value>, bodies_word: bool) -> Result<(), String> {
+    if a.get("timeline").and_then(Value::as_str).is_some_and(|w| w != "summary") {
+        return Err("inspect_design: `timeline` must be true, false or \"summary\"".into());
+    }
+    if bodies_word && a.get("bodies").and_then(Value::as_str).is_some_and(|w| w != "names") {
+        return Err("inspect_design: `bodies` must be true, false or \"names\"".into());
+    }
+    Ok(())
 }
 
 /// `inspect_design`'s `bodies` argument without compact output.
@@ -909,6 +926,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             Ok(if a.get("verbose").and_then(Value::as_bool).unwrap_or(true) { v } else { compact(v) })
         }
         "inspect_design" => {
+            inspect_words(a, true)?;
             let measure = a.get("measure").and_then(Value::as_bool).unwrap_or(true);
             let mut d = b.call("document.inspect", inspect_params(a, measure, &["timeline", "bodies"]))?;
             if a.get("sketches").and_then(Value::as_bool).unwrap_or(true) {
@@ -1228,6 +1246,7 @@ fn inspect_design_compact(b: &mut dyn Backend, a: &Map<String, Value>) -> Result
     {
         return Err("inspect_design: `bodies` must be a list of body names, true, false or \"names\"".into());
     }
+    inspect_words(a, false)?;
     let bodies: Option<Vec<String>> = match a.get("bodies").filter(|v| v.is_array()) {
         None => None,
         Some(v) => Some(
@@ -1920,7 +1939,40 @@ fn compact(mut v: Value) -> Value {
             created.insert(count.into(), json!(n));
         }
     }
+    compact_moved_points(o);
     v
+}
+
+/// `sketch.move_points` answers one `{point, to, at, reached}` row per move (#15864). A compact
+/// reply counts the moves, says whether all of them reached their targets, and lists only the
+/// moves that did not, under `not_reached`. Its empty `created` is left out too. A `moved` that
+/// is not such a list (a count, a flag or names, as other commands answer) stays as it is.
+fn compact_moved_points(o: &mut Map<String, Value>) {
+    let Some(rows) = o.get("moved").and_then(Value::as_array) else { return };
+    if rows.is_empty() || !rows.iter().all(|r| r.get("reached").is_some_and(Value::is_boolean) && r.get("to").is_some()) {
+        return;
+    }
+    let count = rows.len();
+    let missed: Vec<Value> = rows.iter().filter(|r| r.get("reached") != Some(&Value::Bool(true))).cloned().collect();
+    o.remove("moved");
+    o.insert("moved_count".into(), json!(count));
+    o.insert("reached".into(), json!(missed.is_empty()));
+    if !missed.is_empty() {
+        let missed: Vec<Value> = missed
+            .into_iter()
+            .map(|mut r| {
+                if let Some(m) = r.as_object_mut() {
+                    m.remove("reached");
+                }
+                r
+            })
+            .collect();
+        o.insert("not_reached".into(), Value::Array(missed));
+    }
+    let empty = |c: &Value| c.as_object().is_some_and(|m| m.values().all(|x| x.as_array().is_some_and(Vec::is_empty)));
+    if o.get("created").is_some_and(empty) {
+        o.remove("created");
+    }
 }
 
 /// `check_parameters`: try parameter values and put the design back (#3380). The checkpoint is

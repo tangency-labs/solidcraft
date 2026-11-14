@@ -20,6 +20,43 @@ fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-12)
 }
 
+/// A body mirrored as a new body is made of what the body is: the copy takes its physical
+/// material and appearance. Before, the copy came out with neither.
+#[test]
+fn a_mirrored_copy_keeps_the_material_and_appearance_of_its_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Steel"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Block"], "color": "#d01c1c"}));
+    let r = run(&mut s, "solid.mirror", json!({"bodies": ["Block"], "plane": {"origin": [30, 0, 0], "normal": [1, 0, 0]}}));
+    let copy = r["created_bodies"][0].as_str().unwrap().to_string();
+    assert_ne!(copy, "Block");
+    assert_eq!(s.doc.materials.get(&copy).map(String::as_str), Some("Steel"));
+    let look = s.doc.appearances.bodies.get("Block");
+    assert!(look.is_some());
+    assert_eq!(s.doc.appearances.bodies.get(&copy), look);
+}
+
+/// Whether a mirrored copy meets its body, which the Mirror dialog sets Join or New Body from:
+/// apart, mirrored about its own face (touching) and through itself (overlapping), on the exact
+/// geometry. A Mirror of features has no answer, and asking makes nothing.
+#[test]
+fn a_mirror_meets_its_body_when_the_copy_touches_or_overlaps_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    let meets = |x: f64| s.mirror_meets(&json!({"bodies": ["Block"], "plane": {"origin": [x, 0, 0], "normal": [1, 0, 0]}})).unwrap();
+    assert_eq!(meets(30.0), Some(false), "apart");
+    assert_eq!(meets(10.0), Some(true), "about its own face");
+    assert_eq!(meets(7.0), Some(true), "through itself");
+    assert_eq!(meets(-30.0), Some(false), "apart, on the other side");
+    // A slanted plane, square to (1, 1, 0): the box reaches x + y = 20 at its far edge.
+    let slanted = |x: f64| s.mirror_meets(&json!({"bodies": ["Block"], "plane": {"origin": [x, 0, 0], "normal": [1, 1, 0]}})).unwrap();
+    assert_eq!(slanted(20.0), Some(true), "slanted, through its far edge");
+    assert_eq!(slanted(25.0), Some(false), "slanted, apart");
+    assert_eq!(s.mirror_meets(&json!({"features": ["Box1"], "plane": "YZ"})).unwrap(), None, "a Mirror of features");
+    assert_eq!(s.model.state().bodies.len(), 1, "nothing is made");
+}
+
 /// A 100 x 50 x 5 plate with a hole at the start of a straight path (10,10) → (90,10).
 fn plate_with_hole() -> Session {
     let mut s = Session::default();
@@ -1500,4 +1537,25 @@ fn mirror_of_a_thread_threads_the_mirrored_hole() {
             assert_eq!(state.threads.len(), 2, "together {together}: the source and its mirror");
         }
     }
+}
+
+/// #16799: two holes placed from edges, mirrored together. The second hole's edge names mean the
+/// edges of the original body, which the first hole's copy has already cut into.
+#[test]
+fn mirror_of_two_holes_placed_from_edges_makes_both_copies() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [60, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S", "distance": 10, "operation": "new", "name": "E", "body_name": "Body1"}));
+    let plain = volume(&mut s);
+    for (name, x, from) in [("Hole1", -40, "20"), ("Hole2", -20, "40")] {
+        let references = json!([{"edge": [-60, -30, 5], "distance": from}, {"edge": [0, -30, 0], "distance": "5"}]);
+        run(&mut s, "solid.hole", json!({"position": [x, -30, 5], "diameter": 4, "references": references, "name": name}));
+    }
+    let holed = volume(&mut s);
+    run(&mut s, "solid.mirror", json!({"features": ["Hole1", "Hole2"], "plane": "YZ"}));
+    let both = volume(&mut s);
+    let want = plain - 2.0 * (plain - holed);
+    assert!(rel(both, want) < 1e-6, "plain {plain} mm³, two holes {holed} mm³, mirrored {both} mm³ (expected {want})");
 }

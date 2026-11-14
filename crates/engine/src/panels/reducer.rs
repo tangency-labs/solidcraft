@@ -63,6 +63,9 @@ pub enum Mutation {
         column: ColumnId,
         width: f32,
     },
+    ResetSideHeight {
+        section: SectionId,
+    },
     SetBottomHeight {
         section: SectionId,
         height: f32,
@@ -1400,6 +1403,14 @@ fn apply(
         }
         Mutation::SetColumnWidth { column, width } => {
             set_column_width(layout, registry, &column, width)?;
+        }
+        Mutation::ResetSideHeight { section } => {
+            let target = section_mut(layout, &section)?;
+            if !target.location.zone().side() {
+                return Err(error(Rule::Placement, "reset height requires a side section"));
+            }
+            target.preferred_extent = None;
+            target.extent_priority = 0;
         }
         Mutation::SetBottomHeight { section, height } => {
             if layout.section(&section)?.location.zone() != Zone::Bottom {

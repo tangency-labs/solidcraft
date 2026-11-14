@@ -49,9 +49,9 @@
 //!   pointer.
 //! - **Unported callees** return [`SolidError::Unported`] (see the `UNPORTED`
 //!   markers): none left for `surface.surface_p3`.
-//! - [`SurfaceSilhouette::local_point_solve`] forwards `k` to
-//!   [`circle_find_silhouette_points_with_kernel`] (`WR-11`,
-//!   [`crate::kernel::UpstreamFixes::circle_silhouette_perspective_center`]).
+//! - [`SurfaceSilhouette::local_point_solve`] finds the circle's perspective
+//!   silhouette points about the circle's centre ([`circle_find_silhouette_points`],
+//!   `WR-11`).
 //! - The `SM_DEBUG_CODE` drawing blocks and `Dump` are not ported. Recursion:
 //!   `ComputePointValues` calls itself only without a previous point, which does not
 //!   recurse again (depth at most 1); the Brent loop of `LocalPointSolve` stops after
@@ -63,7 +63,7 @@ use crate::curve::curve::Curve;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
-use crate::geom::geom_utility::p1::circle_find_silhouette_points_with_kernel;
+use crate::geom::geom_utility::p1::circle_find_silhouette_points;
 use crate::geom::global_solver::{Branch, GlobalSolver};
 use crate::geom::local_solve1d::{EvalFunction, FunctionValue, LocalSolve1d};
 use crate::geom::polar_box::PolarBox;
@@ -799,8 +799,7 @@ impl<'s> SurfaceSilhouette<'s> {
         let circle_normal = tangent_plane_dir.cross(normal);
 
         // Find the closest silhouette point on the normal circle
-        let Some((sil_point1, sil_point2)) = circle_find_silhouette_points_with_kernel(
-            k,
+        let Some((sil_point1, sil_point2)) = circle_find_silhouette_points(
             center,
             circle_normal,
             radius,

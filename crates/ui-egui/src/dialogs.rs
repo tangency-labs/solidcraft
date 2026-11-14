@@ -194,8 +194,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 taper_present: bool,
                 /// Optional distance beyond the selected end object.
                 to_offset: String,
-                /// Start offset from the profile plane (empty: start on the profile plane).
+                /// Offset from the selected start (empty: no offset).
                 start: String,
+                /// Keep Offset selected while its expression is being edited.
+                offset_start: bool,
                 /// Extent type All (through everything) instead of a distance.
                 all: bool,
                 /// Thin Extrude: a wall along the picked curves (or profiles' outlines).
@@ -419,6 +421,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             },
             /// Insert SVG / DXF: where the picked drawing goes (`dialogs_insert_drawing`).
             InsertDrawing(crate::dialogs_insert_drawing::Place),
+            /// Insert Airfoil: how the picked section goes in (`dialogs_insert_airfoil`).
+            InsertAirfoil(crate::dialogs_insert_airfoil::Airfoil),
             /// Plastic features (`dialogs_plastic`).
             Plastic(crate::dialogs_plastic::Pl),
             /// Frame members (`dialogs_frame`).
@@ -475,6 +479,21 @@ pub struct HoleOpts {
     /// Tap type: tapped (a cosmetic thread) instead of simple.
     pub tapped: bool,
     pub thread: String,
+    /// Tap type: a clearance hole for a bolt (the command's `clearance` and `fit`, ISO 273).
+    pub clearance: bool,
+    /// The bolt size a clearance hole is for, as `clearance` takes it (`M4`).
+    pub clearance_size: String,
+    /// The clearance fit, an index into [`crate::dialogs_hole::CLEARANCE_FITS`].
+    pub clearance_fit: usize,
+    /// A clearance hole's diameter when it is not the table's for the size and fit (the
+    /// command's `diameter`); none: the table's.
+    pub clearance_diameter: Option<String>,
+    /// A clearance counterbore's cap screw head, an index into
+    /// [`crate::dialogs_hole::SCREW_HEADS`] (the command's `head`); 0: none, typed by hand.
+    pub head: usize,
+    /// The head and bolt size the counterbore's diameter and depth were last filled for, so a
+    /// new head or size fills them again and typed values stay otherwise.
+    pub head_filled: Option<(usize, String)>,
     /// Custom nominal diameter and pitch being edited, separate from the saved designation.
     pub custom_thread: Option<crate::dialogs_thread::HoleThreadDraft>,
     /// The Single hole's reference edge distances (`hole_refs`, #37).
@@ -504,6 +523,12 @@ impl Default for HoleOpts {
             tip_angle: "118 deg".into(),
             tapped: false,
             thread: "M5".into(),
+            clearance: false,
+            clearance_size: "M4".into(),
+            clearance_fit: crate::dialogs_hole::NORMAL_FIT,
+            clearance_diameter: None,
+            head: 0,
+            head_filled: None,
             custom_thread: None,
             refs: Default::default(),
             thread_full_depth: true,
@@ -936,6 +961,7 @@ impl Dialog {
                     taper_present: false,
                     to_offset: String::new(),
                     start: String::new(),
+                    offset_start: false,
                     all: false,
                     thin: false,
                     wall: length_default(s, "2"),
@@ -1279,6 +1305,13 @@ impl Dialog {
                 // Fillets and chamfers take an edge with its tangent chain, as a pick does.
                 let picked = match (&d.kind, sel) {
                     (Kind::Fillet { chain, .. }, _) => fillet_edges(s, sel, *chain),
+                    // One item per edge: a click selects all the pieces of an edge a seam splits,
+                    // the clicked one first, and Measure takes that one.
+                    (Kind::Measure { .. }, Sel::Edge { .. })
+                        if crate::viewport::grouped_selection(s, sel).iter().any(|x| inp.items.iter().any(|y| selection::same_item(x, y))) =>
+                    {
+                        Vec::new()
+                    }
                     (Kind::Measure { .. }, _) => vec![crate::viewport::measurement_selection(s, sel)],
                     _ if inp.multi => crate::viewport::grouped_selection(s, sel),
                     _ => vec![sel.clone()],
@@ -1413,7 +1446,7 @@ impl Dialog {
             Kind::SketchModify(k) => return k.previews(),
             Kind::Plastic(k) => return k.previews(),
             Kind::Frame(_) | Kind::EndCap(_) => return true,
-            Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) => return true,
+            Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) | Kind::InsertAirfoil(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
             Kind::Thread { .. } => return !cfg!(target_arch = "wasm32") && self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false),
             _ => {}
@@ -1476,7 +1509,8 @@ impl Dialog {
             Kind::Shell { thickness } => ("Thickness", ValueKind::Length, thickness),
             Kind::Draft { angle } => ("Angle", ValueKind::Angle, angle),
             Kind::Hole { diameter, opts, .. } => {
-                if opts.tapped {
+                // A thread or a bolt size sets the diameter: nothing to type on the canvas.
+                if opts.tapped || opts.clearance {
                     return None;
                 }
                 ("Diameter", ValueKind::Length, diameter)
@@ -1702,6 +1736,15 @@ impl Dialog {
         }
         if let Some(sel) = self.circle_centre_pick(s, inp, h, snap) {
             return Some(sel);
+        }
+        // A mesh body has no vertices or edges to pick, and its own surface is its triangles: a
+        // point input of a construction takes the exact point the pointer's ray meets on one (#16400).
+        if matches!(self.kind, Kind::Construct { .. })
+            && inp.accept & selection::VERTICES != 0
+            && let Hit::Face { body, point, .. } = h
+            && is_mesh_body(s, body)
+        {
+            return Some(Sel::Vertex { body: body.clone(), point: *point });
         }
         // The snap looked the face under the cursor up already, planar or not.
         let sel = inp.accepts(h, s.active_sketch, |body, face| {
@@ -2833,6 +2876,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::ViewDxf { .. } => "Export Current View as DXF",
         Kind::ViewNavigator(_) => "CUSTOM VIEW NAVIGATOR",
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::title(p),
+        Kind::InsertAirfoil(_) => crate::dialogs_insert_airfoil::title(),
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
         Kind::EndCap(_) => "ui.end_cap_title",
@@ -3644,13 +3688,18 @@ pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<
         return Some(FilletRefusal::Plain(solidcraft_ui_text::format("ui.fillet_error_setback_short", &[("least", &format!("{least} mm"))])));
     }
     let too_large = error.contains("larger than the faces beside its edges allow");
+    // The kernel tried smaller radii down to its least and none built: no radius is the cause, so
+    // a smaller one, or Largest radius, is no advice (the full refusal stays under Copy details).
+    let none_fits = too_large && error.contains("no smaller radius builds either");
     let corner = error.contains("setback") || error.contains("G2 corner") || error.contains("corner patch");
     let kernel = error.contains("SMLib")
         || error.contains("the operation failed")
         || error.contains("not supported yet")
         || error.contains("kernel internal error")
         || error.contains("the rounds would leave openings");
-    if too_large {
+    if none_fits {
+        Some(FilletRefusal::Plain(tr("ui.fillet_error_no_radius").to_string()))
+    } else if too_large {
         Some(FilletRefusal::Plain(tr("ui.fillet_error_too_large").to_string()))
     } else if corner && kernel {
         Some(FilletRefusal::Plain(tr("ui.fillet_error_corner").to_string()))
@@ -3987,12 +4036,6 @@ pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
     app.session.feature_edit_sketch = edited.or(started_from);
 }
 
-/// Does this dialog dock as a card (at the view's edge or in the left column)? A delete
-/// confirmation is a centred prompt instead.
-pub(crate) fn docks(d: &Dialog) -> bool {
-    !matches!(d.kind, Kind::ConfirmDelete { .. })
-}
-
 /// The width a dialog's card asks for: the managers' wider form, a study's table, or a card.
 pub(crate) fn card_width(d: &Dialog) -> f32 {
     let t = Tokens::get();
@@ -4026,7 +4069,6 @@ pub(crate) fn corner_confirms(d: &Dialog) -> bool {
 /// Show the active dialog (if any), docked flush to an edge of the viewport just below the axis
 /// view, sized to its content. The right edge is its place, except while a sketch is open: the
 /// Sketch Palette keeps the right there, and the dialog takes the left so both stay on screen.
-/// With Dialogs › In the left column it holds the left column instead (`dialog_column`).
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let escape_routed_here = !crate::viewport_status::enabled(app) || app.escape_owner.is_none_or(|owner| owner == crate::EscapeOwner::Dialog);
     // A click in the view's corner is for the dialog open this frame, or for none.
@@ -4081,31 +4123,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Physical materials: the library's, then the design's own (material.create).
     let t = Tokens::get();
     let vp = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
-    // In Classic, a dialog starts on the left when the Sketch Palette occupies the right.
-    // Shared-panel workspaces keep the existing editor card floating at the right.
-    let column = crate::dialog_column::place(app, ctx, &d);
-    let side = crate::shell::floating_editor_side(
-        app,
-        column.is_some() || (crate::sketch_palette::editing(app) && crate::sketch_palette::fits_beside_a_dialog(app, ctx)),
-    );
-    let top = crate::shell::panel_top(app, vp, vp.bottom(), side);
+    let placement = crate::shell::editor_space(app, vp);
+    let side = crate::frame::Side::Right;
+    let top = crate::shell::panel_top(app, placement, placement.bottom(), side);
     // Empty/hostile viewport geometry cannot provide a safe window rectangle.
     if !vp.is_finite() || !vp.is_positive() {
         app.dialog = Some(d);
         return;
     }
-    // Command dialogs share the last dragged offset on this side until the application
-    // exits, kept inside the viewport. In the left column a dialog stays in its place.
-    let (drag_key, moved, docked, drag_bounds, anchor) = if let Some(column) = column {
-        crate::scenario::publish_rect("dialog:column", column);
-        ("", egui::Vec2::ZERO, column.min, crate::dialog_column::bounds(app, column, vp), column.min)
-    } else {
-        let drag_key = side.dialog_offset_key();
-        let moved = crate::frame::dock_offset(ctx, drag_key);
-        let docked = egui::pos2(side.anchor_x(vp), top);
-        let drag_bounds = crate::shell::tool_drag_rect(app, vp);
-        (drag_key, moved, docked, drag_bounds, crate::frame::offset_anchor(docked, moved, drag_bounds, side))
-    };
+    let drag_key = side.dialog_offset_key();
+    let moved = crate::frame::dock_offset(ctx, drag_key);
+    let docked = egui::pos2(side.anchor_x(placement), top);
+    let drag_bounds = crate::shell::tool_drag_rect(app, vp);
+    let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
     let mut keep = true;
     let mut ok = false;
     let mut applied = false;
@@ -4114,7 +4144,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut cancel = false;
     let mut enter = false;
     let mut value_fields = Vec::new();
-    let wide = matches!(&d.kind, Kind::Motion(k) if k.wide());
 
     let raw_title = title_of(&d);
     let heading =
@@ -4154,15 +4183,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let label_grow = ctx.data(|data| data.get_temp::<f32>(grow_key)).unwrap_or(0.0).min((vp.width() - t.space_24 - card_width(&d)).max(0.0));
     let panel = crate::ui_kit::Panel::new(&heading, egui::Id::unique(("sc_dialog", title_of(&d))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
-    let panel = if let Some(column) = column {
-        panel.width(column.width()).joined(crate::ui_kit::DockEdges { left: true, top: true, ..Default::default() })
-    } else if wide && side == crate::frame::Side::Left {
-        let available = crate::sketch_palette::room_left_of(app, ctx, vp);
-        panel.width(card_width(&d).min(available))
-    } else if manager {
-        panel.width(card_width(&d))
+    let max_width = (docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W);
+    let panel = if manager {
+        panel.width(card_width(&d).min(max_width))
     } else {
-        panel.width(card_width(&d) + label_grow).grow_label(grow_key)
+        panel.width((card_width(&d) + label_grow).min(max_width)).grow_label(grow_key)
     };
     let reset_scroll = d.reset_scroll;
     let panel =
@@ -4170,7 +4195,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let window = panel.window(ctx);
     let repeatable =
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
-    let host = app.universal_panel_host_enabled();
     let mut painted = false;
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
@@ -4189,7 +4213,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             });
         ok = action == crate::ui_kit::Action::Ok;
         cancel = closed || action == crate::ui_kit::Action::Cancel;
-        app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window").filter(|_| !host || painted);
+        app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window").filter(|_| painted);
     } else {
         let response = window.open(&mut keep).show(ctx, |ui| {
             painted = ui.is_visible() && !ui.is_sizing_pass();
@@ -4254,7 +4278,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
         });
-        app.viewport.dialog_rect = response.filter(|_| !host || painted).map(|r| r.response.rect);
+        app.viewport.dialog_rect = response.filter(|_| painted).map(|r| r.response.rect);
         // OK and Cancel in the view's corner do what the dialog's own do (#6709).
         if app.issue_report.draft.is_none() {
             match corner {
@@ -4618,9 +4642,11 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
     let Some(last) = app.remembered_commands.iter().find(|entry| same_command(&entry.kind, &dialog.kind)) else { return };
     let mut next = last.kind.clone();
     match (&mut next, &dialog.kind) {
-        (Kind::Extrude { smart, to_offset, .. }, Kind::Extrude { smart: fresh, to_offset: fresh_offset, .. }) => {
+        (Kind::Extrude { smart, to_offset, start, offset_start, .. }, Kind::Extrude { smart: fresh, to_offset: fresh_offset, .. }) => {
             *smart = fresh.clone();
             *to_offset = fresh_offset.clone();
+            // From Object picks are not recalled; keep their retained offset visible.
+            *offset_start |= !start.is_empty();
         }
         (Kind::Revolve { axis, .. }, Kind::Revolve { axis: fresh, .. }) => *axis = fresh.clone(),
         (Kind::PathPlane { sketch, .. }, Kind::PathPlane { sketch: fresh, .. }) => *sketch = *fresh,
@@ -5144,7 +5170,7 @@ fn look_at_sketch_from(app: &mut SolveApp, again: bool) {
     if let Some(ss) = app.session.active_sketch.and_then(|id| st.sketch(id)) {
         let n = facing(app, ss.plane.normal(), again);
         let to = square_sketch_axes(app.cam.looking_from(n), ss.plane.x, ss.plane.y);
-        if app.universal_panel_host_enabled() && again {
+        if again {
             let bounds = ss.sketch.bounds().map(|(lo, hi)| {
                 let mut bounds = Aabb3::default();
                 for point in [lo, hi, solidcore_record::Vec2::new(lo.x, hi.y), solidcore_record::Vec2::new(hi.x, lo.y)] {
@@ -5497,7 +5523,11 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
                 | FeatureKind::Emboss { sketch, profiles: ProfileSel::All, .. } => Some(*sketch),
                 _ => None,
             };
+            // A thin extrude follows curves and takes no profiles: an extrude of every profile
+            // turned thin in its editor keeps only the curves the dialog sends.
+            let thin_now = params.get("thin").and_then(Value::as_bool).unwrap_or(false);
             if let Some(sketch) = original_all
+                && !thin_now
                 && !d.profile_selection_changed
                 && let Some(ss) = crate::open_meshing::session_world(&app.session).sketch(sketch.0)
             {
@@ -6351,7 +6381,17 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut out = Vec::new();
             for place in places {
                 let mut params = place;
-                if !opts.tapped {
+                if opts.clearance {
+                    // A clearance hole: the bolt size and fit, and the diameter only when it is
+                    // not the table's.
+                    let (_, fit) = crate::dialogs_hole::CLEARANCE_FITS.get(opts.clearance_fit).copied().ok_or("select a clearance fit")?;
+                    solidcraft_engine::cmd::clearance_diameter(&opts.clearance_size, fit).ok_or("select a bolt size from M1.6 to M64")?;
+                    params["clearance"] = json!(opts.clearance_size.trim());
+                    params["fit"] = json!(fit);
+                    if let Some(d) = opts.clearance_diameter.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+                        params["diameter"] = json!(d);
+                    }
+                } else if !opts.tapped {
                     params["diameter"] = json!(diameter);
                 } else if let Some(drill) = opts.drill.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
                     params["diameter"] = json!(drill);
@@ -6387,8 +6427,25 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 match *kind {
                     1 => {
-                        params["cb_diameter"] = json!(cb_diameter);
-                        params["cb_depth"] = json!(cb_depth);
+                        // A clearance counterbore sized to a cap screw's head sends the head,
+                        // and the diameter or depth only when they are not the head's.
+                        let head = if opts.clearance { crate::dialogs_hole::SCREW_HEADS.get(opts.head).and_then(|h| h.1) } else { None };
+                        if let Some(standard) = head {
+                            if let Some(problem) = crate::dialogs_hole::head_problem(opts) {
+                                return Err(problem);
+                            }
+                            let (d, h) = crate::dialogs_hole::head_counterbore_texts(opts).unwrap_or_default();
+                            params["head"] = json!(standard);
+                            if cb_diameter.trim() != d {
+                                params["cb_diameter"] = json!(cb_diameter);
+                            }
+                            if cb_depth.trim() != h {
+                                params["cb_depth"] = json!(cb_depth);
+                            }
+                        } else {
+                            params["cb_diameter"] = json!(cb_diameter);
+                            params["cb_depth"] = json!(cb_depth);
+                        }
                         let bridge = opts.bridge.trim();
                         if !bridge.is_empty() {
                             if !app.session.doc.eval(bridge, ValueKind::Length).is_ok_and(|t| t > 0.0) {
@@ -6498,6 +6555,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::SaveMesh(k) => return crate::dialogs_save_mesh::commands(k, &d.inputs),
         Kind::ViewDxf { .. } | Kind::ViewNavigator(_) => return Ok(Vec::new()),
         Kind::InsertDrawing(p) => return crate::dialogs_insert_drawing::commands(p),
+        Kind::InsertAirfoil(a) => return crate::dialogs_insert_airfoil::commands(a),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
@@ -7077,12 +7135,18 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
     })
 }
 
+/// Is `body` an imported mesh body (no B-rep, so no vertices of its own)?
+fn is_mesh_body(s: &Session, body: &str) -> bool {
+    crate::open_meshing::session_world(s).body(body).is_some_and(|b| b.body.is_mesh())
+}
+
 /// A dialog pick as a construction reference (`construct.*`'s `{face|edge|vertex: [x,y,z]}`,
 /// `{plane}`, `{axis}` or `{sketch, point|curve}`).
 fn construct_ref(app: &SolveApp, sel: &Sel) -> Result<Value, String> {
     Ok(match sel {
         Sel::Face { point, .. } => json!({"face": pt(*point)}),
         Sel::Edge { point, .. } => json!({"edge": pt(*point)}),
+        Sel::Vertex { body, point } if is_mesh_body(&app.session, body) => json!({"point": pt(*point)}),
         Sel::Vertex { point, .. } => match crate::snap_wake::snapped(app, *point) {
             Some((item, snap)) => snap_ref(app, item, snap)?,
             None => json!({"vertex": pt(*point)}),
@@ -7303,6 +7367,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 taper_present: extent.taper.is_some(),
                 to_offset: extent.to_offset.as_deref().map(str::to_string).unwrap_or_default(),
                 start: extent.start_offset.as_deref().map(str::to_string).unwrap_or_default(),
+                offset_start: extent.start_offset.is_some(),
                 all: extent.through_all,
                 thin: thin.is_some(),
                 wall: thin.as_ref().map_or_else(|| length_default(s, "2"), |t| t.thickness.to_string()),
@@ -8394,6 +8459,7 @@ mod refused_ok_tests {
                 added: [2; 4],
                 new_body: [3; 4],
                 removed: [4; 4],
+                mirrored: [6; 4],
                 edge: [5; 4],
                 ghost: false,
                 tint_new: true,

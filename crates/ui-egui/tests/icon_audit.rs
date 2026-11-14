@@ -93,6 +93,17 @@ fn universal_panel_host_menus(requested: &mut BTreeMap<String, bool>) {
         h.call("ui.resize", json!({"width":width,"height":height}));
         enable_host_specimen(&mut h.app, preset).unwrap();
         h.frames(3);
+        if preset == "content_fill" {
+            h.app
+                .dispatch_panel_layout(LayoutAction::Apply {
+                    expected_revision: None,
+                    mutations: vec![Mutation::SetSize {
+                        section: SectionId::new("specimen-section-0").unwrap(),
+                        size: Size { width: 280.0, height: 220.0 },
+                    }],
+                })
+                .unwrap();
+        }
         if preset == "overflow" {
             let section = SectionId::new("specimen-section-0").unwrap();
             let members =
@@ -455,13 +466,13 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     history.app.run("timeline.roll_to", json!({})).unwrap();
     // Named feature history has independent menus in both layout preferences.
     for left in [false, true] {
-        history.app.preferences.timeline_left = left;
+        history.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
         history.frames(3);
         context_rows(&mut history, "timeline:", &mut requested);
     }
-    // The seam has its own checked display menu, independent of feature and folder rows.
-    history.step(&json!({"click":{"handle":"history:names"},"button":"right"})).unwrap();
-    collect(&mut history, "history seam", &mut requested);
+    // The transport controls have their own menu, independent of feature and folder rows.
+    history.step(&json!({"click":{"handle":"history:back"},"button":"right"})).unwrap();
+    collect(&mut history, "history transport menu", &mut requested);
     escape(&mut history);
     let features = history.app.session.doc.features.iter().take(2).map(|f| f.id).collect::<Vec<_>>();
     let group = history.app.run("timeline.group", json!({"features":features,"name":"Audit history folder"})).unwrap()["group"].as_u64().unwrap();

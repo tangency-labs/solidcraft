@@ -489,14 +489,17 @@ pub fn check_face_complimentary_corner_concavity(
 }
 
 /// The `SmBSplineCurve` part of `curve` (`SmTArray<SmBSplineCurve*>` elements: the
-/// analytic curves derive from it upstream).
-fn bspline_part(curve: &Curve) -> Result<&BSplineCurve> {
+/// analytic curves derive from it upstream). Upstream hands the curve object itself to
+/// `CreateSurfOfRevolution`, whose `GetOrCreateGwNurbPointer` runs a line's own
+/// `MakeNurb`: a line's part comes with its NURB ([`Line::base_with_nurb`]), where a
+/// two-point line has none yet.
+fn bspline_part(curve: &Curve) -> Result<std::borrow::Cow<'_, BSplineCurve>> {
     match curve.kind() {
-        CurveKind::BSpline(c) => Ok(c),
-        CurveKind::Line(c) => Ok(&c.base),
-        CurveKind::Ellipse(c) => Ok(c.base()),
-        CurveKind::Hyperbola(c) => Ok(c.base()),
-        CurveKind::Parabola(c) => Ok(c.base()),
+        CurveKind::BSpline(c) => Ok(std::borrow::Cow::Borrowed(c)),
+        CurveKind::Line(c) => c.base_with_nurb(),
+        CurveKind::Ellipse(c) => Ok(std::borrow::Cow::Borrowed(c.base())),
+        CurveKind::Hyperbola(c) => Ok(std::borrow::Cow::Borrowed(c.base())),
+        CurveKind::Parabola(c) => Ok(std::borrow::Cow::Borrowed(c.base())),
         _ => Err(SolidError::invalid_input(
             OP_REVOLUTION,
             "boundary curve is not an SmBSplineCurve",
@@ -583,7 +586,7 @@ pub fn create_srf_of_revolution(
     // Sweep GenCurve about MajorArcCurve AxisOfRevolution to make the fillet surface
     let surface = Surface::from(BSplineSurface::create_surf_of_revolution_with_line_vector(
         k,
-        gen_curve,
+        &gen_curve,
         gen_line_vector,
         origin,
         ref_z_axis,
@@ -1601,9 +1604,8 @@ impl FilletCorner {
         Ok(())
     }
 
-    /// The start of the fork's `SmFilletNx1Corner::CalcCornerEdgeGeom` (not upstream; opt-in
-    /// `fixes.fillet_nx1_end_rib_global_merge`, WR-303, tangency-labs/solidcore#841;
-    /// tangency-labs/smlib `967f7ab`), outside a cliff overflow: see
+    /// The start of the fork's `SmFilletNx1Corner::CalcCornerEdgeGeom` (not upstream;
+    /// WR-303, tangency-labs/solidcore#841; tangency-labs/smlib `967f7ab`), outside a cliff overflow: see
     /// [`FilletCorner::drop_end_rib`]. Returns whether the rib was deleted for the global
     /// merge.
     ///
@@ -1622,9 +1624,8 @@ impl FilletCorner {
         )
     }
 
-    /// The start of the fork's `SmFilletNx1Corner::CalcCornerEdgeGeom` (not upstream; opt-in
-    /// `fixes.fillet_nx1_end_rib_global_merge`, WR-303, tangency-labs/solidcore#841;
-    /// tangency-labs/smlib `967f7ab`; in a cliff overflow, `fixes.fillet_cliff_overflow`,
+    /// The start of the fork's `SmFilletNx1Corner::CalcCornerEdgeGeom` (not upstream;
+    /// WR-303, tangency-labs/solidcore#841; tangency-labs/smlib `967f7ab`; in a cliff overflow, `fixes.fillet_cliff_overflow`,
     /// WR-631, tangency-labs/smlib `8ba4667` and `3f22e97`). At a corner of at most three
     /// edges the one corner edge is the end rib, from one rail's end on its side edge to
     /// the other's. When one rail missed its side edge (`SM_FV_NO_INT_RAIL_EU`) because
@@ -1664,8 +1665,7 @@ impl FilletCorner {
             return Ok(EndRibDrop::Kept);
         };
         let tangent_ends = tangent_ends && !cliff_overflow;
-        if !(k.fixes.fillet_nx1_end_rib_global_merge || cliff_overflow || tangent_ends)
-            || !matches!(self.kind, FilletCornerKind::NByOne | FilletCornerKind::Open)
+        if !matches!(self.kind, FilletCornerKind::NByOne | FilletCornerKind::Open)
             || pseudo.fillet_edge(end_rib)?.edge_type != FilletEdgeType::FilletXSideFace
         {
             return Ok(EndRibDrop::Kept);
@@ -1822,8 +1822,7 @@ impl FilletCorner {
         if runs_on {
             return Ok(EndRibDrop::Kept);
         }
-        // Not upstream (WR-674, `fixes.fillet_round_ends_at_tangent_continuation`,
-        // tangency-labs/solidcore#2176): the side edge the rail missed continues the filleted
+        // Not upstream (WR-674, tangency-labs/solidcore#2176): the side edge the rail missed continues the filleted
         // edge tangentially across the vertex and reaches past the fillet's width there (the
         // straight side of a plate's outline running on from a rounded corner arc): the rail
         // runs alongside it and never meets it, and no face of the body ends the round. The
@@ -1838,9 +1837,6 @@ impl FilletCorner {
                 pseudo.delete_wire_fillet_edge(k, end_rib)?;
                 self.edges.clear();
                 return Ok(EndRibDrop::OpenEnd);
-            }
-            if !k.fixes.fillet_nx1_end_rib_global_merge {
-                return Ok(EndRibDrop::Kept);
             }
         }
         if cliff_overflow {
@@ -1865,7 +1861,7 @@ impl FilletCorner {
             self.edges.clear();
             return Ok(EndRibDrop::OpenEnd);
         }
-        if both_miss || !k.fixes.fillet_nx1_end_rib_global_merge {
+        if both_miss {
             return Ok(EndRibDrop::Kept);
         }
         pseudo.delete_wire_fillet_edge(k, end_rib)?;
@@ -1876,8 +1872,7 @@ impl FilletCorner {
     /// Whether the side edge `side_edge` the rail of `miss_fv` missed at the corner's
     /// vertex `vertex` continues the filleted edge (of `fil_eu`) tangentially there, within
     /// the corner's tangency tolerance, and reaches past the fillet's width: its other vertex
-    /// lies farther from `vertex` than the other rail's end, and it is straight (WR-674,
-    /// `fixes.fillet_round_ends_at_tangent_continuation`). A side edge that ends within the
+    /// lies farther from `vertex` than the other rail's end, and it is straight (WR-674). A side edge that ends within the
     /// fillet's width or bends away (WR-303's short arc, past which the round runs onto
     /// another face) is left to the global merge.
     ///
@@ -3762,5 +3757,49 @@ mod tests {
         assert_eq!(face_by_two_edgeuses(&b, None, None, None).unwrap(), None);
         let k = Kernel::default();
         assert!(create_srf_of_revolution(&k, &[], 0, 0.0).is_err());
+    }
+
+    /// A corner loop of a quarter circle, `(1, 0, 0)` to `(0, 1, 0)` about Z, and two
+    /// lazy lines (`Line::from_points`, no NURB yet, as upstream's two-point `SmLine`):
+    /// `(0, 1, 0)`–`(0, 0, 1)` after the arc and the generator `(0, 0, 1)`–`(1, 0, 0)`
+    /// before it. The generator revolved about the arc's axis is the cone
+    /// `sqrt(x² + y²) + z = 1`, and the line after the arc lies on it.
+    #[test]
+    fn a_lazy_line_generator_fills_a_corner_by_revolution() {
+        for fixes in [
+            crate::kernel::UpstreamFixes::default(),
+            crate::kernel::UpstreamFixes::all(),
+        ] {
+            let k = Kernel {
+                fixes,
+                ..Kernel::default()
+            };
+            let h = 0.5_f64.sqrt();
+            let arc = crate::curve::ellipse::Ellipse::circle_from_3_points(
+                &k,
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(h, h, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+                3,
+                false,
+            )
+            .unwrap();
+            let after =
+                Line::from_points(Point3::new(0.0, 1.0, 0.0), Point3::new(0.0, 0.0, 1.0), 3);
+            let gen = Line::from_points(Point3::new(0.0, 0.0, 1.0), Point3::new(1.0, 0.0, 0.0), 3);
+            assert!(gen.base().gw_nurb().is_none());
+            let curves = [Curve::from(arc), Curve::from(after), Curve::from(gen)];
+            let s = create_srf_of_revolution(&k, &curves, 0, 1e-6).unwrap();
+            let dom = s.natural_uv_domain_with_nurb(&k).unwrap();
+            for (fu, fv) in [(0.25, 0.5), (0.5, 0.25), (0.75, 0.75)] {
+                let uv = Point2::new(
+                    dom.min().x + fu * (dom.max().x - dom.min().x),
+                    dom.min().y + fv * (dom.max().y - dom.min().y),
+                );
+                let p = s.evaluate_point(&k, uv).unwrap();
+                let on = p.x.hypot(p.y) + p.z - 1.0;
+                assert!(on.abs() <= 1e-9, "{p:?} is {on:e} off the cone");
+            }
+        }
     }
 }
