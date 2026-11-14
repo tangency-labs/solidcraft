@@ -4422,6 +4422,22 @@ fn fillet_releases_an_offsets_corners_keeping_its_distance() {
     assert!(sketch(&s).offsets.is_empty());
 }
 
+/// #2874, #8903: an offset this PR does not release keeps its association, so Fillet and
+/// Chamfer still refuse a corner on its output, before anything changes. A circle's offset is
+/// one: a fillet between it and a line ending on it is refused, and the sketch stays as it was.
+#[test]
+fn fillet_still_refuses_a_corner_on_a_circle_offset() {
+    let mut s = new_sketch();
+    let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}))["curves"])[0].clone();
+    let output = ids(&run(&mut s, "sketch.offset", json!({"curves": [circle], "distance": "2 mm", "side": [20, 0]}))["curves"])[0].clone();
+    let line = ids(&run(&mut s, "sketch.line", json!({"points": [[12, 0], [30, 0]]}))["curves"])[0].clone();
+    let before = serde_json::to_value(sketch(&s)).unwrap();
+    let e = s.execute("sketch.fillet", &json!({"a": line, "b": output, "radius": "2 mm"})).unwrap_err().to_string();
+    assert!(e.contains("is an offset") && e.contains("break the offset association"), "{e}");
+    assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "a refused fillet changes nothing");
+    assert_eq!(sketch(&s).offsets.len(), 1, "the circle's offset keeps its association");
+}
+
 /// #8903: an offset of an outline with a rounded corner has an arc among its curves. Filleting
 /// one of the offset's sharp corners releases the arc too: it keeps its source's centre and
 /// stays the offset's distance from the source arc.
