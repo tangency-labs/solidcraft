@@ -62,12 +62,63 @@ struct Access {
     /// A hand-built target body: `edges(Handle(0))` lists its edges as
     /// `Handle(BODY_EDGE + i)` and the manifold check runs on its records.
     body: Option<Brep>,
+    /// The corrections' face check: the blends take the whole of a face they roll on.
+    faces_consumed: bool,
 }
 const BODY_EDGE: u8 = 100;
 fn absent<T>() -> Result<T> {
     Err(invalid("test handle has no geometry"))
 }
 impl ExecutiveAccess<Handle> for Access {
+    // The corrections' checks, judged by this harness as its scenario says: its blends fit
+    // their faces and leave each face some of it, unless `faces_consumed`; its trace needs no
+    // reach; its stitch keeps every edge (it builds no corner patches).
+    fn extend_trace_to_its_rails(&mut self, _: &mut Kernel, _: Handle) -> Result<()> {
+        Ok(())
+    }
+    fn rails_fit(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &FilletExecutive<Handle>,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+    fn rails_fit_judged(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &FilletExecutive<Handle>,
+    ) -> Result<RailsFit> {
+        Ok(RailsFit {
+            fit: true,
+            rolls_over: false,
+            into_material: false,
+        })
+    }
+    fn end_sections_fit(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &FilletExecutive<Handle>,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+    fn faces_outlast(&mut self, _: &mut Kernel, _: &[Handle]) -> Result<bool> {
+        Ok(!self.faces_consumed)
+    }
+    fn bands_clear_other_rails(&mut self, _: &mut Kernel, _: &[Handle]) -> Result<bool> {
+        Ok(true)
+    }
+    fn stitch_faces_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        brep: Handle,
+        tolerance: f64,
+        _: &[Handle],
+    ) -> Result<StitchAttempt> {
+        ExecutiveAccess::stitch_faces(self, k, brep, tolerance, None, false)
+    }
     fn solver_base(&self, _: Handle) -> Result<&crate::blend::fillet_solver::p1::FilletSolver> {
         Err(SolidError::invalid_input(
             "test::executive_access",
@@ -1476,4 +1527,23 @@ fn tag_merge_component_retains_allocated_markers_when_merge_fails() {
     assert_eq!(access.attributes.get(&Handle(30)), Some(&vec![Handle(11)]));
     assert_eq!(access.events, ["new_attr", "merge"]);
     assert_eq!(executive.topo_edges, [Some(Handle(20))]);
+}
+
+/// The corrections' checks run through the adapter over `ExecutiveAccess` and their verdicts
+/// stand: blends that take the whole of a face are refused (no room), not built.
+#[test]
+fn blends_that_consume_a_face_are_refused_through_the_adapter() {
+    let mut executive = state();
+    executive.solvers.push(Handle(3));
+    let mut access = Access {
+        faces_consumed: true,
+        ..Access::default()
+    };
+    let result = executive.do_filleting(&mut Kernel::default(), &mut access, None);
+    assert!(result.is_err(), "{result:?}");
+    assert!(
+        executive.error.comment.contains("take the whole of a face"),
+        "{:?}",
+        executive.error.comment
+    );
 }
