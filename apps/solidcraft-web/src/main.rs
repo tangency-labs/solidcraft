@@ -24,6 +24,8 @@ mod keep;
 #[cfg(target_arch = "wasm32")]
 mod linked;
 #[cfg(any(target_arch = "wasm32", test))]
+mod mouse_buttons;
+#[cfg(any(target_arch = "wasm32", test))]
 mod space_mouse;
 
 /// The browser switches tabs with Ctrl+Tab and Ctrl+Shift+Tab, so the page leaves those keys to
@@ -341,6 +343,7 @@ mod web {
     const JAPANESE_FONT_PATH: &str = "./fonts/BIZUDPGothic-Regular.ttf";
     const CHINESE_SC_FONT_PATH: &str = "./fonts/CraftUI-SC.otf";
     const CHINESE_TC_FONT_PATH: &str = "./fonts/CraftUI-TC.otf";
+    const KOREAN_FONT_PATH: &str = "./fonts/CraftUI-KR.otf";
 
     type FontLoadResult = Rc<std::cell::RefCell<Option<Result<(String, Vec<u8>), String>>>>;
 
@@ -369,12 +372,16 @@ mod web {
         chinese_bytes: Option<Vec<u8>>,
         /// Which Chinese face `chinese_bytes` is: `"zh"` or `"zh-TW"`.
         chinese_kind: Option<&'static str>,
-        /// Kind requested by the in-flight fetch (`"ja"`, `"zh"`, or `"zh-TW"`).
+        /// The fetched Korean font's bytes: kept so a language change can re-order the fallbacks.
+        korean_bytes: Option<Vec<u8>>,
+        /// Kind requested by the in-flight fetch (`"ja"`, `"zh"`, `"zh-TW"` or `"ko"`).
         font_fetch_kind: Option<&'static str>,
         /// The language the fonts were last set up for (a CJK UI leads with the CJK face).
         font_language: String,
         space_mouse: SpaceMouse,
         wheel_gestures: solidcraft_ui_egui::WebWheelGestures,
+        /// The mouse buttons the browser holds, which egui's are kept to (`mouse_buttons`).
+        mouse_buttons: Rc<std::cell::RefCell<crate::mouse_buttons::Tracker>>,
         /// The settings this tab wrote or loaded last, and those another tab wrote since (#8644).
         prefs_writer: crate::PrefsWriter,
         prefs_warning: Option<String>,
@@ -904,9 +911,9 @@ mod web {
                     self.files.panel.set(false);
                 }
                 "insert" => {
-                    if !solidcraft_ui_egui::mesh_units::ask(&mut self.app, &path, true) {
-                        self.app.insert_path(&path);
-                    }
+                    // The staged loader, as Open uses: a large STEP insert keeps the page drawing
+                    // (it asks an STL's or OBJ's units first, as the synchronous insert did).
+                    self.app.insert_path_async(&path);
                     self.files.panel.set(false);
                 }
                 "download" => match vfs::read(&path, solidcraft_engine::io::MAX_DESIGN_BYTES) {
@@ -1021,6 +1028,7 @@ mod web {
                 Some("zh") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh"),
                 Some("zh-TW") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh-TW"),
                 Some("ja") => self.cjk_bytes.is_some(),
+                Some("ko") => self.korean_bytes.is_some(),
                 _ => true,
             }
         }
@@ -1042,6 +1050,9 @@ mod web {
                                 self.chinese_bytes = Some(bytes);
                                 self.chinese_kind = Some("zh-TW");
                             }
+                            Some("ko") => {
+                                self.korean_bytes = Some(bytes);
+                            }
                             _ => {
                                 self.cjk_bytes = Some(bytes);
                             }
@@ -1053,6 +1064,7 @@ mod web {
                         let path = match kind {
                             Some("zh") => CHINESE_SC_FONT_PATH,
                             Some("zh-TW") => CHINESE_TC_FONT_PATH,
+                            Some("ko") => KOREAN_FONT_PATH,
                             _ => JAPANESE_FONT_PATH,
                         };
                         log::warn!("failed to fetch script font from {path}: {err}");
@@ -1080,13 +1092,20 @@ mod web {
         }
 
         /// Set up the UI fonts for the live language, keeping fetched script fonts as fallbacks
-        /// (Chinese leads a Chinese UI; see [`solidcraft_ui_egui::fonts::install_web_script_fonts`]).
+        /// (Chinese leads a Chinese UI, Korean a Korean one; see
+        /// [`solidcraft_ui_egui::fonts::install_web_script_fonts`]).
         fn apply_fonts(&mut self, ctx: &egui::Context) {
             let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
-            if self.cjk_bytes.is_none() && self.chinese_bytes.is_none() {
+            if self.cjk_bytes.is_none() && self.chinese_bytes.is_none() && self.korean_bytes.is_none() {
                 solidcraft_ui_egui::fonts::setup_fonts(ctx);
             } else {
-                solidcraft_ui_egui::fonts::install_web_script_fonts(ctx, self.cjk_bytes.clone(), self.chinese_bytes.clone(), effective);
+                solidcraft_ui_egui::fonts::install_web_script_fonts(
+                    ctx,
+                    self.cjk_bytes.clone(),
+                    self.chinese_bytes.clone(),
+                    self.korean_bytes.clone(),
+                    effective,
+                );
             }
             self.font_language = effective.to_owned();
         }
@@ -1103,6 +1122,7 @@ mod web {
             let path = match kind {
                 "zh" => CHINESE_SC_FONT_PATH,
                 "zh-TW" => CHINESE_TC_FONT_PATH,
+                "ko" => KOREAN_FONT_PATH,
                 _ => JAPANESE_FONT_PATH,
             };
             self.font_fetch_kind = Some(kind);
@@ -1130,6 +1150,8 @@ mod web {
             DESIGN_SHOWN.with(|d| d.set(solidcraft_ui_egui::toolbar::design_shown(&self.app)));
         }
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+            // First, so everything after sees the buttons the browser holds.
+            crate::mouse_buttons::reconcile(&self.mouse_buttons, ctx, raw);
             let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
             if let Some(delay) = self.wheel_gestures.update(raw, now) {
                 ctx.request_repaint_after(delay);
@@ -1270,6 +1292,7 @@ mod web {
             {
                 create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
             }
+            let mouse_canvas = canvas.clone();
             let runner = eframe::WebRunner::new();
             let result = runner
                 .start(
@@ -1354,6 +1377,7 @@ mod web {
                             let rev = app.session.revision;
                             app.home.show(rev);
                         }
+                        let mouse_buttons = crate::mouse_buttons::install(&window, &mouse_canvas, &cc.egui_ctx);
                         let api = Api::install(sender, cc.egui_ctx.clone()).map_err(|e| format!("SolidCraft browser API: {e:?}"))?;
                         let font_language = app.preferences.language.clone();
                         let linked = crate::linked::Download::start(launch.open.as_deref(), &cc.egui_ctx);
@@ -1375,10 +1399,12 @@ mod web {
                             cjk_bytes: None,
                             chinese_bytes: None,
                             chinese_kind: None,
+                            korean_bytes: None,
                             font_fetch_kind: None,
                             font_language,
                             space_mouse: SpaceMouse::default(),
                             wheel_gestures: solidcraft_ui_egui::WebWheelGestures::default(),
+                            mouse_buttons,
                             prefs_writer: crate::PrefsWriter::default(),
                             prefs_warning: None,
                             other_tab_prefs,

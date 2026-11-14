@@ -378,7 +378,7 @@ fn patterned_shafts() -> (Harness, Vec<Sel>) {
     (h, picks)
 }
 
-/// An empty or singly preselected Thread keeps the original viewport replacement behavior.
+/// Every new Thread keeps the first preselected face and the original viewport replacement behavior.
 #[test]
 fn ordinary_thread_face_clicks_replace_the_previous_face() {
     let mut h = Harness::new();
@@ -386,9 +386,13 @@ fn ordinary_thread_face_clicks_replace_the_previous_face() {
     h.app.run("solid.cylinder", json!({"base":[30,0,0],"radius":10,"height":10,"body_name":"Second"})).unwrap();
     let first = thread_face(&h.app, "First");
     let second = thread_face(&h.app, "Second");
-    for selection in [vec![], vec![first.clone()]] {
+    for selection in [vec![], vec![first.clone()], vec![first.clone(), second.clone()], vec![second.clone(), first.clone()]] {
+        let expected: Vec<_> = selection.first().cloned().into_iter().collect();
         h.app.session.selection = selection;
         h.app.start("solid.thread");
+        let d = h.app.dialog.as_ref().unwrap();
+        assert!(!d.inputs[0].multi);
+        assert_eq!(d.inputs[0].items, expected);
         for pick in [first.clone(), second.clone(), second.clone()] {
             let Sel::Face { body, index, point } = &pick else { panic!("face") };
             let hit = crate::viewport::Hit::Face { body: body.clone(), index: *index, point: *point };
@@ -406,21 +410,21 @@ fn ordinary_thread_face_clicks_replace_the_previous_face() {
     }
 }
 
-/// A marquee containing several faces, or an explicit add, opts into the existing toggle behavior.
+/// Marquee replacement keeps one face until an explicit add enables grouped selection.
 #[test]
-fn thread_box_selection_explicitly_enables_multiple_faces() {
+fn thread_box_selection_keeps_one_face_until_explicit_add() {
     let (mut h, picks) = patterned_shafts();
     h.app.session.selection.clear();
-    for add in [false, true] {
+    for added in [vec![picks[1].clone()], picks[..2].to_vec()] {
         let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.thread").unwrap();
+        d.take_box(&h.app.session, picks[..2].to_vec(), false);
         assert!(!d.inputs[0].multi);
-        d.take_box(&h.app.session, vec![picks[0].clone()], false);
-        assert!(!d.inputs[0].multi, "a one-face marquee still replaces");
-        if add {
-            d.take_box(&h.app.session, vec![picks[1].clone()], true);
-        } else {
-            d.take_box(&h.app.session, picks[..2].to_vec(), false);
-        }
+        assert_eq!(d.inputs[0].items, picks[..1]);
+        d.take_box(&h.app.session, picks[2..].to_vec(), false);
+        assert!(!d.inputs[0].multi);
+        assert_eq!(d.inputs[0].items, picks[2..3]);
+        d.take_box(&h.app.session, picks[..2].to_vec(), false);
+        d.take_box(&h.app.session, added, true);
         assert!(d.inputs[0].multi);
         assert_eq!(d.inputs[0].items, picks[..2]);
         d.pick(&h.app.session, picks[2].clone());
@@ -476,12 +480,13 @@ fn a_legacy_multi_face_thread_reopens_in_group_selection_mode() {
     assert!(h.app.session.model.state().threads.iter().all(|thread| thread.feature == id));
 }
 
-/// The new dialog keeps every preselected boss and sends their shared options in one command.
+/// Explicitly adding the selected bosses sends their shared options in one command.
 #[test]
-fn all_preselected_pattern_faces_receive_the_threads_options() {
+fn all_explicitly_added_pattern_faces_receive_the_threads_options() {
     let (mut h, picks) = patterned_shafts();
     h.app.session.selection = picks.clone();
     h.app.start("solid.thread");
+    h.app.dialog.as_mut().unwrap().take_box(&h.app.session, picks.clone(), true);
     let d = h.app.dialog.as_mut().unwrap();
     assert!(d.inputs[0].multi);
     assert_eq!(d.inputs[0].items.len(), 4);
@@ -514,8 +519,9 @@ fn all_preselected_pattern_faces_receive_the_threads_options() {
 #[test]
 fn a_thread_on_four_pattern_faces_applies_and_undoes_as_one_operation() {
     let (mut h, picks) = patterned_shafts();
-    h.app.session.selection = picks;
+    h.app.session.selection = picks.clone();
     h.app.start("solid.thread");
+    h.app.dialog.as_mut().unwrap().take_box(&h.app.session, picks.clone(), true);
     let mut d = h.app.dialog.take().unwrap();
     let Kind::Thread { designation, suggested, .. } = &mut d.kind else { panic!("Thread") };
     *designation = "M6x0.75".into();
@@ -557,6 +563,7 @@ fn an_invalid_face_cannot_partially_apply_a_thread_batch() {
     let (mut h, mut picks) = patterned_shafts();
     h.app.session.selection = picks.clone();
     h.app.start("solid.thread");
+    h.app.dialog.as_mut().unwrap().take_box(&h.app.session, picks.clone(), true);
     let mut d = h.app.dialog.take().unwrap();
     let Kind::Thread { designation, suggested, .. } = &mut d.kind else { panic!("Thread") };
     *designation = "M6x0.75".into();
@@ -584,6 +591,7 @@ fn editing_a_grouped_thread_reopens_adds_and_removes_faces() {
     let (mut h, picks) = patterned_shafts();
     h.app.session.selection = picks[..2].to_vec();
     h.app.start("solid.thread");
+    h.app.dialog.as_mut().unwrap().take_box(&h.app.session, picks[..2].to_vec(), true);
     let mut d = h.app.dialog.take().unwrap();
     let Kind::Thread { designation, suggested, .. } = &mut d.kind else { panic!("Thread") };
     *designation = "M6x0.75".into();
@@ -636,8 +644,9 @@ fn duplicate_face_picks_create_only_one_thread_command() {
 #[test]
 fn a_thread_batch_keeps_its_start_when_the_undo_history_is_full() {
     let (mut h, picks) = patterned_shafts();
-    h.app.session.selection = picks;
+    h.app.session.selection = picks.clone();
     h.app.start("solid.thread");
+    h.app.dialog.as_mut().unwrap().take_box(&h.app.session, picks.clone(), true);
     let mut d = h.app.dialog.take().unwrap();
     let Kind::Thread { designation, suggested, .. } = &mut d.kind else { panic!("Thread") };
     *designation = "M6x0.75".into();

@@ -16,11 +16,13 @@
 //! | [`CompositeCurve::create_offsets_of_many_curves`], [`OffsetParams`], [`TrimmedOffsets`], [`OffsetPiece`] | `CreateOffsetsOfManyCurves` (static) |
 //! | [`CompositeCurve::intersect_and_trim_offsets`]         | `IntersectAndTrimOffsets` (static)                    |
 //! | [`CompositeCurve::create_trimmed_offsets`], [`OffsetDirection`] | `CreateTrimmedOffsets`, `SmOffsetDirectionType` |
-//! | [`CompositeCurve::make_composite_nurb`]                | `MakeCompositeNurb`                                   |
+//! | [`CompositeCurve::make_composite_nurb`], [`CompositeCurve::make_composite_nurb_with_breaks`] | `MakeCompositeNurb` |
 //! | [`CompositeCurve::read_from_db`]                       | `SmCompositeCurve::ReadFromDB` (static)               |
 //! | [`CompositeCurve::write_to_db`]                        | `SmCompositeCurve::WriteToDB`                         |
 //!
 //! Deviations:
+//! - **Join breaks** (not upstream). [`CompositeCurve::make_composite_nurb_with_breaks`]
+//!   also returns each segment's span in the joined curve (tangency-labs/solidcore#3139).
 //! - **Attributes.** A [`Curve`] carries no attribute list, so the offsetters pass each
 //!   curve with its offset map attribute as an [`OffsetPiece`]. Copies and trims keep
 //!   the attribute (upstream's `SM_AB_COPY` behaviour copies it with `MakeCopy`), and
@@ -858,6 +860,22 @@ impl CompositeCurve {
     /// Those of the join; [`SolidError::InvalidInput`] for a segment that is not an
     /// `SmBSplineCurve` (upstream joins a `NULL` curve).
     pub fn make_composite_nurb(&mut self) -> Result<BSplineCurve> {
+        self.composite_nurb(false).map(|(joined, _)| joined)
+    }
+
+    /// [`CompositeCurve::make_composite_nurb`], also returning where each segment lies
+    /// in the joined curve ([`BSplineCurve::create_by_joining_with_breaks`]: segment `i`
+    /// spans `[breaks[i], breaks[i + 1]]`, each value one of the curve's knots).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`CompositeCurve::make_composite_nurb`].
+    pub fn make_composite_nurb_with_breaks(&mut self) -> Result<(BSplineCurve, Vec<f64>)> {
+        self.composite_nurb(true)
+    }
+
+    /// `MakeCompositeNurb`, with the join's breaks when asked (empty otherwise).
+    fn composite_nurb(&mut self, with_breaks: bool) -> Result<(BSplineCurve, Vec<f64>)> {
         // get arrays of composite curve segments and their senses
         let mut bsplines = Vec::with_capacity(self.segments.len());
         let mut senses = Vec::with_capacity(self.segments.len());
@@ -880,7 +898,14 @@ impl CompositeCurve {
         }
 
         // create the joined curve
-        let joined = BSplineCurve::create_by_joining(&mut bsplines, Some(&senses))?;
+        let (joined, breaks) = if with_breaks {
+            BSplineCurve::create_by_joining_with_breaks(&mut bsplines, Some(&senses))?
+        } else {
+            (
+                BSplineCurve::create_by_joining(&mut bsplines, Some(&senses))?,
+                Vec::new(),
+            )
+        };
 
         // the join raised the B-spline segments in place
         for (s, b) in self.segments.iter_mut().zip(bsplines) {
@@ -888,7 +913,7 @@ impl CompositeCurve {
                 *x = b;
             }
         }
-        Ok(joined)
+        Ok((joined, breaks))
     }
 
     /// `CreateTrimmedOffsets`: [`Self::create_offsets_of_many_curves`] of this curve

@@ -56,7 +56,7 @@ impl FilletSession<'_> {
         for (offset, rail) in offsets.iter_mut().zip(0..2) {
             *offset = base
                 .surface(rail)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
                 .surface
                 .offset_distance();
         }
@@ -74,23 +74,24 @@ impl FilletSession<'_> {
                 .map(|fu| eu1::faceuse_face(target, fu))
                 .transpose()?
                 .flatten()
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the face use's face"))?;
             faces.push(face);
         }
-        let faces = <[_; 2]>::try_from(faces).map_err(|_| SolidError::null_pointer(OP))?;
+        let faces = <[_; 2]>::try_from(faces)
+            .map_err(|_| SolidError::blend_missing(OP, "a face on each side of the edge"))?;
         let rollovers = tangent_rollover_supports(k, target, edge, faces, offsets, tangency)?;
         for (rail, rollover) in rollovers.into_iter().enumerate() {
             let Some(rollover) = rollover else {
                 continue;
             };
             let support = crate::topology::face::p2::surface(self.objects.target, rollover.face)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
                 .clone_for_evaluation()?;
             let sign = if rollover.opposite_normals { -1.0 } else { 1.0 };
             let solver = self.objects.solver_mut(id)?.base_mut();
             let old = solver
                 .surface(rail)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
             let (distance, extends) = (
                 old.surface.offset_distance() * sign,
                 old.surface.surface.allow_extension(),

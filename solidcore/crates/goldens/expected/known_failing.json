@@ -8,17 +8,13 @@
   },
   "boolean.api_brep": {
     "gen0150": "tangency-labs/solidcraft#14799: a sphere of radius -3.06e-4 united with a 7.5e-4 x 3.9e-4 x 1.4e-3 box returns the sphere alone (volume 1.20e-10, Level 2 check fails) where the union holds the box (4.28e-10); upstream refused it (1001) because its capture distance spanned both parts",
-    "ub175_after_editing_imprint_failure": "tangency-labs/solidcraft#14799: a sphere of radius 6.8e-4 united with a 7.8e-4 x 5.4e-4 x 7.2e-4 box reaching outside it returns the sphere alone (volume 1.33e-9, Level 2 check fails); upstream refused it (1001) because its capture distance spanned both parts"
-  },
-  "intersect.topology_solver_p2": {
-    "subdivided_1_14_1_12_11_2_1": "tangency-labs/solidcore#3147: the All projected minimum returns 7 of the 21 answers within tolerance; the 14 missing are line endpoints (t = 0 or 1), leaving 5 of 12 vertices without an answer",
-    "subdivided_1_14_1_12_11_2_3": "tangency-labs/solidcore#3147: the All projected minimum returns 7 of the 21 answers within tolerance; the 14 missing are line endpoints (t = 0 or 1), leaving 5 of 12 vertices without an answer",
-    "subdivided_1_14_1_12_11_50_1": "tangency-labs/solidcore#3147: the All projected minimum returns 7 of the 26 answers within tolerance; the 19 missing are line endpoints (t = 0 or 1), leaving 5 of 12 vertices without an answer",
-    "subdivided_1_14_1_12_11_50_3": "tangency-labs/solidcore#3147: the All projected minimum returns 7 of the 26 answers within tolerance; the 19 missing are line endpoints (t = 0 or 1), leaving 5 of 12 vertices without an answer",
-    "subdivided_1_14_1_40_30_2_1": "tangency-labs/solidcore#3147: the All projected minimum returns 24 of the 72 answers within tolerance; the 48 missing are line endpoints (t = 0 or 1), leaving 16 of 40 vertices without an answer",
-    "subdivided_1_14_1_40_30_2_3": "tangency-labs/solidcore#3147: the All projected minimum returns 24 of the 72 answers within tolerance; the 48 missing are line endpoints (t = 0 or 1), leaving 16 of 40 vertices without an answer",
-    "subdivided_1_14_1_40_30_50_1": "tangency-labs/solidcore#3147: the All projected minimum returns 24 of the 88 answers within tolerance; the 64 missing are line endpoints (t = 0 or 1), leaving 16 of 40 vertices without an answer",
-    "subdivided_1_14_1_40_30_50_3": "tangency-labs/solidcore#3147: the All projected minimum returns 24 of the 88 answers within tolerance; the 64 missing are line endpoints (t = 0 or 1), leaving 16 of 40 vertices without an answer"
+    "ub175_after_editing_imprint_failure": "tangency-labs/solidcraft#14799: a sphere of radius 6.8e-4 united with a 7.8e-4 x 5.4e-4 x 7.2e-4 box reaching outside it returns the sphere alone (volume 1.33e-9, Level 2 check fails); upstream refused it (1001) because its capture distance spanned both parts",
+    "wr614_strip_difference_d1.5e-05": "tangency-labs/solidcore#1794: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) whose face lies 1.5e-5 off A's face at its corner edge, past the 1e-5 tolerance, so neither the strip rule (WR-614) nor the speck skip (WR-619) applies; A minus B has no solid region (8 faces, volume 0) where the exact difference is 64 - 20.2 d^2 = 63.999999995455",
+    "wr614_strip_intersection_d1.5e-05": "tangency-labs/solidcore#1794: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) whose face lies 1.5e-5 off A's face at its corner edge, past the 1e-5 tolerance, so neither the strip rule (WR-614) nor the speck skip (WR-619) applies; the intersection is two sheets of the strip (2 faces, no solid region) where the exact overlap is a wedge of 20.2 d^2 = 4.545e-9",
+    "wr614_strip_measured_difference_d1.5e-05": "tangency-labs/solidcore#1794: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) whose face lies 1.5e-5 off A's face at its corner edge, past the 1e-5 tolerance, so neither the strip rule (WR-614) nor the speck skip (WR-619) applies; A minus B has no solid region (8 faces, volume 0) where the exact difference is 64 - 20.2 d^2 = 63.999999995455",
+    "wr614_strip_measured_intersection_d1.5e-05": "tangency-labs/solidcore#1794: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) whose face lies 1.5e-5 off A's face at its corner edge, past the 1e-5 tolerance, so neither the strip rule (WR-614) nor the speck skip (WR-619) applies; the intersection is two sheets of the strip (2 faces, no solid region) where the exact overlap is a wedge of 20.2 d^2 = 4.545e-9",
+    "wr614_strip_measured_union_d1.5e-05": "tangency-labs/solidcore#1794: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) whose face lies 1.5e-5 off A's face at its corner edge, past the 1e-5 tolerance, so neither the strip rule (WR-614) nor the speck skip (WR-619) applies; the union has no solid region (12 faces, not manifold, volume 0) where the exact union is 128 - 20.2 d^2 = 127.999999995455",
+    "wr614_strip_union_d1.5e-05": "tangency-labs/solidcore#1794: box A [-2,2]x[16,20]x[0,4] and a 4 mm cube B turned atan(0.1) whose face lies 1.5e-5 off A's face at its corner edge, past the 1e-5 tolerance, so neither the strip rule (WR-614) nor the speck skip (WR-619) applies; the union has no solid region (12 faces, not manifold, volume 0) where the exact union is 128 - 20.2 d^2 = 127.999999995455"
   },
   "offset.offset_executive_p1": {
     "extend_bilinear_huge": "tangency-labs/solidcore#3000: a 5e8 extension of a bilinear sheet extends 3 of 4 sides; the opposite side's diameter is rounded on the whole net and reads as collapsed",
@@ -145,10 +141,6 @@
     "pe_Fillet_cyl_on_box_w_fillet_f1_d0_out_ext": "tangency-labs/solidcore#3094: success with a body that fails check_brep level 2 (7 lines, the first SmTrimmingTools::Test #0 Edge/Edge Gap)",
     "shell_file_problemShell15_face0_extend": "tangency-labs/solidcore#3094: success with a body that fails check_brep level 2 (12 lines, the first SmTrimmingTools::Test #0 Edge/Edge Gap)"
   },
-  "primitive.primitive_creation_p2": {
-    "gen0092": "tangency-labs/solidcore#2794: a circle of radius 1e-3 swept along two 1e-2 legs at a right angle returns success, but the body fails check_brep level 2 (vertex 1.8284271e-3 off its faces); a refusal or the valid body of volume 6.2832e-8 is right; fix in #2840",
-    "gen0189": "tangency-labs/solidcore#2794: the same input as gen0092 (circle of radius 1e-3 swept along two 1e-2 legs at a right angle) returns success with an invalid body (vertex 1.8284271e-3 off its faces); fix in #2840"
-  },
   "surface.offset_surface": {
     "dome_pole_d0_2_p2": "tangency-labs/solidcraft#13610: simple evaluation succeeds with incorrect finite first and second partials at the collapsed boundary",
     "dome_pole_d0_2_p3": "tangency-labs/solidcraft#13610: simple evaluation succeeds with incorrect finite first and second partials at the collapsed boundary",
@@ -253,9 +245,6 @@
     "gen2949": "tangency-labs/solidcore#2717: step 4 names D(2,0), overwritten by D(1,2) at out[92]",
     "gen2966": "tangency-labs/solidcore#2717: step 0 names D(3,0), overwritten by D(1,2) at out[11]",
     "upper_half_slot_overwrite": "tangency-labs/solidcore#2717: step 1 names D(2,0), overwritten by D(1,2) at out[26]"
-  },
-  "surface.surface_approximate": {
-    "gen0381": "tangency-labs/solidcore#2507: approximation reports success and a returned surface although achieved tolerance 0.5459967665063701 exceeds requested tolerance 0.0013812901040403118"
   },
   "topology.brep_local_operation": {
     "gen0014": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",

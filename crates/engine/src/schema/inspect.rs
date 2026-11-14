@@ -1127,6 +1127,16 @@ pub struct SketchCurve {
     pub link: Option<String>,
 }
 
+/// A fit spline's tangent handle (#6502).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SplineTangentHandle {
+    /// The handle's end point.
+    pub point: String,
+    pub at: Option<[f64; 2]>,
+    /// The construction line from its fit point to the handle's end.
+    pub curve: Option<String>,
+}
+
 /// A curve's kind and its points, by id and (`_at`) by position `[x, y]` in the sketch's plane.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1166,6 +1176,8 @@ pub enum CurveShape {
         control: bool,
         degree: u8,
         periodic: bool,
+        /// A fit spline's tangent handles: the end of each handle and the construction line to it.
+        tangent_handles: Vec<SplineTangentHandle>,
         /// A control spline with its own knots (a projected free-form edge).
         #[serde(skip_serializing_if = "Option::is_none")]
         knots: Option<Vec<f64>>,

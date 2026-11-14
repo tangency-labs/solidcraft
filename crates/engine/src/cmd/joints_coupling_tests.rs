@@ -429,3 +429,34 @@ fn an_editor_accepts_the_ratios_rolling_the_marker_works_out() {
     assert_eq!(s.doc.marker, None);
     assert!(close_to(ratio(&s), -0.6), "{}", ratio(&s));
 }
+
+/// Opening a design saved rolled back before body names were pinned works the later bodies'
+/// names out from the whole timeline (#14008), and keeps nothing else that evaluation reads: a
+/// gear picked on a face after the marker keeps the ratio the file has, and the parts stay
+/// where the file has them.
+#[test]
+fn pinning_the_names_after_the_marker_leaves_a_gear_on_a_later_face_alone() {
+    let s = gear_train();
+    let g1 = s.doc.components.iter().find(|c| c.name == "G1").map(|c| c.id).unwrap_or_else(|| panic!("no G1"));
+    let disc = s.model.state().bodies.iter().find(|b| b.component == g1).map(|b| b.feature).unwrap_or_else(|| panic!("no G1 disc"));
+    let at = s.doc.features.iter().position(|f| f.id == disc).unwrap_or_else(|| panic!("no G1 disc feature"));
+    let mut doc = (*s.doc).clone();
+    for f in &mut doc.features {
+        f.body_names.clear();
+    }
+    doc.reserved_body_names.clear();
+    // Rolled back before G1's disc, so its face is not there, with the ratio the file was saved
+    // with (the whole timeline makes it -0.5).
+    doc.marker = Some(at);
+    if let Some(l) = doc.assembly.links.first_mut() {
+        l.ratio = 0.25;
+    }
+    let text = doc.to_json();
+    let plain = Session::opened(solidcraft_doc::Document::from_json(&text).unwrap(), None);
+    let opened = Session::opened_at(solidcraft_doc::Document::from_json(&text).unwrap(), None, None);
+    assert!(opened.doc.feature(disc).is_some_and(|f| !f.body_names.is_empty()), "the disc after the marker has its name");
+    assert_eq!(opened.doc.marker, Some(at));
+    assert_eq!(opened.doc.assembly.links.first().map(|l| l.ratio), Some(0.25));
+    assert_eq!(opened.doc.assembly, plain.doc.assembly);
+    assert_eq!(opened.doc.occurrences, plain.doc.occurrences);
+}

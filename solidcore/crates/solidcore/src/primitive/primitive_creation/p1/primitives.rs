@@ -19,6 +19,7 @@
 //! | [`PrimitiveCreation::create_sphere_no_pole`] | `CreateSphereNoPole` |
 //! | [`PrimitiveCreation::create_cone_elliptic_ends`] | `CreateConeEllipticEnds` |
 //! | [`analytic_rotational_sweep`] | `sm_CreateAnalyticRotationalSweep` |
+//! | [`coplanar_with_axis`] | (not upstream, WR-776) |
 //!
 //! Deviations: missing topology edits return Unported at their first call.
 //! Mutations after that call are deferred; no success is claimed for those paths.
@@ -26,6 +27,11 @@
 //! them. `SmBrep` is caller-owned; edits retain upstream edit-mode side effects.
 //! Face construction uses caller notification records, attributes and identity keys.
 //! No recursion.
+//! Not upstream (WR-776): [`analytic_rotational_sweep`] makes its cone only for a line in
+//! one plane with the axis ([`coplanar_with_axis`]); upstream makes the cone through the
+//! end circles of a line skew to the axis too, which sweeps a hyperboloid of one sheet. A
+//! skew line is refused here (a described failure, `SM_ERR` status) before any edit, so
+//! the caller gives it its surface of revolution.
 //! Not upstream (WR-565, tangency-labs/solidcore#1477, opt-in
 //! `Kernel::fixes.linear_sweep_arc_is_cylinder`; SolidCraft change, tangency-labs/smlib
 //! 12918e9): [`PrimitiveCreation::create_linear_sweep`] makes a circular arc short of a
@@ -1431,9 +1437,35 @@ impl PrimitiveCreation {
     }
 }
 
+/// Whether the segment from `start` to `end` lies in one plane with the axis through
+/// `axis_base` along `axis`, within `tol`: the lines are parallel (the sine of their
+/// angle within [`EFF_ZERO`]), or their common perpendicular is no longer than `tol` (one
+/// not finite is not). Only such a line, neither parallel nor square to the axis, sweeps a
+/// cone; a skew one sweeps a hyperboloid of one sheet, its radius about the axis the root
+/// of a quadratic in the axial coordinate, not linear in it (WR-776).
+#[must_use]
+pub(crate) fn coplanar_with_axis(
+    axis_base: crate::math::Point3,
+    axis: Vec3,
+    start: crate::math::Point3,
+    end: crate::math::Point3,
+    tol: f64,
+) -> bool {
+    let line = end - start;
+    let normal = line.cross(axis);
+    let sine = normal.length();
+    if sine <= EFF_ZERO * line.length() * axis.length() {
+        return true;
+    }
+    ((start - axis_base).dot(normal) / sine).abs() <= tol
+}
+
 /// Create an analytic rotational sweep (`sm_CreateAnalyticRotationalSweep`).
 /// Lines on the axis, interior axis crossings and unsuitable circular arcs return
-/// `SM_ERR`; topology construction defers at its exact owning unit.
+/// `SM_ERR`; topology construction defers at its exact owning unit. Not upstream
+/// (WR-776): a line skew to the axis and neither parallel nor square to it
+/// ([`coplanar_with_axis`] at the B-rep's tolerance) fails, described, before any edit,
+/// where upstream makes it the cone through its end circles.
 pub fn analytic_rotational_sweep(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -1514,6 +1546,14 @@ pub fn analytic_rotational_sweep(
                 )),
             };
         } else {
+            // Not upstream (WR-776): a line skew to the axis sweeps a hyperboloid, not the
+            // cone through its end circles
+            if !coplanar_with_axis(axis_base, axis, ends.start, ends.end, tol) {
+                return Err(SolidError::primitive_failed(
+                    op,
+                    "the line is skew to the axis: it sweeps a hyperboloid, not a cone",
+                ));
+            }
             let (bottom_radius, bottom_parameter) =
                 line_point_distance(axis_base, axis, ends.start);
             let (top_radius, top_parameter) = line_point_distance(axis_base, axis, ends.end);

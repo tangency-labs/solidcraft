@@ -232,7 +232,10 @@ fn split(sv: &[f64; 4]) -> (Point2, Point2) {
 fn four(x: &[f64]) -> Result<[f64; 4]> {
     match x {
         [a, b, c, d, ..] => Ok([*a, *b, *c, *d]),
-        _ => Err(SolidError::sm_err(OP_LSI)),
+        _ => Err(SolidError::surface_failed(
+            OP_LSI,
+            "the solver returned fewer than four values",
+        )),
     }
 }
 
@@ -312,7 +315,10 @@ impl Surface {
         depth: usize,
     ) -> Result<Option<SurfaceIntersection>> {
         if depth > MAX_RECURSION {
-            return Err(SolidError::sm_err(OP_LSI));
+            return Err(SolidError::surface_failed(
+                OP_LSI,
+                "the local intersection recursed past its depth bound",
+            ));
         }
         let do_boundary = opts.do_boundary_testing;
         let three_deg = three_degrees();
@@ -1012,9 +1018,13 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
             .get(1)
             .copied()
             .flatten()
-            .ok_or(SolidError::null_pointer(OP_CS))?;
-        let cache = self.surface_cache.ok_or(SolidError::null_pointer(OP_CS))?;
-        let curve = self.curve.ok_or(SolidError::null_pointer(OP_CS))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_CS, "the branch's surface node"))?;
+        let cache = self
+            .surface_cache
+            .ok_or_else(|| SolidError::surface_missing(OP_CS, "the surface cache"))?;
+        let curve = self
+            .curve
+            .ok_or_else(|| SolidError::surface_missing(OP_CS, "the curve"))?;
         let curve_tree = self.base.tree(0)?;
         let surface_tree = self.base.tree(1)?;
         let span = *curve_tree.curve_span(&curve_node)?;
@@ -1318,10 +1328,12 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
                     Side4::U2 => u_conts2,
                     Side4::V2 => v_conts2,
                 };
-                let c = side_conts
-                    .get(j)
-                    .copied()
-                    .ok_or(SolidError::sm_err(OP_SS))?;
+                let c = side_conts.get(j).copied().ok_or_else(|| {
+                    SolidError::surface_failed(
+                        OP_SS,
+                        "the side continuity is past the end of the continuities",
+                    )
+                })?;
                 if ct(c) > c0 {
                     continue;
                 }
@@ -1440,18 +1452,15 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
         let k = self.kernel;
         let node1 = *self.base.branch_node(branch, 0)?;
         let node2 = *self.base.branch_node(branch, 1)?;
-        let id1 = branch
-            .first()
-            .copied()
-            .flatten()
-            .ok_or(SolidError::null_pointer(OP_SS))?;
-        let id2 = branch
-            .get(1)
-            .copied()
-            .flatten()
-            .ok_or(SolidError::null_pointer(OP_SS))?;
+        let id1 =
+            branch.first().copied().flatten().ok_or_else(|| {
+                SolidError::surface_missing(OP_SS, "the branch's first surface node")
+            })?;
+        let id2 = branch.get(1).copied().flatten().ok_or_else(|| {
+            SolidError::surface_missing(OP_SS, "the branch's second surface node")
+        })?;
         let [Some(cache1), Some(cache2)] = self.caches else {
-            return Err(SolidError::null_pointer(OP_SS));
+            return Err(SolidError::surface_missing(OP_SS, "a surface cache"));
         };
         let tree1 = self.base.tree(0)?;
         let tree2 = self.base.tree(1)?;
@@ -1740,7 +1749,10 @@ fn boundary_curves(
     let u = surface.create_iso_boundaries(k, SurfParamType::U, tol)?;
     let v = surface.create_iso_boundaries(k, SurfParamType::V, tol)?;
     let (Some((c0, c2)), Some((c1, c3))) = (u, v) else {
-        return Err(SolidError::sm_err(OP_ISB));
+        return Err(SolidError::surface_failed(
+            OP_ISB,
+            "the surface has no iso boundaries",
+        ));
     };
     let mut out = vec![c0, c1];
     // (IsClosed of the surface's own kind, default tolerance, no continuity)
@@ -1909,9 +1921,16 @@ fn extract_iso_curve(
     // `sm_ExtractIsoCurve` takes an `SmBSplineCurve`: every `Curve` kind derived from it
     // has one as base. Other kinds cannot reach upstream's signature, so they are not
     // iso curves here.
+    let line_with_nurb;
     let uv_bspline = match uv_curve.kind() {
         CurveKind::BSpline(b) => b,
-        CurveKind::Line(l) => l.base(),
+        // upstream asks the line object itself for its degree, points and ends, which a
+        // two-point `SmLine` answers without a NURB made yet: its part comes with its NURB
+        // here (the same degree, points and ends)
+        CurveKind::Line(l) => {
+            line_with_nurb = l.base_with_nurb()?;
+            &*line_with_nurb
+        }
         CurveKind::Ellipse(e) => e.base(),
         CurveKind::Hyperbola(h) => h.base(),
         CurveKind::Parabola(p) => p.base(),
@@ -1931,7 +1950,10 @@ fn extract_iso_curve(
         | CurveKind::Ellipse(_)
         | CurveKind::Hyperbola(_)
         | CurveKind::Parabola(_) => Ok(Some((iso, 0.0))),
-        _ => Err(SolidError::sm_err(OP_LIFT)),
+        _ => Err(SolidError::surface_failed(
+            OP_LIFT,
+            "the iso curve kind cannot be lifted",
+        )),
     }
 }
 
@@ -2062,7 +2084,9 @@ impl Surface {
                 let cache = match cache {
                     Ok(c) => c,
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => return Err(SolidError::null_pointer(OP_LIFT)),
+                    Err(_) => {
+                        return Err(SolidError::surface_missing(OP_LIFT, "the surface cache"))
+                    }
                 };
 
                 // the solutions of sm_IntersectAndSplit name crUVCurveToLift (the
@@ -2075,11 +2099,20 @@ impl Surface {
                 let size = u_conts.len().saturating_sub(1);
                 for iu in 1..size {
                     // when surface U knot is C0 or discontinuous
-                    if ct(*u_conts.get(iu).ok_or(SolidError::sm_err(OP_LIFT))?)
-                        < ct(ContinuityType::C1)
+                    if ct(*u_conts.get(iu).ok_or_else(|| {
+                        SolidError::surface_failed(
+                            OP_LIFT,
+                            "the u continuity is past the end of the continuities",
+                        )
+                    })?) < ct(ContinuityType::C1)
                     {
                         // split the UVcurve at the Surface discontinuity (SER: checked)
-                        let knot = *knots.get(iu).ok_or(SolidError::sm_err(OP_LIFT))?;
+                        let knot = *knots.get(iu).ok_or_else(|| {
+                            SolidError::surface_failed(
+                                OP_LIFT,
+                                "the u knot is past the end of the knots",
+                            )
+                        })?;
                         intersect_and_split::<BoundaryCurveHandle>(
                             k,
                             uv_curve,
@@ -2098,11 +2131,20 @@ impl Surface {
                 let size = v_conts.len().saturating_sub(1);
                 for iv in 1..size {
                     // when surface V knot is C0 or discontinuous
-                    if ct(*v_conts.get(iv).ok_or(SolidError::sm_err(OP_LIFT))?)
-                        < ct(ContinuityType::C1)
+                    if ct(*v_conts.get(iv).ok_or_else(|| {
+                        SolidError::surface_failed(
+                            OP_LIFT,
+                            "the v continuity is past the end of the continuities",
+                        )
+                    })?) < ct(ContinuityType::C1)
                     {
                         // (SER: checked)
-                        let knot = *knots.get(iv).ok_or(SolidError::sm_err(OP_LIFT))?;
+                        let knot = *knots.get(iv).ok_or_else(|| {
+                            SolidError::surface_failed(
+                                OP_LIFT,
+                                "the v knot is past the end of the knots",
+                            )
+                        })?;
                         intersect_and_split::<BoundaryCurveHandle>(
                             k,
                             uv_curve,
@@ -2124,7 +2166,12 @@ impl Surface {
             // for every curve knot: the projected 3D curve's C0 break points
             for (j, c) in curve_conts.iter().enumerate() {
                 if ct(*c) < ct(ContinuityType::C1) {
-                    break_params.push(*knots.get(j).ok_or(SolidError::sm_err(OP_LIFT))?);
+                    break_params.push(*knots.get(j).ok_or_else(|| {
+                        SolidError::surface_failed(
+                            OP_LIFT,
+                            "the curve knot is past the end of the knots",
+                        )
+                    })?);
                 }
             }
         }
@@ -2154,7 +2201,10 @@ impl Surface {
             // (SER: checked)
             let pv = uv_curve.evaluate(k, ivl.min() + EFF_ZERO_SQRT, 1, true, true)?;
             let (Some(p0), Some(p1)) = (pv.first(), pv.get(1)) else {
-                return Err(SolidError::sm_err(OP_LIFT));
+                return Err(SolidError::surface_failed(
+                    OP_LIFT,
+                    "the UV curve has no point and tangent",
+                ));
             };
             let pnt = Point2::new(p0.x, p0.y);
             let vec = Vec2::new(p1.x, p1.y);
@@ -2174,7 +2224,10 @@ impl Surface {
 
             // If we don't get some sort of a domain then error out.
             if seg_domain.size().length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP_LIFT));
+                return Err(SolidError::surface_failed(
+                    OP_LIFT,
+                    "the segment has no domain",
+                ));
             }
 
             // define 3DCurve = SmCrvOnSurf(segment, thisSurface)
@@ -2219,11 +2272,16 @@ impl Surface {
         // set output based on the number of lifted segments
         let curve = match curves_3d.len() {
             // signal error
-            0 => return Err(SolidError::sm_err(OP_LIFT)),
+            0 => return Err(SolidError::surface_failed(OP_LIFT, "no segment was lifted")),
             // output = 1 lifted BSpline approximation curve
             1 => match curves_3d.pop().map(Curve::into_kind) {
                 Some(CurveKind::BSpline(b)) => b,
-                _ => return Err(SolidError::sm_err(OP_LIFT)),
+                _ => {
+                    return Err(SolidError::surface_failed(
+                        OP_LIFT,
+                        "the lifted curve is not a B-spline",
+                    ))
+                }
             },
             // output = 1 composite curve (IsClosed default tolerance 0.0)
             _ => {
@@ -2281,6 +2339,53 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    /// A lazy UV line (`Line::from_points`, no NURB yet, as upstream's two-point `SmLine`)
+    /// on the bilinear patch `S(u, v)` with corners `(0, 0, 0)`, `(0, 4, 0)`, `(4, 0, 0)`,
+    /// `(4, 4, 0)` lifts as an iso curve: `u = 1/4` for `v` in `[0, 1]`. Its middle is
+    /// `S(1/4, 1/2)`, which is `(1, 2, 0)` or `(2, 1, 0)` by the patch's orientation.
+    #[test]
+    fn a_lazy_uv_line_lifts_as_an_iso_curve() {
+        for fixes in [UpstreamFixes::default(), UpstreamFixes::all()] {
+            let k = &Kernel {
+                fixes,
+                ..Kernel::default()
+            };
+            let s = bspline_surface(
+                1,
+                1,
+                &[
+                    &[Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 4.0, 0.0)],
+                    &[Vec3::new(4.0, 0.0, 0.0), Vec3::new(4.0, 4.0, 0.0)],
+                ],
+            );
+            let uv_line = crate::curve::line::Line::from_points(
+                Point3::new(0.25, 0.0, 0.0),
+                Point3::new(0.25, 1.0, 0.0),
+                2,
+            );
+            assert!(uv_line.base().gw_nurb().is_none());
+            let dom = Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
+            let lifted = s
+                .lift_curve(
+                    k,
+                    &dom,
+                    &Curve::from(uv_line),
+                    &Extent1d::from_min_max(0.0, 1.0),
+                    1e-6,
+                    false,
+                )
+                .unwrap();
+            let mid = lifted.curve.evaluate_point(k, 0.5).unwrap();
+            let want = s.evaluate_point(k, Point2::new(0.25, 0.5)).unwrap();
+            assert!(mid.distance(want) <= 1e-12, "{mid:?} vs {want:?}");
+            assert!(
+                mid.distance(Point3::new(1.0, 2.0, 0.0)) <= 1e-12
+                    || mid.distance(Point3::new(2.0, 1.0, 0.0)) <= 1e-12,
+                "{mid:?}"
+            );
+        }
     }
 
     #[test]
@@ -2627,6 +2732,46 @@ mod tests {
             assert!((hit.uv.x - 0.2).abs() < 1e-9 && (hit.uv.y - 1.0).abs() < 1e-9);
             assert!((hit.other_uv.x - 0.7).abs() < 1e-9 && (hit.other_uv.y - 0.5).abs() < 1e-9);
             assert!(hit.deviation < 1e-9);
+        }
+    }
+
+    /// The intersection and lifting failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
+            (
+                OP_LSI,
+                SurfaceFailure::Failed("the local intersection recursed past its depth bound"),
+                crate::error::SM_ERR,
+            ),
+            (
+                OP_SS,
+                SurfaceFailure::Missing("a surface cache"),
+                crate::error::SM_ERR_NULL_POINTER,
+            ),
+            (
+                OP_LIFT,
+                SurfaceFailure::Failed("no segment was lifted"),
+                crate::error::SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
         }
     }
 }

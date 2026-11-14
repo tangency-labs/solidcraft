@@ -573,7 +573,9 @@ impl SurfOfExtrusion {
                 plane_tol,
                 [plane_owner, PlaneOwner::NoFace],
             ) {
-                Ok(r) => r,
+                // (its warning, a status ignored upstream, comes with no curves and no
+                // more intersections, as a failure does)
+                Ok((needs_more, plane_x, _warning)) => (needs_more, plane_x),
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => (false, SurfaceIntersection::default()),
             };

@@ -1294,12 +1294,27 @@ fn the_named_setback_builds() {
 /// chord's and the arc's rounds turn at the unrounded upright (a Mitre); the upright's round
 /// ends on the bottom. `faces`: the faces the rounded part has.
 fn d_prism_eight_case(bore: Option<f64>, faces: usize) -> (Kernel, Brep, Vec<EdgeId>, Case) {
+    let name = if bore.is_some() {
+        "bored d prism, flat 8"
+    } else {
+        "d prism, flat 8"
+    };
+    d_prism_eight_bored(bore.map(|r| ([0.0, 0.0], r)), faces, name)
+}
+
+/// [`d_prism_eight_case`], bored where `bore` is given, about the upright through its centre
+/// `(x, y)` with its radius, right through the prism; `name` the case's.
+fn d_prism_eight_bored(
+    bore: Option<([f64; 2], f64)>,
+    faces: usize,
+    name: &'static str,
+) -> (Kernel, Brep, Vec<EdgeId>, Case) {
     let mut k = all_fixes();
     let (rr, a, hh) = (10.0f64, 8.0f64, 20.0f64);
     let h = (rr * rr - a * a).sqrt();
     let mut b = d_prism(&mut k, 0.0, 0.0, rr, a, 0.0, hh);
-    if let Some(r) = bore {
-        let cyl = create_cylinder(&mut k, Point3::new(0.0, 0.0, -1.0), r, hh + 2.0).unwrap();
+    if let Some(([x, y], r)) = bore {
+        let cyl = create_cylinder(&mut k, Point3::new(x, y, -1.0), r, hh + 2.0).unwrap();
         b = boolean_difference(&mut k, b, cyl).unwrap();
     }
     let edges = [[a, 0.0, hh], [a, h, 5.0], [-rr, 0.0, hh]]
@@ -1309,11 +1324,7 @@ fn d_prism_eight_case(bore: Option<f64>, faces: usize) -> (Kernel, Brep, Vec<Edg
     let s2 = 0.5f64.sqrt();
     let mid = |c: Point3, e: Point3, r: f64| c + (e - c).unitize().unwrap() * r;
     let case = Case {
-        name: if bore.is_some() {
-            "bored d prism, flat 8"
-        } else {
-            "d prism, flat 8"
-        },
+        name,
         v: Point3::new(a, h, hh),
         reach: 11.0,
         convex: true,
@@ -1577,4 +1588,155 @@ fn bored_d_prism_spring_curve_leaving_the_top_names_the_setback_that_keeps_it() 
     assert!(r.ok, "asked {named}: {}", r.reason);
     graded(&mut k, &mut b, &case, 3);
     kept_definitions(&k, &b, &case, 3);
+}
+
+/// The corner's piece of the top face of [`d_prism_eight_case`] when every setback is `s`, by
+/// its closed form, as a closed polygon through V (the top is a plane, so its spring curve is
+/// the parabola of [`top_spring_least_rho`]): V, along the chord to `s` from V, the chord
+/// round's end section to its rail end P on x = 7, the spring curve to Q on rho = 8 (2000 even
+/// steps of its parameter), the arc round's end section out to rho = 10, and the arc back to V
+/// (200 steps).
+fn top_piece(s: f64) -> Vec<(f64, f64)> {
+    let psi_v = 6.0f64.atan2(8.0);
+    let p = (7.0, 6.0 - s);
+    let psi = psi_v + s / 10.0;
+    let q = (8.0 * psi.cos(), 8.0 * psi.sin());
+    let along = (7.0 - q.0) / psi.sin();
+    let x = (7.0, q.1 - along * psi.cos());
+    let mut out = vec![(8.0, 6.0), (8.0, 6.0 - s)];
+    for i in 0..=2000 {
+        let t = f64::from(i) / 2000.0;
+        let (a, b, c) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t);
+        out.push((a * p.0 + b * x.0 + c * q.0, a * p.1 + b * x.1 + c * q.1));
+    }
+    for i in 0..=200 {
+        let a = psi + (psi_v - psi) * f64::from(i) / 200.0;
+        out.push((10.0 * a.cos(), 10.0 * a.sin()));
+    }
+    out
+}
+
+/// Whether the point `c` lies inside the polygon `piece` (odd crossings of a ray along +x),
+/// and its least distance from the polygon's sides.
+fn placed(piece: &[(f64, f64)], c: (f64, f64)) -> (bool, f64) {
+    let mut inside = false;
+    let mut least = f64::INFINITY;
+    for i in 0..piece.len() {
+        let (a, b) = (piece[i], piece[(i + 1) % piece.len()]);
+        if (a.1 > c.1) != (b.1 > c.1) && c.0 < a.0 + (c.1 - a.1) / (b.1 - a.1) * (b.0 - a.0) {
+            inside = !inside;
+        }
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let t = (((c.0 - a.0) * dx + (c.1 - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+        least = least.min((a.0 + t * dx - c.0).hypot(a.1 + t * dy - c.1));
+    }
+    (inside, least)
+}
+
+/// Whether the circle about `c` of radius `r` lies outside the polygon `piece` and clear of
+/// it.
+fn circle_outside(piece: &[(f64, f64)], c: (f64, f64), r: f64) -> bool {
+    let (inside, least) = placed(piece, c);
+    !inside && least > r
+}
+
+/// #2343 (d), condition 2: a small bore (R 0.15) through the D prism's top at (6.7, 3), asked
+/// 7.5 at V. The bore lies wholly inside the corner's piece of the top, 0.08 clear of its
+/// spring curve, so condition 1 passes; main built the corner, its fill over the bore's top
+/// loop (`check_brep` clean, but the bore's top circle gone and its wall meeting a fill patch
+/// at 1.57 rad). The corner checks what it takes out of the top: refused as `SetbackTooLong`
+/// at V, why `PieceHoldsEdge`, naming a setback whose piece of the top, by its closed form,
+/// leaves the bore outside and clear, within 1e-3 of the largest such (found by bisection on
+/// the closed form). Asked it, the corner builds, graded as the corners above, the bore's top
+/// circle kept. The twin with the bore just outside the piece asked 7.5, at (6.3, 2.7), 0.08
+/// clear of the spring curve on the other side, builds.
+#[test]
+fn a_bore_inside_the_corners_piece_of_the_top_is_refused_naming_the_setback_that_leaves_it_out() {
+    let (inside, outside, radius, asked) = ((6.7, 3.0), (6.3, 2.7), 0.15, 7.5);
+    let (held_at_asked, least) = placed(&top_piece(asked), inside);
+    assert!(held_at_asked && least > radius + 0.05, "{least}");
+    assert!(circle_outside(&top_piece(asked), outside, radius));
+    // the limit by the closed form: the largest setback whose piece leaves the bore out
+    let (mut clear, mut held) = (4.0, asked);
+    assert!(circle_outside(&top_piece(clear), inside, radius));
+    for _ in 0..50 {
+        let mid = 0.5 * (clear + held);
+        if circle_outside(&top_piece(mid), inside, radius) {
+            clear = mid;
+        } else {
+            held = mid;
+        }
+    }
+    let limit = clear;
+    let name = "d prism, small bore inside the corner's piece";
+    let (mut k, mut b, edges, case) =
+        d_prism_eight_bored(Some(([inside.0, inside.1], radius)), 14, name);
+    let v = vertex_at(&b, case.v);
+    let r = round_asked(
+        &mut k,
+        &mut b,
+        &edges,
+        &[1.0, 1.5, 2.0],
+        case.v,
+        Some(asked),
+    );
+    assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
+    assert!(!r.ok, "asked {asked}: built over the bore");
+    let named = match r.refusal {
+        Some(BlendRefusal::SetbackTooLong {
+            vertex,
+            largest,
+            why,
+        }) => {
+            assert_eq!(vertex, v);
+            assert_eq!(why, SetbackTooLongWhy::PieceHoldsEdge, "{}", r.reason);
+            largest
+        }
+        other => panic!("{other:?}, {}", r.reason),
+    };
+    eprintln!("named {named}, limit {limit}");
+    assert!(
+        circle_outside(&top_piece(named), inside, radius),
+        "{named}: the bore not outside its piece"
+    );
+    assert!(
+        named < limit && named > limit - 1e-3,
+        "{named} against the limit {limit}"
+    );
+    let (mut k, mut b, edges, case) =
+        d_prism_eight_bored(Some(([inside.0, inside.1], radius)), 14, name);
+    let r = round_asked(
+        &mut k,
+        &mut b,
+        &edges,
+        &[1.0, 1.5, 2.0],
+        case.v,
+        Some(named),
+    );
+    assert!(r.ok, "asked {named}: {}", r.reason);
+    graded(&mut k, &mut b, &case, 3);
+    kept_definitions(&k, &b, &case, 3);
+    let top_circle = |k: &Kernel, b: &Brep, c: (f64, f64)| {
+        edges_on(k, b, |p| {
+            (p.z - 20.0).abs() < 1e-9 && ((p.x - c.0).hypot(p.y - c.1) - radius).abs() < 1e-9
+        })
+        .len()
+    };
+    assert_eq!(top_circle(&k, &b, inside), 1, "the bore's top circle");
+
+    let name = "d prism, small bore outside the corner's piece";
+    let (mut k, mut b, edges, case) =
+        d_prism_eight_bored(Some(([outside.0, outside.1], radius)), 14, name);
+    let r = round_asked(
+        &mut k,
+        &mut b,
+        &edges,
+        &[1.0, 1.5, 2.0],
+        case.v,
+        Some(asked),
+    );
+    assert!(r.ok, "asked {asked}: {}", r.reason);
+    graded(&mut k, &mut b, &case, 3);
+    kept_definitions(&k, &b, &case, 3);
+    assert_eq!(top_circle(&k, &b, outside), 1, "the bore's top circle");
 }

@@ -321,6 +321,27 @@ fn shallow_loft_cut_from_the_top_face() {
     assert!((got - want).abs() < 1e-9 * want, "{got} vs {want}");
 }
 
+/// A carved top lofted through six closed spline sections from its slab's top face and joined
+/// onto the slab. The loft lies on and above that face and shares only it with the slab, so the
+/// joined top is exactly the slab plus the loft built as its own body.
+#[test]
+fn carved_top_lofted_onto_its_slab_joins() {
+    let script = include_str!("../../../examples/regressions/loft_join_carved_top_on_slab.json");
+    let joined = replay(script);
+    assert_eq!(joined.model.state().bodies.len(), 1);
+    let mut apart: Value = serde_json::from_str(script).unwrap();
+    let loft = apart["commands"].as_array_mut().unwrap().last_mut().unwrap();
+    loft["params"]["operation"] = json!("new_body");
+    loft["params"]["body_name"] = json!("Arch");
+    loft["params"].as_object_mut().unwrap().remove("targets");
+    let mut s = Session::default();
+    s.run_script(&apart).unwrap();
+    let (slab, arch) = (volume(&s, "Top"), volume(&s, "Arch"));
+    assert!(slab > 0.0 && arch > 0.0, "{slab} {arch}");
+    let got = volume(&joined, "Top");
+    assert!((got - (slab + arch)).abs() < 1e-7 * got, "{got} vs {slab} + {arch}");
+}
+
 #[test]
 fn oblique_cut_through_a_small_arc_matches_a_split() {
     let scripts = [
@@ -1666,4 +1687,143 @@ fn cut_that_leaves_a_closed_cavity_says_so() {
         .execute("solid.box", &json!({"length": 16, "width": 16, "height": 10, "center": [0, -10, 6], "operation": "cut", "targets": ["Plot"]}))
         .unwrap();
     assert!(!cup["warning"].as_str().unwrap_or_default().contains("closed cavity"), "{cup}");
+}
+
+/// Issue #10: fuzzer seed 73. Extrude an arc-sided profile, fillet two top edges, then join a box.
+/// The join's boolean union used to be refused by solidcore's boolean check as "Bad Gap:
+/// Edge/Vertex gap across Edgeuse start larger than tol" (offset=7.7878382e-06,
+/// tolerance=7.5978919e-06). Every failing seed of the boolean fuzzer is a reproducible bug,
+/// fixed with a regression test that fails without the fix.
+/// Root cause not yet found — grows tolerances but gap may exceed platform-specific limits.
+#[ignore = "fails until the tolerance root cause for seed 73 is found (#10)"]
+#[test]
+fn fuzz_seed_73_boolean_join_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_73_boolean_join.json"));
+    let state = s.model.state();
+    // Every step ran: every body is a sound solid, and the join produced one body.
+    assert_eq!(state.bodies.len(), 1, "the join must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the joined body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the union must be a real solid: {}", m.volume);
+    println!("#10 seed 73: joined body volume {volume:.2} mm³", volume = m.volume);
+}
+
+/// Issue #10: fuzzer seed 185. Box, join cylinder, cut cylinder, then rectangular pattern on the
+/// cut cylinder. The pattern's boolean result is refused as "SMLib's result is not a closed
+/// solid". Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a
+/// regression test that fails without the fix.
+/// Root cause not yet found — pattern boolean result tolerance, topologically different from
+/// seed 73's "Bad Gap" boolean tolerance issue.
+#[ignore = "fails until the pattern boolean root cause for seed 185 is found (#10)"]
+#[test]
+fn fuzz_seed_185_pattern_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_185_pattern.json"));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "the pattern must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the pattern result must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the pattern result must be a real solid: {}", m.volume);
+    println!("#10 seed 185: pattern result volume {volume:.2} mm³", volume = m.volume);
+}
+
+/// Issue #10: fuzzer seed 178. Box, fillet, cut cylinder, cut box, shell, rectangular pattern,
+/// then fillet. The final fillet is refused as "SMLib fillet: SMLib's check refuses the result:
+/// Tolerance: Edge tolerance relative to brep tolerance (offset=0.083186985, tolerance=0.01)".
+/// Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a regression test
+/// that fails without the fix.
+/// Root cause not yet found — fillet result tolerance, topologically different from seed 73's
+/// "Bad Gap" boolean tolerance issue.
+#[ignore = "fails until the fillet tolerance root cause for seed 178 is found (#10)"]
+#[test]
+fn fuzz_seed_178_fillet_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_178_fillet.json"));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "the fillet must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the filleted body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the fillet result must be a real solid: {}", m.volume);
+    println!("#10 seed 178: filleted body volume {volume:.2} mm³", volume = m.volume);
+}
+
+/// A cut that leaves nothing of its target, although its tools could never cover it, is a failed
+/// boolean, not an empty result (#15700). A loft with a box-shaped opening in each side, and a
+/// box mirrored into the second opening with 0.2 mm of air all round: the box does not touch the
+/// loft, yet the cut came back empty and deleted the loft without a word. Either the cut leaves
+/// the loft as it was, or it is refused and the loft stays.
+#[test]
+fn cut_never_deletes_a_target_its_tools_cannot_cover() {
+    let mut s = Session::default();
+    let ring = json!([
+        [0.0, 0.0],
+        [10.0, 2.679],
+        [17.321, 10.0],
+        [20.0, 20.0],
+        [17.321, 30.0],
+        [10.0, 37.321],
+        [0.0, 40.0],
+        [-10.0, 37.321],
+        [-17.321, 30.0],
+        [-20.0, 20.0],
+        [-17.321, 10.0],
+        [-10.0, 2.679]
+    ]);
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "YZ", "offset": -30, "name": "Sec0"})),
+        ("sketch.spline.fit_point", json!({"points": ring, "periodic": true})),
+        ("sketch.finish", json!({})),
+        ("sketch.create", json!({"plane": "YZ", "offset": 30, "name": "Sec1"})),
+        ("sketch.spline.fit_point", json!({"points": ring, "periodic": true})),
+        ("sketch.finish", json!({})),
+        ("solid.loft", json!({"sections": [{"sketch": "Sec0"}, {"sketch": "Sec1"}], "body_name": "LoftBody", "operation": "new"})),
+        ("solid.box", json!({"length": 15, "width": 20, "height": 8, "corner": [-25, 10, 16], "operation": "cut", "targets": ["LoftBody"]})),
+        ("solid.box", json!({"length": 15, "width": 20, "height": 8, "corner": [10, 10, 16], "operation": "cut", "targets": ["LoftBody"]})),
+        ("solid.box", json!({"length": 14.6, "width": 13, "height": 7.6, "corner": [-24.8, 12, 16.2], "body_name": "BoxA"})),
+        ("solid.mirror", json!({"bodies": ["BoxA"], "plane": "YZ"})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let faces = |s: &Session| s.model.state().body("LoftBody").map(|b| b.body.face_count());
+    let (before, before_faces) = (volume(&s, "LoftBody"), faces(&s));
+    assert!(before > 0.0 && before_faces.is_some(), "the loft must be built: {before} mm³");
+    let cut = s.execute("solid.combine", &json!({"target": "LoftBody", "tools": ["BoxA (2)"], "operation": "cut", "keep_tools": true}));
+    let after = volume(&s, "LoftBody");
+    assert!(s.model.state().body("LoftBody").is_some(), "the cut deleted the loft: {cut:?}");
+    assert!((after - before).abs() < 1e-6 * before, "the box does not touch the loft, yet its volume went from {before} to {after} mm³: {cut:?}");
+    assert_eq!(faces(&s), before_faces, "{cut:?}");
+    if let Err(e) = &cut {
+        assert!(e.to_string().contains("the cut failed: it would remove all of `LoftBody`, which the tools do not cover"), "{e}");
+    }
+}
+
+/// A cut still takes away a target that lies wholly inside its tools (#15700): a cube inside a
+/// larger one, a cube cut by its exact copy, whose faces all coincide with the target's, and a
+/// cube that only two tools together cover, each reaching past its middle.
+#[test]
+fn cut_removes_a_target_inside_its_tools() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "Inner"})),
+        ("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [-5, -5, -5], "operation": "new", "body_name": "Outer"})),
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new", "body_name": "Twin"})),
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new", "body_name": "Copy"})),
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [80, 0, 0], "operation": "new", "body_name": "Shared"})),
+        ("solid.box", json!({"length": 11, "width": 20, "height": 20, "corner": [75, -5, -5], "operation": "new", "body_name": "Left"})),
+        ("solid.box", json!({"length": 11, "width": 20, "height": 20, "corner": [84, -5, -5], "operation": "new", "body_name": "Right"})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let cuts: [(&str, &[(&str, f64)]); 3] =
+        [("Inner", &[("Outer", 8000.0)]), ("Twin", &[("Copy", 1000.0)]), ("Shared", &[("Left", 4400.0), ("Right", 4400.0)])];
+    for (target, tools) in cuts {
+        let names: Vec<&str> = tools.iter().map(|(n, _)| *n).collect();
+        let cut = s.execute("solid.combine", &json!({"target": target, "tools": names, "operation": "cut", "keep_tools": true})).unwrap();
+        assert_eq!(cut["removed_bodies"], json!([target]), "{cut}");
+        assert!(s.model.state().body(target).is_none(), "{target} must be gone: {cut}");
+        for (tool, kept) in tools {
+            assert!((volume(&s, tool) - kept).abs() < 1e-6, "{tool} is kept as it was: {cut}");
+        }
+    }
 }

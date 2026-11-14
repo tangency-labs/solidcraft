@@ -285,6 +285,7 @@ fn set_back_restores_everything_when_states_share_bodies() {
                 width: "10".into(),
                 height: height.into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -393,6 +394,7 @@ fn rolling_a_large_unchanged_timeline_forward_reuses_its_geometry() {
                 width: "10".into(),
                 height: "10".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -944,6 +946,7 @@ fn errors_are_reported_not_fatal() {
             width: "1".into(),
             height: "1".into(),
             operation: Operation::NewBody,
+            centred: false,
         },
         None,
     )
@@ -1026,6 +1029,7 @@ fn primitives_and_combine() {
             width: "10".into(),
             height: "10".into(),
             operation: Operation::NewBody,
+            centred: false,
         },
         None,
     )
@@ -1441,6 +1445,7 @@ fn empty_boolean_targets_without_overlap_keep_plain_message() {
                     width: "1".into(),
                     height: "1".into(),
                     operation,
+                    centred: false,
                 },
                 None,
             )
@@ -1455,7 +1460,7 @@ fn empty_boolean_targets_without_overlap_keep_plain_message() {
 /// A box of `size` at `corner`, made with `operation`.
 fn cube(doc: &mut Document, corner: Vec3, size: [f64; 3], operation: Operation) -> u64 {
     let [length, width, height] = size.map(|x| Expr::new(x.to_string()));
-    doc.add_feature(FeatureKind::Box { corner: point_expr(corner), length, width, height, operation }, None).unwrap()
+    doc.add_feature(FeatureKind::Box { corner: point_expr(corner), length, width, height, operation, centred: false }, None).unwrap()
 }
 
 /// The bodies of `doc` evaluated, by name with their volumes and pieces, and how feature
@@ -1773,7 +1778,15 @@ fn browser_pruning_cuts_bad_parents_and_drops_stale_and_repeated_entries() {
     let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, None).unwrap();
     let key = sketch.to_string();
     doc.components.push(Component { id: 7, name: "Part".into(), ..Default::default() });
-    doc.occurrences.push(Occurrence { id: 20, component: 7, parent: 0, name: "Part".into(), transform: IDENTITY, grounded: false });
+    doc.occurrences.push(Occurrence {
+        id: 20,
+        component: 7,
+        parent: 0,
+        name: "Part".into(),
+        transform: IDENTITY,
+        grounded: false,
+        expressed_moves: Vec::new(),
+    });
     let deep = MAX_GROUP_NESTING as u64 + 2;
     doc.browser_groups = vec![
         browser_group(1, 0, "bodies", Some(2), &[]),
@@ -1839,7 +1852,15 @@ fn browser_data_survives_a_save_and_old_designs_read_unchanged() {
     let mut doc = Document::new("nested");
     doc.components.push(Component { id: 7, name: "Part".into(), ..Default::default() });
     for id in [20, 21] {
-        doc.occurrences.push(Occurrence { id, component: 7, parent: 0, name: format!("P{id}"), transform: IDENTITY, grounded: false });
+        doc.occurrences.push(Occurrence {
+            id,
+            component: 7,
+            parent: 0,
+            name: format!("P{id}"),
+            transform: IDENTITY,
+            grounded: false,
+            expressed_moves: Vec::new(),
+        });
     }
     doc.browser_groups = vec![browser_group(2, 0, "bodies", None, &[item("Lid"), group(3)]), browser_group(3, 0, "bodies", Some(2), &[item("Base")])];
     doc.browser_order.insert("0/bodies".into(), vec![item("Cap"), group(2)]);
@@ -1920,7 +1941,17 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
                 [(0., 0.), (10., -3.), (20., 4.), (30., 0.)].iter().map(|&(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
             let (a, b) = (sk.add_point(Vec2::new(30., 20.), None).unwrap(), sk.add_point(Vec2::new(0., 20.), None).unwrap());
             let curve = sk
-                .add_curve(solidcraft_sketch::CurveKind::Spline { pts: pts.clone(), control: false, degree: 3, periodic: false, nurbs: None }, None)
+                .add_curve(
+                    solidcraft_sketch::CurveKind::Spline {
+                        pts: pts.clone(),
+                        control: false,
+                        degree: 3,
+                        periodic: false,
+                        nurbs: None,
+                        handles: Vec::new(),
+                    },
+                    None,
+                )
                 .unwrap();
             sk.add_line_pts(pts[3], a, None).unwrap();
             sk.add_line_pts(a, b, None).unwrap();

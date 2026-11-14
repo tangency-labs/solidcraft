@@ -1,13 +1,20 @@
 [
   {
-    "case": "fillets/12342-round-wall-and-ledge-edges-r5-refused",
-    "issue": "solidcore#2845",
-    "reason": "status 1001 instead of the refusal naming the size that fits"
+    "case": "booleans/3012-filleted-boxes-1e-4-apart-cut",
+    "issue": "tangency-labs/solidcraft#15669",
+    "reason": "the two 1e-4 wide faces of the sliver (y=0 and y=30) are absorbed into the tolerance of their edges (4e-5 and 5e-5 for a body at 1e-5): 8 faces, 18 edges, 12 vertices instead of 10, 24, 16",
+    "fails": "faces 8 (rig 10), edges 18 (rig 24), vertices 12 (rig 16)"
   },
   {
-    "case": "fillets/12342-round-wall-edge-r5-past-the-wall-refused",
-    "issue": "solidcore#2845",
-    "reason": "status 1001 instead of the refusal naming the size that fits"
+    "case": "booleans/3012-filleted-boxes-1e-4-apart-cut-reversed",
+    "issue": "tangency-labs/solidcraft#15669",
+    "reason": "the two 1e-4 wide faces of the sliver (y=0 and y=30) are absorbed into the tolerance of their edges (4e-5 and 5e-5 for a body at 1e-5): 8 faces, 18 edges, 12 vertices instead of 10, 24, 16",
+    "fails": "faces 8 (rig 10), edges 18 (rig 24), vertices 12 (rig 16)"
+  },
+  {
+    "case": "fillets/12342-round-wall-and-ledge-edges-r5-refused",
+    "issue": "tangency-labs/solidcraft#13757",
+    "reason": "status 1001: the wall's End corner now builds its cap edge (the wall's round alone builds its overflow), but the end-section rule in end_sections_fit.rs (#14022) judges the ledge round's End at (23, 20, -40) as overflowing: its rail runs past the side edge's far end P = (20, 20, -40), where the wall stands on the ledge top. The wall's own round takes that material off, so nothing is undercut; with the End left open, the trim at the creases takes off all 16 faces and refuses. The rule should count the face standing at P only where it survives the operation's other blends"
   },
   {
     "case": "fillets/9-fillet-corner-curvature-with-reduce-fit",
@@ -35,11 +42,6 @@
     "reason": "step 11 (solid.fillet): invalid input: the setback must be more than 3.9027 mm at the corner (0.000, 0.000, 30.000): the rounds' contact lines meet 3."
   },
   {
-    "case": "fillets/cov-fillet-g2-mixed-corner",
-    "issue": "tangency-labs/solidcore#2361",
-    "reason": "refused as on SMLib d01d7b0: a G2 corner is set back only where every edge meeting it is rounded and all are convex or all concave"
-  },
-  {
     "case": "fillets/cov-fillet-g2-oblique-three-edge-corner",
     "issue": "tangency-labs/solidcore#2697",
     "reason": "not run here: the corner is a blend_setback_open call, which the rig has not ported yet; it waits on that port and on the certified G2 corner fill"
@@ -53,11 +55,6 @@
     "case": "fillets/cov-junction-y-junction-120-round",
     "issue": "tangency-labs/solidcore#2361",
     "reason": "refused as on SMLib: the faces between the three intersection curves narrow to nothing at the two triple points, so the room check trips (the corner step)"
-  },
-  {
-    "case": "fillets/every-block-cylinder-tangent-concave-arc-r2-partial-chain",
-    "issue": "tangency-labs/solidcore#2864",
-    "reason": "refused: the picked edge runs on across the cylinder's seam into the rest of the same half circle, and a round does not end there; it passes as written (19091.9620) once the round runs on across the seam"
   },
   {
     "case": "fillets/report-fillet-curvature-three-edges-at-bar-corner",

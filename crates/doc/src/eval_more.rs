@@ -98,7 +98,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 }
             }
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, b, mb.feature);
+                *slot = mb.remade(b);
             }
             Ok(())
         }
@@ -293,6 +293,33 @@ fn chain_points(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec2>> {
         }
     }
     Ok(pts)
+}
+
+/// The curves of a chain as connected segments in sketch coordinates, in order, with lines
+/// and arcs kept exact (see [`chain_points`] for the polyline form).
+fn chain_segs(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Seg2>> {
+    let mut segs: Vec<Seg2> = Vec::new();
+    for id in ids {
+        let ci = ss.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("curve `{id}`")))?;
+        segs.extend(ss.sketch.segs(ci));
+    }
+    let Some(first) = segs.first().copied() else { return Err(DocError::Invalid("no curves".into())) };
+    // Orient the first segment toward the second, then chain.
+    let mut chain = vec![first];
+    if let Some(n) = segs.get(1)
+        && (first.start().dist(n.start()) < 1e-6 || first.start().dist(n.end()) < 1e-6)
+    {
+        chain[0] = first.reversed();
+    }
+    for s in segs.iter().skip(1) {
+        let prev = chain.last().map(Seg2::end).unwrap_or_default();
+        let s = if s.end().dist(prev) < s.start().dist(prev) { s.reversed() } else { *s };
+        if s.start().dist(prev) > 1e-5 {
+            return Err(DocError::Invalid("the contour curves are not connected end to end".into()));
+        }
+        chain.push(s);
+    }
+    Ok(chain)
 }
 
 /// A rib wall: the band swept from the curves across the plane by `depth` (or to the body),
@@ -587,13 +614,7 @@ pub(super) fn sheet_eval(
         }
         FeatureKind::SheetContour { sketch, curves, distance, rule, flip, reverse } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
-            for id in curves {
-                let ci = ss.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("curve `{id}`")))?;
-                if !ss.sketch.segs(ci).iter().all(|s| matches!(s, Seg2::Line { .. })) {
-                    return Err(DocError::Invalid("not supported yet: arcs in a contour flange (use lines; the bends are made for you)".into()));
-                }
-            }
-            let pts = chain_points(&ss, curves)?;
+            let segs = chain_segs(&ss, &ss.chain_order(curves)?)?;
             let w = val(vals, distance, Kind::Length)?;
             if !(w > 0.0) {
                 return Err(DocError::Invalid("the contour flange distance must be positive".into()));
@@ -601,10 +622,21 @@ pub(super) fn sheet_eval(
             let r = doc.sheet_rule(rule.as_deref());
             let rv = doc.rule_values(vals, &r)?;
             let plane = if *reverse { Plane { origin: ss.plane.origin, x: ss.plane.x, y: ss.plane.y * -1.0 } } else { ss.plane };
-            let pts: Vec<Vec2> = if *reverse { pts.iter().map(|p| Vec2::new(p.x, -p.y)).collect() } else { pts };
+            let segs: Vec<Seg2> = if *reverse {
+                segs.iter()
+                    .map(|s| match *s {
+                        Seg2::Arc { center, radius, start, sweep } => {
+                            Seg2::Arc { center: Vec2::new(center.x, -center.y), radius, start: -start, sweep: -sweep }
+                        }
+                        other => other.map_controls(|p| Vec2::new(p.x, -p.y)),
+                    })
+                    .collect()
+            } else {
+                segs
+            };
             // Mirroring the sketch swaps the material side too.
             let name = new_name(st, f, 0);
-            let sh = sheet::contour_flange(&name, &r.name, &rv, &plane, &pts, w, *flip != *reverse)?;
+            let sh = sheet::contour_flange_path(&name, &r.name, &rv, &plane, &segs, w, *flip != *reverse)?;
             let solid = sh.solid()?;
             st.bodies.push(ModelBody::new(name, solid, f.id));
             st.sheets.push(sh);
@@ -1981,6 +2013,33 @@ pub(super) fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
     a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y || a.max.z < b.min.z || b.max.z < a.min.z
 }
 
+/// Whether `tools` may cover `body`: the body's exact box lies inside the box around the tools'
+/// ([`exact_box`]), grown by twice the body's own tolerance, as it does for a body inside its
+/// tools. A cut that leaves nothing of a body they cannot cover is a failed boolean, not an empty
+/// result (#15700). Unknown is covered, and so is a mesh body or a body cut by a mesh, as such a
+/// cut always was.
+pub(super) fn tools_may_cover(body: &Body, tools: &[Traced]) -> bool {
+    if body.is_mesh() || tools.iter().any(|t| t.body.is_mesh()) {
+        return true;
+    }
+    let mut hull = Aabb3::EMPTY;
+    for t in tools {
+        let Some(b) = exact_box(&t.body) else { return true };
+        hull = hull.union(&b);
+    }
+    let hull = hull.inflated(2.0 * body.record().tolerance);
+    match body.exact_bounds() {
+        Ok(b) if !b.is_empty() && b.min.is_finite() && b.max.is_finite() => hull.contains(b.min) && hull.contains(b.max),
+        _ => true,
+    }
+}
+
+/// The refusal of a cut that left nothing of `body` although its tools cannot cover it
+/// ([`tools_may_cover`]): the body is kept instead of vanishing without a word (#15700).
+pub(super) fn failed_cut(body: &str) -> DocError {
+    DocError::Invalid(format!("the cut failed: it would remove all of `{body}`, which the tools do not cover"))
+}
+
 /// A cut's note on the pieces it parted from the base of `sh` (see
 /// [`sheet::SheetBody::parted_from_base`]; `material` is the sheet's flat material after the cut,
 /// `before` the sheet before it): how many, their area and where they lie in the flat pattern.
@@ -2419,7 +2478,7 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
                 let edges = resolve_edges(&mb.body, &[position.0 + x * r0], &[], &mut warn)?;
                 let nb = mb.traced().then(kernel::fillet(&mb.body, &edges, rf)?);
                 if let Some(slot) = st.bodies.get_mut(i) {
-                    *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+                    *slot = mb.remade(nb);
                 }
             }
             if let Some(hd) = hole_diameter {

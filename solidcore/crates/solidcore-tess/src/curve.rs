@@ -135,4 +135,88 @@ mod tests {
         let pts = curve_points(&circle, [0.0, 4.0], MeshTolerance::chord(100.0)).unwrap();
         assert_eq!(pts.len(), 5, "{pts:?}");
     }
+
+    /// A closed B-spline as solidcore-ops' `curve_fit::closed_cv_curve` makes it: the polygon
+    /// repeating its first `degree` points after its last, on the kernel's unclamped uniform
+    /// knots, its domain `[0, 1]`.
+    fn closed_cv(points: &[[f64; 3]], degree: usize) -> Curve {
+        let mut wrapped = points.to_vec();
+        wrapped.extend_from_slice(&points[..degree]);
+        Curve::Spline {
+            knots: solidcore::nurbs::knots::periodic_uniform(points.len(), degree).unwrap(),
+            points: wrapped,
+        }
+    }
+
+    #[test]
+    fn a_closed_curves_points_close_on_themselves_and_sag_within_tolerance_across_the_seam() {
+        let hexagon = [
+            [10.0, 0.0, 0.0],
+            [5.0, 8.0, 1.0],
+            [-5.0, 8.0, 0.0],
+            [-10.0, 0.0, -1.0],
+            [-5.0, -8.0, 0.0],
+            [5.0, -8.0, 2.0],
+        ];
+        for degree in [2, 3, 5] {
+            let curve = closed_cv(&hexagon, degree);
+            let value = solidcore_convert::curve(&curve).unwrap();
+            let eval = CurveEval::new(&value).unwrap();
+            let at = |t: f64| -> Result<Vec3> {
+                eval.point(t)
+                    .filter(|p| p.is_finite())
+                    .ok_or_else(|| TessError::Failed(format!("no point at {t}")))
+            };
+            for tolerance in [MeshTolerance::chord(0.01), MeshTolerance::display(0.05)] {
+                let pts = curve_points(&curve, [0.0, 1.0], tolerance).unwrap();
+                // The ends are one point: the polyline closes on itself.
+                let (first, last) = (pts[0], pts[pts.len() - 1]);
+                assert!(
+                    first.iter().zip(last).all(|(a, b)| (a - b).abs() < 1e-12),
+                    "degree {degree}: {first:?} and {last:?}"
+                );
+                assert!(pts.len() >= 5, "degree {degree}: {}", pts.len());
+
+                // The edge sampling the mesher uses for a closed edge (four starting
+                // segments, the same rules) gives the same points, and its parameters.
+                let (tol, turn) = tolerance.rules(0.0);
+                let rules = Rules {
+                    tol,
+                    max_len: f64::INFINITY,
+                    turn,
+                };
+                let ends = [at(0.0).unwrap(), at(1.0).unwrap()];
+                let nodes = bisect(&at, [0.0, 1.0], ends, 4, &rules, f64::INFINITY).unwrap();
+                let mesher: Vec<[f64; 3]> = nodes.points.iter().map(|p| [p.x, p.y, p.z]).collect();
+                assert_eq!(mesher, pts, "degree {degree}");
+                assert!(nodes.capped.is_none(), "degree {degree}");
+
+                // Every chord, the first and last at the seam among them, within the
+                // tolerance of its arc at the points the sampling checks.
+                for (w, t) in nodes.points.windows(2).zip(nodes.params.windows(2)) {
+                    for f in [0.25, 0.5, 0.75] {
+                        let q = at(t[0] + f * (t[1] - t[0])).unwrap();
+                        let sag = q.dist_to_segment(w[0], w[1]);
+                        assert!(sag <= tol, "degree {degree}: {sag} on [{}, {}]", t[0], t[1]);
+                    }
+                }
+
+                // Across the wrap, read as a loop: the curve on either side of the seam
+                // stays near the chords that meet there (between the checked points a
+                // chord's arc may sag past them, never by much).
+                let ring: Vec<Vec3> = nodes.points.clone();
+                for i in 0..=100 {
+                    let t = f64::from(i) / 1000.0;
+                    for u in [t, 1.0 - t] {
+                        let q = at(u).unwrap();
+                        let near = ring
+                            .windows(2)
+                            .map(|w| q.dist_to_segment(w[0], w[1]))
+                            .fold(f64::INFINITY, f64::min);
+                        assert!(near <= 1.5 * tol, "degree {degree}: {near} at {u}");
+                    }
+                }
+            }
+        }
+    }
 }

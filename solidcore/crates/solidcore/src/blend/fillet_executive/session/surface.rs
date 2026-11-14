@@ -68,7 +68,7 @@ fn deg_to_rad(deg: f64) -> f64 {
 fn uv(list: &[Option<Curve>], i: usize) -> Result<&Curve> {
     list.get(i)
         .and_then(Option::as_ref)
-        .ok_or_else(|| SolidError::null_pointer(OP))
+        .ok_or_else(|| SolidError::blend_missing(OP, "the intersection's UV curve"))
 }
 
 /// The objects `SmSurfaceSurfaceFS::CalcFilletGeom` reaches in a live session.
@@ -241,7 +241,7 @@ impl SessionObjects<'_> {
                 .face(face)?
                 .surface
                 .clone()
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
             surfaces.push((surface, SurfaceId::Face(face)));
         }
         let [s1, s2]: [(Surface, SurfaceId); 2] = surfaces
@@ -304,7 +304,7 @@ impl FilletSession<'_> {
                 .face(face)?
                 .surface
                 .clone()
-                .ok_or_else(|| SolidError::null_pointer(OP))
+                .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))
         };
         let [face1, face2] = faces;
         let sur1 = surface_of(self, 0, face1)?;
@@ -365,7 +365,7 @@ impl FilletSession<'_> {
                     )?;
                     // Self-intersecting fillets are not yet handled
                     if !solutions.is_empty() {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::blend_failed(OP, "the fillet intersects itself"));
                     }
                 }
             }

@@ -474,9 +474,13 @@ fn the_repros_rounded_slant_plane_leaves_a_sliver_near_the_seam() {
     assert_eq!(faces, 9, "today: a ninth, sliver face");
     assert!(!solid, "today: not a closed manifold solid");
     assert!(!check.is_valid(), "today: the Level2 check refuses it");
+    // The issue's face test 36 named a corner, not the sliver: the seam's own edge ends at
+    // a vertex 8.5e-6 across the seam, inside its 1.7e-5 tolerance, and no edge there runs
+    // beside the seam. Since #13295 that is no near miss. The sliver face is still refused,
+    // through its edge's test 9.
     assert!(
-        names.contains(&"SmFace#36".to_owned()),
-        "the issue's own report, face test 36: {names:?}"
+        names.contains(&"SmEdge#9".to_owned()),
+        "the sliver's edge, test 9: {names:?}"
     );
     assert!(
         names.contains(&"SmEdge#9".to_owned()),

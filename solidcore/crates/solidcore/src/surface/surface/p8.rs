@@ -471,6 +471,205 @@ fn boundary_intersections(
 
 // ---- SmSurface members ------------------------------------------------------------------------
 
+/// Not upstream: a cone (a cylinder is a cone of semi-angle 0) or a sphere as the points
+/// at distance `|radius(p)|` from its axis (from its centre for a sphere), the radius
+/// affine in the height along the axis.
+#[derive(Clone, Copy)]
+struct Revolved {
+    /// A point of the axis, the sphere's centre.
+    origin: Point3,
+    /// The unit axis; `None` for a sphere.
+    axis: Option<Vec3>,
+    /// The radius at `origin`.
+    radius: f64,
+    /// The radius's change per unit of height along `axis` (0 for a sphere).
+    slope: f64,
+}
+
+impl Revolved {
+    /// The cone's axis, radius and slope.
+    fn cone(c: &crate::surface::cone::p1::Cone) -> Self {
+        Self {
+            origin: c.rev.position.origin(),
+            axis: Some(c.rev.position.z_axis()),
+            radius: c.base_radius(),
+            slope: c.tan_semi_angle(),
+        }
+    }
+
+    /// The sphere of centre and radius `ball`.
+    const fn ball(ball: (Point3, f64)) -> Self {
+        Self {
+            origin: ball.0,
+            axis: None,
+            radius: ball.1,
+            slope: 0.0,
+        }
+    }
+
+    /// The part of `v` across the axis (all of it for a sphere).
+    fn across(&self, v: Vec3) -> Vec3 {
+        self.axis.map_or(v, |a| v - a * v.dot(a))
+    }
+
+    /// The radius at the height of `p`.
+    fn radius_at(&self, p: Point3) -> f64 {
+        self.radius
+            + self
+                .axis
+                .map_or(0.0, |a| self.slope * (p - self.origin).dot(a))
+    }
+}
+
+/// Not upstream: an upper bound on the distance from any point of either surface inside
+/// `region` to the other surface, from the definitions alone (no sampling). NaN or
+/// infinite where it cannot bound: an undefined region, a region reaching an axis (or a
+/// centre), or a radius changing sign in it (a cone's apex).
+///
+/// With `d_x(p)` the distance from `p` to the axis of `x` (to its centre) and `r_x(p)` its
+/// radius at `p`'s height, a point of `a` has `d_a = |r_a|`, and its distance to `b` is at
+/// most `|d_b - |r_b||` (the generator of `b` in the half plane through `p` is part of `b`,
+/// and the gap along the radius is at least the gap to that line). On `a` that is
+/// `|G + |r_a| - |r_b||` with `G = d_b - d_a`. Over the box with centre `c`:
+/// - `|r_a| - |r_b|` is affine where both radii keep their signs, so `|G(c) + |r_a| - |r_b||`
+///   is convex and largest at a corner.
+/// - `G(p) - G(c)` is at most `L · e_a + sin θ · e` (mean value theorem), with `e` the largest
+///   corner distance from `c`, `e_a` the largest across `a`'s axis, `θ` the angle between
+///   the axes and `L` a bound on `|u_b - u_a|`, the difference of the unit radial directions
+///   (`∇d_x = u_x`): `|u_b - u_a| ≤ 2 |w| / ρ` for the radial vectors' difference `w` (affine
+///   in `p`, at most `|w(c)| + sin θ · e`) and `ρ`, the larger lower bound on the two radial
+///   distances in the box; both must be positive (`e_b` may stand for `e_a`).
+///
+/// The bound is symmetric in `a` and `b`. Two cylinders through the same points whose axes
+/// part by `δ` stay within `≈ δ · s / R` of each other over a patch of width `s` at radius
+/// `R`.
+fn revolved_separation_bound(a: Revolved, b: Revolved, region: &Extent3d) -> f64 {
+    if !region.is_defined() {
+        return f64::NAN;
+    }
+    let c = region.mid();
+    let corners = region.corners();
+    let (qa, qb) = (a.across(c - a.origin), b.across(c - b.origin));
+    let (mut e, mut e_a, mut e_b) = (0.0_f64, 0.0_f64, 0.0_f64);
+    for &p in &corners {
+        let v = p - c;
+        e = e.max(v.length());
+        e_a = e_a.max(a.across(v).length());
+        e_b = e_b.max(b.across(v).length());
+    }
+    let sin_theta = match (a.axis, b.axis) {
+        (Some(x), Some(y)) => x.cross(y).length(),
+        _ => 0.0,
+    };
+    // both radial directions are defined over the whole box
+    let (rho_a, rho_b) = (qa.length() - e_a, qb.length() - e_b);
+    if rho_a.is_nan() || rho_b.is_nan() || rho_a <= 0.0 || rho_b <= 0.0 {
+        return f64::NAN;
+    }
+    let rho = rho_a.max(rho_b);
+    let lip = 2.0 * ((qb - qa).length() + sin_theta * e) / rho;
+    let g = qb.length() - qa.length();
+    // the radii's signs at the centre hold at every corner, or there is no bound
+    let (sa, sb) = (a.radius_at(c).signum(), b.radius_at(c).signum());
+    let mut at_corners = 0.0_f64;
+    for &p in &corners {
+        let (ra, rb) = (a.radius_at(p) * sa, b.radius_at(p) * sb);
+        if ra.is_nan() || rb.is_nan() || ra <= 0.0 || rb <= 0.0 {
+            return f64::NAN;
+        }
+        at_corners = at_corners.max((g + ra - rb).abs());
+    }
+    at_corners + lip * e_a.min(e_b) + sin_theta * e
+}
+
+/// Not upstream: the most boxes [`revolved_within`] reads before it gives up.
+const REVOLVED_MAX_BOXES: usize = 256;
+
+/// Not upstream: whether the box surely holds no point within `tol` of the surface: the
+/// distances from its points to the axis (the centre) and the radii at their heights do not
+/// overlap. A NaN anywhere answers no (the box is kept).
+fn revolved_misses(s: Revolved, region: &Extent3d, tol: f64) -> bool {
+    let c = region.mid();
+    let q = s.across(c - s.origin).length();
+    let mut reach = 0.0_f64;
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for p in region.corners() {
+        let (across, r) = (s.across(p - c).length(), s.radius_at(p));
+        if across.is_nan() || r.is_nan() {
+            return false;
+        }
+        reach = reach.max(across);
+        lo = lo.min(r);
+        hi = hi.max(r);
+    }
+    // |r| over the box: the radius is affine, so it runs between its corner values
+    let (r_lo, r_hi) = if lo > 0.0 {
+        (lo, hi)
+    } else if hi < 0.0 {
+        (-hi, -lo)
+    } else {
+        (0.0, hi.max(-lo))
+    };
+    (q - reach).max(0.0) > r_hi + tol || q + reach < r_lo - tol
+}
+
+/// Not upstream: whether the surfaces `a` and `b` stay within `tol` of each other at every
+/// point of either inside `region`. The box is halved across the axes (along the side the
+/// surfaces vary most over) until [`revolved_separation_bound`] is within `tol` on each part
+/// that may hold a point of either surface (not [`revolved_misses`]); at most
+/// [`REVOLVED_MAX_BOXES`] boxes are read, and a part still undecided then answers no. A part
+/// holding a point of one surface farther than `tol` from the other never passes, as the
+/// bound is never below the separation it bounds.
+fn revolved_within(a: Revolved, b: Revolved, tol: f64, region: &Extent3d) -> bool {
+    if !region.is_defined() || region.has_negative_volume() {
+        return false;
+    }
+    let mut todo = vec![*region];
+    let mut read = 0_usize;
+    while let Some(part) = todo.pop() {
+        read += 1;
+        if read > REVOLVED_MAX_BOXES {
+            return false;
+        }
+        if revolved_misses(a, &part, tol) && revolved_misses(b, &part, tol) {
+            continue;
+        }
+        // a NaN bound is no bound: the part is halved
+        let bound = revolved_separation_bound(a, b, &part);
+        let undecided = bound.is_nan() || bound > tol;
+        if !undecided {
+            continue;
+        }
+        // halve the side whose length counts most across the axes
+        let (min, max) = (part.min(), part.max());
+        let mut best = (0_usize, 0.0_f64);
+        for i in 0..3 {
+            let mut unit = Vec3::new(0.0, 0.0, 0.0);
+            if let Ok(x) = unit.component_mut(i) {
+                *x = 1.0;
+            }
+            let weight = (part.max_at(i) - part.min_at(i))
+                * a.across(unit).length().max(b.across(unit).length());
+            if weight > best.1 {
+                best = (i, weight);
+            }
+        }
+        if best.1.is_nan() || best.1 <= tol {
+            return false;
+        }
+        let half = 0.5 * (part.min_at(best.0) + part.max_at(best.0));
+        let (mut upper_min, mut lower_max) = (min, max);
+        for (point, value) in [(&mut upper_min, half), (&mut lower_max, half)] {
+            if let Ok(x) = point.component_mut(best.0) {
+                *x = value;
+            }
+        }
+        todo.push(Extent3d::from_points(min, lower_max));
+        todo.push(Extent3d::from_points(upper_min, max));
+    }
+    true
+}
+
 impl Surface {
     /// The interior knots of both directions where the surface continuity is at most
     /// `max_continuity` (exactly, with `at_continuity`): `(u knots, v knots)`
@@ -549,6 +748,12 @@ impl Surface {
     /// - Torus: coaxial, centres and both radii within `tol_3d`. A torus whose major
     ///   radius is within `tol_3d` of 0 is the sphere of its minor radius and is
     ///   compared with spheres as such.
+    ///
+    /// Two cones, or two spheres, that fail that comparison are still the same surface
+    /// inside `region` when an enclosed bound on their separation over the parts of
+    /// `region` that may hold them keeps them within `tol_3d` there (not upstream): two arcs drawn through the same end points about centres a little apart
+    /// (cylinders whose axes part by 8.4e-5) stay within 1e-10 of each other over the
+    /// sliver they share, though not over their whole circles.
     #[must_use]
     pub fn same_analytic_surface(
         &self,
@@ -573,7 +778,12 @@ impl Surface {
             (SurfaceKind::Cone(a), SurfaceKind::Cone(b)) => {
                 let (pa, pb) = (&a.rev.position, &b.rev.position);
                 if !pa.are_coaxial(pb, tol, reach) {
-                    return Some(false);
+                    return Some(revolved_within(
+                        Revolved::cone(a),
+                        Revolved::cone(b),
+                        tol,
+                        region,
+                    ));
                 }
                 // The second cone on the first's axis: its radius at the first's origin
                 // and its slope per unit of the first's height.
@@ -601,7 +811,11 @@ impl Surface {
                         .iter()
                         .all(|h| ((r0 + s0 * h) - (r + s * h)).abs() <= tol)
                 };
-                Some(close(radius, slope) || close(-radius, -slope))
+                Some(
+                    close(radius, slope)
+                        || close(-radius, -slope)
+                        || revolved_within(Revolved::cone(a), Revolved::cone(b), tol, region),
+                )
             }
             (SurfaceKind::Torus(a), SurfaceKind::Torus(b)) => {
                 let (pa, pb) = (&a.base.position, &b.base.position);
@@ -621,8 +835,32 @@ impl Surface {
             }
             // A sphere against a sphere or a hole-less torus; any other pair is left to the
             // caller.
-            _ => ball(self).zip(ball(other)).map(|(x, y)| same_ball(x, y)),
+            _ => ball(self).zip(ball(other)).map(|(x, y)| {
+                same_ball(x, y)
+                    || revolved_within(Revolved::ball(x), Revolved::ball(y), tol, region)
+            }),
         }
+    }
+
+    /// Not upstream: whether `other` is of another kind than this surface among plane, cone
+    /// (a cylinder is a cone of semi-angle 0), sphere and torus. Two such surfaces share no
+    /// region: where they touch tangentially they part as the square of the distance from
+    /// the contact, and they count as one only over a patch on which they stay within the
+    /// tolerance (a sphere cap thinner than it on a plane), which is a distance for the
+    /// caller to measure, never a property of their directions at the contact. `false` for
+    /// two surfaces of one kind ([`Surface::same_analytic_surface`] compares those), for a
+    /// kind with no definition to compare, and for a sphere against a torus (a torus with no
+    /// hole is a sphere).
+    #[must_use]
+    pub fn is_other_analytic_kind(&self, other: &Self) -> bool {
+        // plane, cone, then the two a torus with no hole joins
+        let rank = |s: &Self| match s.kind() {
+            SurfaceKind::Plane(_) => Some(0_u8),
+            SurfaceKind::Cone(_) => Some(1),
+            SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => Some(2),
+            _ => None,
+        };
+        rank(self).zip(rank(other)).is_some_and(|(a, b)| a != b)
     }
 
     /// `SmSurface::CoincidenceCheck` (the base body): a plane `other` runs its own
