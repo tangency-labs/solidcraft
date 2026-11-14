@@ -651,8 +651,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
         return;
     }
     let Some(mut t) = app.tool.take() else { return };
+    t.classic = app.preferences.construction_line_classic;
     sync(&mut t);
     let place = if t.dims.is_empty() { None } else { boxes(app, ui, proj, &mut t) };
+    if t.classic {
+        crate::sketch_construction::line_type_switch(ui, &mut t);
+    }
     app.tool = Some(t);
     if let Some(p) = place {
         crate::tools::place(app, (p, None));
@@ -977,12 +981,14 @@ fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Optio
 /// About the size of a value box, for keeping it in view.
 pub(crate) const BOX: egui::Vec2 = egui::vec2(76.0, 24.0);
 
-/// Whether `p` is over the active tool's own floating value boxes. #10600: these must not
-/// swallow a click that lands on a sketch point, so the viewport asks before letting one take
-/// the click.
+/// Whether `p` is over the active tool's own floating boxes: a value box or, with
+/// `construction_line_classic`, the construction line's Construction/Normal switch. #10600: these
+/// must not swallow a click that lands on a sketch point, so the viewport asks before letting one
+/// take the click.
 pub(crate) fn over_tool_boxes(app: &SolveApp, ctx: &egui::Context, p: egui::Pos2) -> bool {
     let Some(t) = app.tool.as_ref() else { return false };
     (0..t.dims.len()).any(|i| ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).is_some_and(|r| r.contains(p)))
+        || (t.classic && ctx.memory(|m| m.area_rect(egui::Id::unique("sc_construction_switch"))).is_some_and(|r| r.contains(p)))
 }
 
 /// The boxes at `positions` (top left, `None` for one not shown) with none covering another: a

@@ -599,6 +599,59 @@ fn a_typed_angle_without_a_length_draws_the_segment_its_length_box_shows() {
     assert!((d.len() - 5.0).abs() < 1e-6 && (d.angle().to_degrees() - 30.0).abs() < 1e-6, "{d:?}");
 }
 
+fn click_switch(h: &mut Harness, which: &str) {
+    let at = crate::scenario::handle_at(&format!("construction_switch:{which}")).expect("the Construction/Normal switch");
+    h.call("ui.click", json!({"x": at.x, "y": at.y}));
+    h.settle();
+}
+
+/// With the `construction_line_classic` preference the tools work as before #15066: the
+/// Construction/Normal switch under the Length box is greyed out while the line is infinite, and
+/// with a length Normal makes the segment a normal sketch line. The Sketch Palette's Line Type
+/// icons leave the tool alone and its line type is untouched (#10258).
+#[test]
+fn the_classic_preference_keeps_the_construction_normal_switch() {
+    let mut h = sketch();
+    h.app.preferences.construction_line_classic = true;
+    crate::sketch_palette::set_mode(&mut h.app, 1);
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    click_switch(&mut h, "normal");
+    assert_eq!(h.app.tool.as_ref().unwrap().line_type, 3, "an infinite line stays construction");
+
+    // The palette's icons pick the drawing line type, not the tool's.
+    click_line_type(&mut h, "centerline");
+    assert_eq!(h.app.tool.as_ref().unwrap().line_type, 3, "the palette leaves the tool alone");
+    assert_eq!(crate::sketch_palette::mode(&h.app), 2);
+    crate::sketch_palette::set_mode(&mut h.app, 1);
+
+    type_length(&mut h, '8');
+    click_switch(&mut h, "normal");
+    assert_eq!(h.app.tool.as_ref().unwrap().line_type, 0, "with a length the switch works");
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty(), "a click on the switch places no point");
+    assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "8");
+
+    place_with_length(&mut h);
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(!curve.construction && !curve.infinite && !curve.centerline, "{curve:?}");
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    assert!((sk.point(a).unwrap().dist(sk.point(b).unwrap()) - 8.0).abs() < 1e-6);
+    assert_eq!(crate::sketch_palette::mode(&h.app), 1, "the palette's line type is untouched");
+
+    // Without a length the next line is infinite construction again, whatever the switch says.
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    let curve = sk.curves.last().unwrap();
+    assert!(curve.construction && curve.infinite, "{curve:?}");
+}
+
 #[test]
 fn perpendicular_click_on_reference_endpoint_places_line() {
     // #10600: after picking the reference line, a click exactly on that line's own endpoint

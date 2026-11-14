@@ -376,7 +376,8 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     // A construction line tool that takes a length has a line type of its own, which the Line
     // Type icons show and set while it runs, in place of the drawing line type it does not use
     // (#15066).
-    let tool_line_type = app.tool.as_ref().filter(|_| !has_curves).and_then(|t| {
+    // With the Construction/Normal switch (`construction_line_classic`) they leave the tool alone.
+    let tool_line_type = app.tool.as_ref().filter(|t| !has_curves && !t.classic).and_then(|t| {
         let mode = solidcraft_engine::cmd::construction_line_mode(t.cmd)?;
         crate::sketch_construction::takes_length(mode).then(|| crate::sketch_construction::shown_line_type(t))
     });

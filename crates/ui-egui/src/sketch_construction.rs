@@ -58,9 +58,52 @@ pub(crate) fn takes_length(mode: &str) -> bool {
 }
 
 /// Whether the tool draws a segment rather than an infinite line: a line type other than
-/// Infinite was chosen, or a length was typed.
-fn segment(t: &Tool) -> bool {
-    t.line_type != 3 || typed_length(t).is_some()
+/// Infinite was chosen, or a length was typed. With the Construction/Normal switch
+/// (`construction_line_classic`), only a typed length makes one, as before #15066.
+pub(crate) fn segment(t: &Tool) -> bool {
+    typed_length(t).is_some() || (t.line_type != 3 && !t.classic)
+}
+
+/// The Construction/Normal switch under a construction line tool's Length box (#10258), shown
+/// with the `construction_line_classic` preference in place of the Sketch Palette's Line Type
+/// icons (#15066). Normal makes the segment an ordinary sketch line, ready to close a profile,
+/// without converting it afterwards. It only works with a length: an infinite line stays
+/// construction, so the switch is greyed out and says why until a length is typed. It belongs to
+/// the tool alone and leaves the Sketch Palette's drawing line type (X) as it is.
+pub fn line_type_switch(ui: &mut egui::Ui, t: &mut Tool) {
+    if construction_line_mode(t.cmd).is_none() {
+        return;
+    }
+    let Some(i) = t.dims.iter().position(|b| b.label == "Length") else { return };
+    let Some(length_box) = ui.ctx().memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))) else { return };
+    let tokens = solidcraft_theme::Tokens::get();
+    let has_length = typed_length(t).is_some();
+    let reason = solidcraft_ui_text::tr("ui.construction.normal_needs_length");
+    let refused = [Some(reason), Some(reason)];
+    // The Sketch Palette's own line type names, which `segmented` translates.
+    let options = ["Construction", "Normal"];
+    let mut selected = usize::from(has_length && t.line_type == 0);
+    let frame = crate::ui_kit::Container::popup_frame(ui.style()).inner_margin(egui::Margin::same(1)).fill(tokens.panel);
+    crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Canvas)
+        .area(egui::Id::unique("sc_construction_switch"))
+        .fixed_pos(length_box.left_bottom() + egui::vec2(0.0, tokens.space_2))
+        .order(egui::Order::Background)
+        .show(ui.ctx(), |ui| {
+            crate::ui_kit::Container::show_backing(ui, frame, |ui| {
+                let segments = crate::ui_kit::Segments {
+                    disabled_reasons: if has_length { &[] } else { &refused },
+                    targets: &["construction_switch:construction", "construction_switch:normal"],
+                    small: true,
+                    intrinsic: true,
+                    compact: true,
+                    ..Default::default()
+                };
+                if crate::ui_kit::segmented(ui, &mut selected, &options, segments) {
+                    // Normal, or Infinite: a construction segment while a length is typed.
+                    t.line_type = if selected == 1 { 0 } else { 3 };
+                }
+            });
+        });
 }
 
 /// The Sketch Palette's Line Type icon that a construction line tool taking a length lights
