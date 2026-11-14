@@ -169,8 +169,9 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     };
     let t = solidcraft_theme::Tokens::get();
-    // The view less the ribbon, browser and other panels over it, as the Render pill uses.
-    let free = crate::shell::content_rect(app, viewport).shrink(t.space_8);
+    // The view below the ribbon and clear of the panels floating over it, as the Render
+    // workspace's cards use: a selection reaching the top of the view keeps the pill off the ribbon.
+    let free = crate::shell::workspace_content(app, crate::shell::panel_bounds(app, crate::shell::content_rect(app, viewport))).shrink(t.space_8);
     let proj = crate::viewport::projection(app, viewport);
     let mut screen = egui::Rect::NOTHING;
     for x in [bounds.min.x, bounds.max.x] {
@@ -294,6 +295,22 @@ mod tests {
         h.step(&json!({"click": {"world": [10, 10, 10]}, "double": true})).unwrap();
         h.frames(3);
         assert!(!h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Move { .. })));
+    }
+
+    /// A selection that fills the view to its top keeps the pill off the ribbon floating there.
+    #[test]
+    fn the_pill_of_a_selection_reaching_the_top_stays_off_the_ribbon() {
+        let mut h = Harness::new();
+        h.app.preferences.creative_mode = true;
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 200, "corner": [0, 0, 0]})).unwrap();
+        h.settle();
+        let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
+        h.app.fit_view();
+        h.frames(4);
+        let pill = crate::scenario::rect_of("creative:selection").expect("the pill shows");
+        let ribbon = crate::scenario::rect_of("ribbon:card").expect("the ribbon shows");
+        assert!(!pill.intersects(ribbon), "pill {pill:?} over ribbon {ribbon:?}");
     }
 
     #[test]
