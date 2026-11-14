@@ -3746,8 +3746,9 @@ pub fn section_hatch(app: &SolveApp) -> bool {
     }
 }
 
-/// Visible geometry belonging to a timeline feature. Body creators retain their whole-body
-/// feedback; modifiers use persistent face names, which survive later edits and placement.
+/// Visible geometry belonging to a timeline feature. Features light their constituent faces
+/// using persistent face names, which survive later edits and placement, leaving subsequent
+/// features unhighlighted.
 /// Do not expand these faces into surface patches: neighbouring faces can belong to another
 /// feature even when they share a surface.
 fn feature_geometry(app: &SolveApp, id: u64) -> Vec<Sel> {
@@ -3766,16 +3767,34 @@ fn feature_parts(app: &SolveApp, id: u64, shown_only: bool) -> Vec<Sel> {
         if shown_only && (!app.body_visible(&b.name) || app.preview.effective_replaced().contains(&b.name)) {
             continue;
         }
-        if b.feature == id {
-            out.push(Sel::Body { name: b.name.clone() });
-            continue;
-        }
         let names = solidcraft_engine::doc::naming::face_names(b);
         let m = b.mesh();
-        for (index, _) in names.iter().enumerate().filter(|(_, n)| solidcraft_engine::doc::persistent_name::made_by(n) == Some(id)) {
-            if let Some(point) = first_triangle_point(&m, index) {
-                out.push(Sel::Face { body: b.name.clone(), index, point });
+        let target_indices: std::collections::HashSet<usize> =
+            names.iter().enumerate().filter(|(_, n)| solidcraft_engine::doc::persistent_name::made_by(n) == Some(id)).map(|(i, _)| i).collect();
+        let mut found_face = false;
+        if !target_indices.is_empty() {
+            let mut face_points: std::collections::HashMap<usize, solidcore_record::Vec3> = std::collections::HashMap::new();
+            for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+                let fi = *f as usize;
+                if target_indices.contains(&fi)
+                    && !face_points.contains_key(&fi)
+                    && let Some([a, b, c]) = m.tri(t)
+                {
+                    face_points.insert(fi, (a + b + c) / 3.0);
+                    if face_points.len() == target_indices.len() {
+                        break;
+                    }
+                }
             }
+            for index in 0..names.len() {
+                if let Some(&point) = face_points.get(&index) {
+                    out.push(Sel::Face { body: b.name.clone(), index, point });
+                    found_face = true;
+                }
+            }
+        }
+        if !found_face && b.feature == id {
+            out.push(Sel::Body { name: b.name.clone() });
         }
     }
     if out.is_empty() {
@@ -9637,8 +9656,8 @@ mod tests {
             assert_eq!(build_highlight(&h.app).merged().tris.len(), triangles * 3 * crate::gpu::TRI_SIZE);
             let bounds = selection_bounds(&h.app).unwrap();
             assert!(bounds.max.x <= 2.01 && bounds.max.y <= 2.01 && bounds.max.z > 19.99, "{bounds:?}");
-            // Creator features retain whole-body feedback, while hidden bodies stay hidden.
-            assert_eq!(feature_geometry(&h.app, base), vec![Sel::Body { name: body.clone() }]);
+            // Creator features light their own constituent faces, while hidden bodies stay hidden.
+            assert!(feature_geometry(&h.app, base).iter().all(|s| matches!(s, Sel::Face { body: b, .. } if b == body)));
             h.app.session.visibility.hidden_bodies.push(body.clone());
             assert!(feature_geometry(&h.app, id).is_empty());
             assert!(selection_bounds(&h.app).is_none());
@@ -16255,5 +16274,23 @@ mod feature_highlight_tests {
         let copy = parts.iter().any(|p| matches!(p, Sel::Face { point, .. } if point.y > 40.0));
         let turned = parts.iter().any(|p| matches!(p, Sel::Face { point, .. } if point.x < 0.0));
         assert!(copy && turned, "{parts:?}");
+    }
+
+    /// #14718: hovering or selecting an initial creator feature lights only its constituent faces,
+    /// leaving subsequent features (e.g. joined boss, fillets) unlit.
+    #[test]
+    fn a_base_creator_feature_lights_only_its_constituent_faces_leaving_subsequent_features_unlit() {
+        let mut s = solidcraft_engine::Session::default();
+        let base = s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 10, "name": "Base"})).unwrap()["feature"].as_u64().unwrap();
+        let fillet = s.execute("solid.fillet", &json!({"edges": [[0, 0, 5]], "radius": 2, "name": "Round"})).unwrap()["feature"].as_u64().unwrap();
+        let app = SolveApp::new(s, crate::Services::default());
+        let base_parts = feature_parts(&app, base, true);
+        let fillet_parts = feature_parts(&app, fillet, true);
+        assert!(!base_parts.is_empty(), "base feature lights constituent faces");
+        assert!(base_parts.iter().all(|p| matches!(p, Sel::Face { .. })), "base lights faces rather than whole body: {base_parts:?}");
+        // The fillet face belongs to fillet_parts, not base_parts
+        for f in &fillet_parts {
+            assert!(!base_parts.contains(f), "base does not light subsequent fillet face: {f:?}");
+        }
     }
 }
