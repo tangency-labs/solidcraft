@@ -216,7 +216,7 @@ fn the_point_class_makes_the_corner_ball_without_the_ball_patch_flag() {
     );
     let (_, _, r) = tray(false);
     assert!(
-        matches!(r, Err(solidcore::SolidError::Upstream { code: 1001, .. })),
+        r.as_ref().err().and_then(solidcore::error::upstream_status) == Some(1001),
         "{r:?}"
     );
 }

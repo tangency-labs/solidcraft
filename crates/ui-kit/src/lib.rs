@@ -1,6 +1,6 @@
 //! The UI kit: tokenised dense controls (rows, fields, menus, panels, windows) and the components
-//! built from them (the ribbon, app bar, history bar, navigation bar, view compass, preferences
-//! window, start page, window chrome and theme files). Everything is drawn from plain data the host
+//! built from them (the ribbon, app bar, history bar, navigation bar, Browser, view compass,
+//! preferences window, start page, window chrome and theme files). Everything is drawn from plain data the host
 //! passes or installs (its icon set, glyphs, tab table, text and built-in themes) and returns what
 //! the user chose; nothing here reads an app's state.
 //! `Panel` owns card composition; rows own aligned label/control columns and retain egui focus.
@@ -9,6 +9,7 @@
 // Components: each takes plain data and returns the action chosen.
 pub mod app_bar;
 pub mod blur;
+pub mod browser;
 pub mod frame;
 pub mod history_bar;
 pub mod nav_bar;
@@ -19,6 +20,7 @@ pub mod ribbon;
 pub mod start_page;
 pub mod theme_files;
 pub mod theme_options;
+pub mod toast;
 pub mod view_compass;
 pub mod window_chrome;
 
@@ -42,6 +44,7 @@ mod framing;
 mod history;
 mod history_group;
 pub mod icons;
+mod keyboard_focus;
 mod layout;
 mod look_chain;
 pub mod menu;
@@ -107,6 +110,7 @@ pub use file_view::{FileView, RecentRow, RecoveryMessage, SampleCard};
 pub use framing::*;
 pub use history::*;
 pub use history_group::*;
+pub use keyboard_focus::*;
 pub use layout::*;
 pub use look_chain::{LookStep, look_chain};
 pub use menu::{Item, ItemIcon, LIST_W};

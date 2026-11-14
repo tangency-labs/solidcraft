@@ -6,6 +6,7 @@ const HANDLES: Handles<'static> = Handles {
     home_rect: &["t:home"],
     file: &["t:file"],
     file_rect: &["t:file"],
+    plugins: "t:plugins",
     button: &["t:"],
     separator: "t:separator:",
     search: "t:search",
@@ -23,6 +24,8 @@ struct BarRig {
     ctx: egui::Context,
     width: f32,
     name: &'static str,
+    /// The bar has a Plugins menu.
+    plugins: bool,
     time: std::cell::Cell<f64>,
     out: std::cell::RefCell<Option<BarOut>>,
 }
@@ -34,7 +37,8 @@ impl BarRig {
 
     /// The bar with the app's name `name`.
     fn named(width: f32, name: &'static str) -> BarRig {
-        let rig = BarRig { ctx: crate::test_support::context(), width, name, time: std::cell::Cell::new(0.0), out: Default::default() };
+        let rig =
+            BarRig { ctx: crate::test_support::context(), width, name, plugins: false, time: std::cell::Cell::new(0.0), out: Default::default() };
         rig.frame(Vec::new());
         rig
     }
@@ -60,6 +64,7 @@ impl BarRig {
             home: BarButton { id: "home", icon: "home", tip: "Home", enabled: true, narrow: false, wide_only: false },
             file: "File",
             file_open: false,
+            plugins: self.plugins.then_some(("Plugins", false, "Plugins menu")),
             actions: vec![button("save", true, false), button("undo", false, true)],
             quick: 2,
             help: BarButton { id: "help", icon: "help", tip: "Help", enabled: true, narrow: false, wide_only: false },
@@ -113,6 +118,52 @@ fn the_bar_returns_what_was_clicked() {
     assert!(first > file.right() && step > 0.0);
     assert!(out.tabs_start > first + step, "the tabs follow the quick-access buttons");
     assert!(out.assistant.is_some_and(|a| a.left() > out.controls_left), "the assistant is in the right cluster");
+}
+
+/// The Plugins menu's button follows File without overlapping it or Save, and returns its own
+/// action; without one the bar is as before.
+#[test]
+fn the_plugins_button_sits_between_file_and_the_file_actions() {
+    for width in [1200.0, 600.0] {
+        let rig = BarRig::new(width);
+        let save_without = solidcraft_ui_registry::rect_of("t:save").expect("Save is drawn");
+        assert!(solidcraft_ui_registry::rect_of("t:plugins").is_none());
+        let rig = BarRig { plugins: true, ..rig };
+        rig.frame(Vec::new());
+        let file = solidcraft_ui_registry::rect_of("t:file").expect("File is drawn");
+        let plugins = solidcraft_ui_registry::rect_of("t:plugins").expect("Plugins is drawn");
+        let save = solidcraft_ui_registry::rect_of("t:save").expect("Save is drawn");
+        assert!(plugins.left() > file.right() && plugins.right() < save.left(), "{file:?} {plugins:?} {save:?}");
+        assert!(save.left() > save_without.left(), "the file actions move right by its width");
+        assert_eq!(rig.click("t:plugins"), vec![BarAction::Plugins { rect: plugins }]);
+    }
+}
+
+/// Between the compact width and the room the Plugins label needs, the bar leaves Plugins out (the
+/// app lists it in the File menu) and keeps exactly what it showed before there was a Plugins menu.
+#[test]
+fn between_compact_and_the_labels_room_plugins_moves_to_the_file_menu() {
+    for width in [645.0, 660.0] {
+        let rig = BarRig::new(width);
+        let before = rig.out.borrow().as_ref().map(|out| (out.quick, out.tabs_start)).unwrap();
+        let save = solidcraft_ui_registry::rect_of("t:save");
+        let rig = BarRig { plugins: true, ..rig };
+        rig.frame(Vec::new());
+        assert!(solidcraft_ui_registry::rect_of("t:plugins").is_none(), "{width}: no Plugins button");
+        assert!(solidcraft_ui_registry::rect_of("t:undo").is_some(), "{width}: Undo stays");
+        assert_eq!(solidcraft_ui_registry::rect_of("t:save"), save, "{width}: Save stays put");
+        let out = rig.out.borrow();
+        let out = out.as_ref().unwrap();
+        assert!(out.plugins_in_file, "{width}: the app is told to list Plugins in File");
+        assert_eq!((out.quick, out.tabs_start), before, "{width}: the quick-access room and tabs stay put");
+    }
+    for (width, label) in [(1200.0, true), (600.0, false)] {
+        let rig = BarRig { plugins: true, ..BarRig::new(width) };
+        rig.frame(Vec::new());
+        let plugins = solidcraft_ui_registry::rect_of("t:plugins").expect("Plugins is drawn");
+        assert_eq!(plugins.width() > 40.0, label, "{width}: label when wide, icon when compact");
+        assert!(!rig.out.borrow().as_ref().unwrap().plugins_in_file);
+    }
 }
 
 /// A compact bar leaves out the wide-only buttons and the quick-access room.
@@ -171,7 +222,7 @@ impl TabsRig {
             focused: true,
             ..Default::default()
         };
-        let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet" };
+        let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None };
         let mut strip = TabStrip {
             tabs: vec![tab("One"), tab("Two"), tab("Three")],
             selected: 0,
@@ -242,8 +293,13 @@ fn file_item(id: &str, enabled: bool) -> FileItem {
 /// The File menu drawn for a frame with `events`: what it returned, and where each text was.
 fn file_menu_frame(ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> (FileMenuOut, Vec<(String, Pos2)>) {
     let rows = vec![FileRow::Item(file_item("new", true)), FileRow::Item(file_item("save", false)), FileRow::Separator];
+    file_menu_frame_of(ctx, &rows, 600.0, time, events)
+}
+
+/// The File menu with `rows` in an 800 by `height` window, drawn for a frame with `events`.
+fn file_menu_frame_of(ctx: &egui::Context, rows: &[FileRow], height: f32, time: f64, events: Vec<egui::Event>) -> (FileMenuOut, Vec<(String, Pos2)>) {
     let input = egui::RawInput {
-        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, height))),
         time: Some(time),
         events,
         focused: true,
@@ -251,10 +307,37 @@ fn file_menu_frame(ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> 
     };
     let mut out = FileMenuOut::default();
     let output = crate::test_support::raw_frame(ctx, input, |ui| {
-        out = file_menu(ui.ctx(), &rows, pos2(100.0, HEIGHT), egui::Id::unique("test_file_menu"), false);
+        out = file_menu(ui.ctx(), rows, pos2(100.0, HEIGHT), egui::Id::unique("test_file_menu"), false);
     });
     let texts = crate::test_support::text_shapes(&output).map(|s| (s.galley.text().to_string(), s.visual_bounding_rect().center())).collect();
     (out, texts)
+}
+
+/// A File menu taller than the window stays inside it, and its last row scrolls into view.
+#[test]
+fn a_file_menu_taller_than_the_window_scrolls_its_rows() {
+    let ctx = crate::test_support::context();
+    let rows: Vec<FileRow> = (0..40).map(|i| FileRow::Item(file_item(&format!("r{i}"), true))).collect();
+    let height = 360.0;
+    file_menu_frame_of(&ctx, &rows, height, 0.0, Vec::new());
+    file_menu_frame_of(&ctx, &rows, height, 0.1, Vec::new());
+    let menu = ctx.memory(|m| m.area_rect(egui::Id::unique("test_file_menu"))).expect("the menu is laid out");
+    assert!(menu.bottom() <= height, "the menu ends at {} inside a {height} high window", menu.bottom());
+    let shown = |texts: &[(String, Pos2)], text: &str| texts.iter().any(|(t, p)| t == text && menu.contains(*p));
+    let over = menu.center();
+    let mut texts = Vec::new();
+    for i in 0..20 {
+        let wheel = egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -400.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        (_, texts) = file_menu_frame_of(&ctx, &rows, height, 0.2 + f64::from(i) * 0.1, vec![egui::Event::PointerMoved(over), wheel]);
+    }
+    assert!(shown(&texts, "Item r39"), "scrolling shows the last row");
+    assert!(!shown(&texts, "Item r0"), "and the first has scrolled out");
 }
 
 /// A row returns its id and closes the menu; a disabled one returns nothing and keeps it open;

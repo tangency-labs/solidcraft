@@ -2163,16 +2163,19 @@ pub fn find_outer_loops(
 
 // ---- checks -------------------------------------------------------------------------------
 
-/// `CheckFace`: `SM_ERR` (with a report) for a face without loops; nothing to check
-/// when some UV trim curve is missing; otherwise [`check_loop`] (unless
-/// `skip_check_loop`) and the loop orientation test (outer loop first, the others
-/// inner, none of zero area) for every loop.
+/// `CheckFace`: `SM_ERR` (with a report) for a face without loops; otherwise
+/// [`check_loop`] (unless `skip_check_loop`) and the loop orientation test (outer loop
+/// first, the others inner, none of zero area) for every loop. Where some UV trim curve is
+/// missing, the face's trims are made first and stay on `b` (not upstream, which checks
+/// nothing then; #15040); where they cannot be made, the face fails the `UVTrimCurve` test
+/// (report 1).
 ///
 /// # Errors
 ///
 /// `SM_ERR` as described; [`SolidError::InvalidInput`] for a face without surface (with
-/// a loop to check); those of `SmFace::ComputeLoopOrientation` (`topology.face_p3`) and
-/// [`check_loop`].
+/// a loop to check); those of making the UV trim curves
+/// ([`crate::topology::face::p3::create_uv_trim_curves`]), of
+/// `SmFace::ComputeLoopOrientation` (`topology.face_p3`) and of [`check_loop`].
 pub fn check_face(
     k: &Kernel,
     b: &mut Brep,
@@ -2200,9 +2203,38 @@ pub fn check_face(
         return Err(SolidError::topology_failed(OP, "the face has no loops")); // Loops are missing
     }
 
-    // it's not a problem when an edge does not have a stored UVTrimCurve
+    // (not upstream, which passes such a face unchecked: "it's not a problem when an edge
+    // does not have a stored UVTrimCurve") A face whose edge uses have no UV trim curves is
+    // checked like any other: its trims are made first, as the volume and mass properties
+    // make them, so the check's answer does not depend on whether an earlier operation
+    // filled them (definitions-and-certificates.md §7.2; #15040). A face whose trims cannot
+    // be made fails the UVTrimCurve test: it is not passed unchecked.
     if !face_uv_curves_present(b, f)? {
-        return Ok(());
+        let made = face_create_uv_trim_curves(k, b, f);
+        if let Err(e) = &made {
+            if e.is_unported_or_cancelled() {
+                return made;
+            }
+        }
+        let present = made.is_ok() && face_uv_curves_present(b, f)?;
+        report(
+            &mut alist,
+            face,
+            FACE_TYPE,
+            "SmFace",
+            LIST_CHECK_FACE,
+            1,
+            present,
+            UNDEF_DOUBLE,
+            UNDEF_DOUBLE,
+        )?;
+        if !present {
+            made?;
+            return Err(SolidError::topology_failed(
+                OP,
+                "the face's UV trim curves cannot be made, so its loops cannot be checked",
+            ));
+        }
     }
 
     for (ii, &l) in loops.iter().enumerate() {

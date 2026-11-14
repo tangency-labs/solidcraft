@@ -361,6 +361,37 @@ fn edge_on_face_lays_out_as_one_silhouette_line_and_stays_current() {
     assert!(!sk.link(&link).unwrap().lost);
 }
 
+/// A face with a hole cut through the hole by the sketch plane: its section is two pieces on
+/// one line, one each side of the hole. Only a projection seen edge-on is one line end to end;
+/// a section keeps the gap (#14282).
+#[test]
+fn intersected_face_with_a_hole_keeps_both_pieces_on_one_line() {
+    // A pipe's top ring (bore 10, outside 22) cut through its axis.
+    let section = vec![LinkGeom::Line(Vec2::new(-22.0, 40.0), Vec2::new(-10.0, 40.0)), LinkGeom::Line(Vec2::new(10.0, 40.0), Vec2::new(22.0, 40.0))];
+    let ends = |sk: &Sketch, link: &str| -> Vec<[Vec2; 2]> {
+        sk.link_curves(link)
+            .iter()
+            .map(|c| match sk.curves[*c].kind {
+                CurveKind::Line { a, b } => [sk.points[a].pos, sk.points[b].pos],
+                _ => panic!("a line"),
+            })
+            .collect()
+    };
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Intersect, face(), &section).unwrap();
+    let pieces = [[Vec2::new(-22.0, 40.0), Vec2::new(-10.0, 40.0)], [Vec2::new(10.0, 40.0), Vec2::new(22.0, 40.0)]];
+    assert_eq!(ends(&sk, &link), pieces, "one line each side of the hole");
+    assert!(!sk.update_link(&link, &section).unwrap(), "the same section keeps its curves");
+    assert_eq!(ends(&sk, &link), pieces);
+    assert!(!sk.link(&link).unwrap().lost);
+    // Intersecting the same face again finds both pieces already there, so nothing is added.
+    assert!(sk.link_geometry_or_points_present(&section), "the section is already linked");
+    // Projected, the same ring seen edge-on is still one line end to end.
+    let projected = sk.add_link(LinkKind::Project, face(), &section).unwrap();
+    let [[a, b]] = ends(&sk, &projected)[..] else { panic!("one line") };
+    assert!([a, b].contains(&Vec2::new(-22.0, 40.0)) && [a, b].contains(&Vec2::new(22.0, 40.0)), "{a:?} {b:?}");
+}
+
 /// A conic that comes with a link (projected geometry) takes the curve prefix `n` like a drawn
 /// one, not the constraints' `k` (#6173).
 #[test]
@@ -398,6 +429,7 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
         source: face(),
         face_name: None,
         edge_name: None,
+        vertex_name: None,
         auto_face: false,
         lost: false,
     });

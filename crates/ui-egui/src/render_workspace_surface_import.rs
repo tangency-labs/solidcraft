@@ -250,7 +250,8 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut super::
             ("render.surface_import.license", &mut view.imported.license, 4096),
         ] {
             ui_kit::row(ui, app.tr(key), |ui| {
-                ui_kit::bounded_cell_editor(ui, ui.scope_id().with(key), value, "", false, maximum);
+                let editor = ui_kit::bounded_cell_editor(ui, ui.scope_id().with(key), value, "", false, maximum);
+                crate::panel_runtime::register_content_focus(ui.ctx(), &editor);
             });
         }
         ui_kit::row(ui, app.tr("render.stage_panels.plane"), |ui| {

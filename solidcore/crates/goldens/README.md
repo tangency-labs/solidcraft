@@ -332,7 +332,7 @@ nice -n 10 cargo run -p goldens -- --solidcraft-cases '3526-*'        # ids (<fi
   writes the body `id`; the last writes `result`.
 * **Fixes** (`fixes`, optional): `Kernel::fixes` (`UpstreamFixes`) fields the case turns
   on, by name, for a case that needs an opt-in fix of an upstream defect (for example
-  `434-*`: `sweep_frame_on_planar_path_normal`, `cover_refuses_folded_continuation`).
+  `434-*`: `cover_refuses_folded_continuation`).
 * **Known refusal** (`refused_by`, optional): for a case the kernel refuses on purpose,
   the `issue` that tracks it, the `step` id that fails and text its `error` contains. Only
   that step failing with that error defers the case on the issue; any other error stays

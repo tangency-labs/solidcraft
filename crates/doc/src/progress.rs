@@ -333,6 +333,7 @@ mod tests {
             width: "3 mm".into(),
             height: "4 mm".into(),
             operation: crate::Operation::NewBody,
+            centred: false,
         };
         doc.add_feature(block, Some("Block")).unwrap();
         let mut model = crate::Model::default();

@@ -39,6 +39,9 @@ pub struct Row<'a> {
     /// The label is a name someone gave (a body, sketch, component, …): it is shown as typed,
     /// not translated when it happens to match a UI label.
     pub name: bool,
+    /// A slower second click on the label renames the row (the caller handles
+    /// [`RowResp::slow_rename`]); the click is held back for the double-click delay.
+    pub rename: bool,
     pub selected: bool,
     pub dim: bool,
     /// What Cut has marked, until Paste moves it: the row has a dashed outline.
@@ -103,8 +106,13 @@ impl Status {
 #[derive(Default)]
 pub struct RowResp {
     pub rect: Option<Rect>,
+    /// Where the name is drawn, for editing it in place.
+    pub label_rect: Option<Rect>,
+    pub row_id: Option<egui::Id>,
     pub clicked: bool,
     pub double: bool,
+    /// A slower second click on the row's name: rename it.
+    pub slow_rename: bool,
     pub secondary: Option<Pos2>,
     pub fold: bool,
     /// The eye was clicked, or a drag over the eyes sets it (#9680, see [`eye_drag_id`]).
@@ -183,7 +191,7 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     // While something is dragged (an appearance swatch, drawn under the pointer) `hovered` is
     // off; the row under the pointer still counts, so a drop lands on it.
     let dragged_over = egui::DragAndDrop::has_any_payload(ui.ctx()) && ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| r.contains(p));
-    let mut out = RowResp { rect: Some(r), hovered: resp.hovered() || dragged_over, ..Default::default() };
+    let mut out = RowResp { rect: Some(r), row_id: Some(id), hovered: resp.hovered() || dragged_over, ..Default::default() };
     if row.selected {
         ui.painter().rect_filled(r, if row.compact { 0 } else { t.radius_sm.saturating_sub(1) }, solidcraft_theme::TabAccent::current(ui.ctx()).soft);
     } else if resp.hovered() || row.mark == Mark::Here {
@@ -323,6 +331,7 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         }
         out.radio = resp.clicked() && click_on == 3;
         out.radio_at = Some(radio_r.center());
+        solidcraft_ui_registry::publish_handle(&format!("radio:{handle}"), radio_r.center());
         x += 15.0;
     }
     if !row.icon.is_empty() && !(row.compact && row.swatch.is_some()) {
@@ -391,6 +400,7 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         ui.painter().with_clip_rect(ui.clip_rect().intersect(r)).galley(pos2(x, r.top() + ROW_H), galley, t.text_dim);
     }
     let room = (right - name_action_width - x).max(0.0);
+    out.label_rect = Some(Rect::from_min_max(pos2(x, r.top() + 1.0), pos2(x + room, cy + row_height / 2.0 - 1.0)));
     let mut job = egui::text::LayoutJob::simple(label_display.to_string(), font, col, room);
     job.wrap.max_rows = 1;
     job.wrap.break_anywhere = true;

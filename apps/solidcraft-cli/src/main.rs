@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! solidcraft-cli run <script.json|design.sc|part.step|mesh.3mf> [--in design|part.step|mesh.3mf] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]
-//!                    [--param-check off|warn|strict]
+//!                    [--param-check off|warn|strict] [--script-relative]
 //! solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] (alias: inspect) measurements as JSON
 //! solidcraft-cli script <design.sc> [--out script.json]     the design's history as a command script
 //! solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] loading timings as JSON lines
@@ -24,6 +24,7 @@
 //! solidcraft-cli licences                                     SolidCraft's licence and the third-party licences
 //! solidcraft-cli icon --out F.png|F.ico [--size N]             the app icon (packaging; drawn, not a file)
 //!
+//! --plugin-limits FILE.json (local sessions only)              user fuel/memory ceilings; connected desktops use their own preferences
 //! --debug (with any command)                                  SolidCraft's debug log on stderr (or RUST_LOG=LEVEL)
 //! --max-file-size SIZE (with any command)                     read STEP and design files up to SIZE (2GB, 1500MB; at most 16GB)
 //! ```
@@ -62,7 +63,7 @@ struct Command {
 }
 
 /// `run`'s lines in the usage.
-const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
+const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest] [--script-relative]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--script-relative runs command file paths from the positional script's folder; command-line file paths\n       stay relative to the caller's folder, which remains the default for scripts without this option)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
 /// `eval`'s lines in the usage.
 const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run)\n";
 /// `script`'s lines in the usage.
@@ -108,6 +109,8 @@ const USAGE_BENCH_EDIT: &str = "  solidcraft-cli bench-edit <script.json|recipe.
 const USAGE_SAVE_STRESS: &str = "  solidcraft-cli save-stress <path> <rounds>\n";
 /// The flags every command takes, at the end of the top-level usage.
 const USAGE_DEBUG: &str = "  --debug, with any command: what SolidCraft logs (why a body has no display plan, why a save left its\n      model cache out), on stderr; RUST_LOG=error|warn|info|debug|trace sets one level for every crate\n  --max-file-size SIZE, with any command: read STEP and import files and design files up to SIZE for this run\n      (for example 2GB or 1500MB; at most 16GB; the defaults are 512 MB and 256 MB, and a smaller SIZE keeps them)\n";
+
+const USAGE_PLUGIN_LIMITS: &str = "  --plugin-limits FILE.json, with local commands: user ceilings {max_fuel, max_memory_mib}; defaults 100000000000 / 128, invocation defaults remain 10000000 / 64 MiB. With mcp use --headless; connected desktops keep their own preferences.\n";
 
 /// The commands the CLI takes, in the order the top-level usage lists them.
 const COMMANDS: &[Command] = &[
@@ -155,6 +158,10 @@ fn main() -> ExitCode {
     };
     if let Err(e) = max_file_size(&mut args) {
         solidcraft_engine::note!("error: {e}");
+        return ExitCode::FAILURE;
+    }
+    if let Err(e) = plugin_limits(&mut args) {
+        eprintln!("error: {e}");
         return ExitCode::FAILURE;
     }
     let r = match args.first().map(String::as_str) {
@@ -263,6 +270,43 @@ fn max_file_size(args: &mut Vec<String>) -> Result<(), String> {
     solidcraft_engine::io::limits::set_override(Some(bytes))
 }
 
+/// Explicit host policy for local sessions only. A script or package cannot change this.
+fn plugin_limits(args: &mut Vec<String>) -> Result<(), String> {
+    let mut path = None;
+    let mut i = 0;
+    while let Some(arg) = args.get(i) {
+        let value = if arg == "--plugin-limits" {
+            let value = args.get(i + 1).filter(|v| !v.starts_with("--")).cloned().ok_or("--plugin-limits needs a JSON settings file")?;
+            args.drain(i..i + 2);
+            Some(value)
+        } else if let Some(value) = arg.strip_prefix("--plugin-limits=") {
+            let value = value.to_string();
+            args.remove(i);
+            Some(value)
+        } else {
+            i += 1;
+            None
+        };
+        if let Some(value) = value
+            && (value.is_empty() || path.replace(value).is_some())
+        {
+            return Err("provide one --plugin-limits JSON settings file".into());
+        }
+    }
+    let Some(path) = path else { return Ok(()) };
+    if args.iter().any(|v| v == "--connect" || v.starts_with("--connect="))
+        || (args.first().map(String::as_str) == Some("mcp") && !args.iter().any(|v| v == "--headless"))
+    {
+        return Err("--plugin-limits controls local sessions; use mcp --headless or change the connected desktop's Preferences > Plugins".into());
+    }
+    let bytes =
+        solidcraft_engine::io::vfs::read(&path, solidcraft_engine::plugin::MAX_MANIFEST_BYTES).map_err(|e| format!("--plugin-limits: {e}"))?;
+    // Windows editors and PowerShell 5.1 may write a UTF-8 BOM in this user settings file.
+    let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes);
+    let limits: solidcraft_engine::plugin::HostLimits = serde_json::from_slice(bytes).map_err(|e| format!("--plugin-limits: {e}"))?;
+    solidcraft_engine::plugin::configure_process_host_limits(limits).map_err(|e| e.to_string())
+}
+
 fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_default()
 }
@@ -275,6 +319,7 @@ fn usage() -> String {
         s.push_str(c.usage);
     }
     s.push_str(USAGE_DEBUG);
+    s.push_str(USAGE_PLUGIN_LIMITS);
     s
 }
 
@@ -355,6 +400,19 @@ fn read_session(
     Ok(s)
 }
 
+/// `run --save FILE` over a design another SolidCraft has open (a fresh lock beside it, #16199):
+/// the save goes ahead as before, and stderr says who has it open, since that app goes on
+/// showing the design it opened and its next `file.save` is refused.
+fn warn_if_open_elsewhere(path: &str) {
+    use solidcraft_engine::io::design_lock;
+    if let Some(lock) = design_lock::held_elsewhere(std::path::Path::new(path), design_lock::now_secs()) {
+        eprintln!(
+            "{path}: warning: open in SolidCraft {} by {} on {}; saved all the same, and that window still shows the design it opened",
+            lock.app, lock.user, lock.host
+        );
+    }
+}
+
 /// Run `script`, read from `path`, on `s`. At the warn level each step's `param_warnings` go to
 /// stderr as the step completes, even when a later step fails (stdout stays the caller's).
 fn run_script_warning(s: &mut Session, path: &str, script: &Value) -> Result<Vec<Value>, String> {
@@ -390,24 +448,31 @@ fn flags<'a>(args: &'a [String], name: &str) -> Vec<&'a str> {
 
 /// The first argument that is not an option or an option's value.
 fn positional(args: &[String]) -> Option<&String> {
+    args.get(positional_index(args)?)
+}
+
+fn positional_index(args: &[String]) -> Option<usize> {
     let mut i = 0;
     while let Some(a) = args.get(i) {
         if a.starts_with("--") {
-            i += if matches!(a.as_str(), "--quiet" | "--results" | "--timings" | "--profile" | "--allow-errors" | "--no-grid" | "--no-axes") {
+            i += if matches!(
+                a.as_str(),
+                "--quiet" | "--results" | "--timings" | "--profile" | "--allow-errors" | "--no-grid" | "--no-axes" | "--script-relative"
+            ) {
                 1
             } else {
                 2
             };
             continue;
         }
-        return Some(a);
+        return Some(i);
     }
     None
 }
 
 /// Is `path` a command script (or a recipe), not a design: JSON that is no saved design.
 fn is_script(path: &str) -> bool {
-    let Ok(bytes) = solidcraft_engine::io::vfs::read(path, solidcraft_engine::io::MAX_DESIGN_BYTES) else { return false };
+    let Ok(bytes) = solidcraft_engine::io::vfs::read(path, solidcraft_engine::io::limits::max_design_bytes()) else { return false };
     if solidcraft_engine::io::is_design_container(&bytes) {
         return false;
     }
@@ -444,7 +509,6 @@ fn print_json(v: &Value, file: Option<&str>) -> Result<(), String> {
 }
 
 fn cmd_run(args: &[String]) -> Result<(), String> {
-    install_renderer();
     let json_out = json_out(args)?;
     // Before the option check, so a bare `--param-check` gets the words `mcp` uses.
     let check = parse_param_check("run", args)?;
@@ -452,11 +516,15 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         "run",
         args,
         &["--in", "--out", "--save", "--json-out", "--param-check", "--profile-out", "--validation", "--quality"],
-        &["--quiet", "--results", "--timings", "--profile", "--allow-errors"],
+        &["--quiet", "--results", "--timings", "--profile", "--allow-errors", "--script-relative"],
         true,
     )?;
     let validation = validation_flag("run", args)?;
     let quality = export_quality("run", args)?;
+    if args.iter().any(|a| a == "--script-relative") {
+        return run_from_script_directory(args);
+    }
+    install_renderer();
     let base = flag(args, "--in");
     let path = positional(args);
     if path.is_none() && base.is_none() {
@@ -511,6 +579,7 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         s.execute("file.export", &params).map_err(|e| e.to_string())?;
     }
     if let Some(p) = flag(args, "--save") {
+        warn_if_open_elsewhere(p);
         s.execute("file.save_as", &json!({"path": p})).map_err(|e| e.to_string())?;
     }
     if let Some(results) = results {
@@ -521,6 +590,46 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         print_json(&m, json_out)?;
     }
     Ok(())
+}
+
+/// Only this standalone CLI invocation changes directory, before the renderer or session starts.
+/// Commands then resolve every file as if the caller had entered the script's folder, including
+/// nested assets and future commands, without guessing which JSON fields are file paths.
+fn run_from_script_directory(args: &[String]) -> Result<(), String> {
+    const NEED_SCRIPT: &str = "run: --script-relative needs a positional command script or recipe";
+    let script_index = positional_index(args).ok_or(NEED_SCRIPT)?;
+    let script = args.get(script_index).ok_or(NEED_SCRIPT)?;
+    if !is_script(script) {
+        return Err(NEED_SCRIPT.into());
+    }
+    let caller = std::env::current_dir().map_err(|e| format!("run: current directory: {e}"))?;
+    let script = std::path::absolute(script).map_err(|e| format!("run: script path: {e}"))?;
+    let directory = script.parent().ok_or(NEED_SCRIPT)?;
+    let mut rebased = Vec::with_capacity(args.len());
+    for (i, arg) in args.iter().enumerate() {
+        if arg == "--script-relative" {
+            continue;
+        }
+        let file_option = i
+            .checked_sub(1)
+            .and_then(|j| args.get(j))
+            .is_some_and(|previous| matches!(previous.as_str(), "--in" | "--out" | "--save" | "--json-out" | "--profile-out"));
+        let value = if i == script_index || file_option {
+            std::path::absolute(arg)
+                .map_err(|e| format!("run: {arg}: {e}"))?
+                .into_os_string()
+                .into_string()
+                .map_err(|_| format!("run: {arg}: the absolute path is not UTF-8"))?
+        } else {
+            arg.clone()
+        };
+        rebased.push(value);
+    }
+    std::env::set_current_dir(directory).map_err(|e| format!("run: {}: {e}", directory.display()))?;
+    let result = cmd_run(&rebased);
+    // Profiling writes its command-line output after cmd_run returns, even after a failed run.
+    std::env::set_current_dir(&caller).map_err(|e| format!("run: restore {}: {e}", caller.display()))?;
+    result
 }
 
 /// The session `run`, `eval` and `snapshot` start from: `--in` (a design or STEP file) with the
@@ -705,6 +814,12 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
         &["--no-grid", "--no-axes"],
         true,
     )?;
+    // A snapshot writes one picture. Only the body and tool options take several values.
+    for option in ["--in", "--out", "--width", "--height", "--view", "--camera", "--section", "--quality"] {
+        if args.iter().filter(|a| a.as_str() == option).count() > 1 {
+            return Err(format!("snapshot: {option} may be given only once; use a separate call for each picture"));
+        }
+    }
     if positional(args).is_none() && flag(args, "--in").is_none() {
         return Err(usage());
     }

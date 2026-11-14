@@ -18,8 +18,8 @@
 //! `operation` path says which routine. The handles these routines work on are the
 //! classification's or intersector's own, not ids of the caller's B-rep, so no failure
 //! names an entity. The failures that are checks of a caller's handles stay
-//! [`crate::SolidError::InvalidInput`]. `surface_intersector` and `topology_solver` do
-//! not use these yet.
+//! [`crate::SolidError::InvalidInput`]. `surface_intersector/p1` and `p5`, which have
+//! open work elsewhere, do not use these yet.
 
 use super::{
     ErrorKind, Failure, Reason, SM_ERR, SM_ERR_ASSERT_FAILURE, SM_ERR_NULL_POINTER,
@@ -112,7 +112,7 @@ impl crate::SolidError {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::SolidError;
 
@@ -153,38 +153,72 @@ mod tests {
         );
     }
 
-    /// The intersection routines that describe their failures build no bare `Upstream`
-    /// status in their library code.
+    /// A sample of the second set of converted files (`surface_intersector/p2` to `p4`,
+    /// `topology_solver/p1` and `p2`): each keeps the operation, status, kind and entity of
+    /// its `Upstream`.
     #[test]
-    fn the_described_intersect_routines_build_no_bare_statuses() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/intersect");
-        let mut files = vec![
-            "point_class.rs".to_owned(),
-            "ray_tracer.rs".to_owned(),
-            "surface_drop_curve.rs".to_owned(),
-            "surface_drop_lib/p1.rs".to_owned(),
-            "surface_drop_lib/p2.rs".to_owned(),
-            "surface_drop_lib/p3.rs".to_owned(),
-            "adv_surface_intersector.rs".to_owned(),
-            "api_intersectors.rs".to_owned(),
-            "surface_silhouette.rs".to_owned(),
-            "surface_tracer.rs".to_owned(),
+    fn the_surface_intersector_and_topology_solver_samples_keep_their_upstream_answers() {
+        let samples = [
+            (
+                "intersect::surface_intersector::p2::SurfaceIntersector::compute_point_values",
+                IntersectFailure::Failed("the surface point has no normal"),
+                SM_ERR,
+            ),
+            (
+                "intersect::surface_intersector::p3::SurfaceIntersector::find_boundary_start_points",
+                IntersectFailure::Missing("the surface's cache"),
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                "intersect::surface_intersector::p4::SurfaceIntersector::do_law_intersection",
+                IntersectFailure::Missing("the first surface's offset surface"),
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                "intersect::topology_solver::p1::LocalSolver::solve_it",
+                IntersectFailure::Failed("the base, point and curve local solvers solve nothing"),
+                SM_ERR,
+            ),
+            (
+                "intersect::topology_solver::p2::LocalSolver::solve_face_face",
+                IntersectFailure::Missing("the first surface to solve against"),
+                SM_ERR_NULL_POINTER,
+            ),
         ];
-        files.extend((1..=9).map(|i| format!("curve_class/p{i}.rs")));
-        for rel in files {
-            let text = std::fs::read_to_string(src.join(&rel))
-                .expect("read")
-                .replace("\r\n", "\n");
-            let library = text
-                .find("#[cfg(test)]\nmod tests")
-                .map_or(text.as_str(), |at| &text[..at]);
-            for needle in [
-                "SolidError::sm_err(",
-                "SolidError::null_pointer(",
-                "SolidError::Upstream {",
-            ] {
-                assert!(!library.contains(needle), "{needle} in {rel}");
-            }
+        for (operation, failure, code) in samples {
+            let typed = SolidError::intersect(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(super::super::upstream_status(&typed), Some(code));
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(
+                typed.is_unported_or_cancelled(),
+                before.is_unported_or_cancelled()
+            );
         }
+    }
+
+    /// The intersection routines describe their failures: their library code builds no
+    /// bare `Upstream` status, except the files listed (with the bare sites each may still
+    /// hold) whose conversion waits on other open work.
+    #[test]
+    fn the_intersect_routines_build_no_bare_statuses() {
+        super::super::bare_scan::assert_waiting(
+            "intersect",
+            40,
+            &[
+                ("intersect/surface_intersector/p1.rs", 6),
+                ("intersect/surface_intersector/p5.rs", 6),
+            ],
+        );
     }
 }

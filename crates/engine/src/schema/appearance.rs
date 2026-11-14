@@ -1,5 +1,6 @@
 //! Contracts and result types for the appearance commands in `cmd/inspect.rs`:
-//! `appearance.assign`, `appearance.library` and `appearance.list`.
+//! `appearance.assign`, `appearance.library` and `appearance.list`, and for the two gestures in
+//! `cmd/render_ui.rs`: `appearance.paint` and `appearance.pick_up`.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -384,6 +385,134 @@ pub struct BodyLooks {
 pub struct FaceIndexLook {
     pub face: usize,
     pub appearance: LookReply,
+}
+
+/// `appearance.paint` takes a look exactly as `appearance.assign` does — the same five keys, read
+/// by the same parser (`cmd::appearance_look`) — and `done: true` to end the UI's paint tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppearancePaintParams {
+    /// A library appearance's name or a starter recipe's name or stable `starter.*` id (see
+    /// `appearance.library`). With `color` too, that colour under this name.
+    #[serde(default)]
+    pub appearance: Option<String>,
+    /// The colour, `"#rrggbb"` or `[r, g, b]` (0–255); with `appearance`, it replaces the
+    /// recipe's colour.
+    #[serde(default)]
+    pub color: Option<ColorParam>,
+    /// A label for the look: needs `color`, not with `appearance`.
+    #[serde(default)]
+    pub name: Option<LookLabel>,
+    /// 0 (clear) to 1 (opaque). Default: 1, or the appearance's own.
+    #[serde(default)]
+    pub opacity: Option<f64>,
+    /// The opaque PBR response (needs `color` or `appearance`, and opacity 1).
+    #[serde(default)]
+    pub pbr: Option<PbrParam>,
+    /// `true` ends the UI's paint tool; no look is read.
+    #[serde(default)]
+    pub done: Option<bool>,
+}
+
+/// What a paint request answers: one of the two objects the handler returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppearancePaintResult {
+    /// `true` when `done: true` ended the tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub done: Option<bool>,
+    /// The look to paint with, when the call gave one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<LookReply>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// `appearance.pick_up` takes one parameter, `target`, optional.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppearancePickUpParams {
+    /// The body, face or component whose look to read. Left out, the reply asks the UI to
+    /// sample one.
+    #[serde(default)]
+    pub target: Option<ChainTarget>,
+}
+
+/// What a pick-up request answers: one of the two objects the handler returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppearancePickUpResult {
+    /// `"pick_up"` when no target was given, which asks the UI to sample a look.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<&'static str>,
+    /// The look the target resolves to, when a target was given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<LookReply>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// An `appearance.chain` target, which is what `appearance.pick_up` takes: `{body}`,
+/// `{body, face}` (a zero-based `model.faces` index) or `{component}` (a name or id, or a
+/// placement's name such as `K:2`). Read as `cmd::appearance_chain::chain` reads it, with its
+/// messages. The handler counts 4096 *bytes* of name; `maxLength` counts characters, so a name
+/// of multi-byte characters is refused later than the schema says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChainTarget {
+    Body(String),
+    Face { body: String, face: u64 },
+    Component(String),
+}
+
+/// The chain's name check: text of 1..4096 bytes, as `cmd::appearance_chain::name` reads it.
+fn chain_name(value: &Value) -> Option<&str> {
+    value.as_str().filter(|s| !s.is_empty() && s.len() <= 4096)
+}
+
+impl<'de> Deserialize<'de> for ChainTarget {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(d)?;
+        let object = value.as_object().ok_or_else(|| D::Error::custom(whole("give one target object")))?;
+        // The handler reads the name first, so a name it can't use is what it says, whatever
+        // else the object holds.
+        let bad_name = || D::Error::custom(whole("target name must have 1..4096 bytes"));
+        match (object.get("body"), object.get("face"), object.get("component")) {
+            (Some(body), None, None) if object.len() == 1 => Ok(ChainTarget::Body(chain_name(body).ok_or_else(bad_name)?.to_string())),
+            (Some(body), Some(face), None) if object.len() == 2 => {
+                let body = chain_name(body).ok_or_else(bad_name)?.to_string();
+                let face = face.as_u64().ok_or_else(|| D::Error::custom(whole("face must be a zero-based unsigned index")))?;
+                Ok(ChainTarget::Face { body, face })
+            }
+            (None, None, Some(component)) if object.len() == 1 => match component {
+                Value::String(_) => Ok(ChainTarget::Component(chain_name(component).ok_or_else(bad_name)?.to_string())),
+                Value::Number(_) => component
+                    .as_u64()
+                    .map(|id| ChainTarget::Component(id.to_string()))
+                    .ok_or_else(|| D::Error::custom(whole("component must be a name or unsigned id"))),
+                _ => Err(D::Error::custom(whole("component must be a name or unsigned id"))),
+            },
+            _ => Err(D::Error::custom(whole("target must be {body}, {body, face}, or {component}"))),
+        }
+    }
+}
+
+impl JsonSchema for ChainTarget {
+    fn schema_name() -> Cow<'static, str> {
+        "ChainTarget".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let name = json!({"type": "string", "minLength": 1, "maxLength": 4096});
+        json_schema!({
+            "description": "A body, one of its faces, or a component: {body}, {body, face} or {component}.",
+            "anyOf": [
+                {"type": "object", "properties": {"body": name}, "required": ["body"], "additionalProperties": false},
+                {"type": "object", "properties": {"body": name, "face": {"type": "integer", "minimum": 0}},
+                 "required": ["body", "face"], "additionalProperties": false},
+                {"type": "object", "properties": {"component": {"anyOf": [name, {"type": "integer", "minimum": 0}]}},
+                 "required": ["component"], "additionalProperties": false}
+            ]
+        })
+    }
 }
 
 #[cfg(test)]

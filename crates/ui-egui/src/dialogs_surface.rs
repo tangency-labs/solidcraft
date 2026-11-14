@@ -910,6 +910,8 @@ fn tool_sel(app: &SolveApp, plane: &PlaneRef, tool: Option<&FaceAt>) -> Option<S
 pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
     let s = &app.session;
     let edge = |p: &solidcraft_engine::doc::Position| crate::dialogs::edge_sel(s, p.0);
+    // Stored values the dialog shows no box for, sent back unchanged on OK.
+    let mut kept = Map::new();
     let (k, fill): (Surf, Vec<Vec<Sel>>) = match kind {
         FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric } => {
             let (pick, stored) = match axis {
@@ -1219,17 +1221,30 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 vec![crate::dialogs::face_sel(s, face.point.0).into_iter().collect(), picked],
             )
         }
-        FeatureKind::SplitFace { faces, plane, tool, .. } => (
-            Surf::SplitFace,
-            vec![faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect(), tool_sel(app, plane, tool.as_ref()).into_iter().collect()],
-        ),
+        FeatureKind::SplitFace { faces, plane, tool, sketch, loops, .. } => {
+            // The dialog has no box for a sketch: a split by sketch curves keeps its sketch and
+            // `loops` as they were, so OK on the dialog does not turn it into a split by a plane.
+            if let Some(sketch) = sketch {
+                kept.insert("sketch".into(), json!(sketch.0));
+                if *loops {
+                    kept.insert("loops".into(), json!(true));
+                }
+            }
+            (
+                Surf::SplitFace,
+                vec![
+                    faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect(),
+                    tool_sel(app, plane, tool.as_ref()).into_iter().collect(),
+                ],
+            )
+        }
         _ => return None,
     };
     let mut ins = inputs(&k);
     for (inp, items) in ins.iter_mut().zip(fill) {
         inp.items = items;
     }
-    Some((Kind::Surface(k), ins, Map::new()))
+    Some((Kind::Surface(k), ins, kept))
 }
 
 #[cfg(test)]

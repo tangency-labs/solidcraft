@@ -68,10 +68,7 @@
   },
   {
    "name": "chamfer_beside_pocket_4",
-   "note": "Chamfer 4 on the top edge at x = 40 of a 40 x 20 x 20 block with a 10 x 10 pocket 10 deep, 4 mm in from that edge. Up to the pocket's rim it fits: the triangle along the 20 mm edge. The chamfer's rail on the top face then runs along the pocket's rim, so it opts in to `fillet_rail_rim_on_face` (WR-301, tangency-labs/solidcore#485); the pinned SMLib fails it with 1001 (\"Unable to Process Rollover\").",
-   "fixes": [
-    "fillet_rail_rim_on_face"
-   ],
+   "note": "Chamfer 4 on the top edge at x = 40 of a 40 x 20 x 20 block with a 10 x 10 pocket 10 deep, 4 mm in from that edge. Up to the pocket's rim it fits: the triangle along the 20 mm edge. The chamfer's rail on the top face then runs along the pocket's rim, which the rollover joins into one interval on the face (WR-301, tangency-labs/solidcore#485); the pinned SMLib fails it with 1001 (\"Unable to Process Rollover\").",
    "steps": [
     {
      "op": "box",

@@ -20,8 +20,8 @@ use crate::schema::joints::{
     DeleteJointResult, DriveJointParams, DriveJointResult, EditJointResult, FloatingChain, GearParams, HeldValue, InspectJointParams,
     InspectJointResult, JointAddedResult, JointDeleted, JointFrame, JointLimitsParams, JointProblem, LimitSide, LimitStop, LinkInfo,
     ListJointsParams, ListJointsResult, ListedJoint, ListedOrigin, LoopStop, MakeJointOriginParams, MakeJointOriginResult, MotionLinkParams,
-    NamedValue, OccurrenceDof, RackPinionParams, ReachLoopStop, ReachParams, ReachResult, ReachedJoint, RigidGroupParams, RigidGroupResult,
-    ScrewParams, SolveJointsParams, SolveReport, SolveResult, ValueUnit,
+    MotionLinkResult, NamedValue, OccurrenceDof, RackPinionParams, ReachLoopStop, ReachParams, ReachResult, ReachedJoint, RigidGroupParams,
+    RigidGroupResult, ScrewParams, SolveJointsParams, SolveReport, SolveResult, ValueUnit,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -118,8 +118,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "ASSEMBLE")
         .icon("motion_link")
         .contract(&MOTION_LINK_CONTRACT)
-        .output(output_schema_for::<SolveResult>)
-        .params("a, b: joints; ratio (b = ratio · a + offset): b's units per a's (mm per deg for an angle driving a distance); offset?: in b's units (deg for an angle, mm for a distance, or an expression); ia?, ib?: value indices (default 0)"),
+        .output(output_schema_for::<MotionLinkResult>)
+        .params("a, b: joints; ratio (b = ratio · a + offset): b's units per a's (mm per deg for an angle driving a distance); offset?: in b's units (deg for an angle, mm for a distance, or an expression); ia?, ib?: value indices (default 0); link?: index (put this link in place of that motion link, as the gear and cam commands do) → link: the link's index, as joint.list numbers them"),
     CommandSpec::new("joint.gear", "Gear", crate::checked!("joint.gear", gear))
         .at("SOLID", "ASSEMBLE")
         .icon("gear")
@@ -129,7 +129,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "a, b: joints that turn (revolute), b driven by a; ra, rb: the gears' pitch radii (or tooth counts): mm, an expression, or \
          {circle: [x,y,z], occurrence?}: the round face there, its radius (read again whenever the design changes, so the ratio follows \
          edits); internal?: bool (one is a ring gear: both turn the same way; by default b turns the other way); reverse?: bool; \
-         link?: index (replace that motion link) → link, ratio (b's degrees per a's); b keeps where it is, also when the link replaces \
+         link?: index (replace that motion link; a radius left out then keeps the old gear's, picked round face included) → link, ratio (b's degrees per a's); b keeps where it is, also when the link replaces \
          another (at the current pose)",
     ),
     CommandSpec::new("joint.rack_pinion", "Rack and Pinion", crate::checked!("joint.rack_pinion", rack_pinion))
@@ -140,7 +140,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "a, b: a joint that turns (revolute: the pinion) and one that slides (slider: the rack), in either order, b driven by a; \
          radius: the pinion's pitch radius (mm, an expression, or {circle: [x,y,z], occurrence?}): the rack travels radius × the turn in \
-         radians; reverse?: bool; link?: index (replace that motion link) → link, ratio (mm per degree, or degrees per mm); b keeps \
+         radians; reverse?: bool; link?: index (replace that motion link; the radius left out then keeps the old pinion's, picked round face included) → link, ratio (mm per degree, or degrees per mm); b keeps \
          where it is, also when the link replaces another (at the current pose)",
     ),
     CommandSpec::new("joint.screw", "Screw", crate::checked!("joint.screw", screw))
@@ -150,7 +150,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<CouplingResult>)
         .params(
         "joint: a cylindrical joint (its turn drives its travel) | a, b: a joint that turns and one that slides, b driven by a; pitch: \
-         travel per turn (mm or an expression); reverse?: bool (a left-hand thread); link?: index (replace that motion link) → link, \
+         travel per turn (mm or an expression); reverse?: bool (a left-hand thread); link?: index (replace that motion link; the pitch left out then keeps the old screw's) → link, \
          ratio (mm per degree, or degrees per mm); b keeps where it is, also when the link replaces another (at the current \
          pose)",
     ),
@@ -160,7 +160,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CAM_CONTRACT)
         .output(output_schema_for::<CamResult>)
         .params(
-        "a: the cam's joint (revolute); b: the follower's joint, a slider (a translating follower) or a revolute (an oscillating one),          b driven by a; profile: {sketch: id|name, index?: the profile (default: the largest)} | {edges: [[x,y,z]…] (points on edges of          the cam's bodies forming one closed loop, world), occurrence?}: the cam's outline, in a plane square to its axis, read again          whenever the design changes; follower?: knife|roller|flat (default knife; flat: a face square to a slider's line); radius?: the          roller's radius (mm, an expression or {circle: [x,y,z], occurrence?}: the roller's round face, which is its tip too); tip?: a          joint origin where the follower touches: its knife's point or its roller's centre, such as {circle: [x,y,z]} on the roller          (needed for an oscillating follower; a translating one's line runs through it, by default along its slider's axis); flip?: bool (ride the cam from the other side          than the one the follower is on now); link?: index (replace that motion link) → link, lift: {min, max, rise, unit} (b's travel          over a turn of the cam), reverse (the side it rides from), follower_offset (mm: how far a translating follower's line passes          from the cam's axis); b keeps where it is, also when the link replaces another (at the current pose)",
+        "a: the cam's joint (revolute); b: the follower's joint, a slider (a translating follower) or a revolute (an oscillating one),          b driven by a; profile: {sketch: id|name, index?: the profile (default: the largest)} | {edges: [[x,y,z]…] (points on edges of          the cam's bodies forming one closed loop, world), occurrence?}: the cam's outline, in a plane square to its axis, read again          whenever the design changes; follower?: knife|roller|flat (default knife; flat: a face square to a slider's line); radius?: the          roller's radius (mm, an expression or {circle: [x,y,z], occurrence?}: the roller's round face, which is its tip too); tip?: a          joint origin where the follower touches: its knife's point or its roller's centre, such as {circle: [x,y,z]} on the roller          (needed for an oscillating follower; a translating one's line runs through it, by default along its slider's axis); flip?: bool (ride the cam from the other side          than the one the follower is on now); link?: index (replace that motion link; profile, follower, radius and tip left out then keep that cam's definition, picked profile and round face included, and flip left out keeps the side it rides from now) → link, lift: {min, max, rise, unit} (b's travel          over a turn of the cam), reverse (the side it rides from), follower_offset (mm: how far a translating follower's line passes          from the cam's axis); b keeps where it is, also when the link replaces another (at the current pose)",
     ),
     CommandSpec::new("joint.limits", "Joint Limits", crate::checked!("joint.limits", limits))
         .icon("joint")
@@ -1654,9 +1654,26 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
     let before = super::motion::positions(s);
     let st = s.model.state();
     let r = joints::reach(&s.doc, &st, &joints::Reach { occurrence: occ, point: at, to, axis, joints: only });
+    let mut stopped_by_contact = None;
     let reached = match &r {
+        // Only a reach that moves something touches the design (and so adds an undo step).
+        Ok(x) if !x.values.is_empty() && s.doc.assembly.contact_enabled => {
+            // With contact sets on, the joints go toward the values found as joint.drive moves
+            // them, stopping where two parts of a set would pass into each other (#14682). No
+            // value is held on the way: the loops close from each step, so a loop the values
+            // close at both ends doesn't stop the drag in between.
+            let want: Vec<(u64, Vec<f64>)> = x.values.iter().map(|(id, q)| (*id, q.clone())).collect();
+            let (out, _) = super::motion::drive_with_contact(s, &want, &BTreeSet::new())?;
+            stopped_by_contact = out
+                .get("stopped_by_contact")
+                .filter(|v| v.is_object())
+                .cloned()
+                .map(serde_json::from_value::<ContactStop>)
+                .transpose()
+                .map_err(|e| bad(cmd, e.to_string()))?;
+            x.clone()
+        }
         Ok(x) => {
-            // Only a reach that moves something touches the design (and so adds an undo step).
             if !x.values.is_empty() {
                 let doc = s.doc_mut();
                 for (id, q) in &x.values {
@@ -1691,7 +1708,10 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         .filter_map(|id| name(*id))
         .map(|j| ReachedJoint { joint: j.id, name: j.name.clone(), values: named_value_list(j, effective.get(&j.id).unwrap_or(&j.values)) })
         .collect();
-    let stopped_by_limit = (!reached.limits.is_empty()).then(|| {
+    // A contact that stopped it came first: the limits and loop the reach found further on are
+    // not where it rests.
+    let contact_stopped = stopped_by_contact.is_some();
+    let stopped_by_limit = (!contact_stopped && !reached.limits.is_empty()).then(|| {
         reached
             .limits
             .iter()
@@ -1715,7 +1735,8 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         values,
         moved: super::motion::moved(&before, &super::motion::positions(s)).next().is_some(),
         stopped_by_limit,
-        stopped_by_loop: reached.stopped_by_loop.and_then(name).map(|j| ReachLoopStop { joint: j.name.clone() }),
+        stopped_by_loop: reached.stopped_by_loop.filter(|_| !contact_stopped).and_then(name).map(|j| ReachLoopStop { joint: j.name.clone() }),
+        stopped_by_contact,
         reason: r.err(),
         continuous: (bool_(p, "continuous") == Some(true)).then_some(true),
         param_warnings: Vec::new(),
@@ -1728,7 +1749,11 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
 fn body_centre(s: &Session, occ: u64) -> Vec3 {
     let comp = s.doc.occurrences.iter().find(|o| o.id == occ).map(|o| o.component).unwrap_or(0);
     let st = s.model.state();
-    st.bodies.iter().filter(|b| s.doc.model_body_component(b) == comp).fold(Aabb3::EMPTY, |bb, b| bb.union(&b.mesh().bounds())).center()
+    st.bodies
+        .iter()
+        .filter(|b| s.doc.model_body_component(b) == comp)
+        .fold(Aabb3::EMPTY, |bb, b| bb.union(&b.body.exact_bounds().unwrap_or(Aabb3::EMPTY)))
+        .center()
 }
 
 fn motion_link(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1749,9 +1774,27 @@ fn motion_link(s: &mut Session, p: &Value) -> Result<Value> {
         None => 0.0,
     };
     let ratio = ratio * ratio_scale(s, a, ia, b, ib);
-    s.doc_mut().assembly.links.push(MotionLink { a, ia, b, ib, ratio, offset, coupling: None, lift: Vec::new() });
+    let l = MotionLink { a, ia, b, ib, ratio, offset, coupling: None, lift: Vec::new() };
+    // Add the link, or put it in place of link `link`, as the coupling commands do. The offset is
+    // the one typed, for a plain link keeps exactly what it was given, new or replacing.
+    let index = match p.get("link") {
+        None => {
+            let doc = s.doc_mut();
+            doc.assembly.links.push(l);
+            doc.assembly.links.len() - 1
+        }
+        Some(v) => {
+            let i = v
+                .as_u64()
+                .and_then(|i| usize::try_from(i).ok())
+                .filter(|i| *i < s.doc.assembly.links.len())
+                .ok_or_else(|| bad(cmd, "no such motion link"))?;
+            s.doc_mut().assembly.links[i] = l;
+            i
+        }
+    };
     let sol = resolve(s);
-    reply(cmd, SolveResult { solved: solve_report(&sol, p), param_warnings: Vec::new() })
+    reply(cmd, MotionLinkResult { solved: solve_report(&sol, p), link: index, param_warnings: Vec::new() })
 }
 
 /// A coupling length: a number (mm), an expression (kept as typed, so it follows the
@@ -1766,6 +1809,25 @@ fn size_param(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<Size> {
         },
         _ => Err(bad(cmd, format!("`{key}` must be a length (mm or an expression) or a round face ({{circle: [x, y, z]}})"))),
     }
+}
+
+/// `size_param`, but where the command replaces a motion link a size may be left out and comes
+/// from the coupling being replaced: an edit dialog can't re-offer a picked round face, so an
+/// edited coupling keeps the sizes it wasn't given.
+fn size_param_or(s: &Session, p: &Value, key: &str, cmd: &str, old: Option<&Size>) -> Result<Size> {
+    if p.get(key).is_none()
+        && let Some(old) = old
+    {
+        return Ok(old.clone());
+    }
+    size_param(s, p, key, cmd)
+}
+
+/// The coupling of the motion link `link` points at, for the edit path: a command replacing a
+/// link takes its definition for what the call leaves out.
+fn replaced_coupling<'a>(s: &'a Session, p: &Value) -> Option<&'a Coupling> {
+    let i = p.get("link")?.as_u64().and_then(|i| usize::try_from(i).ok())?;
+    s.doc.assembly.links.get(i)?.coupling.as_ref()
 }
 
 /// A joint's first value that turns (an angle), or that travels (a distance).
@@ -1800,9 +1862,13 @@ fn gear(s: &mut Session, p: &Value) -> Result<Value> {
     let (a, b) = joint_pair(s, p, cmd)?;
     let turn = |id: u64| value_index(s, id, true).ok_or_else(|| bad(cmd, "gears need two joints that turn (revolute)"));
     let (ia, ib) = (turn(a)?, turn(b)?);
+    let old = match replaced_coupling(s, p) {
+        Some(Coupling::Gear { ra, rb, .. }) => Some((ra.clone(), rb.clone())),
+        _ => None,
+    };
     let c = Coupling::Gear {
-        ra: size_param(s, p, "ra", cmd)?,
-        rb: size_param(s, p, "rb", cmd)?,
+        ra: size_param_or(s, p, "ra", cmd, old.as_ref().map(|(r, _)| r))?,
+        rb: size_param_or(s, p, "rb", cmd, old.as_ref().map(|(_, r)| r))?,
         internal: bool_(p, "internal").unwrap_or(false),
         reverse: reverse(p),
     };
@@ -1813,7 +1879,11 @@ fn rack_pinion(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.rack_pinion";
     let (a, b) = joint_pair(s, p, cmd)?;
     let (ia, ib) = turn_and_travel(s, a, b, cmd)?;
-    let c = Coupling::RackPinion { radius: size_param(s, p, "radius", cmd)?, reverse: reverse(p) };
+    let old = match replaced_coupling(s, p) {
+        Some(Coupling::RackPinion { radius, .. }) => Some(radius.clone()),
+        _ => None,
+    };
+    let c = Coupling::RackPinion { radius: size_param_or(s, p, "radius", cmd, old.as_ref())?, reverse: reverse(p) };
     reply(cmd, couple(s, p, cmd, MotionLink { a, ia, b, ib, ratio: 1.0, offset: 0.0, coupling: Some(c), lift: Vec::new() })?)
 }
 
@@ -1833,7 +1903,11 @@ fn screw(s: &mut Session, p: &Value) -> Result<Value> {
             (a, ia, b, ib)
         }
     };
-    let c = Coupling::Screw { pitch: size_param(s, p, "pitch", cmd)?, reverse: reverse(p) };
+    let old = match replaced_coupling(s, p) {
+        Some(Coupling::Screw { pitch, .. }) => Some(pitch.clone()),
+        _ => None,
+    };
+    let c = Coupling::Screw { pitch: size_param_or(s, p, "pitch", cmd, old.as_ref())?, reverse: reverse(p) };
     reply(cmd, couple(s, p, cmd, MotionLink { a, ia, b, ib, ratio: 1.0, offset: 0.0, coupling: Some(c), lift: Vec::new() })?)
 }
 
@@ -1849,23 +1923,56 @@ fn cam_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         Some(JointKind::Revolute) => true,
         _ => return Err(bad(cmd, "the follower (b) is a slider or a revolute joint")),
     };
-    let follower = match str_(p, "follower").unwrap_or("knife") {
-        "knife" => Follower::Knife,
-        "roller" => Follower::Roller { radius: size_param(s, p, "radius", cmd)? },
-        "flat" => Follower::Flat,
-        _ => return Err(bad(cmd, "`follower` is knife, roller or flat")),
+    // A cam link being replaced: an edit dialog can't re-offer a picked profile or round face, so
+    // the command keeps the definition of the link it replaces for everything it is not given.
+    let old = match replaced_coupling(s, p) {
+        Some(Coupling::Cam(c)) => Some(c.clone()),
+        _ => None,
     };
-    if oscillating && p.get("tip").is_none() && !matches!(follower, Follower::Roller { radius: Size::Circle(_) }) {
+    let follower = match (str_(p, "follower"), old.as_ref()) {
+        (Some("knife"), _) => Follower::Knife,
+        (Some("roller"), _) => Follower::Roller {
+            radius: size_param_or(
+                s,
+                p,
+                "radius",
+                cmd,
+                match old.as_ref().map(|c| &c.follower) {
+                    Some(Follower::Roller { radius }) => Some(radius),
+                    _ => None,
+                },
+            )?,
+        },
+        (Some("flat"), _) => Follower::Flat,
+        (Some(_), _) => return Err(bad(cmd, "`follower` is knife, roller or flat")),
+        (None, Some(c)) => c.follower.clone(),
+        (None, None) => Follower::Knife,
+    };
+    let old_tip = old.as_ref().and_then(|c| c.tip.clone());
+    if oscillating && p.get("tip").is_none() && old_tip.is_none() && !matches!(follower, Follower::Roller { radius: Size::Circle(_) }) {
         return Err(bad(cmd, "an oscillating follower needs `tip`: its knife's point or its roller's centre ({circle: [x, y, z]} on the roller)"));
     }
     let tip = match p.get("tip") {
         Some(v) => Some(origin_param(s, Some(v), cmd)?),
-        None => None,
+        None => old_tip,
     };
-    let mut c = Cam { profile: cam_profile(s, p, cmd)?, follower, tip, reverse: false };
+    let profile = match old.as_ref().filter(|_| p.get("profile").is_none()) {
+        Some(c) => c.profile.clone(),
+        None => cam_profile(s, p, cmd)?,
+    };
+    let mut c = Cam { profile, follower, tip, reverse: false };
     let probe = MotionLink { a, ia: 0, b, ib: 0, ratio: 1.0, offset: 0.0, coupling: None, lift: Vec::new() };
     let st = s.model.state();
-    c.reverse = cam::default_reverse(&s.doc, &st, &probe, &c).map_err(|e| bad(cmd, e.to_string()))? != bool_(p, "flip").unwrap_or(false);
+    let side = cam::default_reverse(&s.doc, &st, &probe, &c).map_err(|e| bad(cmd, e.to_string()))?;
+    // `flip` left out when replacing a cam link: it keeps riding from the side it rides from now.
+    let flip = match bool_(p, "flip") {
+        Some(f) => f,
+        None => match old.as_ref() {
+            Some(c) => side != c.reverse,
+            None => false,
+        },
+    };
+    c.reverse = side != flip;
     let offset = cam::follower_offset(&s.doc, &st, &probe, &c).map_err(|e| bad(cmd, e.to_string()))?;
     let reverse = c.reverse;
     let coupled = couple(s, p, cmd, MotionLink { coupling: Some(Coupling::Cam(c)), ..probe })?;

@@ -31,7 +31,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::curve::line::Line;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent3d::Extent3d;
-use solidcore::math::{Point3, Vec3};
+use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
@@ -391,5 +391,145 @@ fn tight_box_cells_are_solved_on_their_own_subpatch() {
     assert!(
         read <= 50 * net,
         "control points read {read}, whole net {net}"
+    );
+}
+
+/// The ramp's height over x: z = `RAMP_BEND` x^2.
+const RAMP_BEND: f64 = 0.02;
+/// The ramp's length along x.
+const RAMP_LENGTH: f64 = 10.0;
+/// Where the ramp is cut off: it is trimmed to x in 0.5..`RAMP_STOP`, across all of y.
+const RAMP_STOP: f64 = 6.3;
+
+/// A ramp like a thread's screw wall: a rational quadratic B-spline with `spans` knot spans
+/// along u (x from 0 to `RAMP_LENGTH`, uniform knots, every other weight 0.8) and one
+/// linear span across v (y from 0 to 1); its control points' heights are `RAMP_BEND` x^2
+/// of their x, so z rises along u and does not change across v.
+fn ramp(spans: usize) -> Surface {
+    let n = spans + 2;
+    let mut knots = vec![0.0; 3];
+    knots.extend((1..spans).map(|i| i as f64 / spans as f64));
+    knots.extend([1.0; 3]);
+    let net: Vec<Vec<CPoint>> = (0..n)
+        .map(|i| {
+            let w = if i % 2 == 1 { 0.8 } else { 1.0 };
+            let x = RAMP_LENGTH * i as f64 / (n - 1) as f64;
+            let z = RAMP_BEND * x * x;
+            [0.0, 1.0]
+                .iter()
+                .map(|&y| CPoint::new(x * w, y * w, z * w, w))
+                .collect()
+        })
+        .collect();
+    let nurb = NurbSurface::new(net, 2, 1, knots, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+    Surface::from(BSplineSurface::from_nurb(nurb, false))
+}
+
+/// The ramp's height where its x is `x`, from the surface itself (x rises along u and z
+/// does not change across v): bisection on u.
+fn ramp_z_at(spans: usize, x: f64) -> f64 {
+    let k = Kernel::default();
+    let s = ramp(spans);
+    let at = |u: f64| s.evaluate_point(&k, Point2::new(u, 0.5)).unwrap();
+    let (mut a, mut b) = (0.0, 1.0);
+    for _ in 0..200 {
+        let m = 0.5 * (a + b);
+        if at(m).x < x {
+            a = m;
+        } else {
+            b = m;
+        }
+    }
+    at(0.5 * (a + b)).z
+}
+
+/// The ramp of `spans` spans trimmed to x in 0.5..`RAMP_STOP` (a rectangle projected down
+/// onto it, its long sides on the ramp's own sides y = 0 and y = 1, as a screw wall's
+/// trims run along its sides): its tight box and the control points the trim search's
+/// solves read.
+fn trimmed_ramp_box(spans: usize) -> (Extent3d, u64) {
+    let mut k = Kernel::default();
+    k.fixes.face_tight_box_searches_trim = true;
+    let corners = [
+        (0.5, 0.0),
+        (RAMP_STOP, 0.0),
+        (RAMP_STOP, 1.0),
+        (0.5, 1.0),
+        (0.5, 0.0),
+    ];
+    let pw = corners
+        .iter()
+        .map(|&(x, y)| CPoint::new(x, y, 5.0, 1.0))
+        .collect();
+    let knots = vec![0.0, 0.0, 0.25, 0.5, 0.75, 1.0, 1.0];
+    let window = Curve::from(BSplineCurve::from_nurb(
+        NurbCurve::new(pw, 1, knots).unwrap(),
+        3,
+        false,
+    ));
+    let b = trim_project_parallel(
+        &mut k,
+        TrimObject::Surface(Box::new(ramp(spans))),
+        &window,
+        Vec3::new(0.0, 0.0, -1.0),
+        Point3::new(3.0, 0.5, 0.0),
+        TrimType::KeepPoint,
+    )
+    .unwrap();
+    let fs = faces(&b, None).unwrap();
+    assert_eq!(fs.len(), 1);
+    k.work_counters.reset();
+    let bx = calculate_tight_bounding_box(&k, &b, fs[0]).unwrap();
+    (bx, k.work_counters.face_extreme_control_points())
+}
+
+/// #14460: a thread's screw wall (a knot every eighth of a turn along u, one span across v)
+/// took 1.2 s to box: its +z and -z extremes lie past the trim, and the cells along the
+/// trim stay undecided until they lie within one span along u (the monotone test of a
+/// rational patch). Each undecided cell was divided both ways, so v, which is one span,
+/// was halved at every level too and the cells along the trim doubled each level: as many
+/// cells as the wall has spans, each solved twice. A cell is now divided only the ways a
+/// knot lies inside it while either way has one.
+///
+/// Here: a rational ramp, z = 0.02 x^2 over its control points, one span across, trimmed to
+/// 0.5 <= x <= 6.3, its +z and -z (and +x, -x) extremes past the trim; with 16 and with 128
+/// spans along u. Its box is the trimmed ramp's (z from the ramp's height at x = 0.5 to
+/// that at x = 6.3, to the trim's projection tolerance). The control points the solves read
+/// (each solve reads its cell's net): before, 2,848 and 37,152, 143 times the 128-span
+/// ramp's net; now 728 and 4,872, 19 times it, the depth-0 solves over the whole net most
+/// of it.
+#[test]
+fn a_wall_one_span_across_is_divided_only_along_its_spans() {
+    let mut read = Vec::new();
+    for spans in [16, 128] {
+        let z = |x: f64| ramp_z_at(spans, x);
+        let (bx, n) = trimmed_ramp_box(spans);
+        for (what, got, want) in [
+            ("x min", bx.min().x, 0.5),
+            ("x max", bx.max().x, RAMP_STOP),
+            ("y min", bx.min().y, 0.0),
+            ("y max", bx.max().y, 1.0),
+            ("z min", bx.min().z, z(0.5)),
+            ("z max", bx.max().z, z(RAMP_STOP)),
+        ] {
+            assert!(
+                (got - want).abs() <= 1e-3,
+                "{spans} spans: {what}: {got}, want {want}"
+            );
+        }
+        eprintln!("{spans} spans: control points read {n}");
+        read.push((spans, n));
+    }
+    let [(few, read_few), (many, read_many)] = read[..] else {
+        panic!("two ramps");
+    };
+    let net = 2 * (many as u64 + 2);
+    assert!(
+        read_many <= 30 * net,
+        "{many} spans: control points read {read_many}, net {net}"
+    );
+    assert!(
+        read_many * few as u64 <= read_few * many as u64,
+        "control points read grow faster than the spans: {read_few} at {few}, {read_many} at {many}"
     );
 }

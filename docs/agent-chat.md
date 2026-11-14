@@ -44,18 +44,15 @@ when you send a message or press **Connect** (or at launch, when you turned that
 
 ## The panel
 
-With **Preferences → Layout → Use shared panel layout** enabled, side panels keep
-the conversation above the composer. A wide floating panel places the conversation
-beside the provider controls and composer when both columns have enough width.
-Smaller widths keep the stacked layout. The conversation, unsent draft and scroll
-state stay with the same Assistant when the layout changes. Hovering over its shared
-header reports the current agent state or pending approvals; requests that need
-attention use the shared attention indication. Classic and the Assistant's own
-native window keep their existing layout.
+Assistant uses the shared panel layout. Narrow panels keep the conversation above
+the composer. A wide floating panel places the conversation beside the provider
+controls and composer when both columns have enough width. The conversation,
+unsent draft and scroll state stay with the same Assistant when its placement
+changes. The shared header reports the agent state and pending approvals.
+The Assistant’s own native window keeps its existing layout.
 
-In the floating layout, Assistant fills the viewport height in the shared rounded panel, with
-space around its edges. The compass and navigation bar move into the remaining space beside it. It overlays the model without changing the viewport projection;
-clicks and scrolling over the panel stay in the chat. The docked layout retains its side panel.
+Assistant fills the available side height. The compass and navigation bar use the
+remaining viewport space. Clicks and scrolling over the panel stay in the chat.
 
 After clicking in Assistant, keyboard input stays in the chat, including when selecting text
 in an answer. Copy, Cut and Paste do not also operate on selected CAD geometry. Moving the
@@ -429,9 +426,10 @@ The agent reaches the open design only through SolidCraft's own tools (the
   a single undo step, named after your message. The conversation shows *N changes, one undo
   step* with **Undo these changes** while nothing else has happened since.
 - **Tool cards:** each tool call shows as a card with its state; click it to see what it returned.
-- **Formatted text:** the agent's answers show as Markdown: headings, lists, quotes, code blocks
-  (with **Copy**), bold, italic, `code` and links (web links only; each link is a button that opens
-  it in your browser). What you type, and the agent's thoughts, stay plain text.
+- **Formatted text:** the agent's answers show as Markdown: headings, lists, quotes, tables, code
+  blocks (with **Copy**), bold, italic, `code` and links (web links only; each link is a button
+  that opens it in your browser). A wide table scrolls sideways; one without the `|---|` line
+  under its header, or with more than 200 rows or 2000 cells, shows as plain text. What you type, and the agent's thoughts, stay plain text.
 - **Attach view:** tick it to send a picture of the current view with your message, for agents
   that take pictures. The picture is taken when the agent starts on the message and then shows as
   a small thumbnail under it. Hold the pointer over the thumbnail for a bigger preview that stays

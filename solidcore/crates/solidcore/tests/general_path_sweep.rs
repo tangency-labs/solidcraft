@@ -106,28 +106,13 @@ const FIT: &[(f64, f64, f64)] = &[
 /// The pipe's radius: the wire's 1.5 mm circle.
 const RADIUS: f64 = 0.75;
 
-/// The pipe's radius along [`spline_path`]. The fitted spline overshoots where a straight
-/// meets a round near the wire's far end, bending there with radius about 0.564 (sampled at
-/// (168.51, -37.90, 50.71)). A pipe of [`RADIUS`] would fold its wall through itself in that
-/// bend, and `create_pipe_sweep` refuses it (#13766), so this pipe stays inside the bend.
-const SPLINE_RADIUS: f64 = 0.5;
-
-/// The balance wire's points fitted open, as the wire runs. Fitted closed (C1 between its
-/// two ends, though the wire's ends are apart), the spline bends with radius about 0.041
-/// near its start and 0.045 near its end, which no pipe of the wire's size fits.
+/// The balance wire's points fitted by a cubic spline closed (C1 between its two ends), as
+/// the case was written.
 fn spline_path() -> Curve {
     let pts: Vec<Point3> = FIT.iter().map(|&(x, y, z)| Point3::new(x, y, z)).collect();
     Curve::from(
-        BSplineCurve::interpolate_points(
-            &pts,
-            None,
-            3,
-            None,
-            None,
-            false,
-            ParamMethod::ChordLength,
-        )
-        .unwrap(),
+        BSplineCurve::interpolate_points(&pts, None, 3, None, None, true, ParamMethod::ChordLength)
+            .unwrap(),
     )
 }
 
@@ -658,10 +643,6 @@ fn issue_2572_every_path_wall_is_a_definition_or_in_the_ledger() {
             create_pipe_sweep(&mut k, RADIUS, Some(&arc_path()), false).unwrap(),
         ),
         (
-            "path-spline",
-            create_pipe_sweep(&mut k, SPLINE_RADIUS, Some(&spline_path()), false).unwrap(),
-        ),
-        (
             "path-b-spline",
             create_pipe_sweep(&mut k, RADIUS, Some(&wire), false).unwrap(),
         ),
@@ -730,10 +711,35 @@ fn issue_2572_every_path_wall_is_a_definition_or_in_the_ledger() {
         unlisted.is_empty(),
         "bare wall faces of kinds the ledger does not list: {unlisted:?}"
     );
-    let fixed: Vec<&String> = ledger.keys().filter(|kd| !bare.contains(*kd)).collect();
+    // `path-spline` is the known-failing case's (`issue_2572_the_balance_wire_spline_pipe_is_in_the_ledger`).
+    let fixed: Vec<&String> = ledger
+        .keys()
+        .filter(|kd| *kd != "path-spline" && !bare.contains(*kd))
+        .collect();
     assert!(
         fixed.is_empty(),
         "listed kinds no case makes bare any more (fixed? delete their ledger files): {fixed:?}"
+    );
+}
+
+/// The ledger's `path-spline` kind: the wire's pipe along its points fitted by a spline.
+/// Known failing since #14640: that spline, fitted closed (C1 between the wire's two ends,
+/// though they are apart), bends with radius about 0.041 near its start and 0.045 near its
+/// end, so `create_pipe_sweep` refuses the wire's 0.75 pipe as folding through itself. The
+/// input is the case's own and is not changed to pass (#15038): the case needs a path the
+/// wire's pipe fits, and until it has one this test stays listed as failing.
+#[test]
+#[ignore = "known failing: the closed spline fit bends with radius 0.041 < 0.75 and the pipe is refused (#14640, #15038)"]
+fn issue_2572_the_balance_wire_spline_pipe_is_in_the_ledger() {
+    let mut k = Kernel::default();
+    assert!(path_ledger().contains_key("path-spline"));
+    let b = create_pipe_sweep(&mut k, RADIUS, Some(&spline_path()), false).unwrap();
+    let bare = walls(&b)
+        .iter()
+        .any(|s| s.procedural_definition().is_none() && !matches!(s.kind(), SurfaceKind::Plane(_)));
+    assert!(
+        bare,
+        "the listed kind no longer appears (fixed? delete its ledger file)"
     );
 }
 

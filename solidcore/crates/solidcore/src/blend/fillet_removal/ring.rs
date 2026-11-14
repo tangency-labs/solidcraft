@@ -33,7 +33,10 @@
 //!   use), the port returns [`SolidError::InvalidInput`].
 //! - No recursion.
 
-use super::{bspline_part, glue_edges, ner, null, own_edge_curve, set_vertex_point, sm_err, OP};
+use super::{
+    bspline_part, bspline_part_with_nurb, glue_edges, ner, null, own_edge_curve, set_vertex_point,
+    sm_err, OP,
+};
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
 use crate::error::{ignore_status, Result, SolidError};
@@ -429,7 +432,10 @@ impl RingFilletRemoval {
             return Err(sm_err());
         };
         if bspline_part(&sharp).is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(
+                OP,
+                "the sharp curve's B-spline form",
+            ));
         }
 
         // Run as rail 0.
@@ -477,7 +483,10 @@ impl RingFilletRemoval {
             };
             let mut side_curve = ner(edge::curve(b, side)?)?.clone();
             if bspline_part(&side_curve).is_none() {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(
+                    OP,
+                    "the side curve's B-spline form",
+                ));
             }
             let none = CurveIntersectOptions::<NoObject>::default();
             let mut solutions = sharp.global_curve_intersect(
@@ -519,7 +528,7 @@ impl RingFilletRemoval {
                 } else {
                     end - reach_param
                 };
-                let part = ner(bspline_part(&side_curve))?;
+                let part = ner(bspline_part_with_nurb(&side_curve)?)?;
                 let longer = Curve::from(ner(part.create_extended_curve(
                     far,
                     ContinuityType::CInfinity,
@@ -579,7 +588,10 @@ impl RingFilletRemoval {
         if start_at > ivl.min() + snap && start_at < ivl.max() - snap {
             let mut before = sharp.clone();
             if bspline_part(&before).is_none() {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(
+                    OP,
+                    "the sharp curve's B-spline form",
+                ));
             }
             let mut after_ivl = crate::geom::extent1d::Extent1d::from_min_max(start_at, ivl.max());
             let mut before_ivl = crate::geom::extent1d::Extent1d::from_min_max(ivl.min(), start_at);
@@ -631,11 +643,14 @@ impl RingFilletRemoval {
             }
             let extended = if uv.natural_interval().contains_value(new_t, 0.0) {
                 if bspline_part(uv).is_none() {
-                    return Err(SolidError::null_pointer(OP));
+                    return Err(SolidError::blend_missing(
+                        OP,
+                        "the UV curve's B-spline form",
+                    ));
                 }
                 uv.clone()
             } else {
-                let part = ner(bspline_part(uv))?;
+                let part = ner(bspline_part_with_nurb(uv)?)?;
                 Curve::from(ner(part.create_extended_curve(
                     new_t,
                     ContinuityType::CInfinity,
@@ -797,7 +812,10 @@ impl RingFilletRemoval {
         for &eu in &uses {
             get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
             if eu1::uv_trim_curve(b, eu)?.0.is_none() {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(
+                    OP,
+                    "the edge use's UV trim curve",
+                ));
             }
         }
         for ii in 0..2 {
