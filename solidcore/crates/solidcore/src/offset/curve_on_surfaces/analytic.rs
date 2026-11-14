@@ -44,13 +44,28 @@
 //! **Cone frames** (the slack). The cone is taken about its stored `Z` (its height
 //! `v = (x - O) . Z / |Z|^2`), its circles of radius `R(v)` across it. The placement's
 //! `X`, `Y`, `Z` are enclosed off orthonormal by a residual `r` (the magnitudes of their
-//! dot products and squared lengths less 1), refused past [`FRAME_ULPS`] ulps; then the
-//! surface point `O + R (cos u X + sin u Y) + v Z` lies within `8 r (|R| + |v| + |x - O|)`
-//! of that circle (ARGUED to first order in `r`: each of `X`, `Y`, `Z` is within `3 r` of
-//! an orthonormal frame, so `R (cos u X + sin u Y)` within `6 r |R|` of a vector across
-//! `Z` of length `R`, `v Z` within `3 r |v|` of height `v`; the `x - O` term covers the
-//! height's and radius's own residual), which is added. The semi-angle's tangent is taken
-//! within two ulps of the libm value.
+//! dot products and squared lengths less 1), refused past [`FRAME_ULPS`] ulps. The
+//! allowance added is `8 r (|R| + |v| + |x - O|)`, enclosed with outward rounding; it holds
+//! for every residual `r <= 1e-3` (far above the ulps allowed), with no term dropped:
+//!
+//! - `F` measures `x` against the ideal point `Q = O + v Z + R(v) w` at the same height
+//!   (`v Z` is `x`'s exact projection on the axis), `w` the unit direction of `x`'s part
+//!   across `Z`: `|x - Q| = |F(x)|`.
+//! - The surface at the same `v` is `P(u) = O + v Z + R(v) c(u)`, `c(u) = cos u X +
+//!   sin u Y`, so `|P(u) - Q| = |R(v)| |c(u) - w|`. With `Zh = Z / |Z|` (`|Z|^2 >= 1 -
+//!   r`): `|c . Zh| <= (|X . Z| + |Y . Z|) / |Z| <= 2 r / sqrt(1 - r)`, and `|c|^2 = cos^2
+//!   |X|^2 + sin^2 |Y|^2 + 2 cos sin X . Y` lies in `[1 - 2 r, 1 + 2 r]`.
+//! - `c`'s part across `Z`, `c_p(u)`, traces an ellipse round the axis (`X`, `Y` nearly
+//!   orthonormal, so independent across `Z`), which takes every direction: pick `u` with
+//!   `c_p(u) = lambda w`, `lambda > 0`. Then `|lambda^2 - 1| <= 2 r + 4 r^2 / (1 - r)` and
+//!   `|lambda - 1| <= |lambda^2 - 1|`, so `|c(u) - w| <= |c . Zh| + |lambda - 1| <=
+//!   (2 / sqrt(1 - r) + 2 + 4 r / (1 - r)) r < 5 r` for `r <= 1e-3`.
+//! - So `x` is within `|F(x)| + 5 r |R(v)|` of the surface, and `8 r (|R| + |v| + |x -
+//!   O|)` (with `|R|` enclosed over the box) is at least `5 r |R(v)|`.
+//!
+//! The surface is taken as its formula with the stored axes; the rounding of its own
+//! evaluation is not bounded (as for planes). The semi-angle's tangent is taken within
+//! two ulps of the libm value.
 //!
 //! Deviations: none (no upstream counterpart). Not checked (nothing proved): other analytic
 //! kinds (spheres and tori evaluate through their NURB), offsets of analytic surfaces, a
@@ -195,6 +210,7 @@ impl Analytic {
                     return None;
                 }
                 let frame = frame_residual(&[v3(pos.x_axis()), v3(pos.y_axis()), z]);
+                // (the allowance's derivation needs `r <= 1e-3`; this is far below it)
                 if frame.is_nan() || frame > FRAME_ULPS * f64::EPSILON {
                     return None;
                 }
@@ -276,7 +292,8 @@ impl Analytic {
                     None => 0.0,
                 };
                 // a clamped height moves the point `dv (|Z| + |T|)` at most; the frame's
-                // residual `r` moves it `8 r (|R| + |v| + |x - O|)` at most (module docs)
+                // residual `r` puts the surface within `5 r |R|` of the ideal cone's
+                // point, bounded above by `8 r (|R| + |v| + |x - O|)` (module docs)
                 let zt = round_up(zz.sqrt().hi + t.mag());
                 let r = (*r0 + *t * v).mag();
                 let size = round_up(round_up(r + v.mag()) + norm_up(q));
@@ -426,4 +443,60 @@ pub(super) fn on_analytic(
         }
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The cone-frame allowance's lemma (module docs): for axes off orthonormal by a
+    /// residual `r`, every unit direction `w` across `Z` is within `5 r` of some
+    /// `c(u) = cos u X + sin u Y`, and the allowance `8 r (|R| + ...)` covers `5 r |R|`.
+    /// Checked on skewed frames with `r` far above the ulps allowed (so the effect is not
+    /// lost in rounding); the sampled minimum over `u` bounds the true one from above.
+    #[test]
+    fn a_skewed_frame_reaches_every_direction_within_five_residuals() {
+        for (i, &e) in [1e-6, 1e-5, 1e-4].iter().enumerate() {
+            let s = f64::from(u8::try_from(i).expect("index")) + 1.0;
+            let x = Vec3::new(1.0 + 0.3 * e, 0.7 * e * s, -0.4 * e);
+            let y = Vec3::new(-0.5 * e, 1.0 - 0.2 * e, 0.6 * e / s);
+            let z = Vec3::new(0.3 * e, -0.8 * e, 1.0 + 0.1 * e);
+            let r = frame_residual(&[v3(x), v3(y), v3(z)]);
+            assert!(r > 0.0 && r <= 1e-3, "{r}");
+            let zl = (z.x * z.x + z.y * z.y + z.z * z.z).sqrt();
+            let zh = Vec3::new(z.x / zl, z.y / zl, z.z / zl);
+            // an orthonormal pair across Z
+            let a = {
+                let d = x.x * zh.x + x.y * zh.y + x.z * zh.z;
+                let p = Vec3::new(x.x - d * zh.x, x.y - d * zh.y, x.z - d * zh.z);
+                let l = (p.x * p.x + p.y * p.y + p.z * p.z).sqrt();
+                Vec3::new(p.x / l, p.y / l, p.z / l)
+            };
+            let b = Vec3::new(
+                zh.y * a.z - zh.z * a.y,
+                zh.z * a.x - zh.x * a.z,
+                zh.x * a.y - zh.y * a.x,
+            );
+            for j in 0..64 {
+                let th = f64::from(j) * core::f64::consts::TAU / 64.0;
+                let w = Vec3::new(
+                    th.cos() * a.x + th.sin() * b.x,
+                    th.cos() * a.y + th.sin() * b.y,
+                    th.cos() * a.z + th.sin() * b.z,
+                );
+                let mut best = f64::INFINITY;
+                for n in 0..20_000 {
+                    let u = th - 0.01 + 0.02 * f64::from(n) / 20_000.0;
+                    let c = Vec3::new(
+                        u.cos() * x.x + u.sin() * y.x,
+                        u.cos() * x.y + u.sin() * y.y,
+                        u.cos() * x.z + u.sin() * y.z,
+                    );
+                    let d = Vec3::new(c.x - w.x, c.y - w.y, c.z - w.z);
+                    best = best.min((d.x * d.x + d.y * d.y + d.z * d.z).sqrt());
+                }
+                assert!(best <= 5.0 * r, "r {r} direction {j}: {best}");
+            }
+        }
+    }
 }

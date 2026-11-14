@@ -953,7 +953,8 @@ pub fn flush_curve(
 
 /// [`flush_curve`] with the polygon fixed up by
 /// [`super::boundary_moves::fix_boundary_curves_bounded`] where `bound` is given (not
-/// upstream: a B-spline surface's drop), by [`fix_boundary_curves`] otherwise.
+/// upstream: a B-spline surface's drop, with the kernel whose cancel token it polls), by
+/// [`fix_boundary_curves`] otherwise.
 ///
 /// # Errors
 ///
@@ -967,7 +968,7 @@ pub fn flush_curve_bounded(
     uv_tol_y: f64,
     curves: &mut Vec<BSplineCurve>,
     fix_bc_change: &mut bool,
-    bound: Option<&MoveBound>,
+    bound: Option<(&Kernel, &MoveBound)>,
 ) -> Result<()> {
     // no work: no knots
     let num_knots = knots.len();
@@ -977,7 +978,9 @@ pub fn flush_curve_bounded(
 
     // postprocess the curve (not upstream: bounded moves where the surface allows it)
     let fixed = match bound {
-        Some(b) => fix_boundary_curves_bounded(ctrl_poly, knots, uv_domain, uv_tol_x, uv_tol_y, b)?,
+        Some((k, b)) => {
+            fix_boundary_curves_bounded(k, ctrl_poly, knots, uv_domain, uv_tol_x, uv_tol_y, b)?
+        }
         None => fix_boundary_curves(ctrl_poly, uv_domain, uv_tol_x, uv_tol_y)?,
     };
     if fixed {
@@ -1151,7 +1154,7 @@ pub fn add_to_curve_bounded(
                 uv_tol_y,
                 curves,
                 fix_bc_change,
-                bound,
+                bound.map(|b| (k, b)),
             )?;
         }
     } else if !knots.is_empty() {

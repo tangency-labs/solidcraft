@@ -65,7 +65,7 @@ use crate::blend::fillet_section::interval::{round_down, round_up, Ivl};
 use crate::blend::fillet_section::series::V3;
 use crate::blend::fillet_section::station::Nurbs;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::Result;
+use crate::error::{ignored, Result};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
@@ -121,13 +121,22 @@ struct Checked {
 }
 
 impl Checked {
+    /// `None` for any other kind, and for a surface (or an offset's base) that carries a
+    /// procedural definition: the kernel evaluates that exactly, not its net, so a bound on
+    /// the net would prove nothing about it (as `offset_executive::face` guards).
     fn of(k: &Kernel, s: &Surface) -> Option<Self> {
+        if s.procedural_definition().is_some() {
+            return None;
+        }
         match s.kind() {
             SurfaceKind::BSpline(b) => Some(Self {
                 net: Nurbs::of(b).ok()?,
                 offset: None,
             }),
             SurfaceKind::OffsetSurface(o) => {
+                if o.base_surface().procedural_definition().is_some() {
+                    return None;
+                }
                 let SurfaceKind::BSpline(b) = o.base_surface().kind() else {
                     return None;
                 };
@@ -413,18 +422,34 @@ fn in_one_patch(lines: &(Vec<f64>, Vec<f64>), p: Point2, q: Point2) -> bool {
 /// A surface parameter of the surface point nearest the curve's at `t`, `None` where none
 /// is found: of the point's parameters (a seam or a pole has several), the one nearest
 /// `near` when given, so a segment's two feet are taken on the same side of a seam.
-fn foot(k: &Kernel, s: &Surface, t: f64, curve: &Curve, near: Option<Point2>) -> Option<Point2> {
-    let p = curve.evaluate_point(k, t).ok()?;
-    let uvs = surface_closest_point(k, s, p).ok()?.uvs;
+///
+/// # Errors
+///
+/// A cancellation or an unported dependency of the evaluation or the closest-point
+/// solve (see [`ignored`]); any other failure is `None` (the segment is not proved).
+fn foot(
+    k: &Kernel,
+    s: &Surface,
+    t: f64,
+    curve: &Curve,
+    near: Option<Point2>,
+) -> Result<Option<Point2>> {
+    let Some(p) = ignored(curve.evaluate_point(k, t))? else {
+        return Ok(None);
+    };
+    let Some(cp) = ignored(surface_closest_point(k, s, p))? else {
+        return Ok(None);
+    };
     let finite = |uv: &&Point2| uv.x.is_finite() && uv.y.is_finite();
-    match near {
-        None => uvs.iter().find(finite).copied(),
-        Some(w) => uvs
+    Ok(match near {
+        None => cp.uvs.iter().find(finite).copied(),
+        Some(w) => cp
+            .uvs
             .iter()
             .filter(finite)
             .min_by(|x, y| x.distance(w).total_cmp(&y.distance(w)))
             .copied(),
-    }
+    })
 }
 
 type IV3 = V3<Ivl>;
@@ -612,8 +637,10 @@ fn on_surface(
             if !charge(budget) {
                 return Ok(false);
             }
-            let wa = foot(k, s, a, curve, None);
-            let (Some(wa), Some(wb)) = (wa, foot(k, s, b, curve, wa)) else {
+            let Some(wa) = foot(k, s, a, curve, None)? else {
+                return Ok(false);
+            };
+            let Some(wb) = foot(k, s, b, curve, Some(wa))? else {
                 return Ok(false);
             };
             match (gap_at(cn, c, a, wa), gap_at(cn, c, b, wb)) {
@@ -1098,5 +1125,64 @@ mod tests {
         let off = Surface::from(OffsetSurface::new(&k, 1e-4, s.clone(), true, 0).expect("offset"));
         assert!(curve_on_surfaces(&k, &c, ivl, [&s, &off], 1e-3).expect("check"));
         assert!(!curve_on_surfaces(&k, &c, ivl, [&s, &off], 1e-5).expect("check"));
+    }
+
+    /// A net carrying a procedural definition is evaluated exactly, not through its net,
+    /// so nothing is proved on it (nor on an offset of it): an edge on it falls back to the
+    /// installed intersection. The same net bare is proved.
+    #[test]
+    fn nothing_is_proved_on_a_procedural_surface() {
+        use crate::surface::offset_surface::OffsetSurface;
+        use crate::surface::procedural_sweep::ProceduralSweep;
+        let k = Kernel::default();
+        let line = |a: [f64; 3], b: [f64; 3]| {
+            let pw = [
+                CPoint::new(a[0], a[1], a[2], 1.0),
+                CPoint::new(b[0], b[1], b[2], 1.0),
+            ];
+            BSplineCurve::from_data(3, 1, 3, 1, &pw, &[0.0, 0.0, 1.0, 1.0]).expect("line")
+        };
+        let profile = line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+        let path = line([0.0, 0.0, 0.0], [0.0, 0.0, 5.0]);
+        let (sweep, _) = ProceduralSweep::create_path_exact(
+            &profile,
+            &path,
+            crate::math::Vec3::new(1.0, 0.0, 0.0),
+        )
+        .expect("sweep");
+        // the guard reads only whether a definition is kept, so the plane's net carries
+        // the sweep's here: the arc is proved on the bare net and not on the marked one
+        let bare = plane(0.0);
+        let edge = arc(0.0);
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        assert!(curve_on_surfaces(&k, &edge, ivl, [&bare, &bare], 1e-6).expect("check"));
+        let mut swept = bare.clone();
+        swept.set_sweep_definition(sweep);
+        assert!(Checked::of(&k, &swept).is_none());
+        assert!(!curve_on_surfaces(&k, &edge, ivl, [&bare, &swept], 1e-6).expect("check"));
+        let off = Surface::from(OffsetSurface::new(&k, 0.5, swept, true, 0).expect("offset"));
+        assert!(Checked::of(&k, &off).is_none());
+    }
+
+    /// `foot` passes its calls through `ignored`: an ordinary failure (a parameter that is
+    /// not a number) is an unproved segment, `Ok(None)`, while a cancellation is passed on.
+    /// The closest-point solve on these nets does not poll the token itself, so the check's
+    /// own per-segment poll is what returns `Cancelled` here.
+    #[test]
+    fn a_failed_foot_is_unproved_and_a_cancelled_check_is_passed_on() {
+        let (s, c) = (plane(0.0), arc(0.0));
+        let k = Kernel::default();
+        assert!(foot(&k, &s, 0.5, &c, None).expect("foot").is_some());
+        assert_eq!(foot(&k, &s, f64::NAN, &c, None).expect("foot"), None);
+        let mut k = Kernel::default();
+        let token = crate::kernel::CancelToken::new();
+        k.set_cancel_token(token.clone());
+        token.cancel();
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let r = curve_on_surfaces(&k, &c, ivl, [&s, &s], 1e-6);
+        assert!(
+            matches!(r, Err(crate::error::SolidError::Cancelled { .. })),
+            "{r:?}"
+        );
     }
 }
