@@ -671,7 +671,15 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.messages" => ok(crate::messages::control(app, p)),
         "ui.inspect" => ui_inspect(app),
         "ui.file" => with(p, |q| ui_file(app, q)),
-        "ui.documents" => ok(crate::documents::control(app, p)),
+        "ui.documents" => {
+            if p.get("ask").and_then(Value::as_bool) == Some(false) && p.get("action").and_then(Value::as_str) == Some("close") {
+                let force = p.get("force").and_then(Value::as_bool).unwrap_or(false);
+                if let Err(e) = crate::documents::check_close_without_prompt(app, p.get("index"), force) {
+                    return err(e);
+                }
+            }
+            ok(crate::documents::control(app, p))
+        }
         "ui.operations" => wrap(crate::operations::control(app, p)),
         "ui.home" => with(p, |q| ui_home(app, q)),
         "ui.set" => ui_set(app, p),
@@ -973,7 +981,7 @@ fn ui_workspace(app: &mut SolveApp, q: params::WorkspaceParams) -> Outcome {
 
 /// `ui.agent_cursor {show?, speed?, follow_camera?}`: the agent cursor's settings.
 fn ui_agent_cursor(app: &mut SolveApp, p: &Value) -> Outcome {
-    let s = &mut app.ui.agent_cursor;
+    let mut s = app.ui.agent_cursor;
     if let Some(v) = p.get("show").and_then(Value::as_bool) {
         s.show = v;
     }
@@ -986,6 +994,7 @@ fn ui_agent_cursor(app: &mut SolveApp, p: &Value) -> Outcome {
             None => return err("speed must be a number from 1 to 5, or \"instant\""),
         }
     }
+    app.ui.agent_cursor = s;
     ok(json!(app.ui.agent_cursor))
 }
 
@@ -1430,8 +1439,20 @@ fn ui_render(app: &mut SolveApp, q: params::Render) -> Outcome {
 
 /// `app.quit {force?}`: quit, asking about unsaved designs unless forced.
 fn app_quit(app: &mut SolveApp, ctx: &egui::Context, q: params::Quit) -> Outcome {
+    if !q.ask
+        && let Err(e) = crate::documents::check_quit_without_prompt(app, q.force)
+    {
+        return err(e);
+    }
     // `force`: quit without asking about unsaved designs.
     if q.force {
+        if !q.ask {
+            // An explicit noninteractive discard also drops the recovery copies at shutdown.
+            app.session.mark_saved();
+            for slot in app.docs.background_mut() {
+                slot.session.mark_saved();
+            }
+        }
         app.quit_requested = true;
     } else {
         crate::documents::request_quit(app);
@@ -1563,6 +1584,116 @@ pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    /// A noninteractive force cannot override a person's in-progress save question.
+    #[test]
+    fn noninteractive_close_and_quit_leave_existing_save_prompts_untouched() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.save_prompt_one_at_a_time = false;
+        h.app.run("parameters.add", json!({"name": "width", "expression": "12 mm"})).unwrap();
+        h.call("ui.documents", json!({"action": "new"}));
+        h.app.run("parameters.add", json!({"name": "height", "expression": "24 mm"})).unwrap();
+        assert_eq!(h.call("app.quit", json!({}))["result"]["asking"], true);
+        let prompt = h.call("ui.documents", json!({}))["result"]["save_prompt"].clone();
+        assert!(!prompt.is_null());
+        for (method, params) in
+            [("app.quit", json!({"ask": false, "force": true})), ("ui.documents", json!({"action": "close", "ask": false, "force": true}))]
+        {
+            assert_eq!(h.call(method, params)["ok"], false);
+            assert!(!h.app.quit_requested && h.app.session.is_dirty());
+            assert_eq!(h.call("ui.documents", json!({}))["result"]["save_prompt"], prompt);
+        }
+    }
+
+    /// A refused cursor update must leave every setting unchanged.
+    #[test]
+    fn agent_cursor_rejects_invalid_speed_without_partial_changes() {
+        let mut h = crate::scenario::Harness::new();
+        let before = h.call("ui.agent_cursor", json!({}))["result"].clone();
+        let show = !before["show"].as_bool().unwrap();
+        let follow = !before["follow_camera"].as_bool().unwrap();
+        for speed in [json!("bad"), json!(0), json!(6), Value::Null] {
+            let refused = h.call("ui.agent_cursor", json!({"show": show, "follow_camera": follow, "speed": speed}));
+            assert_eq!(refused["ok"], false, "{refused}");
+            assert_eq!(h.call("ui.agent_cursor", json!({}))["result"], before);
+        }
+    }
+
+    /// #3704: a bridged close must refuse a dirty tab atomically, including a background tab.
+    #[test]
+    fn noninteractive_document_close_refuses_dirty_tabs_without_a_prompt() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("parameters.add", json!({"name": "width", "expression": "12 mm"})).unwrap();
+        let name = h.app.session.doc.name.clone();
+        let original = h.app.session.document_id.clone();
+        assert_eq!(h.call("ui.documents", json!({"action": "new"}))["ok"], true);
+        let active = h.app.docs.active;
+        let current = h.app.session.document_id.clone();
+        let refused = h.call("ui.documents", json!({"action": "close", "index": 0, "ask": false}));
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert!(refused["error"].as_str().unwrap().contains(&name), "{refused}");
+        assert_eq!(h.app.docs.count(), 2);
+        assert_eq!(h.app.docs.active, active);
+        assert_eq!(h.app.session.document_id, current);
+        assert!(h.app.docs.closing.is_none());
+        assert!(h.call("ui.documents", json!({}))["result"]["save_prompt"].is_null());
+        assert!(h.app.docs.quitting.is_none());
+        // A clean active tab closes without asking; the original dirty design remains.
+        assert_eq!(h.call("ui.documents", json!({"action": "close", "ask": false}))["ok"], true);
+        assert_eq!(h.app.docs.count(), 1);
+        assert_eq!(h.app.session.document_id, original);
+        assert!(h.app.session.is_dirty());
+        assert_eq!(h.call("ui.documents", json!({"action": "close", "ask": false}))["ok"], false);
+        assert!(h.app.docs.closing.is_none());
+        assert_eq!(h.call("ui.documents", json!({"action": "close", "ask": false, "force": true}))["ok"], true);
+        assert_ne!(h.app.session.document_id, original);
+        assert!(!h.app.session.is_dirty());
+        assert!(h.app.docs.closing.is_none());
+    }
+
+    /// Hostile close indices never fall back to the active tab, even with force.
+    #[test]
+    fn noninteractive_document_close_checks_the_target_before_changes() {
+        let mut h = crate::scenario::Harness::new();
+        let id = h.app.session.document_id.clone();
+        for index in [json!(-1), json!(1), json!(1.5), json!("0"), json!(u64::MAX)] {
+            let reply = h.call("ui.documents", json!({"action": "close", "index": index, "ask": false, "force": true}));
+            assert_eq!(reply["ok"], false, "{index}: {reply}");
+            assert_eq!(h.app.session.document_id, id);
+            assert!(h.app.docs.closing.is_none());
+        }
+    }
+
+    /// A noninteractive quit names dirty designs and leaves every tab and prompt untouched.
+    #[test]
+    fn noninteractive_quit_refuses_dirty_designs_but_force_and_clean_quit_work() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("parameters.add", json!({"name": "width", "expression": "12 mm"})).unwrap();
+        let name = h.app.session.doc.name.clone();
+        h.call("ui.documents", json!({"action": "new"}));
+        let id = h.app.session.document_id.clone();
+        let active = h.app.docs.active;
+        let refused = h.call("app.quit", json!({"ask": false}));
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert!(refused["error"].as_str().unwrap().contains(&name), "{refused}");
+        assert_eq!(h.app.session.document_id, id);
+        assert_eq!(h.app.docs.active, active);
+        assert_eq!(h.app.docs.count(), 2);
+        assert!(!h.app.quit_requested);
+        assert!(h.app.docs.closing.is_none());
+        assert!(h.call("ui.documents", json!({}))["result"]["save_prompt"].is_null());
+        assert!(h.app.docs.quitting.is_none());
+        assert_eq!(h.call("app.quit", json!({"ask": false, "force": true}))["result"]["quitting"], true);
+        assert!(h.app.quit_requested);
+        let mut clean = crate::scenario::Harness::new();
+        assert_eq!(clean.call("app.quit", json!({"ask": false}))["result"]["quitting"], true);
+        assert!(clean.app.docs.closing.is_none());
+        // Existing callers retain the interactive prompt unless they explicitly opt out.
+        let mut legacy = crate::scenario::Harness::new();
+        legacy.app.run("parameters.add", json!({"name": "width", "expression": "12 mm"})).unwrap();
+        assert_eq!(legacy.call("app.quit", json!({}))["result"]["asking"], true);
+        assert!(!legacy.app.quit_requested);
+    }
+
     fn panel_command_app() -> crate::SolveApp {
         use crate::panel_runtime::*;
         let h = PanelMountHarness::new(false).unwrap();

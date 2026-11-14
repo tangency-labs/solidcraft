@@ -556,6 +556,57 @@ mod tests {
     }
 
     #[test]
+    fn noninteractive_forced_quit_discards_recovery_but_refusal_and_legacy_force_keep_it() {
+        use crate::control::{ControlRequest, Outcome, handle};
+
+        for (tag, params, discards) in [
+            ("control-refused", json!({"ask": false}), false),
+            ("control-discard", json!({"ask": false, "force": true}), true),
+            ("control-legacy-force", json!({"force": true}), false),
+        ] {
+            let (mut app, dir) = app(tag, Duration::ZERO);
+            name(&mut app, "Background design");
+            edit(&mut app);
+            documents::new_tab(&mut app);
+            name(&mut app, "Active design");
+            edit(&mut app);
+            tick_and_wait(&mut app);
+            let before = entries(&dir);
+            assert_eq!(before.len(), 2, "both dirty tabs already have recovery copies");
+            assert!(documents::any_dirty(&app));
+            let active = app.session.document_id.clone();
+            let (req, _rx) = ControlRequest::new("app.quit", params.clone());
+            let Outcome::Done(reply) = handle(&mut app, &egui::Context::default(), &req) else {
+                panic!("quit must answer without requesting a screenshot");
+            };
+            if params.get("force") == Some(&json!(true)) {
+                assert_eq!(reply["ok"], true, "{tag}: {reply}");
+                assert_eq!(reply["result"]["quitting"], true, "{tag}: {reply}");
+                assert!(app.quit_requested);
+            } else {
+                assert_eq!(reply["ok"], false, "{reply}");
+                let error = reply["error"].as_str().unwrap();
+                assert!(error.contains("Background design") && error.contains("Active design"), "{reply}");
+                assert!(!app.quit_requested);
+                assert_eq!(app.session.document_id, active);
+                assert!(app.session.is_dirty());
+                assert!(app.docs.background_mut().all(|slot| slot.session.is_dirty()));
+                assert_eq!(entries(&dir), before, "refusal keeps every existing recovery copy");
+            }
+            assert!(app.docs.closing.is_none(), "{tag}: quit never opens a save prompt");
+            assert!(app.docs.quitting.is_none(), "{tag}: quit never starts an interactive quit");
+            close(&mut app); // The native host calls this when the window exits.
+            let remaining = recovery::orphans(&dir);
+            assert_eq!(remaining.len(), if discards { 0 } else { 2 }, "{tag}: only explicit noninteractive discard removes recovery");
+            if !discards {
+                assert_eq!(entries(&dir), before);
+            }
+            drop(app);
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
     fn cadence_and_big_operations_follow_the_document_and_preferences() {
         let (mut app, dir) = app("cadence", Duration::from_secs(3600));
         app.session.crash_journal = true;

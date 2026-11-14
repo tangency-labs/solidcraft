@@ -123,3 +123,8 @@ zbus = { version = "5", default-features = false, features = ["async-io", "block
 
 [build-dependencies]
 embed-resource = "3.0.11"
+
+[dev-dependencies]
+# Protocol-to-UI regression coverage belongs in the app, above both layer-five crates.
+solidcraft-mcp = { workspace = true }
+solidcraft-ui-kit = { workspace = true, features = ["test-support"] }

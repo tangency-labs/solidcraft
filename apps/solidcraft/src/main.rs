@@ -1897,6 +1897,82 @@ mod backend_tests {
 
 #[cfg(test)]
 mod prefs_writer_tests {
+    /// In-process MCP-to-UI integration, without opening a native window or socket session.
+    #[test]
+    fn app_management_mcp_tools_reach_the_real_ui_without_dialogs() {
+        use serde_json::{Value, json};
+        struct Desktop(solidcraft_ui_egui::scenario::Harness);
+        impl solidcraft_mcp::Backend for Desktop {
+            fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+                let reply = self.0.call(method, params);
+                if reply["ok"] == true {
+                    Ok(reply["result"].clone())
+                } else {
+                    Err(reply["error"].as_str().unwrap_or("unexpected control reply").into())
+                }
+            }
+            fn has_ui(&self) -> bool {
+                true
+            }
+            fn describe(&self) -> String {
+                "in-process desktop UI harness".into()
+            }
+        }
+        fn call(b: &mut Desktop, tool: &str, args: Value, fails: bool) -> Value {
+            let reply = solidcraft_mcp::call_tool(b, tool, &args);
+            assert_eq!(reply["isError"] == true, fails, "{tool}: {reply}");
+            assert!(b.0.app.docs.closing.is_none() && b.0.app.docs.quitting.is_none());
+            assert!(!b.0.app.prefs_window.shell.open);
+            reply
+        }
+        let mut b = Desktop(solidcraft_ui_egui::scenario::Harness::new());
+        b.0.app.run("parameters.add", json!({"name": "width", "expression": "12 mm"})).unwrap();
+        let original = b.0.app.session.document_id.clone();
+        call(&mut b, "documents", json!({"action": "new"}), false);
+        assert_eq!(b.0.app.docs.count(), 2);
+        call(&mut b, "documents", json!({"action": "switch", "index": 0}), false);
+        assert_eq!(b.0.app.session.document_id, original);
+        call(&mut b, "documents", json!({"action": "close"}), true);
+        call(&mut b, "quit_app", json!({}), true);
+        assert!(!b.0.app.quit_requested && b.0.app.session.is_dirty());
+        let before = b.0.app.preferences.theme.clone();
+        call(&mut b, "preferences", json!({"open": "General", "theme": "light"}), true);
+        assert_eq!(b.0.app.preferences.theme, before);
+        call(&mut b, "preferences", json!({"theme": "light", "default_units": "cm"}), false);
+        assert_eq!(b.0.app.preferences.theme, "light");
+        let prefs = call(&mut b, "preferences", json!({}), false);
+        assert!(prefs["content"][0]["text"].as_str().unwrap().contains("cm"));
+        call(&mut b, "agent_cursor", json!({"show": true, "speed": "instant", "follow_camera": true}), false);
+        assert!(b.0.app.ui.agent_cursor.show && b.0.app.ui.agent_cursor.follow_camera);
+        assert_eq!(b.0.call("ui.agent_cursor", json!({}))["result"]["speed"], "instant");
+        if let Ok(dir) = std::env::var("SOLIDCRAFT_APP_TOOLS_EVIDENCE") {
+            // Real egui UI paint, not a native-window or geometry-rendering claim.
+            let ctx = egui::Context::default();
+            solidcraft_ui_egui::fonts::setup_bundled_fonts(&ctx);
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+            let mut textures = std::collections::HashMap::new();
+            let mut shapes = Vec::new();
+            for _ in 0..4 {
+                let raw = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+                let output = ctx.run_ui(raw, |ui| {
+                    b.0.app.logic(ui.ctx());
+                    b.0.app.ui(ui);
+                });
+                solidcraft_ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+                shapes = output.shapes;
+            }
+            std::fs::create_dir_all(&dir).unwrap();
+            solidcraft_ui_kit::test_raster(&ctx, shapes, 1.0, screen, &textures)
+                .save(std::path::Path::new(&dir).join("app-tools-no-dialog.png"))
+                .unwrap();
+        }
+        call(&mut b, "documents", json!({"action": "close", "force": true}), false);
+        assert_eq!(b.0.app.docs.count(), 1);
+        assert_ne!(b.0.app.session.document_id, original);
+        call(&mut b, "quit_app", json!({}), false);
+        assert!(b.0.app.quit_requested);
+    }
+
     use super::PrefsWriter;
     use solidcraft_ui_egui::prefs::{NavigatorStyle, STORAGE_KEY};
     use std::collections::HashMap;
