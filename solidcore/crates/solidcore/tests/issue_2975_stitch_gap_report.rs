@@ -671,10 +671,8 @@ fn lifted_sheets_beside(
     for f in b.face_list().to_vec() {
         b.face_mut(f).unwrap().tolerance = 0.002;
     }
-    // (a body with a third face, which the scope's clearance proof is about, has wider balls)
-    let vertex_zone = if beside.is_some() { 0.006 } else { 0.006 };
     for v in b.vertex_list().to_vec() {
-        b.vertex_mut(v).unwrap().tolerance = vertex_zone;
+        b.vertex_mut(v).unwrap().tolerance = 0.006;
     }
     let translation = Axis2Placement::new(
         Vec3::new(0.0, 0.0, gap),
