@@ -4,7 +4,9 @@
 //! (wgpu: WebGPU where available, WebGL2 otherwise). Build with `trunk build --release` from this
 //! directory (output in `dist/web`). URL flags: `?webgl` forces WebGL2 (remembered until
 //! `?webgpu`), `?sample` opens the sample part, `?embed=editor` runs it as an editing embed in a
-//! host page (no application bar or start page; nothing kept in the browser; #8517).
+//! host page (no application bar or start page; nothing kept in the browser; #8517),
+//! `?host=parent` runs framed by a host page that opens and saves the files over postMessage
+//! (#16476).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 #[cfg(target_arch = "wasm32")]
@@ -17,6 +19,8 @@ mod disk;
 mod easyprint;
 #[cfg(target_arch = "wasm32")]
 mod files;
+#[cfg(any(target_arch = "wasm32", test))]
+mod host;
 #[cfg(target_arch = "wasm32")]
 mod install;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -49,6 +53,9 @@ struct Launch {
     embed: bool,
     /// `?embed=editor` (#8517): an editing embed in a host page that keeps the files itself.
     editor: bool,
+    /// `?host=parent` (#16476): framed by a host page that opens and saves the files over
+    /// postMessage (the host module only answers when the parent is this page's own origin).
+    host: bool,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -61,6 +68,7 @@ impl Launch {
                 "open" if launch.open.is_none() => launch.open = Some(value.into_owned()),
                 "embed" if value == "editor" => launch.editor = true,
                 "embed" => embed = true,
+                "host" if value == "parent" => launch.host = true,
                 _ => {}
             }
         }
@@ -393,6 +401,9 @@ mod web {
         /// A kept copy or recovered work being opened, in stages with progress and Cancel
         /// (#10198): the answer to come and what follows it ([`Shell::restored`]).
         restoring: Option<(std::sync::mpsc::Receiver<serde_json::Value>, keep::AfterOpen)>,
+        /// Host-opened designs (`?host=parent`) whose open is still in flight: the receiver
+        /// answers `{"ok": ...}` when the design is in, or has failed (#16476).
+        host_opens: Vec<std::sync::mpsc::Receiver<serde_json::Value>>,
     }
 
     impl Shell {
@@ -508,6 +519,8 @@ mod web {
                     let path = files::free_name(&name);
                     if let Err(e) = vfs::write(&path, &bytes) {
                         self.app.set_status(e.to_string(), true);
+                        // The host hears it too: its open failed (#16476).
+                        host::failed(&format!("opening {name}: {e}"));
                     }
                     files::flush(&self.files);
                     path
@@ -517,7 +530,14 @@ mod web {
                     path
                 };
                 match intent {
-                    Intent::Open => self.app.open_path_async(&path),
+                    Intent::Open => {
+                        if host::active() {
+                            // The host opened this one: its failure is reported back (#16476).
+                            self.host_opens.push(self.app.open_path_answered(&path));
+                        } else {
+                            self.app.open_path_async(&path);
+                        }
+                    }
                     Intent::Insert | Intent::Theme => self.app.drop_path(&path),
                 }
                 self.files.panel.set(false);
@@ -553,6 +573,18 @@ mod web {
             if !self.files.ready.get() || !self.files.incoming.borrow().is_empty() {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
             }
+            self.host_opens.retain_mut(|rx| match rx.try_recv() {
+                Ok(answer) => {
+                    // A failed open is reported to the host; a successful one needs no word.
+                    if answer.get("ok").and_then(|ok| ok.as_bool()) == Some(false) {
+                        let error = answer.get("error").and_then(|e| e.as_str()).unwrap_or("the design did not open");
+                        host::failed(error);
+                    }
+                    false
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => true,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
+            });
             self.all_kept = self.keep_tick(Some(ctx), false);
         }
 
@@ -1146,7 +1178,11 @@ mod web {
             self.api.poll();
             self.space_mouse.logic(&mut self.app, ctx);
             self.files_tick(ctx);
-            UNSAVED.with(|u| u.set(self.asks_before_unload()));
+            UNSAVED.with(|u| {
+                u.set(self.asks_before_unload());
+                // The host warns before the page closes when there are unsaved changes (#16476).
+                host::dirty(u.get());
+            });
             DESIGN_SHOWN.with(|d| d.set(solidcraft_ui_egui::toolbar::design_shown(&self.app)));
         }
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
@@ -1274,7 +1310,9 @@ mod web {
         wasm_bindgen_futures::spawn_local(async {
             let Some(window) = web_sys::window() else { return };
             let launch = crate::Launch::parse(&query());
-            if launch.persists() {
+            // The host warns about unsaved changes itself (solidcraft:dirty), so the browser's
+            // own prompt would ask twice for the same thing (#16476).
+            if launch.persists() && !launch.host {
                 ask_before_unload(&window);
             }
             leave_tab_switching_to_browser(&window);
@@ -1301,6 +1339,9 @@ mod web {
                     Box::new(move |cc| {
                         solidcraft_ui_egui::fonts::setup_fonts(&cc.egui_ctx);
                         let files = Rc::new(Files::default());
+                        if let Err(e) = host::install(launch.host, &files) {
+                            log::error!("the ?host=parent bridge: {e}");
+                        }
                         if launch.persists() {
                             files::start(&files);
                         }
@@ -1324,7 +1365,14 @@ mod web {
                             // where the browser can't pick one; everything else is downloaded.
                             pick_save: Some(Box::new(move |name: &str, exts: &[&str]| {
                                 let design = exts.contains(&solidcraft_engine::io::DESIGN_EXT);
-                                match disk::save_target(disk::supported(), design) {
+                                // The host keeps the files: a save goes back to it, not to a
+                                // disk handle or the browser's downloads (#16476).
+                                let target = if host::active() {
+                                    SaveTarget::Download
+                                } else {
+                                    disk::save_target(disk::supported(), design)
+                                };
+                                match target {
                                     SaveTarget::Disk => Box::pin(disk::pick_save(&saver, name)),
                                     SaveTarget::Browser => {
                                         saver.say("This browser can't save to a folder: the design is kept in this browser. File > Download design saves a file.", false);
@@ -1411,10 +1459,15 @@ mod web {
                             keep_track: Default::default(),
                             all_kept: false,
                             restoring: None,
+                            host_opens: Vec::new(),
                         }))
                     }),
                 )
                 .await;
+            // The app can take a document now: the host may hand one over (#16476).
+            if result.is_ok() {
+                host::announce_ready();
+            }
             if result.is_ok()
                 && crate::Launch::parse(&query()).persists()
                 && let Some(window) = web_sys::window()
@@ -1482,6 +1535,9 @@ mod tests {
         let viewer = Launch::parse("?embed=viewer&open=https://example.org/a.sc");
         assert!(viewer.embed && !viewer.editor, "any other value is the viewer embed, as before");
         assert!(!Launch::parse("?other=editor").editor);
+        assert!(Launch::parse("?host=parent").host);
+        assert!(!Launch::parse("?host=child").host);
+        assert!(!Launch::parse("?open=a").host);
     }
 
     #[test]
