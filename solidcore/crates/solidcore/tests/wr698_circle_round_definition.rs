@@ -26,7 +26,9 @@
 //! levels stop at the first whose bound is under the target, which the tighter terms reach
 //! a level coarser, so the root round's bound is 7.88e-5 (a coarser level's, still under
 //! its target and above the net's distance at every point checked), and the square corner's
-//! 1.04e-26 (rounding either way). The spans and points are the fork's, bit for bit.
+//! 1.04e-26 (rounding either way). Since #16652 the offset point is enclosed as one
+//! expansion and the root round's bound is 7.42e-5 (the square corner's still 1.04e-26).
+//! The spans and points are the fork's, bit for bit.
 
 #![allow(clippy::unwrap_used, clippy::panic)]
 
