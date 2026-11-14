@@ -246,6 +246,7 @@ impl Pipelines {
         t: &Targets,
         depth: Option<&wgpu::TextureView>,
         stencil: bool,
+        timestamp_writes: Option<wgpu::RenderPassTimestampWrites<'_>>,
         draw: impl FnOnce(&mut wgpu::RenderPass<'static>),
     ) {
         let attach = |view, resolve_target, clear| {
@@ -268,7 +269,7 @@ impl Pipelines {
                     depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
                     stencil_ops: stencil.then_some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
                 }),
-                timestamp_writes: None,
+                timestamp_writes,
                 occlusion_query_set: None,
                 multiview_mask: None,
             })
@@ -278,7 +279,14 @@ impl Pipelines {
     }
 
     /// Lay what was gathered over the frame's `color` (resolved into `resolve`).
-    pub fn composite(&self, encoder: &mut wgpu::CommandEncoder, t: &Targets, color: &wgpu::TextureView, resolve: Option<&wgpu::TextureView>) {
+    pub fn composite(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        t: &Targets,
+        color: &wgpu::TextureView,
+        resolve: Option<&wgpu::TextureView>,
+        timestamp_writes: Option<wgpu::RenderPassTimestampWrites<'_>>,
+    ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sc_oit_composite"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -288,7 +296,7 @@ impl Pipelines {
                 ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
             })],
             depth_stencil_attachment: None,
-            timestamp_writes: None,
+            timestamp_writes,
             occlusion_query_set: None,
             multiview_mask: None,
         });

@@ -1007,6 +1007,10 @@ fn ui_inspect(app: &SolveApp) -> Outcome {
         "frame_ms": app.frame_ms,
         "draw": app.viewport.draw_stats.as_ref().and_then(|s| s.lock().ok().map(|d| json!({
             "draw_calls": d.draw_calls, "triangles": d.triangles, "line_segments": d.line_segments, "supersampled": d.supersampled,
+            "gpu": d.gpu.map(|g| json!({
+                "span_us": g.span_us, "slowest": g.slowest, "slowest_us": g.slowest_us, "passes": g.passes,
+                "each": g.passes().iter().map(|(label, us)| json!({"pass": label, "us": us})).collect::<Vec<_>>(),
+            })),
         }))),
         "adapter": app.viewport.adapter,
         "file_busy": app.file_load.busy(),

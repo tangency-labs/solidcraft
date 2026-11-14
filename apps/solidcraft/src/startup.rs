@@ -417,6 +417,10 @@ pub fn fallback_note(previous: &str, failed: eframe::wgpu::Backends, next: &str,
 /// The device feature for a 32-bit float depth buffer with a stencil (reversed depth, #1434).
 pub const FLOAT_DEPTH_STENCIL: eframe::wgpu::Features = eframe::wgpu::Features::DEPTH32FLOAT_STENCIL8;
 
+/// Timestamp queries: the GPU time of the view's passes in the frame-rate readout's details. Asked
+/// for only where the adapter has them; without them the readout leaves that row out.
+pub const TIMESTAMP_QUERY: eframe::wgpu::Features = eframe::wgpu::Features::TIMESTAMP_QUERY;
+
 /// Whether every adapter `options` could start offers a float depth buffer with a stencil. eframe
 /// makes the window's depth buffer from the depth bits before it picks the adapter, so the window
 /// asks for a float one only when whichever it picks has it.
