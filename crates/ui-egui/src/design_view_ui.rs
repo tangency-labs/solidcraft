@@ -72,6 +72,9 @@ pub fn layout_menu() -> Vec<TabMenuRow<'static>> {
         TabMenuRow::new("layout.stacked", "Two stacked", ""),
         TabMenuRow::new("layout.large_and_two", "One large and two small", ""),
         TabMenuRow::new("layout.grid", "Two by two", ""),
+        TabMenuRow::new("fill.angle", "A new angle of this view", ""),
+        TabMenuRow::new("fill.standard", "Standard angles: front, right, top", ""),
+        TabMenuRow::new("fill.picker", "Empty cells that ask", ""),
     ]
 }
 
@@ -144,6 +147,10 @@ fn plus_row(app: &mut SolveApp, id: &str) -> bool {
         // Render workspace is one place, so it is reused.
         let reuse = kind == ViewKind::Render && app.preferences.design_reuse_views;
         documents::view_open(app, kind, None, reuse);
+        return true;
+    }
+    if let Some(fill) = documents::LayoutFill::ALL.into_iter().find(|fill| fill.key() == id) {
+        app.docs.layout_fill = fill;
         return true;
     }
     if let Some(preset) = id.strip_prefix(LAYOUT_PREFIX).and_then(solidcraft_views::Preset::from_key) {

@@ -92,6 +92,9 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // The focused view is drawn last: what it leaves in the app (the viewport's rectangle, its
     // projection for the panels) is what the rest of the frame reads.
     places.sort_by_key(|(id, _)| *id == focus);
+    // The cells with no view in them ask what to show instead of drawing one.
+    let empties: Vec<Rect> = places.iter().filter(|(id, _)| *id == solidcraft_views::EMPTY).map(|(_, cell)| *cell).collect();
+    places.retain(|(id, _)| *id != solidcraft_views::EMPTY);
     let press = ui.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten()).filter(|p| !crate::shell::covered(app, *p));
     let mut pressed = None;
     let mut cards = Vec::new();
@@ -135,6 +138,12 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             chosen = Some((*id, action));
         }
     }
+    let mut picked = None;
+    for (ordinal, cell) in empties.iter().enumerate() {
+        if let Some(action) = empty_picker(app, ui, ordinal, *cell) {
+            picked = Some((ordinal, action));
+        }
+    }
     ground_chip(app, ui, focus, ground);
     for splitter in tiles.splitters(to_tile(free), GUTTER) {
         splitter_handle(app, ui, &splitter);
@@ -142,6 +151,18 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // The shown view's rectangle is the one the panels and the host's controls read.
     app.viewport.rect = Some(ground);
     app.viewport.cards = cards;
+    match picked {
+        Some((ordinal, EmptyAction::Angle(angle))) => {
+            crate::documents::view_fill_angle(app, ordinal, angle);
+        }
+        Some((ordinal, EmptyAction::Open(id))) => {
+            crate::documents::view_fill_open(app, ordinal, id);
+        }
+        Some((ordinal, EmptyAction::Close)) => {
+            crate::documents::view_close_empty(app, ordinal);
+        }
+        None => {}
+    }
     match chosen {
         Some((id, CardAction::Maximise)) => {
             // This view alone in the window; the others stay open, reached from the bar.
@@ -166,6 +187,80 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn button_rect(card: Rect, slot: f32) -> Rect {
     Rect::from_center_size(pos2(card.right() - 16.0 - slot * 24.0, card.top() + HEADER / 2.0), vec2(22.0, 22.0))
 }
+
+/// What an empty cell's picker asks for.
+enum EmptyAction {
+    /// A new view looking from a standard angle.
+    Angle(solidcraft_viewport::StandardView),
+    /// A view that is open already.
+    Open(u64),
+    /// Close the cell.
+    Close,
+}
+
+/// An empty cell: a dashed frame that asks what to show there. The standard angles, then the
+/// Model views that are open and not shown, and a button that closes the cell.
+fn empty_picker(app: &SolveApp, ui: &mut egui::Ui, ordinal: usize, cell: Rect) -> Option<EmptyAction> {
+    use solidcraft_viewport::StandardView;
+    let t = Tokens::get();
+    let painter = ui.painter().clone();
+    painter.rect_filled(cell, CornerRadius::same(CARD_RADIUS), t.panel_header.gamma_multiply(0.7));
+    let edge = [cell.left_top(), cell.right_top(), cell.right_bottom(), cell.left_bottom(), cell.left_top()];
+    painter.extend(egui::Shape::dashed_line(&edge, Stroke::new(1.5, t.border), 6.0, 4.0));
+    let mut action = None;
+    let width = (cell.width() - 48.0).clamp(120.0, 300.0);
+    let left = cell.center().x - width / 2.0;
+    let open: Vec<(u64, String)> = app
+        .docs
+        .views
+        .views()
+        .iter()
+        .filter(|view| view.kind == solidcraft_views::ViewKind::Model && !app.docs.views.tiles().is_some_and(|tiles| tiles.contains(view.id)))
+        .take(4)
+        .map(|view| (view.id, view.name.clone()))
+        .collect();
+    let height = 22.0 + 2.0 * 34.0 + if open.is_empty() { 0.0 } else { 6.0 + open.len() as f32 * 34.0 };
+    let mut y = (cell.center().y - height / 2.0).max(cell.top() + 8.0);
+    let title = solidcraft_ui_text::tr_label("Show a view here");
+    painter.text(pos2(cell.center().x, y + 8.0), egui::Align2::CENTER_CENTER, title, egui::FontId::proportional(t.font_body), t.text);
+    y += 22.0;
+    let button = |ui: &mut egui::Ui, rect: Rect, key: (usize, u64), label: &str| -> bool {
+        let resp = ui.interact(rect, ui.scope_id().with(("empty_cell", ordinal, key)), Sense::click());
+        let fill = if resp.hovered() { t.accent_soft } else { t.panel_header };
+        ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
+        ui.painter().rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.0, t.border), StrokeKind::Inside);
+        ui.painter().text(rect.left_center() + vec2(10.0, 0.0), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(t.font_body), t.text);
+        resp.clicked()
+    };
+    let half = (width - 6.0) / 2.0;
+    for (i, angle) in [StandardView::Front, StandardView::Right, StandardView::Top, StandardView::Iso].into_iter().enumerate() {
+        let (col, row) = (i % 2, i / 2);
+        let rect = Rect::from_min_size(pos2(left + col as f32 * (half + 6.0), y + row as f32 * 34.0), vec2(half, 28.0));
+        let label = solidcraft_ui_text::tr_label(["Front", "Right", "Top", "Iso"][i]);
+        if button(ui, rect, (0, i as u64), label) {
+            action = Some(EmptyAction::Angle(angle));
+        }
+    }
+    y += 2.0 * 34.0 + 6.0;
+    for (id, name) in &open {
+        let rect = Rect::from_min_size(pos2(left, y), vec2(width, 28.0));
+        if button(ui, rect, (1, *id), name) {
+            action = Some(EmptyAction::Open(*id));
+        }
+        y += 34.0;
+    }
+    let close = Rect::from_center_size(cell.right_top() + vec2(-18.0, 18.0), vec2(22.0, 22.0));
+    let resp = ui.interact(close, ui.scope_id().with(("empty_cell_close", ordinal)), Sense::click()).on_hover_text(solidcraft_ui_text::tr_label("Close this cell"));
+    let ink = Stroke::new(1.6, if resp.hovered() { t.text } else { t.text_dim });
+    let c = close.center();
+    painter.line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], ink);
+    painter.line_segment([c + vec2(-4.5, 4.5), c + vec2(4.5, -4.5)], ink);
+    if resp.clicked() {
+        action = Some(EmptyAction::Close);
+    }
+    action
+}
+
 
 /// What a card's header buttons ask for.
 enum CardAction {
