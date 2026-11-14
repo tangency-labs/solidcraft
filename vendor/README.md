@@ -130,3 +130,9 @@ SolidCraft changes:
   raw motion while it believes the press that started the drag is still held) keeps a paint loop
   spinning for the whole drag: the window moves at 10-40 fps. A resize, a snap or a DPI change
   inside the loop (a size change) paints live either way.
+- `src/platform_impl/windows/event_loop.rs` (`raw_motion`): relative raw mouse motion is summed
+  while more raw input is waiting in the queue (`GetQueueStatus(QS_RAWINPUT)`) and sent once
+  per burst, so a high-rate mouse (8 kHz: about 7,000 `WM_INPUT` a second) no longer makes three
+  device events (`Motion` x, `Motion` y, `MouseMotion`) per report on the window thread. The
+  summed motion is exact; motion is flushed before a button or wheel change in the same report
+  stream, so the order of events is kept.

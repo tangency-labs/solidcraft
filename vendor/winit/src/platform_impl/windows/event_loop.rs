@@ -1199,6 +1199,9 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_ENTERSIZEMOVE => {
+            // Raw motion still pending from before the loop is delivered now, ahead of the loop's
+            // own events (with `quiet_window_move`, raw motion is held back during the loop).
+            raw_motion::flush(&userdata.event_loop_runner);
             {
                 let mut state = userdata.window_state_lock();
                 // Each window counts once, even if a second `WM_ENTERSIZEMOVE` comes first.
@@ -2641,6 +2644,53 @@ unsafe extern "system" fn thread_event_target_callback(
 /// render once per mouse report.
 static WINDOWS_IN_SIZE_MOVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
+/// SolidCraft: relative raw mouse motion is summed while more raw input waits in the queue and
+/// sent once per burst, so an 8 kHz mouse no longer makes three device events per report.
+mod raw_motion {
+    use super::{Event, EventLoopRunnerShared, UserEventPlaceholder};
+    use crate::event::DeviceEvent::{Motion, MouseMotion};
+    use crate::event::DeviceId;
+    use std::cell::Cell;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetQueueStatus, QS_RAWINPUT};
+
+    /// The thread's event loop, reached from the raw-input target and from the window procedure.
+    type Runner = EventLoopRunnerShared<UserEventPlaceholder>;
+
+    thread_local! {
+        static PENDING: Cell<Option<(DeviceId, f64, f64)>> = const { Cell::new(None) };
+    }
+
+    pub(super) fn add(runner: &Runner, device_id: DeviceId, x: f64, y: f64) {
+        let merged = PENDING.with(|p| match p.get() {
+            Some((d, px, py)) if d == device_id => Some((d, px + x, py + y)),
+            Some(_) => {
+                flush(runner);
+                Some((device_id, x, y))
+            },
+            None => Some((device_id, x, y)),
+        });
+        PENDING.with(|p| p.set(merged));
+        // The high word lists what is in the queue now: more raw input means the burst goes on.
+        let queued = unsafe { GetQueueStatus(QS_RAWINPUT) } >> 16;
+        if queued & QS_RAWINPUT == 0 {
+            flush(runner);
+        }
+    }
+
+    pub(super) fn flush(runner: &Runner) {
+        let Some((device_id, x, y)) = PENDING.with(|p| p.take()) else { return };
+        if x != 0.0 {
+            runner.send_event(Event::DeviceEvent { device_id, event: Motion { axis: 0, value: x } });
+        }
+        if y != 0.0 {
+            runner.send_event(Event::DeviceEvent { device_id, event: Motion { axis: 1, value: y } });
+        }
+        if x != 0.0 || y != 0.0 {
+            runner.send_event(Event::DeviceEvent { device_id, event: MouseMotion { delta: (x, y) } });
+        }
+    }
+}
+
 /// SolidCraft: a window left the modal move/size loop, or was destroyed inside it.
 fn leave_size_move() {
     // Only the window thread enters and leaves the loop: no race to guard.
@@ -2666,7 +2716,7 @@ fn quiet_window_move() -> bool {
 }
 
 unsafe fn handle_raw_input(userdata: &ThreadMsgTargetData, data: RAWINPUT) {
-    use crate::event::DeviceEvent::{Button, Key, Motion, MouseMotion, MouseWheel};
+    use crate::event::DeviceEvent::{Button, Key, MouseWheel};
     use crate::event::ElementState::{Pressed, Released};
     use crate::event::MouseScrollDelta::LineDelta;
 
@@ -2678,32 +2728,17 @@ unsafe fn handle_raw_input(userdata: &ThreadMsgTargetData, data: RAWINPUT) {
         let moving_window = quiet_window_move()
             && WINDOWS_IN_SIZE_MOVE.load(std::sync::atomic::Ordering::Relaxed) > 0;
         if util::has_flag(mouse.usFlags as u32, MOUSE_MOVE_RELATIVE) && !moving_window {
-            let x = mouse.lLastX as f64;
-            let y = mouse.lLastY as f64;
-
-            if x != 0.0 {
-                userdata.send_event(Event::DeviceEvent {
-                    device_id,
-                    event: Motion { axis: 0, value: x },
-                });
-            }
-
-            if y != 0.0 {
-                userdata.send_event(Event::DeviceEvent {
-                    device_id,
-                    event: Motion { axis: 1, value: y },
-                });
-            }
-
+            let (x, y) = (mouse.lLastX as f64, mouse.lLastY as f64);
             if x != 0.0 || y != 0.0 {
-                userdata.send_event(Event::DeviceEvent {
-                    device_id,
-                    event: MouseMotion { delta: (x, y) },
-                });
+                raw_motion::add(&userdata.event_loop_runner, device_id, x, y);
             }
         }
 
         let button_flags = unsafe { mouse.Anonymous.Anonymous.usButtonFlags };
+        // Motion that came before a button or wheel change is delivered before it.
+        if button_flags != 0 {
+            raw_motion::flush(&userdata.event_loop_runner);
+        }
         if util::has_flag(button_flags as u32, RI_MOUSE_WHEEL) {
             let button_data = unsafe { mouse.Anonymous.Anonymous.usButtonData } as i16;
             let delta = button_data as f32 / WHEEL_DELTA as f32;
