@@ -72,6 +72,12 @@ macro_rules! unpaged_preferences {
             sketch_variants: crate::sketch_families::Choices = crate::sketch_families::Choices::default();
             /// The line about sending again replacing the slicer's file has been shown.
             slicer_resend_hint_seen: bool = false;
+            /// The 3D mice read through smed (`smed V:P`) that are done taking over what was saved for them
+            /// read directly (`space_mouse::adopt_direct_settings`): they have a calibration or button jobs of
+            /// their own, carried over or set before, so a later reset of those stays a reset. Kept when settings
+            /// are reset, like `space_mouse_offered`.
+            #[serde(deserialize_with = "devices_that_read")]
+            space_mouse_adopted: std::collections::BTreeSet<String> = Default::default();
             /// Per 3D mouse, what each of its buttons does, by number from 1, once the user has changed
             /// any of them; until then a measured device has its printed keys' jobs
             /// (`space_mouse::default_button_jobs`). Kept, like calibrations, when settings are reset.
@@ -81,6 +87,12 @@ macro_rules! unpaged_preferences {
             /// 3Dconnexion's. A device without one is read as it reports. Page resets keep calibrations.
             #[serde(deserialize_with = "calibrations_that_read")]
             space_mouse_calibrations: std::collections::BTreeMap<String, solidcraft_space_mouse::Calibration> = Default::default();
+            /// Per 3D mouse, what each button does when held past the device's long-press threshold, once the
+            /// user has changed any; until then the measured defaults (`space_mouse::default_long_button_jobs`).
+            /// A button without one does its short job. Only devices read through a driver that reports long
+            /// presses (smed) have them. Kept like `space_mouse_buttons` when settings are reset.
+            #[serde(deserialize_with = "button_jobs_that_read")]
+            space_mouse_long_buttons: std::collections::BTreeMap<String, std::collections::BTreeMap<u8, crate::space_mouse::ButtonJob>> = Default::default();
             /// The 3D mice (`space_mouse::Input::device`) whose calibration has been offered and dismissed, so
             /// the offer (`space_mouse_offer`) is made once per device. A saved entry that is not text is dropped.
             /// Kept when settings are reset, like the calibrations and button mappings it goes with: resetting

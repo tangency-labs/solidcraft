@@ -994,13 +994,16 @@ impl ExtrudeStart {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SpaceMouseDriver {
-    /// The device itself (hidraw) when it opens, else spacenavd. Spacenavd has been a known source of
-    /// trouble, and a device read directly keeps its settings across a replug.
+    /// smed when it runs (it owns the device and reports every key, long presses and its rotation
+    /// lock), else the device itself (hidraw) when it opens, else spacenavd. Spacenavd has been a
+    /// known source of trouble, and a device read directly keeps its settings across a replug.
     #[default]
     Automatic,
     Spacenavd,
     /// The hidraw device, bypassing spacenavd's settings.
     Direct,
+    /// smed, the SpaceMouse Enterprise driver daemon; the others when it is not running.
+    Smed,
 }
 
 /// Where the small 3D mouse picture sits in the 3D view (Preferences: "Position").
@@ -1025,7 +1028,7 @@ impl SpaceMouseGhost {
 }
 
 impl SpaceMouseDriver {
-    pub const ALL: [Self; 3] = [Self::Automatic, Self::Spacenavd, Self::Direct];
+    pub const ALL: [Self; 4] = [Self::Automatic, Self::Spacenavd, Self::Direct, Self::Smed];
 
     /// The choice as the reader thread shares it (an `AtomicU8`).
     pub fn to_u8(self) -> u8 {
@@ -2838,47 +2841,80 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     };
     let mut jobs = crate::space_mouse::button_jobs(app, &device);
-    let bit = |number: u8| number.checked_sub(1).and_then(|index| 1_u32.checked_shl(u32::from(index))).unwrap_or(0);
+    let mut long_jobs = crate::space_mouse::button_long_jobs(app, &device);
     let mut numbers: std::collections::BTreeSet<u8> = jobs.keys().copied().collect();
-    numbers.extend((1..=32).filter(|&number| app.space_mouse.seen & bit(number) != 0));
-    let mut changed = false;
+    numbers.extend(app.space_mouse.seen.iter());
+    // A long row for each button that has a long job or was held long: only devices whose reader
+    // reports long presses have them.
+    let long_numbers: std::collections::BTreeSet<u8> = long_jobs.keys().copied().chain(app.space_mouse.seen_long.iter()).collect();
+    numbers.extend(long_numbers.iter().copied());
+    let (mut changed, mut long_changed) = (false, false);
+    let lock = app.space_mouse.lock;
     ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
         hint_under_controls(ui, solidcraft_ui_text::tr("ui.3d_mouse_buttons_hint"), "space_mouse_buttons");
+        // A driver that keeps a rotation lock (smed) can be asked to switch it from here.
+        if let Some(mut on) = lock {
+            let label = solidcraft_ui_text::tr("ui.3d_mouse_rotation_lock").to_string();
+            if ui_kit::checkbox(ui, &label, &mut on).changed() {
+                app.space_mouse.lock_request = Some(on);
+            }
+        }
         for number in numbers {
             let mut name = solidcraft_ui_text::format("ui.3d_mouse_button", &[("number", &number.to_string())]);
-            if app.space_mouse.buttons & bit(number) != 0 {
+            if app.space_mouse.buttons.contains(number) {
                 name.push_str("  ●");
             }
             let current = jobs.get(&number).cloned();
-            if let Some(choice) = ui_kit::row(ui, &name, |ui| button_job_picker(app, ui, number, current.as_ref())) {
+            if let Some(choice) = ui_kit::row(ui, &name, |ui| button_job_picker(app, ui, number, false, current.as_ref())) {
                 changed = true;
                 match choice {
                     Some(job) => jobs.insert(number, job),
                     None => jobs.remove(&number),
                 };
             }
+            if long_numbers.contains(&number) {
+                let mut name = solidcraft_ui_text::format("ui.3d_mouse_button_long", &[("number", &number.to_string())]);
+                if app.space_mouse.long_buttons.contains(number) {
+                    name.push_str("  ●");
+                }
+                let current = long_jobs.get(&number).cloned();
+                if let Some(choice) = ui_kit::row(ui, &name, |ui| button_job_picker(app, ui, number, true, current.as_ref())) {
+                    long_changed = true;
+                    match choice {
+                        Some(job) => long_jobs.insert(number, job),
+                        None => long_jobs.remove(&number),
+                    };
+                }
+            }
         }
     });
     if changed {
         app.preferences.space_mouse_buttons.insert(device.clone(), jobs);
     }
-    if app.preferences.space_mouse_buttons.contains_key(&device) {
+    if long_changed {
+        app.preferences.space_mouse_long_buttons.insert(device.clone(), long_jobs);
+    }
+    if app.preferences.space_mouse_buttons.contains_key(&device) || app.preferences.space_mouse_long_buttons.contains_key(&device) {
         ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
             ui_kit::row(ui, "", |ui| {
                 if ui_kit::button(ui, solidcraft_ui_text::tr("ui.3d_mouse_buttons_reset"), ui_kit::Button::Normal).clicked() {
                     app.preferences.space_mouse_buttons.remove(&device);
+                    app.preferences.space_mouse_long_buttons.remove(&device);
                 }
             });
         });
     }
 }
 
-/// What a button job is called in its picker.
-fn button_job_label(app: &SolveApp, job: Option<&crate::space_mouse::ButtonJob>) -> String {
+/// What a button job is called in its picker. No job on a long press means the short press's job.
+fn button_job_label(app: &SolveApp, long: bool, job: Option<&crate::space_mouse::ButtonJob>) -> String {
     use crate::space_mouse::{ButtonJob, ButtonKey};
     match job {
+        None if long => solidcraft_ui_text::tr("ui.3d_mouse_button_as_short").to_string(),
         None => solidcraft_ui_text::tr("ui.3d_mouse_button_nothing").to_string(),
         Some(ButtonJob::Settings) => solidcraft_ui_text::tr("ui.3d_mouse_button_settings").to_string(),
+        // The isometric view by the name its key carries on the device.
+        Some(ButtonJob::View(view)) if view == "iso" => "ISO".to_string(),
         Some(ButtonJob::View(view)) => {
             let mut name = view.clone();
             if let Some(first) = name.get_mut(0..1) {
@@ -2891,6 +2927,10 @@ fn button_job_label(app: &SolveApp, job: Option<&crate::space_mouse::ButtonJob>)
             ButtonKey::Shift => "Shift",
             ButtonKey::Ctrl => "Ctrl",
             ButtonKey::Alt => "Alt",
+            ButtonKey::Enter => "Enter",
+            ButtonKey::Delete => "Delete",
+            ButtonKey::Tab => "Tab",
+            ButtonKey::Space => "Space",
         }
         .to_string(),
         Some(ButtonJob::Command(id)) => solidcraft_engine::find_command(id).map_or_else(|| id.clone(), |c| app.tr_command(c.id, c.label).to_string()),
@@ -2915,20 +2955,23 @@ fn button_job_picker(
     app: &SolveApp,
     ui: &mut egui::Ui,
     number: u8,
+    long: bool,
     current: Option<&crate::space_mouse::ButtonJob>,
 ) -> Option<Option<crate::space_mouse::ButtonJob>> {
     use crate::space_mouse::{ButtonJob, ButtonKey};
-    let views = ["home", "fit", "top", "front", "right", "left", "back", "bottom"].map(|view| ButtonJob::View(view.into()));
-    let keys = [ButtonKey::Esc, ButtonKey::Shift, ButtonKey::Ctrl, ButtonKey::Alt].map(ButtonJob::Key);
+    let views = ["home", "fit", "top", "front", "right", "left", "back", "bottom", "iso"].map(|view| ButtonJob::View(view.into()));
+    let keys =
+        [ButtonKey::Esc, ButtonKey::Shift, ButtonKey::Ctrl, ButtonKey::Alt, ButtonKey::Enter, ButtonKey::Delete, ButtonKey::Tab, ButtonKey::Space]
+            .map(ButtonJob::Key);
     let commands = solidcraft_engine::command_specs().into_iter().map(|spec| ButtonJob::Command(spec.id.into()));
     let jobs: Vec<Option<ButtonJob>> =
         [None, Some(ButtonJob::Settings)].into_iter().chain(views.into_iter().chain(keys).chain(commands).map(Some)).collect();
-    let entries: Vec<(String, String)> = jobs.iter().map(|job| (button_job_value(job.as_ref()), button_job_label(app, job.as_ref()))).collect();
+    let entries: Vec<(String, String)> = jobs.iter().map(|job| (button_job_value(job.as_ref()), button_job_label(app, long, job.as_ref()))).collect();
     let options: Vec<_> = entries.iter().map(|(value, label)| ui_kit::SearchOption { value, label, handle: None }).collect();
-    let filter_id = egui::Id::unique(("sc_space_mouse_button_filter", number));
+    let filter_id = egui::Id::unique(("sc_space_mouse_button_filter", number, long));
     let mut filter: String = ui.data_mut(|data| data.get_temp(filter_id).unwrap_or_default());
-    let id = format!("sc_space_mouse_button_{number}");
-    let chosen = ui_kit::searchable_dropdown(ui, &id, &button_job_label(app, current), &mut filter, &options, None, None);
+    let id = if long { format!("sc_space_mouse_button_{number}_long") } else { format!("sc_space_mouse_button_{number}") };
+    let chosen = ui_kit::searchable_dropdown(ui, &id, &button_job_label(app, long, current), &mut filter, &options, None, None);
     ui.data_mut(|data| data.insert_temp(filter_id, filter));
     let chosen = chosen?;
     jobs.into_iter().find(|job| button_job_value(job.as_ref()) == chosen)
@@ -5304,7 +5347,7 @@ mod tests {
         for width in [420.0_f32, 560.0, 700.0, 900.0, 1200.0] {
             let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
             app.space_mouse.device = Some("hid 046d:c62b".into());
-            app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: true, denied: false });
+            app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { smed: false, spacenavd: true, direct: true, denied: false });
             app.preferences.space_mouse_in_view = true;
             // Calibrated, so the device's picture and the test model sit side by side where there is room.
             let axes = std::array::from_fn(|source| solidcraft_space_mouse::AxisCalibration {
@@ -5417,18 +5460,21 @@ mod tests {
     #[test]
     fn the_device_line_asks_for_a_movement_when_a_reader_is_reachable_and_only_then_says_none_found() {
         use crate::space_mouse::DriversPresent;
-        let none = DriversPresent { spacenavd: false, direct: false, denied: false };
+        let none = DriversPresent { smed: false, spacenavd: false, direct: false, denied: false };
         assert!(!waiting_for_a_record(None) && !waiting_for_a_record(Some(none)));
-        assert!(waiting_for_a_record(Some(DriversPresent { spacenavd: true, direct: false, denied: false })), "a daemon, no record yet");
-        assert!(waiting_for_a_record(Some(DriversPresent { spacenavd: false, direct: true, denied: false })), "a readable device, no record yet");
-        assert!(waiting_for_a_record(Some(DriversPresent { spacenavd: true, direct: true, denied: false })));
+        assert!(waiting_for_a_record(Some(DriversPresent { smed: false, spacenavd: true, direct: false, denied: false })), "a daemon, no record yet");
+        assert!(
+            waiting_for_a_record(Some(DriversPresent { smed: false, spacenavd: false, direct: true, denied: false })),
+            "a readable device, no record yet"
+        );
+        assert!(waiting_for_a_record(Some(DriversPresent { smed: false, spacenavd: true, direct: true, denied: false })));
         // The texts differ, and the first one is the Calibrate hint.
         assert_ne!(solidcraft_ui_text::tr("ui.3d_mouse_none"), solidcraft_ui_text::tr("ui.3d_mouse_calibrate_wait"));
         // A confirmed device is neither (the status names it).
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.space_mouse.device = Some("spacenavd".into());
-        h.app.space_mouse.drivers = Some(DriversPresent { spacenavd: true, direct: false, denied: false });
+        h.app.space_mouse.drivers = Some(DriversPresent { smed: false, spacenavd: true, direct: false, denied: false });
         crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
         h.frames(3);
         assert!(h.app.prefs_window.shell.open);
@@ -5540,6 +5586,7 @@ mod tests {
         p.space_mouse_calibrations.insert("hid 046d:c62b".into(), calibration);
         p.space_mouse_buttons.insert("hid 046d:c62b".into(), [(1, crate::space_mouse::ButtonJob::Settings)].into());
         p.space_mouse_offered.insert("hid 046d:c62b".into());
+        p.space_mouse_adopted.insert("smed 046d:c62b".into());
         p.space_mouse_offer_never = true;
         p.space_mouse_enabled = false;
         p.space_mouse_driver = SpaceMouseDriver::Direct;
@@ -5563,10 +5610,11 @@ mod tests {
         assert_eq!((p.space_mouse_axis_speed, p.space_mouse_axis_source), (d.space_mouse_axis_speed, d.space_mouse_axis_source));
         assert_eq!((p.space_mouse_ghost_position, p.space_mouse_in_view), (d.space_mouse_ghost_position, d.space_mouse_in_view));
         assert_eq!((p.space_mouse_model_pivot, p.space_mouse_sketch_orbit), (d.space_mouse_model_pivot, d.space_mouse_sketch_orbit));
-        // Kept: the calibration (dead zone too), the buttons, the offered set, never, enabled, the rest of the page.
+        // Kept: the calibration (dead zone too), the buttons, the offered and adopted sets, never, enabled, the rest of the page.
         assert_eq!(p.space_mouse_calibrations, before.space_mouse_calibrations);
         assert_eq!(p.space_mouse_buttons, before.space_mouse_buttons);
         assert_eq!(p.space_mouse_offered, before.space_mouse_offered);
+        assert_eq!(p.space_mouse_adopted, before.space_mouse_adopted);
         assert!(p.space_mouse_offer_never && !p.space_mouse_enabled);
         assert_eq!(p.nav, before.nav);
         assert_eq!(h.app.cam, camera);
@@ -5653,8 +5701,8 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.space_mouse.device = Some("hid 046d:c62b".into());
-        h.app.space_mouse.seen = 1;
-        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: true, denied: false });
+        h.app.space_mouse.seen = crate::space_mouse::ButtonSet::of(1);
+        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { smed: false, spacenavd: true, direct: true, denied: false });
         h.call("ui.resize", json!({"width":1600,"height":4000}));
         open_at(&mut h.app, PAGE_MOUSE3D);
         h.frames(36);
@@ -5678,8 +5726,14 @@ mod tests {
             for width in [280.0, 646.0] {
                 for (drivers, status_id) in [
                     (None, "ui.3d_mouse_none"),
-                    (Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: false, denied: false }), "ui.3d_mouse_calibrate_wait"),
-                    (Some(crate::space_mouse::DriversPresent { spacenavd: false, direct: true, denied: true }), "ui.3d_mouse_denied_short"),
+                    (
+                        Some(crate::space_mouse::DriversPresent { smed: false, spacenavd: true, direct: false, denied: false }),
+                        "ui.3d_mouse_calibrate_wait",
+                    ),
+                    (
+                        Some(crate::space_mouse::DriversPresent { smed: false, spacenavd: false, direct: true, denied: true }),
+                        "ui.3d_mouse_denied_short",
+                    ),
                 ] {
                     let mut heights = Vec::new();
                     for viewport_height in [900.0, 1800.0] {
@@ -5907,7 +5961,7 @@ mod tests {
             h.app.home.open = false;
             h.app.preferences.space_mouse_driver = driver;
             h.app.space_mouse.device = Some(device.into());
-            h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct, denied: false });
+            h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { smed: false, spacenavd: true, direct, denied: false });
             h.call("ui.resize", serde_json::json!({"width": 1600, "height": 4000}));
             crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
             h.frames(6);
@@ -5916,6 +5970,126 @@ mod tests {
             assert_eq!(up, shown, "{driver:?} reading {device}, device present {direct}");
             // Whatever it says, no calibration moves between keys.
             assert!(h.app.preferences.space_mouse_calibrations.is_empty());
+        }
+    }
+
+    /// The Buttons section of a device read through smed: a "held" row for each button with a long
+    /// job (the Enterprise's T, R and F), and the rotation lock smed keeps as a checkbox whose click
+    /// asks for the other state. A device without a lock shows no checkbox.
+    #[test]
+    fn smed_buttons_show_held_rows_and_the_rotation_lock() {
+        for lock in [Some(false), None] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language": "en"}));
+            h.app.space_mouse.device = Some("smed 256f:c633".into());
+            h.app.space_mouse.lock = lock;
+            h.call("ui.resize", json!({"width": 1600, "height": 4000}));
+            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
+            h.frames(10);
+            for number in [3, 5, 6] {
+                let row = format!("Button {number}, held");
+                assert!(h.widget(&row).is_some(), "{row} is drawn");
+            }
+            assert!(h.widget("Button 23, held").is_none(), "no held row for a button without a long job");
+            // Until it is held long once: then its row says what a long press does.
+            h.app.space_mouse.seen_long.insert(23);
+            h.frames(3);
+            assert!(h.widget("Button 23, held").is_some(), "a held row for a button held long");
+            if lock.is_none() {
+                assert!(h.widget("Rotation lock").is_none(), "no lock to show");
+                continue;
+            }
+            h.step(&json!({"widget": "Rotation lock"})).expect("the checkbox");
+            h.frames(2);
+            assert_eq!(h.app.space_mouse.lock_request, Some(true), "the click asks smed to lock");
+            // A long job picked in its held row is saved as a long job, the short ones untouched.
+            let device = "smed 256f:c633";
+            h.step(&json!({"widget": "Bottom"})).expect("button 3's held job");
+            h.frames(3);
+            // The list opens over the page, so its entry is clicked where it is drawn.
+            let [x, y] = h.widget("As a short press").expect("the no-long-job entry in the list");
+            h.call("ui.click", json!({"x": x, "y": y}));
+            h.frames(3);
+            let long = h.app.preferences.space_mouse_long_buttons.get(device).cloned().unwrap_or_default();
+            assert_eq!(long.get(&3), None, "button 3 held now does its short job: {long:?}");
+            assert_eq!(long.get(&5), Some(&crate::space_mouse::ButtonJob::View("left".into())), "the other long jobs kept");
+            assert!(!h.app.preferences.space_mouse_buttons.contains_key(device), "the short jobs untouched");
+            // Reset brings back the measured jobs, short and long.
+            h.step(&json!({"widget": "Restore default buttons"})).expect("the reset button");
+            h.frames(3);
+            assert!(!h.app.preferences.space_mouse_long_buttons.contains_key(device), "long jobs reset");
+            assert!(!h.app.preferences.space_mouse_buttons.contains_key(device), "short jobs reset");
+            assert!(h.widget("Bottom").is_some(), "button 3 held shows its measured job again");
+        }
+    }
+
+    /// The driver choice under Advanced: smed is offered where it runs and picked like the others, is
+    /// not offered where it does not, and is named as the only reader when it is the only one.
+    #[test]
+    fn smed_is_a_driver_choice_where_it_runs() {
+        use crate::prefs::SpaceMouseDriver;
+        use crate::space_mouse::DriversPresent;
+        let open = |present: DriversPresent| {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language": "en"}));
+            h.app.space_mouse.device = Some("smed 256f:c633".into());
+            h.app.space_mouse.drivers = Some(present);
+            h.call("ui.resize", json!({"width": 1600, "height": 4000}));
+            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
+            h.frames(10);
+            h
+        };
+        let all = DriversPresent { smed: true, spacenavd: true, direct: true, denied: false };
+        let mut h = open(all);
+        h.step(&json!({"widget": "Automatic"})).expect("the driver dropdown");
+        h.frames(3);
+        h.step(&json!({"widget": "smed"})).expect("smed is offered");
+        h.frames(3);
+        assert_eq!(h.app.preferences.space_mouse_driver, SpaceMouseDriver::Smed);
+        let mut h = open(DriversPresent { smed: false, ..all });
+        h.step(&json!({"widget": "Automatic"})).expect("the driver dropdown");
+        h.frames(3);
+        assert!(h.widget("smed").is_none(), "smed is not offered where it does not run");
+        let only_smed = DriversPresent { smed: true, spacenavd: false, direct: false, denied: false };
+        let h = open(only_smed);
+        assert!(h.widget("smed").is_some(), "the only reader is named");
+        assert!(h.widget("Automatic").is_none(), "and there is nothing to choose");
+        // Direct saved and smed the only reader: the choice stays, so it can be switched to smed.
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language": "en"}));
+        h.app.preferences.space_mouse_driver = SpaceMouseDriver::Direct;
+        h.app.space_mouse.device = Some("smed 256f:c633".into());
+        h.app.space_mouse.drivers = Some(only_smed);
+        h.call("ui.resize", json!({"width": 1600, "height": 4000}));
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
+        h.frames(10);
+        h.step(&json!({"widget": "Direct (hidraw)"})).expect("the driver dropdown");
+        h.frames(3);
+        h.step(&json!({"widget": "smed"})).expect("smed is offered");
+        h.frames(3);
+        assert_eq!(h.app.preferences.space_mouse_driver, SpaceMouseDriver::Smed);
+        // smed saved and not running, one other reader there: the choice stays, so it can be switched
+        // away from smed. (With no reader at all the row is not shown, as before: nothing to read.)
+        for present in [
+            DriversPresent { smed: false, spacenavd: false, direct: true, denied: false },
+            DriversPresent { smed: false, spacenavd: true, direct: false, denied: false },
+        ] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language": "en"}));
+            h.app.preferences.space_mouse_driver = SpaceMouseDriver::Smed;
+            h.app.space_mouse.drivers = Some(present);
+            h.call("ui.resize", json!({"width": 1600, "height": 4000}));
+            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
+            h.frames(10);
+            h.step(&json!({"widget": "smed"})).unwrap_or_else(|_| panic!("the driver dropdown with {present:?}"));
+            h.frames(3);
+            h.step(&json!({"widget": "Automatic"})).unwrap_or_else(|_| panic!("Automatic is offered with {present:?}"));
+            h.frames(3);
+            assert_eq!(h.app.preferences.space_mouse_driver, SpaceMouseDriver::Automatic, "{present:?}");
         }
     }
 
@@ -6086,7 +6260,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.space_mouse.device = None;
-        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: false, denied: false });
+        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { smed: false, spacenavd: true, direct: false, denied: false });
         h.call("ui.resize", serde_json::json!({"width": 1600, "height": 4000}));
         crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
         h.frames(5);
@@ -6128,7 +6302,7 @@ mod tests {
             assert!(!text.is_empty() && text != "ui.3d_mouse_wiggle", "{}", catalog.id);
         }
         let mut h = changed_3d_mouse_settings(None);
-        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: false, denied: false });
+        h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { smed: false, spacenavd: true, direct: false, denied: false });
         h.frames(10);
         assert!(h.widget(solidcraft_ui_text::tr("ui.3d_mouse_calibrate_wait")).is_some(), "the reader waits for a real record");
         h.app.space_mouse.device = Some("spacenavd".into());
@@ -6157,7 +6331,7 @@ mod tests {
         ];
         for (spacenavd, direct, denied, shown) in cases {
             let mut h = changed_3d_mouse_settings(None);
-            h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd, direct, denied });
+            h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { smed: false, spacenavd, direct, denied });
             h.frames(10);
             let said = h.widget(solidcraft_ui_text::tr("ui.3d_mouse_denied_short")).is_some();
             assert_eq!(said, shown, "spacenavd {spacenavd}, found {direct}, denied {denied}");

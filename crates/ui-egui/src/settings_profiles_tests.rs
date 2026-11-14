@@ -73,6 +73,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "space_mouse_axis_speed",
         "space_mouse_reverse",
         "space_mouse_buttons",
+        "space_mouse_long_buttons",
         "space_mouse_enabled",
         "dark_parts_shading",
         "msaa",
