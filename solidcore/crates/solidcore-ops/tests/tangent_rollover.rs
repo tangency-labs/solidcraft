@@ -1217,7 +1217,6 @@ fn a_round_in_the_sliver_below_the_cutoff_builds_its_end_cap() {
     }
 }
 
-
 /// [`arm_boss_and_foot_round`]'s body before its corner round: the arm and the 20 tall boss,
 /// the boss's foot on the arm's top rounded 5, built with the corpus's fix set. The foot round
 /// runs on past the arm's side x = -36 at the foot edge's end (-36, -90, 5): the side's plane

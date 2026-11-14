@@ -728,6 +728,9 @@ impl FilletCorner {
                 // Not upstream (solidcore-native): a rail rolled onto a face whose foot edge
                 // turns back at the rolled-over edge's vertex ends where it crosses the end
                 // face's surface, inside that face (`nx1_end::TurnedBack`)
+                // A rail that did not roll ends there too where it crosses the end face's
+                // surface on the side edge's continuation past its far end, inside its own face
+                // (`nx1_end::rail_passes_side_edge_end`)
                 let turned = match solver.rolled_faces.get(solver_rail).copied().flatten() {
                     Some(rolled) if mixed => nx1_end::rolled_rail_turns_back(
                         k,
@@ -736,6 +739,15 @@ impl FilletCorner {
                         vertex,
                         rolled,
                         solver.tangency_tolerance,
+                    )?,
+                    None if mixed => nx1_end::rail_passes_side_edge_end(
+                        k,
+                        target,
+                        solver,
+                        matches!(&*solver_object, SolverObject::ConstantRadius(_)),
+                        solver_rail,
+                        side,
+                        vertex,
                     )?,
                     _ => None,
                 };
