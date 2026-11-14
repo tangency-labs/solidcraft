@@ -1,0 +1,34 @@
+{
+  "en": {
+    "timeline.suppress_many": "Suppress {count} Selected Features",
+    "timeline.unsuppress_many": "Unsuppress {count} Selected Features"
+  },
+  "ar": {
+    "timeline.suppress_many": "تعطيل {count} ميزات محددة",
+    "timeline.unsuppress_many": "إلغاء تعطيل {count} ميزات محددة"
+  },
+  "de": {
+    "timeline.suppress_many": "{count} ausgewählte Merkmale unterdrücken",
+    "timeline.unsuppress_many": "Unterdrückung von {count} ausgewählten Merkmalen aufheben"
+  },
+  "he": {
+    "timeline.suppress_many": "השבתת {count} הפיצ'רים שנבחרו",
+    "timeline.unsuppress_many": "ביטול השבתת {count} הפיצ'רים שנבחרו"
+  },
+  "ja": {
+    "timeline.suppress_many": "選択した {count} 個のフィーチャーを抑制",
+    "timeline.unsuppress_many": "選択した {count} 個のフィーチャーの抑制を解除"
+  },
+  "ko": {
+    "timeline.suppress_many": "선택한 피처 {count}개 비활성화",
+    "timeline.unsuppress_many": "선택한 피처 {count}개 비활성화 해제"
+  },
+  "vi": {
+    "timeline.suppress_many": "Bỏ kích hoạt {count} tính năng đã chọn",
+    "timeline.unsuppress_many": "Kích hoạt lại {count} tính năng đã chọn"
+  },
+  "zh": {
+    "timeline.suppress_many": "抑制所选的 {count} 个特征",
+    "timeline.unsuppress_many": "取消抑制所选的 {count} 个特征"
+  }
+}
