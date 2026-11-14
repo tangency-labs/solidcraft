@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use super::{
     Export3mfParams, ExportMeshParams, ExportParams, ExportStepParams, ExportStlParams, ExportUrdfParams, FileExportResult, NewerFileReport,
     OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams, RecoveryDiscardResult,
-    RecoveryListParams, RecoveryListResult,
+    RecoveryListParams, RecoveryListResult, RestoreParams, RestoreResult, RevisionsParams, RevisionsResult,
 };
 use crate::Session;
 use crate::recovery::Autosaver;
@@ -30,6 +30,8 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RecoveryListParams>(), &["dir"]);
     assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id"]);
     assert_keys(input_schema_for::<RecoveryDiscardParams>(), &["all", "dir", "id"]);
+    assert_keys(input_schema_for::<RevisionsParams>(), &[]);
+    assert_keys(input_schema_for::<RestoreParams>(), &["mode", "revision"]);
 }
 
 /// The words the open contract takes are the ones the handler's readers take, and its limits
@@ -214,6 +216,27 @@ fn replies_match_the_output_schema() {
     let warned = run(&mut s, "doc.recovery_discard", json!({"dir": rec, "all": true, "al": true}));
     assert!(warned["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{warned}");
     matches(output_schema_for::<RecoveryDiscardResult>(), "doc.recovery_discard", &warned);
+
+    // The open design's save history, with a snapshot to restore, working and read-only.
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    s.revision_limits.enabled = true;
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "file.save_as", json!({"path": at("history.sc")}));
+    let listed = run(&mut s, "doc.revisions", json!({}));
+    assert_eq!((listed["revision"].as_u64(), listed["entries"][0]["snapshot"].as_bool()), (Some(1), Some(true)), "{listed}");
+    matches(output_schema_for::<RevisionsResult>(), "doc.revisions", &listed);
+    let warned = run(&mut s, "doc.revisions", json!({"all": true}));
+    assert!(warned["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{warned}");
+    matches(output_schema_for::<RevisionsResult>(), "doc.revisions", &warned);
+    let restored = run(&mut s, "doc.restore", json!({"revision": 1}));
+    assert_eq!((restored["mode"].as_str(), restored["readonly"].as_bool()), (Some("working"), Some(false)), "{restored}");
+    matches(output_schema_for::<RestoreResult>(), "doc.restore", &restored);
+    let readonly = run(&mut s, "doc.restore", json!({"revision": 1, "mode": "readonly"}));
+    assert_eq!(readonly["readonly"].as_bool(), Some(true), "{readonly}");
+    matches(output_schema_for::<RestoreResult>(), "doc.restore", &readonly);
+    let listed = run(&mut s, "doc.revisions", json!({}));
+    assert_eq!(listed["readonly"].as_u64(), Some(1), "{listed}");
+    matches(output_schema_for::<RevisionsResult>(), "doc.revisions", &listed);
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -325,6 +348,10 @@ fn strict_keeps_todays_errors() {
         ("doc.recovery_discard", json!({})),
         ("doc.recovery_discard", json!({"all": false})),
         ("doc.recovery_discard", json!({"id": "nothing-here"})),
+        ("doc.restore", json!({})),
+        ("doc.restore", json!({"revision": "one"})),
+        ("doc.restore", json!({"revision": 1, "mode": "draft"})),
+        ("doc.restore", json!({"revision": 1})),
     ]);
     assert_eq!(std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0), 0, "nothing written");
     let _ = std::fs::remove_dir_all(&dir);

@@ -18,6 +18,7 @@ mod send;
 
 use serde_json::{Value, json};
 use solidcraft_doc::Document;
+use solidcraft_doc::document_history::DocumentHistory;
 use solidcraft_io::Format;
 
 use super::CommandSpec;
@@ -28,7 +29,7 @@ use crate::schema::file::GpgKeyInfo;
 use crate::schema::file::{
     ExportResult, GpgKeysParams, GpgKeysResult, NewerFileReport, OpenElsewhere, OpenResult, OpenedDesign, OpenedDrawing, OpenedFile,
     OpenedPointCloud, RecoverParams, RecoverResult, RecoveredDesign, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams,
-    RecoveryListResult, SignatureRecord, SignatureReport, VerifyParams, VerifyResult,
+    RecoveryListResult, RestoreResult, RevisionsResult, SignatureRecord, SignatureReport, VerifyParams, VerifyResult,
 };
 use crate::schema::insert_mesh::{InsertMeshParams, MeshInserted};
 use crate::schema::insert_step::{InsertStepParams, StepInserted};
@@ -75,6 +76,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&SAVE_CONTRACT)
         .output(output_schema_for::<SaveResult>)
+        .enabled(save_enabled)
         .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused); sign?: bool (the app's own Save only: sign the save with GnuPG, appending a provenance record; container only; a script or agent is refused); signing_key?: fingerprint or user id (default: GnuPG's default signing key) → signature: {method, fingerprint, user_id?} when signed"),
     CommandSpec::new("file.save_as", "Save As", crate::checked!("file.save_as", save_as))
         .icon("save")
@@ -111,6 +113,20 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&RECOVERY_DISCARD_CONTRACT)
         .output(output_schema_for::<RecoveryDiscardResult>)
         .params("id, or all: true; dir?"),
+    CommandSpec::new("doc.revisions", "Revisions", crate::checked!("doc.revisions", revisions))
+        .icon("restore")
+        .noundo()
+        .doc_only()
+        .contract(&REVISIONS_CONTRACT)
+        .output(output_schema_for::<RevisionsResult>)
+        .params("→ revision, format_version, readonly?, entries: [{revision, format_version, action, snapshot}]"),
+    CommandSpec::new("doc.restore", "Restore Revision", crate::checked!("doc.restore", restore))
+        .icon("restore")
+        .noundo()
+        .doc_only()
+        .contract(&RESTORE_CONTRACT)
+        .output(output_schema_for::<RestoreResult>)
+        .params("revision (from doc.revisions); mode?: working|readonly (default working). working replaces the model and keeps the save count, so the next save is the next revision; readonly opens that model and refuses edits and Save until Save As or another restore. A revision with no snapshot (pruned, or saved before snapshots) is refused"),
     CommandSpec::new("file.export", "Export", crate::checked!("file.export", export))
         .icon("export")
         .noundo()
@@ -226,6 +242,8 @@ const OPEN_CONTRACT: TypedContract<crate::schema::file::OpenParams> = TypedContr
 const RECOVERY_LIST_CONTRACT: TypedContract<RecoveryListParams> = TypedContract::new();
 const RECOVER_CONTRACT: TypedContract<RecoverParams> = TypedContract::new();
 const RECOVERY_DISCARD_CONTRACT: TypedContract<RecoveryDiscardParams> = TypedContract::new();
+const REVISIONS_CONTRACT: TypedContract<crate::schema::file::RevisionsParams> = TypedContract::new();
+const RESTORE_CONTRACT: TypedContract<crate::schema::file::RestoreParams> = TypedContract::new();
 const NEW_DESIGN_CONTRACT: TypedContract<NewDesignParams> = TypedContract::new();
 const EXPORT_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportParams> = crate::schema::TypedContract::new();
 const SAVE_CONTRACT: TypedContract<SaveParams> = TypedContract::new();
@@ -1597,6 +1615,29 @@ fn write_bytes(
     sign: bool,
     signing_key: Option<&str>,
 ) -> Result<Value> {
+    // Count this save in the file's copy of the history. The session takes that copy up only
+    // once the file is written: a failed write leaves the count where it was (a retry is the
+    // next number), and the live document and its undo history are never changed. Snapshots
+    // are opt-in (`revision_limits`, off by default). A snapshot is the model without the
+    // history, so it does not nest the history it belongs to. Caps still prune bodies already
+    // in the file.
+    let options = s.revision_limits;
+    let limits = options.limits();
+    let model = s.model_at(Some(path));
+    let snapshot = if options.enabled { DocumentHistory::model_snapshot(&model, limits.max_bytes) } else { None };
+    let shared = match &snapshot {
+        Some(value) => solidcraft_doc::document_history::shared_payloads(value),
+        None if s.document_history.entries.iter().any(|entry| entry.snapshot.is_some()) => {
+            serde_json::to_value(&*model).map(|value| solidcraft_doc::document_history::shared_payloads(&value)).unwrap_or_default()
+        }
+        None => std::collections::HashSet::new(),
+    };
+    drop(model);
+    let mut history = (*s.document_history).clone();
+    history.record_save_shared(snapshot, limits, &shared);
+    if format == "json" {
+        history.prune_inline_snapshots(limits.max_bytes);
+    }
     let chain = s.provenance_chain.clone().unwrap_or_default();
     let mut signature = None;
     let bytes = if sign {
@@ -1609,7 +1650,7 @@ fn write_bytes(
         if format != "container" {
             return Err(bad("file.save", "only a container can carry a signature: save as .sc (format container), not json"));
         }
-        let (bytes, signed) = write_signed_container(s, &chain, path, compression, preview, cache, signing_key)?;
+        let (bytes, signed) = write_signed_container(s, &chain, &history, path, compression, preview, cache, signing_key)?;
         signature = signed;
         bytes
     } else if !chain.records.is_empty() {
@@ -1617,18 +1658,19 @@ fn write_bytes(
         // as covering an earlier version instead of the chain being destroyed.
         if format != "container" {
             match format {
-                "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
+                "json" => solidcraft_io::write_design(&s.design_with(Some(path), &history)),
                 _ => return Err(bad("file.save", "format must be container or json")),
             }
         } else {
             let save =
                 solidcraft_io::ProvenanceSave { source: None, chain: &chain, author: None, tool: Some("SolidCraft"), note: None, created: None };
-            s.design_container_signed(Some(path), compression, preview, cache, &save).map_err(|e| EngineError::Other(format!("{path}: {e}")))?
+            s.design_container_signed(Some(path), &history, compression, preview, cache, &save)
+                .map_err(|e| EngineError::Other(format!("{path}: {e}")))?
         }
     } else {
         match format {
-            "container" => s.design_container_at(Some(path), compression, preview, cache)?,
-            "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
+            "container" => s.design_container_with(Some(path), &history, compression, preview, cache)?,
+            "json" => solidcraft_io::write_design(&s.design_with(Some(path), &history)),
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
@@ -1639,11 +1681,13 @@ fn write_bytes(
     // Atomic, keeping the version being replaced as `<file>.bak`; a watched save reports how far
     // the write is and stops on Cancel until the file is replaced.
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, true).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    s.document_history = std::sync::Arc::new(history);
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
     s.provenance_chain = solidcraft_io::read_design_provenance_chain(&bytes);
     s.provenance = None;
+    s.revision_view = None;
     s.mark_saved();
     let mut out = SaveResult {
         path: path.to_string(),
@@ -1676,6 +1720,7 @@ fn write_bytes(
 fn write_signed_container(
     s: &Session,
     chain: &solidcraft_io::ProvenanceChain,
+    history: &DocumentHistory,
     path: &str,
     compression: solidcraft_io::DesignCompression,
     preview: bool,
@@ -1692,7 +1737,8 @@ fn write_signed_container(
         note: None,
         created: Some(solidcraft_io::design_lock::now_secs()),
     };
-    let bytes = s.design_container_signed(Some(path), compression, preview, cache, &save).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let bytes =
+        s.design_container_signed(Some(path), history, compression, preview, cache, &save).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let info = signer.signing_info().ok_or_else(|| EngineError::Other(format!("{path}: GnuPG signed the design but named no key")))?;
     Ok((bytes, Some(SignedSave { method: "gpg".to_owned(), fingerprint: info.fingerprint, user_id: info.user_id })))
 }
@@ -1702,6 +1748,7 @@ fn write_signed_container(
 fn write_signed_container(
     _s: &Session,
     _chain: &solidcraft_io::ProvenanceChain,
+    _history: &DocumentHistory,
     _path: &str,
     _compression: solidcraft_io::DesignCompression,
     _preview: bool,
@@ -1795,6 +1842,90 @@ fn hex(bytes: &[u8]) -> String {
     out
 }
 
+fn revisions(s: &mut Session, _p: &Value) -> Result<Value> {
+    use crate::schema::file::RevisionEntry;
+    let history = &s.document_history;
+    let entries = history
+        .entries
+        .iter()
+        .map(|entry| RevisionEntry {
+            revision: entry.revision,
+            format_version: entry.format_version,
+            action: entry.action.clone(),
+            snapshot: entry.snapshot.is_some(),
+        })
+        .collect();
+    let reply = RevisionsResult {
+        revision: history.revision,
+        format_version: history.format_version,
+        readonly: s.revision_view,
+        entries,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad("doc.revisions", e.to_string()))
+}
+
+fn restore(s: &mut Session, p: &Value) -> Result<Value> {
+    // The words the contract's check uses, so strict and lenient calls fail the same way.
+    let revision = match p.get("revision") {
+        None | Some(Value::Null) => return Err(bad("doc.restore", "`revision` is required")),
+        Some(value) => value.as_u64().ok_or_else(|| bad("doc.restore", "`revision` must be u64"))?,
+    };
+    let mode = match p.get("mode") {
+        None | Some(Value::Null) => "working",
+        Some(value) => match serde_json::from_value::<crate::schema::file::RestoreMode>(value.clone()) {
+            Ok(crate::schema::file::RestoreMode::Working) => "working",
+            Ok(crate::schema::file::RestoreMode::Readonly) => "readonly",
+            Err(e) => return Err(bad("doc.restore", format!("`mode`: {e}"))),
+        },
+    };
+    let snapshot = s
+        .document_history
+        .entries
+        .iter()
+        .rev()
+        .find(|entry| entry.revision == revision)
+        .and_then(|entry| entry.snapshot.clone())
+        .ok_or_else(|| bad("doc.restore", format!("revision {revision} has no stored model; it was pruned or recorded before snapshots")))?;
+    let text = serde_json::to_string(&snapshot).map_err(|e| EngineError::Other(format!("revision {revision}: {e}")))?;
+    let mut doc = Document::from_json(&text)?;
+    // The snapshot was written with the file's relative links; the working model keeps them
+    // absolute, as an opened design does.
+    super::component_link::resolve_design_links(&mut doc, s.path.as_deref());
+    // The session's history stays: restoring is not a save, and the next save is the next
+    // revision.
+    doc.document_history = DocumentHistory::default();
+    let visibility = std::mem::take(&mut doc.visibility);
+    s.doc = std::sync::Arc::new(doc);
+    s.visibility = visibility;
+    s.selection.clear();
+    s.active_sketch = None;
+    // A temporary sketch-edit rollback belonged to the replaced model.
+    s.sketch_entry = None;
+    s.active_component = 0;
+    s.active_occurrence_path = None;
+    s.pending_moves.clear();
+    s.undo.clear();
+    s.redo.clear();
+    s.revision_view = (mode == "readonly").then_some(revision);
+    let reply = crate::schema::file::RestoreResult {
+        revision,
+        mode: mode.to_owned(),
+        name: s.doc.name.clone(),
+        features: s.doc.features.len(),
+        readonly: s.revision_view.is_some(),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad("doc.restore", e.to_string()))
+}
+
+fn save_enabled(s: &Session) -> std::result::Result<(), String> {
+    match s.revision_view {
+        Some(rev) => Err(format!("revision {rev} is open read-only; restore a working model or use Save As")),
+        None => Ok(()),
+    }
+}
+
 impl Session {
     /// Open a design with its file location, resolving component links before history keeps
     /// them. Absolute in-memory targets survive Save As, undo, redo and recovery unchanged.
@@ -1879,8 +2010,24 @@ impl Session {
         self.model.refingerprint_shared(&self.doc, keep);
     }
 
-    /// Prepare only the file's copy with relative paths; saving never rewrites live history.
+    /// Prepare only the file's copy with relative paths and the session's save history; saving
+    /// never rewrites live history.
     pub(crate) fn design_at(&self, path: Option<&str>) -> std::borrow::Cow<'_, Document> {
+        self.design_with(path, &self.document_history)
+    }
+
+    /// [`Self::design_at`] with `history` as the file's save history.
+    fn design_with(&self, path: Option<&str>, history: &DocumentHistory) -> std::borrow::Cow<'_, Document> {
+        let mut design = self.model_at(path);
+        if design.document_history != *history {
+            design.to_mut().document_history = history.clone();
+        }
+        design
+    }
+
+    /// The model a file at `path` holds: relative links and what is hidden, without the save
+    /// history (a revision snapshot is this).
+    fn model_at(&self, path: Option<&str>) -> std::borrow::Cow<'_, Document> {
         let mut design = std::borrow::Cow::Borrowed(&*self.doc);
         if let Some(path) = path {
             let links = super::design_link::rebased(&self.doc, self.path.as_deref(), path);
@@ -1917,6 +2064,8 @@ impl Session {
             let (from, to) = (self.doc.name.clone(), done.doc.name.clone());
             rename_design(self, &from, &to);
         }
+        self.document_history = done.document_history.clone();
+        self.revision_view = done.revision_view;
         self.path.clone_from(&done.path);
         self.disk = done.disk;
         self.read_only = done.read_only;
@@ -1953,40 +2102,43 @@ impl Session {
     /// Container bytes for desktop and browser saves. Only already evaluated bodies
     /// and warm meshes are eligible; saving never forces evaluation or tessellation.
     pub fn design_container(&self, compression: solidcraft_io::DesignCompression, preview: bool, cache: bool) -> solidcraft_io::Result<Vec<u8>> {
-        self.design_container_at(self.path.as_deref(), compression, preview, cache)
+        self.design_container_with(self.path.as_deref(), &self.document_history, compression, preview, cache)
     }
 
-    fn design_container_at(
+    fn design_container_with(
         &self,
         path: Option<&str>,
+        history: &DocumentHistory,
         compression: solidcraft_io::DesignCompression,
         preview: bool,
         cache: bool,
     ) -> solidcraft_io::Result<Vec<u8>> {
-        self.container_bytes(path, compression, preview, cache, None)
+        self.container_bytes(path, history, compression, preview, cache, None)
     }
 
     /// The container bytes with one signed provenance record appended to `save.chain`.
     pub fn design_container_signed(
         &self,
         path: Option<&str>,
+        history: &DocumentHistory,
         compression: solidcraft_io::DesignCompression,
         preview: bool,
         cache: bool,
         save: &solidcraft_io::ProvenanceSave<'_>,
     ) -> solidcraft_io::Result<Vec<u8>> {
-        self.container_bytes(path, compression, preview, cache, Some(save))
+        self.container_bytes(path, history, compression, preview, cache, Some(save))
     }
 
     fn container_bytes(
         &self,
         path: Option<&str>,
+        history: &DocumentHistory,
         compression: solidcraft_io::DesignCompression,
         preview: bool,
         cache: bool,
         provenance: Option<&solidcraft_io::ProvenanceSave<'_>>,
     ) -> solidcraft_io::Result<Vec<u8>> {
-        let design = self.design_at(path);
+        let design = self.design_with(path, history);
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
         let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();
@@ -2047,6 +2199,12 @@ fn saved_preview(s: &Session) -> Option<solidcraft_io::DesignPreview> {
 }
 
 fn save(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(rev) = s.revision_view {
+        return Err(bad(
+            "file.save",
+            format!("revision {rev} is open read-only; restore it as the working model (`doc.restore` mode \"working\") or use Save As"),
+        ));
+    }
     let path = match str_(p, "path") {
         Some(x) if !x.trim().is_empty() => x.to_string(),
         _ => s.path.clone().ok_or_else(|| bad("file.save", "the design has no file yet: give a `path`"))?,
@@ -2669,6 +2827,14 @@ mod tests {
         assert_eq!(other.doc.name, "Other");
     }
 
+    /// A design file's model: the file without its save history, which an open design's session
+    /// keeps (`Session::document_history`) rather than its document.
+    fn file_model(bytes: &[u8]) -> Document {
+        let mut doc = solidcraft_io::read_design(bytes).unwrap();
+        doc.document_history = DocumentHistory::default();
+        doc
+    }
+
     /// #8139: with `objects: "component"` a 3MF has one object for each placement of a component
     /// with two or more bodies, its bodies the object's parts; the design's own bodies stay objects
     /// of their own. The default (and `objects: "body"`) is one object per body, as before. Read
@@ -3137,7 +3303,11 @@ mod tests {
         assert_eq!(adopted.doc.name, "Bracket copy");
         assert_eq!(direct.doc.name, "Bracket");
         assert_eq!(adopted.undo.iter().map(|u| u.doc.name.clone()).collect::<Vec<_>>(), vec!["Bracket copy".to_string(); adopted.undo.len()]);
-        assert_eq!(solidcraft_io::read_design(&std::fs::read(&b).unwrap()).unwrap(), *adopted.doc);
+        // The file is the design plus the save history the session took up with it.
+        let mut file = solidcraft_io::read_design(&std::fs::read(&b).unwrap()).unwrap();
+        assert_eq!(std::mem::take(&mut file.document_history), *adopted.document_history);
+        assert_eq!(adopted.document_history.revision, 1);
+        assert_eq!(file, *adopted.doc);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3368,7 +3538,7 @@ mod tests {
         }
         let bytes = std::fs::read(target.join("issue303-warm.solidcraft")).unwrap();
         assert!(solidcraft_io::read_design_preview(&bytes).is_some());
-        assert_eq!(solidcraft_io::read_design(&bytes).unwrap(), *session.doc);
+        assert_eq!(file_model(&bytes), *session.doc);
         let mut reads = Vec::new();
         for _ in 0..9 {
             let began = std::time::Instant::now();
@@ -3494,7 +3664,8 @@ mod tests {
                     !bytes.windows(b"cache/preview.bin".len()).any(|entry| entry == b"cache/preview.bin"),
                     "display meshes require preview: true"
                 );
-                assert_eq!(solidcraft_io::read_design(&bytes).unwrap(), *session.doc);
+                assert_eq!(solidcraft_io::read_design(&bytes).unwrap(), *session.design_at(None));
+                assert_eq!(file_model(&bytes), *session.doc, "saving leaves the open document as it was");
             }
         }
         std::fs::remove_file(&path).unwrap();
@@ -3942,7 +4113,7 @@ mod tests {
         for (i, times) in samples.iter_mut().enumerate() {
             times.sort_by(f64::total_cmp);
             let bytes = std::fs::read(target.join(format!("issue303-native-{i}.solidcraft"))).unwrap();
-            assert_eq!(solidcraft_io::read_design(&bytes).unwrap(), *session.doc);
+            assert_eq!(file_model(&bytes), *session.doc);
             assert_eq!(solidcraft_io::read_design_geometry(&bytes).is_some(), modes[i].1);
             eprintln!("native_save mode={i} median_ms={:.3} bytes={}", times[4], bytes.len());
         }
@@ -4333,5 +4504,144 @@ mod tests {
         for o in formats::DESIGN_SAVE_OPTIONS {
             assert!(params_of("file.save_as").contains(o.param), "`{}` is not a documented parameter of file.save_as", o.param);
         }
+    }
+
+    /// Save v1, edit, save v2, restore v1. The volume is the first solid. The snapshot is still
+    /// there after the file is closed, an older file with no snapshot still opens, and the save
+    /// count keeps climbing after a restore. A failed write does not consume a revision.
+    #[test]
+    fn revision_snapshots_restore_the_saved_volume() {
+        let dir = name_dir("revisions");
+        for (format, file) in [("container", "part.solidcraft"), ("json", "part.json")] {
+            let path = dir.join(file);
+            let mut s = Session::default();
+            s.revision_limits.enabled = true;
+            s.execute("solid.box", &json!({"length": 40, "width": 20, "height": 10})).unwrap();
+            let missing = dir.join("missing").join(file);
+            let err = s.execute("file.save_as", &json!({"path": &missing, "format": format})).unwrap_err();
+            assert!(err.to_string().contains("missing") || err.to_string().contains("cannot") || err.to_string().contains("os error"), "{err}");
+            assert_eq!(s.document_history.revision, 0, "{format}: a failed save does not count");
+            s.execute("file.save_as", &json!({"path": &path, "format": format})).unwrap();
+            assert_eq!(s.document_history.revision, 1);
+            assert!(s.document_history.entries.first().is_some_and(|e| e.snapshot.is_some()));
+            let saved = s.execute("inspect.measure", &json!({})).unwrap();
+            assert!((saved["total"]["volume_mm3"].as_f64().unwrap() - 8000.0).abs() < 1e-6, "{format}");
+            assert_eq!(saved["total"]["faces"], 6);
+            assert_eq!(saved["body_count"], 1);
+
+            s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0]})).unwrap();
+            let live = s.doc.clone();
+            s.execute("file.save", &json!({"format": format})).unwrap();
+            assert_eq!(s.document_history.revision, 2);
+            assert!(std::sync::Arc::ptr_eq(&live, &s.doc), "{format}: saving leaves the live document alone");
+            assert_eq!(s.doc.document_history, solidcraft_doc::document_history::DocumentHistory::default());
+            let edited = s.execute("inspect.measure", &json!({})).unwrap();
+            assert!((edited["total"]["volume_mm3"].as_f64().unwrap() - 9000.0).abs() < 1e-6, "{format}");
+            assert_eq!(edited["body_count"], 2);
+
+            let mut stepped = Session::default();
+            let mut steps = super::open_steps::OpenSteps::start(&json!({"path": &path}), Default::default()).unwrap().expect("opened in steps");
+            while steps.step() {}
+            steps.finish(&mut stepped).unwrap();
+            assert_eq!(stepped.document_history.revision, 2, "{format}: an open in steps keeps the history in the session");
+            assert_eq!(stepped.doc.document_history, solidcraft_doc::document_history::DocumentHistory::default());
+
+            let mut opened = Session::default();
+            opened.execute("doc.open", &json!({"path": &path})).unwrap();
+            assert_eq!(opened.document_history.revision, 2);
+            assert_eq!(opened.doc.document_history, solidcraft_doc::document_history::DocumentHistory::default());
+            assert!(opened.document_history.entries.iter().all(|e| e.snapshot.is_some()));
+            let list = opened.execute("doc.revisions", &json!({})).unwrap();
+            assert_eq!(list["entries"][0]["snapshot"], true);
+            assert_eq!(list["entries"][1]["revision"], 2);
+
+            let restored = opened.execute("doc.restore", &json!({"revision": 1, "mode": "working"})).unwrap();
+            assert_eq!(restored["mode"], "working");
+            assert_eq!(opened.document_history.revision, 2, "restore does not consume a revision");
+            assert!(opened.is_dirty(), "the restored model is not the file yet");
+            let back = opened.execute("inspect.measure", &json!({})).unwrap();
+            assert!((back["total"]["volume_mm3"].as_f64().unwrap() - 8000.0).abs() < 1e-6, "{format}: {back}");
+            assert_eq!(back["body_count"], 1);
+            assert_eq!(back["total"]["faces"], 6);
+
+            opened.execute("file.save", &json!({"format": format})).unwrap();
+            assert_eq!(opened.document_history.revision, 3);
+            let mut again = Session::default();
+            again.execute("doc.open", &json!({"path": &path})).unwrap();
+            assert_eq!(again.document_history.revision, 3);
+            again.execute("doc.restore", &json!({"revision": 1})).unwrap();
+            let vol = again.execute("inspect.measure", &json!({})).unwrap();
+            assert!((vol["total"]["volume_mm3"].as_f64().unwrap() - 8000.0).abs() < 1e-6, "{format}");
+
+            let readonly = again.execute("doc.restore", &json!({"revision": 2, "mode": "readonly"})).unwrap();
+            assert_eq!(readonly["readonly"], true);
+            let edited_vol = again.execute("inspect.measure", &json!({})).unwrap();
+            assert!((edited_vol["total"]["volume_mm3"].as_f64().unwrap() - 9000.0).abs() < 1e-6, "{format}");
+            let refused = again.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap_err();
+            assert!(refused.to_string().contains("read-only"), "{refused}");
+            let save = again.execute("file.save", &json!({})).unwrap_err();
+            assert!(save.to_string().contains("read-only"), "{save}");
+            let copy = dir.join(format!("copy-{file}"));
+            again.execute("file.save_as", &json!({"path": &copy, "format": format})).unwrap();
+            assert!(again.revision_view.is_none());
+            assert_eq!(again.document_history.revision, 4);
+        }
+
+        let old = dir.join("old.solidcraft");
+        std::fs::write(&old, r#"{"format":"solidcraft/1","name":"old","units":"mm","params":[],"features":[],"next_id":1}"#).unwrap();
+        let mut opened = Session::default();
+        opened.revision_limits.enabled = true;
+        opened.execute("doc.open", &json!({"path": &old})).unwrap();
+        assert_eq!(opened.document_history.revision, 0);
+        assert!(opened.document_history.entries.first().is_some_and(|e| e.snapshot.is_none()));
+        let err = opened.execute("doc.restore", &json!({"revision": 0})).unwrap_err();
+        assert!(err.to_string().contains("no stored model"), "{err}");
+        assert!(opened.doc.features.is_empty());
+        assert_eq!(opened.doc.name, "old");
+        opened.execute("file.save", &json!({})).unwrap();
+        assert_eq!(opened.document_history.revision, 1);
+        assert_eq!(opened.document_history.entries.first().map(|e| e.action.as_str()), Some("opened"));
+        assert!(opened.document_history.entries.first().is_some_and(|e| e.snapshot.is_none()));
+        assert!(opened.document_history.entries.get(1).is_some_and(|e| e.snapshot.is_some()));
+        let again = solidcraft_io::read_design(&std::fs::read(&old).unwrap()).unwrap();
+        assert_eq!(again.document_history.revision, 1);
+        assert_eq!(again.name, "old");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Snapshots stay off until the preference is on. The version cap then keeps only the newest
+    /// models, and a byte cap smaller than the model stores none.
+    #[test]
+    fn revision_history_is_off_until_enabled_and_obeys_the_caps() {
+        let dir = name_dir("revisions-off");
+        let path = dir.join("part.solidcraft");
+        let mut s = Session::default();
+        assert!(!s.revision_limits.enabled);
+        assert_eq!(s.revision_limits.max_bytes, 128 << 20);
+        assert_eq!(s.revision_limits.max_versions, 16);
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("file.save_as", &json!({"path": &path})).unwrap();
+        assert_eq!(s.document_history.revision, 1);
+        assert!(s.document_history.entries.first().is_some_and(|e| e.snapshot.is_none()));
+
+        s.revision_limits.enabled = true;
+        s.revision_limits.max_versions = 1;
+        s.execute("solid.box", &json!({"length": 4, "width": 4, "height": 4, "corner": [30, 0, 0]})).unwrap();
+        s.execute("file.save", &json!({})).unwrap();
+        assert_eq!(s.document_history.revision, 2);
+        assert!(s.document_history.entries[0].snapshot.is_none());
+        assert!(s.document_history.entries[1].snapshot.is_some());
+        s.execute("solid.box", &json!({"length": 2, "width": 2, "height": 2, "corner": [60, 0, 0]})).unwrap();
+        s.execute("file.save", &json!({})).unwrap();
+        assert_eq!(s.document_history.revision, 3);
+        assert_eq!(s.document_history.entries.iter().filter(|e| e.snapshot.is_some()).count(), 1);
+        assert!(s.document_history.entries.last().is_some_and(|e| e.snapshot.is_some()));
+
+        s.revision_limits.max_versions = 16;
+        s.revision_limits.max_bytes = 8;
+        s.execute("file.save", &json!({})).unwrap();
+        assert_eq!(s.document_history.revision, 4);
+        assert!(s.document_history.entries.iter().all(|e| e.snapshot.is_none()), "a cap smaller than the model keeps no snapshot");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

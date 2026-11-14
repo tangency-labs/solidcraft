@@ -157,6 +157,11 @@ impl Writer {
         Ok(())
     }
 
+    /// Has a part of this name been written?
+    pub fn has_part(&self, name: &str) -> bool {
+        self.names.contains(name)
+    }
+
     /// Would `entries` more optional parts of `extra` bytes, stored uncompressed, still keep the
     /// file within `budget` and its expanded size within the reader's budget?
     pub fn room(&self, entries: usize, extra: usize, budget: usize) -> bool {

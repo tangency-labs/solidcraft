@@ -678,6 +678,7 @@ enum FileAction {
     Import,
     Save,
     SaveAs,
+    Revisions,
     Export(&'static str),
     Mesh,
     ViewDxf,
@@ -815,13 +816,15 @@ fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
     } else {
         format!("{} ({})", app.tr_label("Recover"), app.recoverable.len()).into()
     };
-    let nav: [(&str, start_page::Label<'_>, String, Option<Section>, bool, FileAction); 12] = [
+    let save = design && app.session.revision_view.is_none();
+    let nav: [(&str, start_page::Label<'_>, String, Option<Section>, bool, FileAction); 13] = [
         ("home:start", app.tr_label("Start").into(), String::new(), Some(Section::Start), true, FileAction::Section(Section::Start)),
         ("home:new", app.tr_label("New").into(), format!("{primary}N"), None, true, FileAction::New("preferred")),
         ("home:open", app.tr("ui.open").into(), format!("{primary}O"), None, true, FileAction::Open),
         ("home:recover", recover, String::new(), Some(Section::Recovery), true, FileAction::Section(Section::Recovery)),
-        ("home:save", app.tr("ui.save").into(), format!("{primary}S"), None, design, FileAction::Save),
+        ("home:save", app.tr("ui.save").into(), format!("{primary}S"), None, save, FileAction::Save),
         ("home:save_as", app.tr("ui.save_as").into(), format!("{primary}{shift}S"), None, design, FileAction::SaveAs),
+        ("home:revisions", app.tr("home.revisions").into(), String::new(), None, design, FileAction::Revisions),
         ("home:export", app.tr("home.export").into(), String::new(), Some(Section::Export), design, FileAction::Section(Section::Export)),
         ("home:properties", app.tr("home.properties").into(), String::new(), None, design, FileAction::Properties),
         ("home:settings", app.tr("home.settings").into(), format!("{primary},"), None, true, FileAction::Settings),
@@ -831,7 +834,7 @@ fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
     ];
     let mut rail = Vec::with_capacity(nav.len() + 2 + crate::links::LINKS.len() + 1);
     for (index, (id, label, shortcut, section, enabled, chosen)) in nav.into_iter().enumerate() {
-        if index == 4 || index == 8 {
+        if index == 4 || index == 9 {
             rail.push(start_page::RailItem::Separator);
         }
         rail.push(start_page::RailItem::Entry(start_page::RailEntry {
@@ -1132,6 +1135,9 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
         FileAction::SaveAs => {
             app.home.open = false;
             crate::toolbar::save_as(app);
+        }
+        FileAction::Revisions => {
+            app.start("doc.revisions");
         }
         FileAction::Export(ext) => {
             app.home.open = false;
