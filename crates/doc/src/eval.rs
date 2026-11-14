@@ -4836,7 +4836,13 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
         // pieces as they stand (#3455: joining 64 separate pegs took the kernel's union 4.5 s).
         let acc = match union_all_apart(&operands) {
             Some(acc) => acc,
-            None => union_all(&operands)?,
+            // The kernel's union pairs the tools with each other before the target. Fins whose
+            // ends meet only inside a hub then meet in slivers it cannot resolve (#15913); into
+            // the target one at a time, each tool's overlap with the others already lies inside.
+            None => match union_all(&operands) {
+                Ok(acc) => acc,
+                Err(e) => tools.iter().try_fold(base.clone(), |acc, tool| union(&acc, tool)).map_err(|_| e)?,
+            },
         };
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
             *mb = mb.remade(acc);
