@@ -68,52 +68,105 @@ pub(crate) fn panel_scroll_offset(ctx: &egui::Context, previous: egui::Vec2, max
 #[derive(Default)]
 pub struct WebWheelGestures {
     last_scroll: Option<f64>,
+    /// None while sampling, true for a swipe, false for a smooth wheel.
+    swipe: Option<bool>,
+    pending: Vec<egui::Event>,
+    first_step: f32,
+    interval: Option<f64>,
+    samples: usize,
 }
 
 impl WebWheelGestures {
-    /// Bracket point-mode swipes and return the delay until their idle timeout.
+    fn phase(phase: egui::TouchPhase) -> egui::Event {
+        egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::Vec2::ZERO,
+            modifiers: egui::Modifiers::NONE,
+            phase,
+        }
+    }
+
+    fn decide(&mut self, raw: &mut egui::RawInput, swipe: bool) {
+        self.swipe = Some(swipe);
+        if swipe {
+            raw.events.push(Self::phase(egui::TouchPhase::Start));
+        }
+        raw.events.append(&mut self.pending);
+    }
+
+    fn end(&mut self, raw: &mut egui::RawInput) {
+        if self.last_scroll.is_some() {
+            // A short or ambiguous stream keeps the old pan behaviour, including its first delta.
+            if self.swipe.is_none() {
+                self.decide(raw, true);
+            }
+            if self.swipe == Some(true) {
+                raw.events.push(Self::phase(egui::TouchPhase::End));
+            }
+        }
+        *self = Self::default();
+    }
+
+    /// Supply browser scroll phases and return the delay until the gesture's idle timeout.
     ///
-    /// Browsers expose no device identity. A bare vertical delta of at least
-    /// `WHEEL_STEP_MIN` points is a wheel notch (browsers report about 100 points per notch,
-    /// scaled by page zoom and display scaling); smaller point deltas and horizontal input
-    /// start a swipe. Once started, larger deltas and momentum belong to that swipe too.
-    pub fn update(&mut self, raw: &mut egui::RawInput, now: f64) -> Option<std::time::Duration> {
-        use egui::{Event, Modifiers, MouseWheelUnit, TouchPhase, Vec2};
+    /// Browsers expose no device identity. Bare vertical steps >= 40 points remain wheel
+    /// notches. For smaller unmodified vertical steps, sample four input frames: only
+    /// same-sign steps within 10% of the first size, spaced 4–40 ms apart within 20% of
+    /// the first interval, count as a smooth wheel. Events batched in one frame share a
+    /// timestamp and contribute only one timing sample. Buffer at most 16 events; any
+    /// horizontal drift, irregularity, overflow or short stream falls back to a swipe.
+    /// Keep that decision through momentum until 100 ms of idle.
+    /// Always zoom bypasses this guess for bare vertical input; modifiers keep swipe routing.
+    pub fn update(&mut self, raw: &mut egui::RawInput, now: f64, always_zoom: bool) -> Option<std::time::Duration> {
+        use egui::{Event, Modifiers, MouseWheelUnit, Vec2};
         const IDLE: f64 = 0.1;
         const WHEEL_STEP_MIN: f32 = 40.0;
-        let phase_event = |phase| Event::MouseWheel {
-            source: egui::MouseWheelSource::Unknown,
-            unit: MouseWheelUnit::Point,
-            delta: Vec2::ZERO,
-            modifiers: Modifiers::NONE,
-            phase,
-        };
         let valid_time = now.is_finite() && now >= 0.0;
         let events = std::mem::take(&mut raw.events);
         if self.last_scroll.is_some_and(|last| !valid_time || now < last || now - last >= IDLE) {
-            raw.events.push(phase_event(TouchPhase::End));
-            self.last_scroll = None;
+            self.end(raw);
         }
         for event in events {
             match &event {
                 Event::MouseWheel { unit, delta, modifiers, .. } => {
                     let point = *unit == MouseWheelUnit::Point;
                     let valid_delta = delta.is_finite() && *delta != Vec2::ZERO;
-                    let step = delta.x == 0.0 && delta.y.abs() >= WHEEL_STEP_MIN;
-                    let swipe = valid_time && point && valid_delta && !modifiers.ctrl && (self.last_scroll.is_some() || !step);
-                    if swipe {
-                        if self.last_scroll.is_none() {
-                            raw.events.push(phase_event(TouchPhase::Start));
+                    let bare = *modifiers == Modifiers::NONE;
+                    let forced_zoom = always_zoom && bare && delta.x == 0.0;
+                    let notch = delta.x == 0.0 && delta.y.abs() >= WHEEL_STEP_MIN;
+                    if !bare && self.swipe == Some(false) {
+                        self.end(raw);
+                    }
+                    if !valid_time || !point || !valid_delta || modifiers.ctrl || forced_zoom {
+                        self.end(raw);
+                    } else if self.last_scroll.is_some() || !notch || (always_zoom && !bare) {
+                        let previous = self.last_scroll.replace(now);
+                        if self.swipe.is_none() {
+                            if previous.is_none() {
+                                self.first_step = delta.y;
+                            }
+                            let interval = previous.filter(|last| now > *last).map(|last| now - last);
+                            if previous.is_none() || interval.is_some() {
+                                self.samples += 1;
+                            }
+                            let steady = interval.is_none_or(|gap| {
+                                (0.004..=0.040).contains(&gap) && self.interval.is_none_or(|first| (gap - first).abs() <= first * 0.2)
+                            });
+                            let vertical = bare && delta.x == 0.0 && (delta.y - self.first_step).abs() <= self.first_step.abs() * 0.1;
+                            self.interval = self.interval.or(interval);
+                            self.pending.push(event);
+                            if !vertical || !steady || self.pending.len() >= 16 {
+                                self.decide(raw, true);
+                            } else if self.samples >= 4 {
+                                self.decide(raw, false);
+                            }
+                            continue;
                         }
-                        self.last_scroll = Some(now);
-                    } else if self.last_scroll.take().is_some() {
-                        raw.events.push(phase_event(TouchPhase::End));
                     }
                 }
                 // eframe converts browser pinch Ctrl+wheel to Zoom before the hook.
-                Event::Zoom(_) if self.last_scroll.take().is_some() => {
-                    raw.events.push(phase_event(TouchPhase::End));
-                }
+                Event::Zoom(_) => self.end(raw),
                 _ => {}
             }
             raw.events.push(event);
@@ -1653,7 +1706,7 @@ mod tests {
         gesture: &mut bool,
     ) -> (super::RawWheel, Vec<egui::Event>) {
         let mut raw = egui::RawInput { time: Some(time), events, focused: true, ..Default::default() };
-        let _ = state.update(&mut raw, time);
+        let _ = state.update(&mut raw, time, false);
         let events = raw.events.clone();
         let mut input = egui::InputState::default();
         input.events = raw.events;
@@ -1774,7 +1827,7 @@ mod tests {
         use egui::{Modifiers, MouseWheelUnit::Point, TouchPhase, vec2};
         let mut state = super::WebWheelGestures::default();
         let mut gesture = false;
-        for (time, delta) in [(0.0, vec2(0.0, 7.5)), (0.04, vec2(3.0, 0.0)), (0.09, vec2(0.0, 120.0))] {
+        for (time, delta) in [(0.0, vec2(0.1, 7.5)), (0.04, vec2(3.0, 0.0)), (0.09, vec2(0.0, 120.0))] {
             let (wheel, events) = web_frame(&mut state, time, vec![web_wheel(Point, delta, Modifiers::NONE)], &mut gesture);
             assert_eq!(wheel.pan, delta);
             assert_eq!(wheel.zoom, 0.0);
@@ -1782,7 +1835,7 @@ mod tests {
             let starts = events.iter().filter(|e| matches!(e, egui::Event::MouseWheel { phase: TouchPhase::Start, .. })).count();
             assert_eq!(starts, usize::from(time == 0.0));
         }
-        let delay = state.update(&mut egui::RawInput::default(), 0.10).expect("schedule the idle end even without more input");
+        let delay = state.update(&mut egui::RawInput::default(), 0.10, false).expect("schedule the idle end even without more input");
         assert!((delay.as_secs_f64() - 0.09).abs() < 1e-9);
         web_frame(&mut state, 0.18, vec![], &mut gesture);
         assert!(gesture);
@@ -1790,7 +1843,145 @@ mod tests {
         assert!(!gesture);
         assert!(matches!(events.as_slice(), [egui::Event::MouseWheel { phase: TouchPhase::End, delta, .. }] if *delta == egui::Vec2::ZERO));
         let (wheel, _) = web_frame(&mut state, 0.21, vec![web_wheel(Point, vec2(0.0, -2.0), Modifiers::NONE)], &mut gesture);
-        assert_eq!(wheel.pan, vec2(0.0, -2.0));
+        assert_eq!(wheel.pan, egui::Vec2::ZERO, "a new vertical stream is sampled first");
+    }
+
+    #[test]
+    fn web_smooth_wheels_zoom_after_four_steady_vertical_frames() {
+        use egui::{Modifiers, MouseWheelUnit::Point, vec2};
+        for step in [-3.0, 7.5, 20.0] {
+            let mut state = super::WebWheelGestures::default();
+            let mut gesture = false;
+            let mut zoom = 0.0;
+            for index in 0..8 {
+                let (wheel, events) =
+                    web_frame(&mut state, f64::from(index) * 0.016, vec![web_wheel(Point, vec2(0.0, step), Modifiers::NONE)], &mut gesture);
+                assert_eq!(wheel.pan, egui::Vec2::ZERO, "a smooth wheel never pans");
+                assert!(!gesture);
+                if index < 3 {
+                    assert!(events.is_empty(), "sample before moving the camera");
+                }
+                zoom += wheel.zoom;
+            }
+            assert_eq!(zoom, step * 8.0, "buffered steps are delivered exactly once");
+            let (_, events) = web_frame(&mut state, 0.3, vec![], &mut gesture);
+            assert!(events.is_empty(), "a wheel needs no scroll phases");
+        }
+    }
+
+    #[test]
+    fn web_smooth_wheel_events_batched_per_frame_still_zoom() {
+        use egui::{Modifiers, MouseWheelUnit::Point, vec2};
+        let mut state = super::WebWheelGestures::default();
+        let mut gesture = false;
+        let mut zoom = 0.0;
+        for index in 0..4 {
+            let events = vec![web_wheel(Point, vec2(0.0, 3.0), Modifiers::NONE); 2];
+            let (wheel, _) = web_frame(&mut state, f64::from(index) * 0.016, events, &mut gesture);
+            assert_eq!(wheel.pan, egui::Vec2::ZERO);
+            zoom += wheel.zoom;
+        }
+        assert_eq!(zoom, 24.0);
+        assert!(!gesture);
+    }
+
+    #[test]
+    fn web_trackpad_drift_and_irregular_momentum_keep_panning() {
+        use egui::{Modifiers, MouseWheelUnit::Point, vec2};
+        for stream in [
+            vec![(0.0, 8.0), (0.016, 8.0), (0.032, 6.0), (0.055, 3.0), (0.083, 1.0)],
+            vec![(0.0, 8.0), (0.016, 8.0), (0.045, 8.0), (0.070, 4.0), (0.100, 2.0)],
+        ] {
+            for drift in [0.0, 0.1] {
+                let mut state = super::WebWheelGestures::default();
+                let mut gesture = false;
+                let mut pan = egui::Vec2::ZERO;
+                let mut expected = egui::Vec2::ZERO;
+                for &(time, y) in &stream {
+                    let delta = vec2(drift, y);
+                    let (wheel, _) = web_frame(&mut state, time, vec![web_wheel(Point, delta, Modifiers::NONE)], &mut gesture);
+                    assert_eq!(wheel.zoom, 0.0);
+                    pan += wheel.pan;
+                    expected += delta;
+                }
+                assert_eq!(pan, expected, "every sampled and momentum delta pans");
+                assert!(gesture);
+                web_frame(&mut state, 0.3, vec![], &mut gesture);
+                assert!(!gesture);
+            }
+        }
+    }
+
+    #[test]
+    fn web_notches_and_ctrl_wheel_streams_zoom_without_sampling() {
+        use egui::{Modifiers, MouseWheelUnit::Point, vec2};
+        for modifiers in [Modifiers::NONE, Modifiers::CTRL] {
+            let mut state = super::WebWheelGestures::default();
+            let mut gesture = false;
+            for index in 0..5 {
+                let delta = vec2(0.0, if modifiers.ctrl { 2.0 } else { 100.0 });
+                let event = web_wheel(Point, delta, modifiers);
+                let (wheel, events) = web_frame(&mut state, f64::from(index) * 0.016, vec![event.clone()], &mut gesture);
+                assert_eq!(events, vec![event]);
+                assert_eq!(wheel.pan, egui::Vec2::ZERO);
+                assert!(!gesture);
+                if modifiers.ctrl {
+                    let mut input = egui::InputState::default();
+                    input.events = events;
+                    assert_ne!(super::pinch_factor(&input, egui::InputOptions::default(), 600.0, None), 1.0);
+                } else {
+                    assert_eq!(wheel.zoom, 100.0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn web_short_vertical_stream_falls_back_to_pan_on_timeout() {
+        use egui::{Modifiers, MouseWheelUnit::Point, vec2};
+        let mut state = super::WebWheelGestures::default();
+        let mut gesture = false;
+        let (wheel, _) = web_frame(&mut state, 0.0, vec![web_wheel(Point, vec2(0.0, 5.0), Modifiers::NONE)], &mut gesture);
+        assert_eq!(wheel.pan, egui::Vec2::ZERO);
+        let (wheel, _) = web_frame(&mut state, 0.11, vec![], &mut gesture);
+        assert_eq!(wheel.pan, vec2(0.0, 5.0));
+        assert_eq!(wheel.zoom, 0.0);
+        assert!(!gesture);
+    }
+
+    #[test]
+    fn web_always_zoom_does_not_sample_small_steps_and_preserves_shift_pan() {
+        use egui::{Modifiers, MouseWheelUnit::Point, vec2};
+        let mut state = super::WebWheelGestures::default();
+        let mut gesture = false;
+        for modifiers in [Modifiers::NONE, Modifiers::SHIFT] {
+            let event = web_wheel(Point, vec2(0.0, 2.0), modifiers);
+            let mut raw = egui::RawInput { events: vec![event.clone()], ..Default::default() };
+            state.update(&mut raw, 0.0, true);
+            if modifiers == Modifiers::NONE {
+                assert_eq!(raw.events, vec![event]);
+            }
+            let mut input = egui::InputState::default();
+            input.events = raw.events;
+            let wheel = super::immediate_wheel(
+                &input,
+                egui::InputOptions::default(),
+                600.0,
+                &mut gesture,
+                &mut false,
+                &mut Default::default(),
+                crate::prefs::TrackpadScroll::Pans,
+                Some(Modifiers::COMMAND),
+            );
+            if modifiers == Modifiers::NONE {
+                assert_eq!(wheel.zoom, 2.0);
+                assert_eq!(wheel.pan, egui::Vec2::ZERO);
+            } else {
+                assert!(gesture, "Shift still brackets two-finger navigation");
+                assert_eq!(wheel.zoom, 0.0);
+                assert_eq!(wheel.pan + wheel.shift_pan, vec2(0.0, 2.0));
+            }
+        }
     }
 
     #[test]
@@ -1814,7 +2005,7 @@ mod tests {
             if !mods.ctrl {
                 assert_ne!(wheel.zoom, 0.0);
             }
-            web_frame(&mut state, 0.01, vec![web_wheel(Point, vec2(0.0, 2.5), Modifiers::NONE)], &mut gesture);
+            web_frame(&mut state, 0.01, vec![web_wheel(Point, vec2(0.1, 2.5), Modifiers::NONE)], &mut gesture);
             assert!(gesture);
             let (wheel, _) = web_frame(&mut state, 0.02, vec![event], &mut gesture);
             // Point steps can occur during a swipe; explicit line/page wheels and Ctrl cannot.
@@ -1825,7 +2016,7 @@ mod tests {
         }
         let mut state = super::WebWheelGestures::default();
         let mut gesture = false;
-        web_frame(&mut state, 0.0, vec![web_wheel(Point, vec2(0.0, 2.5), Modifiers::NONE)], &mut gesture);
+        web_frame(&mut state, 0.0, vec![web_wheel(Point, vec2(0.1, 2.5), Modifiers::NONE)], &mut gesture);
         assert!(gesture);
         let (_, events) = web_frame(&mut state, 0.01, vec![egui::Event::Zoom(1.1)], &mut gesture);
         assert!(!gesture);
@@ -1840,13 +2031,13 @@ mod tests {
         use egui::{Modifiers, MouseWheelUnit::Point, vec2};
         let mut state = super::WebWheelGestures::default();
         let mut gesture = false;
-        web_frame(&mut state, 1.0, vec![web_wheel(Point, vec2(0.0, 3.5), Modifiers::NONE)], &mut gesture);
+        web_frame(&mut state, 1.0, vec![web_wheel(Point, vec2(0.1, 3.5), Modifiers::NONE)], &mut gesture);
         let (wheel, events) = web_frame(&mut state, 1.2, vec![web_wheel(Point, vec2(0.0, 120.0), Modifiers::NONE)], &mut gesture);
         assert_eq!(wheel.zoom, 120.0);
         assert!(!gesture);
         assert_eq!(events.len(), 2);
         for time in [f64::NAN, f64::INFINITY, -1.0] {
-            web_frame(&mut state, 2.0, vec![web_wheel(Point, vec2(0.0, 3.5), Modifiers::NONE)], &mut gesture);
+            web_frame(&mut state, 2.0, vec![web_wheel(Point, vec2(0.1, 3.5), Modifiers::NONE)], &mut gesture);
             web_frame(&mut state, time, vec![], &mut gesture);
             assert!(!gesture);
         }

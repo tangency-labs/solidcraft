@@ -251,12 +251,33 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 crate::scenario::publish_target("prefs:zoom_stop_at_model", response.rect);
             });
         });
-        let label_width = ["ui.wheel_zoom_speed", "prefs.trackpad_zoom_modifier"]
-            .into_iter()
-            .map(|id| ui_kit::ContentWidth::label(ui, app.tr(id)))
-            .fold(0.0, f32::max);
+        let mut labels = vec!["ui.wheel_zoom_speed", "prefs.trackpad_zoom_modifier"];
+        if cfg!(target_arch = "wasm32") {
+            labels.push("prefs.browser_scroll_wheel");
+        }
+        let label_width = labels.into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr(id))).fold(0.0, f32::max);
         ui_kit::settings_form(ui, label_width, |ui| {
             setting::wheel_zoom_speed(app, ui);
+            if cfg!(target_arch = "wasm32") {
+                ui_kit::row(ui, app.tr("prefs.browser_scroll_wheel"), |ui| {
+                    let choice = &mut app.preferences.browser_scroll_wheel;
+                    let label_id = |value| match value {
+                        BrowserScrollWheel::Automatic => "prefs.browser_scroll_wheel.automatic",
+                        BrowserScrollWheel::AlwaysZoom => "prefs.browser_scroll_wheel.always_zoom",
+                    };
+                    ui_kit::settings_control_width(ui, t.space_24 * 7.0 + t.space_12, |ui| {
+                        let response = ui_kit::dropdown_menu(ui, "pref_browser_scroll_wheel", solidcraft_ui_text::tr(label_id(*choice)), |ui| {
+                            for (id, value) in [("automatic", BrowserScrollWheel::Automatic), ("always_zoom", BrowserScrollWheel::AlwaysZoom)] {
+                                if ui_kit::list_picker(ui, id, solidcraft_ui_text::tr(label_id(value)), *choice == value).clicked() {
+                                    *choice = value;
+                                }
+                            }
+                        })
+                        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.browser_scroll_wheel.help"));
+                        crate::scenario::publish_target("prefs:browser_scroll_wheel", response.rect);
+                    });
+                });
+            }
             ui_kit::row(ui, app.tr("prefs.trackpad_zoom_modifier"), |ui| {
                 let platform = crate::tool_modifiers::Platform::of(ui.ctx());
                 let choice = &mut app.preferences.trackpad_zoom_modifier;

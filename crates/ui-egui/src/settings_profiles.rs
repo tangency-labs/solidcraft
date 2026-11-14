@@ -46,6 +46,7 @@ const MAX_ID: usize = 200;
 const PROFILE_KEYS: &[&str] = &[
     "browser_bodies_folders",
     "browser_eye_left",
+    "browser_scroll_wheel",
     "center_arc_follows_cursor",
     "color_vision",
     "dialog_buttons",
