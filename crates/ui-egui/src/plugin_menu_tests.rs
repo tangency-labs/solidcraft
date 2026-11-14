@@ -1,6 +1,7 @@
 //! The Plugins menu and its entry dialog: schema fields, required gating, and a run through the
 //! dialog matching `plugin.run`.
 use super::*;
+use std::collections::BTreeSet;
 
 fn gear_schema() -> Value {
     json!({"type":"object","required":["module","teeth"],"properties":{
@@ -137,6 +138,7 @@ fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
         version: "0.1.0".into(),
         description: String::new(),
         path: String::new(),
+        disabled: false,
         approval: String::new(),
         groups: BTreeSet::new(),
         entries,
@@ -267,6 +269,10 @@ fn ungranted_command_groups_keep_run_off_and_are_named() {
     assert!(why.contains("file"), "{why}");
     assert!(run(&mut app).is_err() && app.control_held.is_empty(), "nothing is queued");
     app.session.plugin_state.command_groups.insert("file".into());
+    assert!(app.plugin_menu.dialog.as_ref().unwrap().ready(&app).is_err(), "legacy global grants do not approve this plugin");
+    app.session.plugin_state.grants.entry("other".into()).or_default().command_groups.insert("file".into());
+    assert!(app.plugin_menu.dialog.as_ref().unwrap().ready(&app).is_err(), "another plugin's grants do not approve this plugin");
+    app.session.plugin_state.grants.entry("files".into()).or_default().command_groups.insert("file".into());
     assert!(app.plugin_menu.dialog.as_ref().unwrap().ready(&app).is_ok());
 }
 
