@@ -392,7 +392,9 @@ fn a_setback_too_short_for_the_fill_names_what_solidcores_corner_needs() {
 
 /// tangency-labs/solidcraft#14427: the corner of #13913 set back 3.5595, the least setback
 /// solidcore's corner fill is certified convex at, is filled with the G2 patch, and so it is at
-/// 3.6 (whose fades take the last, 181-span grid): one closed valid solid of the box's six faces,
+/// 3.6 (whose fades take the last, 181-span grid) and at 3.8 (where the 128 grid holds every
+/// station but its control net reaches past the box beyond the face tolerance, so the fill goes
+/// on to the next grid): one closed valid solid of the box's six faces,
 /// the three rounds and the patch, within the box to the face tolerance (on the patch's exact
 /// surface, [`past_the_box`]). Outside the corner cube (side s at the corner) it is the sphere
 /// corner's body (the same rounds and faces), and inside it lies within the three rounds'
@@ -407,7 +409,7 @@ fn the_least_setback_solidcores_corner_takes_is_filled_g2() {
     let corner = Vec3::new(40.0, 30.0, 20.0);
     let tol = crate::fill::face_tolerance(&body);
     let sphere = measure(&fillet(&body, &edges, r).unwrap()).unwrap().volume;
-    for s in [3.5595, 3.6] {
+    for s in [3.5595, 3.6, 3.8] {
         let g2 = fillet_g2_corners(&body, &edges, r, &[(corner, s)]).unwrap();
         assert!(g2.validity().is_empty(), "{s}: {:?}", g2.validity());
         let v = crate::validity::validity(&g2);
