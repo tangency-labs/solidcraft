@@ -4263,8 +4263,11 @@ pub fn gn_certify_span(
 /// certificate is then [`gn_certify_span`]'s.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SpanReuse<'a> {
-    /// In: the finest proved level of the span this one is a half of.
+    /// In: the finest proved level of the span this one is a piece of.
     pub inherit: Option<&'a CertifiedLevel>,
+    /// In: how many halvings this span is of the one it inherits from: a piece of it cut into
+    /// `2^split` (0 is taken as 1, a half).
+    pub split: u32,
     /// In: the first level tried where nothing is inherited (the coarser ones are not).
     pub start: u32,
     /// Out: this span's finest proved level, for its own halves.
@@ -4281,10 +4284,11 @@ pub struct SpanReuse<'a> {
 }
 
 /// [`gn_certify_span`] taking from and giving to its neighbours ([`SpanReuse`]), not the
-/// fork's. `reuse.inherit`: the span is a half of one the caller halved, and that span's
-/// finest proved level ([`CertifiedLevel`]) has pieces that meet this span and cover it.
-/// Their bounds hold over every point of them, so over this span; they are its level one
-/// coarser than theirs was (the span is half as long), taken without an enclosure, and the
+/// fork's. `reuse.inherit`: the span is one of the `2^split` pieces of one the caller cut,
+/// and that span's finest proved level ([`CertifiedLevel`]) has pieces that meet this span
+/// and cover it. Their bounds hold over every point of them, so over this span; they are its
+/// level `split` coarser than theirs was (the span is `2^split` times shorter; level 0 where
+/// they are longer than the span), taken without an enclosure, and the
 /// levels go on from the next one as [`gn_certify_span`]'s do. The pieces' row terms are
 /// taken again about this span's first station. Otherwise the levels start at
 /// `reuse.start` (the caller's guess from the span before; a level not tried bounds
@@ -4394,11 +4398,12 @@ pub fn gn_certify_span_reusing(
     // a lower bound on every level's certified bound, from the pieces' middles so far: the
     // feet's Taylor models are taken only while it is at most the target (#14405)
     let mut lb = 0.0_f64;
-    // a halved span's pieces over this half: its level one coarser than theirs
+    // a cut span's pieces over this piece: its level `split` coarser than theirs
     let mut start = reuse.start.min(SPAN_MAX_LEVEL);
     let inherit = reuse.inherit;
     if let Some(pieces) = inherit.and_then(|l| covering(l, a.s, b.s)) {
-        start = inherit.map_or(1, |l| l.level.max(1));
+        let split = reuse.split.max(1);
+        start = inherit.map_or(1, |l| l.level.saturating_sub(split) + 1);
         let mut acc = LevelAcc::new(bar.w.len());
         let mut own_pieces: Vec<CertifiedPiece> = pieces.into_iter().cloned().collect();
         for p in &mut own_pieces {
