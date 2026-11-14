@@ -9,7 +9,11 @@
 //! when it both leaves and returns on or beyond the cross section at the same end of the
 //! filleted edge (#1580; a run past one end and back past the other, round the far side
 //! of a closed rail, is judged, #2175); `518566f` tries [`leaves_past_an_end`] only for
-//! the first and last runs and refuses such a round. A first or last run is also past an
+//! the first and last runs and refuses such a round. Such a run is also skipped when it
+//! leaves across the face's side edge at an end heading out past it, or comes back across
+//! one heading in ([`crosses_side_edge_past_its_end`]): a rail run on round a closed loop
+//! of edges comes back onto its face beyond a seam elsewhere on the loop, after its end
+//! face has already trimmed it. A first or last run is also past an
 //! end where the filleted edge is closed and the run lies beyond the plane on which the
 //! corner at its vertex cuts the rail ([`past_closed_corner`], #2498): the fork takes the
 //! top rail of a teardrop's rim, which crosses the rim itself just past the tip, for a
@@ -228,7 +232,31 @@ fn leaves_past_an_end(
         .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's curve"))?;
 
     // Across or through the face's side edge at an end.
-    let (leave_edge, leave_vertex) = match (leave.point_class(), leave.object()) {
+    if !side_edge_end(solver, target, face, leave)?.is_empty() {
+        return Ok(true);
+    }
+
+    // On or beyond the cross section at an end.
+    Ok(beyond_end_section(solver, k, target, rail, rail_param)?.is_some())
+}
+
+/// The ends of the filleted edge (0 its start vertex, 1 its end vertex) whose side edge in
+/// `face`'s loop (the edge before or after the filleted edge there) the rail crosses at
+/// `at`, across it or through one of its vertices: none where `at` is on no side edge, both
+/// where the side edge joins them (a loop of two edges).
+fn side_edge_end(
+    solver: &FilletSolver,
+    target: &Brep,
+    face: FaceId,
+    at: &PointClassification<FilletClassObject>,
+) -> Result<Vec<usize>> {
+    let fil_eu = solver
+        .edgeuse(0)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's first edge use"))?;
+    let fil_edge = eu::edge(target, fil_eu)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge use's edge"))?;
+    let (fil_start, fil_end) = edge::start_end_vertices(target, fil_edge)?;
+    let (leave_edge, leave_vertex) = match (at.point_class(), at.object()) {
         (PointClassType::Edge, Some(o)) => match o.target_entity()? {
             EntityRef::Edge(e) => (Some(e), None),
             _ => (None, None),
@@ -253,20 +281,83 @@ fn leaves_past_an_end(
             if side == fil_edge {
                 continue;
             }
-            let first = edge::vertex(target, side)?;
-            let past = leave_edge == Some(side)
-                || leave_vertex.is_some_and(|v| {
-                    first == Some(v)
-                        || edge::other_vertex(target, side, first).is_ok_and(|o| o == Some(v))
-                });
-            if past {
-                return Ok(true);
+            let (first, second) = edge::start_end_vertices(target, side)?;
+            let crosses = leave_edge == Some(side)
+                || leave_vertex.is_some_and(|v| first == Some(v) || second == Some(v));
+            if !crosses {
+                continue;
             }
+            // the ends of the filleted edge the side edge meets (both on a loop of two edges)
+            let ends: Vec<usize> = [fil_start, fil_end]
+                .into_iter()
+                .enumerate()
+                .filter(|(_, v)| v.is_some() && (*v == first || *v == second))
+                .map(|(end, _)| end)
+                .collect();
+            return Ok(ends);
         }
     }
+    Ok(Vec::new())
+}
 
-    // On or beyond the cross section at an end.
-    Ok(beyond_end_section(solver, k, target, rail, rail_param)?.is_some())
+/// Whether a run of a rail off its face between two stretches on it lies past an end of the
+/// filleted edge through the face's side edge there: it leaves the face (`leaving`, at rail
+/// parameter `rail_param`) across the side edge at an end heading out past that end, or comes
+/// back onto the face across the side edge at an end heading in from beyond it.
+///
+/// A rail that crosses its face's side edge at an end has reached the end face there, where
+/// the corner at that end trims the blend: the rail beyond that crossing is past the end,
+/// wherever it runs on. A rail run on far enough round a closed edge's other pieces can come
+/// back onto its face beyond the crossing (where the face is split by a seam elsewhere along
+/// the loop), so the run off the face between is not a first or last one, and the cross
+/// section test alone (its leave point's nearest edge point is not an end where the end face
+/// slopes back over the face) would take it for a rail leaving beside the edge.
+fn crosses_side_edge_past_its_end(
+    solver: &FilletSolver,
+    k: &Kernel,
+    target: &Brep,
+    face: FaceId,
+    rail: &Curve,
+    rail_param: f64,
+    at: &PointClassification<FilletClassObject>,
+    leaving: bool,
+) -> Result<bool> {
+    let ends = side_edge_end(solver, target, face, at)?;
+    if ends.is_empty() {
+        return Ok(false);
+    }
+    let fil_eu = solver
+        .edgeuse(0)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's first edge use"))?;
+    let fil_edge = eu::edge(target, fil_eu)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge use's edge"))?;
+    let edge_curve = edge::curve(target, fil_edge)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's curve"))?;
+    let ivl = edge::interval(target, fil_edge)?;
+    // the rail's heading where it crosses: the side it leaves toward, or comes from
+    let on_rail = rail.evaluate(k, rail_param, 1, leaving, true)?;
+    let heading = on_rail
+        .get(1)
+        .copied()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the rail's tangent"))?;
+    for end in ends {
+        // the edge's tangent at that end, pointing out past it
+        let (t, from_left, sign) = if end == 0 {
+            (ivl.min(), false, -1.0)
+        } else {
+            (ivl.max(), true, 1.0)
+        };
+        let jet = edge_curve.evaluate(k, t, 1, from_left, true)?;
+        let tangent = jet
+            .get(1)
+            .copied()
+            .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's end tangent"))?;
+        let ahead = heading.dot(tangent) * sign;
+        if (leaving && ahead > 0.0) || (!leaving && ahead < 0.0) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Whether a first or last run of a rail off its face (`entering`: the first, which comes
@@ -539,6 +630,27 @@ impl FilletSolver {
                         {
                             continue;
                         }
+                    } else if crosses_side_edge_past_its_end(
+                        solver.solver(),
+                        k,
+                        target,
+                        face,
+                        &curve,
+                        d_leave,
+                        leave,
+                        true,
+                    )? || crosses_side_edge_past_its_end(
+                        solver.solver(),
+                        k,
+                        target,
+                        face,
+                        &curve,
+                        last.interval.max(),
+                        &last.end,
+                        false,
+                    )? {
+                        // past an end, through the face's side edge there
+                        continue;
                     } else if let Some(end) =
                         beyond_end_section(solver.solver(), k, target, &curve, d_leave)?
                     {
