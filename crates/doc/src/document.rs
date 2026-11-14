@@ -64,6 +64,9 @@ pub enum PlaneRef {
     /// Another plane rotated about a line (in world coordinates) by an angle expression. With
     /// `line`, an edge or round face of the model ([`crate::construct::model_axis`]), the line is
     /// found there on each evaluation and `axis_origin`/`axis_dir` are where it was when picked.
+    /// `line` can also be a construction axis ([`crate::construct::GeoRef::Axis`], by name),
+    /// found on each evaluation the same way; without `line`, `axis_origin`/`axis_dir` are the
+    /// fixed axis (how designs saved before a construction axis was followed hold one).
     /// With `direction_only`, only the axis direction is used: it is projected onto the base
     /// (nothing of that projection is kept as geometry) and the plane turns about the line
     /// through `pivot`, or through the base origin when `pivot` is absent.

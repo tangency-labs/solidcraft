@@ -662,6 +662,8 @@ pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, compon
                 _ => Err(bad("the datum is not an axis (pick the X, Y or Z of a component)")),
             }
         }
+        // A construction axis by name: where it is on each evaluation, so what turns about it follows it.
+        GeoRef::Axis { name } => crate::eval::construction_axis_in(doc, st, name, component),
         _ => model_axis(st, g),
     }
 }

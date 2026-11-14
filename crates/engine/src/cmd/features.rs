@@ -185,7 +185,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane_angle")
         .contract(&PLANE_AT_ANGLE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (where it is now)|{origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
+        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (followed: the plane moves with the axis)|{origin, dir} (fixed) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
     CommandSpec::new("solid.split_face", "Split Face", crate::checked!("solid.split_face", split_face))
         .at("SOLID", "MODIFY")
         .icon("split_face")
@@ -3070,8 +3070,9 @@ fn plane_offset(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "construct.plane.at_angle";
-    // The plane follows an edge or face it is on; a construction axis is kept as it is now.
-    let (axis_origin, axis_dir, line, _) = axis_line(s, p, cmd)?;
+    // The plane follows the edge, face or construction axis it turns about.
+    let (axis_origin, axis_dir, line, axis_feature) = axis_line(s, p, cmd)?;
+    let line = line.or_else(|| axis_feature.map(|name| solidcraft_doc::construct::GeoRef::Axis { name }));
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let line = line.map(Box::new);
