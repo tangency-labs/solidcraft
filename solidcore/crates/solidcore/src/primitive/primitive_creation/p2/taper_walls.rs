@@ -215,16 +215,18 @@ fn crossing(a: &Wall, b: &Wall, f: f64, n: Vec3, near: Point3) -> Option<Point3>
         if r <= 0.0 {
             return None;
         }
+        // the line's foot from the centre, c + q
         let w = l - c;
-        let bb = d.dot(w);
-        let ww = w.dot(w);
-        let disc = bb * bb - (ww - r * r);
-        if !(disc + touch_bound(d.dot(d), ww, r) >= 0.0) {
+        let dd = d.dot(d);
+        let q = w - (d.dot(w) / dd) * d;
+        let qn = q.length();
+        if !(qn - r <= touch_bound(w.length(), qn, r)) {
             return None;
         }
-        let root = disc.max(0.0).sqrt();
-        cand.push(l + (-bb - root) * d);
-        cand.push(l + (-bb + root) * d);
+        let root = ((r - qn) * (r + qn) / dd).max(0.0).sqrt();
+        let foot = c + q;
+        cand.push(foot - root * d);
+        cand.push(foot + root * d);
     } else {
         if ra <= 0.0 || rb <= 0.0 {
             return None;
@@ -236,8 +238,8 @@ fn crossing(a: &Wall, b: &Wall, f: f64, n: Vec3, near: Point3) -> Option<Point3>
         }
         let d2 = e.dot(e);
         e /= dd;
-        let along = (ra * ra - rb * rb + dd * dd) / (2.0 * dd);
-        let h2 = ra * ra - along * along;
+        let along = ((ra - rb) * (ra + rb) + dd * dd) / (2.0 * dd);
+        let h2 = (ra - along) * (ra + along);
         if h2 < 0.0 && !circles_may_meet(d2, ra, rb) {
             return None;
         }
@@ -256,25 +258,27 @@ fn crossing(a: &Wall, b: &Wall, f: f64, n: Vec3, near: Point3) -> Option<Point3>
     Some(x)
 }
 
-/// A bound on how far [`crossing`]'s computed line/circle discriminant `(d.w)^2 - (w.w -
-/// r^2)`, `w = l - c`, lies from the exact `(d.w)^2 - (d.d)(w.w - r^2)` of the given `l`,
-/// `c`, `d`, `r` (whose sign says whether the line `l + s d` meets the circle), from the
-/// computed `dd = d.d` and `ww = w.w`. Higham's model: `w` rounds once, `d.w` within
-/// `gamma_4 |d| |w|` (Cauchy-Schwarz), its square within `gamma_9 |d|^2 |w|^2`, `w.w` within
-/// `gamma_5`, `r^2` and the two differences once each, so `gamma_10 (dd ww + ww + r^2)`; the
-/// formula's assumption `d.d = 1` adds `|1 - d.d| |w.w - r^2|`, `d.d` itself within
-/// `gamma_3`. Taken as `gamma_16` for the computed `dd` and `ww` and the bound's own rounding.
-/// A line that touches its circle, as at a profile's tip where a line meets an arc at 0
-/// degrees, has an exact discriminant of about 0 and a computed one of either sign.
-fn touch_bound(dd: f64, ww: f64, r: f64) -> f64 {
-    (gamma(16) * (dd + 1.0) + (1.0 - dd).abs() * (1.0 + gamma(8))) * (ww + r * r)
+/// A bound on how far [`crossing`]'s computed `|q| - r` lies from the exact one of the given
+/// `l`, `c`, `d`, `r`, `q = w - (d.w / d.d) d` with `w = l - c` the line's foot from the
+/// centre (the line `l + s d` meets the circle where `|q| <= r`), from the computed `wn = |w|`
+/// and `qn = |q|`. Higham's model: `w` rounds once, `d.w` within `gamma_3 |d| |w|`
+/// (Cauchy-Schwarz) and `d.d` within `gamma_3 |d|^2`, so their quotient times `d` within
+/// `gamma_8` of `|d.w| / |d| <= |w|`, and the difference once, so `q` within `gamma_11 |w| + u
+/// |q|`; `|q|` within `gamma_4`, and `|q| - r` rounds once. Taken as `gamma_16` of
+/// `|w| + |q| + r` for the computed `|w|` and the bound's own rounding. A line that touches
+/// its circle, as at a profile's tip where a line meets an arc at 0 degrees, has `|q| - r`
+/// of about 0 and a computed one of either sign; within the bound the foot (or the points
+/// either side of it) is within the bound of both sections.
+fn touch_bound(wn: f64, qn: f64, r: f64) -> f64 {
+    gamma(16) * (wn + qn + r)
 }
 
 /// Whether two circles of radii `ra` and `rb` whose centres' computed squared distance is
 /// `d2` are not proved apart (they touch or cross): they meet where
 /// `(ra - rb)^2 <= D^2 <= (ra + rb)^2` (from
 /// `4 D^2 h^2 = ((ra + rb)^2 - D^2)(D^2 - (ra - rb)^2)`, `h` the half chord), which
-/// [`crossing`]'s `h^2 = ra^2 - along^2` decides badly conditioned (`along` divides by D).
+/// [`crossing`]'s `h^2 = (ra - along)(ra + along)` decides badly conditioned (`along` divides
+/// by D).
 /// `d2` is within `gamma_5` of the exact `D^2` (the difference rounds once, the squares and
 /// their sum), each square of a radius sum or difference within `gamma_3`; taken as
 /// `gamma_12` of the two sides for the comparison's own rounding. Read only where `h^2` comes
@@ -2113,8 +2117,9 @@ mod tests {
     }
 
     /// A line touching a circle, as at the issue's lower horn's tip (the line from (406, s.y)
-    /// to the circle's point t = (c + r, 0), leaning 1.6e-8 off x = 406): the discriminant comes
-    /// out -2.2e-11, and they meet at the line's foot from the centre, 5.3e-8 from t (the line
+    /// to the circle's point t = (c + r, 0), leaning 1.6e-8 off x = 406): the discriminant
+    /// `(d.w)^2 - (w.w - r^2)` came out -2.2e-11, the foot's `|q| - r` 0, and they meet at the
+    /// line's foot from the centre, 5.3e-8 from t (the line
     /// crosses the circle at t and 1.1e-7 above it). Moved a micrometre off the circle, they do
     /// not meet.
     #[test]

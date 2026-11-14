@@ -12,11 +12,18 @@ Updates: WR-520
   touching point and drafted 15 degrees inward, built its upper horn and refused its lower one:
   the discriminant there is +2.8e-15 exactly for the given doubles and -2.18e-11 as computed.
 - **Fix (solidcore):** the sign is decided against a certified rounding bound (Higham's gamma):
-  apart only where the bound proves it, one touching point otherwise; a positive discriminant
-  is used as before, so every draft that built before is unchanged. The circle/circle case
-  decides from `(ra - rb)^2 <= D^2 <= (ra + rb)^2`, which is well conditioned.
+  apart only where the bound proves it, one touching point otherwise. The line/circle case is
+  taken from the line's foot from the centre, `|q| - r` against `gamma_16 (|w| + |q| + r)`, not
+  from `(d.w)^2 - (w.w - r^2)`, which rounds with the square of the line's start's distance (a
+  line starting 1e8 from a circle of radius 1 touched it a radius off); within the bound the
+  point returned is within it of both sections. The circle/circle case decides from
+  `(ra - rb)^2 <= D^2 <= (ra + rb)^2`, which is well conditioned, and takes the chord from
+  `(ra - rb)(ra + rb)` and `(ra - along)(ra + along)` (radii 1e8 and 1e8 - 1 touched half a unit
+  off both).
 - **Rust port:** `primitive/primitive_creation/p2/taper_walls.rs` (`crossing`, `touch_bound`,
   `circles_may_meet`). Regression tests:
   `crates/solidcore/tests/fork_3ae7bfa_drafted_cone_wall.rs`
   (`a_horn_drafted_from_its_touching_tip_builds`: 5 faces, 9 edges, 6 vertices, the volume in
-  closed form) and the unit test `two_circles_touching_within_rounding_touch`.
+  closed form) and the unit tests `two_circles_touching_within_rounding_touch`,
+  `two_large_circles_touching_inside_touch_where_they_do` and
+  `a_line_far_from_its_start_meets_a_circle_where_it_does`.
