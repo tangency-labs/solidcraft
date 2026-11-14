@@ -327,8 +327,9 @@ impl Camera {
             return (near, far);
         }
         // A box crossing the eye uses the minimum positive near plane; points behind the eye
-        // still cannot be projected. Keep the existing one-micrometre lower limit.
-        (near.min((depth * 0.5).max(1e-3)), far)
+        // still cannot be projected. The floor is one micrometre, scaled down with the distance
+        // so a close view (see `hold_min_distance`) still sees what is in front of the eye (#16628).
+        (near.min((depth * 0.5).max((self.distance * 1e-3).clamp(1e-6, 1e-3))), far)
     }
     /// Projection to clip space (OpenGL/wgpu style, depth 0..1).
     pub fn proj(&self, aspect: f64, near: f64, far: f64) -> Mat4 {
@@ -384,6 +385,18 @@ impl Camera {
             self.target = a + (self.target - a) * (nd / self.distance);
         }
         self.distance = nd;
+    }
+    /// Keep a perspective eye at least `min` from the target (#16628). Zooming in shrinks the
+    /// distance geometrically, so left alone it collapses toward zero: the near plane then clips the
+    /// model and the origin planes fill the screen. At the bound the eye keeps going where the
+    /// zoom put it, and the TARGET is dollied forward along the view ray instead (eye and target
+    /// move together, the eye does not jump): the view never degenerates, and the user can still
+    /// fly close, in steps that shrink with the bound. Orthographic views have no eye, so are left alone.
+    pub fn hold_min_distance(&mut self, min: f64) {
+        if self.fov > 0.0 && min.is_finite() && min > 0.0 && self.distance.is_finite() && self.distance < min {
+            self.target = self.target - self.back() * (min - self.distance);
+            self.distance = min;
+        }
     }
     /// Pan by a screen delta in pixels for a viewport of height `h`.
     pub fn pan(&mut self, dx: f64, dy: f64, h: f64) {
@@ -896,6 +909,21 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_close_perspective_eye_is_held_off_the_target_and_keeps_its_place() {
+        let mut cam = Camera { distance: 0.01, fov: 0.6, ..Camera::default() };
+        let eye = cam.eye();
+        cam.hold_min_distance(0.5);
+        assert_eq!(cam.distance, 0.5);
+        assert!(cam.eye().dist(eye) < 1e-9, "the eye must not jump");
+        let mut ortho = Camera { distance: 0.01, ..Camera::default() };
+        ortho.hold_min_distance(0.5);
+        assert_eq!(ortho.distance, 0.01);
+        let cam = Camera { distance: 0.01, fov: 0.6, ..Camera::default() };
+        let (near, _) = cam.clip_bounds(&Bounds { min: Vec3::new(-1.0, -1.0, -1.0), max: Vec3::new(1.0, 1.0, 1.0) });
+        assert!(near > 0.0 && near <= 1e-5 + 1e-12, "near {near}");
     }
 
     #[test]
