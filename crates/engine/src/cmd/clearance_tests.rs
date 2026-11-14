@@ -240,6 +240,34 @@ fn a_small_gap_past_a_corner_is_not_contact() {
     }
 }
 
+/// A part in the missing quarter of an L-shaped block is 0.3 mm from both inside walls.
+/// Its top corners are on the top's support plane, outside the trimmed face (#16393).
+#[test]
+fn a_small_gap_in_an_inside_corner_is_not_contact() {
+    for gap in [0.3, 0.0] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 200, "width": 200, "height": 10, "corner": [-100, -100, 0], "body_name": "Block"}));
+        run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 12, "corner": [0, 0, -1], "operation": "new", "body_name": "Cut"}));
+        run(&mut s, "solid.combine", json!({"operation": "cut", "target": "Block", "tools": ["Cut"]}));
+        run(&mut s, "solid.box", json!({"length": 90, "width": 90, "height": 10, "corner": [gap, gap, 0], "operation": "new", "body_name": "Part"}));
+        for params in [json!({"clearance": 1, "nearest": 1}), json!({"nearest": 1})] {
+            let r = run(&mut s, "inspect.clearance", params.clone());
+            assert_eq!(r["unchecked"], json!([]), "{gap}: {r}");
+            assert_eq!(r["overlaps"], json!([]), "{gap}: {r}");
+            for body in ["Block", "Part"] {
+                assert!((f(&r["nearest"][body][0]["distance_mm"]) - gap).abs() < 1e-9, "{gap}: {r}");
+            }
+            if params.get("clearance").is_some() {
+                assert_eq!(r["near"].as_array().map(Vec::len), Some(1), "{gap}: {r}");
+                assert!((f(&r["near"][0]["distance_mm"]) - gap).abs() < 1e-9, "{gap}: {r}");
+                assert!(r["near"][0].get("exact").is_none(), "{gap}: {r}");
+            } else {
+                assert_eq!(r["near"], json!([]), "{gap}: {r}");
+            }
+        }
+    }
+}
+
 /// #2283: a knuckle (Ø6, z 3.7 to 8.3, with a 150 mm arm) turning between two frame bands (Ø6,
 /// z -1.5 to 3.5 and 8.5 to 13.5) on a shared axis is 0.2 mm from them at every angle. Its axis
 /// tilted 1.5e-6 rad (as a STEP round trip leaves it), the band's rim lies on the knuckle's

@@ -46,16 +46,12 @@ pub struct DistanceShape<'a> {
     faces: Vec<Option<SurfaceEval>>,
     edges: Vec<Option<(CurveEval, [f64; 2])>>,
     surfaces: Vec<OnceLock<Option<FaceSurface>>>,
-    face_tris: OnceLock<HashMap<u32, Vec<u32>>>,
 }
 
 /// Most face pairs near the nearest mesh points whose exact distance is worked out.
 const MAX_FACE_PAIRS: usize = 24;
 /// Most projection rounds for one pair of features.
 const MAX_ROUNDS: usize = 400;
-/// A point less than this fraction of its distance from an edge off the line through it is
-/// straight along the edge (see [`DistanceShape::on_face`]).
-const ALONG: f64 = 1e-3;
 
 impl<'a> DistanceShape<'a> {
     /// `mesh` is `body`'s mesh, within `chord` (mm) of its faces.
@@ -65,7 +61,7 @@ impl<'a> DistanceShape<'a> {
         let edges = record.edges.iter().map(|e| CurveEval::new(e.parameters()).ok().map(|c| (c, e.interval))).collect();
         let surfaces = faces.iter().map(|_| OnceLock::new()).collect();
         let chord = if chord.is_finite() && chord > 0.0 { chord } else { 0.0 };
-        DistanceShape { body, mesh, set: TriangleSet::new(mesh), chord, faces, edges, surfaces, face_tris: OnceLock::new() }
+        DistanceShape { body, mesh, set: TriangleSet::new(mesh), chord, faces, edges, surfaces }
     }
 
     /// The box around the body: its mesh's, grown by the chord tolerance.
@@ -87,82 +83,16 @@ impl<'a> DistanceShape<'a> {
         *self.surfaces.get(face)?.get_or_init(|| surface_of(self.body.record(), face))
     }
 
-    fn face_triangles(&self, face: u32) -> &[u32] {
-        let map = self.face_tris.get_or_init(|| {
-            let mut m: HashMap<u32, Vec<u32>> = HashMap::new();
-            for t in 0..self.set.len() as u32 {
-                if let Some(f) = self.set.face(t) {
-                    m.entry(f).or_default().push(t);
-                }
-            }
-            m
-        });
-        map.get(&face).map(Vec::as_slice).unwrap_or(&[])
-    }
-
-    /// Does `p`, a point on face `face`'s surface, lie on the face itself? Its mesh rules out
-    /// points farther than twice the chord. Nearer the face's boundary than that, the exact edge
-    /// nearest `p` decides: `p` must lie on the side of it where the face's mesh is.
-    fn on_face(&self, face: u32, p: Vec3) -> bool {
-        let tris = self.face_triangles(face);
+    /// A projected point belongs to a face only when its distance to the trimmed face is
+    /// within rounding tolerance. The kernel query respects the outer loop and every hole;
+    /// nearby display triangles cannot establish membership at a concave corner.
+    fn on_face(&self, face: u32, p: Vec3) -> Result<bool> {
+        let (body, order) = self.body.ops_body().ok_or_else(|| crate::KernelError::Failed("body distance: exact face query unavailable".into()))?;
+        let distances = body
+            .face_distances(order, face as usize, &[[p.x, p.y, p.z]])
+            .map_err(|e| crate::KernelError::Failed(format!("body distance: trimmed face: {e}")))?;
         let tiny = 1e-9 * self.body.size().max(1.0);
-        let reach = 2.0 * self.chord + tiny;
-        if self.set.distance_to(p, tris) > reach {
-            return false;
-        }
-        // The exact edges of the face near `p`: their nearest points and directions there.
-        let mut near: Vec<(f64, Vec3, Vec3)> = Vec::new();
-        for e in self.mesh.face_edges(face) {
-            let Some(line) = self.mesh.edges.get(e) else { continue };
-            let rough = match line.as_slice() {
-                [one] => one.dist(p),
-                _ => line.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min),
-            };
-            if rough > 2.0 * reach {
-                continue;
-            }
-            if let Some((at, dir)) = self.edge_nearest(e, p, &mut Hint::default()) {
-                near.push((at.dist(p), at, dir));
-            }
-        }
-        let Some(least) = near.iter().map(|n| n.0).reduce(f64::min) else { return true };
-        if least <= tiny {
-            return true;
-        }
-        // The nearest edge (any of them, where several meet at a vertex) with the face's mesh on
-        // `p`'s side. An edge with the face on both sides (a seam inside it) says nothing.
-        let mut decided = false;
-        for &(_, at, dir) in near.iter().filter(|n| n.0 <= least + tiny) {
-            let Some(t) = dir.normalized() else { continue };
-            let across = |x: Vec3| {
-                let v = x - at;
-                v - t * v.dot(t)
-            };
-            let sides: Vec<Vec3> = tris
-                .iter()
-                .filter_map(|&k| self.set.triangle(k))
-                .filter(|[a, b, c]| solidcraft_geom::compare::closest_on_triangle(at, *a, *b, *c).dist(at) <= reach)
-                .map(|[a, b, c]| across((a + b + c) / 3.0))
-                .filter(|w| w.len() > tiny)
-                .collect();
-            let Some(inward) = sides.iter().copied().max_by(|x, y| x.len().total_cmp(&y.len())) else { continue };
-            if sides.iter().any(|w| w.dot(inward) < 0.0) {
-                continue;
-            }
-            // `p` straight along the edge (past its end, on the line through it) says nothing
-            // about which side it is on: another edge meeting there decides. Straight along is
-            // relative to how far `p` is: past the end, what is left across the edge is the
-            // edge's own tilt and rounding, and its side is chance (#2283).
-            let off = across(p);
-            if off.len() <= tiny.max(ALONG * at.dist(p)) {
-                continue;
-            }
-            decided = true;
-            if off.dot(inward) >= 0.0 {
-                return true;
-            }
-        }
-        !decided
+        Ok(distances.first().copied().flatten().is_some_and(|d| d <= tiny))
     }
 
     /// The features near mesh point `p` on face `face`: the face, and its edges within twice the chord.
@@ -300,9 +230,9 @@ pub fn body_distance(a: &DistanceShape, b: &DistanceShape, limit: f64) -> Result
                     let Some((d, p, q)) = settle(a, xa, b, xb, c.b) else { continue };
                     let holds = |s: &DistanceShape, f: Feature, x: Vec3| match f {
                         Feature::Face(i) => s.on_face(i as u32, x),
-                        Feature::Edge(_) => true,
+                        Feature::Edge(_) => Ok(true),
                     };
-                    if holds(a, xa, p) && holds(b, xb, q) && best.is_none_or(|bd| d < bd.distance) {
+                    if holds(a, xa, p)? && holds(b, xb, q)? && best.is_none_or(|bd| d < bd.distance) {
                         best = Some(BodyDistance { distance: d, from: p, to: q, exact: true });
                     }
                 }
