@@ -3282,7 +3282,7 @@ impl FilletBrep {
                         k,
                         seed,
                         &domain,
-                        &crate::surface::surface::p5::DropPointOptions::default(),
+                        &DropPointOptions::default(),
                     )?;
                     if !dropped.success {
                         // the rolled rail's foot does not drop onto the face beyond
