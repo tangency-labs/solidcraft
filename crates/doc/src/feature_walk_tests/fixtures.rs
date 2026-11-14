@@ -146,7 +146,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         (
             "cell_grid",
-            json!({"type": "cell_grid", "sketch": 1, "profiles": {"type": "indices", "indices": [0]}, "sides": "cell_grid.sides", "size": "cell_grid.size", "web": "cell_grid.web", "angle": "cell_grid.angle", "anchor": ["cell_grid.x", "cell_grid.y", "cell_grid.z"], "depth": "cell_grid.depth"}),
+            json!({"type": "cell_grid", "sketch": 1, "profiles": {"type": "indices", "indices": [0]}, "sides": "cell_grid.sides", "size": "cell_grid.size", "web": "cell_grid.web", "angle": "cell_grid.angle", "margin": "cell_grid.margin", "anchor": ["cell_grid.x", "cell_grid.y", "cell_grid.z"], "depth": "cell_grid.depth"}),
         ),
         ("sheet_base", json!({"type": "sheet_base", "sketch": 1, "profiles": {"type": "all"}})),
         ("sheet_contour", json!({"type": "sheet_contour", "sketch": 1, "curves": ["l1"], "distance": "contour.distance"})),

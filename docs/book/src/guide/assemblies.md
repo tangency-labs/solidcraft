@@ -70,7 +70,9 @@ does not move, and a part that joints hold to something grounded moves only as f
 allow (below). Dragging any member of a chain joined to nothing grounded moves the whole chain,
 preserving its joint values. Shared nested definitions move in every instance; the selected
 instance follows the pointer even when its parent is rotated differently from the first one. A drag that starts on empty space, on a part that can't move, or
-with Shift, Ctrl (Cmd) or Alt held draws a selection box instead. Other uncaptured moves stay
+with Shift, Ctrl (Cmd) or Alt held draws a selection box instead. A drag over a selected part
+grabs that part, even where another part is in front of it: select a copy's row in the Browser
+to drag it off a grounded copy placed on top of it. Other uncaptured moves stay
 pending. Scripts and agents do the same with `occurrence.drag {occurrence or path, at, point}`,
 which moves the placement by `point - at` in world coordinates and answers the placements it
 `moved`.

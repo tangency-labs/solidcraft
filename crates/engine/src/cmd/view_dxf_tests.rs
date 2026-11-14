@@ -351,3 +351,39 @@ fn view_dxf_curves_arcs_write_a_round_hole_as_one_circle_and_the_default_still_w
     let err = s.execute(CMD, &json!({"camera": top, "curves": "splines"})).unwrap_err().to_string();
     assert!(err.contains("curves must be lines or arcs"), "{err}");
 }
+
+#[test]
+fn view_dxf_front_view_of_a_tray_with_round_corner_reliefs_is_exported_not_refused() {
+    // #16814: the faces beside round corner reliefs are swept along the front view, and their
+    // mesh triangles tilt either way. Each of their mesh edges counted as a silhouette, and
+    // the hidden-line work budget ran out on the exact front view (yaw 0).
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"Steel 1.2mm","thickness":"1.2 mm","bend_radius":"1.2 mm","k_factor":"0.42","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center":[0,0],"corner":[100,90]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base","body_name":"Chassis"}));
+    run(&mut s, "sheet.flange", json!({"edges":[[0,-90,1.2],[0,90,1.2]],"height":70}));
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"edges":[[-100,0,1.2],[100,0,1.2],[-100,-88.8,35],[100,-88.8,35],[-100,88.8,35],[100,88.8,35]],"height":12,"corner_relief_shape":"round","corner_relief":3}),
+    );
+    let v = run(&mut s, CMD, json!({"hidden":"dashed","camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":2000,"fov":0.0}}));
+    // The tray's outline: the 200 mm base, the 70 mm walls (from z = 0 to 70).
+    let mut points = Vec::new();
+    for g in solidcraft_io::read_dxf(v["dxf"].as_str().unwrap()).unwrap() {
+        if let solidcraft_io::Geom2::Line(a, b) = g {
+            points.extend([a, b]);
+        }
+    }
+    let min = points.iter().fold(Vec2::new(f64::INFINITY, f64::INFINITY), |a, p| Vec2::new(a.x.min(p.x), a.y.min(p.y)));
+    let max = points.iter().fold(Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |a, p| Vec2::new(a.x.max(p.x), a.y.max(p.y)));
+    assert!(min.dist(Vec2::new(-100., 0.)) < 1e-6 && max.dist(Vec2::new(100., 70.)) < 1e-6, "{min:?} {max:?}");
+    // Only the B-rep edges and real silhouettes are drawn: 1134 segments, 0.5 million of the
+    // 200 million work steps. Before, 76680 segments ran the budget out.
+    let stats = &v["stats"];
+    assert!(stats["segments"].as_u64().unwrap() < 2_000, "{stats}");
+    assert!(stats["occlusion_work"].as_u64().unwrap() < 2_000_000, "{stats}");
+    assert!(v["visible"].as_u64().unwrap() > 0 && v["hidden"].as_u64().unwrap() > 0, "{v}");
+}

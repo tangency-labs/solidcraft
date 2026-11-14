@@ -753,15 +753,21 @@ pub(crate) fn seed_records(
     b: &Brep,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
 ) {
+    // (the scan passes every slot, emptied ones too, and the B-rep's key)
+    let visits = slot_counts(b).iter().sum::<usize>().saturating_add(1);
     if records.is_empty() {
         // Bulk build (sorted input is O(n)); the same map as entry-by-entry.
+        let noted = records.take_visits();
         *records = entities(b)
             .map(|e| key_of(e).key)
             .chain([p2::brep_ref(b).key])
             .map(|k| (k, topo::Topology::default()))
             .collect();
+        records.note_visits(usize::try_from(noted).unwrap_or(usize::MAX));
+        records.note_visits(visits);
         return;
     }
+    records.note_visits(visits);
     for e in entities(b) {
         records.or_default(key_of(e).key);
     }
@@ -829,10 +835,13 @@ pub(crate) fn reseed_records(
             && mark.slots.iter().zip(slots).all(|(&then, now)| then <= now)
     };
     if let Some((since, changed)) = records.changed_since(same) {
-        for &e in removals.get(since.removed..).unwrap_or_default() {
+        let removed = removals.get(since.removed..).unwrap_or_default();
+        records.note_visits(removed.len().saturating_add(changed.len()));
+        for &e in removed {
             records.settle(key_of(e), false);
         }
         for (kind, (from, to)) in since.slots.into_iter().zip(slots).enumerate() {
+            records.note_visits(to.saturating_sub(from));
             for index in (from..to).map_while(|i| u32::try_from(i).ok()) {
                 if is_live(b, kind, index) {
                     records.settle(key_of(kind_entity(kind, index)), true);
@@ -851,10 +860,25 @@ pub(crate) fn reseed_records(
         let mut keys: Vec<ObjectKey> = std::iter::once(scheme.brep_key)
             .chain(entities(b).map(key_of))
             .collect();
+        // (the tally: every slot scanned for the keys and the B-rep's key, the pairs the
+        // sortedness test and the removal of repeats each compare, a sort's comparisons.
+        // The sortedness test is counted as its whole pass, which it is for keys that come
+        // out in order, as the schemes in use give them; on other keys it stops early.)
+        let pairs = keys.len().saturating_sub(1);
+        let mut visits = slots
+            .iter()
+            .sum::<usize>()
+            .saturating_add(1)
+            .saturating_add(pairs)
+            .saturating_add(pairs);
         if !keys.is_sorted() {
-            keys.sort_unstable();
+            keys.sort_unstable_by(|a, b| {
+                visits = visits.saturating_add(1);
+                a.cmp(b)
+            });
         }
         keys.dedup();
+        records.note_visits(visits);
         records.reset_to_keys(&keys);
     }
     let mark = topo::ReseedMark {
@@ -1116,6 +1140,10 @@ pub(crate) fn with_caller_identities_for<R>(
             // (a source is read, never added to)
             let context = env.context.as_deref().unwrap_or(&k.context);
             check_keys(context, src, key_of, 0)?;
+            // (the tally: every slot of the source scanned, and the source itself; no
+            // prospective object, the window being 0)
+            env.records
+                .note_visits(slot_counts(src).iter().sum::<usize>().saturating_add(1));
         }
     }
     seed_records_once(env.records, (id, instance), b, env.key_of)?;
@@ -1235,6 +1263,7 @@ fn check_keys_once(
     let mut checked_to = progress.checked_to;
     let mut passed: Vec<(usize, usize)> = Vec::new();
     let mut skipped: Vec<(usize, usize)> = Vec::new();
+    let mut visits = 0_usize;
     let kinds = live_counts(b)
         .into_iter()
         .zip(slot_counts(b))
@@ -1258,6 +1287,7 @@ fn check_keys_once(
         }
         let from = *to;
         *to = from.max(slots).max(end);
+        visits = visits.saturating_add(to.saturating_sub(from));
         for i in from..*to {
             let covered = (count..end).contains(&i)
                 || u32::try_from(i).is_ok_and(|index| is_live(b, kind, index));
@@ -1273,6 +1303,13 @@ fn check_keys_once(
         return Err(RESERVED_KEY);
     }
     progress.checked_to = checked_to;
+    // (the tally: the indices passed, where they were asked and where they leave the
+    // unchecked set; the indices skipped; the B-rep's key)
+    visits = visits
+        .saturating_add(passed.len())
+        .saturating_add(passed.len())
+        .saturating_add(skipped.len())
+        .saturating_add(1);
     for (kind, i) in passed {
         if let Some(unchecked) = progress.unchecked.get_mut(kind) {
             unchecked.remove(&i);
@@ -1283,6 +1320,7 @@ fn check_keys_once(
             unchecked.insert(i);
         }
     }
+    records.note_visits(visits);
     Ok(())
 }
 
@@ -1310,6 +1348,7 @@ fn seed_records_once(
     }
     // (through the store's own methods, so a reset sees what was added)
     for (kind, (from, to)) in from.into_iter().zip(slots).enumerate() {
+        records.note_visits(to.saturating_sub(from));
         for index in (from..to).map_while(|i| u32::try_from(i).ok()) {
             if is_live(b, kind, index) {
                 records.or_default(key_of(kind_entity(kind, index)).key);
@@ -1317,6 +1356,7 @@ fn seed_records_once(
         }
     }
     records.or_default(brep_key);
+    records.note_visits(1);
     Ok(())
 }
 
@@ -3582,6 +3622,152 @@ pub fn remove_slit_loops_where_solids_touch(
         split_disconnected_shells(k, b)?;
     }
     Ok(removed)
+}
+
+/// Not upstream (#16640): collapses the faces of no area whose loop is two edges between the
+/// same two vertices, where two surfaces graze each other within tolerance (an arc that
+/// crosses the plane of a coplanar face by a fraction of the tolerance). Such a face is the
+/// sliver the classification kept between two edges that coincide to within their
+/// tolerance, yet were never made one edge: each of the two edges bounds one other face.
+/// The face goes (as [`delete_face`] removes it, without the region nesting a solid that
+/// stays closed does not need), the first edge takes over the other edge's two uses, with
+/// the larger of the two tolerances, and the other edge is destroyed, so the two faces
+/// that met the sliver meet at one edge. A face whose edges do not have that shape, or
+/// whose uses do not pair up as the radial list of a solid edge's does, is left as it is.
+/// Returns whether a face was collapsed.
+///
+/// # Errors
+///
+/// `SM_ERR_NULL_POINTER` for a loop, edge use or edge the topology lacks (`NER`); those of
+/// the face deletion, the topology reads and the edge destruction.
+pub fn collapse_zero_area_two_edge_faces(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+) -> Result<bool> {
+    let mut collapsed = false;
+    for f in p1::faces(b, None)? {
+        let loops = face2::loops(b, f, false, None)?;
+        let [l] = loops[..] else {
+            continue;
+        };
+        let lu = b
+            .loop_(l)?
+            .loopuse
+            .ok_or_else(|| ner("the loop's loop use"))?;
+        let uses = lu1::edgeuses(b, lu, None, None)?;
+        let [use1, use2] = uses[..] else {
+            continue;
+        };
+        let (Some(keep), Some(gone)) = (eu1::edge(b, use1)?, eu1::edge(b, use2)?) else {
+            continue;
+        };
+        if keep == gone {
+            continue;
+        }
+        // the edges run between the same two vertices, the same way
+        let ends = edge::start_end_vertices(b, keep)?;
+        if ends != edge::start_end_vertices(b, gone)? || ends.0 == ends.1 || ends.0.is_none() {
+            continue;
+        }
+        // the loop has no area
+        let area = crate::topology::face::p3::compute_loop_orientation(k, b, f, l, None, false);
+        if !matches!(area, Ok(OrientType::Unknown)) {
+            continue;
+        }
+        // each edge is used by this face and by one other, as a solid edge is
+        let (Some(rest_keep), Some(rest_drop)) = (
+            other_face_edge_uses(b, keep, f)?,
+            other_face_edge_uses(b, gone, f)?,
+        ) else {
+            continue;
+        };
+        // the uses of the other edge, in the order the list keeps its pairs: the use that
+        // runs with the list's primary use first, on the opposite side of the face
+        let primary = eu1::orientation(b, rest_keep[0])?;
+        let drop_pair = if eu1::orientation(b, rest_drop[0])? == primary {
+            rest_drop
+        } else {
+            [rest_drop[1], rest_drop[0]]
+        };
+        if eu1::orientation(b, drop_pair[0])? != primary
+            || eu1::orientation(b, rest_keep[1])? == primary
+            || eu1::orientation(b, drop_pair[1])? == primary
+            || is_upward_use(b, rest_keep[0])? == is_upward_use(b, drop_pair[0])?
+        {
+            continue;
+        }
+        let Some(other_face) = eu1::face(b, drop_pair[0])? else {
+            continue;
+        };
+
+        delete_face_in(
+            k,
+            b,
+            env,
+            &mut DeletionMarks::Retained,
+            f,
+            DeleteFaceOptions {
+                delete_edges_vertices: false,
+                do_region_nesting: false,
+                region_to_keep: None,
+            },
+            None,
+        )?;
+
+        // the other face's uses move to the edge that stays
+        for eu in drop_pair {
+            b.edgeuse_mut(eu)?.edge = Some(keep);
+        }
+        let tolerance = b.edge(keep)?.tolerance.max(b.edge(gone)?.tolerance);
+        {
+            let kept = b.edge_mut(keep)?;
+            kept.edgeuses = rest_keep.into_iter().chain(drop_pair).collect();
+            kept.tolerance = tolerance;
+        }
+        b.edge_mut(gone)?.edgeuses.clear();
+        for l in face2::loops(b, other_face, false, None)? {
+            for used in &mut b.loop_mut(l)?.edges {
+                if used.edge == gone {
+                    used.edge = keep;
+                }
+            }
+        }
+        edge::destroy(k, b, gone, env)?;
+        collapsed = true;
+    }
+    Ok(collapsed)
+}
+
+/// The two uses of `e` that are not on face `f`, in the order of the edge's use list, when
+/// the list is `f`'s pair and one other face's pair.
+fn other_face_edge_uses(b: &Brep, e: EdgeId, f: FaceId) -> Result<Option<[EdgeuseId; 2]>> {
+    let list = &b.edge(e)?.edgeuses;
+    if list.len() != 4 {
+        return Ok(None);
+    }
+    let mut rest = Vec::with_capacity(2);
+    for &eu in list {
+        if eu1::face(b, eu)? != Some(f) {
+            rest.push(eu);
+        }
+    }
+    let [first, second] = rest[..] else {
+        return Ok(None);
+    };
+    let other = eu1::face(b, first)?;
+    if other.is_none() || other != eu1::face(b, second)? {
+        return Ok(None);
+    }
+    Ok(Some([first, second]))
+}
+
+/// Whether the edge use is on its face's upward face use.
+fn is_upward_use(b: &Brep, eu: EdgeuseId) -> Result<bool> {
+    let Some(f) = eu1::face(b, eu)? else {
+        return Ok(false);
+    };
+    Ok(face2::upward_faceuse(b, f)? == eu1::faceuse(b, eu)?)
 }
 
 /// Not upstream (tangency-labs/solidcore#746, the fork's
