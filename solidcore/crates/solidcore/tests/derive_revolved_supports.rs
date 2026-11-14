@@ -230,6 +230,18 @@ fn a_shallow_cylinders_endpoints_stay_on_the_derived_support() {
     )
     .unwrap();
     let form = BSplineSurface::from_nurb(nurb, true);
+    // Certify the constructed form against its intended cylinder before recognition:
+    // the shallow sweep must not hide malformed weights or control points.
+    assert!(lies_on(
+        &form,
+        &Implicit::Cone {
+            origin: Vec3::ZERO,
+            axis: z,
+            radius,
+            tan_angle: 0.0,
+        },
+    )
+    .unwrap());
     let support = AnalyticSupport::derive(&k, SupportKind::Cylinder, &form).unwrap();
     assert_eq!(support.kind(), SupportKind::Cylinder);
     if let AnalyticSupport::Cylinder { placement, radius } = support {
