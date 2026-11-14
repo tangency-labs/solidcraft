@@ -475,10 +475,11 @@ impl<'a> NearHoles<'a> {
     }
 }
 
-// The planar booleans this thread ran, for the tests that count them.
+// Counters for the tests: the planar booleans and the flat materials this thread ran.
 #[cfg(test)]
 thread_local! {
     static MATERIAL_BOOLEANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static FLAT_MATERIALS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 pub(crate) fn material_boolean(a: &[Region2], b: &[Region2], op: kernel::BoolOp, work: &mut FlatWork) -> Result<Vec<Region2>> {
@@ -2991,11 +2992,24 @@ impl SheetBody {
     pub fn machining(&self) -> Result<Vec<SheetPocket>> {
         // The material without the junction slits: they are zero-width, and the kernel's planar
         // booleans read the material's loops.
+        self.machining_in(&self.flat_material()?)
+    }
+
+    /// The flat pattern ([`Self::flat_regions`]) and its machining ([`Self::machining`]) from one
+    /// build of the flat material, for a reader that wants both (the flat pattern's JSON, its
+    /// DXF): building it is the costly part (#13493).
+    pub fn flat_with_machining(&self) -> Result<(Vec<Region2>, Vec<SheetPocket>)> {
         let material = self.flat_material()?;
+        let pockets = self.machining_in(&material)?;
+        Ok((self.flat_regions_of(material)?, pockets))
+    }
+
+    /// [`Self::machining`] in `material`, the flat material.
+    fn machining_in(&self, material: &[Region2]) -> Result<Vec<SheetPocket>> {
         let mut work = FlatWork::new();
         let mut out = Vec::new();
         for pocket in &self.pockets {
-            for region in material_boolean(&material, std::slice::from_ref(&pocket.region), kernel::BoolOp::Intersect, &mut work)? {
+            for region in material_boolean(material, std::slice::from_ref(&pocket.region), kernel::BoolOp::Intersect, &mut work)? {
                 if out.len() >= 1000 {
                     return Err(flat_budget_error());
                 }
@@ -3012,7 +3026,11 @@ impl SheetBody {
     /// follows it with tangent arcs. Where a split edge's stretches bend to opposite sides the
     /// blank is cut along their junction (see [`Self::junction_slits`]).
     pub fn flat_regions(&self) -> Result<Vec<Region2>> {
-        let mut regions = self.flat_material()?;
+        self.flat_regions_of(self.flat_material()?)
+    }
+
+    /// [`Self::flat_regions`] from `regions`, the flat material.
+    fn flat_regions_of(&self, mut regions: Vec<Region2>) -> Result<Vec<Region2>> {
         if regions.is_empty() {
             return Err(DocError::Invalid("empty flat pattern".into()));
         }
@@ -3101,6 +3119,8 @@ impl SheetBody {
     }
 
     pub(crate) fn flat_material(&self) -> Result<Vec<Region2>> {
+        #[cfg(test)]
+        FLAT_MATERIALS.with(|n| n.set(n.get() + 1));
         let mut work = FlatWork::new();
         // Merge structural pieces before cutting: clipping each panel first introduces
         // coincident notch endpoints at seams, while a single material cut has no seams.
@@ -7578,6 +7598,20 @@ mod tests {
         let mapped = s.region_to_flat(None, &below, &Region2 { outer: drawn.clone(), holes: vec![] }).unwrap();
         assert_eq!(mapped.outer, lobe(mirror));
         assert!(mapped.holes.is_empty() && (mapped.area() + drawn.signed_area()).abs() < 1e-9 && mapped.area() > 100.0, "{}", mapped.area());
+    }
+
+    /// The flat pattern's readers (its JSON, its DXF) want the outline and the pockets: one build
+    /// of the flat material gives both, the same as the two calls that build it once each.
+    #[test]
+    fn the_flat_and_its_machining_come_from_one_build() {
+        let mut s = plate(100.0, 60.0);
+        s.holes.push(ellipse(Vec2::new(30.0, 30.0), 15.0, 8.0));
+        s.record_pocket(ellipse(Vec2::new(70.0, 30.0), 10.0, 6.0), 0.0, 1.0, &mut FlatWork::new()).unwrap();
+        let (regions, pockets) = (s.flat_regions().unwrap(), s.machining().unwrap());
+        FLAT_MATERIALS.with(|n| n.set(0));
+        let both = s.flat_with_machining().unwrap();
+        assert_eq!(FLAT_MATERIALS.with(std::cell::Cell::get), 1, "flat material builds");
+        assert_eq!(both, (regions, pockets));
     }
 
     #[test]
