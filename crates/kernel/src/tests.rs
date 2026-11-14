@@ -180,6 +180,27 @@ fn a_cylinder_rim_round_goes_to_step_as_its_torus() {
     let pappus = PI * big * big * height - 2.0 * PI * (big - r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI))) * (1.0 - PI / 4.0) * r * r;
     assert!(rel(a, pappus) < 1e-7 && rel(b, pappus) < 1e-7, "{a} {b} {pappus}");
 }
+/// A small round of a cylinder's rim builds whether the cylinder is the primitive (its seam at an
+/// odd angle) or an extruded circle (#16748: the primitive's was refused as larger than its faces
+/// allow, at any radius up to about a twentieth of the cylinder's). Pappus: the round takes off
+/// 2 pi (R - r (10 - 3 pi) / (3 (4 - pi))) (1 - pi / 4) r^2.
+#[test]
+fn a_small_rim_round_builds_on_a_primitive_cylinder_as_on_an_extruded_one() {
+    let (big, height) = (10.0, 20.0);
+    let primitive = cylinder(Vec3::ZERO, Vec3::Z, big, height).unwrap();
+    let circle = Region2 { outer: Loop2::circle(Vec2::ZERO, big), holes: vec![] };
+    let extruded = extrude(&Plane::XY, &[circle], 0.0, height).unwrap().pop().unwrap();
+    let rim = Vec3::new(7.0711, 7.0711, height);
+    // Pappus' closed form, pi R^2 h - 2 pi (R - r (10 - 3 pi) / (3 (4 - pi))) (1 - pi / 4) r^2.
+    for (r, want) in [(0.1, 6283.050770054479), (0.5, 6279.851997607429)] {
+        for (name, body) in [("primitive", &primitive), ("extruded", &extruded)] {
+            let round = fillet(body, &[rim], r).unwrap_or_else(|e| panic!("{name} cylinder, round {r}: {e}"));
+            let volume = measure(&round).unwrap().volume;
+            assert!(rel(volume, want) < 1e-7, "{name} cylinder, round {r}: {volume} vs {want}");
+        }
+    }
+}
+
 #[test]
 fn hostile_inputs_are_errors() {
     assert!(extrude(&Plane::XY, &[rect(1.0, 1.0)], 0.0, 0.0).is_err());

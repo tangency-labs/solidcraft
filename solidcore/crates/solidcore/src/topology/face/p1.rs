@@ -25,6 +25,7 @@
 //! | [`swap_uv`]                                  | `SmFace::SwapUV`                             |
 //! | [`move_seam`], [`move_seam_notified`], [`MoveSeamOptions`], [`MoveSeamResult`], [`SeamProblem`] | `SmFace::MoveSeam` |
 //! | [`split_at_seam`], [`SeamSplit`]             | `SmFace::SplitAtSeam`                        |
+//! | [`complete_merged_face_seam`]                | (the fork's WR-599: `HasSeamProblem`, then `SplitAtSeam`, after a face merge) |
 //! | [`shrink_geometry`], [`shrink_geometry_with`] | `SmFace::ShrinkGeometry`                    |
 //! | [`FixSeamPlanType`]                          | `SmFixSeamPlanType` (`SmTypes.h`)            |
 //!
@@ -2583,6 +2584,55 @@ pub fn split_at_seam_notified<O: LoopObject>(
         resolve,
         0,
     )
+}
+
+/// WR-599 (the fork's tangency-labs/smlib@16bf1cb): a face just merged with a face its surface covers across a
+/// seam the surface wraps completed as a face on a periodic surface has it: `HasSeamProblem`
+/// (its classification status passed on, as the fork's `SER`), then, when a seam is crossed
+/// or missing, [`split_at_seam_notified`] with its optional arguments left out, notifying
+/// through `env` when given. The cover keeps the merged domain within the period it spans,
+/// so the trims of the covered part cross the seam; without the seam edges the loops'
+/// UV trims jump by the period where they cross it. `SmMerge::BooleanPostProcess`
+/// ([`crate::boolean::merge::p1::boolean_post_process`]) calls this after each face merge
+/// under `Kernel::fixes.cover_wraps_across_closed_seam`, and
+/// `SmBrep::RemoveTopologicalEdgesAndVertices`
+/// ([`crate::topology::brep::p5::remove_topological_edges_and_vertices`]) after each one
+/// (#16866).
+///
+/// # Errors
+///
+/// Those of [`crate::topology::face::p4::has_seam_problem_in_brep_mut`] and
+/// [`split_at_seam_notified`].
+pub fn complete_merged_face_seam(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: Option<&mut crate::topology::edge::NotifyEnv<'_>>,
+    f: FaceId,
+) -> Result<()> {
+    use crate::topology::brep::p1::HealLoopHandle;
+    let check = crate::topology::face::p4::has_seam_problem_in_brep_mut::<HealLoopHandle>(
+        k,
+        b,
+        f,
+        crate::topology::face::p4::HasSeamProblemOptions::default(),
+    )?;
+    let problem = check.problem;
+    if problem.crossed == SurfParamType::Neither && problem.missing == SurfParamType::Neither {
+        return Ok(());
+    }
+    let (mut class_u, mut class_v) = (check.class_u, check.class_v);
+    split_at_seam_notified(
+        k,
+        b,
+        env,
+        f,
+        &mut class_u,
+        &mut class_v,
+        problem,
+        None,
+        &|o: HealLoopHandle| o.as_topology(),
+    )?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

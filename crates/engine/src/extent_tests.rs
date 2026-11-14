@@ -411,3 +411,27 @@ fn through_all_cut_with_a_start_offset_goes_all_the_way() {
         }
     }
 }
+
+/// #16780: From and To points at two planes (not faces) above a board, the To plane within the
+/// board's pick tolerance of its top face, run from the From plane to the To plane. The To plane
+/// was taken for the board's top face, which is where the extrude starts, and the extrude refused.
+#[test]
+fn extrude_from_a_plane_to_a_plane_near_a_face_runs_between_the_planes() {
+    for operation in ["new", "join"] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [-30, -30, 0], "length": 60, "width": 60, "height": 1.3, "body_name": "Board"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "P"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, -10], "p1": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "P", "from": [0, 0, 1.3], "to": [0, 0, 3.6], "operation": operation, "body_name": "Glass"}));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{operation}: {:?}", s.model.results);
+        let name = if operation == "join" { "Board" } else { "Glass" };
+        let b = body(&mut s, name);
+        let top = b["bbox"]["max"][2].as_f64().unwrap_or(0.0);
+        assert!((top - 3.6).abs() < 1e-6, "{operation}: top {top}");
+        let glass = 400.0 * 2.3;
+        let want = if operation == "join" { 3600.0 * 1.3 + glass } else { glass };
+        let volume = b["volume_mm3"].as_f64().unwrap_or(0.0);
+        assert!((volume - want).abs() < 1e-3 * want, "{operation}: volume {volume}, want {want}");
+    }
+}
