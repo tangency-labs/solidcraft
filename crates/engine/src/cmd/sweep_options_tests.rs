@@ -76,6 +76,26 @@ fn scaled_sweep_is_a_frustum() {
     assert!((again.volume - m.volume).abs() < 1e-9 * volume);
 }
 
+/// A path across two sketches (#16168): the sweep's path continues from the XZ sketch's line
+/// into a sketch on YZ, in the order picked (the entry naming the sketch first). Each entry is
+/// saved with its sketch, and the solid is the same when reopened.
+#[test]
+fn sweep_path_across_sketches() {
+    let mut s = setup();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "S2"}));
+    // The YZ sketch's y runs along world Z: the line joins `up`'s end at world Z 20.
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [0, 40]], "ids": ["seg2"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let volume = 40.0 * 100.0 * PI;
+    sweep(&mut s, "C", "Across", json!({"path": [{"sketch": "S2", "curve": "seg2"}, "up"]})).unwrap();
+    let m = measure(&s, "Across");
+    assert!((m.volume - volume).abs() < 2e-3 * volume, "volume {} vs {volume}", m.volume);
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let reopened = Session::new(doc);
+    let again = measure(&reopened, "Across");
+    assert!((again.volume - volume).abs() < 2e-3 * volume, "volume {} vs {volume}", again.volume);
+}
+
 /// A twisted square keeps its faces' names (each wall after its profile curve), and the twist is
 /// a parameter: editing it changes the solid, a plain sweep has the same names.
 #[test]

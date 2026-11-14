@@ -5964,8 +5964,19 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 p["path_body"] = json!(body);
                 p["path_edges"] = json!(edges);
             } else {
-                let path: Vec<String> = sels(d, 1).curve_ids();
-                p["path_sketch"] = json!(picks_sketch(app, sels(d, 1), sketch.as_u64()).ok_or("the path curves must be in one sketch")?);
+                // Each curve's sketch, resolved one pick at a time: the path may join the curves
+                // of several sketches (#16168), so a pick in another sketch is saved with that
+                // sketch. A pick whose sketch cannot be resolved still refuses the path.
+                let mut resolved: Vec<(String, u64)> = Vec::new();
+                for sel in sels(d, 1) {
+                    let Sel::SketchCurve { id, .. } = sel else { continue };
+                    let sk = picks_sketch(app, std::slice::from_ref(sel), sketch.as_u64()).ok_or("the path curves must be in one sketch")?;
+                    resolved.push((id.clone(), sk));
+                }
+                let Some(&(_, path_sketch)) = resolved.first() else { return Err("the path curves must be in one sketch".into()) };
+                let path: Vec<Value> =
+                    resolved.into_iter().map(|(id, sk)| if sk == path_sketch { json!(id) } else { json!({"sketch": sk, "curve": id}) }).collect();
+                p["path_sketch"] = json!(path_sketch);
                 p["path"] = json!(path);
             }
             crate::dialogs_sweep::params(app, opts, sels(d, 2).first(), [sels(d, 3), sels(d, 4)], &mut p)?;
@@ -8062,7 +8073,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 // A body's edge is looked for on the body the path was picked on (#2216).
                 inp.items = match path_body {
                     Some(body) => path_edges.iter().filter_map(|p| edge_sel_on(s, Some(body.0.as_str()), p.0)).collect(),
-                    None => path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect(),
+                    None => path
+                        .iter()
+                        .map(|e| {
+                            let (sketch, curve) = e.split(*path_sketch);
+                            crate::selection::curve_pick(curve, sketch.0, s.active_sketch)
+                        })
+                        .collect(),
                 };
             }
             if !targets.is_empty() {

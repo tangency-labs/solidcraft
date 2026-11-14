@@ -65,7 +65,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sweep")
         .contract(&SWEEP_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
+        .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order; an entry {sketch, curve} is a curve of that sketch, so the path may join curves of several sketches (#16168)]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
     CommandSpec::new("solid.loft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2…50, in order; matching hole counts, no holes at an apex); rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them), name?, body_name?"),
     CommandSpec::new("solid.box", "Box", crate::checked!("solid.box", prim_box))
         .at("SOLID", "CREATE")
@@ -3847,10 +3847,11 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-/// A sweep's path (#2216): a chain of a body's edges (`path_body` and `path_edges`) or the
-/// curves of a sketch (`path_sketch` and `path`). The body's edges are a point on each edge of
-/// the chain; the path runs from the end nearest the profile.
-pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<String>, Option<BodyName>, Vec<Position>)> {
+/// A sweep's path (#2216, #16168): a chain of a body's edges (`path_body` and `path_edges`) or
+/// a chain of sketch curves (`path_sketch` and `path`, whose entries may name the sketch each
+/// curve is in). The body's edges are a point on each edge of the chain; the path runs from the
+/// end nearest the profile.
+pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<solidcraft_doc::PathEntry>, Option<BodyName>, Vec<Position>)> {
     if p.get("path_body").is_some_and(|b| !b.is_null()) {
         let body = str_(p, "path_body").ok_or_else(|| bad(cmd, "`path_body` must be a body name"))?;
         if s.model.state().body(body).is_none() {
@@ -3860,10 +3861,25 @@ pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<
         return Ok((0, Vec::new(), Some(BodyName::from(body)), edges));
     }
     let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() {
-        return Err(bad(cmd, "`path` must list curve ids"));
+    let path = p.get("path").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`path` must list curve ids"))?;
+    if path.is_empty() || path.len() > 1000 {
+        return Err(bad(cmd, "the path needs 1…1000 curves"));
     }
+    // A curve of the path's sketch is its id; a curve of another sketch is saved with that
+    // sketch, so a path may join the curves of several sketches (#16168).
+    let path = path
+        .iter()
+        .map(|e| match e {
+            Value::String(id) => Ok(solidcraft_doc::PathEntry::OfPathSketch(id.clone())),
+            Value::Object(o) => {
+                let curve =
+                    o.get("curve").and_then(Value::as_str).ok_or_else(|| bad(cmd, "each `path` entry must be a curve id or {sketch, curve}"))?;
+                let sketch = sketch_id(s, o.get("sketch"), cmd, "path curve's sketch")?;
+                Ok(solidcraft_doc::PathEntry::OfSketch { sketch: solidcraft_doc::SketchId(sketch), curve: curve.to_string() })
+            }
+            _ => Err(bad(cmd, "each `path` entry must be a curve id or {sketch, curve}")),
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok((path_sketch, path, None, Vec::new()))
 }
 

@@ -7452,24 +7452,23 @@ fn feature_tools_with_constructor(
                 let ctl = sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
                 return regions.iter().map(|r| Ok(tool(r, kernel::sweep_with(&ss.plane, r, &segs, &ctl)?))).collect();
             }
-            let ps =
-                st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
+            // Each path curve in the sketch it is in, mapped into the feature's frame: the path
+            // may join the curves of several sketches (#16168).
+            let curves = path_curves(doc, st, path, *path_sketch, f.component)?;
             let profile;
-            let ss = if !ps.sketch.wires.is_empty() {
+            let ss = if curves.iter().any(|c| c.ss.sketch.wire_index(&c.id).is_some()) {
                 profile = profile_in_frame(doc, ss, f.component)?;
                 &profile
             } else {
                 ss
             };
-            let mapped = path_in_frame(doc, ps, f.component)?;
-            let ps = mapped.as_ref();
             let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
             let start = regions.first().map(|r| ss.plane.to_world(r.centroid())).unwrap_or_default();
             let tool = |r: &Region2, body: Body| crate::lineage::ProfileRoles::swept(Some(ss), Some(r)).tool(body, None);
-            let points = path_points(ps, path, start)?;
+            let points = path_points(&curves, start)?;
             let segs = match points {
                 Some(_) => Vec::new(),
-                None => path_segments_at(ps, path, start, Some(&ss.plane))?,
+                None => path_segments_at(&curves, start, Some(&ss.plane))?,
             };
             let path_start =
                 points.as_ref().and_then(|p| p.points().first().copied()).or_else(|| segs.first().map(kernel::PathSeg::start)).unwrap_or(start);
@@ -7493,7 +7492,7 @@ fn feature_tools_with_constructor(
             let region = pipe_region(vals, r, wall)?;
             // Its faces are named as a sweep's caps and a cylinder's wall are (#14897).
             let tool = |body: Body| crate::lineage::pipe_tool(body, region.outer.segs.len());
-            if let Some(along) = path_points(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
+            if let Some(along) = path_points(&curves_in(ps, path), Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
                 let pts = along.points();
                 let (Some(a), Some(b)) = (pts.first().copied(), pts.get(1).copied()) else { return Err(DocError::Invalid("empty path".into())) };
                 let t = (b - a).normalized().ok_or_else(|| DocError::Invalid("path direction".into()))?;
@@ -7592,7 +7591,7 @@ pub(crate) fn rail_polylines(doc: &Document, st: &ModelState, rails: &[crate::Sw
                 .ok_or_else(|| DocError::Unknown(format!("rail sketch {} (it must come earlier in the timeline)", rail.sketch)))?;
             let mapped = path_in_frame(doc, rs, consumer)?;
             let rs = mapped.as_ref();
-            match path_points(rs, &rail.curves, start)? {
+            match path_points(&curves_in(rs, &rail.curves), start)? {
                 Some(path) => Ok(path.points()),
                 None => Ok(kernel::path_polyline(&path_segments(rs, &rail.curves, start)?)?),
             }
@@ -7680,22 +7679,58 @@ fn path_in_frame<'a>(doc: &Document, sketch: &'a SolvedSketch, consumer: u64) ->
     Ok(Cow::Owned(mapped))
 }
 
-/// A path that uses 3D sketch curves (wires), as one chain of pieces from the end nearest
-/// `start` (no start: the first curve runs toward the second): each drawn 3D spline as its fit
-/// points (the kernel has its exact curve), each curve held exactly (a planar sketch curve, a
-/// linked curve with [`solidcraft_sketch::Wire::exact`]) as its path segments, and a linked
-/// curve known only as points as those points. `None` when the path is all planar curves.
-fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<kernel::PointPath>> {
-    if !ids.iter().any(|id| ps.sketch.wire_index(id).is_some()) {
+/// One curve of a path: the sketch it is in (already in the feature's frame) and the curve's id.
+/// A path may join the curves of several sketches (#16168); the sketches are shared, one each.
+pub(crate) struct PathCurve {
+    ss: std::rc::Rc<SolvedSketch>,
+    id: String,
+}
+
+/// Every id as a curve of the one sketch `ps`, for the path helpers' callers whose path is the
+/// curves of a single sketch.
+fn curves_in(ps: &SolvedSketch, ids: &[String]) -> Vec<PathCurve> {
+    let ss = std::rc::Rc::new(ps.clone());
+    ids.iter().map(|id| PathCurve { ss: ss.clone(), id: id.clone() }).collect()
+}
+
+/// A sweep's path curves resolved: each entry's curve in its own sketch, each sketch mapped into
+/// the feature's frame (#16168). An entry without a sketch of its own is a curve of the path's
+/// sketch, as designs before cross-sketch paths saved.
+fn path_curves(doc: &Document, st: &ModelState, path: &[crate::PathEntry], path_sketch: crate::SketchId, component: u64) -> Result<Vec<PathCurve>> {
+    let mut mapped: Vec<(u64, std::rc::Rc<SolvedSketch>)> = Vec::new();
+    for entry in path {
+        let (sid, _) = entry.split(path_sketch);
+        if !mapped.iter().any(|(s, _)| *s == sid.0) {
+            let sk = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid} (it must come earlier in the timeline)")))?;
+            let sketch = std::rc::Rc::new(path_in_frame(doc, sk, component)?.into_owned());
+            mapped.push((sid.0, sketch));
+        }
+    }
+    let mut curves: Vec<PathCurve> = Vec::with_capacity(path.len());
+    for entry in path {
+        let (sid, id) = entry.split(path_sketch);
+        let (_, ss) = mapped.iter().find(|(s, _)| *s == sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
+        curves.push(PathCurve { ss: ss.clone(), id: id.to_string() });
+    }
+    Ok(curves)
+}
+
+/// A path that uses 3D sketch curves (wires), as one chain of pieces put in order from the end
+/// nearest `start` (no start: the first curve runs toward the second): each drawn 3D spline as
+/// its fit points (the kernel has its exact curve), each curve held exactly (a planar sketch
+/// curve, a linked curve with [`solidcraft_sketch::Wire::exact`]) as its path segments, and a
+/// linked curve known only as points as those points. `None` when the path is all planar curves.
+fn path_points(curves: &[PathCurve], start: Vec3) -> Result<Option<kernel::PointPath>> {
+    if !curves.iter().any(|c| c.ss.sketch.wire_index(&c.id).is_some()) {
         return Ok(None);
     }
-    if ids.len() > 1000 {
+    if curves.is_empty() || curves.len() > 1000 {
         return Err(DocError::Invalid("the path needs 1…1000 curves".into()));
     }
-    let mut pieces: Vec<kernel::PathPiece> = Vec::with_capacity(ids.len());
-    for id in ids {
-        if let Some(wi) = ps.sketch.wire_index(id) {
-            pieces.push(match ps.sketch.wires.get(wi) {
+    let mut pieces: Vec<kernel::PathPiece> = Vec::with_capacity(curves.len());
+    for c in curves {
+        if let Some(wi) = c.ss.sketch.wire_index(&c.id) {
+            pieces.push(match c.ss.sketch.wires.get(wi) {
                 // A drawn 3D arc is its circle, from its start counter-clockwise about its normal
                 // (its three fit points define it; a spline through them is not the arc).
                 Some(solidcraft_sketch::Wire { arc: Some(arc), .. }) => {
@@ -7716,20 +7751,22 @@ fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<
                 w => kernel::PathPiece::Polyline(w.map(|w| w.pts.clone()).unwrap_or_default()),
             });
         } else {
-            let ci = ps.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("path curve `{id}`")))?;
-            let segs = ps.sketch.exact_segs(ci).unwrap_or_else(|| ps.sketch.segs(ci));
-            pieces.push(kernel::PathPiece::Segs(segs.iter().map(|s| kernel::PathSeg::of_sketch(&ps.plane, s)).collect()));
+            let ci = c.ss.sketch.curve_index(&c.id).ok_or_else(|| DocError::Unknown(format!("path curve `{}`", c.id)))?;
+            let segs = c.ss.sketch.exact_segs(ci).unwrap_or_else(|| c.ss.sketch.segs(ci));
+            pieces.push(kernel::PathPiece::Segs(segs.iter().map(|s| kernel::PathSeg::of_sketch(&c.ss.plane, s)).collect()));
         }
     }
-    // Pieces meet within the sketch's tolerance (projected curves are only that close).
+    // Pieces are put end to end from the end nearest `start`, whatever order they were picked
+    // in (#16168); they must meet within the sketches' tolerance (projected curves are only
+    // that close).
     let tol = 1e-3;
     let ends = |p: &kernel::PathPiece| {
         let pts = p.points();
         (pts.first().copied().unwrap_or_default(), pts.last().copied().unwrap_or_default())
     };
-    let mut pieces = pieces.into_iter();
-    let Some(first) = pieces.next() else { return Ok(None) };
-    let rest: Vec<kernel::PathPiece> = pieces.collect();
+    let mut rest: Vec<kernel::PathPiece> = pieces;
+    let Some(first) = rest.first().cloned() else { return Ok(None) };
+    rest.remove(0);
     let (a, b) = ends(&first);
     let flip = if start.is_finite() {
         b.dist(start) < a.dist(start)
@@ -7740,22 +7777,35 @@ fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<
         })
     };
     let first = if flip { first.reversed() } else { first };
-    let mut last = ends(&first).1;
     let mut chain = vec![first];
-    for p in rest {
-        let (a, b) = ends(&p);
-        let (p, a, b) = if b.dist(last) < a.dist(last) { (p.reversed(), b, a) } else { (p, a, b) };
-        if a.dist(last) > tol {
+    let mut last = ends(&chain[0]).1;
+    while !rest.is_empty() {
+        // The unused piece with the end nearest where the chain stands, reversed where the
+        // chain runs against it.
+        let mut best: Option<(usize, bool, f64)> = None;
+        for (i, p) in rest.iter().enumerate() {
+            let (a, b) = ends(p);
+            let (da, db) = (a.dist(last), b.dist(last));
+            if best.is_none_or(|(_, _, bd)| da.min(db) < bd) {
+                best = Some((i, db < da, da.min(db)));
+            }
+        }
+        let Some((i, reverse, d)) = best else { break };
+        if d > tol {
             return Err(DocError::Invalid("the path curves are not connected end to end".into()));
         }
+        let mut p = rest.swap_remove(i);
+        if reverse {
+            p = p.reversed();
+        }
+        last = ends(&p).1;
         chain.push(p);
-        last = b;
     }
     Ok(Some(kernel::PointPath { pieces: chain }))
 }
 
 fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<kernel::PathSeg>> {
-    path_segments_at(ps, ids, start, None)
+    path_segments_at(&curves_in(ps, ids), start, None)
 }
 
 /// The path segments of a sweep's path on a body's edges (#2216): the chain the picked edges
@@ -7914,71 +7964,87 @@ fn closest_on_curve(c: &solidcore_record::brep::Curve, [t0, t1]: [f64; 2], p: Ve
 /// profile's plane crosses it nearest `start`, the curve there split in two, when that is not
 /// already where the chain starts (#3345). Swept from anywhere else, the profile would stand
 /// off the path by the distance between the two.
-pub(crate) fn path_segments_at(ps: &SolvedSketch, ids: &[String], start: Vec3, profile: Option<&Plane>) -> Result<Vec<kernel::PathSeg>> {
-    if ids.is_empty() || ids.len() > 1000 {
+pub(crate) fn path_segments_at(curves: &[PathCurve], start: Vec3, profile: Option<&Plane>) -> Result<Vec<kernel::PathSeg>> {
+    if curves.is_empty() || curves.len() > 1000 {
         return Err(DocError::Invalid("the path needs 1…1000 curves".into()));
     }
     // A path through 3D sketch curves is followed as a 3D polyline.
-    if let Some(path) = path_points(ps, ids, start)? {
+    if let Some(path) = path_points(curves, start)? {
         return Ok(path.points().windows(2).map(|w| kernel::PathSeg::Line { a: w[0], b: w[1] }).collect());
     }
-    // Each curve as its exact pieces (Béziers, conics) where it has them, in its own direction
-    // of travel. A curve is turned round whole: its pieces stay one run.
-    let mut curves: Vec<Vec<solidcore_record::Seg2>> = Vec::with_capacity(ids.len());
-    for id in ids {
-        let ci = ps.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("path curve `{id}`")))?;
-        curves.push(ps.sketch.exact_segs(ci).unwrap_or_else(|| ps.sketch.segs(ci)));
-    }
-    curves.retain(|c| !c.is_empty());
-    let ends = |c: &[solidcore_record::Seg2]| c.first().zip(c.last()).map(|(f, l)| (f.start(), l.end()));
-    let reversed = |c: Vec<solidcore_record::Seg2>| c.into_iter().rev().map(|s| s.reversed()).collect::<Vec<_>>();
+    // Each curve as its exact pieces (Béziers, conics) where it has them, on the plane of the
+    // sketch it is in: the path may join curves of several sketches, whose planes differ
+    // (#16168). A curve is turned round whole: its pieces stay one run.
+    let mut curves: Vec<(Plane, Vec<solidcore_record::Seg2>)> = curves
+        .iter()
+        .map(|c| {
+            let ci = c.ss.sketch.curve_index(&c.id).ok_or_else(|| DocError::Unknown(format!("path curve `{}`", c.id)))?;
+            Ok((c.ss.plane, c.ss.sketch.exact_segs(ci).unwrap_or_else(|| c.ss.sketch.segs(ci))))
+        })
+        .collect::<Result<_>>()?;
+    curves.retain(|(_, c)| !c.is_empty());
+    let ends = |(plane, c): &(Plane, Vec<solidcore_record::Seg2>)| {
+        c.first().zip(c.last()).map(|(f, l)| (plane.to_world(f.start()), plane.to_world(l.end())))
+    };
     // Where two curves meet: one tolerance for telling which ends touch and for the joint.
     const JOINT: f64 = 1e-5;
-    // Curves listed out of chain order are one chain all the same (#12199): when the list is
-    // not already end to end, put each next curve where one of its ends meets the chain's end.
-    curves = chain_order(curves, JOINT);
+    // Curves listed out of chain order are one chain all the same (#12199, #16168): when the
+    // list is not already end to end, put each next curve where one of its ends meets the
+    // chain's end.
+    curves = chain_order(curves, JOINT, ends);
     // Orient the first curve: it runs toward the second where it meets it at one end only;
     // otherwise (one curve, or a second meeting it at both ends) from the end nearest `start`
     // (no start given, a pipe: as drawn).
-    let w = |p: Vec2| ps.plane.to_world(p);
-    if let Some((a, b)) = curves.first().and_then(|c| ends(c)) {
-        let touches = |p: Vec2| curves.get(1).and_then(|n| ends(n)).is_some_and(|(na, nb)| na.dist(p) <= JOINT || nb.dist(p) <= JOINT);
+    if let Some((a, b)) = curves.first().and_then(&ends) {
+        let touches = |p: Vec3| curves.get(1).and_then(&ends).is_some_and(|(na, nb)| na.dist(p) <= JOINT || nb.dist(p) <= JOINT);
         let flip = match (touches(a), touches(b)) {
             (true, false) => true,
             (false, true) => false,
-            _ => start.is_finite() && w(b).dist(start) < w(a).dist(start),
+            _ => start.is_finite() && b.dist(start) < a.dist(start),
         };
         if flip && let Some(first) = curves.first_mut() {
-            *first = reversed(std::mem::take(first));
+            first.1 = std::mem::take(&mut first.1).into_iter().rev().map(|s| s.reversed()).collect();
         }
     }
-    // Each next curve starts where the previous one ended.
-    let mut segs: Vec<solidcore_record::Seg2> = Vec::new();
-    for curve in curves {
-        let (Some(prev_end), Some((a, b))) = (segs.last().map(solidcore_record::Seg2::end), ends(&curve)) else {
-            segs.extend(curve);
+    // Each next curve starts where the previous one ended; the curves are carried onto their
+    // own sketch's plane as they join the chain.
+    let mut segs: Vec<kernel::PathSeg> = Vec::new();
+    for (plane, curve) in &curves {
+        let pieces: Vec<kernel::PathSeg> = curve.iter().map(|s| kernel::PathSeg::of_sketch(plane, s)).collect();
+        let (Some(prev_end), Some((a, b))) =
+            (segs.last().map(kernel::PathSeg::end), pieces.first().zip(pieces.last()).map(|(f, l)| (f.start(), l.end())))
+        else {
+            segs.extend(pieces);
             continue;
         };
-        let curve = if b.dist(prev_end) < a.dist(prev_end) { reversed(curve) } else { curve };
-        segs.extend(curve);
+        let pieces = if b.dist(prev_end) < a.dist(prev_end) { pieces.into_iter().rev().map(|s| s.reversed()).collect() } else { pieces };
+        segs.extend(pieces);
     }
     if segs.windows(2).any(|pair| pair[1].start().dist(pair[0].end()) > JOINT) {
         return Err(DocError::Invalid("the path curves are not connected end to end".into()));
     }
-    if let Some(profile) = profile {
-        segs = from_profile_on_closed_path(segs, &ps.plane, profile, start);
+    // The closed-path split works on the curves of one plane; a path across sketches that
+    // closes is followed as listed.
+    if let Some(profile) = profile
+        && let Some((plane, _)) = curves.first()
+        && curves.iter().all(|(p, _)| p == plane)
+    {
+        let flat: Vec<solidcore_record::Seg2> = curves.iter().flat_map(|(_, c)| c.iter().copied()).collect();
+        let split = from_profile_on_closed_path(flat, plane, profile, start);
+        return Ok(split.iter().map(|s| kernel::PathSeg::of_sketch(plane, s)).collect());
     }
-    Ok(segs.iter().map(|s| kernel::PathSeg::of_sketch(&ps.plane, s)).collect())
+    Ok(segs)
 }
 
 /// `curves` (each a run of segments) put into one chain, when they are not end to end as listed.
 /// The chain starts at the first listed curve with an end that touches no other curve (the first
 /// curve when they close into a ring) and goes on with the first listed unused curve that meets
 /// its end. Curves that meet nothing keep their listed order after the chain, so a real gap is
-/// still reported by the caller.
-fn chain_order(curves: Vec<Vec<solidcore_record::Seg2>>, joint: f64) -> Vec<Vec<solidcore_record::Seg2>> {
-    let ends: Vec<Option<(Vec2, Vec2)>> = curves.iter().map(|c| c.first().zip(c.last()).map(|(f, l)| (f.start(), l.end()))).collect();
-    let meets = |p: Vec2, q: Vec2| p.dist(q) <= joint;
+/// still reported by the caller. `ends` gives each curve's two ends, in space (curves of
+/// different sketches sit in different planes, #16168).
+fn chain_order<T: Clone>(curves: Vec<T>, joint: f64, ends: impl Fn(&T) -> Option<(Vec3, Vec3)>) -> Vec<T> {
+    let ends: Vec<Option<(Vec3, Vec3)>> = curves.iter().map(&ends).collect();
+    let meets = |p: Vec3, q: Vec3| p.dist(q) <= joint;
     // Already end to end as listed: nothing to do.
     let connected = ends.windows(2).all(|w| match (w[0], w[1]) {
         (Some((a, b)), Some((c, d))) => meets(a, c) || meets(a, d) || meets(b, c) || meets(b, d),
@@ -7989,7 +8055,7 @@ fn chain_order(curves: Vec<Vec<solidcore_record::Seg2>>, joint: f64) -> Vec<Vec<
     }
     let n = curves.len();
     // Whether end `p` of curve `i` meets an end of any other curve.
-    let shared = |i: usize, p: Vec2| (0..n).any(|j| j != i && ends[j].is_some_and(|(a, b)| meets(a, p) || meets(b, p)));
+    let shared = |i: usize, p: Vec3| (0..n).any(|j| j != i && ends[j].is_some_and(|(a, b)| meets(a, p) || meets(b, p)));
     let head = (0..n).find(|&i| ends[i].is_some_and(|(a, b)| !shared(i, a) || !shared(i, b))).or_else(|| (0..n).find(|&i| ends[i].is_some()));
     let Some(head) = head else { return curves };
     let mut used = vec![false; n];
@@ -8008,7 +8074,7 @@ fn chain_order(curves: Vec<Vec<solidcore_record::Seg2>>, joint: f64) -> Vec<Vec<
         order.push(next);
     }
     order.extend((0..n).filter(|&j| !used[j]));
-    let mut slots: Vec<Option<Vec<solidcore_record::Seg2>>> = curves.into_iter().map(Some).collect();
+    let mut slots: Vec<Option<T>> = curves.into_iter().map(Some).collect();
     order.into_iter().filter_map(|i| slots.get_mut(i).and_then(Option::take)).collect()
 }
 

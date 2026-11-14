@@ -425,6 +425,16 @@ fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let sketch = feature_sketch(s, p, cmd)?;
     let (profiles, curves) = sheet_inputs(p, cmd)?;
     let (path_sketch, path, path_body, path_edges) = super::features::sweep_path(s, p, cmd)?;
+    // A surface sweep's path is the curves of one sketch (its own format keeps plain ids);
+    // a curve of another sketch is refused.
+    let path = path
+        .into_iter()
+        .map(|e| match e {
+            solidcraft_doc::PathEntry::OfPathSketch(id) => Ok(id),
+            solidcraft_doc::PathEntry::OfSketch { sketch, curve } if sketch.0 == path_sketch => Ok(curve),
+            _ => Err(bad(cmd, "the surface sweep's path curves must be in one sketch")),
+        })
+        .collect::<Result<Vec<_>>>()?;
     if path_body.is_none() && (path.is_empty() || path.len() > 1000) {
         return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
     }
