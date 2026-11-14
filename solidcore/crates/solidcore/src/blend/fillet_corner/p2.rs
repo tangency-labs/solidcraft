@@ -1697,39 +1697,33 @@ impl FilletCorner {
             }
         }
 
-        // Not upstream (WR-645, `fixes.fillet_corner_variable_radius_rail_on_opposite_fillet`):
+        // Not upstream (WR-645):
         // rail 1 replaces the opposite edge, which also bounds the opposite fillet's
         // face, so it must stay on that fillet's surface as the edge did. Refused as
         // the crossing rail-rail curve is above: the corner gets the patch instead.
-        if env
-            .k
-            .fixes
-            .fillet_corner_variable_radius_rail_on_opposite_fillet
-        {
-            let opposite_fillet = env
-                .pseudo
-                .geom(opposite_fg)?
-                .fillet_surface(None)?
-                .cloned()
-                .ok_or_else(null)?;
-            let rail1_curve = env
-                .pseudo
-                .brep()
-                .edge(rail1)?
-                .curve
-                .clone()
-                .ok_or_else(null)?;
-            if !rail_on_surface(
-                env.k,
-                &rail1_curve,
-                &opposite_fillet,
-                &uv_domain,
-                10.0 * tol,
-            )? {
-                env.pseudo.delete_fillet_edge(rail0)?;
-                env.pseudo.delete_fillet_edge(rail1)?;
-                return Err(sm_err()); // Unable to convert
-            }
+        let opposite_fillet = env
+            .pseudo
+            .geom(opposite_fg)?
+            .fillet_surface(None)?
+            .cloned()
+            .ok_or_else(null)?;
+        let rail1_curve = env
+            .pseudo
+            .brep()
+            .edge(rail1)?
+            .curve
+            .clone()
+            .ok_or_else(null)?;
+        if !rail_on_surface(
+            env.k,
+            &rail1_curve,
+            &opposite_fillet,
+            &uv_domain,
+            10.0 * tol,
+        )? {
+            env.pseudo.delete_fillet_edge(rail0)?;
+            env.pseudo.delete_fillet_edge(rail1)?;
+            return Err(sm_err()); // Unable to convert
         }
 
         // Reset all geometry of corresponding edges: retrieve 3d & uv curves from rails,

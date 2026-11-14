@@ -651,6 +651,10 @@ fn place_compatibly(
             mutations.push(Mutation::Move { instance, destination });
             if width.is_some() && zone.side() {
                 mutations.push(Mutation::SetSize { section: section.clone(), size });
+                // Compatibility placement supplies a width, so it must not pin an automatic height.
+                if !source.location.zone().side() || source.preferred_extent.is_none() {
+                    mutations.push(Mutation::ResetSideHeight { section: section.clone() });
+                }
             }
             if zone == Zone::Bottom && source.collapsed {
                 mutations.push(Mutation::Collapse { section: section.clone(), collapsed: false });

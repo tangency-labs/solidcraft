@@ -32,15 +32,12 @@ use solidcore::{Kernel, Point3};
 const EXACT_CIRCLES_VOLUME: f64 = 49712.42816838713;
 
 fn sc_fixes(k: &mut Kernel) {
-    k.fixes.temporary_radius_setup_errors = true;
     k.fixes.fillet_trim_status = true;
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_vertex_error_diagnostics = true;
-    k.fixes.fillet_corner_ball_patch = true;
-    k.fixes.fillet_corner_ball_center_from_axes = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_chamfer_cone_stored_as_cone = true;
     k.fixes.corner_patch_face_side_twist = true;
@@ -49,7 +46,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_half_degree_crease = true;
     k.fixes.offset_excess_faces_after_merge = true;
-    k.fixes.fillet_split_edge_keeps_near_half = true;
     k.fixes.offset_point_vertex_caps = true;
     k.fixes.offset_clip_right_side_out = true;
     k.fixes.offset_extended_edges_mated = true;
@@ -78,14 +74,11 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.join_touching_loops = true;
     k.fixes.offset_resolve_crossing_loops = true;
     k.fixes.local_operation_box_holds_new_surfaces = true;
-    k.fixes.offset_walls_touch_refused = true;
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;
     k.fixes.local_operation_closes_walls_to_nothing = true;
     k.fixes.offset_collapsed_rounds_mated = true;
-    k.fixes.offset_missing_surface_fails = true;
     k.fixes.revolution_round_offset_collapses = true;
-    k.fixes.fillet_nx1_end_rib_global_merge = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
@@ -120,7 +113,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_nx1_tangent_side_edge = true;
     k.fixes.fillet_nx1_opposite_continuation_side_edge = true;
     k.fixes.fillet_rails_meet_at_one_end_point = true;
-    k.fixes.fillet_nx1_tangent_corner_edge = true;
     k.fixes.fillet_3x2_mixed_concave_side_edge = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.shell_edges_on_analytics_exact = true;
@@ -137,7 +129,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.boolean_skips_faces_apart = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
     k.fixes.boolean_new_face_closure_both_sides = true;
-    k.fixes.glue_vertices_joins_every_region = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;
 }

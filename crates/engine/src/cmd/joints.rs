@@ -416,7 +416,15 @@ pub(crate) fn cannot_move(s: &Session, sol: &joints::Solution, id: u64) -> Optio
     if let Some((_, _, why)) = sol.errors.iter().find(|e| e.0 == id) {
         return Some((why.clone(), None));
     }
-    // The solver places what it reaches from the root and grounded occurrences.
+    // A joint between two fixed parts holds both sides: nothing is left to move.
+    let fixed = |o: u64| o == 0 || sol.fixed.contains(&o);
+    if fixed(j.a.occurrence) && fixed(j.b.occurrence) && j.a.occurrence != j.b.occurrence {
+        let held = |o: u64| if o == 0 { "the root".to_string() } else { occurrence_name(s, o) };
+        return Some((format!("both sides are held by grounded parts: {}, {}", held(j.a.occurrence), held(j.b.occurrence)), None));
+    }
+    // The solver places what it reaches from the root and grounded occurrences. A pair joined to
+    // nothing grounded (neither side placed) is a floating chain: its parts are not placed, so
+    // driving the joint moves nothing, and the reply says which part is joined to nothing.
     let placed = |o: u64| o == 0 || sol.world.contains_key(&o);
     if placed(j.a.occurrence) || placed(j.b.occurrence) {
         return None;
