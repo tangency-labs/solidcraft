@@ -7445,6 +7445,16 @@ mod tests {
         h.frames(2);
         let hard = resolved_theme(&h.app.preferences, active_theme_file(&h.app).unwrap());
         assert_eq!((Tokens::get().panel, Tokens::get().viewport_top), (hard.panel, Tokens::light().viewport_top));
+        // Dark on a dark theme file is the built-in Dark view too, not the file's own: every choice shows something.
+        let builtin = Tokens::dark();
+        assert_ne!((hard.viewport_top, hard.body), (builtin.viewport_top, builtin.body), "the fixture's view differs from the built-in Dark");
+        for (view, want) in [("dark", (builtin.viewport_top, builtin.body)), ("theme", (hard.viewport_top, hard.body))] {
+            h.call("ui.prefs", json!({"viewport_theme": view}));
+            h.frames(2);
+            let (t, v) = (Tokens::get(), Tokens::view());
+            assert_eq!(t.panel, hard.panel, "{view}: the window keeps the theme file's colours");
+            assert_eq!(((t.viewport_top, t.body), (v.viewport_top, v.body)), (want, want), "{view}: the view");
+        }
 
         // Asked for, an unknown value is refused; read from saved preferences, it is the default.
         assert!(h.call("ui.prefs", json!({"viewport_theme": "dim"}))["error"].is_string());

@@ -1305,7 +1305,7 @@ impl Tokens {
 
     fn base_in(mode: ColorVision) -> Tokens {
         let window = Tokens::themed(is_dark(), mode);
-        let tokens = if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), mode)) };
+        let tokens = Tokens::viewport_own(mode).map_or(window, |view| window.with_viewport(view));
         tokens.with_background(viewport_background())
     }
 
@@ -1316,7 +1316,7 @@ impl Tokens {
         if let Some(published) = PUBLISHED.get().filter(|p| p.environment == Environment::current()) {
             return published.view;
         }
-        Tokens::themed(viewport_dark(), vision()).with_background(viewport_background())
+        Tokens::viewport_own(vision()).unwrap_or_else(|| Tokens::themed(is_dark(), vision())).with_background(viewport_background())
     }
 
     pub fn protect_tab_panel(&mut self) {
@@ -1502,6 +1502,17 @@ impl Tokens {
             analysis: view.analysis,
             ..self
         }
+    }
+
+    /// The colours of the 3D view's own Light or Dark when Preferences give it one ([`set_viewport_dark`], #4146):
+    /// the built-in Light or Dark theme's whatever theme the window uses, so Dark on a dark theme file still shows
+    /// the built-in Dark view. `None`: the view is drawn with the window's own tokens.
+    pub fn viewport_own(mode: ColorVision) -> Option<Tokens> {
+        VIEWPORT_DARK.get().map(|dark| {
+            let t = if dark { Tokens::dark() } else { Tokens::light() };
+            let t = if LOGO_ACCENT.get() { t.with_accent_logo() } else { t };
+            t.with_vision(dark, mode)
+        })
     }
 
     /// The tokens of a theme and colour vision mode: a theme file's palette when one is on for
