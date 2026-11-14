@@ -767,7 +767,7 @@ impl<O: ClassObject> CurveClassification<O> {
                             geometry,
                             adjacent,
                             near_miss_dist_3d,
-                        )?
+                        )? == Some(true)
                     {
                         on_curve = true;
                         break;
@@ -3578,10 +3578,10 @@ fn native_curve_in_strip(
         let [px, py, pz] = point;
         let [ox, oy, oz] = origin;
         let offset = [px - ox, py - oy, pz - oz];
-        let distance = (interval_dot(offset, across) / length).mag();
-        if distance < threshold {
+        let distance = interval_dot(offset, across) / length;
+        if distance.mag() < threshold {
             Some(true)
-        } else if distance.lo >= threshold {
+        } else if distance.mig() >= threshold {
             Some(false)
         } else {
             None
