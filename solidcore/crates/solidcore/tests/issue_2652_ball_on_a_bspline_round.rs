@@ -696,6 +696,39 @@ fn a_twisted_side_round_is_its_walls_round_between_sections() {
     }
 }
 
+/// The twisted disc's top round at 1.10 (narrower than the side rounds it meets, which are
+/// only fitted): every edge of the result carries a stored tolerance at least its measured
+/// gap to its faces, and every vertex one whose half bounds its gap, so the level-2 check
+/// reports no edge-use gaps. Only the vertex/face gaps over the intersection tolerance that
+/// the side rounds' fit leaves remain (tangency-labs/solidcraft#13772).
+#[test]
+fn the_twisted_disc_s_top_round_keeps_tolerances_at_least_its_measured_gaps() {
+    let mut k = kernel();
+    let mut b = side_rounded_disc(&mut k, 2);
+    let top = top_edges(&b);
+    fillet_edges(&mut k, &mut b, &top, 1.10, 1, 1, 1.0).unwrap();
+    b.refresh_cached_topology();
+    for e in solidcore::topology::brep::p1::edges(&b, None).unwrap() {
+        let tol = edge::tolerance(&b, e).unwrap();
+        for eu in b.edge(e).unwrap().edgeuses.clone() {
+            if let Some(g) =
+                solidcore::topology::edgeuse::p1::max_edge_face_gap(&k, &mut b, eu, true).unwrap()
+            {
+                assert!(
+                    g.gap_3d <= tol,
+                    "edge {e:?}: tolerance {tol:e} under its gap {:e}",
+                    g.gap_3d
+                );
+            }
+        }
+    }
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    let edge_use: Vec<_> = lines.iter().filter(|l| l.contains("SmEdgeuse")).collect();
+    assert!(edge_use.is_empty(), "edge-use gaps: {edge_use:#?}");
+}
+
 // ---- helpers (as `issue_2648_twisted_disc_top_round.rs`'s) -----------------------------
 
 /// The disc's radius, height and twist (degrees over the height).

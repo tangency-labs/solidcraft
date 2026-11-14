@@ -317,6 +317,10 @@ struct SessionObjects<'target> {
     corners: Vec<FilletCorner>,
     generators: Vec<FilletSurfaceGenerator>,
     laws: Vec<FilletLaw>,
+    /// The target's faces before filleting: the faces after it that are not among them are
+    /// the fillet's, whose edges and vertices have their stored tolerances grown to their
+    /// measured gaps after the merge.
+    faces_before: BTreeSet<FaceId>,
     attributes: AttributeStore,
     /// (not upstream) The target's and the second base's own attribute stores as the
     /// session took them, put back by `Drop` if handing the session's back fails.
@@ -1584,6 +1588,7 @@ impl<'target> FilletSession<'target> {
                 corners: Vec::new(),
                 generators: Vec::new(),
                 laws: Vec::new(),
+                faces_before: BTreeSet::new(),
                 attributes,
                 attributes_before,
                 merge_attributes: None,
@@ -6069,6 +6074,23 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
             return Err(invalid("edge is not in the target"));
         };
         crate::topology::edge::tolerance(self.target, id)
+    }
+    fn parameters_edge_gap(&mut self, k: &Kernel, edge: FilletObject) -> Result<f64> {
+        let FilletObject::Topology(FilletBody::Target, EntityRef::Edge(id)) = edge else {
+            return Err(invalid("edge is not in the target"));
+        };
+        let mut gap = None::<f64>;
+        for eu in self.target.edge(id)?.edgeuses.clone() {
+            let measured =
+                crate::topology::edgeuse::p1::max_edge_face_gap(k, self.target, eu, false)?;
+            if let Some(g) = measured.filter(|g| g.gap_3d >= 0.0) {
+                gap = Some(gap.map_or(g.gap_3d, |m| m.max(g.gap_3d)));
+            }
+        }
+        match gap {
+            Some(gap) => Ok(gap),
+            None => crate::topology::edge::tolerance(self.target, id),
+        }
     }
     fn parameters_new_solver(
         &mut self,

@@ -548,7 +548,67 @@ impl FilletSession<'_> {
     pub fn do_fillet(&mut self, k: &mut Kernel) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::do_fillet");
         let tolerance = approx_tol3d(k, 0.5 * self.objects.target.tolerance());
-        NetScope::within_mut(k, tolerance, |k| self.do_fillet_within(k))
+        NetScope::within_mut(k, tolerance, |k| self.do_fillet_within(k))?;
+        // Measured outside the net scope, as every later reader of the body (the full check
+        // among them) evaluates the round's surfaces.
+        self.raise_fillet_tolerances_to_measured_gaps(k)
+    }
+
+    /// A round is approximated as finely as its edge is known (`SetFilletParameters`), and its
+    /// new edges and vertices are made at that approximation tolerance. They can lie farther
+    /// from their faces than that (a face the round meets may itself only be fitted, and the
+    /// round's own surface is evaluated from its net outside the fillet), and a stored
+    /// tolerance must bound the entity's measured gap to its faces: on the fillet's faces
+    /// (those the target did not have) each edge's and vertex's tolerance is grown to its
+    /// largest measured gap, never shrunk.
+    fn raise_fillet_tolerances_to_measured_gaps(&mut self, k: &Kernel) -> Result<()> {
+        let faces_before = std::mem::take(&mut self.objects.faces_before);
+        let target = &mut *self.objects.target;
+        let mut edges = std::collections::BTreeSet::new();
+        let mut vertices = std::collections::BTreeSet::new();
+        for f in p1::faces(target, None)? {
+            if faces_before.contains(&f) {
+                continue;
+            }
+            for e in crate::topology::face::p4::edges(target, f, None, false, None)? {
+                if edges.insert(e) {
+                    vertices.extend(crate::topology::edge::start_vertex(target, e)?);
+                    vertices.extend(crate::topology::edge::end_vertex(target, e)?);
+                }
+            }
+        }
+        for e in edges {
+            let mut gap = None::<f64>;
+            for eu in target.edge(e)?.edgeuses.clone() {
+                if let Some(g) =
+                    crate::topology::edgeuse::p1::max_edge_face_gap(k, target, eu, true)?
+                {
+                    if g.gap_3d.is_finite() {
+                        gap = Some(gap.map_or(g.gap_3d, |m| m.max(g.gap_3d)));
+                    }
+                }
+            }
+            if let Some(gap) = gap {
+                crate::topology::edge::set_tolerance(target, e, gap, true, true)?;
+            }
+        }
+        for v in vertices {
+            let mut gap = None::<f64>;
+            for vu in crate::topology::vertex::vertexuses(target, v)? {
+                if let Some(g) = crate::topology::vertexuse::vertex_face_gap(k, target, vu, true)? {
+                    if g.gap_3d.is_finite() {
+                        gap = Some(gap.map_or(g.gap_3d, |m| m.max(g.gap_3d)));
+                    }
+                }
+            }
+            if let Some(gap) = gap {
+                // a vertex's tolerance is the width of its zone: a gap within half of it
+                // (`ValidateTolerances`, which grows a bad one the same way)
+                let zone = crate::geom::tol::zone_tol3d(k, 2.0 * gap);
+                crate::topology::vertex::set_tolerance(target, v, zone, true, true)?;
+            }
+        }
+        Ok(())
     }
 
     /// The body of [`Self::do_fillet`], in its tolerance's [`NetScope`].
@@ -711,6 +771,7 @@ impl FilletSession<'_> {
     ) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::filleting");
         self.sync_self_intersection_handler();
+        self.objects.faces_before = p1::faces(self.objects.target, None)?.into_iter().collect();
         // solidcore-native (WR-697 addendum; the fork refuses this only in its capi): a
         // setback set on a made corner (SetSetBackDist) that builds none (neither the
         // Setback nor an N x N corner) would be dropped silently, so it is refused, as
