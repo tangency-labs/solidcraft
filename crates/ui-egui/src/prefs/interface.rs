@@ -594,6 +594,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.tr("prefs.layout_page.pinned_menus"),
                 app.tr("prefs.layout_page.hover_panel_menus"),
                 app.tr("prefs.pinned_constraints_in_grid"),
+                app.tr("prefs.search_lists_script_commands"),
             ];
             let widest =
                 labels.iter().map(|label| ui_kit::ContentWidth::label(ui, label)).fold(0.0, f32::max) + t.space_14 + t.space_6 * 2.0 + t.space_16;
@@ -671,6 +672,15 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                             app.tr("prefs.pinned_constraints_in_grid_note"),
                                             &mut app.preferences.pinned_constraints_in_grid,
                                             "pinned_constraints_in_grid",
+                                        );
+                                    }
+                                    7 => {
+                                        layout_check(
+                                            ui,
+                                            app.tr("prefs.search_lists_script_commands"),
+                                            app.tr("prefs.search_lists_script_commands_note"),
+                                            &mut app.preferences.search_lists_script_commands,
+                                            "search_lists_script_commands",
                                         );
                                     }
                                     _ => {}

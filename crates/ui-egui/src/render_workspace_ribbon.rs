@@ -12,7 +12,7 @@ fn is_job_action(id: &str) -> bool {
         "render.preflight" | "render.start" | "render.batch" | "render.cancel" | "render.export" | "render.result.regrade" | "render.result.copy"
     )
 }
-fn handled(id: &str) -> bool {
+pub(super) fn handled(id: &str) -> bool {
     is_job_action(id)
         || matches!(
             id,
