@@ -597,7 +597,7 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let exists = feature.is_some();
     let sketch = feature.and_then(|f| crate::timeline::TimelineKind::of(&f.kind).profile_sketch());
     let suppressed = feature.is_some_and(|f| f.suppressed);
-    vec![
+    let mut items = vec![
         act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists),
         act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some()),
         act("ui.rename", "Rename", "rename").key("F2").with(json!({"feature":id})).on(exists),
@@ -610,7 +610,27 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.delete", "Delete", "delete").key("Del").with(json!({"items": [{"type": "feature", "id": id}]})).on(exists),
         Item::sep(),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({"feature":id})).on(exists),
-    ]
+    ];
+    // A construction plane, axis or point shows or hides from its Features row too, as from its
+    // row in the Construction folder.
+    if let Some(name) = construction_name(app, id) {
+        let visible = !app.session.visibility.hidden_origin.contains(&name);
+        items.extend([Item::sep(), act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [name], "show": !visible }))]);
+    }
+    items
+}
+
+/// The name of feature `id` when it is a construction plane, axis or point: the name its
+/// visibility is kept under.
+pub(crate) fn construction_name(app: &SolveApp, id: u64) -> Option<String> {
+    use solidcraft_engine::doc::FeatureKind;
+    app.session
+        .doc
+        .feature(id)
+        .filter(|f| {
+            matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+        })
+        .map(|f| f.name.clone())
 }
 
 /// The canvas menus put Repeat on
@@ -2182,15 +2202,20 @@ pub fn toggle_visibility(app: &mut SolveApp) {
         .collect();
     sketches.sort_unstable();
     sketches.dedup();
-    let origin: Vec<String> = app
+    // A construction plane, axis or point picked as a feature (a row of the Features list or a
+    // timeline step) is hidden by name, as when it is picked in the viewport or the Construction folder.
+    let mut origin: Vec<String> = app
         .session
         .selection
         .iter()
         .filter_map(|s| match s {
             Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => Some(name.clone()),
+            Sel::Feature { id } => construction_name(app, *id),
             _ => None,
         })
         .collect();
+    origin.sort_unstable();
+    origin.dedup();
     let canvases = app.tree.picked_canvases.clone();
     let joints = app.tree.picked_joints.clone();
     let any_visible = bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b))

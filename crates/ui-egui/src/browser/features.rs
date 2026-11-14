@@ -470,8 +470,14 @@ fn feature_row(
     // A sketch row has the eye its Sketches folder row has. A feature's eye shows and hides the
     // bodies it made (#5099); a component listed on its own stands for all of its placements.
     let placement = (component == 0 || !path.is_empty()).then_some((component, path));
-    let (has_bodies, visible) = if is_sketch { (false, crate::browser::sketch_visible(app, id)) } else { made_bodies_shown(app, id, placement) };
-    let eye = (is_sketch || has_bodies).then_some(visible);
+    // A construction plane, axis or point has the eye its Construction folder row has.
+    let construction = crate::context_menu::construction_name(app, id);
+    let (has_bodies, visible) = match &construction {
+        Some(name) => (false, !app.session.visibility.hidden_origin.contains(name)),
+        None if is_sketch => (false, crate::browser::sketch_visible(app, id)),
+        None => made_bodies_shown(app, id, placement),
+    };
+    let eye = (is_sketch || has_bodies || construction.is_some()).then_some(visible);
     let status = match current_model(app) {
         Some(model) => model.status(app, id),
         None => crate::timeline::feature_status(app, id),
@@ -500,7 +506,11 @@ fn feature_row(
             ..Default::default()
         },
     );
-    if r.eye && is_sketch {
+    if r.eye
+        && let Some(name) = &construction
+    {
+        let _ = app.run("browser.visibility", json!({"items": [name], "visible": !visible}));
+    } else if r.eye && is_sketch {
         crate::browser::set_sketch_visible(app, id, !visible);
     } else if r.eye {
         let mut p = json!({"visible": !visible, "features": [id]});
@@ -757,6 +767,22 @@ mod tests {
         assert_eq!(h.app.session.visibility.hidden_bodies, ["Plate"]);
         h.step(&json!({"click":{"handle":"eye:Box1"}})).unwrap();
         assert!(h.app.session.visibility.hidden_bodies.is_empty());
+    }
+
+    /// A construction plane's Features row has the eye its Construction folder row has (#15843).
+    #[test]
+    fn a_construction_feature_rows_eye_shows_and_hides_it() {
+        let mut h = Harness::new();
+        let id = h.app.run("construct.plane.offset", json!({"base":"XY","offset":5,"name":"Lid"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.settle();
+        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{id}")).unwrap();
+        let eye = crate::scenario::handle_at("eye:Lid").expect("the plane's Features row has an eye");
+        assert!((eye.y - row.y).abs() < 2.0, "the eye is on the plane's Features row");
+        h.step(&json!({"click":{"handle":"eye:Lid"}})).unwrap();
+        assert_eq!(h.app.session.visibility.hidden_origin, ["Lid"]);
+        h.step(&json!({"click":{"handle":"eye:Lid"}})).unwrap();
+        assert!(h.app.session.visibility.hidden_origin.is_empty());
     }
 
     #[test]
