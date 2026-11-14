@@ -700,8 +700,7 @@ fn lifted_sheets(k: &mut Kernel, gap: f64, stitch_tol: f64, edge_zone: f64) -> (
         data.vertex_face_gap = VertexFaceGap::default();
     }
     let sewed = stitch_faces(k, &mut b, stitch_tol, None, false)
-        .map(|outcome| outcome.stitched_edges)
-        .unwrap_or(0);
+        .map_or(0, |outcome| outcome.stitched_edges);
     b.refresh_cached_topology();
     // `add_square` names each surface's owner by its arena identity, while `new_brep`
     // checks under the notification scheme: relabel so the check sees the owners.
