@@ -393,7 +393,14 @@ fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
 /// request and echoes it. The window opens or closes the panel; the design is not changed.
 fn browser_tree(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.browser";
-    let request: BrowserTreeParams = serde_json::from_value(if p.is_null() { json!({}) } else { p.clone() }).map_err(|e| bad(cmd, e.to_string()))?;
+    // The request is an object: serde would read a list as the fields in order, so a call
+    // like `[]` would answer instead of being refused.
+    let p = match p {
+        Value::Null => json!({}),
+        Value::Object(_) => p.clone(),
+        _ => return Err(bad(cmd, "parameters must be an object")),
+    };
+    let request: BrowserTreeParams = serde_json::from_value(p).map_err(|e| bad(cmd, e.to_string()))?;
     serde_json::to_value(BrowserTreeResult { visible: request.visible, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
 }
 
