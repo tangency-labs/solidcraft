@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod agent_setup;
+pub mod agent_tools;
 pub mod batch_params;
 pub mod batch_preflight;
 pub mod capture;

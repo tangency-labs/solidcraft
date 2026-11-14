@@ -245,8 +245,7 @@ impl ControlJob {
 pub(crate) const MAX_NEXT_SHOWN: usize = 12;
 
 fn label(app: &SolveApp, command: &str) -> String {
-    let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
-    language.label(solidcraft_engine::find_command(command).map_or(command, |c| c.label)).to_string()
+    crate::agent_label::name_in(solidcraft_ui_text::Locale::for_language(&app.preferences.language), command)
 }
 
 /// Run `f` on a worker thread (with the request's folder scope, stopping early once `progress`
@@ -508,6 +507,19 @@ impl SolveApp {
                 "engine.execute" | "command" => executed(&r.params).map(|(c, _)| c),
                 _ => r.params.get("commands").and_then(Value::as_array).and_then(|s| s.first()).and_then(crate::control::batch_step_command),
             };
+            let is_batch = matches!(r.method.as_str(), "engine.batch" | "engine.script");
+            let steps: Vec<String> = if is_batch {
+                let all = r.params.get("commands").and_then(Value::as_array);
+                all.into_iter().flatten().take(4).filter_map(crate::control::batch_step_command).map(|c| label(self, c)).collect()
+            } else {
+                Vec::new()
+            };
+            if steps.len() > 1 {
+                let count = r.params.get("commands").and_then(Value::as_array).map_or(0, Vec::len);
+                let names = if count > steps.len() { steps[..3.min(steps.len())].iter().cloned().chain(["…".into()]).collect() } else { steps };
+                let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
+                return (r.serial, crate::agent_label::batch_in(language, &names));
+            }
             (r.serial, label(self, first.unwrap_or(&r.method)))
         })
         .collect()

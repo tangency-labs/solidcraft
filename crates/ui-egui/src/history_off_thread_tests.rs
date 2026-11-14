@@ -1711,6 +1711,25 @@ fn an_agent_request_waiting_its_turn_is_a_row_the_x_cancels() {
     assert!(agent_rows(&mut h).is_empty());
 }
 
+/// A batch waiting its turn is one row named for its commands ("Batch: Box, Cylinder"), and a
+/// command named the way an MCP client names it reads as its label, in the panel and in the echo
+/// the status line and the undo toast follow: never an id with `mcp` in it.
+#[test]
+fn waiting_agent_rows_and_echoes_name_commands_not_ids() {
+    let (mut h, tx) = agent_harness();
+    let _hole = ask(&tx, "engine.execute", second_hole());
+    let _batch = ask(&tx, "engine.batch", json!({"commands": [boss_step(), second_hole(), boss_step()]}));
+    h.frames(1);
+    let rows = agent_rows(&mut h);
+    let held: Vec<&str> = rows.iter().filter(|r| r["queued"] == true).filter_map(|r| r["label"].as_str()).collect();
+    assert_eq!(held.len(), 1, "{rows:?}");
+    assert!(held[0].ends_with("Batch: Box, Cylinder, Box") && !held[0].contains("solid."), "{held:?}");
+    until_settled(&mut h);
+    h.app.finish_command("mcp.solidcraft_solid_box", &Ok(json!({})));
+    let echo = h.app.session.log.last().cloned().unwrap_or_default();
+    assert!(echo.contains("Box") && !echo.contains("mcp"), "{echo}");
+}
+
 /// An agent that queues dozens of design changes still gets the operations panel: it shows the
 /// first few waiting ones and one row standing for the rest, whose X cancels exactly those. Every
 /// waiting one stays listed, and cancellable by its own key, over the control channel.

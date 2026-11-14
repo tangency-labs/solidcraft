@@ -12,6 +12,7 @@ use crate::ui_kit::recent_colors;
 pub mod access;
 pub mod agent_chat;
 pub mod agent_cursor;
+pub mod agent_label;
 pub mod ai_connect;
 pub use solidcraft_ui_kit::app_bar;
 pub use solidcraft_ui_kit::blur;
@@ -1744,7 +1745,7 @@ impl SolveApp {
                 // thread-local scope. The command's own label is translated too, so the echo
                 // reads the same way the toolbar button it came from does.
                 let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
-                let label = language.label(command_label(id));
+                let label = &crate::agent_label::name_in(language, id);
                 // Frames of a gesture (a continuous view move, a part dragged by its joints) are
                 // not echoed one by one.
                 if v.get("continuous").and_then(Value::as_bool) != Some(true) {

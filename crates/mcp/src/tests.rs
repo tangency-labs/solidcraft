@@ -3083,6 +3083,17 @@ fn mechanisms_skill_example_moves_as_documented() {
     assert!(value(&list, "Stroke") <= 10.0 + 1e-6 && (value(&list, "Stroke") - stroke(hinge)).abs() < 1e-6, "{list}");
 }
 
+/// Every tool the server offers has a name for the person watching an agent use it (the UI shows
+/// that name, never the tool's id).
+#[test]
+fn every_tool_has_a_name_for_the_person_watching() {
+    use solidcraft_engine::agent_tools::{MESSAGE_TOOLS, tool_command};
+    for tool in tool_definitions() {
+        let name = tool["name"].as_str().unwrap();
+        assert!(tool_command(name).is_some() || MESSAGE_TOOLS.contains(&name), "tool `{name}` needs a name in solidcraft_engine::agent_tools");
+    }
+}
+
 /// Every tool and command the agent skills call exists, so a rename or removal can't leave the
 /// skills sending agents to names the server no longer has.
 #[test]
