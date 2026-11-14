@@ -38,9 +38,9 @@ pub struct ParamsDialog {
     /// Expressions being edited, by parameter name.
     pub editing: std::collections::BTreeMap<String, String>,
     /// Expressions applied live since the dialog opened (#15377), by parameter name: the one the
-    /// parameter had before the first, and the one the design listed after the last (`None`
-    /// until the rows are listed again). Cancel and Escape put the first back.
-    applied: std::collections::BTreeMap<String, (String, Option<String>)>,
+    /// parameter had before the first, and the one the design listed right after the last, read
+    /// before anything else can change it. Cancel and Escape put the first back.
+    applied: std::collections::BTreeMap<String, (String, String)>,
     /// Comments being edited, by parameter name.
     pub comments: std::collections::BTreeMap<String, String>,
     /// A parameter being renamed: (old name, new name).
@@ -289,7 +289,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         d.lists += 1;
         rows
     };
-    note_applied(&mut d, &all);
     let mut outcome = (false, ui_kit::Action::None);
     let live = app.preferences.parameters_apply_live;
     let held_status = if live { None } else { held_status(held(&d, &all).len()) };
@@ -1060,11 +1059,17 @@ fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, row
     match run_as_one(app, &all) {
         Ok(()) => {
             d.error = held_error;
+            // Listed once, right after the edit, before anything else can change it (#15377).
+            let listed = if applied.is_empty() { Vec::new() } else { self::rows(app) };
             for name in applied {
                 d.editing.remove(&name);
-                // The first live edit keeps the expression to put back (#15377).
-                if let Some(r) = find(&name) {
-                    d.applied.entry(name).or_insert_with(|| (r.expression.clone(), None)).1 = None;
+                // The first live edit keeps the expression to put back (#15377); the design may
+                // write the edit differently (`30` becomes `30 mm`), so what it lists now is what
+                // Cancel later checks is still there.
+                if let Some(r) = find(&name)
+                    && let Some(now) = listed.iter().find(|l| l.name == name)
+                {
+                    d.applied.entry(name).or_insert_with(|| (r.expression.clone(), String::new())).1 = now.expression.clone();
                 }
             }
             for name in comments {
@@ -1163,20 +1168,11 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
     true
 }
 
-/// Note the expression the design lists for each parameter applied live since the rows were last
-/// listed (#15377). The design may write an edit differently (`30` becomes `30 mm`), so Cancel
-/// compares with this, not with what was typed.
-fn note_applied(d: &mut ParamsDialog, rows: &[Row]) {
-    for (name, (_, listed)) in d.applied.iter_mut().filter(|(_, (_, listed))| listed.is_none()) {
-        *listed = rows.iter().find(|r| r.name == *name).map(|r| r.expression.clone());
-    }
-}
-
 /// Put back the expressions applied live since the dialog opened (#15377): one
 /// `parameters.change`, so the design rebuilds once and one undo (or redo) covers them. A
 /// parameter changed since by something else (an agent, an undo) or gone (renamed, deleted) is
 /// left as it is. With `parameters_cancel_reverts` off, nothing is put back, as before. False,
-/// with the error shown, when the put-back is refused.
+/// with the error shown, when the put-back is refused; what to put back is kept for the next try.
 fn revert_applied(app: &mut SolveApp, d: &mut ParamsDialog) -> bool {
     if d.applied.is_empty() || !app.preferences.parameters_cancel_reverts {
         return true;
@@ -1187,15 +1183,17 @@ fn revert_applied(app: &mut SolveApp, d: &mut ParamsDialog) -> bool {
         .iter()
         .filter_map(|(name, (before, listed))| {
             let current = &now.iter().find(|r| r.name == *name)?.expression;
-            (listed.as_ref().is_none_or(|l| l == current) && current != before).then(|| (name.clone(), json!(before)))
+            (listed == current && current != before).then(|| (name.clone(), json!(before)))
         })
         .collect();
-    d.applied.clear();
-    if changes.is_empty() {
-        return true;
+    if !changes.is_empty() {
+        d.error = app.run("parameters.change", json!({"changes": changes})).err();
+        if d.error.is_some() {
+            return false;
+        }
     }
-    d.error = app.run("parameters.change", json!({"changes": changes})).err();
-    d.error.is_none()
+    d.applied.clear();
+    true
 }
 
 /// "Apply each change as you leave its field", remembered across sessions (#9279). Turning it
@@ -1919,6 +1917,58 @@ mod tests {
         assert!(h.app.params.is_none());
         assert_eq!(expression(&h, "w"), "30 mm", "with the preference off, Cancel only closes the dialog, as before");
         assert_eq!(h.app.session.undo.len(), undo + 1);
+    }
+
+    /// An agent can change a parameter between the frame that applies a live edit and the next
+    /// one that lists the rows: Escape and Cancel leave the agent's expression (#15377 review).
+    #[test]
+    fn cancel_and_escape_leave_a_change_made_before_the_rows_are_listed_again() {
+        for escape in [true, false] {
+            let mut h = live_dialog();
+            escape_type(&mut h, "param:w", "30 mm");
+            // Enter applies the edit in this one frame; nothing lists the rows after it.
+            h.app.synthetic.push(egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.frame();
+            assert_eq!(expression(&h, "w"), "30 mm", "Enter applied the edit live");
+            h.app.run("parameters.change", json!({"name":"w","expression":"40 mm"})).unwrap();
+            if escape {
+                escape_key(&mut h, true);
+                escape_key(&mut h, false);
+            } else {
+                h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+            }
+            assert!(h.app.params.is_none(), "escape {escape}: the dialog closes");
+            assert_eq!(expression(&h, "w"), "40 mm", "escape {escape}: the agent's change stays");
+        }
+    }
+
+    /// A refused put-back keeps the dialog open with its error, and the next Cancel tries again
+    /// (#15377 review).
+    #[test]
+    fn a_refused_put_back_is_tried_again_by_the_next_cancel() {
+        let mut h = live_dialog();
+        h.app.run("parameters.add", json!({"name":"k","expression":"5 mm"})).unwrap();
+        h.app.run("parameters.change", json!({"name":"w","expression":"k * 2"})).unwrap();
+        h.frames(2);
+        hold(&mut h, "w", "30 mm");
+        assert_eq!(expression(&h, "w"), "30 mm");
+        // Without `k`, `k * 2` can't go back.
+        h.app.run("parameters.delete", json!({"name":"k"})).unwrap();
+        h.frames(1);
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.as_ref().is_some_and(|d| d.error.is_some()), "the refused put-back keeps the dialog open with its error");
+        assert_eq!(expression(&h, "w"), "30 mm");
+        h.app.run("parameters.add", json!({"name":"k","expression":"5 mm"})).unwrap();
+        h.frames(1);
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none(), "the second Cancel puts it back and closes");
+        assert_eq!(expression(&h, "w"), "k * 2");
     }
 
     #[test]
