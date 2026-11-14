@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.parameters_cancel_reverts": "Cancel in Parameters takes back applied changes",
+    "prefs.parameters_cancel_reverts_tip": "Cancel or Escape puts back the expressions the Parameters dialog applied as you left each field, in one undo step. Off: they only close the dialog. The close button always keeps them."
+  },
+  "ar": {
+    "prefs.parameters_cancel_reverts": "«إلغاء» في المعاملات يتراجع عن التغييرات المطبَّقة",
+    "prefs.parameters_cancel_reverts_tip": "«إلغاء» أو Escape يعيد التعبيرات التي طبّقها مربع حوار المعاملات عند مغادرة كل حقل، في خطوة تراجع واحدة. عند الإيقاف: يغلقان مربع الحوار فقط. زر الإغلاق يحتفظ بها دائمًا."
+  },
+  "de": {
+    "prefs.parameters_cancel_reverts": "Abbrechen in Parameter nimmt übernommene Änderungen zurück",
+    "prefs.parameters_cancel_reverts_tip": "Abbrechen oder Esc stellt die Ausdrücke wieder her, die der Parameter-Dialog beim Verlassen jedes Feldes übernommen hat, in einem Rückgängig-Schritt. Aus: Sie schließen nur den Dialog. Die Schließen-Schaltfläche behält sie immer."
+  },
+  "he": {
+    "prefs.parameters_cancel_reverts": "„ביטול” בפרמטרים מבטל שינויים שהוחלו",
+    "prefs.parameters_cancel_reverts_tip": "„ביטול” או Escape מחזירים את הביטויים שתיבת הדו-שיח של הפרמטרים החילה ביציאה מכל שדה, בצעד ביטול אחד. כבוי: הם רק סוגרים את תיבת הדו-שיח. לחצן הסגירה תמיד שומר אותם."
+  },
+  "ja": {
+    "prefs.parameters_cancel_reverts": "パラメータの「キャンセル」で適用済みの変更を元に戻す",
+    "prefs.parameters_cancel_reverts_tip": "「キャンセル」または Esc で、パラメータ ダイアログが各フィールドを離れたときに適用した式を、1 回の元に戻す操作として戻します。オフ: ダイアログを閉じるだけです。閉じるボタンは常に変更を保持します。"
+  },
+  "ko": {
+    "prefs.parameters_cancel_reverts": "매개변수에서 취소하면 적용된 변경을 되돌림",
+    "prefs.parameters_cancel_reverts_tip": "취소 또는 Esc를 누르면 매개변수 대화 상자가 각 필드를 벗어날 때 적용한 식을 한 번의 실행 취소 단계로 되돌립니다. 끄기: 대화 상자만 닫습니다. 닫기 단추는 항상 변경을 유지합니다."
+  },
+  "vi": {
+    "prefs.parameters_cancel_reverts": "Hủy trong Bảng tham số sẽ hoàn lại các thay đổi đã áp dụng",
+    "prefs.parameters_cancel_reverts_tip": "Hủy hoặc Escape sẽ đặt lại các biểu thức mà hộp thoại Bảng tham số đã áp dụng khi rời từng ô, trong một bước hoàn tác. Tắt: chúng chỉ đóng hộp thoại. Nút đóng luôn giữ lại các thay đổi."
+  },
+  "zh": {
+    "prefs.parameters_cancel_reverts": "在“参数”中取消会撤回已应用的更改",
+    "prefs.parameters_cancel_reverts_tip": "“取消”或 Esc 会把“参数”对话框在离开每个字段时应用的表达式恢复原样，作为一个撤销步骤。关闭时：它们只关闭对话框。关闭按钮始终保留这些更改。"
+  }
+}

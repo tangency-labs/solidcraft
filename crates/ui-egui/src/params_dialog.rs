@@ -37,6 +37,10 @@ pub struct ParamsDialog {
     reset_scroll: bool,
     /// Expressions being edited, by parameter name.
     pub editing: std::collections::BTreeMap<String, String>,
+    /// Expressions applied live since the dialog opened (#15377), by parameter name: the one the
+    /// parameter had before the first, and the one the design listed after the last (`None`
+    /// until the rows are listed again). Cancel and Escape put the first back.
+    applied: std::collections::BTreeMap<String, (String, Option<String>)>,
     /// Comments being edited, by parameter name.
     pub comments: std::collections::BTreeMap<String, String>,
     /// A parameter being renamed: (old name, new name).
@@ -204,7 +208,12 @@ pub(crate) fn cancel_on_escape(app: &mut SolveApp, ctx: &egui::Context) -> bool 
         i.raw.events.retain(|event| !matches!(event, egui::Event::Key { key: egui::Key::Escape, modifiers, .. } if modifiers.matches_logically(egui::Modifiers::NONE)));
     });
     // Dropping the dialog discards every draft. The regular preview update clears its scene.
-    app.params = None;
+    // What was applied live goes back first; a refused put-back keeps the dialog open to say so.
+    if let Some(mut d) = app.params.take()
+        && !revert_applied(app, &mut d)
+    {
+        app.params = Some(d);
+    }
     app.esc_handled = true;
     true
 }
@@ -259,6 +268,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         d.lists += 1;
         rows
     };
+    note_applied(&mut d, &all);
     let mut outcome = (false, ui_kit::Action::None);
     let live = app.preferences.parameters_apply_live;
     let held_status = if live { None } else { held_status(held(&d, &all).len()) };
@@ -382,9 +392,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     // Held edits (#9279) are set by Apply and OK; Cancel, the close button and Escape drop them.
+    // Cancel and Escape also put back what was applied live (#15377); the close button keeps it,
+    // as closing the window the usual way never loses an edit.
     let (closed, action) = outcome;
     let applied = live || !matches!(action, ui_kit::Action::Ok | ui_kit::Action::Apply) || apply_held(app, &mut d, &all);
-    let close = closed || action == ui_kit::Action::Cancel || (action == ui_kit::Action::Ok && applied);
+    let cancelled = action == ui_kit::Action::Cancel && revert_applied(app, &mut d);
+    let close = closed || cancelled || (action == ui_kit::Action::Ok && applied);
     // Each cell owns fresh Enter from raw events. The panel itself must not submit on
     // Enter in the filter or with unrelated focus (the legacy editor left those alone), but
     // the filter, rename and comment fields still see Enter first to give up focus.
@@ -754,6 +767,8 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                                 .err();
                             if d.error.is_none() {
                                 d.editing.remove(&r.name);
+                                // The first live edit keeps the expression to put back (#15377).
+                                d.applied.entry(r.name.clone()).or_insert_with(|| (r.expression.clone(), None)).1 = None;
                             }
                         } else {
                             d.editing.remove(&r.name);
@@ -863,6 +878,41 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
         d.editing.remove(name);
     }
     true
+}
+
+/// Note the expression the design lists for each parameter applied live since the rows were last
+/// listed (#15377). The design may write an edit differently (`30` becomes `30 mm`), so Cancel
+/// compares with this, not with what was typed.
+fn note_applied(d: &mut ParamsDialog, rows: &[Row]) {
+    for (name, (_, listed)) in d.applied.iter_mut().filter(|(_, (_, listed))| listed.is_none()) {
+        *listed = rows.iter().find(|r| r.name == *name).map(|r| r.expression.clone());
+    }
+}
+
+/// Put back the expressions applied live since the dialog opened (#15377): one
+/// `parameters.change`, so the design rebuilds once and one undo (or redo) covers them. A
+/// parameter changed since by something else (an agent, an undo) or gone (renamed, deleted) is
+/// left as it is. With `parameters_cancel_reverts` off, nothing is put back, as before. False,
+/// with the error shown, when the put-back is refused.
+fn revert_applied(app: &mut SolveApp, d: &mut ParamsDialog) -> bool {
+    if d.applied.is_empty() || !app.preferences.parameters_cancel_reverts {
+        return true;
+    }
+    let now = rows(app);
+    let changes: serde_json::Map<String, Value> = d
+        .applied
+        .iter()
+        .filter_map(|(name, (before, listed))| {
+            let current = &now.iter().find(|r| r.name == *name)?.expression;
+            (listed.as_ref().is_none_or(|l| l == current) && current != before).then(|| (name.clone(), json!(before)))
+        })
+        .collect();
+    d.applied.clear();
+    if changes.is_empty() {
+        return true;
+    }
+    d.error = app.run("parameters.change", json!({"changes": changes})).err();
+    d.error.is_none()
 }
 
 /// "Apply each change as you leave its field", remembered across sessions (#9279). Turning it
@@ -1427,6 +1477,8 @@ mod tests {
     #[test]
     fn escape_keeps_previously_committed_parameter_edit() {
         let mut h = escape_dialog();
+        // The old Escape, kept behind the preference: an edit already applied stays (#15377).
+        h.app.preferences.parameters_cancel_reverts = false;
         escape_type(&mut h, "param:width", "20 mm");
         h.step(&json!({"key":"Enter"})).unwrap();
         assert_eq!(h.app.session.doc.param("width").unwrap().expr, "20 mm");
@@ -1506,6 +1558,84 @@ mod tests {
         assert!(d.editing.is_empty() && d.error.is_none());
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("10 mm", "20 mm"), "one undo takes both back");
+    }
+
+    /// #15377: the box of `held_dialog`, the dialog open with live updates on (the default).
+    fn live_dialog() -> crate::scenario::Harness {
+        let mut h = held_dialog();
+        h.app.preferences.parameters_apply_live = true;
+        h.frames(2);
+        h
+    }
+
+    fn reopen(h: &mut crate::scenario::Harness) {
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        h.frames(2);
+    }
+
+    #[test]
+    fn live_edits_are_put_back_by_cancel_or_escape_in_one_undo_step_and_kept_by_ok_or_the_close_button() {
+        let mut h = live_dialog();
+        assert!(crate::prefs::Prefs::default().parameters_cancel_reverts, "Cancel takes live edits back by default");
+        let undo = h.app.session.undo.len();
+        hold(&mut h, "w", "30 mm");
+        hold(&mut h, "h", "w * 2");
+        hold(&mut h, "w", "35 mm");
+        assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("35 mm", "w * 2"), "live edits apply as each field is left");
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none(), "Cancel closes the dialog");
+        assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("10 mm", "20 mm"), "Cancel puts back what the dialog opened with");
+        assert_eq!(h.app.session.undo.len(), undo + 4, "three live edits, then one step that puts both parameters back");
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("35 mm", "w * 2"), "one undo brings the edits back");
+        h.app.run("edit.redo", json!({})).unwrap();
+
+        reopen(&mut h);
+        hold(&mut h, "w", "30 mm");
+        escape_key(&mut h, true);
+        escape_key(&mut h, false);
+        assert!(h.app.params.is_none());
+        assert_eq!(expression(&h, "w"), "10 mm", "Escape puts live edits back");
+
+        reopen(&mut h);
+        escape_type(&mut h, "param:w", "30 mm");
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none());
+        assert_eq!(expression(&h, "w"), "10 mm", "an edit applied by the Cancel click that leaves its field goes back too");
+
+        reopen(&mut h);
+        hold(&mut h, "w", "30 mm");
+        h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+        assert!(h.app.params.is_none());
+        assert_eq!(expression(&h, "w"), "30 mm", "OK keeps live edits");
+
+        reopen(&mut h);
+        hold(&mut h, "w", "40 mm");
+        h.step(&json!({"click":{"handle":"params:close"}})).unwrap();
+        assert!(h.app.params.is_none());
+        assert_eq!(expression(&h, "w"), "40 mm", "the close button only closes, keeping live edits");
+    }
+
+    #[test]
+    fn cancel_leaves_a_parameter_changed_elsewhere_and_the_preference_keeps_the_old_cancel() {
+        let mut h = live_dialog();
+        hold(&mut h, "w", "30 mm");
+        hold(&mut h, "h", "25 mm");
+        h.frames(1);
+        // An agent changes `w` while the dialog is open: Cancel must not undo that.
+        h.app.run("parameters.change", json!({"name":"w","expression":"40 mm"})).unwrap();
+        h.frames(1);
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("40 mm", "20 mm"), "only the dialog's own edit goes back");
+
+        h.app.preferences.parameters_cancel_reverts = false;
+        reopen(&mut h);
+        let undo = h.app.session.undo.len();
+        hold(&mut h, "w", "30 mm");
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none());
+        assert_eq!(expression(&h, "w"), "30 mm", "with the preference off, Cancel only closes the dialog, as before");
+        assert_eq!(h.app.session.undo.len(), undo + 1);
     }
 
     #[test]
