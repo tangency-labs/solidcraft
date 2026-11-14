@@ -68,7 +68,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
                     Some(ss.plane.to_world(mid + n) - ss.plane.to_world(mid))
                 }
                 // A thin extrude's curves extrude along their sketch's normal.
-                Kind::Extrude { .. } => Some(ss.plane.normal()),
+                Kind::Extrude { .. } | Kind::Surface(crate::dialogs_surface::Surf::Extrude { .. }) => Some(ss.plane.normal()),
                 _ => None,
             };
             (ss.plane.to_world(mid), dir)
@@ -139,6 +139,8 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         },
         Kind::Sheet(_) => (at, crate::dialogs_sheet::arrow(app, d).or(normal)),
         Kind::Plastic(_) => (at, normal),
+        // A surface extrude's profiles stand square to their sketch, as a solid extrude's do.
+        Kind::Surface(crate::dialogs_surface::Surf::Extrude { .. }) => (at, normal),
         Kind::PatternRect { .. } => (at, d.inputs.get(1).and_then(|i| i.items.first()).and_then(|x| crate::dialogs::axis_of(app, x)).map(|a| a.1)),
         // A sketch move's X Distance grows along the sketch's own x axis, so its drag arrow
         // lies in the sketch plane. Scale has no arrow: a factor is not a length, and the
@@ -581,9 +583,12 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             }
         }
         (_, Kind::Extrude { direction: 1 | crate::dialogs::TWO_SIDES_REVERSED, .. }) => -1.0,
+        // Surface Extrude's sides are One Side, Symmetric, Flipped (`EXTRUDE_SIDES`).
+        (_, Kind::Surface(crate::dialogs_surface::Surf::Extrude { direction: 2, .. })) => -1.0,
         _ => 1.0,
     };
-    let symmetric = to_span.is_none() && matches!(d.kind, Kind::Extrude { direction: 2, .. });
+    let symmetric = to_span.is_none()
+        && matches!(d.kind, Kind::Extrude { direction: 2, .. } | Kind::Surface(crate::dialogs_surface::Surf::Extrude { direction: 1, .. }));
     let symmetric_scale = if symmetric {
         d.extra
             .get("convention")
@@ -599,6 +604,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // distance's size only, so a drag past its curve would just turn the arrow round.
     let signed = match &d.kind {
         Kind::Extrude { .. }
+        | Kind::Surface(crate::dialogs_surface::Surf::Extrude { .. })
         | Kind::Move { .. }
         | Kind::Section { .. }
         | Kind::OffsetPlane { .. }
