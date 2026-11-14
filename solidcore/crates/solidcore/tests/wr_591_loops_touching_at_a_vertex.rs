@@ -125,20 +125,6 @@ fn wr_591_on_every_order_closes_round_the_touching_vertex() {
     }
 }
 
-#[test]
-fn wr_591_off_the_input_order_decides() {
-    let k = Kernel::default();
-    let mut bad = Vec::new();
-    for (variant, turn, curves) in orders() {
-        match loop_areas(&k, &curves) {
-            Some(areas) if sound(&areas) => {}
-            other => bad.push((variant, turn, other)),
-        }
-    }
-    eprintln!("upstream order failures: {bad:?}");
-    assert_eq!(bad.len(), 15, "upstream order failures: {bad:?}");
-}
-
 /// Loops that touch nowhere are ordered the same with the fix on and off.
 #[test]
 fn wr_591_loops_apart_are_unchanged() {

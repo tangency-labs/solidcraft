@@ -597,6 +597,9 @@ impl FilletSession<'_> {
             self.executive.error.comment = "ERROR: fillet parameters not set up.".into();
             return Err(invalid("fillet parameters not set up"));
         }
+        // the result check holds a closed manifold input to a closed manifold result; a sheet
+        // (an edge with one face) is open before the fillet and after it
+        let input_closed = k.fixes.fillet_refuse_non_manifold_result && self.target_is_closed()?;
         self.create_corners(k, None)?;
         // The opt-in missing-corner note is the reason the later stage fails; keep it
         // through that later error so `error_info()` reports the unsupported vertex,
@@ -625,15 +628,26 @@ impl FilletSession<'_> {
         }
         result?;
         split_and_logged?;
-        if !k.fixes.fillet_refuse_non_manifold_result {
+        if !input_closed {
             return Ok(());
         }
         self.check_closed_manifold()
     }
 
+    /// Whether every edge of the live target is manifold (two faces, four edge uses): a
+    /// closed manifold body, not a sheet.
+    fn target_is_closed(&self) -> Result<bool> {
+        for edge in p1::edges(self.objects.target, None)? {
+            if !crate::topology::edge::is_manifold(self.objects.target, edge)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     /// The closed-manifold result check of `FilletExecutive::do_fillet` (not
-    /// upstream, opt-in `fixes.fillet_refuse_non_manifold_result`, WR-212,
-    /// tangency-labs/solidcore#422), on the live target.
+    /// upstream, `fixes.fillet_refuse_non_manifold_result`, WR-212,
+    /// tangency-labs/solidcore#422), on the live target of a closed manifold input.
     fn check_closed_manifold(&mut self) -> Result<()> {
         for edge in p1::edges(self.objects.target, None)? {
             if crate::topology::edge::is_manifold(self.objects.target, edge)? {

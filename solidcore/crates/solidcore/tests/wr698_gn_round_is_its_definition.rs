@@ -1032,11 +1032,46 @@ fn a_query_below_the_bound_takes_s_and_one_at_it_the_net() {
 
 // ---- #2487: the offset of a round built from its definition S ----------------------------
 
-/// The tilted pipe's root rounded r 2 by the ball's exact circle (every circular round's
-/// section): a procedural blend of order 1 on the plate's plane and
-/// the pipe's cylinder. Its surface.
+/// A ridge's root rounded r 2 by the ball's exact circle (every circular round's section): a
+/// procedural blend of order 1 on the plate's plane and the ridge's wall. The 60 x 40 x 10
+/// plate carries a ridge extruded from a freeform (cubic Bezier) profile 4 degrees off y.
+/// (The tilted pipe's root, a plane against a cylinder, is an exact round class, not a blend
+/// by its definition.) Its surface.
 fn circle_root(k: &mut Kernel) -> (Brep, Surface) {
-    let b = tilted_pipe_rounded(k, 1, 1, 1.0);
+    use solidcore::boolean::api_brep::boolean_union;
+    use solidcore::curve::curve::Curve;
+    use solidcore::primitive::api_curves::{create_curve, create_line_segment};
+    use solidcore::sweep::api_brep::create_linear_sweep;
+    let plate = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
+    let p = |x: f64, z: f64| Point3::new(x, 0.0, z);
+    let profile = [
+        Curve::from(create_line_segment(p(20.0, 10.0), p(40.0, 10.0)).unwrap()),
+        Curve::from(
+            create_curve(&[p(40.0, 10.0), p(37.0, 19.0), p(24.0, 16.0), p(20.0, 10.0)]).unwrap(),
+        ),
+    ];
+    let refs: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+    let phi = 4.0_f64.to_radians();
+    let ridge = create_linear_sweep(
+        k,
+        &refs,
+        Vec3::new(phi.sin(), phi.cos(), 0.0),
+        40.0 / phi.cos(),
+        true,
+    )
+    .unwrap();
+    let mut b = boolean_union(k, plate, ridge).unwrap();
+    let q = Point3::new(40.0 + 20.0 * phi.tan(), 20.0, 10.0);
+    let mut best = (1.0_f64, None);
+    for &e in b.edge_list() {
+        if let Ok(c) = edge_closest_point(k, &b, e, q) {
+            if c.closest.distance <= best.0 {
+                best = (c.closest.distance, Some(e));
+            }
+        }
+    }
+    let e = best.1.expect("the root edge");
+    fillet_edges(k, &mut b, &[e], 2.0, 1, 1, 1.0).unwrap();
     let s = rounds_of(&b)
         .into_iter()
         .map(|(_, s)| s)
@@ -1057,7 +1092,7 @@ fn unit_normal_of(k: &Kernel, s: &Surface, uv: Point2) -> (Point3, Vec3) {
 }
 
 /// #2487: the root round (concave: its normal points at the ball's centre) offset by
-/// d = +-0.5 is the procedural blend of radius 2 - d on the plate and the pipe offset by
+/// d = +-0.5 is the procedural blend of radius 2 - d on the plate and the ridge offset by
 /// d, on the same leader, seeds and parameters: at every (u, v) of a 41 x 9 grid it is
 /// S + d n to rounding at part scale (the ball's circles about the same centres, scaled).
 /// Its net is certified, its bound recorded and proved again.

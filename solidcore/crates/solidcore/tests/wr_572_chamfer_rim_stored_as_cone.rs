@@ -82,11 +82,6 @@ fn removed_want(a: f64) -> f64 {
 }
 
 #[test]
-fn wr_572_flag_is_off_by_default() {
-    assert!(!Kernel::default().fixes.fillet_chamfer_cone_stored_as_cone);
-}
-
-#[test]
 fn wr_572_rim_chamfers_are_stored_as_cones() {
     let (before, k, mut body) = chamfered(true);
     solidcore::topology::integrity::check(&body).unwrap();

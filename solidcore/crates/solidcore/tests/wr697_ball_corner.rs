@@ -985,40 +985,6 @@ fn unequal_chamfers_at_a_corner_facet() {
     assert!((v - want).abs() <= 1e-12 * want, "{v}");
 }
 
-// Without the flag nothing changes: the facet asked for is the pinned 3x3 chamfer
-// corner, whose patch the pinned `AdjustTopology` stretches to four sides, a B-spline,
-// not the facet's plane, and not its volume (24000 - 356).
-#[test]
-fn without_the_flag_the_chamfer_corner_is_the_pinned_patch() {
-    let mut k = chamfer_fixes(false);
-    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
-    let edges: Vec<EdgeId> = BOX_CORNER_EDGES.iter().map(|&p| pick(&k, &b, p)).collect();
-    chamfer(
-        &mut k,
-        &mut b,
-        &edges,
-        &[2.0, 3.0, 4.0],
-        BlendChamferCorner::Facet,
-    )
-    .unwrap();
-    let (n, lines, v) = report(&mut k, &mut b);
-    eprintln!("pinned: volume {v:.12}; {n:?}; {lines:?}");
-    assert!(lines.is_empty(), "{lines:?}");
-    assert_eq!(n, (10, 22, 14));
-    let bsplines = get_faces(&b)
-        .unwrap()
-        .into_iter()
-        .filter(|&f| {
-            matches!(
-                face2::surface(&b, f).unwrap().unwrap().kind(),
-                SurfaceKind::BSpline(_)
-            )
-        })
-        .count();
-    assert_eq!(bsplines, 1);
-    assert!((v - (24000.0 - 356.0)).abs() > 1.0, "{v}");
-}
-
 // brett19's case on #2345: `fillet_edges_per_edge` with a linear section (not the chamfer
 // API, which sets every corner to bevel) reaches the pinned 3x3 corner's non-bevel
 // `m_bChamfer` branch. On the 2/3/4 corner that branch builds 10 faces and removes

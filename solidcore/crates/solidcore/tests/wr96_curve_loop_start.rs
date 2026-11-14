@@ -25,21 +25,6 @@ fn later_loop_ranges_are_disjoint_with_the_fix() {
 }
 
 #[test]
-fn default_ranges_keep_pinned_cpp_results() {
-    let k = Kernel::default();
-    assert!(!k.fixes.curve_loop_start_after_previous_end);
-    let keys: Vec<_> = (0..8)
-        .map(solidcore::topology::trimming_tools::curve_loops::CurveKey)
-        .collect();
-    let loops = CurveLoops::from_loops(&[3, 4, 1], None, Some(&keys), &[]);
-    assert_eq!(loops.loop_start_end(&k, 0).unwrap(), (0, 2));
-    assert_eq!(loops.loop_start_end(&k, 4).unwrap(), (2, 6));
-    assert_eq!(loops.loop_start_end(&k, 7).unwrap(), (6, 7));
-    assert!(loops.loop_start_end(&k, 8).is_err());
-    assert!(CurveLoops::new().loop_start_end(&k, 0).is_err());
-}
-
-#[test]
 fn adjacency_and_sampling_wrap_within_the_second_loop() {
     use solidcore::curve::curve::Curve;
     use solidcore::curve::line::Line;

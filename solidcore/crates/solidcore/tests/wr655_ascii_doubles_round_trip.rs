@@ -130,13 +130,3 @@ fn an_ascii_b_rep_reloads_exactly_with_the_fix() {
     let back = read(&mut k, file);
     assert_eq!(corners(&back), corners(&b));
 }
-
-#[test]
-fn by_default_the_file_is_upstreams_and_moves_the_corners() {
-    let mut k = Kernel::default();
-    let (b, file) = box_file(&mut k);
-    let text = String::from_utf8(file.clone()).unwrap();
-    assert!(text.contains("0.3000000000000000"), "fixed %.16f");
-    let back = read(&mut k, file);
-    assert_ne!(corners(&back), corners(&b));
-}

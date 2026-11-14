@@ -106,11 +106,12 @@ fn corner_surface(
             },
         )
         .unwrap();
-    // (a plain B-spline without `fillet_round_as_definition`)
-    let solidcore::surface::surface::SurfaceKind::BSpline(s) = s.into_kind() else {
-        panic!("the G^n section is a B-spline without the definition flag");
-    };
-    (g, s)
+    // the section's net: the surface is a blend by its definition (`fillet_round_as_definition`)
+    let net = solidcore::blend::fillet_section::station::as_b_spline(&k, &s)
+        .unwrap()
+        .expect("the G^n section's net")
+        .into_owned();
+    (g, net)
 }
 
 /// The surface's section at every u is the closed form, for orders 2 to 4 and two

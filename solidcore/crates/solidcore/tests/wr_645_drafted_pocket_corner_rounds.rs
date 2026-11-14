@@ -162,19 +162,7 @@ fn rounded(draft: f64, radius: f64, on: bool) -> Rounded {
 
 #[test]
 fn wr_645_drafted_pocket_corners_are_exact_with_the_fix() {
-    // upstream: three corners' end edges 0.845 off, refused by SMLib's check
-    let upstream = rounded(10.0, 3.0, false);
-    assert!(
-        upstream.max_edge_tolerance > 0.8,
-        "upstream: {}",
-        upstream.max_edge_tolerance
-    );
-    assert!(
-        upstream.check.iter().any(|l| l.contains("Test #59")),
-        "upstream: {:?}",
-        upstream.check
-    );
-
+    // (the pinned C++ left three corners' end edges 0.845 off, refused by SMLib's check)
     // with the fix, at 10 and 2 degrees: the same faces, every corner exact, valid
     for draft in [10.0, 2.0] {
         let fixed = rounded(draft, 3.0, true);

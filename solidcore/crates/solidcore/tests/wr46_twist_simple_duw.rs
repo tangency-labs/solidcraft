@@ -5,10 +5,9 @@ use solidcore::surface::twist_volume::TwistVolume;
 use solidcore::surface::volume::{EvalOptions, Volume, VolumeKind};
 
 #[test]
-fn opt_in_duw_matches_central_difference() {
-    let mut kernel = Kernel::default();
-    assert!(!kernel.fixes.twist_simple_duw_sign);
-    kernel.fixes.twist_simple_duw_sign = true;
+fn duw_matches_central_difference() {
+    let kernel = Kernel::default();
+    assert!(kernel.fixes.twist_simple_duw_sign);
     // Simple evaluation is in the identity frame, without orientation or compounding.
     for period in [4.0, -4.0] {
         let twist = Volume::new(VolumeKind::Twist(TwistVolume::from_members(period, 1e-5)));
@@ -41,61 +40,6 @@ fn opt_in_duw_matches_central_difference() {
             }
         }
     }
-}
-
-#[test]
-fn default_preserves_cpp_sign_and_all_other_entries() {
-    let mut kernel = Kernel::default();
-    let twist = Volume::new(VolumeKind::Twist(TwistVolume::from_members(4.0, 1e-5)));
-    for n in 0..=3 {
-        let p = Vec3::new(0.7, -0.4, 0.0);
-        let legacy = twist
-            .evaluate_simple(p, n, &EvalOptions::default())
-            .unwrap();
-        let default = twist
-            .map(
-                p,
-                n,
-                &EvalOptions {
-                    fixes: kernel.fixes,
-                    ..EvalOptions::default()
-                },
-            )
-            .unwrap();
-        assert_eq!(default, legacy);
-        kernel.fixes.twist_simple_duw_sign = true;
-        let fixed = twist
-            .map(
-                p,
-                n,
-                &EvalOptions {
-                    fixes: kernel.fixes,
-                    ..EvalOptions::default()
-                },
-            )
-            .unwrap();
-        for (i, (before, after)) in legacy.iter().zip(&fixed).enumerate() {
-            if n >= 2 && i == (n + 1) * (n + 1) + 1 {
-                assert!(before.y < 0.0);
-                assert_eq!(after.y, -before.y);
-                assert_eq!(after.x, before.x);
-                assert_eq!(after.z, before.z);
-            } else {
-                assert_eq!(before, after);
-            }
-        }
-        kernel.fixes.twist_simple_duw_sign = false;
-    }
-    assert!(twist
-        .map(
-            Vec3::ZERO,
-            4,
-            &EvalOptions {
-                fixes: kernel.fixes,
-                ..EvalOptions::default()
-            }
-        )
-        .is_err());
 }
 
 #[test]
@@ -143,7 +87,7 @@ fn mapped_surface_propagates_kernel_fix() {
     use solidcore::surface::srf_in_volume::SrfInVolume;
     use solidcore::surface::surface::Surface;
 
-    let mut kernel = Kernel::default();
+    let kernel = Kernel::default();
     let base = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0)));
     let twist = TwistVolume::create(
         Vec3::ZERO,
@@ -165,10 +109,6 @@ fn mapped_surface_propagates_kernel_fix() {
             .unwrap()[1][0]
     };
     let difference = (du(uv.y + h) - du(uv.y - h)) / (2.0 * h);
-    let legacy = surface.evaluate(&kernel, uv, 2, 2, flags).unwrap();
-    assert!((legacy[1][1] - difference).length() > 0.1);
-    kernel.fixes.twist_simple_duw_sign = true;
     let fixed = surface.evaluate(&kernel, uv, 2, 2, flags).unwrap();
     assert!((fixed[1][1] - difference).length() < 1e-9);
-    assert_eq!(legacy[0][0], fixed[0][0]);
 }

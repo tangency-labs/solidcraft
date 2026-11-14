@@ -99,20 +99,9 @@ fn mitred_union(turn: f64) -> (solidcore::Result<Brep>, Kernel, f64) {
 }
 
 #[test]
-fn small_turns_fail_like_cpp() {
-    for turn in [0.1, 0.25, 0.3] {
-        let (r, ..) = mitred_union(turn);
-        let e = r.unwrap_err();
-        assert!(
-            e.operation().contains("make_faceuse") && e.sm_status() == Some(1001),
-            "turn {turn}: {e}"
-        );
-    }
-}
-
-#[test]
-fn larger_turns_unite_the_pieces() {
-    for turn in [0.4, 0.5, 1.0, 5.0, 90.0] {
+fn every_turn_unites_the_pieces() {
+    // (the small turns, 0.1 to 0.3 degrees, failed in the pinned C++'s make_faceuse)
+    for turn in [0.1, 0.25, 0.3, 0.4, 0.5, 1.0, 5.0, 90.0] {
         let (r, k, pieces) = mitred_union(turn);
         let mut b = r.unwrap();
         assert!(is_manifold_solid(&b).unwrap(), "turn {turn}");

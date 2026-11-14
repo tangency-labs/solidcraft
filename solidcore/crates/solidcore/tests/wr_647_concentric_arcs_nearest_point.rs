@@ -43,11 +43,6 @@ fn check(fix: bool, gap: f64) -> (Curve, Curve, Vec<Solution<u8>>) {
     (a, b, sols)
 }
 
-#[test]
-fn wr_647_crossing_is_point_is_off_by_default() {
-    assert!(!Kernel::default().fixes.simple_coincidence_crossing_is_point);
-}
-
 /// Upstream: one coincidence range over the whole arcs.
 #[test]
 fn wr_647_concentric_arcs_within_tolerance_are_a_range_by_default() {

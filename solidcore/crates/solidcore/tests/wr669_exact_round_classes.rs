@@ -204,7 +204,7 @@ fn tray_kept(exact: bool, definition: bool) -> (f64, f64, solidcore::Result<()>,
 }
 
 #[test]
-fn the_point_class_makes_the_corner_ball_without_the_ball_patch_flag() {
+fn the_point_class_makes_the_corner_ball() {
     // each vertical edge loses (1 - pi/4) 4 along 8, each corner the octant of the two
     // bottom rounds' crossing (16/3) less the corner ball's (4 pi / 3)
     let removed = 4.0 * (32.0 * (1.0 - PI / 4.0) + 16.0 / 3.0 - 4.0 * PI / 3.0);
@@ -213,11 +213,6 @@ fn the_point_class_makes_the_corner_ball_without_the_ball_patch_flag() {
     assert!(
         (after - (rounded - removed)).abs() < 1e-7 * after,
         "{rounded} {after}"
-    );
-    let (_, _, r) = tray(false);
-    assert!(
-        r.as_ref().err().and_then(solidcore::error::upstream_status) == Some(1001),
-        "{r:?}"
     );
 }
 

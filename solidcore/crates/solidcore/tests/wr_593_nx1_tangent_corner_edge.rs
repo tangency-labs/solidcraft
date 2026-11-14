@@ -130,11 +130,3 @@ fn exact_round_is_unchanged_by_the_fix() {
     let on = fillet(true, 0.0).unwrap();
     assert_eq!(off.to_bits(), on.to_bits());
 }
-
-#[test]
-fn residue_round_fails_by_default() {
-    let mut k = Kernel::default();
-    let mut body = peg(&mut k, RESIDUE);
-    let e = concave_arc(&body);
-    assert!(fillet_edges(&mut k, &mut body, &[e], RADIUS, 1, 1, 1.0).is_err());
-}

@@ -118,10 +118,6 @@ fn join(fixed: bool) -> Result<f64, String> {
 
 #[test]
 fn wr579_near_coincident_tube_ends_join() {
-    let unfixed = join(false);
-    println!("flag off: {unfixed:?}");
-    assert!(unfixed.is_err(), "upstream's union succeeded: {unfixed:?}");
-
     let v = join(true).unwrap();
     let mut k = Kernel::default();
     let (mut t, mut s) = (top(&mut k), seat(&mut k));
@@ -246,13 +242,9 @@ fn wr575_tube_ends_join_adds_no_check_failure_at_any_gap() {
     // Face test 36 is gone from every row since #13295: it named the joined tube's seam
     // edge ending at a vertex a few micrometres across the seam, inside the vertex's own
     // tolerance, with no edge beside the seam there: a corner, not a sliver.
-    let rows = [
-        (1e-5, false, report(2, 2, 0)),
-        (1e-6, false, report(0, 1, 0)),
-        (1e-7, false, report(0, 0, 0)),
-        (1e-5, true, report(0, 2, 0)),
-        (1e-7, true, report(0, 0, 0)),
-    ];
+    // (the rows with every other correction off, upstream's controls, went with u69: every
+    // correction is on by default)
+    let rows = [(1e-5, true, report(0, 2, 0)), (1e-7, true, report(0, 0, 0))];
     let failures: Vec<String> = rows
         .iter()
         .flat_map(|(gap, all, off)| flag_row(*gap, *all, off))

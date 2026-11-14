@@ -185,45 +185,6 @@ fn is_plate(s: &Swept) -> bool {
         && s.check.is_empty()
 }
 
-/// The defect WR-591 is about, pinned while the flag is opt-in, not a result to keep:
-/// without the flag the cap plane is refused in 15 orders (the loop ordering ends on a
-/// curve it already used, or runs round the hole the wrong way), and the capped sweep
-/// still returns `Ok`, the eight side faces as an open skin: no solid region, volume 0.
-/// In the other orders the plane is the one loop. This test goes when the flag becomes
-/// the default.
-#[test]
-fn wr591_without_the_flag_the_capped_sweep_returns_an_open_skin() {
-    assert!(!Kernel::default().fixes.loops_go_on_round_the_vertex);
-    let mut refused = Vec::new();
-    for (variant, turn, curves) in orders() {
-        let mut k = kernel(false);
-        match cap_loops(&k, &curves) {
-            None => {
-                refused.push((variant, turn));
-                let s = sweep(&mut k, &curves);
-                assert_eq!(s.faces, 8, "variant {variant}, turn {turn}: {s:?}");
-                assert!(
-                    !s.edges_manifold && !s.manifold_solid && s.volume == 0.0,
-                    "variant {variant}, turn {turn}: {s:?}"
-                );
-                assert!(
-                    (s.area - (area() - 2.0 * 59.0)).abs() < 1e-9,
-                    "variant {variant}, turn {turn}: {s:?}"
-                );
-            }
-            Some((outer, loops, enclosed)) => {
-                assert_eq!(
-                    (outer, loops),
-                    (vec![1], vec![8]),
-                    "variant {variant}, turn {turn}"
-                );
-                assert!((enclosed.abs() - 59.0).abs() < 1e-12, "{enclosed}");
-            }
-        }
-    }
-    assert_eq!(refused, REFUSED_OFF);
-}
-
 /// With the flag the cap plane is one loop of all eight lines, enclosing 59, in every
 /// order, and the sweep closes: ten faces, every edge manifold, the area of the plate
 /// less the hole.

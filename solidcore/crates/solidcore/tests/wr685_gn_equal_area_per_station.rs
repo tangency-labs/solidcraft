@@ -75,15 +75,23 @@ struct Net {
     x_ends: [Vec<f64>; 2],
 }
 
-/// The blend faces (B-spline surfaces of degree `vdeg` in v), in face order.
+/// The blend faces (B-spline surfaces of degree `vdeg` in v, or blends by their definition,
+/// read as their nets), in face order.
 fn blend_nets(b: &Brep, vdeg: usize) -> Vec<Net> {
+    let k = Kernel::default();
     let mut out = Vec::new();
     for &f in b.face_list() {
         let Some(s) = b.face(f).unwrap().surface.clone() else {
             continue;
         };
-        let SurfaceKind::BSpline(bs) = s.kind() else {
-            continue;
+        let bs = match s.kind() {
+            SurfaceKind::BSpline(bs) => std::borrow::Cow::Borrowed(bs),
+            SurfaceKind::ProceduralBlend(_) => {
+                solidcore::blend::fillet_section::station::as_b_spline(&k, &s)
+                    .unwrap()
+                    .expect("a definition's net")
+            }
+            _ => continue,
         };
         if bs.degree(SurfParamType::V) != vdeg {
             continue;

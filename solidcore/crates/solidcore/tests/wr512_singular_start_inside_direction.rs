@@ -133,14 +133,6 @@ fn assert_built_to(k: &mut Kernel, b: &mut Brep, r: solidcore::Result<()>, tol: 
     );
 }
 
-#[test]
-fn default_kernel_refuses_the_arc_round() {
-    let mut k = Kernel::default();
-    assert!(!k.fixes.ssi_singular_start_inside_direction);
-    let (_, r) = both_rounds(&mut k);
-    assert_refused(r);
-}
-
 /// The default kernel with the flag: the C++ body with the fork's line and WR-568's span,
 /// [`BOTH_ROUNDS_SPAN`], to 1e-9 (the gate's tolerance; the same construction and integration
 /// on both sides).

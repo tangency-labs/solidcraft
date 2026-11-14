@@ -61,20 +61,6 @@ fn solid_regions(b: &Brep) -> usize {
 }
 
 #[test]
-fn wr_619_union_refuses_solid_leak_is_off_by_default() {
-    assert!(!Kernel::default().fixes.boolean_union_refuses_solid_leak);
-}
-
-#[test]
-fn wr_619_union_has_no_solid_by_default() {
-    let mut k = Kernel::default();
-    let (a, b) = operands(&mut k);
-    let u = boolean_union(&mut k, a, b).unwrap();
-    assert_eq!(solid_regions(&u), 0);
-    assert!(!is_manifold_solid(&u).unwrap());
-}
-
-#[test]
 fn wr_619_union_with_the_fix_is_refused() {
     let mut k = Kernel::default();
     k.fixes.boolean_union_refuses_solid_leak = true;

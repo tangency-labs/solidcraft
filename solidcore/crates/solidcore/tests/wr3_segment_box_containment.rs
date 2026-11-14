@@ -12,7 +12,7 @@ use solidcore::{
 };
 
 #[test]
-fn one_endpoint_inside_is_contained_only_in_legacy_mode() {
+fn a_segment_is_contained_only_with_both_endpoints_inside() {
     let mut nurb = allocate_nurb_volume([1; 3], [1; 3], [3; 3]).unwrap();
     for d in 0..3 {
         nurb.knots_mut(d).copy_from_slice(&[0.0, 0.0, 1.0, 1.0]);
@@ -23,10 +23,11 @@ fn one_endpoint_inside_is_contained_only_in_legacy_mode() {
     let volume = Volume::new(VolumeKind::BSpline(BSplineVolume::new(nurb)));
     let inside = Vec3::new(0.5, 0.5, 0.5);
     let outside = Vec3::new(2.0, 0.5, 0.5);
-    let mut kernel = Kernel::default();
-    assert!(!kernel.fixes.extent3d_contains_both_segment_endpoints);
-    for fixed in [false, true] {
-        kernel.fixes.extent3d_contains_both_segment_endpoints = fixed;
+    let kernel = Kernel::default();
+    // the correction is the default: a segment with one end outside is not contained
+    assert!(kernel.fixes.extent3d_contains_both_segment_endpoints);
+    let fixed = true;
+    {
         for (start, end, expected) in [
             (inside, outside, !fixed),
             (outside, inside, !fixed),
@@ -54,8 +55,8 @@ fn one_endpoint_inside_is_contained_only_in_legacy_mode() {
                 (expected, start, end),
             );
         }
-        // Box checks also traverse this path, but their outside face has edges
-        // with both ends outside, so even legacy mode rejects this box.
+        // Box checks also traverse this path; their outside face has edges with both
+        // ends outside, so the box is rejected.
         let partial_box = Extent3d::from_points(inside, outside);
         assert!(!volume
             .is_box_in_param_domain(&kernel, &partial_box, false)
