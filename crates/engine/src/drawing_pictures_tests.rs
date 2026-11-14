@@ -349,3 +349,30 @@ fn the_scene_holds_a_logo_with_or_without_its_cache() {
     assert_eq!(block_group(&cached.scene), block_group(&built.scene));
     assert!(matches!(block_group(&cached.scene).items[0], Item::Picture(_)));
 }
+
+/// A logo change rebuilds the title block without losing a view's centre line, and the provider and
+/// one-shot scene agree throughout.
+#[test]
+fn a_logo_and_centre_line_survive_each_others_updates() {
+    let folder = Folder::new("logo-and-centre-line");
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let block = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block}));
+    let added = run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(front), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0}));
+    let line = ids::decode(added["line"].as_str().unwrap()).unwrap();
+    let d = s.drawing("test").unwrap().clone();
+    let before = crate::drawing_scene::as_shown(&mut s, &d, sheet).unwrap();
+    let line_group = before.scene.groups.iter().find(|group| group.object == line && group.kind == ObjectKind::CentreLine).unwrap().clone();
+    logo(&mut s, &folder, &red_blue(), "legal_owner");
+    let d = s.drawing("test").unwrap().clone();
+    let shown = crate::drawing_scene::as_shown(&mut s, &d, sheet).unwrap();
+    assert_eq!(shown.scene, crate::drawing_scene::build(&s, &d, sheet).unwrap().scene);
+    assert!(matches!(block_group(&shown.scene).items[0], Item::Picture(_)));
+    assert_eq!(shown.scene.groups.iter().find(|group| group.object == line).unwrap(), &line_group);
+    run(&mut s, "drawing.title_block.logo", json!({"cell": "legal_owner", "file": null}));
+    let d = s.drawing("test").unwrap().clone();
+    let cleared = crate::drawing_scene::as_shown(&mut s, &d, sheet).unwrap();
+    assert_eq!(cleared.scene, crate::drawing_scene::build(&s, &d, sheet).unwrap().scene);
+    assert!(!block_group(&cleared.scene).items.iter().any(|item| matches!(item, Item::Picture(_))));
+    assert_eq!(cleared.scene.groups.iter().find(|group| group.object == line).unwrap(), &line_group);
+}

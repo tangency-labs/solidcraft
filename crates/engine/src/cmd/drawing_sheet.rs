@@ -72,8 +72,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&DELETE)
         .output(output_schema_for::<SheetsResult>)
         .params(
-            "sheet: id or name (a drawing keeps at least one); contents?: delete, to delete the views on it, their dimensions and \
-             balloons, and the images on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
+            "sheet: id or name (a drawing keeps at least one); contents?: delete, to delete the views on it, their dimensions, \
+             balloons, notes, centre marks and centre lines, and the images on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
         ),
 ];
 
@@ -111,6 +111,8 @@ fn listed(on: &OnSheet) -> String {
         kind("revision tag", &on.tags),
         kind("table", &on.tables),
         kind("note", &on.notes),
+        kind("centre mark", &on.centre_marks),
+        kind("centre line", &on.centre_lines),
     ]
     .into_iter()
     .flatten()

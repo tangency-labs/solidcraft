@@ -499,6 +499,29 @@ pub fn not_drawable(display: VisualStyle, reference: VisualStyle) -> Option<&'st
     (lined(display) || lined(reference)).then_some("not supported yet: shaded views with lines need the view's exact lines (W06)")
 }
 
+/// Centre references still read the design's active geometry and placement. Other view states
+/// must omit them rather than put that geometry on a different configuration or position.
+pub fn unsupported_centre_view(d: &Drawing, id: u64) -> Option<&'static str> {
+    let view = d.resolve_view(id).ok()?;
+    if view.exploded.value != Exploded::Assembled {
+        Some("an exploded view")
+    } else if view.pose.value != Pose::Designed {
+        Some("a view in a position of its own")
+    } else if view.configuration.value != ViewConfiguration::Active {
+        Some("a view of a configuration of its own")
+    } else {
+        None
+    }
+}
+
+/// Refuses a new centre annotation that would read another state than its view draws.
+pub fn check_centre_view(d: &Drawing, view: u64, what: &str, cmd: &str) -> Result<()> {
+    match unsupported_centre_view(d, view) {
+        Some(view) => Err(bad(cmd, format!("not supported yet: {what} on {view}"))),
+        None => Ok(()),
+    }
+}
+
 /// Why saved view `view` can't be drawn yet, if it can't, as it draws its parts apart (#13048): its
 /// shaded parts' pictures are rendered from the design as it builds and places its parts. Its lines
 /// alone draw. Exploded comes first, as an exploded view of a position is still exploded, then posed,
