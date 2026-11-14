@@ -282,6 +282,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             Some(_) => return Err(refuse("`lay_on_print_faces` must be true or false")),
         };
         out.hierarchy = match m.get("hierarchy") {
+            _ if format != Format::Glb => None,
             None | Some(Value::Null) => None,
             Some(Value::Bool(b)) => Some(*b),
             Some(_) => return Err(refuse("`hierarchy` must be true or false")),

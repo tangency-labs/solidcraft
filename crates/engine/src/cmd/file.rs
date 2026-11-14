@@ -1504,14 +1504,15 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if lay_on_print_faces(p, cmd, format)? {
         return export_laid(s, path, format, &bodies, &parts, quality);
     }
-    export_to(s, cmd, path, format, &bodies, &parts, quality, hierarchy(p, cmd)?)
+    export_to(s, cmd, path, format, &bodies, &parts, quality, hierarchy(p, cmd, format)?)
 }
 
 /// `hierarchy` (GLB only, not read for the other formats): true, the default, writes each
 /// occurrence as a named node holding its part's bodies; false writes every body under the root
 /// in world coordinates, as SolidCraft 0.40 did.
-fn hierarchy(p: &Value, cmd: &str) -> Result<bool> {
+fn hierarchy(p: &Value, cmd: &str, format: Format) -> Result<bool> {
     match p.get("hierarchy") {
+        _ if format != Format::Glb => Ok(true),
         None | Some(Value::Null) => Ok(true),
         Some(Value::Bool(b)) => Ok(*b),
         Some(_) => Err(bad(cmd, "`hierarchy` must be true or false")),
@@ -2134,6 +2135,9 @@ mod tests {
         }
         let e = s.execute("file.export", &json!({"path": path("bad.glb"), "hierarchy": "yes"})).unwrap_err().to_string();
         assert!(e.contains("hierarchy"), "{e}");
+        // GLB only: other formats don't read it, so any value is ignored there.
+        s.execute("file.export", &json!({"path": path("part.obj"), "hierarchy": "yes"})).unwrap();
+        assert!(std::fs::metadata(path("part.obj")).is_ok_and(|m| m.len() > 0));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
