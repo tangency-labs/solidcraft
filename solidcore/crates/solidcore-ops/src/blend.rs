@@ -1165,6 +1165,52 @@ pub fn failure(e: &SolidError) -> Option<Error> {
     })
 }
 
+/// [`failure`] for a failure of the session `s`, where a step of the session failed: the
+/// kernel's statement followed by what the session noted of that step ([`noted`]), so two
+/// failures the kernel states alike ("the fillet body is not built") say which step failed
+/// and why. A session that noted nothing gives [`failure`]'s; `None` as [`failure`].
+#[must_use]
+pub fn session_failure(s: &FilletSession<'_>, e: &SolidError) -> Option<Error> {
+    noted_failure(s.error_info(), e)
+}
+
+/// [`session_failure`] on the session's error info.
+fn noted_failure(info: &ErrorInfo<FilletObject>, e: &SolidError) -> Option<Error> {
+    Some(match (failure(e)?, noted(info)) {
+        (
+            Error::BlendFailed {
+                class,
+                status,
+                phrase,
+            },
+            Some(why),
+        ) => Error::BlendFailed {
+            class,
+            status,
+            phrase: format!("{phrase}: {why}"),
+        },
+        (failed, _) => failed,
+    })
+}
+
+/// What the session noted of its last failure, in the kernel's words: its error info's
+/// comment, without the "Fillet Error:" that says only whose it is. `None` where the session
+/// noted no failure (no code) or said nothing of it (the comment an error info starts with).
+fn noted(info: &ErrorInfo<FilletObject>) -> Option<&str> {
+    if info.code == FilletErrorType::Ok as i32 {
+        return None;
+    }
+    let why = info.comment.trim();
+    let why = why
+        .strip_prefix("Fillet Error:")
+        .map_or(why, str::trim_start);
+    (!why.is_empty() && why != NO_COMMENT).then_some(why)
+}
+
+/// The comment of an error info that says nothing (`SmFilletErrorInfo`'s initial comment,
+/// trimmed).
+const NO_COMMENT: &str = "<no comment>";
+
 /// The edges of `body` at native-list indices `edges` blended by `kind`, edge i at `sizes[i]` (or
 /// `sizes[0]` for every edge), the corners at `setbacks` set back (not for a chamfer, whose
 /// corners are bevelled) and, with [`Corners::Open`], left open. When some of the rounds

@@ -163,6 +163,8 @@ pub struct WorkCounters {
     loops_classified: Cell<u64>,
     wall_body_copies: Cell<u64>,
     proto_edge_intersections: Cell<u64>,
+    shell_traversal_faces: Cell<u64>,
+    proto_vertex_point_solves: Cell<u64>,
     face_extreme_control_points: Cell<u64>,
     feet_tm_coefficients: Cell<u64>,
     mass_iso_evaluations: Cell<u64>,
@@ -186,8 +188,7 @@ impl WorkCounters {
 
     /// Inner loops of a face classified against the new face that a closed loop
     /// imprinted in it makes (`SmWorkCounters::eLoopsClassified`): each inner loop
-    /// `make_edge_in_face_with_vu` goes on to classify after the box test of
-    /// [`UpstreamFixes::boolean_skips_faces_apart`] (every inner loop with that flag off).
+    /// `make_edge_in_face_with_vu` goes on to classify after its box test (WR-527).
     #[must_use]
     pub fn loops_classified(&self) -> u64 {
         self.loops_classified.get()
@@ -207,6 +208,24 @@ impl WorkCounters {
     #[must_use]
     pub fn proto_edge_intersections(&self) -> u64 {
         self.proto_edge_intersections.get()
+    }
+
+    /// Faces marked by shell traversals (`SmTopologyTraverser::ShellTraversal`): each
+    /// face a walk over what a shell joins to a vertex reaches. Deleting a face starts
+    /// one to learn whether the face's vertices are still joined to the shell. Not the
+    /// fork's.
+    #[must_use]
+    pub fn shell_traversal_faces(&self) -> u64 {
+        self.shell_traversal_faces.get()
+    }
+
+    /// Point solves a boolean ran to learn whether a proto vertex lies on a proto edge
+    /// (`RemoveCoincidentNoEdgeProtoVertex`): each solve of a proto vertex's position
+    /// against a proto edge's curve. A proto vertex found on a proto edge is removed
+    /// only when it has no proto edges of its own. Not the fork's.
+    #[must_use]
+    pub fn proto_vertex_point_solves(&self) -> u64 {
+        self.proto_vertex_point_solves.get()
     }
 
     /// Control points of the B-spline nets the trimmed-face tight box's directed solves
@@ -303,6 +322,8 @@ impl WorkCounters {
         self.loops_classified.set(0);
         self.wall_body_copies.set(0);
         self.proto_edge_intersections.set(0);
+        self.shell_traversal_faces.set(0);
+        self.proto_vertex_point_solves.set(0);
         self.face_extreme_control_points.set(0);
         self.feet_tm_coefficients.set(0);
         self.mass_iso_evaluations.set(0);
@@ -336,6 +357,18 @@ impl WorkCounters {
     pub(crate) fn add_proto_edge_intersection(&self) {
         self.proto_edge_intersections
             .set(self.proto_edge_intersections.get().saturating_add(1));
+    }
+
+    /// Counts one face marked by a shell traversal.
+    pub(crate) fn add_shell_traversal_face(&self) {
+        self.shell_traversal_faces
+            .set(self.shell_traversal_faces.get().saturating_add(1));
+    }
+
+    /// Counts one point solve of a proto vertex against a proto edge.
+    pub(crate) fn add_proto_vertex_point_solve(&self) {
+        self.proto_vertex_point_solves
+            .set(self.proto_vertex_point_solves.get().saturating_add(1));
     }
 
     /// Counts the control points of the net one trimmed-face extreme solve ran on.
@@ -591,9 +624,6 @@ pub struct UpstreamFixes {
     pub drop_curve_v_domain_degeneracy: bool,
     /// `SmTorus::AssertValid` reports a spindle torus whose V interval runs through an apex (`V = ±(90 + asin(R/r))`) as test 5, "Self Intersection", where upstream clears its result with no report and tests the U interval against `90 + acos(R/r)`, failing every spindle torus with a whole turn of U (WR-539; the fork's tangency-labs/smlib@daba678).
     pub torus_check_spindle_apex: bool,
-    /// Volume line-domain checks using `SmExtent3d::ContainsLineSeg3d` require
-    /// both endpoints inside the natural parameter box instead of either (WR-3).
-    pub extent3d_contains_both_segment_endpoints: bool,
     /// `SmSurface::LocalSurfaceIntersect`'s out-of-bounds boundary retries guard both
     /// the minimum and maximum boundary tests of the second through fourth parameter
     /// branches (`v` of `this`, `u` of `other`, `v` of `other`) with `!bFoundSolution`,
@@ -796,23 +826,10 @@ pub struct UpstreamFixes {
     /// carrying on and reporting success (WR-661, #2009 group B; tangency-labs/smlib
     /// 873c7c9, 66b02de, 9b7cd48). Off by default for pinned parity.
     pub fillet_statuses_pass_on: bool,
-    /// `SmDatabaseIO::ReadBoolean` ([`crate::topology::database_io::DatabaseReader::read_boolean`]
-    /// on a reader configured via [`crate::topology::database_io::DatabaseReader::with_fixes`] or
-    /// [`crate::topology::database_io::DatabaseReader::set_fixes`]) byte-swaps a 4-byte binary
-    /// `SmBoolean` when `m_bByteSwap` is active (matching `SmDatabaseIO::ReadBooleans` at
-    /// `SmDatabaseIO.cpp:547`), and `SmDatabaseIO::ByteSwap32(unsigned short)`
-    /// ([`crate::topology::database_io::byte_swap_32_u16_with_fixes`]) swaps the two bytes of the
-    /// `u16` (`SmDatabaseIO::ByteSwap16`) instead of shifting both bytes into bits `16..31` of a
-    /// 32-bit intermediate and truncating back to `0` (`WR-47`;
-    /// `plan/upstream-issues/WR-47--addendum-2026-11-01-database-io-byte-swap.md`). Off by
-    /// default for pinned C++ parity.
-    pub database_io_byte_swaps_read_boolean_and_u16: bool,
     /// `CoverCoincidentSurface` refuses a cover that extends a B-spline-based surface onto a continuation whose normal vanishes or turns back (a fold) over the domain the merge would use (WR-407, #434; SolidCraft change, tangency-labs/smlib e960ca1 (was 1b6f5fa)).
     pub cover_refuses_folded_continuation: bool,
     /// `SmSurface::CoverCoincidentSurface` covers a face straddling this surface's seam in a direction the surface already wraps (`IsClosed` over its natural domain: a cylinder's full turn): a step of its boundary walk across that seam is no failure, and the domain in that direction stays the period it spans; a crossing in an open direction, or at a pole, still refuses. `SmMerge::BooleanPostProcess` then completes each merged face as a periodic face has it (`HasSeamProblem`, then `SplitAtSeam` when a seam is crossed or missing), so the seam runs on through the covered part. Upstream refuses every crossing and the two walls stay apart (WR-599; the fork's tangency-labs/smlib@16bf1cb). `sm_CoverOtherCoincidentFace` lets only its trim-derived attempt cross such a seam (`bAcrossWrappedSeams`): the stored-domain attempt stays within one period, so faces whose stored domains are their whole surfaces do not merge to those (360 x 208 for half-turn faces spanning 180 x 3; tangency-labs/smlib@b518bbe).
     pub cover_wraps_across_closed_seam: bool,
-    /// `SmSurface::CoverCoincidentSurface` on a plane grows its search domain to the projection of the other surface's tight box (a plane is unbounded, its STEP parameterization affine), where upstream searches only `GetMaxAnalyticDomain` (the domain grown by 100 widths); and `SmPrimitiveCreation::Boolean2D` refuses with `SM_ERR_INVALID_INPUT` when a cover fails, where upstream ignores it and rebuilds a face on a plane that does not hold it, with edges far off their surface (WR-536; the fork's tangency-labs/smlib@67b8a1e).
-    pub boolean2d_plane_covers_far_faces: bool,
     /// A boolean vertex takes its position from the intersection curve that crosses its edge most steeply (WR-410, #1059).
     pub boolean_vertex_by_best_crossing: bool,
     /// `SmProtoTopologyManager::UpdateEdges` splits a coincident edge definition on a split edge that runs across the split point (away from both its ends, on its curve) there, with its proto edge (`SmProtoEdge::Split`), and classifies each part to the piece it lies on; upstream re-points the whole definition to the piece under its midpoint, whose vertices are not its ends, and the imprint finds no vertex for them (`SM_ERR_NULL_POINTER`, 1006) (WR-533; the fork's tangency-labs/smlib@f11d0ac).
@@ -957,8 +974,6 @@ pub struct UpstreamFixes {
     pub fillet_variable_span_follows_fillet: bool,
     /// `SmFace::CalculateTightBoundingBox` searches a trimmed face's own extreme inside its trim (subdividing the UV domain from the vertex and edge extremes, bounded at depth 16 / 4096 cells, an undecided cell divided at the surface's knot inside it nearest its middle, else at its middle), not only the surface's global extreme, so a face whose surface peaks outside the trim is not boxed too small (WR-588, #1799; tangency-labs/smlib@beb6061 (was 9d44c1b)), nor one whose rational surface has knots off the domain's dyadic points too large (WR-651; tangency-labs/smlib@326de73); only points classified inside the face (`SM_PC_FACE`), not on its edges or vertices, count as the face's, so a rounded box corner's sphere octant is not boxed past its arcs (1.0000243 for 1; tangency-labs/smlib@95bf434).
     pub face_tight_box_searches_trim: bool,
-    /// `SmTopologyIntersector::IntersectTopology` skips a face pair whose face boxes lie farther apart than the intersection tolerance (a box that cannot be computed, or holds nothing, rules nothing out), and `SmBrep::MakeEdgeInFaceWithVU`, on a plane, leaves in place without classifying an inner loop whose test point lies outside the box of the new face's outer loop (grown by the edges' tolerances, at the retry tolerance). Upstream pairs every face of one sheet with every face of the other through whole-surface checks and classifies every inner loop against each imprinted face, so a 2D boolean of a sheet with n holes takes time in n^2 (WR-527, #1526/#1527; the fork's tangency-labs/smlib@60b1c6a).
-    pub boolean_skips_faces_apart: bool,
     /// `SmBrep::DeleteTopologicalVertex` joins an edge whose curve is a curve on a B-spline-kind surface along a UV line of constant u or v (the seam an extrusion leaves on its wall) as that surface's iso curve over the edge, the same curve exactly, so the seam of a full-turn face that a union runs on through a covered face is one edge (WR-598; the fork's tangency-labs/smlib@829b982). Upstream casts the curve's copy to `SmBSplineCurve` and dereferences the null; without the flag the port leaves the vertex in place (the routine's silent `SM_ERR`).
     pub delete_vertex_joins_seam_iso_curve: bool,
     /// `SmBrep::TestClosureSplitRegion` asks whether a new face closes a region with `ClosureTraversalFromBothSides`, two breadth-first searches through edge-use radials from the face use and from its mate that stop when they meet or one runs out, instead of `ClosureTraversal`'s depth-first walk from one side that stops only at the mate. The answer is the same, and no mark is claimed or set; upstream's walk can cross most of the shell for each face a boolean makes, so a union costs the new faces times the shell's size (WR-584; the fork's tangency-labs/smlib@69c5198).
@@ -1332,6 +1347,11 @@ pub struct Kernel {
     /// stations and the definition solve through `&Kernel`; it is never borrowed across a
     /// solve, and a hit returns what a fresh solve of the same order and u gives.
     pub blend_w_memo: RefCell<crate::blend::fillet_section::section::ThumbweightMemo>,
+    /// Not upstream: the memo of the loop area signs this kernel certified
+    /// ([`crate::mass::loop_area::LoopAreaMemo`]), on with [`Kernel::memoize_curve_caches`].
+    /// A [`RefCell`]: the certificate runs through `&Kernel`; it is never borrowed across a
+    /// certificate, and a hit returns what certifying the loop again returns.
+    pub loop_area_memo: RefCell<crate::mass::loop_area::LoopAreaMemo>,
     /// Not upstream: the fork's `thread_local` count of open blend operation scopes
     /// (`t_lOperationScopes`; [`crate::blend::fillet_section::section::OperationScope`]).
     /// Shared, so that a scope can outlive a borrow of the kernel (a fillet session holds
@@ -1388,6 +1408,7 @@ impl Kernel {
                 crate::topology::topology::NotifyRecords::new(),
             ),
             blend_w_memo: RefCell::default(),
+            loop_area_memo: RefCell::default(),
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),
             blend_face_log: None,
@@ -1624,9 +1645,11 @@ mod tests {
                 w.proto_edge_intersections(),
                 w.loop_walks(),
                 w.ball_certified_roots(),
+                w.shell_traversal_faces(),
+                w.proto_vertex_point_solves(),
             )
         };
-        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0));
         w.add_face_pair();
         w.add_face_pair();
         w.add_loop_classified();
@@ -1636,11 +1659,13 @@ mod tests {
         w.add_loop_walk();
         w.add_loop_walk();
         w.add_ball_certified_root();
-        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1));
+        w.add_shell_traversal_face();
+        w.add_proto_vertex_point_solve();
+        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1, 1, 1));
         // each kernel counts its own work
         assert_eq!(Kernel::default().work_counters.face_pairs(), 0);
         w.reset();
-        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0));
     }
 
     #[test]

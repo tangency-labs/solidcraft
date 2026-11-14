@@ -133,12 +133,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_trace_tangent_curves_once = true;
     f.ssi_singular_start_inside_direction = true;
     f.found_torus_sphere_keep_tested_nurb = true;
-    f.boolean_skips_faces_apart = true;
     f.local_operation_box_holds_new_surfaces = true;
     f.shell_edges_on_analytics_exact = true;
     f.ssi_pole_point_keeps_its_tangent = true;
     f.fillet_patch_keeps_fillet_edges = true;
-    f.boolean2d_plane_covers_far_faces = true;
     f.boolean_splits_definition_across_split = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
@@ -200,7 +198,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.drop_curve_v_domain_degeneracy = true;
     f.mirror_curve_keeps_euclidean_control_points = true;
     f.dupin_bottom_hyperbola_axis = true;
-    f.extent3d_contains_both_segment_endpoints = true;
     f.twist_simple_duw_sign = true;
     f.offset_swap_uv_extended_distance = true;
     f.validation_does_not_make_uv_trims = true;
@@ -227,7 +224,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.curve_sweep_closed_path_joins_ends = true;
     f.validate_tolerances_fixes_reported_gaps = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
-    f.database_io_byte_swaps_read_boolean_and_u16 = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.cone_iso_circle_at_axial_height = true;

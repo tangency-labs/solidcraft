@@ -1388,7 +1388,9 @@ pub enum ErrorKind {
     StationDidNotConverge = 125,
     /// The faces the blend's rails enclose reach past its rails: a defect.
     TrimLeaks = 126,
-    /// A stage of the blend failed with no reason the kernel names: a defect.
+    /// A stage failed with no reason the kernel names: a defect. The blend's class 127, also
+    /// the class of the other areas' stage failures (`CurveFailure::StageFailed`, ...); the
+    /// failure's operation says which stage.
     StageFailed = 127,
     /// A round that ends where its edge runs on tangentially into an edge that is not
     /// blended, in a shape the kernel does not build. Not a matter of size: the way out is to
@@ -1435,8 +1437,9 @@ impl ErrorKind {
     }
 
     /// True for a failure that is the kernel's fault, not a fact of the geometry: report it.
-    /// The blend's defect classes, and a port invariant that did not hold. The blend's
-    /// [`ErrorKind::StageFailed`] is one: a stage failed with no reason the kernel names.
+    /// The blend's defect classes, and a port invariant that did not hold.
+    /// [`ErrorKind::StageFailed`] is one, in every area: a stage failed with no reason the
+    /// kernel names.
     #[must_use]
     pub const fn is_defect(self) -> bool {
         matches!(
@@ -2024,6 +2027,20 @@ pub fn upstream_status(error: &SolidError) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `e` is a stage of `operation` that failed with no reason the kernel names: class
+    /// [`ErrorKind::StageFailed`], a defect, keeping `status` (the one the C++ reports) for the
+    /// goldens, and worded from its class.
+    pub(in crate::error) fn assert_stage_failure(e: &SolidError, operation: &str, status: i32) {
+        assert_eq!(e.kind(), ErrorKind::StageFailed, "{e:?}");
+        assert!(e.is_defect() && !e.is_refusal() && !e.sized(), "{e:?}");
+        assert_eq!(e.operation(), operation, "{e:?}");
+        assert_eq!(e.sm_status(), Some(status), "{e:?}");
+        assert_eq!(e.upstream_status(), Some(status), "{e:?}");
+        assert!(e.is_status_answer(), "{e:?}");
+        assert!(!e.is_port_failure(), "{e:?}");
+        assert_eq!(e.to_string(), format!("{operation}: stage_failed"));
+    }
 
     #[test]
     fn native_failures_keep_upstream_statuses_and_propagate_port_errors() {

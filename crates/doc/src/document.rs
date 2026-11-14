@@ -64,6 +64,9 @@ pub enum PlaneRef {
     /// Another plane rotated about a line (in world coordinates) by an angle expression. With
     /// `line`, an edge or round face of the model ([`crate::construct::model_axis`]), the line is
     /// found there on each evaluation and `axis_origin`/`axis_dir` are where it was when picked.
+    /// `line` can also be a construction axis ([`crate::construct::GeoRef::Axis`], by name),
+    /// found on each evaluation the same way; without `line`, `axis_origin`/`axis_dir` are the
+    /// fixed axis (how designs saved before a construction axis was followed hold one).
     /// With `direction_only`, only the axis direction is used: it is projected onto the base
     /// (nothing of that projection is kept as geometry) and the plane turns about the line
     /// through `pivot`, or through the base origin when `pivot` is absent.
@@ -393,6 +396,20 @@ pub struct Extent {
     /// it set, so they keep the bodies they were built with.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub to_body_apart: bool,
+    /// Where each other component stood, relative to this extrude's own, when To / From Object
+    /// was picked (#16732). The pick is measured against the model as it was then, so a joint
+    /// that slides the drawer does not stretch a body that ends at the frame. Designs saved
+    /// before it carry none and keep measuring against the placements shown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub picked_placements: Vec<PickedPlacement>,
+}
+
+/// A component's placement relative to a feature's own component, as it was when the feature
+/// picked something in it ([`Extent::picked_placements`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PickedPlacement {
+    pub component: u64,
+    pub placement: crate::Mat,
 }
 
 /// Thin Extrude: a wall of constant thickness along sketch curves instead of the profiles.
