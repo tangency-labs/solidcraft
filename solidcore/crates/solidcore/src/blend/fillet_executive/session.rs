@@ -52,6 +52,8 @@ pub mod insertion;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::geom::extent3d::Extent3d;
+
 use super::p1::{CornerCreation, ExecutiveObjects, SolverLoadingAccess};
 use super::p2::{EdgeMapAccess, FilletParameters, FilletParametersAccess, RunOn, SolverSpec};
 use super::p3::{
@@ -5638,6 +5640,34 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         use crate::intersect::point_class::{PointClassType, PointClassification};
         let (rails, edges, tol) = band_rails(self, k, solvers)?;
         let apart = 10.0 * tol;
+        // Most pairs of blends are nowhere near each other (every hole of a pegboard chamfered
+        // in one call, solidcraft#6478: the check below cost the square of their number). A
+        // rail's point can lie inside another blend's band only within the band's reach of its
+        // edge: nearer the edge than the band is wide, which is at most the diagonal of the box
+        // round that blend's edge and rails. Each blend's rails over their kept intervals, and
+        // each blend's reach, boxed once; a pair whose boxes are apart is skipped. A curve
+        // without a box keeps every pair it is in.
+        let mut rail_boxes: Vec<Option<Extent3d>> = Vec::with_capacity(edges.len());
+        let mut reaches: Vec<Option<Extent3d>> = Vec::with_capacity(edges.len());
+        for (own, &(edge, _)) in rails.iter().zip(&edges) {
+            let mut rail_box: Option<Extent3d> = Some(Extent3d::new());
+            let mut reach: Option<Extent3d> = Some(Extent3d::new());
+            for (_, curve, kept) in own {
+                rail_box = union_of(rail_box, curve_box(k, curve, kept)?);
+                reach = union_of(reach, curve_box(k, curve, &curve.natural_interval())?);
+            }
+            let rec = self.target.edge(edge)?;
+            let edge_curve = rec
+                .curve
+                .clone()
+                .ok_or_else(|| invalid("filleted edge without curve"))?;
+            reach = union_of(reach, curve_box(k, &edge_curve, &rec.interval)?);
+            if let Some(r) = reach.as_mut() {
+                r.expand_absolute(r.size().length() + apart + tol);
+            }
+            rail_boxes.push(rail_box);
+            reaches.push(reach);
+        }
         for (a, &(edge_a, ends_a)) in edges.iter().enumerate() {
             for (b, &(edge_b, ends_b)) in edges.iter().enumerate() {
                 if a == b || edge_a == edge_b {
@@ -5645,6 +5675,12 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                 }
                 if ends_a.iter().any(|v| ends_b.contains(v)) {
                     continue; // a corner trims them where they meet
+                }
+                if beyond_reach(
+                    rail_boxes.get(a).and_then(Option::as_ref),
+                    reaches.get(b).and_then(Option::as_ref),
+                ) {
+                    continue; // nowhere near each other
                 }
                 let edge_curve_b = self
                     .target
@@ -5751,6 +5787,40 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             }
         }
         Ok(true)
+    }
+}
+
+/// The axis-aligned box of `curve` over `interval` (its `CalculateBoundingBox`), `None` where
+/// none is made.
+fn curve_box(
+    k: &Kernel,
+    curve: &crate::curve::curve::Curve,
+    interval: &crate::geom::extent1d::Extent1d,
+) -> Result<Option<Extent3d>> {
+    let req = crate::nurbs::b_spline_curve::p2::BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+    match curve.calculate_bounding_box(k, interval, req, true) {
+        Ok(boxes) => Ok(boxes.normal),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
+/// The union of two boxes, `None` once either is missing.
+fn union_of(a: Option<Extent3d>, b: Option<Extent3d>) -> Option<Extent3d> {
+    Some(a?.union(&b?))
+}
+
+/// Whether a blend's rails (`rail`, their box) lie wholly outside another blend's `reach` (the
+/// box round its edge and rails, expanded by as much as its band can be wide), so that no point
+/// of the rails can be inside that band. A missing box keeps the pair.
+fn beyond_reach(rail: Option<&Extent3d>, reach: Option<&Extent3d>) -> bool {
+    match (rail, reach) {
+        (Some(rail), Some(reach)) => rail.min_distance(reach) > 0.0,
+        _ => false,
     }
 }
 
@@ -7735,5 +7805,93 @@ mod attribute_seed_tests {
             second.entity_attributes(EntityRef::Face(second_face)).len(),
             1
         );
+    }
+}
+
+#[cfg(test)]
+mod band_tests {
+    use super::*;
+    use crate::blend::fillet_executive::NoRoomReason;
+    use crate::geom::extent3d::Extent3d;
+    use crate::geom::global_solver::SolverOperation;
+    use crate::math::Point3;
+    use crate::topology::{brep::p1, edge, Brep};
+
+    fn edge_near(k: &Kernel, b: &Brep, point: [f64; 3]) -> EdgeId {
+        let point = Point3::new(point[0], point[1], point[2]);
+        let mut nearest = (f64::MAX, None);
+        for id in p1::edges(b, None).unwrap() {
+            let Some(curve) = edge::curve(b, id).unwrap() else {
+                continue;
+            };
+            let interval = edge::interval(b, id).unwrap();
+            let d = curve
+                .drop_point(
+                    k,
+                    &interval,
+                    point,
+                    None,
+                    1e-6,
+                    None,
+                    SolverOperation::Minimize,
+                )
+                .unwrap();
+            if d.success && d.distance < nearest.0 {
+                nearest = (d.distance, Some(id));
+            }
+        }
+        assert!(nearest.0 < 2e-3, "no edge near {point:?}");
+        nearest.1.unwrap()
+    }
+
+    /// The two long top edges of a 60 x `width` x 20 box rounded r3 together, with the band
+    /// check on: the reason the executive refused for, if any, and the session's result.
+    fn two_top_rounds(width: f64) -> (Option<NoRoomReason>, Result<()>) {
+        let mut k = Kernel::default();
+        k.fixes.fillet_refuse_overlapping_bands = true;
+        let mut body =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 60.0, width, 20.0)
+                .unwrap();
+        let edges: Vec<_> = [[30.0, 0.0, 20.0], [30.0, width, 20.0]]
+            .into_iter()
+            .map(|p| edge_near(&k, &body, p))
+            .collect();
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &edges, 3.0, 1, 1, 1.0)
+            .unwrap();
+        let result = session.do_fillet(&mut k);
+        (session.executive.error.no_room, result)
+    }
+
+    /// Two r3 rounds across a 4 mm top: their bands on it overlap, and the blend is refused
+    /// for that; across a 40 mm top they are clear and the rounds build.
+    #[test]
+    fn bands_that_overlap_on_a_face_are_refused_and_bands_apart_are_clear() {
+        let (reason, result) = two_top_rounds(4.0);
+        assert!(result.is_err(), "the 4 mm top: {result:?}");
+        assert_eq!(
+            reason,
+            Some(NoRoomReason::BandsOverlap),
+            "the 4 mm top: {result:?}"
+        );
+        let (reason, result) = two_top_rounds(40.0);
+        result.unwrap();
+        assert_eq!(reason, None);
+    }
+
+    /// A rail's box clear of a band's reach skips the pair; a box without bounds (no box
+    /// could be made) never does.
+    #[test]
+    fn a_rail_beyond_a_bands_reach_is_skipped() {
+        let a = Extent3d::from_points(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 1.0, 0.0));
+        let b = Extent3d::from_points(Point3::new(0.0, 30.0, 0.0), Point3::new(10.0, 31.0, 0.0));
+        assert!(beyond_reach(Some(&a), Some(&b)));
+        assert!(!beyond_reach(Some(&a), Some(&a)));
+        let mut near = b;
+        near.expand_absolute(29.5);
+        assert!(!beyond_reach(Some(&a), Some(&near)));
+        assert!(!beyond_reach(None, Some(&b)));
+        assert!(!beyond_reach(Some(&a), None));
     }
 }
