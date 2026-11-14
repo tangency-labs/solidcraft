@@ -205,22 +205,48 @@ fn same_pair(faces: &Faces, a: &[usize], b: &[usize]) -> bool {
     }
 }
 
-/// Merged face/edge/vertex counts (see module docs). `mesh` must be `b.mesh(..)`: faces of no
-/// area in it don't count.
-pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
+/// The exact area of face `f` (SMLib's integration); infinite when the kernel cannot tell, so
+/// such a face is counted rather than dropped.
+fn face_area_exact(b: &Body, f: usize) -> f64 {
+    b.ops_body().and_then(|(ops, order)| ops.face_area(order, f, 1e-2).ok()).unwrap_or(f64::INFINITY)
+}
+
+/// The area of the polygon through face `f`'s record vertices: cheap, and a face whose corners
+/// span an area is no zero-area face, so only the others need [`face_area_exact`].
+fn polygon_area(b: &Body, f: usize) -> f64 {
+    let rec = b.record();
+    let Some(face) = rec.faces.get(f) else { return 0.0 };
+    let mut total = 0.0;
+    for lp in &face.loops {
+        let Loop::Edges { edges } = lp else { continue };
+        let mut pts: Vec<Vec3> = Vec::new();
+        for u in edges {
+            let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+            let Some(&v_idx) = (if u.forward { edge.vertices.first() } else { edge.vertices.get(1) }) else { continue };
+            if let Some(v) = rec.vertices.get(v_idx as usize) {
+                pts.push(Vec3::from(v.point));
+            }
+        }
+        if let Some(&p0) = pts.first() {
+            let sum = pts.windows(2).skip(1).fold(Vec3::ZERO, |acc, w| match w {
+                [a, c] => acc + (*a - p0).cross(*c - p0),
+                _ => acc,
+            });
+            total += sum.len() * 0.5;
+        }
+    }
+    total
+}
+
+/// Merged face/edge/vertex counts (see module docs). Faces of zero area don't count.
+pub fn merged_topology(b: &Body) -> Result<TopoCounts> {
     let record = b.record();
     let nf = record.faces.len();
     let tol = (b.size() * 1e-4).max(1e-6);
     let faces = Faces::new(record, tol * 10.0);
-    // Zero-area faces (a revolved profile edge lying on the axis) don't count.
-    let mut area = vec![0.0f64; nf];
-    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        if let (Some([p, q, r]), Some(a)) = (mesh.tri(t), area.get_mut(*f as usize)) {
-            *a += (q - p).cross(r - p).len() * 0.5;
-        }
-    }
     let tiny = (b.size() * 1e-6).powi(2);
-    let is_deg = |f: usize| area.get(f).is_some_and(|a| *a < tiny);
+    let degenerate: Vec<bool> = (0..nf).map(|f| polygon_area(b, f) < tiny && face_area_exact(b, f) < tiny).collect();
+    let is_deg = |f: usize| degenerate.get(f).copied().unwrap_or(false);
 
     // Edge → faces, edge → vertices. Vertices and edges lying on each other count once (two
     // tangent holes touch along a line that both bodies' pieces carry): welded by position,
