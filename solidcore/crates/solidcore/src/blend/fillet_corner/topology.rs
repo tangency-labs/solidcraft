@@ -740,7 +740,8 @@ impl FilletCorner {
                         rolled,
                         solver.tangency_tolerance,
                     )?,
-                    None if mixed => nx1_end::rail_passes_side_edge_end(
+                    // a failure in the decision finds nothing: the corner is main's
+                    None if mixed => match nx1_end::rail_passes_side_edge_end(
                         k,
                         target,
                         solver,
@@ -748,7 +749,11 @@ impl FilletCorner {
                         solver_rail,
                         side,
                         vertex,
-                    )?,
+                    ) {
+                        Ok(found) => found,
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                        Err(_) => None,
+                    },
                     _ => None,
                 };
                 pseudo

@@ -311,7 +311,10 @@ pub(crate) fn rolled_rail_turns_back(
 /// - R lies past W along E, by more than the body's tolerance;
 /// - at W, an edge N between P and a face other than S leaves W turned back along E's
 ///   arriving tangent ([`turns_back`]): P's boundary turns back at W, so P does not reach R;
-/// - R lies on S (its point classification on S, within the body's tolerance).
+/// - R lies inside S (classified in S's interior, not on its boundary, within the body's
+///   tolerance), and no boundary edge of S crosses the open segment from W to R, the cap
+///   edge's place on S's plane ([`edge_clear_of_segment`]).
+/// - P is a plane, so R, on E's line, is where the rail meets P's surface.
 ///
 /// The cap's edge then runs from the rail's end along E's continuation on S to W, then along
 /// E: [`TurnedBack`] with E as its edge (whose continuation past W leaves W against E's own
@@ -384,6 +387,14 @@ pub(crate) fn rail_passes_side_edge_end(
     let Some(&p_face) = e_faces.iter().find(|&&f| f != s_face) else {
         return Ok(None);
     };
+    // P a plane too: R, on E's line, is then where the rail meets P's surface
+    let p_planar = match target.face(p_face)?.surface.as_ref() {
+        Some(surface) => surface.is_planar(k, tol)?.is_planar,
+        None => false,
+    };
+    if !p_planar {
+        return Ok(None);
+    }
     // the rail in closed form, and E's line
     let Some(section) = planar_section(k, target, filleted, faces, offsets)? else {
         return Ok(None);
@@ -472,17 +483,172 @@ pub(crate) fn rail_passes_side_edge_end(
             ..crate::query::face::p2::PointClassifyOptions::default()
         },
     )?;
-    if matches!(
-        class.point_class(),
-        PointClassType::Unknown | PointClassType::Nothing
-    ) {
+    if class.point_class() != PointClassType::Face {
         return Ok(None);
+    }
+    // the cap edge from R to W on S: no boundary edge of S crosses it
+    let normal = surface.evaluate_normal(
+        k,
+        dropped.result_uv,
+        crate::nurbs::knots::Side::Left,
+        crate::nurbs::knots::Side::Left,
+    )?;
+    let Ok(across) = normal.cross(u).unitize() else {
+        return Ok(None);
+    };
+    let frame = SegmentFrame {
+        w,
+        along: u,
+        across,
+        length: (r - w).dot(u),
+        tol,
+    };
+    for edge_id in crate::topology::face::p4::edges(target, s_face, None, false, None)? {
+        if !edge_clear_of_segment(k, target, edge_id, far, &frame)? {
+            return Ok(None);
+        }
     }
     Ok(Some(TurnedBack {
         far,
         edge: e,
         face: s_face,
     }))
+}
+
+/// The open segment from W to R on S's plane, in its own frame: `along` from W towards R,
+/// `across` square to it in the plane, `length` its length, `tol` the body's tolerance.
+struct SegmentFrame {
+    w: Point3,
+    along: Vec3,
+    across: Vec3,
+    length: f64,
+    tol: f64,
+}
+
+impl SegmentFrame {
+    /// `p` in the frame: along and across the segment from W.
+    fn coords(&self, p: Point3) -> (f64, f64) {
+        let v = p - self.w;
+        (v.dot(self.along), v.dot(self.across))
+    }
+}
+
+/// Whether the boundary edge `edge_id` of S is proved not to cross the open segment of
+/// `frame` (from W, the vertex `far`, to R), with the points in `frame`'s coordinates (a
+/// along, h across) and `err` the rounding of each coordinate (`gamma(16)` of the largest
+/// coordinate involved: the subtraction, the three-term dot product, and the quotient by a
+/// weight):
+/// - an edge with no end at W must keep clear by more than the tolerance plus `err`: its
+///   points (a line's ends, a B-spline's Euclidean control points, which hold its curve in
+///   their hull where the weights are positive) all lie before W, all past R, or all on one
+///   side of the segment's line, each by more than that;
+/// - an edge with an end at W lies on one side of the segment's line, within `err` (every
+///   point's `h >= -err`, or every point's `h <= err`): it then never reaches the other side,
+///   so it cannot cross the segment, though it may touch it (as a curve leaving W tangent to
+///   E). A line from W running along the segment's line toward R (its far end within the
+///   tolerance of the line, ahead of W) lies on the segment and is not clear.
+///
+/// A curve of another kind, a 2D or non-finite net, or a weight not proved positive is not
+/// proved.
+///
+/// # Errors
+/// Those of the topology queries, the recogniser and the evaluations.
+fn edge_clear_of_segment(
+    k: &Kernel,
+    target: &Brep,
+    edge_id: EdgeId,
+    far: VertexId,
+    frame: &SegmentFrame,
+) -> Result<bool> {
+    use crate::curve::curve::CurveKind;
+    use crate::nurbs::math::{gamma, NOW, NOZ};
+    let Some(curve) = edge::curve(target, edge_id)?.cloned() else {
+        return Ok(false);
+    };
+    let ivl = edge::interval(target, edge_id)?;
+    let at_w = edge::start_vertex(target, edge_id)? == Some(far)
+        || edge::end_vertex(target, edge_id)? == Some(far);
+    let points: Vec<Point3> = if curve.is_line(k, 3, CURVE_TOL)?.is_some() {
+        vec![
+            curve.evaluate_point(k, ivl.min())?,
+            curve.evaluate_point(k, ivl.max())?,
+        ]
+    } else {
+        let CurveKind::BSpline(base) = curve.kind() else {
+            return Ok(false);
+        };
+        let Some(nurb) = base.nurb.as_ref() else {
+            return Ok(false);
+        };
+        let (Some(&first), Some(&last)) = (nurb.knots().first(), nurb.knots().last()) else {
+            return Ok(false);
+        };
+        let (lo, hi) = (ivl.min(), ivl.max());
+        if !(first <= lo && lo < hi && hi <= last) {
+            return Ok(false);
+        }
+        let segment = if first < lo || hi < last {
+            nurb.extract_seg(lo, hi)?
+        } else {
+            nurb.clone()
+        };
+        let mut out = Vec::new();
+        for c in segment.cpts() {
+            if c.z == NOZ {
+                return Ok(false);
+            }
+            let wt = if c.w == NOW { 1.0 } else { c.w };
+            // positive weights keep the curve in the hull (the weights are the net's own)
+            let finite = c.x.is_finite() && c.y.is_finite() && c.z.is_finite();
+            if !(finite && crate::geom::certified::above(wt, 0.0)) {
+                return Ok(false);
+            }
+            out.push(Point3::new(c.x / wt, c.y / wt, c.z / wt));
+        }
+        out
+    };
+    let Some(&last_point) = points.last() else {
+        return Ok(false);
+    };
+    let size = points
+        .iter()
+        .chain(std::iter::once(&frame.w))
+        .flat_map(|p| [p.x.abs(), p.y.abs(), p.z.abs()])
+        .fold(frame.length.abs(), f64::max);
+    if !size.is_finite() {
+        return Ok(false);
+    }
+    let err = gamma(16) * size;
+    let coords: Vec<(f64, f64)> = points.iter().map(|&p| frame.coords(p)).collect();
+    let clear = frame.tol + err;
+    if at_w {
+        if curve.is_line(k, 3, CURVE_TOL)?.is_some() {
+            // the line's end away from W
+            let first_point = points.first().copied().unwrap_or(last_point);
+            let away = if first_point.distance(frame.w) > last_point.distance(frame.w) {
+                first_point
+            } else {
+                last_point
+            };
+            let (a, h) = frame.coords(away);
+            if !(a.is_finite() && h.is_finite()) {
+                return Ok(false);
+            }
+            // along the segment's line, ahead of W: on the segment
+            if h.abs() <= clear && a > 0.0 {
+                return Ok(false);
+            }
+            return Ok(true);
+        }
+        let above = coords.iter().all(|&(_, h)| h >= -err);
+        let below = coords.iter().all(|&(_, h)| h <= err);
+        return Ok(above || below);
+    }
+    let all = |f: &dyn Fn(f64, f64) -> bool| coords.iter().all(|&(a, h)| f(a, h));
+    Ok(all(&|a, _| a < -clear)
+        || all(&|a, _| a > frame.length + clear)
+        || all(&|_, h| h > clear)
+        || all(&|_, h| h < -clear))
 }
 
 /// The tolerance [`rail_passes_side_edge_end`] recognises a side edge's curve as a line

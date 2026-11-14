@@ -1314,10 +1314,86 @@ fn a_corner_round_whose_rail_ends_past_the_top_under_the_foot_round_builds() {
 /// edge, short of W, and the round builds as before, with the same closed forms.
 #[test]
 fn a_corner_round_whose_rail_ends_on_the_top_s_edge_builds() {
-    for r4 in [8.0, 10.0, 10.6] {
+    for r4 in [8.0, 10.0, 10.6, CORNER_ROUND_REACHES_W - 1e-3] {
         assert!(-65.0 - r4 > top_end_on_side());
         for corpus in [true, false] {
             assert_corner_round_under_foot_round_builds(r4, corpus);
         }
+    }
+}
+
+/// The radius at which the corner round's rail on the side x = -36 meets z = 5 at W:
+/// -65 - r4 = -90 + sqrt 205.
+const CORNER_ROUND_REACHES_W: f64 = 25.0 - 14.317_821_063_276_353;
+
+/// The corner round `r4` on [`arm_boss_foot_only`] (or on `b`), with the corpus's fix set
+/// (`corpus`) or none: its result, the fix set restored after.
+fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
+    let e = edge_at(b, [-36.0, -65.0, 2.5]);
+    if !corpus {
+        session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+    }
+    let result = blend(b, Blend::Round, &[e], &[r4], &[], Corners::Filled);
+    fixes();
+    result.map(|_| ())
+}
+
+/// Next to r4 = 25 - sqrt 205, where the rail meets z = 5 at W, main's outcome stands:
+/// - 1e-3 past it, R lies past W by 1e-3 but within the body's tolerance of the side's edge
+///   on the foot round, which leaves W tangent to the top's edge (the side's lobe is thinner
+///   than the tolerance there): R is not inside the side, the turned-back end is not taken,
+///   and the rounds are refused as crossing at R, as on main;
+/// - 5e-6 past it, within the body's tolerance (1e-5), R is not past W: the rail ends on the
+///   top's edge as on main, and the round builds valid (its volume, MEASURED, 1.4e-5 from the
+///   closed form, which the end at W within the tolerance does not bound).
+#[test]
+fn a_corner_round_whose_rail_meets_the_top_next_to_w_keeps_main_s_outcome() {
+    let w = top_end_on_side();
+    assert!((-65.0 - CORNER_ROUND_REACHES_W - w).abs() < 1e-12);
+    for corpus in [true, false] {
+        let r4 = CORNER_ROUND_REACHES_W + 1e-3;
+        match corner_round(&arm_boss_foot_only(), r4, corpus) {
+            Err(Error::RoundsCross { .. }) => {}
+            other => panic!("r4 {r4} corpus {corpus}: {other:?}"),
+        }
+        let r4 = CORNER_ROUND_REACHES_W + 5e-6;
+        let b = arm_boss_foot_only();
+        corner_round(&b, r4, corpus).unwrap_or_else(|e| panic!("r4 {r4} corpus {corpus}: {e:?}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "r4 {r4} corpus {corpus}: {report}");
+    }
+}
+
+/// A real miss next to the accepted case: [`arm_boss_foot_only`] with a hole 1 x 1 through the
+/// side round R = (-36, -80, 5), from x = -37 to -30, so the rail of the corner round r4 = 15
+/// meets z = 5 past W but off the side (in the hole), and the hole's edges on the side cross
+/// the cap edge's place from W to R. The turned-back end is not taken, and main's outcome
+/// stands: refused, with the corpus's fixes as its rail leaving its face (fit 14.49), without
+/// them naming 10.68, the closed form less the fit margin (MEASURED 1e-5). MEASURED: with the membership conditions (R inside the side, no edge
+/// crossing W to R) removed, the turned-back end is taken and the round without the corpus's
+/// fixes fails with status 1001 instead.
+#[test]
+fn a_corner_round_whose_rail_ends_past_w_off_the_side_is_refused_as_on_main() {
+    let r4 = 15.0;
+    let b = arm_boss_foot_only();
+    let hole = make_box([-37.0, -80.5, 4.5], [7.0, 1.0, 1.0]).unwrap();
+    let b = boolean(b, hole, BooleanOp::Subtract).unwrap().unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    assert!(-65.0 - r4 < top_end_on_side());
+    match corner_round(&b, r4, true) {
+        Err(Error::TooLarge {
+            why: Some(RoomReason::RailLeavesFace),
+            ..
+        }) => {}
+        other => panic!("corpus: {other:?}"),
+    }
+    match corner_round(&b, r4, false) {
+        Err(Error::TooLarge {
+            size, why: None, ..
+        }) => assert!(
+            size < CORNER_ROUND_REACHES_W && size > CORNER_ROUND_REACHES_W - 1e-4,
+            "no fixes: fit {size}, the closed form {CORNER_ROUND_REACHES_W} less the fit margin"
+        ),
+        other => panic!("no fixes: {other:?}"),
     }
 }
