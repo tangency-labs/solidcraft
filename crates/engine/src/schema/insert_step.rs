@@ -59,6 +59,15 @@ fn folder_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error>
     value.as_bool().map(Some).ok_or_else(|| D::Error::custom(whole(FOLDER_MESSAGE)))
 }
 
+/// `link`: true or false, `null` as left out, with the handler's refusal message.
+fn link_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    let value = Value::deserialize(d)?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    value.as_bool().map(Some).ok_or_else(|| D::Error::custom(whole("`link` must be a boolean")))
+}
+
 /// `matrix`: as given, `null` as left out, which is how the handler has it.
 fn matrix_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MatrixParam>, D::Error> {
     let value = Value::deserialize(d)?;
@@ -102,6 +111,11 @@ pub struct InsertStepKeys {
     /// default), or only its solids as one Import feature.
     #[serde(default)]
     pub history: Option<HistoryParam>,
+    /// Keep a STEP source link for Update Links (default true). False keeps an independent
+    /// copy; without a disk path the web app keeps a copy.
+    #[serde(default, deserialize_with = "link_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub link: Option<bool>,
     /// Where the import goes in the active component, as a rigid move applied after `up`: a
     /// row-major 3×4 (12 numbers) or 4×4 (16 numbers) matrix, flat or as rows, as
     /// `occurrence.move` takes it. The reply gives the placement it made as `transform`.
@@ -122,7 +136,7 @@ fn leave_unread(value: &mut Value) {
     };
     if !solidcraft_io::is_step_path(path) {
         // A file of another kind is refused before any other key is read.
-        for key in ["name", "up", "names", "folder", "history", "matrix", "tolerance"] {
+        for key in ["name", "up", "names", "folder", "history", "matrix", "tolerance", "link"] {
             keys.remove(key);
         }
         return;

@@ -488,6 +488,9 @@ pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<S
 
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
+    if request.kind == Kind::Insert && insert_command(&request.path) == "file.insert_step" {
+        request.options.entry("link").or_insert_with(|| json!(app.preferences.link_step_inserts));
+    }
     if request.kind == Kind::Open
         && app.preferences.verify_opened_designs
         && solidcraft_engine::io::is_design_path(&request.path)

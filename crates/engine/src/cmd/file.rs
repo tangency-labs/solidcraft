@@ -62,7 +62,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("import")
         .contract(&INSERT_STEP_CONTRACT)
         .output(output_schema_for::<StepInserted>)
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move); link?: bool (default true: keep a STEP source link for Update Links; false keeps an independent copy; without a disk path the web app keeps a copy)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -368,10 +368,33 @@ impl DesignSnapshot {
 /// While the profiler records, the reply's `profile` is the import's share of it (reading,
 /// building the solids in SMLib, placing, meshing and evaluating them), as
 /// `diagnostics.profile` reports it.
-fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions) -> Result<Value> {
+fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions, keep_link: bool) -> Result<Value> {
     let profiled = solidcraft_profile::enabled().then(solidcraft_profile::mark);
+    let keep_link = keep_link && !cfg!(target_arch = "wasm32") && super::component_link::is_step_source(path);
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    add_step_bytes(s, path, name, options, &bytes, profiled)
+    let reply = add_step_bytes(s, path, name, options, &bytes, profiled)?;
+    if keep_link {
+        let (Some(component), Some(feature)) = (reply["component"].as_u64(), reply["feature"].as_u64()) else {
+            return Err(EngineError::Other(format!("{path}: the import has no component to link")));
+        };
+        let names = match options.names {
+            solidcraft_io::StepNames::Auto => "auto",
+            solidcraft_io::StepNames::Solid => "solid",
+            solidcraft_io::StepNames::Product => "product",
+            solidcraft_io::StepNames::Instance => "instance",
+        };
+        s.doc_mut().links.insert(
+            component,
+            solidcraft_doc::DesignLink {
+                path: super::design_link::absolute(std::path::Path::new(path)).to_string_lossy().into_owned(),
+                feature,
+                step_names: Some(names.into()),
+                file_sha256: Some(solidcraft_doc::DesignLink::file_digest(&bytes)),
+                ..Default::default()
+            },
+        );
+    }
+    Ok(reply)
 }
 
 /// Add a STEP, IGES or native CAD file's `bytes`. A FreeCAD file's sketches and features come in
@@ -772,7 +795,12 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => None,
         Some(m) => Some(super::component::matrix::rigid(m, super::component::matrix::tolerance(p, cmd)?, cmd)?),
     };
-    let mut out = add_step(s, path, str_(p, "name"), &options)?;
+    let keep_link = match p.get("link") {
+        None | Some(Value::Null) => true,
+        Some(Value::Bool(link)) => *link,
+        Some(_) => return Err(bad(cmd, "`link` must be a boolean")),
+    };
+    let mut out = add_step(s, path, str_(p, "name"), &options, keep_link)?;
     if let Some(m) = placement {
         let occ = out["occurrence"].as_u64().ok_or_else(|| EngineError::Other("the import has no placement to move".into()))?;
         if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {

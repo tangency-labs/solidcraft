@@ -11,7 +11,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<InsertStepParams>(), &["folder", "history", "matrix", "name", "names", "path", "tolerance", "up"]);
+    assert_keys(input_schema_for::<InsertStepParams>(), &["folder", "history", "link", "matrix", "name", "names", "path", "tolerance", "up"]);
 }
 
 #[test]
@@ -44,6 +44,8 @@ fn strict_keeps_todays_errors() {
         ("file.insert_step", json!({"path": "a.step", "matrix": [1, 2, 3], "tolerance": "loose"})),
         ("file.insert_step", json!({"path": "a.step", "matrix": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "tolerance": 0})),
         ("file.insert_step", json!({"path": "a.step", "matrix": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "tolerance": 0.01})),
+        ("file.insert_step", json!({"path": "a.step", "link": "yes"})),
+        ("file.insert_step", json!({"path": "a.stl", "link": "yes"})),
         // A file that isn't there.
         ("file.insert_step", json!({"path": "does-not-exist.step"})),
         ("file.insert_step", json!({"path": "does-not-exist.step", "up": "Z", "names": " Auto ", "folder": false})),
@@ -148,6 +150,9 @@ fn the_schema_takes_what_the_handler_reads() {
     let matrix = json!([0, -1, 0, 100, 1, 0, 0, 0, 0, 0, 1, 0]);
     for (p, takes) in [
         (json!({"path": "a.step"}), true),
+        (json!({"path": "a.step", "link": false}), true),
+        (json!({"path": "a.step", "link": null}), true),
+        (json!({"path": "a.step", "link": "yes"}), false),
         (json!({"path": "a.STP", "name": "N", "up": "y", "names": "auto", "folder": true}), true),
         (json!({"path": "a.iges", "up": null, "names": null, "folder": null, "matrix": null, "tolerance": null}), true),
         (json!({"path": "a.fcstd", "matrix": matrix, "tolerance": 1e-9}), true),
@@ -320,6 +325,8 @@ fn strict_runs_the_calls_that_work() {
     for p in [
         json!({"path": block}),
         json!({"path": block, "name": "Brake"}),
+        json!({"path": block, "link": false}),
+        json!({"path": block, "link": true}),
         json!({"path": block, "up": "z", "names": "auto", "folder": true}),
         json!({"path": block, "tolerance": "x"}),
         json!({"path": block, "matrix": null, "tolerance": []}),

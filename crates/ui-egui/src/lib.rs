@@ -1423,6 +1423,11 @@ impl SolveApp {
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
         }
+        if id == "file.insert_step"
+            && let Some(options) = params.as_object_mut()
+        {
+            options.entry("link").or_insert_with(|| json!(self.preferences.link_step_inserts));
+        }
         if self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
         }

@@ -1265,3 +1265,55 @@ fn sketch_edit_contracts_validate_markers_before_changing_the_session() {
         assert_eq!(s.doc.to_json(), before);
     }
 }
+
+#[test]
+fn step_and_component_link_schema_keys_and_replies() {
+    use super::{component_link::*, insert_step::InsertStepParams};
+    assert_keys(input_schema_for::<InsertStepParams>(), &["folder", "link", "matrix", "name", "names", "path", "tolerance", "up"]);
+    assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components"]);
+    assert_keys(input_schema_for::<BreakLinkParams>(), &["component"]);
+    assert_keys(input_schema_for::<LinksParams>(), &[]);
+    let examples = [
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": true, "changed": false}]}),
+        ),
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": false, "changed": null}]}),
+        ),
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": null, "host": "nas", "reason": "not allowed"}]}),
+        ),
+        (
+            "component.update_links",
+            json!({"updated": ["Part"], "unchanged": [], "failed": [{"component": 2, "name": "Missing", "error": "file missing"}], "warnings": ["Missing keeps its bodies"]}),
+        ),
+        ("component.break_link", json!({"component": 1, "path": "part.step"})),
+        ("component.links", json!({"links": [], "param_warnings": ["unknown parameter"]})),
+        (
+            "file.insert_step",
+            json!({"path": "part.step", "feature": 1, "name": "Import", "component": 1, "component_name": "Part", "occurrence": 1, "bodies": ["Box"], "created_bodies": ["Box"], "warnings": [], "system": "SolidCraft"}),
+        ),
+    ];
+    for (id, reply) in examples {
+        let spec = crate::find_command(id).unwrap();
+        let schema = spec.output.unwrap()();
+        assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{id}: {reply}");
+    }
+    let mut s = crate::Session { param_check: ParamCheck::Strict, ..Default::default() };
+    for (id, params) in [
+        ("file.insert_step", json!({"path": "part.step", "link": "yes"})),
+        ("file.insert_step", json!({"path": "part.step", "unknown": true})),
+        ("component.update_links", json!({"components": "all"})),
+        ("component.update_links", json!({"component": null})),
+        ("component.update_links", json!({"components": null})),
+        ("component.break_link", json!({"component": []})),
+        ("component.links", json!({"unknown": true})),
+    ] {
+        let before = s.doc.to_json();
+        assert!(s.execute(id, &params).is_err(), "{id} {params}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
