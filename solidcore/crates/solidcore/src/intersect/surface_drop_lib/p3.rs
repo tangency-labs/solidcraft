@@ -213,6 +213,26 @@ fn accepted_endpoint_status(
     }
 }
 
+/// The endpoint a redrop from the actual start gives, when the redrop is accepted: the same
+/// rule as the initial endpoint's, so a redrop that lands on an interior pole or leaves the
+/// domain is a failed redrop (the caller keeps the saved point), however its solve ended.
+fn accepted_redrop(
+    status: i32,
+    mut redrop: DropPt,
+    interval: &Extent1d,
+    keep_all_drop_curves: bool,
+    approx_tol_3d: f64,
+) -> Option<DropPt> {
+    let status = accepted_endpoint_status(
+        status,
+        &mut redrop,
+        interval,
+        keep_all_drop_curves,
+        approx_tol_3d,
+    );
+    (status == SM_SUCCESS).then_some(redrop)
+}
+
 /// An `SmBoolean` argument of `SmDropCurveFail::Set`.
 fn sm_bool(b: bool) -> i32 {
     i32::from(b)
@@ -1413,15 +1433,14 @@ impl Surface {
                             Err(e) if e.is_unported_or_cancelled() => return Err(e),
                             Err(e) => status_of(&e),
                         };
-                        let status = accepted_endpoint_status(
+                        if let Some(accepted) = accepted_redrop(
                             status,
-                            &mut redrop,
+                            redrop,
                             interval,
                             keep_all_drop_curves,
                             approx_tol_3d,
-                        );
-                        if status == SM_SUCCESS {
-                            end = redrop;
+                        ) {
+                            end = accepted;
                         }
                     }
                     ignore_status(ivl.set_min_max(start.t, end.t))?;
@@ -1853,6 +1872,35 @@ mod tests {
             checked_endpoint_status(SM_ERR_NOT_CONVERGING, &end, &interval),
             SM_ERR_NOT_CONVERGING
         );
+    }
+
+    /// The redrop's own decision: a redrop that succeeded in its solve but landed on an
+    /// interior pole or left the domain is refused (the caller then keeps the saved
+    /// endpoint), and one at the curve's end or off both is taken.
+    #[test]
+    fn a_redrop_at_an_interior_pole_or_domain_exit_is_not_taken() {
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let redrop = |t: f64, pole: bool, leaving: bool| {
+            let mut end = DropPt::new(t, Some(false));
+            end.on_pole = Some(pole);
+            end.leaving_domain = Some(leaving);
+            end
+        };
+        let take = |end: DropPt| accepted_redrop(SM_SUCCESS, end, &interval, false, 1e-4);
+        let ordinary = take(redrop(0.5, false, false)).expect("an ordinary redrop is taken");
+        assert_eq!(ordinary.t, 0.5);
+        assert!(take(redrop(0.5, true, false)).is_none());
+        assert!(take(redrop(0.5, false, true)).is_none());
+        assert!(take(redrop(1.0, true, true)).is_some());
+        // the approximation recovery never takes an interior pole either
+        assert!(accepted_redrop(
+            SM_ERR_NOT_CONVERGING,
+            redrop(0.5, true, false),
+            &interval,
+            true,
+            1e-4
+        )
+        .is_none());
     }
 
     #[test]
