@@ -20,6 +20,51 @@ pub enum TabViewKind {
     Animation,
 }
 
+/// How the window lays its Model views out side by side.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TabViewLayout {
+    /// One view at a time.
+    Single,
+    SideBySide,
+    Stacked,
+    /// One large view and two small ones.
+    LargeAndTwo,
+    /// Two by two.
+    Grid,
+}
+
+/// Which side of the active view another view is shown on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum TabViewEdge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+/// `tab.view.layout`: show the Model views of the design together.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TabViewLayoutParams {
+    /// How to lay them out. `single` shows one view at a time again.
+    pub layout: TabViewLayout,
+}
+
+/// `tab.view.beside`: show another view beside the active one.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TabViewBesideParams {
+    /// The Model view to show (`tab.view.list`). Default: a new view that starts as a copy of the
+    /// active one, so a second angle is one call.
+    #[serde(default)]
+    pub id: Option<u64>,
+    /// The side of the active view it goes on. Default: right.
+    #[serde(default)]
+    pub edge: Option<TabViewEdge>,
+}
+
 /// `tab.view.open`: open a view of the shown design and make it the active one.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -129,6 +174,15 @@ pub struct TabViewReply {
     /// The place asked to move to (`tab.view.move`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<u64>,
+    /// The layout asked for (`tab.view.layout`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<TabViewLayout>,
+    /// The side asked for (`tab.view.beside`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edge: Option<TabViewEdge>,
+    /// How many views the window shows together after the call (from the window).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shown: Option<u64>,
     /// The views of the shown design in tab order (`tab.view.list`, from the window).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub views: Option<Vec<TabViewInfo>>,

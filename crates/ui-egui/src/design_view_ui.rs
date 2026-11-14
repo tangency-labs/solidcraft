@@ -15,6 +15,7 @@ use solidcraft_views::ViewKind;
 /// Menu row ids of a view's right-click menu ([`VIEW_MENU`]).
 pub const VIEW_RENAME: &str = "view.rename";
 pub const VIEW_DUPLICATE: &str = "view.duplicate";
+pub const VIEW_BESIDE: &str = "view.beside";
 pub const VIEW_NEW_WINDOW: &str = "view.new_window";
 pub const VIEW_CLOSE: &str = "view.close";
 pub const VIEW_CLOSE_OTHERS: &str = "view.close_others";
@@ -23,6 +24,9 @@ pub const DESIGN_CLOSE: &str = "design.close";
 
 /// Menu row ids of the "+" menu ([`plus_menu`]); a row that opens a kind is `plus.` and its key.
 pub const PLUS_DUPLICATE: &str = "plus.duplicate";
+pub const PLUS_BESIDE: &str = "plus.beside";
+/// A layout row is `layout.` and the preset's key ([`solidcraft_views::Preset::key`]).
+const LAYOUT_PREFIX: &str = "layout.";
 pub const PLUS_REOPEN: &str = "plus.reopen";
 
 /// Menu row ids of the view switcher's footer.
@@ -32,9 +36,10 @@ pub const SWITCHER_AS_TABS: &str = "switcher.as_tabs";
 
 /// A view's right-click menu in three groups set apart by lines: rename, copy and move; close
 /// views; close the design.
-pub const VIEW_MENU: [TabMenuRow<'static>; 7] = [
+pub const VIEW_MENU: [TabMenuRow<'static>; 8] = [
     TabMenuRow::new(VIEW_RENAME, "Rename view", "F2").with_icon("rename", None),
     TabMenuRow::new(VIEW_DUPLICATE, "Duplicate view", "").with_icon("duplicate", None),
+    TabMenuRow::new(VIEW_BESIDE, "Show beside", "").with_icon("tiles", None),
     TabMenuRow::new(VIEW_NEW_WINDOW, "Open in new window", "").with_icon("window", None),
     TabMenuRow::new(VIEW_CLOSE, "Close view", "Ctrl+W").with_icon("close", None).separated(),
     TabMenuRow::new(VIEW_CLOSE_OTHERS, "Close other views", "").needing_others(),
@@ -44,17 +49,24 @@ pub const VIEW_MENU: [TabMenuRow<'static>; 7] = [
 
 /// The "+" menu: a header, one row per view kind with its icon in the kind's accent (`dark` picks
 /// the accent for the menu's ground), then copy the shown view and bring back the last closed one.
-pub fn plus_menu(dark: bool) -> [TabMenuRow<'static>; 8] {
+pub fn plus_menu(dark: bool) -> Vec<TabMenuRow<'static>> {
     let kind = |id, label: &'static str, icon| TabMenuRow::new(id, label, "").with_icon(icon, Some(crate::workspace::view_icon_colour(label, dark)));
-    [
+    vec![
         TabMenuRow::heading("Open as a view"),
         kind("plus.model", "Model", "model"),
         kind("plus.sketch", "Sketch", "sketch"),
         kind("plus.sheet", "Sheet", "sheet"),
         kind("plus.render", "Render", "render"),
         kind("plus.animation", "Animation", "animation"),
-        TabMenuRow::new(PLUS_DUPLICATE, "Duplicate this view", "").with_icon("duplicate", None).separated(),
+        TabMenuRow::new(PLUS_BESIDE, "Another angle of this view", "").with_icon("tiles", None).separated(),
+        TabMenuRow::new(PLUS_DUPLICATE, "Duplicate this view", "").with_icon("duplicate", None),
         TabMenuRow::new(PLUS_REOPEN, "Reopen closed view", "Ctrl+Shift+T").with_icon("reopen", None),
+        TabMenuRow::heading("Show views together").separated(),
+        TabMenuRow::new("layout.single", "Single view", "").with_icon("tiles", None),
+        TabMenuRow::new("layout.side_by_side", "Two side by side", "").with_icon("tiles", None),
+        TabMenuRow::new("layout.stacked", "Two stacked", "").with_icon("tiles", None),
+        TabMenuRow::new("layout.large_and_two", "One large and two small", "").with_icon("tiles", None),
+        TabMenuRow::new("layout.grid", "Two by two", "").with_icon("tiles", None),
     ]
 }
 
@@ -101,6 +113,11 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
         VIEW_DUPLICATE => {
             documents::view_duplicate(app, view);
         }
+        VIEW_BESIDE => {
+            // Beside the shown view; a view that is not shown is shown first.
+            documents::view_activate(app, view);
+            return documents::view_beside(app, None, solidcraft_views::Edge::Right).is_some();
+        }
         VIEW_NEW_WINDOW => {
             let kind = app.docs.views.get(view).map(|v| v.kind.key());
             open_new_window(app, kind);
@@ -124,7 +141,14 @@ fn plus_row(app: &mut SolveApp, id: &str) -> bool {
         documents::view_open(app, kind, None, reuse);
         return true;
     }
+    if let Some(preset) = id.strip_prefix(LAYOUT_PREFIX).and_then(solidcraft_views::Preset::from_key) {
+        documents::view_layout(app, preset);
+        return true;
+    }
     match id {
+        PLUS_BESIDE => {
+            documents::view_beside(app, None, solidcraft_views::Edge::Right);
+        }
         PLUS_DUPLICATE => {
             let active = app.docs.views.active().id;
             documents::view_duplicate(app, active);
@@ -258,7 +282,8 @@ mod tests {
         for kind in ViewKind::ALL {
             assert!(plus.iter().any(|r| r.id.strip_prefix("plus.") == Some(kind.key()) && r.icon == kind.key() && r.accent.is_some()));
         }
-        assert!(plus[0].heading && plus.iter().skip(1).all(|r| !r.heading));
+        assert!(plus[0].heading, "the menu opens with a header");
+        assert!(plus.iter().filter(|r| r.heading).count() == 2, "and has one more over the layouts");
     }
 
     #[test]

@@ -715,6 +715,28 @@ fn show_look(app: &mut SolveApp, view: &DesignView) {
     }
 }
 
+/// Run `draw` with the Model view `id` standing in for the shown one: its camera and analyses are
+/// the app's while `draw` runs, and what `draw` left them as (an orbit, a dragged cut) is kept with
+/// that view. The shown view's own come back afterwards. This is how the views of a tiled window
+/// are each drawn and handled by the one viewport code.
+pub(crate) fn with_view_look<T>(app: &mut SolveApp, id: u64, draw: impl FnOnce(&mut SolveApp) -> T) -> T {
+    let shown = (app.cam, app.cam_anim.take(), app.session.inspect());
+    if let Some(view) = app.docs.views.get(id).cloned() {
+        show_look(app, &view);
+    }
+    let out = draw(app);
+    app.docs.views.set_spec(id, solidcraft_viewport::ViewSpec::new(app.cam));
+    app.docs.inspect.insert(id, app.session.inspect());
+    (app.cam, app.cam_anim) = (shown.0, shown.1);
+    app.session.set_inspect(shown.2);
+    out
+}
+
+/// Make the view `id` the shown one, keeping the look of the one it replaces.
+pub(crate) fn focus_view(app: &mut SolveApp, id: u64) -> bool {
+    change_views(app, |views| views.activate(id))
+}
+
 /// Open a view of `kind` showing `subject` in the shown design and show it (`reuse`: one that
 /// already has that kind and subject is shown instead, unless Preferences turn reuse off). Returns
 /// the id of the view now active. When Preferences keep that kind out of sub-tabs, no view is
@@ -844,6 +866,45 @@ pub fn view_duplicate(app: &mut SolveApp, id: u64) -> Option<u64> {
     change_views(app, |views| views.duplicate(id))
 }
 
+/// Show the Model views of the shown design together as `preset`. A design with fewer Model views
+/// than the layout has places for gets copies of the shown view until it has enough (a second
+/// angle each). Returns how many views are shown now.
+pub fn view_layout(app: &mut SolveApp, preset: solidcraft_views::Preset) -> usize {
+    let shown = app.docs.views.active().clone();
+    if shown.kind != ViewKind::Model {
+        return 1;
+    }
+    if preset != solidcraft_views::Preset::Single {
+        let have = app.docs.views.views().iter().filter(|view| view.kind == ViewKind::Model).count();
+        for _ in have..preset.tiles() {
+            if view_duplicate(app, shown.id).is_none() {
+                break;
+            }
+        }
+        view_activate(app, shown.id);
+    }
+    change_views(app, |views| views.set_layout(preset))
+}
+
+/// Show the Model view `id` beside the shown one, on `edge` of it; `None`: a new view that starts
+/// as a copy of the shown one. Returns the view now shown beside it, None when it cannot be (four
+/// views are shown, or either is not a Model view).
+pub fn view_beside(app: &mut SolveApp, id: Option<u64>, edge: solidcraft_views::Edge) -> Option<u64> {
+    let shown = app.docs.views.active().clone();
+    if shown.kind != ViewKind::Model || app.docs.views.tiles().is_some_and(|tiles| tiles.len() >= solidcraft_views::MAX_TILES) {
+        return None;
+    }
+    let id = match id {
+        Some(id) => id,
+        None => {
+            let copy = view_duplicate(app, shown.id)?;
+            view_activate(app, shown.id);
+            copy
+        }
+    };
+    change_views(app, |views| views.show_beside(id, edge)).then_some(id)
+}
+
 /// Move the view at place `from` of the shown design to place `to`.
 pub fn view_move(app: &mut SolveApp, from: usize, to: usize) {
     app.docs.views.move_view(from, to);
@@ -905,6 +966,24 @@ pub(crate) fn view_command(app: &mut SolveApp, command: &str, mut v: Value) -> R
             Some(asked)
         }
         "tab.view.duplicate" => Some(view_duplicate(app, asked).ok_or("there is no such view, or the design has too many views")?),
+        "tab.view.layout" => {
+            let preset = v.get("layout").and_then(Value::as_str).and_then(solidcraft_views::Preset::from_key).ok_or("unknown layout")?;
+            let shown = view_layout(app, preset);
+            v["shown"] = json!(shown);
+            None
+        }
+        "tab.view.beside" => {
+            let edge = match v.get("edge").and_then(Value::as_str) {
+                Some("left") => solidcraft_views::Edge::Left,
+                Some("top") => solidcraft_views::Edge::Top,
+                Some("bottom") => solidcraft_views::Edge::Bottom,
+                _ => solidcraft_views::Edge::Right,
+            };
+            let asked = v.get("id").and_then(Value::as_u64);
+            let id = view_beside(app, asked, edge).ok_or("a view is shown beside a Model view, at most four at a time")?;
+            v["shown"] = json!(app.docs.views.tiles().map_or(1, solidcraft_views::Tiles::len));
+            Some(id)
+        }
         "tab.view.move" => {
             let len = app.docs.views.len();
             let (from, to) = (place("from").filter(|n| *n < len), place("to").filter(|n| *n < len));
@@ -3802,6 +3881,30 @@ mod tests {
         assert_eq!(h.app.cam.yaw, 1.5);
         assert!(view_activate(&mut h.app, copy));
         assert_eq!(h.app.cam.yaw, -0.5);
+    }
+
+    /// A layout opens the views it needs, and a view standing in for the shown one is drawn from its
+    /// own angle and leaves the shown view's as it was.
+    #[test]
+    fn a_layout_opens_views_and_each_is_drawn_from_its_own_angle() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let first = h.app.docs.views.active().id;
+        h.app.cam.yaw = 0.25;
+        assert_eq!(view_layout(&mut h.app, solidcraft_views::Preset::SideBySide), 2);
+        assert!(h.app.docs.views.is_tiled());
+        assert_eq!(h.app.docs.views.active().id, first, "the view that was shown stays the focused one");
+        let other = h.app.docs.views.tiles().unwrap().views().into_iter().find(|id| *id != first).unwrap();
+        let yaw = with_view_look(&mut h.app, other, |app| {
+            app.cam.yaw = 2.0;
+            app.cam.yaw
+        });
+        assert_eq!(yaw, 2.0);
+        assert_eq!(h.app.cam.yaw, 0.25, "the focused view's angle is back");
+        assert!(focus_view(&mut h.app, other));
+        assert_eq!(h.app.cam.yaw, 2.0, "the other view kept the angle it was orbited to");
+        assert_eq!(view_layout(&mut h.app, solidcraft_views::Preset::Single), 1);
+        assert!(!h.app.docs.views.is_tiled());
     }
 
     /// Each Model view keeps its own section and analysis too, so one design can be inspected two
