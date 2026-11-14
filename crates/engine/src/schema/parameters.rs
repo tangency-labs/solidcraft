@@ -45,9 +45,9 @@ pub struct ParamAddParams {
     #[serde(default, deserialize_with = "expression")]
     #[schemars(schema_with = "expression_schema")]
     pub value: Option<Value>,
-    /// The unit: `mm`, `cm`, `m`, `in`, `ft`, `deg`, `rad`, `""` (no unit) or `text` (a text
-    /// parameter, whose expression is its text). Default: the expression's own unit, a length
-    /// in the design's units.
+    /// The unit: a unit expressions know (`mm`, `in`, `deg`, `kg`, `mm³`, `m²`…; each is listed in
+    /// docs/book/src/guide/parameters.md), `""` (no unit) or `text` (a text parameter, whose
+    /// expression is its text). Default: the expression's own unit, a length in the design's units.
     #[serde(default)]
     pub unit: Option<String>,
     /// A note to show with it.
@@ -237,8 +237,8 @@ pub enum AddedValue {
     Number {
         /// Its unit; `""` for none.
         unit: Option<String>,
-        /// Its value in mm for a length and degrees for an angle, as in every reply; `null` if
-        /// it can't be worked out.
+        /// Its value in mm for a length, degrees for an angle, g for a mass, mm³ for a volume and
+        /// mm² for an area, as in every reply; `null` if it can't be worked out.
         value: Option<f64>,
         /// Its value in its own unit; `null` if it can't be worked out.
         display_value: Option<f64>,
@@ -362,8 +362,9 @@ pub struct ParamChangeKeys {
     #[serde(default, deserialize_with = "expression")]
     #[schemars(schema_with = "expression_schema")]
     pub value: Option<Value>,
-    /// The unit: `mm`, `cm`, `m`, `in`, `ft`, `deg`, `rad`, `""` (no unit) or `text`. Default:
-    /// the parameter's own, or for a new one its value's unit, a length in the design's units.
+    /// The unit: a unit expressions know (`mm`, `in`, `deg`, `kg`, `mm³`, `m²`…; each is listed in
+    /// docs/book/src/guide/parameters.md), `""` (no unit) or `text`. Default: the parameter's own,
+    /// or for a new one its value's kind's unit, a length in the design's units.
     #[serde(default, deserialize_with = "unit_text")]
     pub unit: Option<String>,
     /// A note to show with the parameter.
@@ -560,8 +561,8 @@ pub enum ParamChangedBody {
     },
     /// Several parameters were set (`changes`).
     Many {
-        /// Each changed parameter's value, in mm for a length and degrees for an angle; `null`
-        /// where it can't be worked out.
+        /// Each changed parameter's value, in mm for a length, degrees for an angle, g for a mass,
+        /// mm³ for a volume and mm² for an area; `null` where it can't be worked out.
         changed: BTreeMap<String, Option<f64>>,
         /// How many features were rebuilt.
         recomputed: usize,
@@ -597,8 +598,8 @@ pub struct ParamChangedOne {
     /// A text parameter's text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
-    /// Its value in mm for a length and degrees for an angle, as in every reply; `null` if it
-    /// can't be worked out.
+    /// Its value in mm for a length, degrees for an angle, g for a mass, mm³ for a volume and mm²
+    /// for an area, as in every reply; `null` if it can't be worked out.
     pub value: Option<f64>,
     /// Its value in its own unit; `null` if it can't be worked out.
     pub display_value: Option<f64>,
@@ -667,8 +668,9 @@ pub struct ParameterRow {
     pub expression: String,
     /// Its unit; `""` for none, `text` for a text parameter.
     pub unit: String,
-    /// Its value in mm for a length and degrees for an angle, whatever its own unit; `null` if
-    /// it can't be worked out (a text parameter has none).
+    /// Its value in mm for a length, degrees for an angle, g for a mass, mm³ for a volume and mm²
+    /// for an area, whatever its own unit; `null` if it can't be worked out (a text parameter has
+    /// none).
     pub value: Option<f64>,
     /// Its value in its own unit, as the Parameters window shows it.
     pub display_value: Option<f64>,
@@ -941,13 +943,14 @@ pub struct ExprEvaluateKeys {
     #[serde(default, deserialize_with = "evaluate_expression", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ExpressionText")]
     pub expression: Option<ExpressionText>,
-    /// The unit the answer is shown in, and what bare numbers mean: `mm`, `cm`, `m`, `in`, `ft`,
-    /// `deg`, `rad`, `""` (none) or `text` (a text parameter's text). Default: none; bare numbers
-    /// follow the design's length unit.
+    /// The unit the answer is shown in, and what bare numbers mean: a unit expressions know
+    /// (`mm`, `in`, `deg`, `kg`, `mm³`, `m²`…; each is listed in docs/book/src/guide/parameters.md), `""`
+    /// (none) or `text` (a text parameter's text). Default: none; bare numbers follow the design's
+    /// length unit.
     #[serde(default, deserialize_with = "evaluate_unit")]
     pub unit: Option<String>,
-    /// What it must evaluate to: `length`, `angle` or `unitless` (`number` too). Default: the
-    /// unit's kind, or what the expression is. Not read when `unit` is `text`.
+    /// What it must evaluate to: `length`, `angle`, `mass`, `volume`, `area` or `unitless` (`number`
+    /// too). Default: the unit's kind, or what the expression is. Not read when `unit` is `text`.
     #[serde(default, deserialize_with = "evaluate_kind")]
     pub kind: Option<String>,
 }
@@ -990,8 +993,8 @@ fn expression_required(schema: &mut Schema) {
 }
 
 /// Evaluate an expression against the design's parameters, without changing anything: its
-/// value (in mm for a length, radians for an angle), its value in the unit asked for, what it
-/// names, or why it fails. `name = expression` is worth its expression and says what it would
+/// value (in mm for a length, radians for an angle, grams for a mass, mm³ for a volume and mm² for
+/// an area), its value in the unit asked for, what it names, or why it fails. `name = expression` is worth its expression and says what it would
 /// define.
 ///
 /// `kind` is not read when `unit` is `text`, as the handler leaves it.
@@ -1026,6 +1029,9 @@ pub enum EvalKind {
     Length,
     Angle,
     Unitless,
+    Mass,
+    Volume,
+    Area,
 }
 
 impl From<Kind> for EvalKind {
@@ -1034,6 +1040,9 @@ impl From<Kind> for EvalKind {
             Kind::Length => EvalKind::Length,
             Kind::Angle => EvalKind::Angle,
             Kind::Unitless => EvalKind::Unitless,
+            Kind::Mass => EvalKind::Mass,
+            Kind::Volume => EvalKind::Volume,
+            Kind::Area => EvalKind::Area,
         }
     }
 }
@@ -1045,6 +1054,9 @@ impl EvalKind {
             EvalKind::Length => "length",
             EvalKind::Angle => "angle",
             EvalKind::Unitless => "unitless",
+            EvalKind::Mass => "mass",
+            EvalKind::Volume => "volume",
+            EvalKind::Area => "area",
         }
     }
 }
@@ -1078,12 +1090,13 @@ pub enum ExprEvaluatedBody {
     Value {
         /// Always true.
         ok: bool,
-        /// Its value: mm for a length, radians for an angle.
+        /// Its value: mm for a length, radians for an angle, g for a mass, mm³ for a volume, mm² for
+        /// an area.
         value: f64,
         /// What it is.
         kind: EvalKind,
-        /// Its value in the unit asked for; with none, degrees for an angle and the value itself
-        /// otherwise.
+        /// Its value in the unit asked for; with none, in its kind's unit (degrees for an angle,
+        /// kilograms for a mass) and the value itself otherwise.
         display_value: f64,
         /// The parameters it names.
         references: Vec<String>,
