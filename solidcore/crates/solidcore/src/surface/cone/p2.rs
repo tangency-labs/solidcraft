@@ -55,6 +55,12 @@
 //!   `CreateCanonical` without checking its status (a `NULL` cone crashes, a
 //!   non-finite height recurses without bound); here that construction's error is
 //!   returned.
+//! - **Offset truncation height.** Where one offset radius falls below the tolerance,
+//!   upstream takes the kept cone's height as `new_top_radius * height / old_top_radius`
+//!   (and the mirror), which holds only for a full apex cone. Here the slope comes from
+//!   the radius's span, `height / (old_top_radius - old_bot_radius)`, so a truncated
+//!   cone's offset keeps its slope and stays `S + d n` at the same parameters; full apex
+//!   cones give the same value.
 //! - **NURB.** As in `surface::cone::p1`, the cone is expected to have its NURB
 //!   ([`Cone::make_nurb`]); upstream makes a missing one inside `const` queries, which
 //!   the port does (and keeps) at the `Surface` level (`Surface::kind_with_nurb`).
@@ -615,7 +621,7 @@ impl Cone {
             // zero) and the surviving end, at the original's slope: the radius spans
             // `old_top_radius - old_bot_radius` over `height`.
             let (new_height, bot_origin, collapsed_at_base) = if new_bot_radius < approx_tol_3d {
-                let new_height = new_top_radius * height / old_top_radius;
+                let new_height = new_top_radius * height / (old_top_radius - old_bot_radius);
                 new_bot_radius = 0.0;
                 (
                     new_height,
@@ -623,7 +629,7 @@ impl Cone {
                     true,
                 )
             } else {
-                let new_height = new_bot_radius * height / old_bot_radius;
+                let new_height = new_bot_radius * height / (old_bot_radius - old_top_radius);
                 new_top_radius = 0.0;
                 (new_height, origin + off_z_dist * z_axis, false)
             };
@@ -2125,8 +2131,10 @@ mod tests {
             // negated inside out: the shrinking offset is -1.2 there and 1.2 here
             let d = if inside { 1.2 } else { -1.2 };
             // full apex cones: (bot, top) = (0, 2) collapses at the bot end under the
-            // offset, (2, 0) at the top
-            for (bot, top) in [(0.0, 2.0), (2.0, 0.0)] {
+            // offset, (2, 0) at the top; truncated cones (1, 2) and (2, 1) likewise,
+            // where the kept height follows the radius's span top - bot, not the
+            // surviving radius alone
+            for (bot, top) in [(0.0, 2.0), (2.0, 0.0), (1.0, 2.0), (2.0, 1.0)] {
                 let cone = canonical(&k, bot, top, 3.0, false, inside);
                 let off = cone.create_offset_surface(&k, d, 1e-6).unwrap().unwrap();
                 // the radii move by cos(semi) * d along the NURB normal (negated
@@ -2188,6 +2196,70 @@ mod tests {
                         s.distance(o)
                     );
                 }
+            }
+        }
+    }
+
+    /// tangency-labs/solidcraft#15165: a truncated cone (bot 1, top 2, height 3) offset
+    /// inward by 1.2 collapses at its bot end. Its radii move by `cos(semi) d` with
+    /// `tan(semi) = 1 / 3`, so the offset top radius is `2 - 1.2 * 3 / sqrt(10)` =
+    /// 0.86158 and, at the original's slope (the radius grows 1 over 3 of height), the
+    /// kept cone is `3 * 0.86158 / 1` = 2.58474 high (2.5848 in the issue, from 0.8616).
+    /// The old height `0.86158 * 3 / 2` = 1.29237 took the slope from the top radius
+    /// alone, as for a full apex cone. The
+    /// offset is `S + d n` at the same parameters, with the closed-form unit normal
+    /// `(cos(semi) cos(t), cos(semi) sin(t), -sin(semi))` of the identity-placed cone.
+    /// The mirror cone (bot 2, top 1) collapses at its top by the same amount.
+    #[test]
+    fn offset_truncation_of_a_truncated_cone_keeps_its_slope() {
+        let k = kernel();
+        let (cos_semi, sin_semi) = (3.0 / 10f64.sqrt(), 1.0 / 10f64.sqrt());
+        let d = -1.2;
+        let kept_radius = 2.0 + d * cos_semi;
+        let want_height = 3.0 * kept_radius / 1.0;
+        // the issue's figures: 0.8616 to four places, and 3 * 0.8616 = 2.5848 (the
+        // unrounded height is 2.58474)
+        assert!((kept_radius - 0.8616).abs() < 5e-5, "{kept_radius}");
+        assert!((want_height - 2.5848).abs() < 3.0 * 5e-5, "{want_height}");
+        for (bot, top) in [(1.0, 2.0), (2.0, 1.0)] {
+            let cone = canonical(&k, bot, top, 3.0, false, false);
+            let off = cone.create_offset_surface(&k, d, 1e-6).unwrap().unwrap();
+            let height = off.height(&k).unwrap();
+            assert!(
+                (height - want_height).abs() < 1e-12,
+                "bot {bot} top {top}: height {height}, the radius's span gives {want_height}"
+            );
+            let (want_bot, want_top) = if bot < top {
+                (0.0, kept_radius)
+            } else {
+                (kept_radius, 0.0)
+            };
+            assert!(
+                (off.bot_radius() - want_bot).abs() < 1e-12
+                    && (off.top_radius() - want_top).abs() < 1e-12,
+                "bot {bot} top {top}: radii {} {}",
+                off.bot_radius(),
+                off.top_radius()
+            );
+
+            // S + d n at the same parameters, n the outward unit normal of the cone
+            // whose radius grows with z (bot < top) or shrinks (bot > top)
+            let tilt = if bot < top { sin_semi } else { -sin_semi };
+            let dom = off.rev().base().natural_uv_domain();
+            for (su, sv) in [(0.1, 0.2), (0.37, 0.5), (0.8, 0.9), (0.5, 1.0)] {
+                let uv = Point2::new(
+                    dom.min().x + su * (dom.max().x - dom.min().x),
+                    dom.min().y + sv * (dom.max().y - dom.min().y),
+                );
+                let s = cone.evaluate_point(&k, uv).unwrap();
+                let o = off.evaluate_point(&k, uv).unwrap();
+                let t = s.y.atan2(s.x);
+                let n = Vec3::new(cos_semi * t.cos(), cos_semi * t.sin(), -tilt);
+                let want = s + d * n;
+                assert!(
+                    o.distance(want) < 1e-12,
+                    "bot {bot} top {top} at {uv:?}: offset {o:?}, S + d n {want:?}"
+                );
             }
         }
     }
