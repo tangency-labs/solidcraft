@@ -72,10 +72,12 @@
 //! - **A hole's outside is the face.** `SectorClassifyCurveOn`'s loop-containment retry
 //!   takes a stepped-off point that an inner loop measured clockwise
 //!   ([`compute_loop_orientation`](crate::topology::face::p3::compute_loop_orientation))
-//!   does not wind around for inside the face. Upstream reads every point its loop does
-//!   not wind around as outside, so a curve leaving a vertex of a hole into the face,
-//!   tangent to the hole's boundary there, was classified out of the face. The outer
-//!   loop, and an inner loop not measured clockwise, keep upstream's reading.
+//!   does not wind around for inside the face when the face's outer loop winds it
+//!   counter-clockwise and none of its inner loops winds it, each loop reading the point
+//!   in its own period of a closed surface (`holds_point_beside_hole`). Upstream reads
+//!   every point its loop does not wind around as outside, so a curve leaving a vertex
+//!   of a hole into the face, tangent to the hole's boundary there, was classified out
+//!   of the face. Every other reading keeps upstream's: outside.
 //! - **Same curve on two edges.** `SectorClassifyCurveOn` compares the curve pointers
 //!   of two different edges; an edge owns its curve in the port, so two edges never
 //!   share one (`bSingleCurveOnEdges` is always false), as in `query::edge`.
@@ -2335,6 +2337,102 @@ fn project(p: Vec3, v: Vec3) -> Vec3 {
     p.cross(v).cross(p)
 }
 
+/// Not upstream (#15247): whether face `f` holds `uv`, a point that its inner loop `hole`,
+/// measured clockwise, does not wind around ([`sector_classify_curve_on`]'s retry). The
+/// face holds it when its outer loop winds it counter-clockwise and none of its inner
+/// loops, `hole` included, winds it. Each loop reads `uv` moved by whole periods of a
+/// closed surface towards the middle of that loop's UV box
+/// ([`into_loop_period`]), so a hole whose trims run past the seam is read in its own
+/// period. Any other reading (a boundary point, an unknown winding, an outer loop that
+/// winds nothing) is not held.
+///
+/// # Errors
+///
+/// Those of the loop list, the surface's closure test, the trim boxes and
+/// [`contains_uv_point`].
+fn holds_point_beside_hole(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    hole: LoopId,
+    uv: Point2,
+    tol: f64,
+) -> Result<bool> {
+    let surface = face_surface(b, f, OP_SECTOR)?.clone_for_evaluation()?;
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let closed_u = surface
+        .is_closed(k, &domain, SurfParamType::U, None, false)?
+        .0;
+    let closed_v = surface
+        .is_closed(k, &domain, SurfParamType::V, None, false)?
+        .0;
+    let periods = (
+        closed_u.then(|| domain.x_length()),
+        closed_v.then(|| domain.y_length()),
+    );
+    let loops = crate::topology::face::p2::loops(b, f, false, None)?;
+    if !loops.contains(&hole) {
+        return Ok(false);
+    }
+    for l in loops {
+        let at = into_loop_period(k, b, l, uv, periods)?;
+        let c = contains_uv_point(k, b, l, None, at, tol)?;
+        let held = if loopuse::is_outer_loop(b, l)? {
+            c.containment == PointContainment::Inside && c.orientation == OrientType::Same
+        } else {
+            c.containment == PointContainment::Outside
+        };
+        if !held {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Not upstream (#15247): `uv` moved by the whole `periods` (`(u, v)`, `None` where the
+/// surface is open) that bring it nearest the middle of loop `l`'s UV box (the union of
+/// its UV trim curves' boxes); `uv` itself on an open surface or for a loop without trim
+/// curves.
+///
+/// # Errors
+///
+/// Those of the loop's edge uses and the trim boxes.
+fn into_loop_period(
+    k: &Kernel,
+    b: &Brep,
+    l: LoopId,
+    uv: Point2,
+    periods: (Option<f64>, Option<f64>),
+) -> Result<Point2> {
+    if periods.0.is_none() && periods.1.is_none() {
+        return Ok(uv);
+    }
+    let mut lo = Point2::new(f64::INFINITY, f64::INFINITY);
+    let mut hi = Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for eu in loopuse::loop_edgeuses(b, l)? {
+        let Some(trim) = eu1::uv_trim_curve(b, eu)?.0 else {
+            continue;
+        };
+        let req = crate::nurbs::b_spline_curve::BoundingBoxRequest {
+            normal: true,
+            ..Default::default()
+        };
+        let boxes = trim.calculate_bounding_box(k, &trim.natural_interval(), req, false)?;
+        if let Some(bx) = boxes.normal {
+            lo = Point2::new(lo.x.min(bx.min().x), lo.y.min(bx.min().y));
+            hi = Point2::new(hi.x.max(bx.max().x), hi.y.max(bx.max().y));
+        }
+    }
+    let shift = |value: f64, low: f64, high: f64, period: Option<f64>| match period {
+        Some(p) if p > 0.0 && low <= high => value + ((0.5 * (low + high) - value) / p).round() * p,
+        _ => value,
+    };
+    Ok(Point2::new(
+        shift(uv.x, lo.x, hi.x, periods.0),
+        shift(uv.y, lo.y, hi.y, periods.1),
+    ))
+}
+
 /// `SmFace::SectorClassifyCurveOn`: classifies the interval of a curve on face `f`
 /// that crosses the face boundary at an edge (both edge uses the same) or a vertex
 /// (two neighbouring edge uses of a loop) as inside or outside the face sector the
@@ -2959,13 +3057,14 @@ pub fn sector_classify_curve_on(
             res.problem = ClassifyProblem::None;
             return Ok(res);
         } else if cont == PointContainment::Outside {
-            // The face lies on the left of its loops, so a point a hole (a clockwise
-            // inner loop) does not wind around is in the face: `ContainsUVPoint` gives
-            // such a point no orientation, and upstream takes it for outside the face,
-            // so a curve leaving a vertex of a hole into the face was classified out of
-            // it. An inner loop measured clockwise decides it inside. The outer loop,
-            // and an inner loop whose orientation is not measured clockwise, keep
-            // upstream's reading: outside.
+            // The face lies on the left of its loops, so a point that a hole (an inner
+            // loop measured clockwise) does not wind around is in the face, provided
+            // the outer loop winds it and no other hole does
+            // ([`holds_point_beside_hole`]). `ContainsUVPoint` gives such a point no
+            // orientation, and upstream takes it for outside the face, so a curve
+            // leaving a vertex of a hole into the face was classified out of it. Every
+            // other reading keeps upstream's: outside. (`compute_loop_orientation` runs
+            // at most once per call: both branches return.)
             // (A loop whose place in the face cannot be read is taken for the outer.)
             let inner = matches!(loopuse::is_outer_loop(b, loop1), Ok(false));
             if c.orientation != OrientType::Opposite && inner {
@@ -2976,7 +3075,13 @@ pub fn sector_classify_curve_on(
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => OrientType::Unknown,
                 };
-                if loop_orientation == OrientType::Opposite {
+                let held = loop_orientation == OrientType::Opposite
+                    && match holds_point_beside_hole(k, b, f, loop1, step_uv, xsect_tol) {
+                        Ok(h) => h,
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                        Err(_) => false,
+                    };
+                if held {
                     res.inside = true;
                     res.possible_problem = false;
                     res.problem = ClassifyProblem::None;
@@ -3842,5 +3947,180 @@ mod tests {
     fn classify_problem_codes() {
         assert_eq!(ClassifyProblem::None as i32, 0);
         assert_eq!(ClassifyProblem::UnresolvedClassification as i32, 7);
+    }
+
+    /// (The probes avoid the circles' centres, which `ContainsUVPoint` reads as on the
+    /// boundary.)
+    /// A face on `surface` over `dom` made by `MakeFaceWithCurves` from UV loops: an outer
+    /// rectangle `outer` (fractions of `dom`, counter-clockwise) and clockwise circles
+    /// `holes` (`(u, v, r)` in fractions, `r` of the shorter side).
+    fn face_with_holes(
+        k: &mut Kernel,
+        surface: Surface,
+        dom: &Extent2d,
+        outer: [f64; 4],
+        holes: &[(f64, f64, f64)],
+    ) -> (Brep, FaceId) {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
+        use crate::topology::brep_cache::{arena_identity, CacheObject};
+        let at = |a: f64, c: f64| {
+            Point3::new(
+                dom.min().x + a * dom.x_length(),
+                dom.min().y + c * dom.y_length(),
+                0.0,
+            )
+        };
+        let [u0, v0, u1, v1] = outer;
+        let corners = [at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)];
+        let mut uv = Vec::new();
+        let mut orientations = Vec::new();
+        for i in 0..4 {
+            uv.push(Curve::from(
+                BSplineCurve::create_line_segment(2, corners[i], corners[(i + 1) % 4]).unwrap(),
+            ));
+            orientations.push(OrientType::Same);
+        }
+        let side = dom.x_length().min(dom.y_length());
+        for &(a, c, r) in holes {
+            let mut frame = Axis2Placement::default();
+            frame.set_canonical(at(a, c), Vec3::X, Vec3::Y).unwrap();
+            uv.push(Curve::from(
+                BSplineCurve::create_circle_segment(
+                    2,
+                    &frame,
+                    r * side,
+                    0.0,
+                    360.0,
+                    NurbCircleParam::Quadratic,
+                )
+                .unwrap(),
+            ));
+            orientations.push(OrientType::Opposite);
+        }
+        let mut loops = vec![4];
+        loops.extend(holes.iter().map(|_| 1));
+        let input = FaceCurvesInput {
+            loops,
+            curves_3d: None,
+            uv_curves: Some(uv),
+            orientations,
+            loop_points: Vec::new(),
+        };
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let region = b.infinite_region();
+        let made = {
+            let mut state = ArenaNotifyState::new(&b);
+            let this_face = |face| arena_identity(CacheObject::Face(face));
+            let mut env = state.env(None);
+            make_face_with_curves(
+                k,
+                &mut b,
+                region,
+                input,
+                surface,
+                dom,
+                OrientType::Same,
+                None,
+                &this_face,
+                &mut env,
+            )
+            .unwrap()
+        };
+        (b, made.face.unwrap())
+    }
+
+    /// The loop of `f` that winds `uv` clockwise: the hole around it.
+    fn hole_around(k: &Kernel, b: &mut Brep, f: FaceId, uv: Point2) -> LoopId {
+        for l in crate::topology::face::p2::loops(b, f, false, None).unwrap() {
+            let c = contains_uv_point(k, b, l, None, uv, 1e-6).unwrap();
+            if c.containment == PointContainment::Inside && c.orientation == OrientType::Opposite {
+                return l;
+            }
+        }
+        panic!("no hole around {uv:?}");
+    }
+
+    /// #15247: a point beside one hole is held by the face only when the outer loop winds
+    /// it and no other hole does: between two holes 0.02 apart, a point just outside the
+    /// first lies in the second and is not held; past the outer loop nothing is held.
+    #[test]
+    fn a_point_beside_a_hole_is_in_the_face_only_outside_every_other_loop() {
+        let mut k = Kernel::default();
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let plane = Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y,
+            Vec2::new(1.0, 1.0),
+            &dom,
+        );
+        let (mut b, f) = face_with_holes(
+            &mut k,
+            Surface::from(plane),
+            &dom,
+            [0.05, 0.05, 0.95, 0.95],
+            &[(0.3, 0.5, 0.1), (0.52, 0.5, 0.1)],
+        );
+        let first = hole_around(&k, &mut b, f, Point2::new(0.33, 0.51));
+        let holds = |b: &mut Brep, u: f64, v: f64| {
+            holds_point_beside_hole(&k, b, f, first, Point2::new(u, v), 1e-6).unwrap()
+        };
+        // between the holes (the second spans u 0.42..0.62)
+        assert!(holds(&mut b, 0.41, 0.5));
+        // inside the second hole
+        assert!(!holds(&mut b, 0.45, 0.5));
+        // inside the first hole
+        assert!(!holds(&mut b, 0.33, 0.51));
+        // past the outer loop (u 0.05..0.95)
+        assert!(!holds(&mut b, 0.97, 0.5));
+        assert!(holds(&mut b, 0.8, 0.8));
+    }
+
+    /// #15247: on a cylinder, points one period away from where the loops' trims lie are
+    /// read in each loop's period: the point at -0.05 of the period (the copy of 0.95 that a
+    /// drop onto the closed surface may return) lies in the hole at 0.94 and is not held,
+    /// though the hole does not wind it where it is; the point at -0.5 lies in the face and
+    /// is held, though the outer loop does not wind it where it is.
+    #[test]
+    fn a_point_a_period_away_is_read_in_each_loops_period() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::surface::cone::Cone;
+        let mut k = Kernel::default();
+        let surface = Surface::from(
+            Cone::create_canonical_cylinder(&k, &Axis2Placement::default(), 1.0).unwrap(),
+        );
+        let natural = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let period = natural.x_length();
+        let dom = Extent2d::from_bounds(natural.min().x, 0.0, natural.max().x, period);
+        let (mut b, f) = face_with_holes(
+            &mut k,
+            surface,
+            &dom,
+            [0.0, 0.05, 1.0, 0.95],
+            &[(0.94, 0.5, 0.05)],
+        );
+        let u = |a: f64| natural.min().x + a * period;
+        let hole = hole_around(&k, &mut b, f, Point2::new(u(0.95), 0.51 * period));
+        let holds = |b: &mut Brep, a: f64| {
+            holds_point_beside_hole(&k, b, f, hole, Point2::new(u(a), 0.51 * period), 1e-6).unwrap()
+        };
+        assert!(!holds(&mut b, -0.05));
+        assert!(holds(&mut b, 0.5));
+        // a point of the face one period away is held: each loop reads it in its period
+        assert!(holds(&mut b, -0.5));
+        // read without moving it, the hole does not wind the point
+        let c = contains_uv_point(
+            &k,
+            &mut b,
+            hole,
+            None,
+            Point2::new(u(-0.05), 0.51 * period),
+            1e-6,
+        )
+        .unwrap();
+        assert_eq!(c.containment, PointContainment::Outside);
     }
 }
