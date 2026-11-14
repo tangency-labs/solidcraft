@@ -1310,6 +1310,25 @@ pub(crate) fn keyboard_resize_action(
             if edge != HostResizeEdge::BottomRight && ((horizontal && dx == 0.0) || (!horizontal && dy == 0.0)) {
                 return Err(error(Rule::Availability, "resize key is perpendicular to focused edge"));
             }
+            let source = service.layout().section(&section)?;
+            let dx = if horizontal && let Some(column) = &source.column {
+                let direction = if edge == HostResizeEdge::Left { -1.0 } else { 1.0 };
+                let width = outer.size.width;
+                let requested = (width + dx * direction).max(1.0);
+                if resolve_column_width(service.layout(), service.registry(), column, requested)? == width {
+                    let ranges = column_widths(service.layout(), service.registry(), column)?;
+                    let next = if dx * direction > 0.0 {
+                        ranges.iter().map(|range| range.0).find(|min| *min > width)
+                    } else {
+                        ranges.iter().rev().map(|range| range.1).find(|max| *max < width)
+                    };
+                    next.map_or(dx, |next| (next - width) * direction)
+                } else {
+                    dx
+                }
+            } else {
+                dx
+            };
             resize_preview(service, layout, &section, edge, size, outer, dx, dy)
         }
         Some(GestureKind::Pair { first, second, first_size, second_size, zone, outer }) => {
