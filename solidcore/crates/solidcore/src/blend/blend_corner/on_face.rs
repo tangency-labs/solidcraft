@@ -9,7 +9,7 @@
 //! | Rust              | Upstream |
 //! |-------------------|----------|
 //! | [`Clearance`]     | none     |
-//! | [`bezier_pieces`] | none     |
+//! | [`bezier_pieces`], [`bezier_spans`] | none |
 //! | [`clear_of`]      | none     |
 //!
 //! Decided on control points, never at sample points (`docs/definitions-and-certificates.md`
@@ -40,6 +40,9 @@ const OP: &str = "blend::blend_corner::on_face::clear_of";
 
 /// A homogeneous point `(x w, y w, z w, w)`.
 pub type Hom = [f64; 4];
+
+/// A rational Bezier piece of a curve's B-spline: its knot span and homogeneous points.
+pub type Span = ([f64; 2], Vec<Hom>);
 
 /// How many times a piece is halved at most: a piece of a part's size, tens of millimetres,
 /// is then under 1e-10 long, the rounding of the part's coordinates (§4.4 of the
@@ -72,6 +75,16 @@ pub enum Clearance {
 /// Those of the B-spline's decomposition into its Bézier pieces; a cancellation while an
 /// ellipse's is made.
 pub fn bezier_pieces(k: &Kernel, curve: &Curve) -> Result<Option<Vec<Vec<Hom>>>> {
+    Ok(bezier_spans(k, curve)?.map(|spans| spans.into_iter().map(|(_, piece)| piece).collect()))
+}
+
+/// [`bezier_pieces`] with each piece's knot span `[a, b]` on the B-spline, which is the
+/// curve's own parameter where the curve is a B-spline or evaluates through its B-spline.
+///
+/// # Errors
+///
+/// As [`bezier_pieces`].
+pub fn bezier_spans(k: &Kernel, curve: &Curve) -> Result<Option<Vec<Span>>> {
     let base: Cow<'_, BSplineCurve> = match curve.kind() {
         CurveKind::BSpline(c) => Cow::Borrowed(c),
         CurveKind::Line(c) => c.base_with_nurb()?,
@@ -93,6 +106,9 @@ pub fn bezier_pieces(k: &Kernel, curve: &Curve) -> Result<Option<Vec<Vec<Hom>>>>
     };
     let mut pieces = Vec::new();
     for bez in nurb.decompose_bez()? {
+        let (Some(&a), Some(&b)) = (bez.knots().first(), bez.knots().last()) else {
+            return Ok(None);
+        };
         let mut piece = Vec::new();
         for cp in bez.cpts() {
             if cp.z == NOZ {
@@ -108,7 +124,7 @@ pub fn bezier_pieces(k: &Kernel, curve: &Curve) -> Result<Option<Vec<Vec<Hom>>>>
             }
             piece.push(h);
         }
-        pieces.push(piece);
+        pieces.push(([a, b], piece));
     }
     Ok(Some(pieces))
 }

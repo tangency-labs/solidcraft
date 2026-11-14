@@ -2391,6 +2391,9 @@ pub struct ReachResult {
     pub stopped_by_limit: Option<Vec<LimitStop>>,
     /// The closed loop that stopped it (its chain alone gets closer); `null` when none.
     pub stopped_by_loop: Option<ReachLoopStop>,
+    /// With contact sets on: the pair of a set that stopped it where they touch, as `joint.drive`
+    /// says; `null` when none.
+    pub stopped_by_contact: Option<ContactStop>,
     /// Why nothing can move. Left out when the reach worked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -2434,6 +2437,10 @@ pub struct MotionLinkParams {
     /// Which of b's values follows, counted from zero (a negative number is 0). Default: 0.
     #[serde(default)]
     pub ib: Option<f64>,
+    /// Replace that motion link (its index in `joint.list`'s `links`) instead of adding one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "u64")]
+    pub link: Option<u64>,
     /// Leave out `dof` and `fixed` in the reply. Default: false.
     #[serde(default)]
     pub quiet: Option<bool>,
@@ -2468,7 +2475,7 @@ impl<'de> Deserialize<'de> for MotionLinkParams {
         })?;
         let (ia, ib) = (number(&m, "ia")?, number(&m, "ib")?);
         let offset = given(&m, "offset", JointValue::read)?;
-        Ok(MotionLinkParams { a, b, ratio, offset, ia, ib, quiet: flag(&m, "quiet")? })
+        Ok(MotionLinkParams { a, b, ratio, offset, ia, ib, link: link_index(&m, "link")?, quiet: flag(&m, "quiet")? })
     }
 }
 
@@ -2481,6 +2488,18 @@ pub struct CouplingResult {
     pub link: usize,
     /// The ratio worked out: b's units per a's, per degree (mm per degree, or degrees per mm).
     pub ratio: f64,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `joint.motion_link` returns: the solve, then the motion link made or replaced.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MotionLinkResult {
+    #[serde(flatten)]
+    pub solved: SolveReport,
+    /// The motion link made (or replaced), by its index in `joint.list`'s `links`.
+    pub link: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

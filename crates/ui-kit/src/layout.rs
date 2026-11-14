@@ -202,6 +202,21 @@ pub fn row<R>(ui: &mut Ui, text: &str, control: impl FnOnce(&mut Ui) -> R) -> R 
     sized_row(ui, text, row_height(), control)
 }
 
+/// Aligned label/value row for read-only text (what a sketch is on now): the value wraps in the
+/// control column and the row grows to hold every line, so a long value is never clipped.
+/// One line keeps the 28 pt row. Tokens: `row, font_label, form_ink, space_8`.
+pub fn value_row(ui: &mut Ui, text: &str, value: &str) -> Response {
+    let t = Tokens::get();
+    let font = egui::FontId::proportional(t.font_label);
+    let width = dimension(ui.available_width());
+    let label_width = label_column(ui, text, width);
+    let gutter = if label_width > 0.0 { label_gap(ui, width) } else { 0.0 };
+    let value_width = (width - label_width - gutter).max(0.0);
+    let lines = ui.painter().layout(value.to_owned(), font, t.form_ink, value_width).size().y;
+    let height = row_height().max(lines + t.space_8);
+    sized_row(ui, text, height, |ui| ui.add(egui::Label::new(RichText::new(value).size(t.font_label).color(t.form_ink)).wrap()))
+}
+
 /// Semantic ink for a form's explanatory message.
 #[derive(Clone, Copy)]
 pub enum StatusTone {
@@ -229,7 +244,17 @@ pub fn status_line(ui: &mut Ui, text: &str, tone: StatusTone) -> Response {
 pub fn expr_row(ui: &mut Ui, label: &str, value: &mut String) -> bool {
     scrub_row(ui, label, |ui, scrub| {
         if let Some(scrub) = scrub {
-            super::fields::scrub(ui, scrub, value);
+            super::fields::scrub(ui, scrub, value, false);
+        }
+        super::field(ui, value)
+    })
+}
+
+/// Expression row whose scrubbed value stops at zero (for physical dimensions like radius or thickness).
+pub fn expr_row_positive(ui: &mut Ui, label: &str, value: &mut String) -> bool {
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value, true);
         }
         super::field(ui, value)
     })
@@ -245,7 +270,17 @@ pub fn count_row(ui: &mut Ui, label: &str, value: &mut String, limits: &super::C
 pub fn hint_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> bool {
     scrub_row(ui, label, |ui, scrub| {
         if let Some(scrub) = scrub {
-            super::fields::scrub(ui, scrub, value);
+            super::fields::scrub(ui, scrub, value, false);
+        }
+        super::hint_field(ui, value, hint)
+    })
+}
+
+/// Expression row with a hint whose scrubbed value stops at zero.
+pub fn hint_row_positive(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> bool {
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value, true);
         }
         super::hint_field(ui, value, hint)
     })
@@ -271,6 +306,19 @@ pub fn text_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> (bo
 /// Indexed choice row with the caller's unchanged dropdown ID. Tokens: `row, dropdown`.
 pub fn choice_row(ui: &mut Ui, label: &str, id: &str, selected: &mut usize, options: &[&str]) -> Response {
     row(ui, label, |ui| super::dropdown(ui, id, selected, options))
+}
+
+/// A card row whose control is one action: the kit's [`super::button_at`] across the control
+/// column, under an empty label column so it lines up with the rows' fields, its text the
+/// catalog's for `label`. Returns whether it was clicked. Published as `dialog:action:{key}`.
+/// Tokens: `row, button`.
+pub fn action_row(ui: &mut Ui, key: &str, label: &str) -> bool {
+    row(ui, "", |ui| {
+        let rect = ui.max_rect();
+        let response = super::button_at(ui, &format!("action_row:{key}"), rect, solidcraft_ui_text::tr_label(label), super::Button::Normal);
+        solidcraft_ui_registry::publish_target(&format!("dialog:action:{key}"), response.rect);
+        response.clicked()
+    })
 }
 
 /// Internal form geometry for controls which need several lines (e.g. text areas).

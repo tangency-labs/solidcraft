@@ -7,3 +7,4 @@
 
 pub mod enclosure;
 pub mod integrator;
+pub mod loop_area;

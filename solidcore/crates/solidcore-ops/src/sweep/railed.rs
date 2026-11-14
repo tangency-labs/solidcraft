@@ -74,7 +74,8 @@ impl RailLoft {
 /// # Errors
 /// [`Error::Argument`] for a curve list refused or a count out of range;
 /// [`Error::RailPastTolerance`] where the kernel's certificate is not met within
-/// `how.max_wires`; the kernel's other refusals by their status; [`Error::Empty`],
+/// `how.max_wires`; the kernel's other refusals ([`Error::Refused`] in its words for input it
+/// refuses, else by their status); [`Error::Empty`],
 /// [`Error::NotSolid`].
 pub fn loft_rails(sections: &[RailSection], rails: &[Curve], how: &RailLoft) -> Result<Body> {
     if !(2..=solidcore::sweep::loft_rails::MAX_SECTIONS).contains(&sections.len())
@@ -170,7 +171,8 @@ pub struct BlendFrame {
 /// definition.
 ///
 /// # Errors
-/// [`Error::Argument`] for a frame not finite; the kernel's refusals by their status;
+/// [`Error::Argument`] for a frame not finite; the kernel's refusals ([`Error::Refused`] in its
+/// words for input it refuses, else by their status);
 /// [`Error::Empty`].
 pub fn loft_blend(
     sections: &[Vec<BlendFrame>],
@@ -215,7 +217,7 @@ pub fn loft_blend(
 }
 
 /// The kernel's refusal of a railed loft as ops' error.
-fn refused(e: solidcore::SolidError) -> Error {
+pub(super) fn refused(e: solidcore::SolidError) -> Error {
     use solidcore::error::sweep::SweepFailure;
     use solidcore::error::Reason;
     if let solidcore::SolidError::Failed(f) = &e {
@@ -233,4 +235,52 @@ fn refused(e: solidcore::SolidError) -> Error {
         }
     }
     status(e)
+}
+
+/// The frames of a cross-section that is the edge chain `edges` (indices into the body's edge
+/// list, in order, each sharing a vertex with the next) of `body`, at `stations` stations of
+/// even arc length, leaving along `leave` ([`solidcore::sweep::section_blend::section_frames`]):
+/// a section for [`loft_blend`]. `min_in_plane` is the least share of `leave` the support
+/// face's tangent plane keeps (SolidCraft's is 0.2).
+///
+/// # Errors
+/// [`Error::Argument`] for an edge index not in the body; the kernel's refusals
+/// ([`Error::Refused`] in its words for input it refuses, else by their status).
+pub fn section_frames(
+    body: &Body,
+    edges: &[usize],
+    leave: [f64; 3],
+    stations: usize,
+    min_in_plane: f64,
+) -> Result<Vec<BlendFrame>> {
+    use solidcore::sweep::section_blend::{section_frames as kernel_frames, FrameOptions};
+    let arr = |v: Vec3| [v.x, v.y, v.z];
+    crate::session::with_body("section_frames", body, |k, b| {
+        let list = b.edge_list();
+        let mut chain = Vec::with_capacity(edges.len());
+        for &i in edges {
+            let Some(&e) = list.get(i) else {
+                return Ok(Err(Error::Argument));
+            };
+            chain.push(e);
+        }
+        let opts = FrameOptions {
+            stations,
+            min_in_plane,
+        };
+        Ok(
+            match kernel_frames(k, b, &chain, Vec3::new(leave[0], leave[1], leave[2]), &opts) {
+                Ok(frames) => Ok(frames
+                    .into_iter()
+                    .map(|f| BlendFrame {
+                        p: arr(f.p),
+                        leave: arr(f.leave),
+                        bend: arr(f.bend),
+                        bend_change: arr(f.bend_change),
+                    })
+                    .collect()),
+                Err(e) => Err(status(e)),
+            },
+        )
+    })?
 }

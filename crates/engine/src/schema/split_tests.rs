@@ -16,7 +16,7 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(
         input_schema_for::<SplitFaceParams>(),
-        &["body", "body_name", "body_names", "faces", "name", "participants", "plane", "sketch", "tool"],
+        &["body", "body_name", "body_names", "faces", "loops", "name", "participants", "plane", "sketch", "tool"],
     );
 }
 
@@ -155,6 +155,8 @@ fn the_check_takes_what_the_schema_allows() {
         ("solid.split_face", &face, json!({"faces": [[1, 2, 3]], "tool": {"body": "T", "point": [1, 2, 3]}}), true),
         ("solid.split_face", &face, json!({"faces": [[1, 2, 3]], "sketch": "Cuts"}), true),
         ("solid.split_face", &face, json!({"faces": [[1, 2, 3]], "sketch": 7, "name": "Split", "participants": ["*"]}), true),
+        ("solid.split_face", &face, json!({"faces": [[1, 2, 3]], "sketch": "Cuts", "loops": true}), true),
+        ("solid.split_face", &face, json!({"faces": [[1, 2, 3]], "sketch": "Cuts", "loops": null}), true),
         ("solid.split_face", &face, json!({"faces": [[1, 2, 3]], "tool": null, "sketch": null, "plane": null, "body": null}), true),
         ("solid.split_face", &face, json!({"faces": [[1, 2, 3]]}), true),
         ("solid.split_face", &face, json!({"plane": "XY"}), false),
@@ -162,6 +164,7 @@ fn the_check_takes_what_the_schema_allows() {
         ("solid.split_face", &face, json!({"faces": [[1, 2]], "plane": "XY"}), false),
         ("solid.split_face", &face, json!({"faces": [[1, 2, 3]], "body": 5, "plane": "XY"}), false),
         ("solid.split_face", &face, json!({"faces": [[1, 2, 3]], "sketch": true}), false),
+        ("solid.split_face", &face, json!({"faces": [[1, 2, 3]], "sketch": "Cuts", "loops": "yes"}), false),
         ("solid.split_face", &face, json!({"faces": [[1, 2, 3]], "tool": {"point": [1, 2, 3]}}), false),
         ("solid.split_face", &face, json!({"faces": [[1, 2, 3]], "plane": "XY", "line": "cut"}), false),
     ] {

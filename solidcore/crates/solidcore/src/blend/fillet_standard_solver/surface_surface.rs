@@ -140,7 +140,7 @@ impl SurfaceSurfaceFs {
         let mut faces = [None; 2];
         for (ii, face) in faces.iter_mut().enumerate() {
             let SurfaceId::Face(id) = self.base.surface(ii)?.base_id else {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(OP, "the base surface's face"));
             };
             *face = Some(id);
         }
@@ -172,7 +172,7 @@ impl SurfaceSurfaceFs {
         let uv_domain = pseudo
             .geom(fillet_geom)?
             .fillet_surface(None)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the fillet surface"))?
             .natural_uv_domain_with_nurb(k)?;
         let uv_max = uv_domain.max();
         let uv_min = uv_domain.min();
@@ -224,6 +224,10 @@ impl SurfaceSurfaceFs {
 }
 
 impl FilletSolverOps for SurfaceSurfaceFs {
+    fn uses_constant_offset_equations(&self) -> bool {
+        true
+    }
+
     fn solver(&self) -> &FilletSolver {
         &self.base.solver
     }

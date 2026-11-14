@@ -50,7 +50,6 @@ const NOTCHED: &[u8] = include_bytes!("data/issue_2364_solidcraft_1080_notched_b
 fn kernel() -> Kernel {
     let mut f = UpstreamFixes::all();
     f.cone_unbounded_parameterized_as_nurb = false;
-    f.ellipse_open_arc_keeps_end_angle = false;
     f.fillet_overflow_crease_along_edge = false;
     f.fillet_refuse_rounds_breaking_through = false;
     Kernel {

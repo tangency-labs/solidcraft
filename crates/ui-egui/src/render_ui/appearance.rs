@@ -266,21 +266,50 @@ pub(in crate::render_workspace) fn remove(app: &mut SolveApp) {
     }
 }
 
-pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        let enabled = !app.session.selection.is_empty();
-        if ui_kit::icon_label_action(ui, app.tr("render.inspector_save_library"), Some("plus"), enabled, false)
-            .backing_on_hover_text(app.tr_label("Export design library..."))
-            .clicked()
-        {
+pub(in crate::render_workspace) fn remove_is_current(app: &SolveApp) -> bool {
+    let view = &app.render_workspace.view.inspector.selection_appearance;
+    view.draft.is_some()
+        && view.selection == app.session.selection
+        && view.revision == Some(app.session.revision)
+        && view.document.as_ref().is_some_and(|doc| Weak::ptr_eq(doc, &Arc::downgrade(&app.session.doc)))
+}
+
+pub(in crate::render_workspace) fn footer_stacked(app: &SolveApp, ui: &egui::Ui) -> bool {
+    ui_kit::icon_label_width(ui, app.tr("render.inspector_save_library"), Some("plus"), false)
+        + ui.spacing().item_spacing.x
+        + ui_kit::icon_label_width(ui, app.tr("render.inspector_reset"), None, false)
+        > ui.available_width()
+}
+
+pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui, stacked: bool) {
+    let enabled = !app.session.selection.is_empty();
+    let draw_save = |app: &mut SolveApp, ui: &mut egui::Ui| {
+        let label = app.tr("render.inspector_save_library");
+        let response = if ui_kit::icon_label_width(ui, label, Some("plus"), false) > ui.available_width() {
+            ui_kit::icon_action(ui, label, "plus", enabled, false)
+        } else {
+            ui_kit::icon_label_action(ui, label, Some("plus"), enabled, false)
+        };
+        if response.backing_on_hover_text(app.tr_label("Export design library...")).clicked() {
             app.start("library.export");
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui_kit::text_button(ui, app.tr("render.inspector_reset"), enabled).clicked() {
-                reset(app);
-            }
+    };
+    let draw_reset = |app: &mut SolveApp, ui: &mut egui::Ui| {
+        if ui_kit::text_button(ui, app.tr("render.inspector_reset"), enabled).clicked() {
+            reset(app);
+        }
+    };
+    if stacked {
+        ui.vertical(|ui| {
+            draw_save(app, ui);
+            draw_reset(app, ui);
         });
-    });
+    } else {
+        ui.horizontal(|ui| {
+            draw_save(app, ui);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| draw_reset(app, ui));
+        });
+    }
 }
 
 /// Returns false only when the explicit-target fallback should be shown.

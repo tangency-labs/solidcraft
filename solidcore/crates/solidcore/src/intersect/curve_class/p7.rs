@@ -97,7 +97,12 @@
 //!   when the classification has a surface 1 and a UV curve 1: upstream counts the
 //!   whole gap (or, with `bInSurfaceGaps`, its part in the tangent plane), so two seams
 //!   ending 1e-8 apart along the seam read as a near miss. A coincident edge's gap is
-//!   counted as upstream.
+//!   counted as upstream. A vertex that ends a coincident edge lying on the curve (the
+//!   seam's own edge) is that edge's end, so its gap across the curve is bounded by the
+//!   vertex's tolerance, not by the fixed `1000 * SM_EFF_ZERO`: a near miss only past the
+//!   tolerance. A cut wall whose seam edge ends on a body edge 1e-7 to 1e-5 across the
+//!   seam (the cut's sketch circle that far off the edge) read as a near miss; its loop
+//!   closes at the vertex within tolerance, and no sliver lies beside the seam.
 //! - **Recursion.** None.
 
 use std::borrow::Cow;
@@ -109,7 +114,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
 use crate::geom::tol::{eff_zero_ang_rad, scaled_zero, xsect_tol_3d_from_zones, ScaledZero};
-use crate::intersect::curve_class::p3::curve_is_degenerate;
+use crate::intersect::curve_class::p3::{curve_is_degenerate, straight_run_on_line};
 use crate::intersect::curve_class::p5::ClassGeometryMut;
 use crate::intersect::point_class::{
     object_zone_tol_3d, ClassGeometry, ClassObject, ClassObjectKind, PointClassType,
@@ -705,31 +710,113 @@ impl<O: ClassObject> CurveClassification<O> {
             None
         };
         let near_miss_dist_3d = EFF_ZERO * 1000.0;
-        let vertex_misses = |pc: &PointClassification<O>, t: f64, end: bool| -> Result<bool> {
-            if pc.point_class() != PointClassType::Vertex
-                || pc.gap_3d(k, geometry, surface)? < near_miss_dist_3d
-            {
-                return Ok(false);
-            }
-            let across = match self.surface1().and_then(|s| geometry.surface(s)) {
-                Some(s) => self.gap_across_curve(k, geometry, pc, t, end, s)?,
-                None => None,
+        // `on_curve`: the vertex ends a coincident edge that lies on the curve, so it is
+        // that edge's own end, and its gap across the curve is the edge's end gap, which
+        // the vertex's tolerance bounds (deviation, see the file header)
+        let vertex_misses =
+            |pc: &PointClassification<O>, t: f64, end: bool, on_curve: bool| -> Result<bool> {
+                if pc.point_class() != PointClassType::Vertex
+                    || pc.gap_3d(k, geometry, surface)? < near_miss_dist_3d
+                {
+                    return Ok(false);
+                }
+                let across = match self.surface1().and_then(|s| geometry.surface(s)) {
+                    Some(s) => self.gap_across_curve(k, geometry, pc, t, end, s)?,
+                    None => None,
+                };
+                let threshold = if on_curve && !self.edge_runs_beside(k, geometry, pc)? {
+                    max2(
+                        near_miss_dist_3d,
+                        object_zone_tol_3d(k, geometry, pc.object())?,
+                    )
+                } else {
+                    near_miss_dist_3d
+                };
+                Ok(across.is_none_or(|gap| gap >= threshold))
             };
-            Ok(across.is_none_or(|gap| gap >= near_miss_dist_3d))
-        };
 
         for ivl in self.intervals() {
             let mid = &ivl.mid;
+            let coincident = mid.point_class() == PointClassType::Edge;
+            let beside = coincident && mid.gap_3d(k, geometry, surface)? >= near_miss_dist_3d;
+            let on_curve = coincident && !beside;
 
-            if vertex_misses(&ivl.start, ivl.interval.min(), false)?
-                || (mid.point_class() == PointClassType::Edge
-                    && mid.gap_3d(k, geometry, surface)? >= near_miss_dist_3d)
-                || vertex_misses(&ivl.end, ivl.interval.max(), true)?
+            if vertex_misses(&ivl.start, ivl.interval.min(), false, on_curve)?
+                || beside
+                || vertex_misses(&ivl.end, ivl.interval.max(), true, on_curve)?
             {
                 return Ok(true);
             }
         }
 
+        Ok(false)
+    }
+
+    /// Whether an edge at the vertex end `pc` other than the curve's own edges runs beside
+    /// the curve: its middle within the vertex's tolerance of the curve. Such an edge and
+    /// the curve bound a sliver (a face between them a tolerance wide), where an edge that
+    /// leaves the vertex across the curve makes a corner. `false` where the vertex, its
+    /// edges or the curve cannot be resolved, or a drop fails.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] and cancellation from the evaluations and the drop; any
+    /// other failure counts as no edge beside.
+    fn edge_runs_beside(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        pc: &PointClassification<O>,
+    ) -> Result<bool> {
+        let (Some((b, EntityRef::Vertex(v))), Some(curve)) = (
+            pc.object().and_then(|o| geometry.topology_entity(o)),
+            self.curve().and_then(|c| geometry.curve(c)),
+        ) else {
+            return Ok(false);
+        };
+        let (Some(first), Some(last)) = (self.intervals().first(), self.intervals().last()) else {
+            return Ok(false);
+        };
+        let span = Extent1d::from_min_max(first.interval.min(), last.interval.max());
+        let tolerance = object_zone_tol_3d(k, geometry, pc.object())?;
+        // the curve's own edges: those coincident with it
+        let own: Vec<_> = self
+            .intervals()
+            .iter()
+            .filter(|i| i.mid.point_class() == PointClassType::Edge)
+            .filter_map(|i| i.mid.object().and_then(|o| geometry.topology_entity(o)))
+            .filter_map(|(_, e)| match e {
+                EntityRef::Edge(e) => Some(e),
+                _ => None,
+            })
+            .collect();
+        let Some(edges) = ignored(vertex::edges(b, v, None))? else {
+            return Ok(false);
+        };
+        for e in edges.into_iter().filter(|e| !own.contains(e)) {
+            let Ok(edge) = b.edge(e) else { continue };
+            let Some(other) = edge.curve.as_ref() else {
+                continue;
+            };
+            let Some(middle) = ignored(other.evaluate_point(k, edge.interval.mid()))? else {
+                continue;
+            };
+            let Some(dropped) = ignored(curve.drop_point(
+                k,
+                &span,
+                middle,
+                None,
+                tolerance,
+                None,
+                SolverOperation::Minimize,
+            ))?
+            else {
+                continue;
+            };
+            if dropped.success && dropped.distance <= tolerance {
+                return Ok(true);
+            }
+        }
         Ok(false)
     }
 
@@ -882,6 +969,25 @@ impl<O: ClassObject> CurveClassification<O> {
 
                 let edge_curve = edge_curve(geometry, edge_obj)?;
                 let edge_ivl = edge_interval(geometry, Some(edge_obj))?;
+
+                // Not upstream (#15718): a straight interval whose two ends lie within the
+                // intersection tolerance of a straight edge's line runs along that edge, by
+                // certificate (`straight_run_on_line`): it is coincident, not "maybe", and no
+                // heuristic below removes it as mislabelled. Upstream's case 1 removed such a
+                // run when it was short beside its edge, so two edges that coincide over a
+                // piece never got their edge definition and were never made one.
+                if !on_surface
+                    && straight_run_on_line(
+                        k,
+                        tgt_curve_3d,
+                        &tgt_ivl.interval,
+                        edge_curve,
+                        &edge_ivl,
+                        xsect_tol_3d,
+                    )?
+                {
+                    continue;
+                }
                 let tgt_curve: Cow<'_, Curve> = if on_surface {
                     Cow::Owned(crv_on_surf(
                         k,
@@ -1460,8 +1566,10 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         ))?;
         ignored(copy.trim(k, &mut final_ivl, TrimMode::Notify))?;
 
-        // reparameterize the OtherCurveCopy to the ThisEdge Interval
-        ignored(copy.edit_parameterization(k, &this_edge_ivl))?;
+        // reparameterize the OtherCurveCopy to the ThisEdge Interval (not upstream, #15505:
+        // exactly, as ThisEdge keeps its interval; ends the same within the scaled zero
+        // were left outside the copy's natural interval)
+        ignored(copy.edit_parameterization_exactly(k, &this_edge_ivl))?;
 
         // when needed reverse parameterization
         if (((start_start_close && start_end_close) || (end_start_close && end_end_close))

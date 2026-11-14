@@ -101,7 +101,10 @@ impl Brep {
     /// [`Brep::to_native`], with what the mapping kept as SMLib wrote it.
     pub fn to_native_report(&self) -> std::result::Result<(b::Brep, Report), ExportError> {
         let arrays = self.arrays().map_err(ExportError::Smlib)?;
-        let r = native(&arrays);
+        let r = native_ordered(&arrays).and_then(|(mut brep, report, order)| {
+            self.with_definitions(&mut brep, &order)?;
+            Ok((brep, report))
+        });
         if let Ok((record, _)) = &r {
             crate::trace::exported(self, record);
         }
@@ -114,11 +117,37 @@ impl Brep {
     /// `GetEdges`), the order its history uses.
     pub fn to_native_ordered(&self) -> std::result::Result<(b::Brep, Order), ExportError> {
         let arrays = self.arrays().map_err(ExportError::Smlib)?;
-        let r = native_ordered(&arrays).map(|(brep, _, order)| (brep, order));
+        let r = native_ordered(&arrays).and_then(|(mut brep, _, order)| {
+            self.with_definitions(&mut brep, &order)?;
+            Ok((brep, order))
+        });
         if let Ok((record, _)) = &r {
             crate::trace::exported(self, record);
         }
         r
+    }
+}
+
+impl Brep {
+    /// The record's blend faces as their definitions: each face of this body whose surface carries
+    /// a definition a record keeps (a procedural blend, a round of an exact class whose net has no
+    /// analytic label) is written as that definition, with its net, the face's NURBS, as its form.
+    /// The arrays carry the net alone; `order` places this body's faces in the record.
+    fn with_definitions(&self, record: &mut b::Brep, order: &Order) -> Res<()> {
+        let definitions = crate::core::definition::definitions(self.core()).map_err(ExportError::Smlib)?;
+        for (i, definition) in definitions.into_iter().enumerate() {
+            let Some(definition) = definition else { continue };
+            let at = if order.faces.is_empty() { i } else { *order.faces.get(i).ok_or_else(|| invalid("a face the order does not place"))? };
+            let face = record.faces.get_mut(at).ok_or_else(|| invalid("a face the record does not have"))?;
+            let net = face.nurbs.as_ref().unwrap_or(&face.surface);
+            if !matches!(net, b::Surface::Spline { .. } | b::Surface::RationalSpline { .. }) {
+                continue;
+            }
+            let net = face.nurbs.take().unwrap_or_else(|| face.surface.clone());
+            face.surface = b::Surface::Blend { definition: Box::new(definition) };
+            face.nurbs = Some(net);
+        }
+        Ok(())
     }
 }
 
@@ -406,6 +435,43 @@ impl Nurbs {
     }
 }
 
+/// The points of edge `e`'s start and end vertices, in SMLib's direction along it.
+fn edge_ends(flat: View, e: usize) -> Res<[[f64; 3]; 2]> {
+    let ends = flat.i(EDGE_VERTICES);
+    let point = |k: usize| -> Res<[f64; 3]> {
+        let v = usize::try_from(at(ends, k, "edge vertices")?).map_err(|_| invalid("edge vertex"))?;
+        v3(flat.f(VERTEX_POSITION), v, "edge vertex")
+    };
+    Ok([point(2 * e)?, point(2 * e + 1)?])
+}
+
+/// `SM_INFINITE_PARAMETER`: the parameter range of an unbounded line.
+const INFINITE_PARAMETER: f64 = 1_234_567.0;
+
+/// A NURBS edge on an unbounded line given as a B-spline (degree 1, two control points of one
+/// weight, knots at [`INFINITE_PARAMETER`]): the line through the edge's own vertices, its
+/// interval, and the [`TrimMap`] that carries SMLib's parameter onto it (affine, as the
+/// B-spline's is). SMLib's mirror gives every line so (upstream's `CreateMirrorCurve` over the
+/// line's whole range): control points that far out lose the edge's precision and, once the edge
+/// is longer than 810 mm, pass the 1e9 the flat arrays take back, so the mirrored body could not
+/// be measured or used again. None for anything else: a B-spline with knots of its own (a round's
+/// straight piece) stays as SMLib holds it.
+fn straight_piece(n: &Nurbs, r: [f64; 2], ends: [[f64; 3]; 2]) -> Option<(b::Curve, [f64; 2], [f64; 2])> {
+    let ([k0, k1], [w0, w1]) = match (n.knots.as_slice(), n.points.len(), n.weights.as_slice()) {
+        ([a, b, c, d], 2, [w0, w1]) if a == b && c == d => ([*a, *c], [*w0, *w1]),
+        _ => return None,
+    };
+    let (lo, hi) = (r[0].min(r[1]), r[0].max(r[1]));
+    if w0 != w1 || k0 != -INFINITE_PARAMETER || k1 != INFINITE_PARAMETER || !(k0 < lo && lo < hi && hi < k1) || ends[0] == ends[1] {
+        return None;
+    }
+    // The vertex at `lo` starts the line: SMLib's start vertex sits at r[0].
+    let (start, end) = if r[0] <= r[1] { (ends[0], ends[1]) } else { (ends[1], ends[0]) };
+    let scale = 1.0 / (hi - lo);
+    let on = |t: f64| (t - lo) * scale;
+    Some((b::Curve::Line { start, end }, [on(r[0]), on(r[1])], [scale, -lo * scale]))
+}
+
 /// How a UV trim's parameter (SMLib's edge parameter, as the arrays carry it) becomes the edge
 /// record's: t ↦ scale · t + offset, scale > 0. None where the record's parameter is not an
 /// affine image of SMLib's (a circle or ellipse, whose angle is not its NURBS parameter).
@@ -485,14 +551,20 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, Option<b::Curve>, [
                 }
             }
             CURVE_NURBS => {
-                let c = next_nurbs()?.record();
-                // A NURBS edge stays the NURBS SMLib holds, its trims on its own parameter: SMLib
-                // gives lines, circles and ellipses as their own kinds, and nothing is recognised here.
-                // SMLib's interval may start or end a rounding past its knots (a variable round's
-                // end trimmed by a cylinder, ladder 07-fillets/012: 7e-15 before the first knot).
-                kept += 1;
-                let r = onto(r, c.natural());
-                (c, None, r, Some([1.0, 0.0]))
+                let n = next_nurbs()?;
+                if let Some((line, r, map)) = straight_piece(&n, r, edge_ends(flat, e)?) {
+                    (line, None, r, Some(map))
+                } else {
+                    let c = n.record();
+                    // A NURBS edge stays the NURBS SMLib holds, its trims on its own parameter: SMLib
+                    // gives lines, circles and ellipses as their own kinds, and nothing else is recognised
+                    // here (a piece of a straight B-spline is a line, [`straight_piece`]).
+                    // SMLib's interval may start or end a rounding past its knots (a variable round's
+                    // end trimmed by a cylinder, ladder 07-fillets/012: 7e-15 before the first knot).
+                    kept += 1;
+                    let r = onto(r, c.natural());
+                    (c, None, r, Some([1.0, 0.0]))
+                }
             }
             other => return Err(unsupported(format!("SMLib curve kind {other}"))),
         });
@@ -546,15 +618,14 @@ fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
 }
 
 /// A trim along its edge, its parameter moved onto the edge record's ([`TrimMap`]): one whose
-/// edgeuse runs against the edge (`same` false) reversed exactly (control points in reverse
-/// order, knots t ↦ a + b − t), then the knots mapped. SMLib keeps a trim on its edge's
-/// interval; where the two ends differ by the rounding of SMLib's own or this remap (within the
-/// schema's 10⁻⁹ of the interval's magnitude, at least 1), or by more but at one point of the edge
-/// within its tolerance (`on_edge`: a circle on its NURBS form whose end lies a rounding past the
-/// quarter line its trim stops on moves along it 10⁻⁷ of the form's parameter, a micron), every
-/// knot within that of an interval end is that end, and the end spans this leaves without length
-/// go with their control points, so the pcurve is a valid record defined on the edge; farther
-/// apart is an error.
+/// edgeuse runs against the edge (`same` false) reversed exactly (points reversed, knots
+/// t ↦ a + b − t), then the knots mapped. SMLib keeps a trim on its edge's interval; where the
+/// ends differ by the rounding of SMLib's own or this remap (10⁻⁹ of the interval's magnitude,
+/// no floor: a micro edge on knots spanning 10⁻⁷ lies on [0, 6e-12]), or by more but at one point
+/// of the edge within its tolerance (`on_edge`: a circle on its NURBS form ending a rounding past
+/// its trim's quarter line), every knot within that of an end is that end, and the end spans left
+/// without length go with their control points. Farther is an error, as is an interval of at most
+/// `SM_EFF_ZERO` (10⁻¹², SMLib's absolute knot resolution: no trim fits on it).
 fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2], on_edge: &dyn Fn(f64, f64) -> bool) -> Res<b::Curve2> {
     fn along<T: Clone>(knots: &[f64], points: &[T], same: bool) -> (Vec<f64>, Vec<T>) {
         if same {
@@ -585,7 +656,7 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
         let n = points.len();
         let degree = k.len().checked_sub(n + 1).ok_or_else(|| invalid("UV trim knots"))?;
         let (a, z) = (at(&k, degree, "UV trim knots")?, at(&k, n, "UV trim knots")?);
-        let rounding = 1e-9 * t0.abs().max(t1.abs()).max(1.0);
+        let rounding = 1e-9 * t0.abs().max(t1.abs());
         // Each end's slack: the rounding, or the gap where it is one point of the edge (less
         // than a quarter of the interval, so the two ends' slacks never meet).
         let end = |x: f64, t: f64| {
@@ -598,8 +669,8 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
                 None
             }
         };
-        let (Some(s0), Some(s1)) = (end(a, t0), end(z, t1)) else {
-            return Err(invalid(format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}]")));
+        let (Some(s0), Some(s1), false) = (end(a, t0), end(z, t1), t1 - t0 <= 1e-12) else {
+            return Err(invalid(format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}] (SMLib's knot resolution is 1e-12)")));
         };
         // A knot within the rounding of an end is that end, and so is one past the end on the
         // side the trim runs over it, up to the trim's end; a knot inside the edge's interval

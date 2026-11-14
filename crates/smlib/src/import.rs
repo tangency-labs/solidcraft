@@ -188,7 +188,8 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool, bare: &HashSet<(u32, 
         // parameterised on, whose range and trims these are (FACE_NURBS_FORM). A revolution
         // (SMLib has no class for one) is that form alone, a NURBS face. A ball patch is its form
         // too, as a NURBS face's block under its own kind, with its sphere as its definition.
-        let form_is_face = f.nurbs.is_some() && matches!(f.surface, b::Surface::PlacedRevolution { .. } | b::Surface::BallPatch { .. });
+        let form_is_face =
+            f.nurbs.is_some() && matches!(f.surface, b::Surface::PlacedRevolution { .. } | b::Surface::BallPatch { .. } | b::Surface::Blend { .. });
         let spline = match (&f.nurbs, &f.surface) {
             (Some(n), b::Surface::BallPatch { center, radius }) => ball_patch(&mut a, n, *center, *radius, f.domain)?,
             (Some(n), _) if form_is_face => surface(&mut a, n, f.domain, analytic)?,
@@ -401,6 +402,7 @@ fn surface(a: &mut Arrays, s: &b::Surface, domain: [[f64; 2]; 2], analytic_plane
         }
         b::Surface::PlacedRevolution { profile, origin, axis, matrix, forward } => revolution(a, profile, *origin, *axis, matrix, *forward, domain)?,
         b::Surface::BallPatch { .. } => return Err(Unsupported::Invalid("a ball patch without its NURBS form")),
+        b::Surface::Blend { .. } => return Err(Unsupported::Invalid("a blend without its NURBS form")),
     }
     Ok(false)
 }
@@ -667,20 +669,47 @@ mod tests;
 
 impl crate::Brep {
     /// A body from flat arrays.
+    /// A body built from `record` (its faces in the record's order, each blend face on its net),
+    /// with its blend faces given their definitions back, rebuilt and their nets certified again
+    /// (`solidcore_ops::blend_definition::adopt`). A net its definition does not certify refuses
+    /// the body.
+    fn adopt(self, record: &b::Brep) -> crate::Result<crate::Brep> {
+        let faces: Vec<(usize, &solidcore_record::brep::blend::BlendDefinition)> = record
+            .faces
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| match &f.surface {
+                b::Surface::Blend { definition } => Some((i, definition.as_ref())),
+                _ => None,
+            })
+            .collect();
+        if faces.is_empty() {
+            return Ok(self);
+        }
+        if crate::core::counts(self.core())?[0] != record.faces.len() {
+            return Err(crate::Error::Record(Unsupported::Invalid("the body built has another number of faces than its record")));
+        }
+        crate::core::definition::adopt(self.core(), &faces)?;
+        Ok(self)
+    }
+
     pub(crate) fn from_arrays(a: &Arrays) -> crate::Result<crate::Brep> {
         crate::core::from_arrays(a).map(crate::Brep::made_core)
     }
 
     /// The SMLib B-rep of a schema 4 record. `trusted` as in [`arrays`].
     pub fn from_record(brep: &b::Brep, trusted: bool) -> crate::Result<crate::Brep> {
-        let r = arrays(brep, trusted).map_err(crate::Error::Record).and_then(|a| crate::Brep::from_arrays(&a));
+        let r = arrays(brep, trusted).map_err(crate::Error::Record).and_then(|a| crate::Brep::from_arrays(&a)).and_then(|body| body.adopt(brep));
         crate::trace::imported(&r, brep, trusted, false);
         r
     }
 
     /// [`crate::Brep::from_record`] through [`arrays_keeping_splines`].
     pub fn from_record_keeping_splines(brep: &b::Brep, trusted: bool) -> crate::Result<crate::Brep> {
-        let r = arrays_keeping_splines(brep, trusted).map_err(crate::Error::Record).and_then(|a| crate::Brep::from_arrays(&a));
+        let r = arrays_keeping_splines(brep, trusted)
+            .map_err(crate::Error::Record)
+            .and_then(|a| crate::Brep::from_arrays(&a))
+            .and_then(|body| body.adopt(brep));
         crate::trace::imported(&r, brep, trusted, true);
         r
     }

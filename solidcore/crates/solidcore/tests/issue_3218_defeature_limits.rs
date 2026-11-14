@@ -9,7 +9,9 @@
 //! - `TangentNeighbours`: `fillet1019`'s fillet that ends on another, tangent, fillet: the
 //!   patch's piece on the wall is cut from that fillet's extension only along an edge the
 //!   kernel proves smooth, so nothing bounds it there;
-//! - `NotEnclosed`: a box face, whose neighbours, extended, run past it.
+//! - `NotEnclosed`: a box face, whose neighbours, extended, run past it;
+//! - `ExtensionWithinTolerance`: the faces along a fillet's loop extended by less than the
+//!   distance within which the loop's vertices and the patch's are one point.
 //!
 //! The models are the upstream test files, read by the Rust reader when the pinned upstream
 //! checkout is present.
@@ -99,7 +101,7 @@ fn limit(
     );
     match &r {
         Err(e @ SolidError::Failed(f)) => {
-            assert!(matches!(f.entity, Some(EntityRef::Edge(_))), "{r:?}");
+            assert!(matches!(f.entity(), Some(EntityRef::Edge(_))), "{r:?}");
             assert_eq!(e.sm_status(), Some(SM_ERR), "{r:?}");
             match f.reason {
                 Reason::Defeature(d) => Some(d),
@@ -164,6 +166,127 @@ fn a_box_face_is_refused_as_not_enclosed() {
         return;
     };
     assert!(matches!(l, DefeatureFailure::NotEnclosed { .. }), "{l:?}");
+}
+
+/// `box_with_large_fillet`'s fillet (face 6), its faces extended by 0.001: the loop's
+/// vertices carry tolerances of 2.374e-3, so a vertex of the extended boundary and the
+/// loop's vertex are one point within their summed zone tolerances and the 0.001 extension
+/// is no feature the kernel can resolve (the merged vertex's tolerance covers it). The
+/// refusal names that identity radius, from the loop vertices' tolerances and the patch's:
+/// a lower bound on the extension, not a size that builds a valid body (see the bracket test
+/// below and #16457).
+#[test]
+fn an_extension_within_the_loop_s_tolerance_is_refused_naming_the_identity_radius() {
+    let Some(l) = limit(
+        "box_with_large_fillet.smb",
+        6,
+        RebuildBrepType::ExtendSurface,
+        Some(0.001),
+    ) else {
+        return;
+    };
+    let DefeatureFailure::ExtensionWithinTolerance {
+        extended_by,
+        identity_radius,
+    } = l
+    else {
+        panic!("a refusal naming the identity radius, got {l:?}");
+    };
+    assert_eq!(extended_by, 0.001);
+    let mut k = Kernel::default();
+    let mut b = read(&mut k, "box_with_large_fillet.smb").unwrap();
+    let widest = bp1::vertices(&b, None)
+        .unwrap()
+        .into_iter()
+        .map(|v| b.vertex(v).unwrap().tolerance)
+        .fold(0.0_f64, f64::max);
+    let patch = b.tolerance();
+    assert!(
+        identity_radius > widest && identity_radius <= (widest + patch) * (1.0 + 1e-12),
+        "radius {identity_radius}, loop vertex tolerance {widest}, patch {patch}"
+    );
+    let faces = bp1::faces(&b, None).unwrap();
+    let mut ex = FeatureExecutive::new(&mut k, &mut b).unwrap();
+    ex.add_feature(
+        &mut k,
+        &[faces[6]],
+        RebuildBrepType::ExtendSurface,
+        RebuildBrepType::ExtendSurface,
+    )
+    .unwrap()
+    .unwrap();
+    ex.set_base_ext_dist(1.01 * identity_radius);
+    let r = ex.do_defeature(&mut k);
+    assert!(r.is_ok(), "extended by 1.01 x {identity_radius}: {r:?}");
+}
+
+/// The same fillet bracketed at its identity radius: extended by 0.9999 x the radius the
+/// patch still fails and is refused naming the radius; extended by 1.0001 x it builds. On
+/// this model the construction's own failure ends at the radius to within 1e-4 (measured:
+/// it fails at 2.3843e-3 and builds at 2.3845e-3, the radius being 2.38440e-3), so the
+/// refusal is named over no extension that would have built. The body built past it is not
+/// valid: Level 2 reports 6 x `SmBrep` test 61 (an edge fails `ValidateGeometry`), as main's
+/// body does at every extension from 0.001 to 0.01 (#16457). The radius is a lower bound on
+/// the extension, never a size that fits; this asserts the defect as it is, so a fix shows.
+#[test]
+fn the_identity_radius_brackets_where_the_patch_starts_to_build() {
+    // (no upstream test file: nothing to check)
+    let Some(l) = limit(
+        "box_with_large_fillet.smb",
+        6,
+        RebuildBrepType::ExtendSurface,
+        Some(0.001),
+    ) else {
+        return;
+    };
+    let DefeatureFailure::ExtensionWithinTolerance {
+        identity_radius, ..
+    } = l
+    else {
+        panic!("a refusal naming the identity radius, got {l:?}");
+    };
+    let below = 0.9999 * identity_radius;
+    let l = limit(
+        "box_with_large_fillet.smb",
+        6,
+        RebuildBrepType::ExtendSurface,
+        Some(below),
+    );
+    assert_eq!(
+        l,
+        Some(DefeatureFailure::ExtensionWithinTolerance {
+            extended_by: below,
+            identity_radius,
+        })
+    );
+    let mut k = Kernel::default();
+    let mut b = read(&mut k, "box_with_large_fillet.smb").unwrap();
+    let faces = bp1::faces(&b, None).unwrap();
+    let mut ex = FeatureExecutive::new(&mut k, &mut b).unwrap();
+    ex.add_feature(
+        &mut k,
+        &[faces[6]],
+        RebuildBrepType::ExtendSurface,
+        RebuildBrepType::ExtendSurface,
+    )
+    .unwrap()
+    .unwrap();
+    ex.set_base_ext_dist(1.0001 * identity_radius);
+    let r = ex.do_defeature(&mut k);
+    assert!(r.is_ok(), "extended by 1.0001 x {identity_radius}: {r:?}");
+    drop(ex);
+    let check = solidcore::topology::brep::validation::check_brep(
+        &mut k,
+        &mut b,
+        solidcore::topology::brep::validation::CheckLevel::Level2,
+    )
+    .unwrap();
+    let lines = check.lines();
+    let invalid_edges = lines.iter().filter(|l| l.contains("Test #61")).count();
+    assert_eq!(
+        invalid_edges, 6,
+        "#16457: the body past the radius fails ValidateGeometry on 6 edges: {lines:?}"
+    );
 }
 
 /// A kept feature carries its limit too: of the two fillets of `cyl_on_box_w_fillet` one

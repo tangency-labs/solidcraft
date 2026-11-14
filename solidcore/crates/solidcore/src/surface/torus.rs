@@ -55,14 +55,13 @@
 //! - **Iso endpoint angles.** Correct upstream's explicit-domain endpoint vectors
 //!   to be relative to the iso circle's center, not the torus origin (#774).
 //!   Extraction, periodic wrapping and interval-length policy remain unchanged.
-//! - **Copies.** As upstream's copy constructor, which leaves `m_bInsideOut` at its
-//!   default, `Clone` (and [`Torus::copy`]) resets [`Torus::inside_out`] to `false`.
-//!   The constructor also leaves it `false` (its `bInsideOut` only orients the minor
-//!   circle); only [`Torus::rebuild_step_from_nurb_parameters`] and
-//!   [`Torus::read_from_db`] set it. With the opt-in
-//!   `Kernel::fixes.torus_keeps_inside_out` (WR-500, #1490) the constructor sets it
-//!   from `bInsideOut` and a torus made, rebuilt or read that way keeps it in its
-//!   copies (`SmSurfOfRevolution` Test #11 compares it with the generator's).
+//! - **Inside out (WR-500, #1490).** The constructor sets [`Torus::inside_out`] from
+//!   its generator's bit (`bInsideOut` for the circle it makes, the given curve's own
+//!   for `pOptCircleNurb`), and `Clone` (and [`Torus::copy`]) copies it, so the surface and
+//!   its generating circle always agree (`SmSurfOfRevolution` Test #11 compares them).
+//!   Upstream's constructor only orients the minor circle with `bInsideOut`, leaving
+//!   `m_bInsideOut` `FALSE`, and its copy constructor resets it; a torus that forgot it
+//!   was written to STEP with the wrong `same_sense`.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments and the
 //!   arguments upstream marks `NotUsed` (`EvaluateSTEP`'s side flags,
 //!   `CreateIsoParametricCurve`'s approximation tolerance, `ReadFromDB`'s type) are
@@ -173,23 +172,17 @@ pub struct Torus {
     pub(crate) minor_radius: f64,
     /// `m_bInsideOut`.
     pub(crate) inside_out: bool,
-    /// Not upstream (WR-500, #1490): made, rebuilt or read with
-    /// `Kernel::fixes.torus_keeps_inside_out`, so the copy keeps
-    /// [`Self::inside_out`].
-    pub(crate) keeps_inside_out: bool,
 }
 
-/// The copy constructor: copies the surface of revolution and the radii; the
-/// inside-out flag keeps its default (`false`), as upstream, unless the torus keeps it
-/// (`Kernel::fixes.torus_keeps_inside_out`, WR-500).
+/// The copy constructor: copies the surface of revolution, the radii and the inside-out
+/// flag (WR-500: upstream's resets the flag).
 impl Clone for Torus {
     fn clone(&self) -> Self {
         Self {
             base: self.base.clone(),
             major_radius: self.major_radius,
             minor_radius: self.minor_radius,
-            inside_out: self.keeps_inside_out && self.inside_out,
-            keeps_inside_out: self.keeps_inside_out,
+            inside_out: self.inside_out,
         }
     }
 }
@@ -207,7 +200,10 @@ fn gen_circle<'a>(gen: Option<&'a Curve>, op: &'static str) -> Result<&'a Ellips
     match gen.map(Curve::kind) {
         Some(CurveKind::Ellipse(e)) => Ok(e),
         Some(_) => Err(SolidError::invalid_input(op, "generator is not a circle")),
-        None => Err(SolidError::null_pointer(op)),
+        None => Err(SolidError::surface_missing(
+            op,
+            "the torus's generator circle",
+        )),
     }
 }
 
@@ -226,7 +222,6 @@ impl Torus {
             major_radius: UNDEF_DOUBLE,
             minor_radius: UNDEF_DOUBLE,
             inside_out: false,
-            keeps_inside_out: false,
         }
     }
 
@@ -236,8 +231,9 @@ impl Torus {
     /// minor circle at `origin + major_radius x_axis` in the plane of `x_axis` and
     /// `x_axis x y_axis` over the domain's V interval, inside out with
     /// `opts.inside_out` (`SmCircle::CreateCanonical`); the generator is then not
-    /// tested for planarity (it is marked planar). The surface's own inside-out flag
-    /// stays `false`, as upstream.
+    /// tested for planarity (it is marked planar). The surface's own inside-out flag is
+    /// its generator's (WR-500; upstream leaves it `false`): `opts.inside_out` for the
+    /// circle made here, the given curve's own for `opts.circle_nurb`.
     ///
     /// # Errors
     ///
@@ -282,7 +278,7 @@ impl Torus {
                 if e.is_unported_or_cancelled() {
                     e
                 } else {
-                    SolidError::null_pointer(OP_NEW)
+                    SolidError::surface_missing(OP_NEW, "the torus's generator circle")
                 }
             })?;
             base.gen_curve = Some(Curve::from(circle));
@@ -290,15 +286,14 @@ impl Torus {
         };
 
         // (the self-intersection test of a major radius below the minor radius only
-        // warns upstream); not upstream (WR-500, opt-in): the surface is inside out
-        // with its generator
-        let keeps_inside_out = k.fixes.torus_keeps_inside_out;
+        // warns upstream); not upstream (WR-500): the surface is inside out with its
+        // generator, the circle made inside out with `opts.inside_out` or the one given
+        let inside_out = base.gen_curve.as_ref().is_some_and(Curve::inside_out_bit);
         Ok(Self {
             base,
             major_radius,
             minor_radius,
-            inside_out: keeps_inside_out && opts.inside_out,
-            keeps_inside_out,
+            inside_out,
         })
     }
 
@@ -324,7 +319,10 @@ impl Torus {
             || major_radius.is_nan()
             || major_radius <= EFF_ZERO
         {
-            return Err(SolidError::sm_err(OP_CANONICAL));
+            return Err(SolidError::surface_failed(
+                OP_CANONICAL,
+                "a radius of the torus is not above zero",
+            ));
         }
 
         // In the future, allow user to specify angles
@@ -346,11 +344,19 @@ impl Torus {
         // Build NURB; fail cleanly rather than leak a null-NURB object.
         match torus.make_nurb(k) {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::sm_err(OP_CANONICAL)),
+            Err(_) => {
+                return Err(SolidError::surface_failed(
+                    OP_CANONICAL,
+                    "the torus's NURB could not be made",
+                ))
+            }
             Ok(()) => {}
         }
         if torus.base.base.gw_nurb().is_none() {
-            return Err(SolidError::sm_err(OP_CANONICAL));
+            return Err(SolidError::surface_failed(
+                OP_CANONICAL,
+                "the torus has no NURB",
+            ));
         }
         Ok(torus)
     }
@@ -687,7 +693,7 @@ impl Torus {
             .base
             .nurb
             .as_mut()
-            .ok_or(SolidError::null_pointer(OP_OFFSET))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_OFFSET, "the offset torus's NURB"))?;
         let ix = off_nurb.indices();
 
         // For every m_pNurb ControlPoint - make inner iteration the Sweep direction
@@ -771,6 +777,19 @@ impl Torus {
         convert_uv_from_nurbs_to_step(&self.base, k, nurbs_uv)
     }
 
+    /// [`Self::convert_uv_from_nurbs_to_step`] with the polar converters' exactness.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::convert_uv_from_nurbs_to_step`].
+    pub(crate) fn convert_uv_from_nurbs_to_step_exact(
+        &self,
+        k: &Kernel,
+        nurbs_uv: Point2,
+    ) -> Result<(Point2, bool)> {
+        convert_uv_from_nurbs_to_step_exact(&self.base, k, nurbs_uv)
+    }
+
     // ---- STEP evaluation ------------------------------------------------------------
 
     /// The point and triangular derivatives at the STEP parameters `uv` (degrees),
@@ -811,7 +830,10 @@ impl Torus {
     ) -> Result<()> {
         // check input
         if hu > 3 || hv > 3 {
-            return Err(SolidError::sm_err(OP_EVAL_STEP));
+            return Err(SolidError::surface_failed(
+                OP_EVAL_STEP,
+                "the STEP form evaluates derivatives up to order 3 only",
+            ));
         }
         if hu != hv {
             return Err(SolidError::invalid_input(
@@ -1217,7 +1239,7 @@ impl Torus {
         if k.fixes.found_torus_sphere_keep_tested_nurb {
             let nurb = test
                 .gw_nurb()
-                .ok_or_else(|| SolidError::null_pointer(OP_NURB_TORUS))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_NURB_TORUS, "the tested NURB"))?;
             torus.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
             torus.base.base.nurb_is_borrowed = false;
             ignore_status(torus.rebuild_step_from_nurb_parameters(k))?;
@@ -1250,7 +1272,10 @@ impl Torus {
             || srf.degree(SurfParamType::V) != 2
             || !srf.is_rational()
         {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the NURB is not a rational surface of degree 2",
+            ));
         }
 
         // evaluate min/max domain points
@@ -1284,7 +1309,10 @@ impl Torus {
 
         // quit when not a properly oriented torus
         if !is_torus_with_swap_uv && !is_torus_no_swap_uv {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the NURB is not a properly oriented torus",
+            ));
         }
 
         // locals
@@ -1317,7 +1345,12 @@ impl Torus {
             fitted_sides(&ref_frame, ref_iso.angles.ok_or_else(missing)?),
             meridians(srf, swap_uv)?,
         )
-        .ok_or_else(|| SolidError::sm_err(OP_REBUILD))?;
+        .ok_or_else(|| {
+            SolidError::surface_failed(
+                OP_REBUILD,
+                "a meridian has no control point off the axis on its side",
+            )
+        })?;
 
         // Install the origin into pRefFrame.  // [B328]
         let _ = ref_frame.set_canonical(torus_origin, x_axis, y_axis);
@@ -1450,7 +1483,10 @@ impl Torus {
 
         // no work - GenCurve is degenerate
         if circle.is_degenerate(scaled_zero) {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the generator circle is degenerate",
+            ));
         }
 
         // set m_pGenCurve
@@ -1460,8 +1496,6 @@ impl Torus {
         self.major_radius = maj_rad;
         self.minor_radius = min_rad;
         self.inside_out = inside_out;
-        // not upstream (WR-500, opt-in): its copies keep the flag
-        self.keeps_inside_out |= k.fixes.torus_keeps_inside_out;
         self.base.planar_generator = true;
         self.base.position = ref_frame;
         self.base.swap_uv = swap_uv;
@@ -1517,7 +1551,10 @@ impl Torus {
         let mut d_scale = 1.0;
         if let Some(s) = scale {
             if !are_same(s.x, s.y) || !are_same(s.x, s.z) || s.x < EFF_ZERO {
-                return Err(SolidError::sm_err(OP_TRANSFORM));
+                return Err(SolidError::surface_failed(
+                    OP_TRANSFORM,
+                    "an analytic surface cannot be scaled non-uniformly",
+                ));
             }
             d_scale = s.x;
         }
@@ -1554,8 +1591,6 @@ impl Torus {
     pub fn read_from_db(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Self> {
         // init output object
         let mut torus = Self::empty();
-        // not upstream (WR-500, opt-in): its copies keep the flag read
-        torus.keeps_inside_out = k.fixes.torus_keeps_inside_out;
 
         if db.file_type() == FileType::Ascii {
             if let Some(s) = db.in_stream_mut() {
@@ -1612,7 +1647,7 @@ impl Revolved for Torus {
 fn meridians(srf: &BSplineSurface, swap_uv: bool) -> Result<[Vec<Point3>; 2]> {
     let nurb = srf
         .gw_nurb()
-        .ok_or_else(|| SolidError::null_pointer(OP_NURB_TORUS))?;
+        .ok_or_else(|| SolidError::surface_missing(OP_NURB_TORUS, "the form's NURB"))?;
     let (n, m) = (nurb.n(), nurb.m());
     let column = |end: bool| -> Result<Vec<Point3>> {
         if swap_uv {
@@ -1849,6 +1884,16 @@ fn convert_uv_from_nurbs_to_step(
     k: &Kernel,
     nurbs_uv: Point2,
 ) -> Result<Point2> {
+    Ok(convert_uv_from_nurbs_to_step_exact(base, k, nurbs_uv)?.0)
+}
+
+/// [`convert_uv_from_nurbs_to_step`] with the polar converters' exactness: `false` where
+/// the sweep or generator angle is not a closed form's.
+fn convert_uv_from_nurbs_to_step_exact(
+    base: &SurfOfRevolution,
+    k: &Kernel,
+    nurbs_uv: Point2,
+) -> Result<(Point2, bool)> {
     // m_bSwapUV - Nurb and STEP parameters are swapped
     let nurb_uv = if base.swap_uv {
         Point2::new(nurbs_uv.y, nurbs_uv.x)
@@ -1861,14 +1906,14 @@ fn convert_uv_from_nurbs_to_step(
         OP_CONVERT,
         "polar converter has no curve",
     ))?;
-    let (step_x, _exact) = base
+    let (step_x, exact_x) = base
         .polar
         .convert_to_polar_parameter(k, polar_curve, nurb_uv.x)?;
 
     // convert genCurve NurbParam to PolarParam
     let circle = gen_circle(base.gen_curve.as_ref(), OP_CONVERT)?;
-    let polar_param = circle.convert_t_from_nurbs_to_step(k, nurb_uv.y)?;
-    Ok(Point2::new(step_x, polar_param))
+    let (polar_param, exact_y) = circle.convert_t_from_nurbs_to_step_exact(k, nurb_uv.y)?;
+    Ok((Point2::new(step_x, polar_param), exact_x && exact_y))
 }
 
 /// Not upstream (WR-408, tangency-labs/solidcore#1112; the SolidCraft fork's
@@ -1923,6 +1968,7 @@ fn torus_gen_curve_interval(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::surface::SurfaceFailure;
 
     fn canonical(k: &Kernel, swap: bool, inside_out: bool) -> Torus {
         let frame = Axis2Placement::new(
@@ -2092,9 +2138,58 @@ mod tests {
         let k = Kernel::default();
         let frame = Axis2Placement::IDENTITY;
         for (a, b) in [(0.0, 1.0), (1.0, 0.0), (f64::NAN, 1.0), (-1.0, 0.5)] {
-            let r = Torus::create_canonical(&k, &frame, a, b, TorusOptions::default(), None);
-            assert!(matches!(r, Err(SolidError::Upstream { .. })));
+            let e = Torus::create_canonical(&k, &frame, a, b, TorusOptions::default(), None)
+                .unwrap_err();
+            assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+            assert_eq!(e.operation(), OP_CANONICAL);
+            assert_eq!(
+                e.surface_failure(),
+                Some(&SurfaceFailure::Failed(
+                    "a radius of the torus is not above zero"
+                ))
+            );
         }
+    }
+
+    /// The torus's failures carry a typed reason and keep the status, kind and operation
+    /// of the bare status each replaced.
+    #[test]
+    fn torus_failures_keep_their_upstream_answers() {
+        let k = Kernel::default();
+        let mut t = canonical(&k, false, false);
+        let e = t.evaluate_step(Point2::new(0.0, 0.0), 4, 4).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.operation(), OP_EVAL_STEP);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::Failed(
+                "the STEP form evaluates derivatives up to order 3 only"
+            ))
+        );
+        let e = t
+            .transform(
+                &k,
+                &Axis2Placement::IDENTITY,
+                Some(Vec3::new(1.0, 2.0, 1.0)),
+            )
+            .unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.operation(), OP_TRANSFORM);
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::Failed(
+                "an analytic surface cannot be scaled non-uniformly"
+            ))
+        );
+        let e = gen_circle(None, OP_NEW).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.operation(), OP_NEW);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Missing);
+        assert_eq!(
+            e.to_string(),
+            format!("{OP_NEW}: the torus's generator circle is missing")
+        );
     }
 
     #[test]

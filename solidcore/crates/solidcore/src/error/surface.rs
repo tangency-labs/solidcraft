@@ -15,14 +15,14 @@
 //! | [`SurfaceFailure::OffSurface`]     | `SM_ERR_NOT_WITHIN_TOLERANCE`  |
 //!
 //! Deviations: not upstream. A failure says in a phrase what went wrong; the failure's
-//! `operation` path says which routine. No failure names an entity: the sites they
-//! replace named none. The failures that are checks of a caller's arguments stay
+//! `operation` path says which routine. A failure names an entity only where the site it
+//! replaces named one (a blend face whose net fails its re-certification). The failures that are checks of a caller's arguments stay
 //! [`crate::SolidError::InvalidInput`]. Only part of `crate::surface` uses these yet; the
 //! files that still build bare statuses are listed in this module's ratchet test.
 
 use super::{
-    ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NOT_WITHIN_TOLERANCE,
-    SM_ERR_NULL_POINTER, SM_ERR_OUTSIDE_OF_DOMAIN,
+    EntityRef, ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT,
+    SM_ERR_NOT_WITHIN_TOLERANCE, SM_ERR_NULL_POINTER, SM_ERR_OUTSIDE_OF_DOMAIN,
 };
 
 /// Why a surface routine fails.
@@ -86,6 +86,17 @@ impl crate::SolidError {
     #[must_use]
     pub(crate) fn surface(operation: &'static str, failure: SurfaceFailure) -> Self {
         Failure::new(operation, failure).into_error()
+    }
+
+    /// [`crate::SolidError::Failed`] for a surface routine that fails with `failure` about
+    /// `entity`.
+    #[must_use]
+    pub(crate) fn surface_at(
+        operation: &'static str,
+        failure: SurfaceFailure,
+        entity: EntityRef,
+    ) -> Self {
+        Failure::new(operation, failure).at(entity).into_error()
     }
 
     /// [`crate::SolidError::Failed`] for a surface routine that could not continue, as the
@@ -171,96 +182,91 @@ mod tests {
         assert_eq!(SolidError::sm_err("surface::op").surface_failure(), None);
     }
 
+    /// A sample of the second set of converted files (`extend` and its sides, `side`,
+    /// `implicit`, the volumes, `srf_in_volume`, `procedural_blend` and its offset,
+    /// `trim_srf_cache`): each keeps the operation, status, kind and entity of its
+    /// `Upstream`.
+    #[test]
+    fn the_extend_volume_and_blend_samples_keep_their_upstream_answers() {
+        let samples = [
+            (
+                "surface::extend::analytic::analytic_extended_sides",
+                SurfaceFailure::Failed("the joint is not an interior knot"),
+                SM_ERR,
+            ),
+            (
+                "surface::extend::ball",
+                SurfaceFailure::Failed("the B-spline surface has no NURB"),
+                SM_ERR,
+            ),
+            (
+                "surface::volume::p1::Volume::copy",
+                SurfaceFailure::Failed("a plain volume cannot be copied"),
+                SM_ERR,
+            ),
+            (
+                "surface::srf_in_volume",
+                SurfaceFailure::Failed("the volume's inversion failed"),
+                SM_ERR,
+            ),
+            (
+                "surface::procedural_blend::ProceduralBlend::read_from_db",
+                SurfaceFailure::Missing("the input stream"),
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                "surface::trim_srf_cache::TrimSrfCache::build_tree_with_face",
+                SurfaceFailure::InvalidValue("the face's domain and the surface's are disjoint"),
+                SM_ERR_INVALID_INPUT,
+            ),
+            (
+                "surface::side",
+                SurfaceFailure::Failed("the iso curve has no NURB"),
+                SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+        }
+        // the re-certification refusal keeps the face the bare status named
+        let face = EntityRef::Face(crate::topology::FaceId::from_index(3));
+        let typed = SolidError::surface_at(
+            "surface::procedural_blend::recertify_faces",
+            SurfaceFailure::Failed(
+                "the face's net is not proved within its bound of its definition",
+            ),
+            face,
+        );
+        let before = SolidError::Upstream {
+            operation: "surface::procedural_blend::recertify_faces",
+            code: SM_ERR,
+            entity: Some(face),
+        };
+        assert_eq!(typed.sm_status(), before.sm_status());
+        assert_eq!(typed.upstream_status(), Some(SM_ERR));
+        assert_eq!(typed.kind(), before.kind());
+        assert_eq!(typed.operation(), before.operation());
+        assert_eq!(typed.entity(), Some(face));
+        assert_eq!(typed.is_status_answer(), before.is_status_answer());
+    }
+
     /// The surface routines describe their failures: their library code builds no bare
     /// `Upstream` status, except the files listed (with the bare sites each may still hold)
     /// whose conversion waits on other open work or a later part of the slice.
     #[test]
     fn the_surface_routines_build_no_bare_statuses() {
-        const WAITING: [(&str, usize); 29] = [
-            ("surface/b_spline_volume.rs", 4),
-            ("surface/b_spline_volume_n_lib.rs", 1),
-            ("surface/cone/p1.rs", 10),
-            ("surface/extend.rs", 2),
-            ("surface/extend/analytic.rs", 22),
-            ("surface/extend/ball.rs", 10),
-            ("surface/extend/blend.rs", 6),
-            ("surface/extend/sides.rs", 2),
-            ("surface/from_parameters.rs", 1),
-            ("surface/implicit.rs", 7),
-            ("surface/offset_surface.rs", 27),
-            ("surface/plane/p2.rs", 9),
-            ("surface/procedural_blend.rs", 9),
-            ("surface/procedural_blend/convert.rs", 13),
-            ("surface/procedural_blend/offset.rs", 5),
-            ("surface/side.rs", 7),
-            ("surface/sphere.rs", 16),
-            ("surface/srf_in_volume.rs", 4),
-            ("surface/surface/p10.rs", 7),
-            ("surface/surface/p11.rs", 21),
-            ("surface/surface/p3.rs", 3),
-            ("surface/surface/p5.rs", 2),
-            ("surface/surface/p6.rs", 22),
-            ("surface/surface/p7.rs", 20),
-            ("surface/surface_cache/p1.rs", 17),
-            ("surface/torus.rs", 14),
-            ("surface/trim_srf_cache.rs", 4),
-            ("surface/volume/p1.rs", 8),
-            ("surface/volume/p2.rs", 6),
-        ];
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = vec![root.join("surface.rs")];
-        let mut dirs = vec![root.join("surface")];
-        while let Some(dir) = dirs.pop() {
-            for entry in std::fs::read_dir(dir).expect("read dir") {
-                let path = entry.expect("entry").path();
-                if path.is_dir() {
-                    dirs.push(path);
-                } else if path.extension().is_some_and(|x| x == "rs") {
-                    files.push(path);
-                }
-            }
-        }
-        files.sort();
-        assert!(files.len() > 50, "{files:?}");
-        for path in files {
-            let relative = path
-                .strip_prefix(&root)
-                .expect("under src")
-                .to_string_lossy()
-                .replace('\\', "/");
-            if relative.ends_with("/tests.rs") || relative.ends_with("_tests.rs") {
-                continue;
-            }
-            let text = std::fs::read_to_string(&path)
-                .expect("read")
-                .replace("\r\n", "\n");
-            // The library part ends at the test module: `#[cfg(test)]`, then any attributes
-            // (such as an `#[allow(..)]` for the tests' unwraps), then `mod`.
-            let library = text
-                .match_indices("\n#[cfg(test)]\n")
-                .find(|(at, _)| {
-                    let mut rest = text[at + "\n#[cfg(test)]\n".len()..].lines();
-                    rest.find(|line| {
-                        let line = line.trim_start();
-                        !(line.starts_with("#[") || line.starts_with("clippy::") || line == ")]")
-                    })
-                    .is_some_and(|line| line.starts_with("mod "))
-                })
-                .map_or(text.as_str(), |(at, _)| &text[..at]);
-            let bare: usize = [
-                "SolidError::sm_err(",
-                "SolidError::null_pointer(",
-                "SolidError::Upstream {",
-                "SolidError::nl_ser(",
-            ]
-            .iter()
-            .map(|needle| library.matches(needle).count())
-            .sum();
-            let allowed = WAITING
-                .iter()
-                .find(|(file, _)| *file == relative)
-                .map_or(0, |(_, n)| *n);
-            assert_eq!(bare, allowed, "bare statuses in {relative}");
-        }
+        super::super::bare_scan::assert_waiting("surface", 51, &[]);
     }
 }

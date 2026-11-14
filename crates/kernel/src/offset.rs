@@ -67,7 +67,7 @@ pub(crate) fn surf_of(b: &Brep, face: usize) -> Option<Surf> {
             let (o, a) = axes(frame)?;
             Surf::Torus { o, a, big: *major_radius, h: 0.0, r: *minor_radius, convex: out }
         }
-        Surface::Spline { .. } | Surface::RationalSpline { .. } | Surface::PlacedRevolution { .. } => return None,
+        Surface::Spline { .. } | Surface::RationalSpline { .. } | Surface::PlacedRevolution { .. } | Surface::Blend { .. } => return None,
     })
 }
 

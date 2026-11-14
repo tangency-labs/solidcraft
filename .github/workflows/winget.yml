@@ -29,7 +29,7 @@ env:
 
 jobs:
   submit:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - id: check
         name: Check for the token and the package

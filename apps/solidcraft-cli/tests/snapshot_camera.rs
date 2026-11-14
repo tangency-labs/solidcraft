@@ -401,6 +401,49 @@ fn a_view_or_a_camera_that_cannot_be_used_is_an_error_and_writes_nothing() {
     }
 }
 
+#[test]
+fn repeated_snapshot_options_are_refused_without_writing_a_picture() {
+    let dir = Scratch::new();
+    let script = dir.script("part.json", &[]);
+    let second = dir.0.join("second.png");
+    let second = second.to_str().unwrap();
+    let camera = camera().to_string();
+    let cases: [(&[&str], &str); 7] = [
+        (&["--out", second], "--out"),
+        (&["--view", "front", "--view", "top"], "--view"),
+        (&["--camera", &camera, "--camera", &camera], "--camera"),
+        (&["--width", "320"], "--width"),
+        (&["--height", "240"], "--height"),
+        (&["--section", "z=0", "--section", "z=5"], "--section"),
+        (&["--quality", "normal", "--quality", "fine"], "--quality"),
+    ];
+    for (extra, option) in cases {
+        let output = dir.run(&script, "never.png", extra);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{extra:?}: {stderr}");
+        assert!(stderr.contains(&format!("{option} may be given only once")), "{extra:?}: {stderr}");
+        assert!(output.stdout.is_empty(), "{extra:?}");
+        assert!(!dir.0.join("never.png").exists() && !Path::new(second).exists(), "{extra:?}");
+    }
+}
+
+#[test]
+fn repeated_snapshot_input_is_refused_before_loading_or_replacing_files() {
+    let dir = Scratch::new();
+    let out = dir.0.join("keep.png");
+    std::fs::write(&out, b"existing picture").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
+        .args(["snapshot", "--in", "missing-first.sc", "--in", "missing-second.sc", "--out"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("--in may be given only once"), "{stderr}");
+    assert!(output.stdout.is_empty());
+    assert_eq!(std::fs::read(&out).unwrap(), b"existing picture");
+}
+
 /// The usage text says what the new options do.
 #[test]
 fn the_usage_names_the_camera_and_the_guides() {
