@@ -1,4 +1,4 @@
-//! B-rep pointer validation and ordered coincidence checks.
+//! B-rep pointer validation, the B-rep check and its soundness tests.
 //!
 //! Upstream: `source/SMLib/src/SmBrep.cpp`, `source/SMLib/inc/SmBrep.h`,
 //! `source/SMLib/src/SmEdge.cpp`, `source/SMLib/src/NL_CrvBasic.cpp`.
@@ -6,7 +6,6 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`validate_pointers`] | `SmBrep::ValidatePointers` |
-//! | [`contains_coincident_topology`] | `SmBrep::ContainsCoincidentTopology` |
 //! | [`soundness`], [`standing`], [`volume`] | (not upstream) the check at level 2, the manifold test and the volume |
 //! | [`update_tolerances_after_boolean`] | (not upstream) a boolean result's tolerance update, wide vertices centred first |
 //! | `check_edge_geometry` | `SmEdge::ValidateGeometry(FALSE)` |
@@ -22,7 +21,6 @@
 
 mod assert_valid;
 pub(crate) use assert_valid::standalone_curve_assert_valid;
-mod coincidence;
 mod pointers;
 mod soundness;
 pub(crate) mod spatial;
@@ -32,7 +30,6 @@ pub use assert_valid::{
     assert_valid, check_brep, check_brep_with_keys, curve_assert_valid,
     validate_and_update_tolerances, BrepCheck, CheckLevel, FailureClass, ToleranceGaps,
 };
-pub use coincidence::{contains_coincident_topology, CoincidenceResult};
 pub(crate) use pointers::validate_geometry;
 pub use pointers::validate_pointers;
 pub(crate) use soundness::lost_manifold;
@@ -109,7 +106,6 @@ fn object_info(b: &Brep, object: Object) -> Result<(ObjectKey, i64, &'static str
 
 struct Reports<'a> {
     array: Option<&'a mut AssertArray>,
-    level: u8,
 }
 
 impl Reports<'_> {
@@ -120,16 +116,7 @@ impl Reports<'_> {
         passed: bool,
         owner: impl Into<Object>,
     ) -> Result<bool> {
-        self.record(
-            b,
-            1,
-            index,
-            passed,
-            owner.into(),
-            None,
-            UNDEF_DOUBLE,
-            UNDEF_DOUBLE,
-        )
+        self.record(b, index, passed, owner.into(), UNDEF_DOUBLE, UNDEF_DOUBLE)
     }
 
     fn value(
@@ -141,39 +128,16 @@ impl Reports<'_> {
         tol: f64,
         value: f64,
     ) -> Result<bool> {
-        self.record(b, 1, index, passed, owner.into(), None, tol, value)
+        self.record(b, index, passed, owner.into(), tol, value)
     }
 
-    fn pair(
-        &mut self,
-        b: &Brep,
-        index: u64,
-        passed: bool,
-        owner: EntityRef,
-        other: EntityRef,
-        tol: f64,
-        value: f64,
-    ) -> Result<bool> {
-        self.record(
-            b,
-            3,
-            index,
-            self.level < 2 || passed,
-            owner.into(),
-            Some(other.into()),
-            tol,
-            value,
-        )
-    }
-
+    /// A report of list 1 (`SmBrep`'s pointer tests), which names no other object.
     fn record(
         &mut self,
         b: &Brep,
-        list: u64,
         index: u64,
         passed: bool,
         owner: Object,
-        other: Option<Object>,
         tol: f64,
         value: f64,
     ) -> Result<bool> {
@@ -185,13 +149,6 @@ impl Reports<'_> {
             return Ok(true);
         }
         let (owner, owner_type, owner_name) = object_info(b, owner)?;
-        let (other, other_type, other_name) = match other {
-            Some(o) => {
-                let (key, ty, name) = object_info(b, o)?;
-                (Some(key), ty, name)
-            }
-            None => (None, 0, "NULL"),
-        };
         array.add_unique_delete_duplicate(AssertReport::new(ReportSpec {
             reporter: Some(
                 object_info(b, Object::Topology(EntityRef::Brep(BrepId::from_index(0))))?.0,
@@ -201,12 +158,12 @@ impl Reports<'_> {
             owner: Some(owner),
             owner_type,
             owner_type_string: Some(owner_name),
-            other,
-            other_type,
-            other_type_string: Some(other_name),
+            other: None,
+            other_type: 0,
+            other_type_string: Some("NULL"),
             tol3d: crate::geom::tol::tol3d(tol),
             value,
-            list_index: list,
+            list_index: 1,
             message: None,
         })?);
         Ok(false)

@@ -19,10 +19,17 @@
 //! `Kernel::fixes.validate_tolerances_fixes_reported_gaps` (WR-679) the update grows a
 //! vertex past half its tolerance, not the whole. Edge-use marks are a local set. `CollectRegions`'
 //! linear stack and result searches use companion sets (same order).
+//! `AssertValid` does not run `ContainsCoincidentTopology`, which is not ported: upstream
+//! folds in a result that is always true and leaves its report (test 15) commented out, so
+//! the search never changed a check's result (it did edit the body: its queries created the
+//! faces' UV trim curves). It cannot be a validity test: the bodies solidcore builds keep
+//! coincident topology on purpose (a pinch where a hole is tangent to a face, solids
+//! touching along an edge, a sweep's glued lamina edges). A face's own coincident vertices
+//! and edges are its tests 32, 33 and 34.
 
 use std::collections::BTreeSet;
 
-use super::super::{contains_coincident_topology, ERROR};
+use super::super::ERROR;
 use super::{base, brep_object, class, edge, face, loops, seams, shell, vertex, Cx, Rep, Test};
 use crate::error::{EntityRef, Result};
 use crate::geom::tol;
@@ -184,11 +191,6 @@ pub(super) fn brep(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, walk: bool) ->
     let common = connected.iter().filter(|r| region_set.contains(r)).count();
     let ok = !cx.rep.need(0) || common == num_regions;
     rtn &= cx.rep.this_bool(b, C, this, 19, ok)?;
-
-    // See about running coincident-topology checks (its default level 0, first pair).
-    rtn &=
-        contains_coincident_topology(k, b, -1.0, false, cx.rep.array.as_deref_mut(), 0, cx.keys)?
-            .found;
 
     // Shell context checks (intrinsic).
     for _ in &shells {

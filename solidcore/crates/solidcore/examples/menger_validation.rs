@@ -5,46 +5,18 @@
 //! 5f1547971e2f487323aa5aabd47e0dc9c2ced9b52871e32d3c691e0ae0448bd9.
 //! The archived recipe order is X, Y, Z; each axis has its central cut followed
 //! by the eight off-center grid cuts. Times are observations, not performance gates.
-//! Add `--features profile` for phase counts; profiled timings include instrumentation.
 use solidcore::boolean::api_brep::boolean_difference;
-use solidcore::geom::assert_array::AssertArray;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::p1::{edges, faces, vertices};
 use solidcore::topology::brep::p3::brep_copy;
-use solidcore::topology::brep::validation::{check_brep, contains_coincident_topology, CheckLevel};
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::{Kernel, Point3};
 use std::time::Instant;
 
 /// A 45-unit cube keeps 20/27 of its volume at each of two Menger levels.
 const EXPECTED_VOLUME: f64 = 45.0 * 45.0 * 45.0 * 20.0 * 20.0 / (27.0 * 27.0);
-
-/// Drain observational phase counts without treating profiled times as the baseline.
-#[cfg(feature = "profile")]
-fn coincidence_profile(kernel: &Kernel) -> serde_json::Value {
-    let profile = kernel.take_profile();
-    let rows: Vec<_> = profile
-        .scopes
-        .iter()
-        .filter(|scope| scope.name.starts_with("validation::coincidence"))
-        .map(|scope| {
-            let counts: std::collections::BTreeMap<_, _> = solidcore::profile::Counter::ALL
-                .iter()
-                .zip(scope.counters)
-                .map(|(counter, value)| (counter.name(), value))
-                .collect();
-            serde_json::json!({"phase": scope.name, "calls": scope.calls, "counts": counts})
-        })
-        .collect();
-    serde_json::json!(rows)
-}
-
-/// Distinguish unmeasured work from a measured zero when profiling is disabled.
-#[cfg(not(feature = "profile"))]
-fn coincidence_profile(_kernel: &Kernel) -> serde_json::Value {
-    serde_json::Value::Null
-}
 
 /// Execute the archived cuts and verify validity, topology and analytic volume.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -86,25 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let start = Instant::now();
             let check = check_brep(&mut check_kernel, &mut checked, CheckLevel::Level2)?;
             let validation_seconds = start.elapsed().as_secs_f64();
-            let mut coincidence_kernel = Kernel::default();
-            let mut coincident = brep_copy(&mut coincidence_kernel, &body)?;
-            let identities = coincident.clone_standing_for_self()?;
-            let keys = |entity| identities.owner_identity(entity);
-            let mut reports = AssertArray::new();
-            let start = Instant::now();
-            let pairs = contains_coincident_topology(
-                &coincidence_kernel,
-                &mut coincident,
-                -1.0,
-                false,
-                Some(&mut reports),
-                0,
-                &keys,
-            )?
-            .pairs
-            .len();
-            let coincidence_seconds = start.elapsed().as_secs_f64();
-            all_valid &= check.is_valid() && pairs == 0;
+            all_valid &= check.is_valid();
             cuts += 1;
             println!(
                 "{}",
@@ -113,10 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "edges": edges(&body, None)?.len(), "vertices": vertices(&body, None)?.len(),
                     "boolean_face_pairs": face_pairs, "boolean_loops_classified": loops_classified,
                     "boolean_seconds": boolean_seconds, "validation_seconds": validation_seconds,
-                    "coincidence_seconds": coincidence_seconds, "valid": check.is_valid(),
-                    "validation_failures": check.lines(), "coincidence_pairs": pairs,
-                    "validation_coincidence_profile": coincidence_profile(&check_kernel),
-                    "standalone_coincidence_profile": coincidence_profile(&coincidence_kernel),
+                    "valid": check.is_valid(), "validation_failures": check.lines(),
                 })
             );
         }

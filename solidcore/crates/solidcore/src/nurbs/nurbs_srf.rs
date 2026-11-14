@@ -15,11 +15,8 @@
 //! | [`decompose_srf`]                     | `sm_DecomposeSrf`                           |
 //! | [`split_srf`]                         | `sm_SplitSrf`                               |
 //! | [`is_nsrf_degenerate`]                | `sm_IsNSrfDegenerate`                       |
-//! | [`srf_span_boxes`]                    | none (not upstream)                         |
 //!
 //! Deviations:
-//! - [`srf_span_boxes`] is not upstream: the boxes of the control points of every knot
-//!   span, a certified cover of the surface used to prune coincidence queries.
 //! - Out-params become return values. The optional `double*` outputs of
 //!   `sm_ComputeNetConstants` / `sm_ComputeSurfConstants` (NULL = not wanted) are a
 //!   [`ConstantsRequest`] in and [`NetConstants`] (`Some` for each requested value)
@@ -88,9 +85,7 @@ use crate::math::{max2, Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ, PI};
 use crate::nurbs::index::oob;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::CPoint;
-use crate::nurbs::nurbs_crv::{
-    hull_point, is_clamped, nonempty_spans, piece_slack, points_box, to_euclid,
-};
+use crate::nurbs::nurbs_crv::to_euclid;
 use crate::nurbs::srf_basic::{Direction, Surface};
 use crate::nurbs::srf_tool::p1 as srf_tool;
 
@@ -1127,167 +1122,6 @@ pub fn is_nsrf_degenerate(sur: &Surface, tol3d: f64) -> Result<bool> {
     Ok(bx.is_point_sized(tol))
 }
 
-/// One box per pair of non-empty knot spans of `sur` (u-major, knot order): the piece on
-/// `[U[i], U[i+1]] x [V[j], V[j+1]]` is a convex combination of control points
-/// `(i-p..=i) x (j-q..=j)` (the tensor basis is non-negative and sums to one, also for a
-/// rational surface whose weights are all positive, whose Euclidean points are then the
-/// convex-combination vertices), so it lies in the box of those Euclidean points. Every
-/// span of the whole surface is covered, whatever sub-domain a caller uses.
-///
-/// `None`, meaning no certified boxes, when a weight is not positive and finite, a
-/// coordinate is not finite or a knot vector is not finite, non-decreasing and sized for
-/// the net.
-///
-/// Not upstream.
-#[must_use]
-pub fn srf_span_boxes(sur: &Surface) -> Option<Vec<Extent3d>> {
-    let (p, q) = sur.degrees();
-    let u_spans = nonempty_spans(sur.u_knots(), p, sur.n())?;
-    let v_spans = nonempty_spans(sur.v_knots(), q, sur.m())?;
-    let net: Vec<Vec<Vec3>> = sur
-        .rows()
-        .map(|row| row.iter().map(|&c| hull_point(c)).collect::<Option<_>>())
-        .collect::<Option<_>>()?;
-    let mut boxes = Vec::new();
-    for &i in &u_spans {
-        let rows = net.get(i.checked_sub(p)?..=i)?;
-        for &j in &v_spans {
-            let cols = j.checked_sub(q)?..=j;
-            let mut points = Vec::new();
-            for row in rows {
-                points.extend(row.get(cols.clone())?.iter().copied());
-            }
-            boxes.push(points_box(points)?);
-        }
-    }
-    Some(boxes)
-}
-
-/// The control-point boxes of `pieces` (`None` when a point has no hull point).
-fn surface_piece_boxes(pieces: &[Surface]) -> Option<Vec<Extent3d>> {
-    pieces
-        .iter()
-        .map(|s| {
-            points_box(
-                s.rows()
-                    .flatten()
-                    .map(|&c| hull_point(c))
-                    .collect::<Option<Vec<_>>>()?,
-            )
-        })
-        .collect()
-}
-
-/// A certified cover of a surface that can be refined span by span.
-///
-/// Level 0 is [`srf_span_boxes`]. [`SurfaceCover::pieces`] takes a span's Bezier patch
-/// ([`decompose_srf`]), splits it at the midpoints of its parameter ranges ([`split_srf`],
-/// in u then in v, so into four) `depth` times and returns the control-point boxes of the
-/// `4^depth` pieces; [`SurfaceCover::slack`] is the rounding allowance to add to
-/// distances to them. A span is refined once, when first asked, and kept. Where a
-/// refinement cannot be made (unclamped knots, a decomposition, split or weight failure)
-/// the span keeps its level 0 box: a coarser, still certified cover, never an error.
-///
-/// Not upstream.
-pub struct SurfaceCover {
-    surface: Surface,
-    /// Positions of each level 0 box's spans among the non-empty u and v spans.
-    spans: Vec<(usize, usize)>,
-    coarse: Vec<Extent3d>,
-    depth: usize,
-    slack: f64,
-    patches: Option<Vec<Vec<Surface>>>,
-    refined: Vec<Option<Vec<Extent3d>>>,
-}
-
-impl SurfaceCover {
-    /// The cover of `sur`, to be refined `depth` times; `None` as for [`srf_span_boxes`].
-    #[must_use]
-    pub fn new(sur: &Surface, depth: usize) -> Option<Self> {
-        let coarse = srf_span_boxes(sur)?;
-        let (p, q) = sur.degrees();
-        let nu = nonempty_spans(sur.u_knots(), p, sur.n())?.len();
-        let nv = nonempty_spans(sur.v_knots(), q, sur.m())?.len();
-        let spans = (0..nu)
-            .flat_map(|iu| (0..nv).map(move |iv| (iu, iv)))
-            .collect();
-        // Bezier extraction chains at most `p` insertions per u span and `q` per v
-        // span; each split then takes `p` (u) and `q` (v) more.
-        let levels = p
-            .saturating_mul(nu)
-            .saturating_add(q.saturating_mul(nv))
-            .saturating_add(depth.saturating_mul(p.saturating_add(q)));
-        let slack = piece_slack(sur.rows().flatten().copied(), levels)?;
-        let refined = vec![None; coarse.len()];
-        Some(Self {
-            surface: sur.clone(),
-            spans,
-            coarse,
-            depth,
-            slack,
-            patches: None,
-            refined,
-        })
-    }
-
-    /// The level 0 boxes, one per pair of non-empty spans, u-major, in knot order.
-    #[must_use]
-    pub fn coarse(&self) -> &[Extent3d] {
-        &self.coarse
-    }
-
-    /// The rounding allowance to add to a distance test against boxes of
-    /// [`SurfaceCover::pieces`] (see [`piece_slack`]).
-    #[must_use]
-    pub const fn slack(&self) -> f64 {
-        self.slack
-    }
-
-    /// The boxes of span `i` split `depth` times, the level 0 box alone when it cannot
-    /// be refined; empty for an `i` out of range.
-    pub fn pieces(&mut self, i: usize) -> &[Extent3d] {
-        if self.refined.get(i).is_some_and(Option::is_none) {
-            let made = self.refine(i);
-            let fallback = self.coarse.get(i).copied();
-            if let Some(slot) = self.refined.get_mut(i) {
-                *slot = made.or_else(|| fallback.map(|b| vec![b]));
-            }
-        }
-        self.refined
-            .get(i)
-            .and_then(Option::as_deref)
-            .unwrap_or(&[])
-    }
-
-    fn refine(&mut self, i: usize) -> Option<Vec<Extent3d>> {
-        let (p, q) = self.surface.degrees();
-        if !is_clamped(self.surface.u_knots(), p) || !is_clamped(self.surface.v_knots(), q) {
-            return None;
-        }
-        if self.patches.is_none() {
-            self.patches = Some(decompose_srf(&self.surface).ok()?);
-        }
-        let &(iu, iv) = self.spans.get(i)?;
-        let mut level = vec![self.patches.as_ref()?.get(iu)?.get(iv)?.clone()];
-        for _ in 0..self.depth {
-            let mut next = Vec::new();
-            for patch in &level {
-                let (u, v) = (patch.u_knots(), patch.v_knots());
-                let mid_u = 0.5 * (u.first()? + u.last()?);
-                let mid_v = 0.5 * (v.first()? + v.last()?);
-                let (left, right) = split_srf(patch, mid_u, Direction::U).ok()?;
-                for half in [left, right] {
-                    let (a, b) = split_srf(&half, mid_v, Direction::V).ok()?;
-                    next.push(a);
-                    next.push(b);
-                }
-            }
-            level = next;
-        }
-        surface_piece_boxes(&level)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1542,111 +1376,6 @@ mod tests {
                     reason: "index too large",
                 }
             ));
-        }
-    }
-
-    /// A rational biquadratic Bezier patch (a bulging sheet) with the given weight on
-    /// every control point but the middle one, which gets `centre`.
-    fn rational_patch(corner: f64, centre: f64) -> Surface {
-        let net = (0..3)
-            .map(|i| {
-                (0..3)
-                    .map(|j| {
-                        let w = if (i, j) == (1, 1) { centre } else { corner };
-                        let z = if (i, j) == (1, 1) { 2.0 } else { 0.0 };
-                        CPoint::weighted(Vec3::new(f64::from(i), f64::from(j) * 1.5, z), w)
-                    })
-                    .collect()
-            })
-            .collect();
-        let k = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
-        Surface::new(net, 2, 2, k.clone(), k).unwrap()
-    }
-
-    fn surface_samples(s: &Surface, u: (f64, f64), v: (f64, f64)) -> Vec<Vec3> {
-        let mut out = Vec::new();
-        for a in 0..=12 {
-            for b in 0..=12 {
-                let uu = u.0 + (u.1 - u.0) * f64::from(a) / 12.0;
-                let vv = v.0 + (v.1 - v.0) * f64::from(b) / 12.0;
-                out.push(s.eval(uu, vv, Side::Left, Side::Left).unwrap());
-            }
-        }
-        out
-    }
-
-    #[test]
-    fn span_boxes_hold_every_sample_of_their_span() {
-        let s = bicubic();
-        let boxes = srf_span_boxes(&s).unwrap();
-        let (us, vs) = ([(0.0, 0.4), (0.4, 1.0)], [(0.0, 0.5), (0.5, 1.0)]);
-        assert_eq!(boxes.len(), 4);
-        for (iu, &u) in us.iter().enumerate() {
-            for (iv, &v) in vs.iter().enumerate() {
-                let bx = boxes[iu * 2 + iv];
-                for p in surface_samples(&s, u, v) {
-                    assert!(bx.contains_point(p, 1e-13), "span {iu},{iv} p={p:?}");
-                }
-            }
-        }
-        // Rational: de-homogenised control points bound the patch, and the patch really
-        // bulges to z > 0 so the box is not trivial.
-        let r = rational_patch(1.0, 3.0);
-        let boxes = srf_span_boxes(&r).unwrap();
-        assert_eq!(boxes.len(), 1);
-        for p in surface_samples(&r, (0.0, 1.0), (0.0, 1.0)) {
-            assert!(boxes[0].contains_point(p, 1e-13), "p={p:?}");
-        }
-        assert_eq!(boxes[0].max_at(2), 2.0);
-    }
-
-    #[test]
-    fn a_non_positive_or_non_finite_weight_gives_no_boxes() {
-        for w in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-            assert!(srf_span_boxes(&rational_patch(1.0, w)).is_none(), "w={w}");
-            assert!(
-                SurfaceCover::new(&rational_patch(w, 1.0), 2).is_none(),
-                "w={w}"
-            );
-        }
-        // Unsized knots: no cover.
-        let mut s = bicubic();
-        s.u_knots_mut()[2] = f64::NAN;
-        assert!(srf_span_boxes(&s).is_none());
-    }
-
-    #[test]
-    fn refined_pieces_hold_the_surface_and_are_tighter() {
-        for s in [bicubic(), rational_patch(1.0, 3.0)] {
-            let mut cover = SurfaceCover::new(&s, 2).unwrap();
-            let coarse = cover.coarse().to_vec();
-            let slack = cover.slack();
-            assert!(slack > 0.0 && slack < 1e-9, "slack={slack}");
-            let (u0, u1) = (s.u_knots()[0], *s.u_knots().last().unwrap());
-            let (v0, v1) = (s.v_knots()[0], *s.v_knots().last().unwrap());
-            let all = surface_samples(&s, (u0, u1), (v0, v1));
-            let mut pieces = Vec::new();
-            for (i, whole) in coarse.iter().enumerate() {
-                let here = cover.pieces(i).to_vec();
-                assert_eq!(here.len(), 16);
-                assert!(here.iter().all(|p| p.is_contained_by(whole, slack)));
-                pieces.extend(here);
-            }
-            // Every sample of the surface lies in some piece box.
-            for p in &all {
-                assert!(
-                    pieces.iter().any(|b| b.contains_point(*p, slack)),
-                    "p={p:?}"
-                );
-            }
-            // The pieces are tighter than the hull: a point of the coarse box that the
-            // surface never gets near is in no piece.
-            let far: Vec<_> = coarse
-                .iter()
-                .flat_map(|c| [c.min, c.max])
-                .filter(|corner| !pieces.iter().any(|b| b.contains_point(*corner, 1e-3)))
-                .collect();
-            assert!(!far.is_empty(), "refining tightened nothing");
         }
     }
 }

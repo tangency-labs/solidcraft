@@ -438,34 +438,6 @@ impl BSplineCurve {
         Ok(self.degree()? == 3 && self.is_piecewise_c0()?)
     }
 
-    /// Certified boxes covering the part of the curve over `interval`, one per knot span
-    /// that meets it ([`crate::nurbs::nurbs_crv::crv_span_boxes`]); `None`, meaning no
-    /// certified cover, without a NURB, when the weights, knots or interval cannot be
-    /// read as a cover, or while evaluation beyond the natural interval is enabled.
-    /// Not upstream.
-    #[must_use]
-    pub fn span_boxes(&self, interval: &Extent1d) -> Option<Vec<Extent3d>> {
-        if self.is_out_of_bounds_enabled() {
-            return None;
-        }
-        crate::nurbs::nurbs_crv::crv_span_boxes(self.nurb.as_ref()?, interval)
-    }
-
-    /// The refinable certified cover ([`crate::nurbs::nurbs_crv::CurveCover`]) over
-    /// `interval`, refined `depth` times; `None` under the conditions of
-    /// [`BSplineCurve::span_boxes`]. Not upstream.
-    #[must_use]
-    pub fn cover(
-        &self,
-        interval: &Extent1d,
-        depth: usize,
-    ) -> Option<crate::nurbs::nurbs_crv::CurveCover> {
-        if self.is_out_of_bounds_enabled() {
-            return None;
-        }
-        crate::nurbs::nurbs_crv::CurveCover::new(self.nurb.as_ref()?, interval, depth)
-    }
-
     /// Bounding boxes of the part of the curve over `interval` (clamped to the natural
     /// interval), built from the control points of the spans it covers
     /// (`CalculateBoundingBox`). The pseudo box takes its basis from the control point

@@ -915,55 +915,6 @@ fn classify_curve_on_face_cached(
     Ok(classification.intervals().to_vec())
 }
 
-/// Classifies an explicit edge interval for the B-rep coincidence validator, on the
-/// caller's B-rep in place ([`curve_on_classify_mut`]): the classification keeps the
-/// caller's interval, and the trim/gap updates it makes stay on `b`, including those
-/// made before a failed status.
-pub(crate) fn classify_interval_on_face(
-    k: &Kernel,
-    b: &mut Brep,
-    f: FaceId,
-    curve: &Curve,
-    interval: Extent1d,
-    tol: f64,
-) -> Result<Vec<PointClassType>> {
-    let mut objects = FaceClassify { brep: b, curve };
-    let init = ClassificationInit {
-        curve: Some(ClassHandle::Curve),
-        interval,
-        uv_curve: None,
-        src_zone_tol_3d: zone_tol3d(k, tol),
-        opt_data_size: 0,
-        is_curve_owned: false,
-        is_curve_current: true,
-        surface1: None,
-        surface2: None,
-        uv_curve2: None,
-        ti: None,
-    };
-    let mut classification = CurveClassification::with_curve(k, &init)?;
-    let result = curve_on_classify_mut(
-        k,
-        f,
-        &mut objects,
-        true,
-        &mut classification,
-        false,
-        false,
-        true,
-    );
-    if let Err(error) = result {
-        if error.is_unported_or_cancelled() {
-            return Err(error);
-        }
-    }
-    Ok(classification
-        .intervals()
-        .iter()
-        .map(|i| i.mid.point_class())
-        .collect())
-}
-
 /// One interval of [`classify_free_curve_on_face`]: its parameter interval, the class of
 /// its interior, and the class of each end with the edge it lies on (`None` off an edge).
 #[derive(Debug, Clone, Copy)]

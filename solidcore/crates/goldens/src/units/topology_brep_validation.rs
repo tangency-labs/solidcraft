@@ -1,6 +1,5 @@
-//! Runner for unit `topology.brep_validation`: B-rep pointer reports and coincidence pairs.
-//! Ported from upstream `SmBrep::ValidatePointers` and `ContainsCoincidentTopology`;
-//! checked against its golden. The case builds a [`BrepIn`] source
+//! Runner for unit `topology.brep_validation`: B-rep pointer reports.
+//! Ported from upstream `SmBrep::ValidatePointers`; checked against its golden. The case builds a [`BrepIn`] source
 //! ([`crate::own_builder`], and upstream's `SmBrepConstructor` sheet grids through
 //! [`sheet_grid`]) or reads an `.smb` file with the Rust reader
 //! ([`crate::own_reader::brep_in_order`]), both under this runner's conventions. Post-call
@@ -45,16 +44,10 @@ struct Inputs {
     grid_faces: Option<usize>,
     #[serde(default)]
     shared_boundaries: Option<u8>,
-    #[serde(default)]
-    coincidence: bool,
     #[serde(default = "level_two")]
     level: u8,
     #[serde(default = "yes")]
     walk: bool,
-    #[serde(default = "default_tol")]
-    tolerance: f64,
-    #[serde(default = "yes")]
-    find_all: bool,
     #[serde(default)]
     mutation: u8,
     #[serde(default)]
@@ -70,9 +63,6 @@ fn yes() -> bool {
 }
 fn level_two() -> u8 {
     2
-}
-fn default_tol() -> f64 {
-    -1.0
 }
 fn herr(e: impl Into<String>) -> HarnessError {
     HarnessError::new(e)
@@ -150,19 +140,16 @@ impl Reader<'_> {
     }
 }
 /// The input contract of a case (upstream's validation entry points take these ranges): a
-/// check level of 0 to 4, boolean flags, a finite tolerance and value within 1e6, a
-/// mutation of 0 to 10 (none for a coincidence search) on an index up to 1e6, a link
+/// check level of 0 to 4, boolean flags, a finite value within 1e6, a mutation of 0 to 10
+/// on an index up to 1e6, a link
 /// mutation (4, 5) with a value of 0, 1 or 2, a sheet grid of 1 to 512 faces and a shared
 /// boundary mode of 1 or 2.
 fn in_contract(i: &Inputs) -> bool {
     let link = matches!(i.mutation, 4 | 5);
     i.level <= 4
-        && i.tolerance.is_finite()
-        && i.tolerance.abs() <= 1e6
         && i.value.is_finite()
         && i.value.abs() <= 1e6
         && i.mutation <= 10
-        && !(i.coincidence && i.mutation != 0)
         && i.index as f64 <= 1e6
         && (!link || (i.value.fract() == 0.0 && (0.0..=2.0).contains(&i.value)))
         && match (i.shared_boundaries, i.grid_faces) {
@@ -331,18 +318,8 @@ fn report_key(out: &mut Vec<f64>, k: Option<ReportKey>) {
         out.extend([-1.0, -1.0]);
     }
 }
-fn rust_protocol(
-    b: &Brep,
-    status: i32,
-    pairs: &[(EntityRef, EntityRef)],
-    reports: &AssertArray,
-) -> Result<Vec<f64>, HarnessError> {
-    let mut out = vec![0.0, f64::from(status), pairs.len() as f64];
-    for &(a, c) in pairs {
-        let (t, i) = info(a);
-        let (u, j) = info(c);
-        out.extend([t as f64, f64::from(i), u as f64, f64::from(j)]);
-    }
+fn rust_protocol(b: &Brep, status: i32, reports: &AssertArray) -> Result<Vec<f64>, HarnessError> {
+    let mut out = vec![0.0, f64::from(status)];
     out.push(reports.len() as f64);
     for r in reports.reports() {
         out.extend([
@@ -398,12 +375,6 @@ fn output(protocol: &[f64]) -> Result<Output, HarnessError> {
     }
     let status = rd.num()? as i64;
     let n = rd.count()?;
-    let pairs: Vec<i64> = rd
-        .slice(n.checked_mul(4).ok_or_else(|| herr("pair overflow"))?)?
-        .iter()
-        .map(|&x| x as i64)
-        .collect();
-    let n = rd.count()?;
     let mut ints = vec![n as i64];
     let mut numbers = Vec::new();
     for _ in 0..n {
@@ -440,7 +411,6 @@ fn output(protocol: &[f64]) -> Result<Output, HarnessError> {
     }
     Ok(Output::new()
         .int("status", status)
-        .ints("pairs", pairs)
         .ints("reports", ints)
         .values("report_values", numbers)
         .ints("geometry", geometry)
@@ -465,36 +435,15 @@ impl UnitDiff for Runner {
         mutate(&mut b, &i)?;
         let kernel = Kernel::default();
         let mut reports = AssertArray::new();
-        let run = if i.coincidence {
-            validation::contains_coincident_topology(
-                &kernel,
-                &mut b,
-                i.tolerance,
-                i.find_all,
-                Some(&mut reports),
-                i.level,
-                &key,
-            )
-            .map(|r| (i32::from(r.found), r.pairs))
-        } else {
-            validation::validate_pointers(
-                &kernel,
-                &mut b,
-                Some(&mut reports),
-                i.level,
-                i.walk,
-                &key,
-            )
-            .map(|s| (s, Vec::new()))
-        };
-        let (status, pairs) = match run {
+        let run =
+            validation::validate_pointers(&kernel, &mut b, Some(&mut reports), i.level, i.walk, &key);
+        let status = match run {
             Ok(x) => x,
             Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
         };
-        output(&rust_protocol(&b, status, &pairs, &reports)?)
+        output(&rust_protocol(&b, status, &reports)?)
     }
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        let coincidence = rng.below(3) == 0;
         let brep = match rng.below(4) {
             0 => BrepIn::Box {
                 origin: rng.point3(-10.0, 10.0),
@@ -515,7 +464,7 @@ impl UnitDiff for Runner {
                 lines: vec![[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1e-6]],
             },
         };
-        let mutation = if coincidence { 0 } else { rng.below(11) as u8 };
+        let mutation = rng.below(11) as u8;
         let value = if matches!(mutation, 4 | 5) {
             rng.below(3) as f64
         } else {
@@ -527,11 +476,8 @@ impl UnitDiff for Runner {
             brep,
             grid_faces: None,
             shared_boundaries: None,
-            coincidence,
             level: rng.below(5) as u8,
             walk: rng.below(2) == 0,
-            tolerance: 1e-6,
-            find_all: rng.below(2) == 0,
             mutation,
             index: rng.below(100) as usize,
             value,
@@ -1027,12 +973,12 @@ fn sheet_grid(k: &mut Kernel, b: &mut Brep, count: usize, shared: u8) -> Result<
 mod tests {
     use super::*;
 
-    fn grid_case(grid_faces: u64, coincidence: bool) -> Case {
+    fn grid_case(grid_faces: u64) -> Case {
         Case {
             unit: "topology.brep_validation".into(),
             name: "t".into(),
             source: crate::CaseSource::Inline,
-            inputs: serde_json::json!({"grid_faces": grid_faces, "coincidence": coincidence}),
+            inputs: serde_json::json!({"grid_faces": grid_faces}),
         }
     }
 
@@ -1040,41 +986,15 @@ mod tests {
     /// grid of 2^32 faces is refused instead of building faces until the allocator aborts.
     #[test]
     fn huge_sheet_grid_is_refused() {
-        for coincidence in [false, true] {
-            let case = grid_case(4_294_967_296, coincidence);
-            let rust = Runner.run_rust(&case).unwrap_err().to_string();
-            assert_eq!(rust, "invalid argument: invalid B-rep validation arguments");
-        }
+        let rust = Runner.run_rust(&grid_case(4_294_967_296)).unwrap_err().to_string();
+        assert_eq!(rust, "invalid argument: invalid B-rep validation arguments");
     }
 
     /// The largest sheet grid the contract accepts runs.
     #[test]
     fn max_sheet_grid_runs() {
-        let rust = Runner.run_rust(&grid_case(512, false)).unwrap();
+        let rust = Runner.run_rust(&grid_case(512)).unwrap();
         assert!(rust.error.is_none() && rust.rejected.is_none());
         assert!(!rust.ints["geometry"].is_empty());
-    }
-
-    #[test]
-    fn shared_boundaries_reach_positive_edge_and_face_comparisons() {
-        for (mode, expected_type) in [(1, 16002), (2, 16016)] {
-            let case = Case {
-                unit: "topology.brep_validation".into(),
-                name: format!("positive_shared_boundaries_{mode}"),
-                source: crate::CaseSource::Inline,
-                inputs: serde_json::json!({"shared_boundaries": mode, "coincidence": true}),
-            };
-            let rust = Runner
-                .run_rust(&case)
-                .expect("Rust shared-boundary fixture");
-            assert!(rust.error.is_none());
-            assert!(rust.rejected.is_none());
-            assert!(rust.deferred.is_none());
-            assert!(rust.ints["pairs"]
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .any(|p| p[0] == expected_type && p[2] == expected_type));
-        }
     }
 }
