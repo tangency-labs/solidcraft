@@ -12,18 +12,56 @@ use solidcraft_doc::{ModelState, PrintFace};
 use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
-use crate::params::{bad, str_};
-use crate::schema::print_face::PrintFaceResult;
+use crate::params::{bad, str_, string_list};
+use crate::schema::print_face::{BodyPrintFace, PrintFaceResult, PrintFaceStatus, PrintFacesResult};
 use crate::{EngineError, Result, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("body.print_face", "Print Face", crate::checked!("body.print_face", print_face))
-    .icon("print_face")
-    .key("Ctrl+B")
-    .contract(&PRINT_FACE_CONTRACT)
-    .output(crate::schema::output_schema_for::<PrintFaceResult>)
-    .params("body: its name; point?: [x, y, z] on a flat face of it, in mm (omit to clear) → {body, face?}: marks the face a slicer export (file.send_to_slicer, file.save_mesh with slicer, file.open_in_easyprint), or an STL or 3MF export with lay_on_print_faces (file.export, file.export_stl, file.export_3mf, file.save_mesh), lays the body on: turned so the face points down at Z = 0, the centre of mass over the origin. One per body, replacing the last; flat faces of solid bodies only. A print face that is gone or no longer flat is reported in the export's warnings, and the body exported as it lies")];
+pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("body.print_face", "Print Face", crate::checked!("body.print_face", print_face))
+        .icon("print_face")
+        .key("Ctrl+B")
+        .contract(&PRINT_FACE_CONTRACT)
+        .output(crate::schema::output_schema_for::<PrintFaceResult>)
+        .params("body: its name; point?: [x, y, z] on a flat face of it, in mm (omit to clear) → {body, face?}: marks the face a slicer export (file.send_to_slicer, file.save_mesh with slicer, file.open_in_easyprint), or an STL or 3MF export with lay_on_print_faces (file.export, file.export_stl, file.export_3mf, file.save_mesh), lays the body on: turned so the face points down at Z = 0, the centre of mass over the origin. One per body, replacing the last; flat faces of solid bodies only. A print face that is gone or no longer flat is reported in the export's warnings, and the body exported as it lies"),
+    CommandSpec::new("body.print_faces", "Check Print Faces", crate::checked!("body.print_faces", print_faces))
+        .icon("print_face")
+        .noundo()
+        .read_only()
+        .contract(&PRINT_FACES_CONTRACT)
+        .output(crate::schema::output_schema_for::<PrintFacesResult>)
+        .params("bodies?: name | [names] (default every body) → {bodies: [{body, status: set | none | lost, face?, problem?}], all_set}: whether each body has a print face (body.print_face) that an export would lay it on; lost: one was marked but the face is gone or no longer flat (problem says why). all_set is true when at least one body was checked and every one is set. Read-only"),
+];
 
 const PRINT_FACE_CONTRACT: crate::schema::TypedContract<crate::schema::print_face::PrintFaceParams> = crate::schema::TypedContract::new();
+const PRINT_FACES_CONTRACT: crate::schema::TypedContract<crate::schema::print_face::PrintFacesParams> = crate::schema::TypedContract::new();
+
+/// Say whether each body has a print face, and whether an export can still find it. Changes
+/// nothing.
+fn print_faces(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "body.print_faces";
+    let names = string_list(cmd, p, "bodies")?;
+    let world = s.world_state()?;
+    let bodies: Vec<&solidcraft_doc::ModelBody> = if names.is_empty() {
+        world.bodies.iter().collect()
+    } else {
+        names.iter().map(|n| world.body(n).ok_or_else(|| bad(cmd, format!("no body `{n}`")))).collect::<Result<_>>()?
+    };
+    let checked: Vec<BodyPrintFace> = bodies
+        .into_iter()
+        .map(|b| {
+            let face = s.doc.print_faces.get(b.definition_name()).map(|t| t.name.clone());
+            let (status, problem) = match s.doc.print_face(&world, b) {
+                None => (PrintFaceStatus::None, None),
+                Some(Ok(_)) => (PrintFaceStatus::Set, None),
+                Some(Err(e)) => (PrintFaceStatus::Lost, Some(e.to_string())),
+            };
+            BodyPrintFace { body: b.name.clone(), status, face, problem }
+        })
+        .collect();
+    let all_set = !checked.is_empty() && checked.iter().all(|b| b.status == PrintFaceStatus::Set);
+    let reply = PrintFacesResult { bodies: checked, all_set, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
 
 /// Mark or clear a body's print face.
 fn print_face(s: &mut Session, p: &Value) -> Result<Value> {
@@ -281,6 +319,80 @@ mod tests {
         assert_eq!(laid.warnings.len(), 1, "{:?}", laid.warnings);
         assert!(laid.warnings[0].contains("Block"), "{:?}", laid.warnings);
         assert!(near(bbox.min.x, 0.) && near(bbox.max.z, 3.), "{bbox:?}");
+    }
+
+    #[test]
+    fn print_faces_says_which_bodies_have_one_and_changes_nothing() {
+        let mut s = block();
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [40, 0, 0], "body_name": "Spacer"}));
+        let undo = s.undo.len();
+        let r = run(&mut s, "body.print_faces", json!({}));
+        assert_eq!(r["all_set"], false, "{r}");
+        assert_eq!(r["bodies"], json!([{"body": "Block", "status": "none"}, {"body": "Spacer", "status": "none"}]), "{r}");
+
+        let marked = run(&mut s, "body.print_face", json!({"body": "Block", "point": [10, 5, 5]}));
+        let undo_after_mark = s.undo.len();
+        let r = run(&mut s, "body.print_faces", json!({}));
+        assert_eq!(r["bodies"][0]["status"], "set", "{r}");
+        assert_eq!(r["bodies"][0]["face"], marked["face"], "{r}");
+        assert_eq!(r["bodies"][1]["status"], "none", "{r}");
+        assert_eq!(r["all_set"], false, "{r}");
+
+        // Only the bodies asked for, in the order asked for.
+        let r = run(&mut s, "body.print_faces", json!({"bodies": ["Block"]}));
+        assert_eq!(r["all_set"], true, "{r}");
+        assert_eq!(r["bodies"].as_array().map(Vec::len), Some(1), "{r}");
+        run(&mut s, "body.print_face", json!({"body": "Spacer", "point": [42.5, 2.5, 0]}));
+        let r = run(&mut s, "body.print_faces", json!({"bodies": ["Spacer", "Block"]}));
+        assert_eq!(r["bodies"][0]["body"], "Spacer", "{r}");
+        assert_eq!(r["all_set"], true, "{r}");
+
+        // Checking is not an undo step and changes no print face.
+        assert!(undo < undo_after_mark);
+        let before = s.doc.print_faces.clone();
+        let steps = s.undo.len();
+        run(&mut s, "body.print_faces", json!({}));
+        assert_eq!(s.undo.len(), steps);
+        assert_eq!(s.doc.print_faces, before);
+    }
+
+    #[test]
+    fn print_faces_reports_a_face_that_was_cut_away_as_lost() {
+        let mut s = block();
+        run(&mut s, "body.print_face", json!({"body": "Block", "point": [10, 5, 5]}));
+        run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 5, "corner": [-5, -5, 3], "operation": "cut"}));
+        let r = run(&mut s, "body.print_faces", json!({"bodies": ["Block"]}));
+        let b = &r["bodies"][0];
+        assert_eq!(b["status"], "lost", "{r}");
+        assert!(b["face"].is_string() && b["problem"].as_str().is_some_and(|p| !p.is_empty()), "{r}");
+        assert_eq!(r["all_set"], false, "{r}");
+    }
+
+    #[test]
+    fn print_faces_refuses_an_unknown_body_or_a_bad_list_and_is_false_with_no_bodies() {
+        let mut s = block();
+        let e = s.execute("body.print_faces", &json!({"bodies": ["Bracket"]})).unwrap_err().to_string();
+        assert!(e.contains("Bracket"), "{e}");
+        let e = s.execute("body.print_faces", &json!({"bodies": 3})).unwrap_err().to_string();
+        assert!(e.contains("bodies"), "{e}");
+        let e = s.execute("body.print_faces", &json!({"bodies": [1]})).unwrap_err().to_string();
+        assert!(e.contains("bodies"), "{e}");
+        let r = run(&mut Session::default(), "body.print_faces", json!({}));
+        assert_eq!(r, json!({"bodies": [], "all_set": false}));
+    }
+
+    #[test]
+    fn print_faces_takes_one_name_as_a_list_of_one_with_strict_checks_too() {
+        // A plain name is the repository's shorthand for a list of one (`params::string_list`);
+        // the contract accepts it as well, so strict parameter checks don't refuse it.
+        for check in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
+            let mut s = block();
+            s.param_check = check;
+            let r = run(&mut s, "body.print_faces", json!({"bodies": "Block"}));
+            assert_eq!(r["bodies"], json!([{"body": "Block", "status": "none"}]), "{check:?}: {r}");
+            let e = s.execute("body.print_faces", &json!({"bodies": 3})).unwrap_err().to_string();
+            assert!(e.contains("bodies"), "{check:?}: {e}");
+        }
     }
 
     #[test]
