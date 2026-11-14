@@ -189,7 +189,8 @@ fn absolute_path(path: std::path::PathBuf) -> Option<std::path::PathBuf> {
 
 impl McpBridge {
     pub fn to_json(&self) -> Value {
-        let control_dir = solidcraft_engine::control_auth::token_path(self.port)
+        let control_dir = solidcraft_engine::control_auth::APP
+            .token_path(self.port)
             .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
             .and_then(absolute_path);
         json!({
