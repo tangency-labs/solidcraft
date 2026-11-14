@@ -1931,10 +1931,14 @@ impl BSplineCurve {
             // surface (a sphere's pole) it overstates the steps along the collapsing
             // direction, and the exact trim of a smooth curve passing near the pole
             // turns there through up to half a period over a few times the pole's
-            // distance. A solution below the tolerance is passed over where the image
-            // on the surface is proved to have a radius of at least the tolerance over
-            // the solution's neighbourhood, out to the neighbouring solutions
-            // ([`radius_clears_on_surface`]).
+            // distance. A solution below the tolerance is passed over only where the
+            // image on the surface is proved to have a radius of at least the tolerance
+            // over the whole trim, off the zero-speed stretches at its ends
+            // ([`radius_clears_on_surface`]). The bound covers the whole trim, not only
+            // the solution's neighbourhood: the analysis finds solutions on the mapped
+            // trim, and a corner that is sharp on the surface can read above the
+            // tolerance mapped (where a step in u is shorter on the surface than at the
+            // trim's middle) and be no solution at all.
             let on_surface = match (mapped.as_ref(), ovr.trim_surface) {
                 (Some(_), Some(surface)) => Some(surface),
                 _ => None,
@@ -1946,23 +1950,23 @@ impl BSplineCurve {
                 for s in &solutions {
                     params.push(s.param(0)?);
                 }
+                // the whole trim off the zero-speed stretches, certified once
+                let mut whole_clears: Option<bool> = None;
                 for (s, &p) in solutions.iter().zip(&params) {
                     let growth = (p - domain.min()).abs() <= stretch[0]
                         || (p - domain.max()).abs() <= stretch[1];
                     let smooth_on_surface = match on_surface {
                         Some(surface) if s.solution_value < radius_tol && !growth => {
-                            // out to the neighbouring solutions, else the domain's ends
-                            let lo = params
-                                .iter()
-                                .copied()
-                                .filter(|&q| q < p)
-                                .fold(domain.min(), |m, q| if q > m { q } else { m });
-                            let hi = params
-                                .iter()
-                                .copied()
-                                .filter(|&q| q > p)
-                                .fold(domain.max(), |m, q| if q < m { q } else { m });
-                            radius_clears_on_surface(k, self, surface, lo, hi, radius_tol)?
+                            if let Some(c) = whole_clears {
+                                c
+                            } else {
+                                let lo = domain.min() + max2(stretch[0], 0.0);
+                                let hi = domain.max() - max2(stretch[1], 0.0);
+                                let c =
+                                    radius_clears_on_surface(k, self, surface, lo, hi, radius_tol)?;
+                                whole_clears = Some(c);
+                                c
+                            }
                         }
                         _ => false,
                     };
@@ -2685,9 +2689,9 @@ mod tests {
     /// 0.9, 0.95, 0.97, 1). Its middle lies on the meridian at a latitude of about 70°, where
     /// a step in u is about 33 times as long as at the turn. So the turn onto the latitude
     /// circle, whose u leg is 2 rad but 0.12 long on the ball, mapped by the metric at the
-    /// middle (WR-560), has a radius of about 2.9e-4 against the tolerance 1.0e-3, while its
-    /// image on the ball has a least radius of about 6.8e-3 (a closed-form model of the
-    /// curve, sampled; the test asserts only the verdicts).
+    /// middle (WR-560), gives test-13 solutions of 3.4e-4 to 7.4e-4 against the tolerance
+    /// 1.0e-3 (measured), while its image on the ball has a least radius of about 6.8e-3 (a
+    /// closed-form model of the curve, sampled; the test asserts only the verdicts).
     fn turn_onto_a_latitude_circle(dom: &Extent2d, extra: &[[f64; 2]]) -> BSplineCurve {
         let top = 0.5 * PI - 0.01;
         let mut pts = vec![
@@ -2723,6 +2727,11 @@ mod tests {
     /// t = 0.9 still has a radius of about 3.1e-3 there at its own parameter, which a test
     /// at one point passes. Over `[0.9, 0.95]` the bound clears the tolerance 1e-3; over
     /// `[0.9, 1]`, which holds the corner off the turn's parameter, it does not.
+    ///
+    /// Test 13 reports the trim. Mapped, the corner reads about 4.2e-3, above the tolerance,
+    /// so the analysis finds no solution there; a pass-over certified only out to the
+    /// neighbouring solutions passed the turn at 0.9 and so the whole trim. The pass-over is
+    /// certified over the whole trim, which the corner fails, so the turn is reported.
     #[test]
     fn a_kink_on_the_ball_off_a_turns_parameter_is_not_cleared() {
         let k = Kernel::default();
@@ -2732,6 +2741,8 @@ mod tests {
         let clears = |lo, hi| radius_clears_on_surface(&k, &trim, &surface, lo, hi, 1e-3);
         assert!(clears(0.9, 0.95).unwrap());
         assert!(!clears(0.9, 1.0).unwrap());
+        let idx = failed_tests(&k, &trim, Some(&surface));
+        assert!(idx.contains(&13), "{idx:?}");
     }
 
     /// WR-668 (fork tangency-labs/smlib ecf1963): `C(t) = (t^2, t^3, 0)` on `[0, 1]`,

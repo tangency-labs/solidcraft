@@ -12,8 +12,8 @@ tolerance although its image on the surface is smooth.
 
 Change (not upstream, no flag): a test-13 solution below the tolerance on a mapped trim is
 passed over only where a certified lower bound on the radius of curvature of the trim's
-image `S(c(t))` is at least the tolerance over the solution's whole neighbourhood, out to
-the neighbouring solutions (else the trim's ends). The bound composes each polynomial piece
+image `S(c(t))` is at least the tolerance over the whole trim, off the zero-speed stretches
+at its ends (WR-668). The bound composes each polynomial piece
 of the trim with each polynomial patch of the surface in rounded interval arithmetic and
 bounds `|g'|^3 / |g' x g''|` from the composed coefficients (no sampling); pieces that do not
 clear are halved, breadth first, at most 4096 pieces and 64 halvings each, no recursion. A
@@ -28,14 +28,17 @@ error. That is a defect of the surface/surface trace's UV fit near a pole (its s
 bounds position only), not of the exact curve, and the bound reports it: those cuts stay
 refused until the fit is fixed (follow-up of #15994).
 
-Known gap, unchanged: the constant metric also understates a turn where a step in u is
-shorter on the surface than at the trim's middle. On a r 6 sphere, a trim whose middle lies
-at latitude 70 degrees and which turns back down a meridian 0.01 rad from the pole after
-0.06 rad of longitude (`a_kink_on_the_ball_off_a_turns_parameter_is_not_cleared` in
-`p3.rs`) has a corner of radius about 5e-6 on the ball, but about 4.2e-3 mapped, above the
-tolerance 1.0e-3, so test 13 never sees it, on main as here. Only solutions below the
-tolerance are measured on the surface. Measuring the whole trim on its surface would close
-that gap and is left as a follow-up.
+Known gap, unchanged from main: the constant metric also understates a turn where a step
+in u is shorter on the surface than at the trim's middle, and only solutions the mapped
+analysis finds below the tolerance are measured on the surface. A trim with such a corner and
+no solution below the tolerance is not reported, on main as here. A trim that also has a
+turn this change would pass over is reported: the pass-over needs the whole trim to clear on
+the surface, and the corner does not. `a_kink_on_the_ball_off_a_turns_parameter_is_not_cleared`
+in `p3.rs` is that case: on a r 6 sphere, a trim whose middle lies at latitude 70 degrees
+turns onto a latitude circle 0.01 rad from the pole and back down a meridian after 0.06 rad
+of longitude. Its corner has radius about 5e-6 on the ball but about 4.2e-3 mapped. Test 13
+reports it. Measuring every trim on its surface would close the rest of the gap and is left
+as a follow-up.
 
 Code: `radius_clears_on_surface` (`crates/solidcore/src/nurbs/b_spline_curve/trim_image.rs`)
 and the pass-over in `BSplineCurve::assert_valid_with`
