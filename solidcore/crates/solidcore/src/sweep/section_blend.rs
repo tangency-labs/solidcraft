@@ -859,8 +859,9 @@ pub fn section_frames(
 ///   an edge twice (a seam) is left across its first use.
 ///
 /// # Errors
-/// `InvalidInput` for stations out of range, a `toward` not finite or of no length, a chain that
-/// is empty or does not join end to start, an edge without a curve, no face bounding the whole
+/// `InvalidInput` for stations out of range, a `toward` not finite or of no length where several
+/// faces bound the chain (one bounding it alone needs none), a chain that is empty or does not
+/// join end to start, an edge without a curve, no face bounding the whole
 /// chain, a chain edge its support face does not use, or a surface singular at a station; those
 /// of the lengths, binormals, projections and evaluations.
 pub fn section_frames_outward(
@@ -873,27 +874,35 @@ pub fn section_frames_outward(
     if !(MIN_STATIONS..=MAX_STATIONS).contains(&stations) {
         return Err(frames_invalid("a section's frames take 2 to 257 stations"));
     }
-    if !finite(toward) {
-        return Err(frames_invalid(
-            "a direction towards the blend that is not finite",
-        ));
-    }
-    let toward = toward
-        .unitize()
-        .map_err(|_| frames_invalid("a direction towards the blend of no length"))?;
     let walk = walk_chain(k, b, chain)?;
     let at = walk.stations(k, stations)?;
     let (first, middle) = walk.first_middle;
     let faces = walk.faces;
-    // the support face: the one leaving furthest along `toward` where several bound the chain
-    let mut best: Option<(f64, crate::topology::FaceId)> = None;
-    for f in faces {
-        let along = outward(k, b, first, f, middle)?.dot(toward);
-        if best.is_none_or(|(s, _)| along > s) {
-            best = Some((along, f));
+    // the support face: the one face bounding the chain, or of several the one leaving furthest
+    // along `toward`, which is asked for only there
+    let face = match faces.as_slice() {
+        [] => return Err(frames_invalid("no face bounds the whole chain")),
+        [only] => *only,
+        several => {
+            if !finite(toward) {
+                return Err(frames_invalid(
+                    "a direction towards the blend that is not finite",
+                ));
+            }
+            let toward = toward
+                .unitize()
+                .map_err(|_| frames_invalid("a direction towards the blend of no length"))?;
+            let mut best: Option<(f64, crate::topology::FaceId)> = None;
+            for &f in several {
+                let along = outward(k, b, first, f, middle)?.dot(toward);
+                if best.is_none_or(|(s, _)| along > s) {
+                    best = Some((along, f));
+                }
+            }
+            best.map(|(_, f)| f)
+                .ok_or_else(|| frames_invalid("no face bounds the whole chain"))?
         }
-    }
-    let (_, face) = best.ok_or_else(|| frames_invalid("no face bounds the whole chain"))?;
+    };
     let leaves = at
         .iter()
         .map(|s| outward(k, b, s.edge, face, s.t))

@@ -261,11 +261,15 @@ fn a_sheet_edge_is_left_outward_whatever_the_blend_s_direction() {
     let mut b = create_plane(&mut k, Point3::ZERO, 20.0, 10.0).unwrap();
     let front = pick(&k, &b, [10.0, 0.0, 0.0]);
     let right = pick(&k, &b, [20.0, 5.0, 0.0]);
+    // (a toward of no length, or not finite, too: it is asked only to choose between faces,
+    // #16410 review, finding 6)
     for toward in [
         Vec3::Y,
         Vec3::new(0.0, -1.0, 0.0),
         Vec3::Z,
         Vec3::new(1.0, 1.0, -1.0),
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(f64::NAN, 0.0, 0.0),
     ] {
         // each edge, its outward direction, and the point of the edge's line nearest a station
         for (edge, out, on_edge) in [

@@ -8,8 +8,10 @@ pub use solidcore::topology::brep::SolidTest;
 /// SMLib's `SM_ERR_INVALID_INPUT`, the status of input the kernel refuses.
 pub const INVALID_INPUT: i32 = solidcore::error::SM_ERR_INVALID_INPUT;
 
-/// Why an operation failed.
+/// Why an operation failed. Non-exhaustive: a refusal may gain a variant, so a caller matches
+/// the ones it treats and lets the rest through.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Error {
     /// The kernel's own status (1001 `SM_ERR`, 1007 `SM_ERR_INVALID_INPUT`, …).
     Status(i32),

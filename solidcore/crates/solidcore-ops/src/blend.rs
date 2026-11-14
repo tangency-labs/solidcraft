@@ -166,8 +166,10 @@ pub struct Hole {
     pub edges: Vec<HoleEdge>,
 }
 
-/// What [`blend`] reports besides the blended body.
+/// What [`blend`] reports besides the blended body. Non-exhaustive: it may gain fields, so a
+/// caller reads the ones it needs and never builds one.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct Blended {
     /// Per edge asked, whether a larger round that overflowed its faces and went first removed
     /// it whole (nothing of it was left to round).

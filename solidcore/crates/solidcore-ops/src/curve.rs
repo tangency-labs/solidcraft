@@ -2012,8 +2012,8 @@ pub struct SurfaceOffset {
 /// constructors refuse, or a sheet that is not one face with a surface;
 /// [`Error::OffsetPastTolerance`] for an offset whose measured deviation strays past
 /// `tolerance`; [`Error::Record`] for an offset the record cannot hold; the kernel's refusals
-/// otherwise (a geodesic leaving the surface, a station off it, a singular surface); those of
-/// [`crate::Body::from_record`].
+/// otherwise (a geodesic leaving the surface, a station of the curve farther from the surface
+/// than `tolerance`, a singular surface); those of [`crate::Body::from_record`].
 pub fn offset_on_surface(
     curve: &Curve,
     sheet: &solidcore_record::brep::Brep,

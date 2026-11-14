@@ -203,3 +203,31 @@ fn a_spline_face_has_none_and_the_input_is_unchanged() {
         SurfaceKind::Sphere(_)
     ));
 }
+
+/// The sheet of an analytic face lists its edges from the side the face's own loop starts on,
+/// as a planar face's sheet does: a later edit makes it again in that order, and a client names
+/// edges by their place (#16410 review, finding 3). For each primitive's curved face.
+#[test]
+fn an_analytic_faces_sheet_starts_at_its_loops_first_side() {
+    use solidcore::topology::brep::sheet::first_side;
+    let mut k = kernel();
+    let cylinder = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0, 5.0).unwrap();
+    let cone = create_cone(&mut k, Point3::new(0.0, 0.0, 0.0), 3.0, 1.0, 4.0).unwrap();
+    let sphere = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0).unwrap();
+    let torus = create_torus(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 1.0).unwrap();
+    for (name, b) in [
+        ("cylinder", cylinder),
+        ("cone", cone),
+        ("sphere", sphere),
+        ("torus", torus),
+    ] {
+        let f = curved_face(&b);
+        let mut copy = solidcore::topology::brep::p3::brep_copy(&mut k, &b).unwrap();
+        let fc = curved_face(&copy);
+        let want = first_side(&k, &mut copy, fc).unwrap();
+        let mut sheet = editable_sheet(&mut k, &b, f).unwrap().unwrap();
+        let sf = sheet.face_list()[0];
+        let got = first_side(&k, &mut sheet, sf).unwrap();
+        assert_eq!(got, want, "{name}");
+    }
+}

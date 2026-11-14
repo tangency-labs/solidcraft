@@ -113,3 +113,43 @@ fn a_curvature_continuous_round_along_the_shoulder_is_curvature_continuous_with_
     let f = fillet_sheets(&deck, &side, &how(Section::Curvature(30.0))).unwrap();
     holds(&f, 2);
 }
+
+/// The deck and the side over a short stretch of the shoulder (about 0.8 m of it, four points
+/// each), through their records.
+fn short_deck_and_side() -> (Body, Body) {
+    let through_record = |s: Body| {
+        Body::from_record(&s.to_record().unwrap().0, true)
+            .unwrap()
+            .0
+    };
+    let shoulder = [
+        [1121.5, -900.0, 858.7],
+        [1390.0, -900.0, 815.0],
+        [1660.0, -900.0, 765.0],
+        [1936.4, -900.0, 713.5],
+    ];
+    let sill = [
+        [1100.0, -900.0, 450.0],
+        [1360.0, -900.0, 462.0],
+        [1620.0, -900.0, 474.0],
+        [1885.5, -900.0, 484.3],
+    ];
+    let roof = [
+        [1197.9, 0.0, 968.2],
+        [1486.0, 0.0, 1023.0],
+        [1775.0, 0.0, 1078.0],
+        [2063.7, 0.0, 1133.7],
+    ];
+    let deck = loft(&[vec![fit(&roof)], vec![fit(&shoulder)]], 1, false).unwrap();
+    let side = loft(&[vec![fit(&shoulder)], vec![fit(&sill)]], 1, false).unwrap();
+    (through_record(deck), through_record(side))
+}
+
+/// The curvature-continuous section built and certified in CI time (#16410 review, finding 4):
+/// the same fillet on a short stretch of the shoulder, its seams curvature continuous.
+#[test]
+fn a_curvature_continuous_round_on_a_short_shoulder_is_curvature_continuous_with_both_sheets() {
+    let (deck, side) = short_deck_and_side();
+    let f = fillet_sheets(&deck, &side, &how(Section::Curvature(30.0))).unwrap();
+    holds(&f, 2);
+}

@@ -363,6 +363,32 @@ pub struct Fillet {
     pub seams: Vec<SeamReport>,
 }
 
+/// Which part of a rounded pair of sheets a face of it is ([`owner`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Owner {
+    /// The fillet's.
+    Fillet,
+    /// The first sheet's, cut back.
+    A,
+    /// The second sheet's, cut back.
+    B,
+}
+
+/// Where a face of a rounded pair of sheets goes, from whether the blend made it (`made`) and
+/// whether a point inside it lies on the first sheet (`on_a`) and on the second (`on_b`): the
+/// fillet's when the blend made it or it lies on neither sheet (a piece of a round a later pass
+/// split, not marked by the session that made it), else the sheet it lies on (the first where it
+/// lies on both). Each sheet is asked on its own, never taken as the one left over.
+const fn owner(made: bool, on_a: bool, on_b: bool) -> Owner {
+    if made || !(on_a || on_b) {
+        Owner::Fillet
+    } else if on_a {
+        Owner::A
+    } else {
+        Owner::B
+    }
+}
+
 /// The fillet between sheets `a` and `b` where they meet along an edge of each: the two sheets'
 /// copies sewn into one body at `how.tolerance`, the edges they then share rounded by the
 /// kernel's blend ([`crate::blend`]) with `how.section` (on the side the sheets' normals give,
@@ -434,9 +460,12 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
     let blended = crate::blend::blend(&sewn, kind, &shared, &sizes, &[], crate::Corners::Filled)?;
     let rounded = native_order(&sewn);
     // The fillet's faces are the ones the kernel's blend made. Every other face is a sheet's,
-    // cut back: the first's where a point inside it lies on the first sheet, else the
-    // second's (the blend makes the faces it trims anew, so a face's id does not say which).
+    // cut back, where a point inside it lies on that sheet (the blend makes the faces it trims
+    // anew, so a face's id does not say which), each sheet asked on its own ([`owner`]).
     let made = blended.made;
+    if made.is_empty() {
+        return Err(Error::NoEffect);
+    }
     let inside = inside_points(&sewn)?;
     let on = |sheet: &Body, order: &Order, p: [f64; 3]| -> Result<bool> {
         Ok(sheet
@@ -445,20 +474,21 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
             .flatten()
             .any(|d| d.is_some_and(|d| d <= how.tolerance)))
     };
-    let (mut of_a, mut of_b) = (Vec::new(), Vec::new());
+    let (mut of_fillet, mut of_a, mut of_b) = (Vec::new(), Vec::new(), Vec::new());
     for (i, p) in inside.iter().enumerate() {
-        if made.contains(&i) {
-            continue;
-        }
-        if on(a, &a_order, *p)? {
-            of_a.push(i);
+        let is_made = made.contains(&i);
+        let (on_a, on_b) = if is_made {
+            (false, false)
         } else {
-            of_b.push(i);
+            (on(a, &a_order, *p)?, on(b, &b_order, *p)?)
+        };
+        match owner(is_made, on_a, on_b) {
+            Owner::Fillet => of_fillet.push(i),
+            Owner::A => of_a.push(i),
+            Owner::B => of_b.push(i),
         }
     }
-    if made.is_empty() {
-        return Err(Error::NoEffect);
-    }
+    let made = of_fillet;
     let without = |keep: &[usize]| -> Vec<usize> {
         (0..rounded.faces.len())
             .filter(|i| !keep.contains(i))
@@ -624,4 +654,22 @@ fn half(cut: &Body, other: &Body, side: SheetSide, tol: f64) -> Result<Body> {
         ));
     }
     crate::trim::remove_faces(cut, &order, &away)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #16410 review, finding 1: a face neither the blend marked nor on either sheet is the
+    /// fillet's (a round's piece a later pass split), never the second sheet's by elimination; a
+    /// face on a sheet is that sheet's, the first where it is on both.
+    #[test]
+    fn a_face_on_neither_sheet_is_the_fillets() {
+        assert_eq!(owner(false, false, false), Owner::Fillet);
+        assert_eq!(owner(true, false, false), Owner::Fillet);
+        assert_eq!(owner(true, true, true), Owner::Fillet);
+        assert_eq!(owner(false, true, false), Owner::A);
+        assert_eq!(owner(false, false, true), Owner::B);
+        assert_eq!(owner(false, true, true), Owner::A);
+    }
 }

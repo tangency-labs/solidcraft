@@ -5,7 +5,8 @@
 //!
 //! Not upstream. The construction, every step the surface's own derivatives:
 //! - Stations at even steps of the curve's interval asked, its ends included. At each, the
-//!   curve's point dropped onto the surface (its foot `(u, v)`), the unit normal
+//!   curve's point dropped onto the surface (its foot `(u, v)`, within the tolerance of it: a
+//!   curve off the surface is refused, not offset as its shadow), the unit normal
 //!   `n = S_u x S_v / |S_u x S_v|`, the curve's tangent taken into the tangent plane, and the
 //!   direction square to it there, `w = n x t` (to the left about `n`) or `-w` (to the right).
 //! - From the foot along `w`, the geodesic of length `distance`: in arc length `s`,
@@ -84,7 +85,7 @@ pub struct GeodesicOffset {
 ///
 /// # Errors
 /// `InvalidInput` for a distance or a tolerance not finite and positive, a station whose foot is
-/// not found or where the surface is singular, a curve with no tangent at a station, or a
+/// not found or lies farther from it than the tolerance, or where the surface is singular, a curve with no tangent at a station, or a
 /// geodesic leaving the surface's parameter box; `NotConverged` when a geodesic's end does not
 /// settle within [`MAX_STEPS`] steps; those of the evaluations, the drops and the fit.
 pub fn geodesic_offset(
@@ -125,6 +126,7 @@ pub fn geodesic_offset(
         distance,
         side,
         settle: tolerance * 0.1,
+        on: tolerance,
     };
     let ivl = *interval;
     if !(ivl.min().is_finite() && ivl.max().is_finite() && ivl.min() < ivl.max()) {
@@ -179,6 +181,8 @@ struct Shoot<'a> {
     side: Side,
     /// How close two successive end points must lie for the integration to have settled.
     settle: f64,
+    /// How close a station must lie to its foot on the surface: the tolerance.
+    on: f64,
 }
 
 /// The surface's derivatives to second order at a point.
@@ -317,6 +321,14 @@ impl Shoot<'_> {
         if !foot.success {
             return Err(invalid(
                 "a station of the curve with no foot on the surface",
+            ));
+        }
+        // a curve on the surface: its station within the tolerance of its foot (a curve off the
+        // surface would be offset as its shadow)
+        #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+        if !(foot.gap <= self.on) {
+            return Err(invalid(
+                "a station of the curve farther from the surface than the tolerance",
             ));
         }
         let uv = foot.result_uv;

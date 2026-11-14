@@ -100,7 +100,9 @@ fn a_circle_round_a_cylinder_offsets_to_the_circles_above_and_below() {
         .is_ok_and(|f| f.success && f.gap <= 1e-9)
     });
     let tau = std::f64::consts::TAU;
-    let round = through(65, |t| {
+    // (257 points: the interpolant lies on the wall to 1e-7, within the offset's tolerance;
+    // through 65 it strays 1.2e-5 off near its ends, past it)
+    let round = through(257, |t| {
         Vec3::new(5.0 * (tau * t).cos(), 5.0 * (tau * t).sin(), 5.0)
     });
     let mut zs = Vec::new();
@@ -137,7 +139,8 @@ fn the_equator_of_a_sphere_offsets_to_the_latitudes_d_over_r_from_it() {
     let b = create_sphere(&mut k, Point3::ZERO, 10.0).unwrap();
     let (s, dom) = face_of(&b, |_, _| true);
     let tau = std::f64::consts::TAU;
-    let equator = through(65, |t| {
+    // (257 points: on the sphere to 1e-7; through 65 it strays 2.4e-5 off near its ends)
+    let equator = through(257, |t| {
         Vec3::new(10.0 * (tau * t).cos(), 10.0 * (tau * t).sin(), 0.0)
     });
     let (z, r) = (10.0 * 0.3_f64.sin(), 10.0 * 0.3_f64.cos());
@@ -222,4 +225,25 @@ fn an_offset_off_the_surface_and_bad_inputs_are_refused() {
         geodesic_offset(&k, &s, &dom, &line, &point, 1.0, Side::Left, 1e-6),
         Err(SolidError::InvalidInput { .. })
     ));
+}
+
+/// A curve off its surface is refused, not offset as its shadow: a line 50 above the plane has
+/// a foot at every station, but none within the tolerance (#16410 review, finding 2).
+#[test]
+fn a_curve_off_its_surface_is_refused() {
+    let mut k = Kernel::default();
+    let b = create_plane(&mut k, Point3::ZERO, 20.0, 10.0).unwrap();
+    let (s, dom) = face_of(&b, |_, _| true);
+    let above = through(5, |t| Vec3::new(2.0 + 16.0 * t, 5.0, 50.0));
+    let r = geodesic_offset(
+        &k,
+        &s,
+        &dom,
+        &above,
+        &above.natural_interval(),
+        3.0,
+        Side::Left,
+        1e-6,
+    );
+    assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
 }
