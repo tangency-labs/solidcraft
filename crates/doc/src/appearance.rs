@@ -500,16 +500,7 @@ pub fn face_index_at(b: &crate::ModelBody, p: Vec3) -> Option<usize> {
 
 /// The face of `b` nearest `p` and how far it is, however far.
 pub fn nearest_face(b: &crate::ModelBody, p: Vec3) -> Option<(f64, usize)> {
-    let m = b.mesh();
-    let mut best: Option<(f64, u32)> = None;
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        let Some([a, bb, c]) = m.tri(t) else { continue };
-        let d = closest_on_triangle(p, a, bb, c).dist(p);
-        if best.is_none_or(|(x, _)| d < x) {
-            best = Some((d, *f));
-        }
-    }
-    best.map(|(d, f)| (d, f as usize))
+    b.body.nearest_face(p)
 }
 
 /// How far from a face of `b` a picked point may lie and still pick it (`face_index_at`).
