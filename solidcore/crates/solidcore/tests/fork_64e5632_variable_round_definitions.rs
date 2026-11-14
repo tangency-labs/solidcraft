@@ -1,6 +1,6 @@
 //! The SolidCraft fork's tangency-labs/smlib@64e5632 and 8f145ee (#2273, smlib#79 step 7):
 //! a variable round whose balls exist over the variable radius solver's stations is its
-//! definition (`fillet_round_as_definition`, WR-698).
+//! definition (WR-698).
 //!
 //! The capi's `variable_round_on_a_cone_is_its_definition` and
 //! `variable_round_quadratic_law_is_its_definition`: the top back edge (y = 30, z = 20) of a
@@ -450,7 +450,7 @@ fn solidcraft_kernel() -> Kernel {
 }
 
 /// The fork's behaviour these cases reach, and no other fix: the round as its definition
-/// (`fillet_round_as_definition`) on the G^n section generator, whose circle is a definition
+/// on the G^n section generator, whose circle is a definition
 /// only where it is the ball's exact circle (as every circular round's section is); and the
 /// trace and
 /// ends the fork's net is certified over, the variable round's spans tested against its law
@@ -458,7 +458,6 @@ fn solidcraft_kernel() -> Kernel {
 /// each end of the edge.
 fn fork_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.fillet_round_as_definition = true;
     k.fixes.fillet_variable_span_follows_fillet = true;
     k
 }
@@ -588,18 +587,4 @@ fn a_variable_round_whose_law_reaches_zero_over_the_stations_is_not_its_definiti
             g.volume
         );
     }
-}
-
-/// Without `fillet_round_as_definition` the round on the cone is its net alone, a B-spline,
-/// as before 0d43b4c (the fork's tests failed there).
-#[test]
-fn without_the_definition_fix_the_round_on_the_cone_is_not_its_definition() {
-    let mut k = fork_kernel();
-    k.fixes.fillet_round_as_definition = false;
-    let g = grade(&mut k, &LINEAR, 3.0, Some(&off_the_cone));
-    println!("{g:?}, volume {:.13}", g.volume);
-    assert!(
-        !g.faces.is_empty() && g.faces.iter().all(|f| !f.definition),
-        "{g:?}"
-    );
 }

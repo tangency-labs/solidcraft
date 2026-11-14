@@ -111,18 +111,13 @@ fn live(solvers: &[Option<SolverObject>], id: Option<FilletSolverId>) -> Result<
 /// loop's gap closes ([`LOOP_GAP_ZONES`] of the body's tolerance), the blend with the larger
 /// and the other's offset. Each blend's rails are on its own offsets, which
 /// `SM_FE_CROSS_SECTION` cannot end both of. `None` for anything else: other solvers (a
-/// law's rails are the law's to meet), without `fixes.fillet_round_as_definition` (a blend
-/// not by its definition bends its rails to the section), or one closed blend.
+/// law's rails are the law's to meet), or one closed blend.
 fn unequal_blends(
-    k: &Kernel,
     target: &Brep,
     solvers: &[Option<SolverObject>],
     ids: &[Option<FilletSolverId>],
     faces: [Option<FaceId>; 2],
 ) -> Result<Option<(usize, f64)>> {
-    if !k.fixes.fillet_round_as_definition {
-        return Ok(None);
-    }
     let mut offsets = Vec::new();
     for (&id, face) in ids.iter().zip(faces) {
         let object = id
@@ -416,7 +411,7 @@ impl FilletCorner {
         }
         let first_side = side.get(first).copied().unwrap_or_default();
         if let Some((blend, builds)) =
-            unequal_blends(k, target, solvers, &solver_eu_solvers, first_side)?
+            unequal_blends(target, solvers, &solver_eu_solvers, first_side)?
         {
             return Ok(JoinTopology::RefusedUnequalOffsets { blend, builds });
         }

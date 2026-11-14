@@ -309,9 +309,6 @@ only on a B-spline piece, since it is read point for point on its net. The test
 cuts a cylinder through a round, once as built and once rebuilt from its record, and checks the same
 volume, the same edges on the round, and every such edge on S within its own tolerance.
 
-The blend definitions themselves are opt-in (`fillet_round_as_definition`); without it a round is a
-bare net and there is no definition to keep.
-
 **Where exact edges still get fitted trims.**
 - A curve from a closed form (a line, circle or ellipse, [ssi.md](ssi.md) §5) has no UV curves; its
   trims are made by dropping the 3D curve onto each surface (`Surface::drop_curve`,

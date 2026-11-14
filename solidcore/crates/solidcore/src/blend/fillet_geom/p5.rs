@@ -146,7 +146,7 @@ const OP_INT_FILLET: &str = "blend::fillet_geom::p5::FilletBrep::calc_fillet_int
 const OP_CROSS: &str = "blend::fillet_geom::p5::FilletBrep::calc_cross_section";
 const OP_SIDE: &str = "blend::fillet_geom::p5::FilletBrep::calc_fillet_int_side_face";
 
-/// Not the fork's (#2406; with `fixes.fillet_round_as_definition`): where the plane `end` holds a section of the round
+/// Not the fork's (#2406): where the plane `end` holds a section of the round
 /// `fillet` by its definition (a [`SurfaceKind::ProceduralBlend`]) that runs from one of
 /// `ends` (the rib's start, then its end) to the other, the end rib is that section: the
 /// definition's rational quadratic arc of the ball's circle (`EvaluateDefinition`, order 1)
@@ -1621,17 +1621,13 @@ impl FilletBrep {
             } else if let Some(section) = match &surface {
                 // Not the fork's (#2406): an End's plane that holds a section of a round
                 // by its definition through both rail ends cuts the round in that section
-                Some(surface)
-                    if k.fixes.fillet_round_as_definition && the_corner.end_cap.is_some() =>
-                {
-                    definition_section_in_plane(
-                        k,
-                        &fillet_surface1,
-                        surface,
-                        [start_pnt, end_pnt],
-                        approx_tol,
-                    )?
-                }
+                Some(surface) if the_corner.end_cap.is_some() => definition_section_in_plane(
+                    k,
+                    &fillet_surface1,
+                    surface,
+                    [start_pnt, end_pnt],
+                    approx_tol,
+                )?,
                 _ => None,
             } {
                 Ok(section)

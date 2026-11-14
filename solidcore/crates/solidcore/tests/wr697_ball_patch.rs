@@ -868,10 +868,9 @@ fn a_box_rounded_all_round_shells_in_and_out_after_a_round_trip() {
 use solidcore::surface::procedural_blend::corner::CornerKind;
 use solidcore::surface::procedural_blend::BlendNet;
 
-/// The box corner's Ball face with `fillet_round_as_definition` on or off.
-fn ball_face_with(definition: bool) -> (Kernel, Surface) {
+/// The box corner's Ball face, built by the fillet session, its definition kept.
+fn kept_ball_face() -> (Kernel, Surface) {
     let mut k = all_fixes();
-    k.fixes.fillet_round_as_definition = definition;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
     let at = [[20.0, 30.0, 20.0], [40.0, 15.0, 20.0], [40.0, 30.0, 10.0]];
     let edges: Vec<EdgeId> = at.iter().map(|&p| pick(&k, &b, p)).collect();
@@ -895,10 +894,10 @@ fn ball_face_with(definition: bool) -> (Kernel, Surface) {
 
 /// The Ball's face is its definition: the sphere (centre r in from each face, radius r),
 /// the patch's loop (its three sections) and its net, exact (bound 0), G1, re-certified
-/// at 0; the patch is bit for bit the one built without keeping the definition.
+/// at 0.
 #[test]
 fn the_ball_s_patch_is_its_definition() {
-    let (k, s) = ball_face_with(true);
+    let (k, s) = kept_ball_face();
     let d = s
         .procedural_blend()
         .expect("the ball's patch keeps its definition");
@@ -923,16 +922,13 @@ fn the_ball_s_patch_is_its_definition() {
             assert!(((p - CENTRE).length() - 3.0).abs() <= 1e-13, "{p:?}");
         }
     }
-    let (_, bare) = ball_face_with(false);
-    assert!(bare.procedural_blend().is_none());
-    assert!(same_bits(patch(&s), patch(&bare)));
 }
 
 /// A moved patch (rigid, and by a uniform scale) carries its definition with it and is
 /// certified again; its sphere is the patch's own, bit for bit.
 #[test]
 fn a_moved_ball_s_patch_is_certified_again() {
-    let (k, s) = ball_face_with(true);
+    let (k, s) = kept_ball_face();
     let mut place = Axis2Placement::default();
     place.rotate_about_axis(0.3, Vec3::new(1.0, 2.0, 3.0).unitize().unwrap());
     place.translate(Vec3::new(1e2, -2e2, 5e1));
@@ -956,7 +952,7 @@ fn a_moved_ball_s_patch_is_certified_again() {
 /// 1e-7 off its sphere there is still refused.
 #[test]
 fn a_ball_s_patch_far_from_the_origin_is_certified_as_tightly() {
-    let (k, s) = ball_face_with(true);
+    let (k, s) = kept_ball_face();
     let far = Point3::new(1e5, -7e4, 3e4);
     let mut place = Axis2Placement::default();
     place.translate(far - CENTRE);
@@ -1012,7 +1008,7 @@ fn a_ball_s_patch_far_from_the_origin_is_certified_as_tightly() {
 /// certificates.
 #[test]
 fn non_finite_or_overflowing_nets_and_loops_are_refused() {
-    let (_k, s) = ball_face_with(true);
+    let (_k, s) = kept_ball_face();
     let ball = s
         .procedural_blend()
         .unwrap()

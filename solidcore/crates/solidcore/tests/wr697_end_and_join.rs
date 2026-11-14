@@ -567,11 +567,9 @@ use solidcore::surface::procedural_blend::BlendNet;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::face::p2 as face2;
 
-/// The step's front edge rounded r 2 into an End on `wall`, with or without
-/// `fillet_round_as_definition`.
-fn end_on(wall: fn(&mut Kernel) -> Brep, definition: bool) -> (Kernel, Brep) {
+/// The step's front edge rounded r 2 into an End on `wall`.
+fn end_on(wall: fn(&mut Kernel) -> Brep) -> (Kernel, Brep) {
     let mut k = all_fixes();
-    k.fixes.fillet_round_as_definition = definition;
     let mut b = wall(&mut k);
     round(&mut k, &mut b, &[[30.0, 0.0, 10.0]], 2.0);
     (k, b)
@@ -587,30 +585,6 @@ fn corner_faces(b: &Brep, kind: CornerKind) -> Vec<Surface> {
             s.procedural_blend()
                 .and_then(|d| d.corner())
                 .is_some_and(|c| c.kind() == kind)
-        })
-        .collect()
-}
-
-/// Every face's surface over a 9 x 9 grid of its natural domain, as bits.
-fn face_bits(k: &Kernel, b: &Brep) -> Vec<Vec<[u64; 3]>> {
-    get_faces(b)
-        .unwrap()
-        .into_iter()
-        .filter_map(|f| face2::surface(b, f).unwrap())
-        .map(|s| {
-            let d = s.natural_uv_domain_with_nurb(k).unwrap();
-            let mut pts = Vec::new();
-            for i in 0..=8 {
-                for j in 0..=8 {
-                    let u = d.min().x + (d.max().x - d.min().x) * f64::from(i) / 8.0;
-                    let v = d.min().y + (d.max().y - d.min().y) * f64::from(j) / 8.0;
-                    let p = s
-                        .evaluate_point(k, solidcore::geom::vector2d::Point2::new(u, v))
-                        .unwrap();
-                    pts.push([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
-                }
-            }
-            pts
         })
         .collect()
 }
@@ -633,7 +607,7 @@ fn moved(rec: &SupportRecord, by: f64) -> SupportRecord {
 #[test]
 fn the_end_patches_are_their_definitions() {
     for wall in [cylinder_wall as fn(&mut Kernel) -> Brep, sloped_wall] {
-        let (k, mut b) = end_on(wall, true);
+        let (k, b) = end_on(wall);
         let ends = corner_faces(&b, CornerKind::End);
         assert_eq!(ends.len(), 1);
         for s in &ends {
@@ -643,18 +617,13 @@ fn the_end_patches_are_their_definitions() {
             assert!(d.support(0).is_some());
             assert_eq!(d.recertify(&k).unwrap(), 0.0);
         }
-        // the volume and every surface bit for bit as without the definition
-        let (k0, mut b0) = end_on(wall, false);
-        assert!(corner_faces(&b0, CornerKind::End).is_empty());
-        assert_eq!(volume(&k, &mut b).to_bits(), volume(&k0, &mut b0).to_bits());
-        assert_eq!(face_bits(&k, &b), face_bits(&k0, &b0));
     }
 }
 
 #[test]
 fn an_end_patch_round_trips_through_its_record() {
     for wall in [cylinder_wall as fn(&mut Kernel) -> Brep, sloped_wall] {
-        let (k, b) = end_on(wall, true);
+        let (k, b) = end_on(wall);
         for s in corner_faces(&b, CornerKind::End) {
             let rec = corner_to_record(&k, &s).unwrap();
             let json = serde_json::to_string(&rec).unwrap();
@@ -671,7 +640,7 @@ fn an_end_patch_round_trips_through_its_record() {
 #[test]
 fn an_end_patch_off_its_support_is_refused() {
     for wall in [cylinder_wall as fn(&mut Kernel) -> Brep, sloped_wall] {
-        let (k, b) = end_on(wall, true);
+        let (k, b) = end_on(wall);
         let s = &corner_faces(&b, CornerKind::End)[0];
         let CornerRecord::End(rec) = corner_to_record(&k, s).unwrap() else {
             panic!("not an end's record");

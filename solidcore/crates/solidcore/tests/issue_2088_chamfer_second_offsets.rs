@@ -157,9 +157,7 @@ use solidcore::topology::edgeuse::p1 as eu1;
 
 /// The section generator and rounds (and chamfers) as their definitions.
 fn definition_kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = true;
-    k
+    Kernel::default()
 }
 
 /// The box [0, 20] x [0, 20] x [0, 10]'s top front edge, along x at y = 0, z = 10.

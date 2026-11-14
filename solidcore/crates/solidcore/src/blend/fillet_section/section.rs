@@ -1326,8 +1326,6 @@ impl GnSectionFsg {
             ));
         }
         let [rail1, rail2] = rails;
-        // (the fork's 4a10ed8, opt-in: the surface is the blend by its definition)
-        let definition = k.fixes.fillet_round_as_definition;
         let (c_min, c_max) = interval(center);
         // the stations: the unique knots of the rails and the centre line; with a law, the
         // solver's own stations' t (their feet the seeds) and the leader's and the law's
@@ -1708,12 +1706,10 @@ impl GnSectionFsg {
                 weights: None,
                 trim: None,
             };
-            if definition {
-                // (apUV[f]->Copy, then SetCanonical on the copy)
-                let mut seed = uv.clone();
-                seed.set_canonical(&uv_data)?;
-                seeds.push(seed);
-            }
+            // (apUV[f]->Copy, then SetCanonical on the copy)
+            let mut seed = uv.clone();
+            seed.set_canonical(&uv_data)?;
+            seeds.push(seed);
             if replace_rails {
                 let rail_cps: Vec<Point3> = (0..lnu).map(|i| jet(f, 0, i)).collect();
                 rail.set_canonical(&CanonicalData {
@@ -1760,10 +1756,6 @@ impl GnSectionFsg {
             })?;
             new_center = Some(c);
         }
-        if !definition {
-            return Ok(Some((Surface::from(surface), new_center)));
-        }
-
         // the blend by its definition on this net (4a10ed8): the faces, the ball's offsets
         // and sides, the section, the centre line as the leader the stations were solved
         // in, the seeds, the certified bound

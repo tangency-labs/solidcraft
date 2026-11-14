@@ -5,8 +5,7 @@
 //!
 //! Not in the pinned upstream: the SolidCraft fork's `source/SMLib/inc/SmProceduralBlend.h`,
 //! `source/SMLib/src/SmProceduralBlend.cpp` and `source/SMLib/inc/SmBlendNetScope.h`
-//! (tangency-labs/smlib@014f66f, c6d9b9a and bb9f45e, smlib#79, merged at 5e8c9c1). Only
-//! [`crate::kernel::UpstreamFixes::fillet_round_as_definition`] builds or reads one.
+//! (tangency-labs/smlib@014f66f, c6d9b9a and bb9f45e, smlib#79, merged at 5e8c9c1).
 //!
 //! | Rust                                         | Fork                                         |
 //! |----------------------------------------------|----------------------------------------------|

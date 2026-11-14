@@ -646,7 +646,7 @@ fn the_middle_edge_r1_rolls_over_onto_the_top_face_before_its_end() {
     check_top_end(&k, &b, 1.0, EXACT_TOL);
 }
 
-/// With `fillet_round_as_definition` (every fix here) the round on each side of the seam is
+/// The round on each side of the seam is
 /// a `ProceduralBlend`, a ball of radius r by its definition: the rolled one rolls it on the
 /// wall and the top face (the face beyond T), the one before on the wall and the R2 round.
 /// Each goes to the fork's record and back unchanged: the same definition, the same points

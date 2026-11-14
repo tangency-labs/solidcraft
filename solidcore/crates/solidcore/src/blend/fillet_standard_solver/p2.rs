@@ -3060,8 +3060,8 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
 const OP_LAW: &str = "blend::fillet_standard_solver::p2::law_in_parameter";
 
 impl CircularCrossSectionFsg {
-    /// The fork's `SmGnSectionFSG::CircleSurface` gate (cc08236, 308cc40, c596548; with
-    /// `fixes.fillet_round_as_definition`, WR-698): a ball of one radius between faces that are NURBS surfaces is the round by
+    /// The fork's `SmGnSectionFSG::CircleSurface` gate (cc08236, 308cc40, c596548;
+    /// WR-698): a ball of one radius between faces that are NURBS surfaces is the round by
     /// its definition, the order-1 section's `Build` with the rails and uv curves
     /// replaced ([`GnSectionFsg::build_given_ball`]), unless the rails or the centre line
     /// turn at a knot (`sm_FilletCurveCorners`: the pieces are built as before), a face is
@@ -3107,9 +3107,6 @@ impl CircularCrossSectionFsg {
             corner_angle, fillet_curve_corners,
         };
         use crate::surface::surface::SurfaceKind;
-        if !k.fixes.fillet_round_as_definition {
-            return Ok(None);
-        }
         let [rail1, rail2] = rails;
         let corners =
             fillet_curve_corners(center_line, rail1, rail2, corner_angle(ball.ang_tol_rad))?;
@@ -3391,15 +3388,17 @@ impl CircularCrossSectionFsg {
 }
 
 impl super::p1::LinearCrossSectionFsg {
-    /// A chamfer by its definition (solidcore's, #2486; with
-    /// `fixes.fillet_round_as_definition`): the
+    /// A chamfer by its definition (solidcore's, #2486): the
     /// section generator's chord, order 0, between the feet of the point at the solver's
     /// offsets off the two faces ([`GnSectionFsg::build_chord`]), keeping the chamfer's
     /// sizes: those the solver was made for, else its two offsets' setbacks at the wedge
     /// at the rails' start, or a constant-distance solver's chord between planes. The
     /// rails and uv curves become the stations' feet. `None` (built as before): a face
     /// that is not an offset of a NURBS surface (or is a blend by its definition), rails
-    /// or a centre line that turn at a knot, rails that meet at an end, a
+    /// or a centre line that turn at a knot, rails that meet at an end, a centre line or a
+    /// rail of no length (the offsets meet on an axis: a cylinder's rim chamfered by its
+    /// radius is a cone to its apex, whose centre line and rail on the top are one point,
+    /// and a section has no length to run along), a
     /// constant-distance solver on a face that is not a plane (its offsets vary along
     /// the edge), a solver of another kind, or rails that are not those feet.
     ///
@@ -3424,10 +3423,14 @@ impl super::p1::LinearCrossSectionFsg {
         };
         use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
         use crate::surface::surface::SurfaceKind;
-        if !k.fixes.fillet_round_as_definition {
+        let [rail1, rail2] = rails;
+        // a centre line or a rail of no length: the stations along it are one
+        if center_line.is_degenerate(k, approx_tol_3d, None)?
+            || rail1.is_degenerate(k, approx_tol_3d, None)?
+            || rail2.is_degenerate(k, approx_tol_3d, None)?
+        {
             return Ok(None);
         }
-        let [rail1, rail2] = rails;
         let corners =
             fillet_curve_corners(center_line, rail1, rail2, corner_angle(ball.ang_tol_rad))?;
         if !corners.is_empty() {

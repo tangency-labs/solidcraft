@@ -3899,11 +3899,8 @@ impl Surface {
             OFFSET_SURFACE_TYPE => Ok(Self::from(OffsetSurface::read_from_db(k, db, version)?)),
             SRF_IN_VOLUME_TYPE => Ok(Self::from(SrfInVolume::read_from_db(k, db, version)?)),
             STEP_SURFACE_TYPE => Ok(Self::from(StepSurface::read_from_db(k, db, version)?)),
-            // the fork's SmProceduralBlend (014f66f), read only with its flag: the pinned
-            // reader refuses the type
-            PROCEDURAL_BLEND_TYPE if k.fixes.fillet_round_as_definition => {
-                Ok(Self::from(ProceduralBlend::read_from_db(k, db, version)?))
-            }
+            // the fork's SmProceduralBlend (014f66f), which the pinned reader refuses
+            PROCEDURAL_BLEND_TYPE => Ok(Self::from(ProceduralBlend::read_from_db(k, db, version)?)),
             // the fork's SmBallPatch (f8e6709), which the pinned reader refuses
             BALL_PATCH_TYPE => Ok(Self::from(BallPatch::read_from_db(db, version)?)),
             _ => Err(SolidError::surface_failed(
