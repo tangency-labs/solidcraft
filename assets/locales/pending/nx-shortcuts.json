@@ -1,0 +1,42 @@
+{
+  "en": {
+    "cmd.view.align": "Align View",
+    "nav.nx_shortcuts.help": "Use familiar NX keys with the NX mouse preset. Custom shortcuts take priority. Turn this off to restore standard SolidCraft keys.",
+    "nav.nx_shortcuts.label": "Use NX keyboard shortcuts"
+  },
+  "de": {
+    "cmd.view.align": "Ansicht ausrichten",
+    "nav.nx_shortcuts.help": "Verwendet vertraute NX-Tasten mit der NX-Mausbelegung. Eigene Tastenkürzel haben Vorrang. Ausschalten stellt die SolidCraft-Standardtasten wieder her.",
+    "nav.nx_shortcuts.label": "NX-Tastenkürzel verwenden"
+  },
+  "ar": {
+    "cmd.view.align": "محاذاة العرض",
+    "nav.nx_shortcuts.help": "استخدم مفاتيح NX المألوفة مع إعداد الفأرة المسبق لـ NX. تكون الأولوية للاختصارات المخصصة. أوقف هذا الخيار لاستعادة مفاتيح SolidCraft القياسية.",
+    "nav.nx_shortcuts.label": "استخدام اختصارات لوحة مفاتيح NX"
+  },
+  "he": {
+    "cmd.view.align": "יישור התצוגה",
+    "nav.nx_shortcuts.help": "שימוש במקשי NX המוכרים עם הגדרת העכבר של NX. לקיצורים מותאמים אישית יש עדיפות. יש לכבות אפשרות זו כדי לשחזר את מקשי ברירת המחדל של SolidCraft.",
+    "nav.nx_shortcuts.label": "שימוש בקיצורי המקלדת של NX"
+  },
+  "ja": {
+    "cmd.view.align": "ビューを整列",
+    "nav.nx_shortcuts.help": "NXのマウス設定で使い慣れたNXのキーを使用します。独自のショートカットが優先されます。オフにするとSolidCraftの標準キーに戻ります。",
+    "nav.nx_shortcuts.label": "NXのキーボードショートカットを使用"
+  },
+  "vi": {
+    "cmd.view.align": "Căn chỉnh góc nhìn",
+    "nav.nx_shortcuts.help": "Dùng các phím NX quen thuộc với cấu hình chuột NX. Phím tắt tùy chỉnh được ưu tiên. Tắt tùy chọn này để khôi phục các phím chuẩn của SolidCraft.",
+    "nav.nx_shortcuts.label": "Dùng phím tắt NX"
+  },
+  "zh": {
+    "cmd.view.align": "对齐视图",
+    "nav.nx_shortcuts.help": "配合NX鼠标预设使用熟悉的NX按键。自定义快捷键优先。关闭此选项可恢复SolidCraft的标准按键。",
+    "nav.nx_shortcuts.label": "使用NX键盘快捷键"
+  },
+  "ko": {
+    "cmd.view.align": "뷰 정렬",
+    "nav.nx_shortcuts.help": "NX 마우스 프리셋에서 익숙한 NX 키를 사용합니다. 사용자 지정 단축키가 우선합니다. 이 옵션을 끄면 SolidCraft 기본 키로 돌아갑니다.",
+    "nav.nx_shortcuts.label": "NX 키보드 단축키 사용"
+  }
+}

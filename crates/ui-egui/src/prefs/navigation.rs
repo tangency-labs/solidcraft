@@ -108,6 +108,10 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 });
             });
         });
+        if app.preferences.nav == "nx" {
+            let response = setting::nx_shortcuts(app, ui);
+            crate::scenario::publish_target("prefs:nx_shortcuts", response.rect);
+        }
         if app.preferences.nav == "maya" {
             let axis = setting::maya_horizontal_zoom(app, ui).backing_on_hover_text(app.tr("nav.maya_horizontal_zoom.help"));
             crate::scenario::publish_target("prefs:maya_horizontal_zoom", axis.rect);

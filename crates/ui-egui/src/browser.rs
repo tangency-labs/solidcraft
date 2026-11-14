@@ -746,10 +746,11 @@ pub(crate) fn picked_group(app: &SolveApp) -> Option<u64> {
     find_group(app, id).map(|g| g.id)
 }
 
-pub(crate) fn toggle_picked_folder(app: &mut SolveApp) -> bool {
+pub(crate) fn set_picked_folder_visibility(app: &mut SolveApp, visible: Option<bool>) -> bool {
     let Some(pick) = app.tree.picked_folder.as_ref().filter(|pick| pick.current(app)) else { return false };
     let key = pick.key.clone();
-    toggle_folder(app, &key);
+    let visible = visible.unwrap_or_else(|| app.session.folder_hidden(&key));
+    let _ = app.run("browser.visibility", json!({"tree_folders": [key], "visible": visible}));
     true
 }
 

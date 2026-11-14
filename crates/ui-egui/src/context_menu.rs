@@ -2129,14 +2129,19 @@ pub(crate) fn show_current_keys(app: &SolveApp, list: &mut [Item]) {
 /// axes, components' bodies, canvases, joints' glyphs). When some are shown and some hidden, all are hidden.
 /// A clicked folder takes precedence, and toggles its own visibility without changing its items.
 pub fn toggle_visibility(app: &mut SolveApp) {
+    set_selection_visibility(app, None);
+}
+
+/// Explicit show/hide shares selection and folder semantics with the normal toggle command.
+pub(crate) fn set_selection_visibility(app: &mut SolveApp, target: Option<bool>) {
     use solidcraft_engine::doc::FeatureKind;
-    if crate::browser::toggle_picked_folder(app) {
+    if crate::browser::set_picked_folder_visibility(app, target) {
         return;
     }
     let paths: Vec<Vec<u64>> =
         app.session.selection.iter().filter_map(|s| if let Sel::Occurrence { path } = s { Some(path.clone()) } else { None }).collect();
     if !paths.is_empty() {
-        let visible = !paths.iter().any(|p| !app.session.occurrence_hidden(p));
+        let visible = target.unwrap_or_else(|| !paths.iter().any(|p| !app.session.occurrence_hidden(p)));
         let _ = app.run("browser.visibility", json!({"visible": visible, "paths": paths}));
     }
     let mut bodies: Vec<String> = touched_bodies(app);
@@ -2172,7 +2177,7 @@ pub fn toggle_visibility(app: &mut SolveApp) {
         || sketches.iter().any(|s| crate::browser::sketch_visible(app, *s))
         || origin.iter().any(|o| !app.session.visibility.hidden_origin.contains(o))
         || app.session.doc.canvases.iter().any(|c| canvases.contains(&c.id) && c.visible);
-    let hide = any_visible;
+    let hide = target.map_or(any_visible, |visible| !visible);
     // One command for the picked bodies, construction items and sketches: the same step the
     // menus run, so hiding from the viewport (V) is undone like any other hide (#2219).
     let mut items: Vec<Value> = bodies.iter().map(|b| json!(b)).collect();

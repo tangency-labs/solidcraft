@@ -2405,6 +2405,15 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         if k != Key::Escape {
             app.last_escape = None;
         }
+        let chord = crate::keymap::key_name(k, mods);
+        if crate::keymap::nx_active(app) && crate::keymap::nx_host_key(app, &chord) {
+            continue;
+        }
+        let nx_settings =
+            matches!(chord.as_str(), "Ctrl+1" | "Ctrl+2") && !app.keymap.custom.values().any(|keys| keys.iter().any(|key| key == &chord));
+        if (shown || nx_settings) && crate::keymap::nx_press(app, &chord, repeat) {
+            continue;
+        }
         if shown && (crate::keymap::drag_zoom_key(app, k, mods) || crate::navigation::view_key(app, ctx, k, mods, repeat)) {
             continue;
         }

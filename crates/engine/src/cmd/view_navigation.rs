@@ -151,6 +151,10 @@ CommandSpec::new("view.normal_to", "Normal to Selection", crate::checked!("view.
         .contract(&NORMAL_TO_CONTRACT)
         .output(output_schema_for::<CameraReply>)
         .params("camera?: Camera (default: current session camera or home view) → camera; Look At the first selected planar face or plane, centered on the picked point; repeat while aligned to flip the side; preserves scale and projection"),
+CommandSpec::new("view.align", "Align View", crate::checked!("view.align", align))
+        .icon("camera").noundo()
+        .contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>)
+        .params("camera?: Camera (default: current session camera or home view) → camera; look normal to the first selected planar face or plane, otherwise turn to the closest principal direction; preserves distance, projection and up axis"),
 CommandSpec::new("view.front", "Front View", crate::checked!("view.front", front)).icon("camera").noundo().key("Ctrl+1").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
 CommandSpec::new("view.back", "Back View", crate::checked!("view.back", back)).icon("camera").noundo().key("Ctrl+2").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
 CommandSpec::new("view.left", "Left View", crate::checked!("view.left", left)).icon("camera").noundo().key("Ctrl+3").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
@@ -290,6 +294,21 @@ fn normal_to(s: &mut Session, p: &Value) -> Result<Value> {
     let direction = if cam.back().dot(normal) > 0.999 { -normal } else { normal };
     let mut to = cam.looking_from(direction);
     to.target = point;
+    s.camera = Some(to);
+    camera_reply(cmd, to)
+}
+
+fn align(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.align";
+    view_params(p, cmd, &["camera"])?;
+    if normal_target(s).is_some() {
+        return normal_to(s, p);
+    }
+    let cam = given_camera(s, p)?
+        .filter(|cam| cam.yaw.abs() <= 1e6 && cam.roll.abs() <= 1e6 && cam.pitch.abs() <= std::f64::consts::FRAC_PI_2)
+        .ok_or_else(|| bad(cmd, "invalid camera"))?;
+    let direction = solidcore_ops::measure::nearest_principal_direction(cam.back().into()).ok_or_else(|| bad(cmd, "invalid camera direction"))?;
+    let to = cam.looking_from(direction.into());
     s.camera = Some(to);
     camera_reply(cmd, to)
 }
@@ -669,6 +688,42 @@ mod tests {
     use super::*;
     use solidcore_record::Vec3;
     use solidcraft_viewport::UpAxis;
+
+    #[test]
+    fn align_chooses_the_closest_principal_view_without_changing_scale_or_design() {
+        let mut s = Session::default();
+        let design = s.doc.to_json();
+        for up in [UpAxis::Y, UpAxis::Z] {
+            for direction in [Vec3::X, -Vec3::X, Vec3::Y, -Vec3::Y, Vec3::Z, -Vec3::Z] {
+                let camera = Camera { target: Vec3::new(1.0, 2.0, 3.0), distance: 123.0, fov: 0.6, up, ..Default::default() }
+                    .looking_from(direction + Vec3::new(0.12, 0.17, 0.08));
+                let result = s.execute("view.align", &json!({"camera":camera})).unwrap();
+                let aligned: Camera = serde_json::from_value(result["camera"].clone()).unwrap();
+                assert!(aligned.back().dist(direction) < 2e-6, "{up:?}: {direction:?}");
+                assert_eq!((aligned.target, aligned.distance, aligned.fov, aligned.up), (camera.target, camera.distance, camera.fov, up));
+                let again = s.execute("view.align", &json!({})).unwrap();
+                assert_eq!(again, result, "aligning a principal direction is idempotent");
+            }
+        }
+        assert_eq!(s.doc.to_json(), design);
+        assert!(s.undo.is_empty());
+    }
+
+    #[test]
+    fn align_uses_a_selected_plane_and_rejects_invalid_camera_inputs() {
+        let mut s = Session { selection: vec![Sel::Plane { name: "XY".into() }], ..Default::default() };
+        let camera = Camera { yaw: 0.2, pitch: 0.3, distance: 123.0, ..Default::default() };
+        let result = s.execute("view.align", &json!({"camera":camera})).unwrap();
+        let aligned: Camera = serde_json::from_value(result["camera"].clone()).unwrap();
+        assert!(aligned.back().dist(Vec3::Z) < 2e-6);
+        assert_eq!(aligned.distance, camera.distance);
+        s.selection.clear();
+        for params in [json!({"camera": {}}), json!({"camera":null}), json!({"unknown":true}), json!([]), json!(true)] {
+            let before = s.camera;
+            assert!(s.execute("view.align", &params).is_err(), "{params}");
+            assert_eq!(s.camera, before);
+        }
+    }
 
     #[test]
     fn view_bar_commands_validate_json_without_editing_design_or_history() {

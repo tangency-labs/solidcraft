@@ -1058,6 +1058,8 @@ preference_settings! {
     default_units: String = "mm".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
+    /// NX keyboard conventions are independent of the existing mouse preset and explicitly opt in.
+    nx_shortcuts: bool = false, PAGE_NAVIGATION => check_id_help("nav.nx_shortcuts.label", "nav.nx_shortcuts.help");
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
     free_orbit: bool = false, PAGE_NAVIGATION;
@@ -4906,6 +4908,40 @@ mod tests {
         assert!(restored.preferences.invert_navigator_arrows);
         super::reset_preferences(&mut app.preferences, super::PAGE_NAVIGATION);
         assert!(!app.preferences.invert_navigator_arrows);
+    }
+
+    #[test]
+    fn nx_shortcuts_stay_opt_in_for_saved_navigation_and_reset_on_navigation() {
+        assert!(!Prefs::default().nx_shortcuts);
+        let legacy = json!({"nav": "nx"});
+        assert!(!serde_json::from_value::<Prefs>(legacy.clone()).unwrap().nx_shortcuts);
+        assert!(!super::lenient(&legacy).nx_shortcuts);
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.preferences.nav = "nx".into();
+        app.preferences.nx_shortcuts = true;
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(restored.preferences.nx_shortcuts);
+        let profile = crate::settings_profiles::capture(&restored, "NX");
+        assert_eq!(profile["preferences"]["nx_shortcuts"], true);
+        super::reset_preferences(&mut restored.preferences, super::PAGE_SHORTCUTS);
+        assert!(restored.preferences.nx_shortcuts, "the Navigation page owns the preset option");
+        super::reset_preferences(&mut restored.preferences, super::PAGE_NAVIGATION);
+        assert!(!restored.preferences.nx_shortcuts);
+    }
+
+    #[test]
+    fn nx_shortcut_option_is_explicit_and_only_offered_with_nx_navigation() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open": "Navigation"}));
+        h.frames(3);
+        assert!(crate::scenario::handle_at("prefs:nx_shortcuts").is_none());
+        h.call("ui.prefs", json!({"nav": "nx"}));
+        h.frames(3);
+        assert!(!h.app.preferences.nx_shortcuts, "choosing NX mouse navigation does not change keys");
+        h.step(&json!({"click": {"handle": "prefs:nx_shortcuts"}})).unwrap();
+        assert!(h.app.preferences.nx_shortcuts);
     }
 
     /// #10483: the curved-roll invert toggle is off by default, persists, and the Navigation

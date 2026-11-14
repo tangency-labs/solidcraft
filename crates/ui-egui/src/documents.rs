@@ -1405,6 +1405,14 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let mut rename = app.menu.rename.take();
     let renaming = renaming_tab_state(rename.as_ref());
     let new_tip = app.tr("ui.start_page").to_string();
+    let mut tab_menu = TAB_MENU;
+    if crate::keymap::nx_active(app) && !app.embed_editor {
+        for row in &mut tab_menu {
+            if row.id == "ui.closeTab" {
+                row.key_on_selected = "";
+            }
+        }
+    }
     let actions = {
         let mut strip = crate::app_bar::TabStrip {
             tabs: info
@@ -1429,7 +1437,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 focused: &mut r.focused,
                 max: MAX_DESIGN_NAME,
             }),
-            menu: &TAB_MENU,
+            menu: &tab_menu,
             close_name: solidcraft_ui_text::tr("ui.close_tab"),
             close_tip: "Close",
             more_tip: solidcraft_ui_text::tr_label("All open designs"),

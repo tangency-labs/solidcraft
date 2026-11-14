@@ -109,6 +109,15 @@ fn camera_commands_reply_with_the_camera_schema() {
         assert!(crate::cmd::camera_form(&r["camera"]).is_some(), "{id}: the reply's camera is one the commands take: {r}");
     };
     let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    for selected in [false, true] {
+        let mut align_session = if selected { top_face_selected(ParamCheck::Strict) } else { Session::default() };
+        for p in [json!({}), json!({"camera": camera(json!({"up":"y"}))})] {
+            let result = align_session.execute("view.align", &p).unwrap();
+            check("view.align", &result, false);
+        }
+        let spec = crate::find_command("view.align").unwrap();
+        assert!(spec.contract.is_some() && spec.output.is_some() && !spec.undoable);
+    }
     for id in STANDARD_VIEWS {
         for p in [json!({}), json!({"camera": camera(json!({}))}), json!({"camera": camera(json!({"up": "y", "fov": 0.6}))})] {
             let r = s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));

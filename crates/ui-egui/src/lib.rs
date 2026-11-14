@@ -2001,9 +2001,12 @@ impl SolveApp {
             print_face_ui::toggle(self);
             return;
         }
-        if id == "view.normal_to" {
+        if matches!(id, "view.align" | "view.normal_to") {
             if self.run(id, json!({"camera": self.cam})).is_ok() {
-                if let (Some(mut camera), Some(layout), Ok(usable)) = (self.session.camera, self.viewport.layout.as_ref(), shell::host_usable(self)) {
+                if id == "view.normal_to"
+                    && let (Some(mut camera), Some(layout), Ok(usable)) =
+                        (self.session.camera, self.viewport.layout.as_ref(), shell::host_usable(self))
+                {
                     // Match the established follow-view up-axis semantics before
                     // calculating the exact full-domain projection offset.
                     if !render_workspace::active(self) {

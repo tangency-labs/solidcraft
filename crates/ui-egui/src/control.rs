@@ -204,6 +204,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
     let fit_command = !matches!(
         fit_id,
         "view.fit"
+            | "view.align"
             | "view.home"
             | "view.tool"
             | "view.tool.zoom"
