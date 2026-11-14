@@ -48,7 +48,7 @@ pub struct Read {
     /// The record; each of its faces' origin is that face's index in the model's faces.
     pub solid: Solid,
     /// Where the body's placement puts the record (column-major 4 × 4, millimetres), when it
-    /// moves it. Only a rigid placement is kept: another leaves the record where it is, noted.
+    /// moves it. Only a rigid placement is taken: a body placed otherwise is refused.
     pub placement: Option<[[f64; 4]; 4]>,
 }
 
@@ -96,17 +96,28 @@ pub fn read_bodies(ir: &CadIr, trims: Option<&dyn Trims>) -> Bodies {
             BodyKind::Wire => None,
         };
         let Some(kind) = kind else { continue };
-        let (placement, placement_note) = match body
+        // A body placed by anything but a rotation and a move is left out with the reason: its
+        // geometry would come in at the wrong place or size otherwise.
+        let placement = match body
             .transform
             .map(|t| geometry::Similarity::of(geometry::Rows3::rows3(&t)))
         {
-            None => (None, None),
-            Some(Ok(s)) if s.is_rigid() => (s.column_major(), None),
-            Some(Ok(_)) => (
-                None,
-                Some("its placement scales it, and is left out".to_string()),
-            ),
-            Some(Err(m)) => (None, Some(format!("its placement is left out: {m}"))),
+            None => None,
+            Some(Ok(s)) if s.is_rigid() => s.column_major(),
+            refused => {
+                let why = match refused {
+                    Some(Err(m)) => m,
+                    _ => "not supported yet: a placement that scales".to_string(),
+                };
+                for k in 0..body.regions.len() {
+                    out.failures.push(Failure {
+                        body: id.clone(),
+                        region: k,
+                        message: format!("its placement: {why}"),
+                    });
+                }
+                continue;
+            }
         };
         for (k, region) in body.regions.iter().enumerate() {
             let name = body.name.clone().unwrap_or_default();
@@ -118,8 +129,7 @@ pub fn read_bodies(ir: &CadIr, trims: Option<&dyn Trims>) -> Bodies {
                 trims,
                 &mut budget,
             ) {
-                Ok(mut solid) => {
-                    solid.notes.extend(placement_note.clone());
+                Ok(solid) => {
                     out.read.push(Read {
                         body: id.clone(),
                         region: k,
