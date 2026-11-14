@@ -45,6 +45,9 @@ pub struct Resize {
     pub size: usize,
     pub length: Option<f64>,
     original_size: usize,
+    /// How the part's thread is made: an index into the Thread type list.
+    pub thread: usize,
+    original_thread: usize,
     family: Family,
     source: Arc<Document>,
 }
@@ -127,7 +130,8 @@ impl Resize {
             "bearing" => s == part.size.trim(),
             _ => s.eq_ignore_ascii_case(&part.size),
         })?;
-        Some(Self { component, size, original_size: size, length: part.length, family, source: app.session.doc.clone() })
+        let thread = crate::dialogs_parts::THREADS.iter().position(|t| Some(t.0) == part.thread.as_deref()).unwrap_or(0);
+        Some(Self { component, size, original_size: size, length: part.length, thread, original_thread: thread, family, source: app.session.doc.clone() })
     }
 
     fn current(&self, app: &SolveApp) -> Result<(), String> {
@@ -192,6 +196,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Resize) -> bool {
         choice_row(ui, "Length", "part_resize_length", &mut index, &labels);
         k.length = lengths.get(index).copied();
     }
+    crate::dialogs_parts::thread_row(ui, "part_resize_thread", &k.family, &mut k.thread);
     if let Some((size, _)) = k.family.sizes.get(k.size) {
         row(ui, "Configuration", |ui| {
             ui.label(configuration_name(&k.family.id, size, k.length));
@@ -211,7 +216,11 @@ pub fn commands(app: &SolveApp, k: &Resize) -> Result<Vec<(String, Value)>, Stri
         }
         params["length"] = json!(length);
     }
-    if k.size == k.original_size && k.source.parts.get(&k.component).is_some_and(|part| part.length == k.length) {
+    if k.thread != k.original_thread
+        && let Some(t) = crate::dialogs_parts::THREADS.get(k.thread)
+    {
+        params["thread"] = json!(t.0);
+    } else if k.size == k.original_size && k.source.parts.get(&k.component).is_some_and(|part| part.length == k.length) {
         return Ok(Vec::new());
     }
     Ok(vec![("parts.resize".into(), params)])
@@ -259,6 +268,24 @@ mod tests {
             app.run(&id, params).unwrap();
         }
         crate::dialogs::cancel(app);
+    }
+
+    /// The Thread type row starts on how the part was made, and a change of it alone reaches
+    /// `parts.resize`; leaving everything as it was runs nothing.
+    #[test]
+    fn the_thread_type_can_be_changed_on_a_placed_part() {
+        let (mut app, id) = part("hex_nut", "M6", None);
+        open(&mut app, id);
+        assert_eq!(editor(&app).thread, 0);
+        assert!(crate::dialogs::apply_commands(&app, app.dialog.as_ref().unwrap()).unwrap().is_empty());
+        let Kind::PartSize(k) = &mut app.dialog.as_mut().unwrap().kind else { panic!("not a part-size dialog") };
+        k.thread = 2;
+        let commands = crate::dialogs::apply_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
+        assert_eq!(commands[0].1["thread"], "none", "{commands:?}");
+        apply(&mut app);
+        assert_eq!(app.session.doc.parts.get(&id).and_then(|p| p.thread.clone()).as_deref(), Some("none"));
+        open(&mut app, id);
+        assert_eq!(editor(&app).thread, 2, "it reopens on the thread the part has");
     }
 
     #[test]

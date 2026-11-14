@@ -93,6 +93,15 @@ component's current family, size and actual length, including a non-catalogue
 length. Choose a size and, for parts with a length, a length, then confirm with OK.
 Cancel leaves the design unchanged.
 
+A part with a metric thread also has a **Thread type**, in Insert Part and here.
+**Cosmetic thread** (the default) records the thread on the face and leaves the shank a plain
+cylinder: quick, and enough for drawings and the parts list. **Modeled thread** cuts the thread
+into the body over the standard's thread length from the tip, with the start chamfered. It is
+slower to build, and right for a section view, a render or a print. A thread of more than 80
+turns is refused; give that part a cosmetic thread. **No thread** leaves the shank plain and
+records nothing. The live preview always shows a cosmetic thread; OK cuts a modeled one. In
+scripts, `parts.insert` and `parts.resize` take `thread: cosmetic | modeled | none`.
+
 Resizing regenerates the standard part, replacing any extra features added inside
 that component. The dialog warns about this before applying the change.
 

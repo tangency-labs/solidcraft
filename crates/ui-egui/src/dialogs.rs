@@ -6363,6 +6363,17 @@ pub fn preview_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value
     if matches!(d.kind, Kind::Move { .. }) {
         crate::dialogs_move::preview(app, d, &mut cmds);
     }
+    // A standard part's modelled thread takes seconds to cut: the preview shows where the part
+    // goes and how big it is, with its thread left cosmetic; OK cuts it.
+    if matches!(d.kind, Kind::Part(_) | Kind::PartSize(_)) {
+        for (_, p) in &mut cmds {
+            if p.get("thread").and_then(Value::as_str) == Some("modeled")
+                && let Value::Object(m) = p
+            {
+                m.insert("thread".into(), json!("cosmetic"));
+            }
+        }
+    }
     Ok(cmds)
 }
 

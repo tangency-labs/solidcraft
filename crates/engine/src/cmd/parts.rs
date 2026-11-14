@@ -57,7 +57,9 @@ pub static COMMANDS: &[CommandSpec] = &[
          them (one component, placed and seated once per pick) | point?: [x,y,z] with direction?: [x,y,z] (no joint: the part's seating plane, under a head or \
          the bottom of a nut, washer or bearing, the top of a set screw, pin or countersunk head, goes to point, and direction is its +z, from the shank's tip toward the head; default [0,0,1], \
          head up, shank down -z); flip?: bool (default false: turned over, head into the material with at, +z against direction \
-         with point); material?: physical material (default \"Steel\"); name? → component, occurrence, joint?, directions (each placement's head direction in the world, the one \
+         with point); material?: physical material (default \"Steel\"); name?; thread?: for a part with a metric thread, cosmetic (default: recorded on the face, the body unchanged) | \
+         modeled (cut into the body over the standard's thread length from the tip, the start chamfered; slower, and refused past 80 \
+         turns) | none → component, occurrence, thread? (how the thread was made, for a part with a metric thread), joint?, directions (each placement's head direction in the world, the one \
          chosen), and with at: occurrences, joints (one per pick, in pick order)",
         ),
     CommandSpec::new("parts.seats", "Resolve Fastener Seats", crate::checked!("parts.seats", resolve_seats))
@@ -71,7 +73,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("scale")
         .contract(&RESIZE_CONTRACT)
         .output(output_schema_for::<ResizedPart>)
-        .params("component: id|name of an inserted part; size?; length? — rebuilds it (joints keep it seated)"),
+        .params("component: id|name of an inserted part; size?; length? — rebuilds it (joints keep it seated); thread?: cosmetic | modeled | none, as parts.insert takes it (left out: as the part has it)"),
 ];
 
 /// A family: (id, name, standard).
@@ -879,13 +881,141 @@ fn fix_all(s: &mut Session) -> Result<()> {
     Ok(())
 }
 
-fn thread(s: &mut Session, d: f64, pitch: f64, at: Vec3) {
-    let _ = run(s, "solid.thread", json!({"face": at, "designation": format!("M{}x{}", d, pitch)}));
-    let _ = d;
+/// How a part's metric thread is made.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ThreadMode {
+    /// Recorded on the face; the body stays a plain cylinder.
+    #[default]
+    Cosmetic,
+    /// Cut into the body.
+    Modeled,
+    /// Neither.
+    None,
+}
+
+impl ThreadMode {
+    fn id(self) -> &'static str {
+        match self {
+            ThreadMode::Cosmetic => "cosmetic",
+            ThreadMode::Modeled => "modeled",
+            ThreadMode::None => "none",
+        }
+    }
+
+    /// As a standard part saved it.
+    fn of(part: &solidcraft_doc::StandardPart) -> Self {
+        match part.thread.as_deref() {
+            Some("modeled") => ThreadMode::Modeled,
+            Some("none") => ThreadMode::None,
+            _ => ThreadMode::Cosmetic,
+        }
+    }
+
+    /// As a standard part saves it: nothing for a cosmetic thread.
+    fn saved(self) -> Option<String> {
+        (self != ThreadMode::Cosmetic).then(|| self.id().to_string())
+    }
+}
+
+/// The most turns a modelled thread is cut with. Cutting one takes longer than in proportion to
+/// its length, and a part with more is asked for with a cosmetic thread instead.
+const MAX_MODELED_TURNS: f64 = 80.0;
+
+/// The families whose parts have a metric thread, which `thread` acts on.
+fn threaded(family: &str) -> bool {
+    matches!(family, "socket_head_cap_screw" | "button_head_cap_screw" | "countersunk_socket_screw" | "hex_bolt" | "hex_nut" | "set_screw")
+}
+
+/// `thread` as a call gives it, or `base` when it is left out.
+fn thread_mode(p: &Value, cmd: &str, family: &str, base: ThreadMode) -> Result<ThreadMode> {
+    let mode = match p.get("thread") {
+        None | Some(Value::Null) => return Ok(base),
+        Some(Value::String(t)) => match t.as_str() {
+            "cosmetic" => ThreadMode::Cosmetic,
+            "modeled" | "modelled" => ThreadMode::Modeled,
+            "none" => ThreadMode::None,
+            _ => return Err(bad(cmd, "`thread` must be cosmetic, modeled or none")),
+        },
+        Some(_) => return Err(bad(cmd, "`thread` must be cosmetic, modeled or none")),
+    };
+    if mode != ThreadMode::Cosmetic && !threaded(family) {
+        return Err(bad(cmd, "`thread` is for a part with a metric thread: this one has none (parts.library: threads)"));
+    }
+    Ok(mode)
+}
+
+/// How far a part's external thread runs from its tip: the standard's thread length where the
+/// shank is long enough to leave a plain part under the head, else the whole shank (none).
+fn thread_length(family: &str, d: f64, pitch: f64, shank: f64) -> Option<f64> {
+    match family {
+        // ISO 4762 and ISO 10642: b = 2d + 12.
+        "socket_head_cap_screw" | "countersunk_socket_screw" => {
+            let b = 2.0 * d + 12.0;
+            (shank - b > 7.0 * pitch).then_some(b)
+        }
+        // ISO 4014: b = 2d + 6 up to 125 mm long, 2d + 12 above.
+        "hex_bolt" => {
+            let b = if shank <= 125.0 { 2.0 * d + 6.0 } else { 2.0 * d + 12.0 };
+            (shank - b > 10.0 * pitch).then_some(b)
+        }
+        _ => None,
+    }
+}
+
+/// The length of the modelled thread a part would get, with its pitch.
+fn modeled_turns(family: &str, sh: &Shape) -> Option<(f64, f64)> {
+    match *sh {
+        Shape::Screw { d, pitch: Some(p), len, head, .. } => {
+            let shank = if let Head::Countersunk { k, .. } = head { len - k } else { len };
+            Some((thread_length(family, d, p, shank).unwrap_or(shank), p))
+        }
+        Shape::Rod { pitch: Some(p), len, .. } => Some((len, p)),
+        Shape::Nut { pitch: Some(p), m, .. } => Some((m, p)),
+        _ => None,
+    }
+}
+
+/// A modelled thread is cut turn by turn: one too long to cut in reasonable time is refused, with
+/// the way out.
+fn check_turns(family: &str, sh: &Shape, mode: ThreadMode) -> std::result::Result<(), String> {
+    match modeled_turns(family, sh) {
+        Some((length, pitch)) if mode == ThreadMode::Modeled && length / pitch > MAX_MODELED_TURNS => Err(format!(
+            "a modelled thread of {:.0} turns takes too long to cut (the limit is {MAX_MODELED_TURNS:.0}): use `thread: cosmetic` for this part, or a length of {} mm or less",
+            length / pitch,
+            (MAX_MODELED_TURNS * pitch).floor()
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// The thread of a part: on the cylindrical face at `at`, of diameter `d`. `start` is a point near
+/// the end the thread starts from and `length` how far it runs from there (none: the whole face);
+/// `external` threads get their start chamfered when modelled, as a real screw's end is.
+fn thread(s: &mut Session, mode: ThreadMode, (d, pitch): (f64, f64), at: Vec3, start: Vec3, length: Option<f64>, external: bool) -> Result<()> {
+    let mut p = json!({"face": at, "designation": format!("M{}x{}", d, pitch)});
+    match mode {
+        ThreadMode::None => Ok(()),
+        // A cosmetic thread a part can't take is left off, as it always was.
+        ThreadMode::Cosmetic => {
+            let _ = run(s, "solid.thread", p);
+            Ok(())
+        }
+        ThreadMode::Modeled => {
+            p["modeled"] = json!(true);
+            p["from"] = json!(start);
+            if external {
+                p["tip"] = json!("start");
+            }
+            if let Some(l) = length {
+                p["length"] = json!(format!("{l} mm"));
+            }
+            run(s, "solid.thread", p).map(|_| ())
+        }
+    }
 }
 
 /// Build a part in the active component.
-fn build(s: &mut Session, sh: &Shape, body_name: Option<&str>) -> Result<()> {
+fn build(s: &mut Session, family: &str, sh: &Shape, mode: ThreadMode, body_name: Option<&str>) -> Result<()> {
     let _frame = crate::frames::local_geometry();
     match *sh {
         Shape::Screw { d, pitch, len, head, socket } => {
@@ -920,19 +1050,22 @@ fn build(s: &mut Session, sh: &Shape, body_name: Option<&str>) -> Result<()> {
                 hex(s, af, k, k - t, "cut", None)?;
             }
             if let Some(p) = pitch {
-                // Halfway down the shank, which a countersunk head leaves shorter than the length.
-                let mid = match head {
-                    Head::Countersunk { k, .. } => -(len + k) / 2.0,
-                    _ => -len / 2.0,
+                // The shank, which a countersunk head leaves shorter than the length; the face is
+                // picked halfway down it, and a modelled thread starts at the tip.
+                let shank = match head {
+                    Head::Countersunk { k, .. } => len - k,
+                    _ => len,
                 };
-                thread(s, d, p, Vec3::new(d / 2.0, 0.0, mid));
+                let length = if mode == ThreadMode::Modeled { thread_length(family, d, p, shank) } else { None };
+                let (at, start) = (Vec3::new(d / 2.0, 0.0, shank / 2.0 - len), Vec3::new(d / 2.0, 0.0, -len + 0.1 * shank));
+                thread(s, mode, (d, p), at, start, length, true)?;
             }
         }
         Shape::Nut { d, pitch, s: af, m } => {
             hex(s, af, 0.0, m, "new", body_name)?;
             cyl(s, d, -1.0, m + 1.0, "cut")?;
             if let Some(p) = pitch {
-                thread(s, d, p, Vec3::new(d / 2.0, 0.0, m / 2.0));
+                thread(s, mode, (d, p), Vec3::new(d / 2.0, 0.0, m / 2.0), Vec3::new(d / 2.0, 0.0, 0.1 * m), None, false)?;
             }
         }
         Shape::Ring { d_in, d_out, h } => {
@@ -944,7 +1077,7 @@ fn build(s: &mut Session, sh: &Shape, body_name: Option<&str>) -> Result<()> {
                 hex(s, af, 0.0, -t, "cut", None)?;
             }
             if let Some(p) = pitch {
-                thread(s, d, p, Vec3::new(d / 2.0, 0.0, -len / 2.0));
+                thread(s, mode, (d, p), Vec3::new(d / 2.0, 0.0, -len / 2.0), Vec3::new(d / 2.0, 0.0, -0.9 * len), None, true)?;
             }
         }
     }
@@ -1011,7 +1144,8 @@ fn library(_s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         let system = if is_inch(id) { "inch" } else { "metric" };
-        PartFamily { family: id.into(), name: name.into(), standard: standard.into(), system: system.into(), sizes, lengths }
+        let threads = threaded(id).then(|| [ThreadMode::Cosmetic, ThreadMode::Modeled, ThreadMode::None].map(|m| m.id().to_string()).to_vec());
+        PartFamily { family: id.into(), name: name.into(), standard: standard.into(), system: system.into(), sizes, lengths, threads }
     };
     match str_(p, "family") {
         Some(f) if FAMILIES.iter().any(|x| x.0 == f) => {
@@ -1146,6 +1280,8 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let family = str_(p, "family").ok_or_else(|| bad(cmd, "`family` is required (parts.library)"))?.to_string();
     let size = str_(p, "size").ok_or_else(|| bad(cmd, "`size` is required"))?.to_string();
     let sh = shape(&family, &size, length_param(p, cmd)?).map_err(|e| bad(cmd, e))?;
+    let mode = thread_mode(p, cmd, &family, ThreadMode::Cosmetic)?;
+    check_turns(&family, &sh, mode).map_err(|e| bad(cmd, e))?;
     // A pick on a hole's rim also touches its end face: step onto the wall just inside the rim.
     // Each hole's occurrence is found before the part exists, so a pick off every body fails the
     // insert before anything is made.
@@ -1163,7 +1299,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     // Hardware is fitted to other parts: it starts free even as the design's first part (#2804).
     let c = run(s, "component.create", json!({"name": name, "grounded": false}))?;
     let (comp, occ) = (c["component"].as_u64().unwrap_or(0), c["occurrence"].as_u64().unwrap_or(0));
-    build(s, &sh, None)?;
+    build(s, &family, &sh, mode, None)?;
     let material_name = str_(p, "material").unwrap_or("Steel");
     let canonical = s.doc.material_name(material_name).ok_or_else(|| bad(cmd, format!("unknown material `{material_name}` (see material.list)")))?;
     let bodies: Vec<String> = s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == comp).map(|b| b.name.clone()).collect();
@@ -1174,12 +1310,13 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
             s.doc_mut().materials.insert(name, canonical.clone());
         }
     }
-    s.doc_mut().parts.insert(comp, solidcraft_doc::StandardPart { family: family.clone(), size: size.clone(), length: shape_len(&sh) });
+    s.doc_mut().parts.insert(comp, solidcraft_doc::StandardPart { family: family.clone(), size: size.clone(), length: shape_len(&sh), thread: mode.saved() });
     set_identity(s, comp, identity(&family, &size, &sh), None);
     run(s, "component.activate", json!({"component": active}))?;
     let mut out = InsertedPart {
         component: comp,
         occurrence: occ,
+        thread: threaded(&family).then(|| mode.id().to_string()),
         name: name.clone(),
         joint: None,
         occurrences: None,
@@ -1514,6 +1651,8 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
     let size = str_(p, "size").map(str::to_string).unwrap_or(part.size.clone());
     let length = length_param(p, cmd)?.or(if size == part.size { part.length } else { None });
     let sh = shape(&part.family, &size, length).map_err(|e| bad(cmd, e))?;
+    let mode = thread_mode(p, cmd, &part.family, ThreadMode::of(&part))?;
+    check_turns(&part.family, &sh, mode).map_err(|e| bad(cmd, e))?;
     // Later features can use the body by name. Build its replacement at the original slot
     // and give the new producer that name before evaluating the rest of the timeline.
     let features: Vec<_> = s.doc.features.iter().enumerate().filter(|(_, f)| f.component == comp).collect();
@@ -1530,7 +1669,7 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
     s.doc_mut().marker = Some(position);
     let active = s.active_component;
     run(s, "component.activate", json!({"component": comp}))?;
-    build(s, &sh, body_name.as_deref())?;
+    build(s, &part.family, &sh, mode, body_name.as_deref())?;
     let bodies: Vec<String> = s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == comp).map(|b| b.name.clone()).collect();
     for name in bodies {
         s.doc_mut().materials.entry(name).or_insert_with(|| "Steel".to_string());
@@ -1545,7 +1684,7 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
     let name = part_name(&part.family, &size, &sh);
     let was = shape(&part.family, &part.size, part.length).ok().map(|old| identity(&part.family, &part.size, &old));
     set_identity(s, comp, identity(&part.family, &size, &sh), was);
-    s.doc_mut().parts.insert(comp, solidcraft_doc::StandardPart { family: part.family.clone(), size: size.clone(), length: shape_len(&sh) });
+    s.doc_mut().parts.insert(comp, solidcraft_doc::StandardPart { family: part.family.clone(), size: size.clone(), length: shape_len(&sh), thread: mode.saved() });
     if let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == comp) {
         c.name = name.clone();
     }
@@ -1554,7 +1693,8 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(e) = s.model.results.iter().find_map(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
-    reply(cmd, ResizedPart { component: comp, name, size, length: shape_len(&sh), param_warnings: Vec::new() })
+    let thread = threaded(&part.family).then(|| mode.id().to_string());
+    reply(cmd, ResizedPart { component: comp, name, size, length: shape_len(&sh), thread, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]
@@ -2291,6 +2431,80 @@ mod tests {
         // The 6 mm head on the floor, inside the counterbore; the 20 mm shank down through the bore.
         let (lo, hi) = bbox(&s, "SHCS M6x20");
         assert!((lo.z + 16.4).abs() < 1e-6 && (hi.z - 9.6).abs() < 1e-6, "{lo:?} {hi:?}");
+    }
+
+    fn volume(s: &mut Session) -> f64 {
+        run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
+    }
+
+    /// `thread: modeled` cuts the thread into the shank instead of recording it: the screw loses
+    /// less than the whole ring between its major and minor diameters over its thread, and more
+    /// than a third of it. `none` leaves a plain shank and records nothing.
+    #[test]
+    fn a_modeled_thread_is_cut_into_the_shank() {
+        let screw = |thread: &str| {
+            let mut s = Session::default();
+            let r = run(&mut s, "parts.insert", json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20, "thread": thread}));
+            (volume(&mut s), s.model.state().threads.len(), r)
+        };
+        let (plain, recorded, r) = screw("cosmetic");
+        assert_eq!((recorded, r["thread"].as_str()), (1, Some("cosmetic")), "{r}");
+        let (bare, none, r) = screw("none");
+        assert_eq!((none, r["thread"].as_str()), (0, Some("none")), "{r}");
+        assert!((bare - plain).abs() < 1e-6, "{bare} {plain}");
+        let (cut, modeled, r) = screw("modeled");
+        assert_eq!((modeled, r["thread"].as_str()), (0, Some("modeled")), "{r}");
+        // M6: the external minor diameter is d - 1.226869 P = 4.773.
+        let ring = std::f64::consts::PI / 4.0 * (36.0 - 4.773 * 4.773) * 20.0;
+        assert!(plain - cut > ring / 3.0 && plain - cut < ring, "{plain} - {cut} against a ring of {ring}");
+        let m = run(&mut Session::default(), "parts.library", json!({"family": "socket_head_cap_screw"}));
+        assert_eq!(m["family"]["threads"], json!(["cosmetic", "modeled", "none"]), "{m}");
+        let w = run(&mut Session::default(), "parts.library", json!({"family": "washer"}));
+        assert!(w["family"].get("threads").is_none_or(Value::is_null), "{w}");
+    }
+
+    /// A long screw is threaded over its standard's thread length only (ISO 4762: 2d + 12), so
+    /// its plain shank keeps its full diameter and the cut stays short. Past 80 turns a
+    /// modelled thread is refused, with the way out; a part with no metric thread refuses one.
+    #[test]
+    fn a_long_modeled_screw_keeps_a_plain_shank_under_its_head() {
+        let mut s = Session::default();
+        run(&mut s, "parts.insert", json!({"family": "socket_head_cap_screw", "size": "M6", "length": 60, "thread": "modeled"}));
+        let plain = std::f64::consts::PI * 9.0 * 60.0 + std::f64::consts::PI * 25.0 * 6.0 - 3f64.sqrt() / 2.0 * 25.0 * 3.0;
+        let ring = std::f64::consts::PI / 4.0 * (36.0 - 4.773 * 4.773);
+        let lost = plain - volume(&mut s);
+        // Thread over 24 mm of the 60: more than a third of that ring, and less than all of it.
+        assert!(lost > ring * 24.0 / 3.0 && lost < ring * 24.0 * 1.05, "lost {lost}; a 24 mm ring is {}", ring * 24.0);
+        let made = s.doc.components.len();
+        let e = s.execute("parts.insert", &json!({"family": "set_screw", "size": "M3", "length": 60, "thread": "modeled"})).unwrap_err().to_string();
+        assert!(e.contains("cosmetic") && e.contains("120 turns"), "{e}");
+        for (family, size) in [("washer", "M6"), ("bearing", "608"), ("dowel_pin", "6"), ("hex_cap_screw_inch", "1/4-20 UNC")] {
+            let e = s.execute("parts.insert", &json!({"family": family, "size": size, "thread": "modeled"})).unwrap_err().to_string();
+            assert!(e.contains("metric thread"), "{family}: {e}");
+        }
+        let e = s.execute("parts.insert", &json!({"family": "hex_nut", "size": "M6", "thread": "cut"})).unwrap_err().to_string();
+        assert!(e.contains("cosmetic, modeled or none"), "{e}");
+        assert_eq!(s.doc.components.len(), made, "nothing is made for a refused call");
+    }
+
+    /// The thread type is saved with the part: Change Part Size keeps it when it is left out,
+    /// and changes it when it is given. A design saved before has none and keeps a cosmetic thread.
+    #[test]
+    fn change_part_size_keeps_or_changes_the_thread_type() {
+        let mut s = Session::default();
+        let r = run(&mut s, "parts.insert", json!({"family": "hex_nut", "size": "M6", "thread": "modeled"}));
+        let comp = r["component"].as_u64().unwrap();
+        assert_eq!(s.doc.parts.get(&comp).and_then(|p| p.thread.clone()).as_deref(), Some("modeled"));
+        let r = run(&mut s, "parts.resize", json!({"component": comp, "size": "M8"}));
+        assert_eq!(r["thread"], "modeled", "{r}");
+        assert!(s.model.state().threads.is_empty(), "a modelled thread is cut, not recorded");
+        let r = run(&mut s, "parts.resize", json!({"component": comp, "thread": "cosmetic"}));
+        assert_eq!((r["thread"].as_str(), r["size"].as_str()), (Some("cosmetic"), Some("M8")), "{r}");
+        assert_eq!(s.model.state().threads.len(), 1);
+        assert_eq!(s.doc.parts.get(&comp).and_then(|p| p.thread.clone()), None, "a cosmetic thread is not saved");
+        // A part saved before the thread type existed reads as cosmetic.
+        let old: solidcraft_doc::StandardPart = serde_json::from_value(json!({"family": "hex_nut", "size": "M6"})).unwrap();
+        assert_eq!(old.thread, None);
     }
 
     /// #12150: `flip` turns a seated part over (head into the hole, shank out of the face) and a

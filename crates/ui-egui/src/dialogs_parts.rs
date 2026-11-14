@@ -25,6 +25,26 @@ pub struct Family {
     /// Size names and their table rows.
     pub sizes: Vec<(String, Value)>,
     pub lengths: Option<Vec<f64>>,
+    /// It has a metric thread, which the Thread type row acts on.
+    pub threaded: bool,
+}
+
+/// How a thread is made: the command's word and the list's label.
+pub(crate) const THREADS: [(&str, &str); 3] = [("cosmetic", "Cosmetic thread"), ("modeled", "Modeled thread"), ("none", "No thread")];
+
+/// The Thread type row, for a family with a metric thread; `thread` indexes [`THREADS`].
+pub(crate) fn thread_row(ui: &mut egui::Ui, key: &str, f: &Family, thread: &mut usize) {
+    if !f.threaded {
+        *thread = 0;
+        return;
+    }
+    *thread = (*thread).min(THREADS.len() - 1);
+    crate::ui_kit::choice_row(ui, "Thread type", key, thread, &THREADS.map(|t| t.1));
+    if *thread == 1 {
+        ui.vertical(|ui| {
+            crate::ui_kit::text(ui, solidcraft_ui_text::tr("parts.thread.modeled_hint"), crate::ui_kit::Text::Note("parts_modeled"));
+        });
+    }
 }
 
 /// The library as `parts.library` gives it.
@@ -48,6 +68,7 @@ pub fn families(v: &Value) -> Vec<Family> {
                 system: f.get("system").and_then(Value::as_str).unwrap_or("metric").to_string(),
                 sizes,
                 lengths: f.get("lengths").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_f64).collect()),
+                threaded: f.get("threads").is_some_and(Value::is_array),
                 id,
             })
         })
@@ -81,6 +102,8 @@ pub struct Pt {
     /// Turned over where it sits (the command's `flip`): for a screw that a pick seats upside
     /// down, as one on the outer edge of a counterbore's floor does.
     pub flip: bool,
+    /// How the part's thread is made: an index into [`THREADS`].
+    pub thread: usize,
 }
 
 /// The dialog for Insert Part.
@@ -89,7 +112,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     // that shows it (#8735), which did nothing before.
     matches!(id, "parts.fastener" | "parts.insert" | "parts.library").then(|| {
         (
-            Kind::Part(Pt { family: 0, size: 0, length: None, name: String::new(), picture: None, lib: None, flip: false }),
+            Kind::Part(Pt { family: 0, size: 0, length: None, name: String::new(), picture: None, lib: None, flip: false, thread: 0 }),
             vec![SelInput::new("parts.holes", FACES | EDGES, true)],
         )
     })
@@ -106,6 +129,9 @@ pub fn insert_params(lib: &[Family], k: &Pt, holes: &[Sel]) -> Result<Value, Str
     let mut p = json!({"family": f.id, "size": size});
     if let Some(l) = k.length.and_then(|i| f.lengths.as_ref().and_then(|ls| ls.get(i))) {
         p["length"] = json!(l);
+    }
+    if let Some(t) = THREADS.get(k.thread).filter(|_| f.threaded && k.thread > 0) {
+        p["thread"] = json!(t.0);
     }
     let at: Vec<Value> = holes
         .iter()
@@ -156,8 +182,10 @@ fn picture(p: &Value) -> Option<egui::ColorImage> {
     let mut s = Session::default();
     let mut q = p.clone();
     if let Value::Object(m) = &mut q {
-        // The picture shows the part itself, head up.
+        // The picture shows the part itself, head up, and its shape: a thread cut into it takes
+        // seconds and shows little at this size.
         m.remove("flip");
+        m.remove("thread");
         m.remove("at");
         m.insert("point".into(), json!([0.0, 0.0, 0.0]));
         m.insert("direction".into(), json!([0.0, 0.0, 1.0]));
@@ -235,6 +263,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
             k.length = Some(i);
         });
     }
+    thread_row(ui, "pt_thread", f, &mut k.thread);
     if crate::ui_kit::checkbox_row(ui, "pt_flip", "Flip", k.flip) {
         k.flip = !k.flip;
     }
@@ -354,7 +383,7 @@ mod tests {
             assert_ne!(family_name(f), f.name, "{}", f.id);
         }
         let unknown =
-            Family { id: "spring".into(), name: "Spring".into(), standard: String::new(), system: "metric".into(), sizes: vec![], lengths: None };
+            Family { id: "spring".into(), name: "Spring".into(), standard: String::new(), system: "metric".into(), sizes: vec![], lengths: None, threaded: false };
         assert_eq!(family_name(&unknown), "Spring");
     }
 
@@ -375,7 +404,7 @@ mod tests {
     #[test]
     fn insert_params_for_picks() {
         let l = lib();
-        let k = Pt { family: 0, size: 1, length: Some(2), name: String::new(), picture: None, lib: None, flip: false };
+        let k = Pt { family: 0, size: 1, length: Some(2), name: String::new(), picture: None, lib: None, flip: false, thread: 0 };
         let hole = Sel::Face { body: "Body1".into(), index: 3, point: Vec3::new(5.0, 0.0, 10.0) };
         let p = insert_params(&l, &k, std::slice::from_ref(&hole)).unwrap();
         assert_eq!(p, json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20.0, "at": [5.0, 0.0, 10.0]}));
@@ -383,7 +412,7 @@ mod tests {
         let p = insert_params(&l, &k, &[hole, rim]).unwrap();
         assert_eq!(p["at"], json!([[5.0, 0.0, 10.0], [25.0, 0.0, 10.0]]));
         assert!(p.get("point").is_none());
-        let k = Pt { family: 1, size: 0, length: None, name: "Front bearing".into(), picture: None, lib: None, flip: false };
+        let k = Pt { family: 1, size: 0, length: None, name: "Front bearing".into(), picture: None, lib: None, flip: false, thread: 0 };
         let p = insert_params(&l, &k, &[]).unwrap();
         assert_eq!(p["point"], json!([0.0, 0.0, 0.0]));
         assert_eq!(p["name"], "Front bearing");
@@ -397,7 +426,7 @@ mod tests {
     fn flip_turns_the_part_over_where_it_sits() {
         let l = lib();
         let hole = Sel::Face { body: "Body1".into(), index: 3, point: Vec3::new(5.0, 0.0, 10.0) };
-        let k = Pt { family: 0, size: 1, length: Some(2), name: String::new(), picture: None, lib: None, flip: true };
+        let k = Pt { family: 0, size: 1, length: Some(2), name: String::new(), picture: None, lib: None, flip: true, thread: 0 };
         let p = insert_params(&l, &k, std::slice::from_ref(&hole)).unwrap();
         assert_eq!(p, json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20.0, "at": [5.0, 0.0, 10.0], "flip": true}));
         let p = insert_params(&l, &k, &[]).unwrap();
@@ -421,6 +450,30 @@ mod tests {
         h.step(&json!({"click":{"handle":"sketch_palette:toggle:pt_flip"}})).unwrap();
         h.frames(2);
         assert_eq!(chosen(&h)["flip"], true);
+    }
+
+    /// The Thread type row is there for a part with a metric thread, and what it picks reaches
+    /// the command; a cosmetic thread, the default, sends nothing, as before.
+    #[test]
+    fn the_thread_type_reaches_the_command() {
+        let chosen = |h: &crate::scenario::Harness| {
+            let Kind::Part(k) = &h.app.dialog.as_ref().unwrap().kind else { panic!("not Insert Part") };
+            commands(&h.app, k, &[]).unwrap()[0].1.clone()
+        };
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.start("parts.insert");
+        h.frames(3);
+        assert!(chosen(&h).get("thread").is_none());
+        h.step(&json!({"click":{"handle":"dialog:Thread type"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Thread type:Modeled thread"}})).unwrap();
+        h.frames(2);
+        assert_eq!(chosen(&h)["thread"], "modeled");
+        // A washer has no thread: no row, and nothing sent.
+        let l = families(&solidcraft_engine::Session::default().execute("parts.library", &json!({})).unwrap());
+        let washer = l.iter().position(|f| f.id == "washer").unwrap();
+        let k = Pt { family: washer, size: 0, length: None, name: String::new(), picture: None, lib: None, flip: false, thread: 1 };
+        assert!(insert_params(&l, &k, &[]).unwrap().get("thread").is_none());
     }
 
     /// #10316: the Unit system list above Type picks metric or inch, and Type then lists that
