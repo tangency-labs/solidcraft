@@ -96,6 +96,54 @@ fn own_torus(net: &Surface) -> Result<Option<Implicit>> {
     }
 }
 
+/// Not upstream (#10876): the torus `net` is when it is a round of the circle class kept as
+/// its definition ([`ExactClass::Circle`], whose net is re-certified on that torus by an
+/// identity), as its centre, unit axis, and major and minor radii; `None` for any other
+/// surface.
+///
+/// # Errors
+///
+/// Those of reading the arc's control polygon.
+pub fn circle_round_torus(net: &Surface) -> Result<Option<(Point3, Vec3, f64, f64)>> {
+    let circle = matches!(
+        net.procedural_blend(),
+        Some(crate::surface::procedural_blend::BlendRef::Exact { round, .. })
+            if round.class() == ExactClass::Circle
+    );
+    if !circle {
+        return Ok(None);
+    }
+    Ok(match own_torus(net)? {
+        Some(Implicit::Torus {
+            centre,
+            axis,
+            major,
+            minor,
+        }) => Some((centre, axis, major, minor)),
+        _ => None,
+    })
+}
+
+/// Not upstream (#10876): the torus a surface of revolution of a circular arc (or a torus) is,
+/// read off its generating arc's control polygon as the circle class's own check reads it,
+/// as its centre, unit axis, and major and minor radii; `None` for any other surface. A
+/// reading, not a certificate: the caller proves what it relies on.
+///
+/// # Errors
+///
+/// Those of reading the arc's control polygon.
+pub fn revolved_circle_torus(net: &Surface) -> Result<Option<(Point3, Vec3, f64, f64)>> {
+    Ok(match own_torus(net)? {
+        Some(Implicit::Torus {
+            centre,
+            axis,
+            major,
+            minor,
+        }) => Some((centre, axis, major, minor)),
+        _ => None,
+    })
+}
+
 /// The exact class of a round whose net is its definition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExactClass {

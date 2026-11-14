@@ -562,8 +562,9 @@ impl FilletBrep {
                 // the fork's 63c7962: the edge along a side edge continued across seams'
                 // vertices
                 let c = corners.corner(corner)?;
-                let (vertex, tol) = (c.filleted_vertex(), c.tangency_tol_radians);
-                self.calc_edge_on_edge_at_corner(k, e, target, vertex, tol)
+                let (vertex, tol, roll_over) =
+                    (c.filleted_vertex(), c.tangency_tol_radians, c.roll_over);
+                self.calc_edge_on_edge_at_corner(k, e, target, vertex, tol, roll_over)
             }
             FilletEdgeType::OnExtendEdge => {
                 self.calc_edge_on_extended_edge(k, e, Some(corner), corners, target)
@@ -649,8 +650,9 @@ impl FilletBrep {
                 // the fork's 63c7962: the edge along a side edge continued across seams'
                 // vertices
                 let c = corners.corner(corner)?;
-                let (vertex, tol) = (c.filleted_vertex(), c.tangency_tol_radians);
-                self.calc_edge_on_edge_at_corner(k, e, target, vertex, tol)
+                let (vertex, tol, roll_over) =
+                    (c.filleted_vertex(), c.tangency_tol_radians, c.roll_over);
+                self.calc_edge_on_edge_at_corner(k, e, target, vertex, tol, roll_over)
             }
             FilletEdgeType::RailRailInterpolation => self
                 .calc_rail_rail_interpolation_with_context(

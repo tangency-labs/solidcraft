@@ -968,6 +968,7 @@ impl FilletBrep {
         target: &mut Brep,
         corner_vertex: Option<VertexId>,
         tangency_tol_radians: f64,
+        roll_over: bool,
     ) -> Result<()> {
         let nul = |what| SolidError::blend_missing(OP_ON_EDGE, what);
         let (start_fv, end_fv) = self.edge_end_vertices(e, OP_ON_EDGE)?;
@@ -995,9 +996,37 @@ impl FilletBrep {
                 continue;
             };
             let fv_edge = eu1::edge(target, fv_eu)?;
-            if fv_edge == Some(orig_edge) || edge::is_closed(target, orig_edge)? {
+            // Not upstream (#10876): in the Roll-over's second pass the rail's end can lie on
+            // the edge past the cliff's tangent seam that the corner's own edge was made on,
+            // which does not meet the corner's vertex: the chain then starts at the side
+            // edge at the vertex that runs on to it across that seam
+            let roll_start = if roll_over
+                && fv_edge == Some(orig_edge)
+                && edge::start_vertex(target, orig_edge)? != Some(corner_vertex)
+                && edge::end_vertex(target, orig_edge)? != Some(corner_vertex)
+            {
+                roll_over_chain_start(
+                    k,
+                    target,
+                    corner_vertex,
+                    orig_edge,
+                    fv_eu,
+                    tangency_tol_radians,
+                )?
+            } else {
+                None
+            };
+            if roll_start.is_none()
+                && (fv_edge == Some(orig_edge) || edge::is_closed(target, orig_edge)?)
+            {
                 continue;
             }
+            let chain_edge = match roll_start {
+                Some(eu) => eu1::edge(target, eu)?.ok_or_else(|| {
+                    SolidError::invalid_input(OP_ON_EDGE, "a chain edge use has no edge")
+                })?,
+                None => orig_edge,
+            };
             // this edge's edgeuse on the rail's faceuse, and the chain from the corner's vertex
             let fv_faceuse = eu1::faceuse(target, fv_eu)?;
             let mut curr = None;
@@ -1020,10 +1049,13 @@ impl FilletBrep {
                     }
                 }
             }
+            if roll_start.is_some() {
+                curr = roll_start;
+            }
             let mut curr =
                 Some(curr.ok_or_else(|| nul("the original edge's use on the rail's face"))?);
-            if edge::start_vertex(target, orig_edge)? != Some(corner_vertex)
-                && edge::end_vertex(target, orig_edge)? != Some(corner_vertex)
+            if edge::start_vertex(target, chain_edge)? != Some(corner_vertex)
+                && edge::end_vertex(target, chain_edge)? != Some(corner_vertex)
             {
                 return Err(SolidError::blend_failed(
                     OP_ON_EDGE,
@@ -2909,6 +2941,74 @@ fn same_surface(brep: &Brep, face: Option<FaceId>, own: Option<FaceId>) -> Resul
         (Some(x), Some(y)) => x.owner().is_some_and(|o| Some(o) == y.owner()),
         _ => false,
     })
+}
+
+/// Not upstream (#10876): the use of the edge at `corner_vertex` that runs on across the cliff's
+/// tangent seam at its far end into `far_edge`
+/// ([`crate::blend::blend_corner::end::side_edgeuse_across_rolled_edge`]), for the Roll-over's
+/// second pass; `None` when no edge there does. The use is the one on the faceuse of the rail
+/// end's use `rail_eu` (on `far_edge`), else on the faceuse of its radial (the face beyond the
+/// rail end's edge), as the chain on the original edge takes it: never an arbitrary use of the
+/// edge, whose continuation would walk the other face.
+///
+/// # Errors
+/// Those of the topology walks and the continuation.
+fn roll_over_chain_start(
+    k: &Kernel,
+    target: &mut Brep,
+    corner_vertex: VertexId,
+    far_edge: EdgeId,
+    rail_eu: EdgeuseId,
+    tangency_tol_radians: f64,
+) -> Result<Option<EdgeuseId>> {
+    let own = eu1::faceuse(target, rail_eu)?;
+    let beyond = match eu1::radial(target, rail_eu)? {
+        Some(r) => eu1::faceuse(target, r)?,
+        None => None,
+    };
+    for x in crate::topology::vertex::edges(target, corner_vertex, None)? {
+        if x == far_edge || edge::is_closed(target, x)? {
+            continue;
+        }
+        let far = if edge::start_vertex(target, x)? == Some(corner_vertex) {
+            edge::end_vertex(target, x)?
+        } else {
+            edge::start_vertex(target, x)?
+        };
+        let Some(far) = far else {
+            continue;
+        };
+        // the use of `x` on the rail end's faceuse, else on the faceuse beyond its edge
+        let uses = edge::edgeuses(target, x, None, None)?;
+        let mut on = None;
+        for want in [own, beyond] {
+            if on.is_some() || want.is_none() {
+                continue;
+            }
+            for &u in &uses {
+                if on.is_none() && eu1::faceuse(target, u)? == want {
+                    on = Some(u);
+                }
+            }
+        }
+        let Some(eu) = on else {
+            continue;
+        };
+        let next = crate::blend::blend_corner::end::side_edgeuse_across_rolled_edge(
+            k,
+            target,
+            eu,
+            far,
+            None,
+            tangency_tol_radians,
+        )?;
+        if let Some(next) = next {
+            if eu1::edge(target, next)? == Some(far_edge) {
+                return Ok(Some(eu));
+            }
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]

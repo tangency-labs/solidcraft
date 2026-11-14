@@ -722,6 +722,11 @@ pub struct FilletExecutive<O> {
     /// [`Self::overflow_edges`] the edges whose blends overflow (possibly none). Acts only
     /// with the flags of [`Self::overflow_first`].
     pub classify_only: bool,
+    /// Not upstream (#10876; `false` from the constructor): the session is the blend
+    /// corner's Roll-over's second pass, the concave chain
+    /// ([`crate::blend::blend_corner::rollover`]): its concave overflow across the cliff is
+    /// accepted (`choose_cliff_overflow`) and built as a cliff overflow.
+    pub roll_over_pass: bool,
     /// `m_vOverflowEdges` (the fork's, WR-634; cleared by `SetFilletParameters`): the
     /// edges of the blends that overflow, in solver order, when stopped so.
     pub overflow_edges: Vec<O>,
@@ -3076,7 +3081,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return Err(failure());
         }
         if overflow {
-            let why = if concave_overflow {
+            // the Roll-over's concave chain (#10876) overflows the cliff by construction:
+            // the material it adds past the cliff is trimmed at the creases
+            let why = if concave_overflow && !self.roll_over_pass {
                 Some((NoRoomReason::ConcaveOverflow, "Fillet Error: a rail leaves the face it rolls on (the blend is larger than the faces allow, and adds material)"))
             } else if round_into_material {
                 Some((NoRoomReason::RoundIntoMaterial, "Fillet Error: a round's rail leaves the face it rolls on into the body's material (beyond a wall)"))

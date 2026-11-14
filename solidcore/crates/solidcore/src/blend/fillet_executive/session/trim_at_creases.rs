@@ -42,6 +42,12 @@
 //! - **Open setbacks and each round's side (the fork's ef57570, ce748fa; smlib#125).** An
 //!   open G1 setback corner's spring curves are imprinted with the sheet's boundary and its
 //!   hole's `3 n` edges stay free; a concave round's sheet lies in the void it fills.
+//! - **The Roll-over's certified creases (not the fork's, #10876).** In the blend corner's
+//!   Roll-over second pass (`FilletSession::set_roll_over_pass`), a crease of an exact torus
+//!   with a cliff face parallel to its axis (a plane, or a cylinder touching the convex
+//!   round) is the certified graph over the face's profile
+//!   ([`crate::blend::blend_corner::rollover::geometry::torus_creases`]), within the body's
+//!   tolerance of the torus, not the general intersection.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -906,7 +912,27 @@ impl FilletSession<'_> {
                 // fitted to the body's own accuracy, so that creases meeting at a corner of
                 // the sheet (on two faces past a cliff) meet there within it; exact
                 // sections stay exact
-                let found = creases(k, &mut sheet, s, self.objects.target, f, body_tol)?;
+                // Not upstream (#10876): the Roll-over's torus against a cliff face parallel
+                // to its axis, its creases as certified graphs over the face's profile
+                let certified = if self.executive.roll_over_pass {
+                    match (
+                        face::p2::surface(&sheet, s)?,
+                        face::p2::surface(self.objects.target, f)?,
+                    ) {
+                        (Some(torus), Some(cliff)) => {
+                            crate::blend::blend_corner::rollover::geometry::torus_creases(
+                                k, torus, cliff, tol, body_tol,
+                            )?
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                let found = match certified {
+                    Some(found) => found,
+                    None => creases(k, &mut sheet, s, self.objects.target, f, body_tol)?,
+                };
                 // each crease where it lies inside both faces
                 let mut in_face = Vec::new();
                 for c in &found {
