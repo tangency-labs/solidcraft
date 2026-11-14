@@ -796,9 +796,11 @@ pub fn stack_look(stack: &[f64]) -> Result<(f64, [Point2; 2])> {
 
 // ---- control polygon --------------------------------------------------------------------
 
-/// How small the across-boundary offset of a control point must be, against its
-/// offset along the boundary, for the curve to count as running along it.
-const RUNS_ALONG: f64 = 0.1;
+/// How small the across-boundary offset of a tangent or control point must be,
+/// against its offset along the boundary, for the curve to count as running along
+/// it. At 1 only a curve that passes mostly across the boundary (the cusp case) is
+/// kept; an oblique approach to the boundary is flattened as upstream does.
+const RUNS_ALONG: f64 = 1.0;
 
 /// Keeps the piecewise cubic Bezier UV curve of `ctrl_poly` (knot points at every
 /// third point) inside `uv_domain` (`sm_FixBoundaryCurves`): knot points outside are
@@ -876,17 +878,8 @@ pub fn fix_boundary_curves(
             );
             // How far a neighbour lies across the boundary compared with along it.
             let slope = |across: f64, along: f64| across.abs() <= RUNS_ALONG * along.abs();
-            let level = |across: f64, along: f64| across.abs() <= along.abs();
-            let run_u = |f: fn(f64, f64) -> bool| {
-                f(p.x - knot.x, p.y - knot.y) && f(n.x - knot.x, n.y - knot.y)
-            };
-            let run_v = |f: fn(f64, f64) -> bool| {
-                f(p.y - knot.y, p.x - knot.x) && f(n.y - knot.y, n.x - knot.x)
-            };
-            let leaves_u = p.x < u0 || p.x > u1 || n.x < u0 || n.x > u1;
-            let leaves_v = p.y < v0 || p.y > v1 || n.y < v0 || n.y > v1;
-            let along_u = run_u(slope) || (leaves_u && run_u(level));
-            let along_v = run_v(slope) || (leaves_v && run_v(level));
+            let along_u = slope(p.x - knot.x, p.y - knot.y) && slope(n.x - knot.x, n.y - knot.y);
+            let along_v = slope(p.y - knot.y, p.x - knot.x) && slope(n.y - knot.y, n.x - knot.x);
             if (knot.x == u0 || knot.x == u1)
                 || ((knot.x < u0 + uv_tol_x || knot.x > u1 - uv_tol_x) && along_u)
             {
@@ -1550,6 +1543,13 @@ mod tests {
         let mut end = DropPt::new(1.0, None);
         start.uv_pd = [Point2::new(0.2, 0.004), Vec2::new(1.0, -0.002)];
         end.uv_pd = [Point2::new(0.8, 0.002), Vec2::new(1.0, -0.002)];
+        assert!(start.fix_boundary_tangents(&domain, &mut end, 0.01, 0.01, 1e-3));
+        assert_eq!(start.uv_pd[1].y, 0.0);
+        assert_eq!(end.uv_pd[1].y, 0.0);
+
+        // An oblique tangent (across less than along) still flattens, as upstream.
+        start.uv_pd = [Point2::new(0.2, 0.004), Vec2::new(1.0, -0.5)];
+        end.uv_pd = [Point2::new(0.8, 0.002), Vec2::new(1.0, -0.5)];
         assert!(start.fix_boundary_tangents(&domain, &mut end, 0.01, 0.01, 1e-3));
         assert_eq!(start.uv_pd[1].y, 0.0);
         assert_eq!(end.uv_pd[1].y, 0.0);
