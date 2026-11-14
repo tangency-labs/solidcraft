@@ -276,8 +276,8 @@ never returns "no kind": a configuration the table does not name is a Setback.
 | **Turn** | two blends sharing a face, turning at a sharp unrounded side edge (a boss base, a pocket's floor or rim; also blends meeting G1 where a side edge between their faces is sharp, such as a ruled loft's side edge at its rim), or one closed blend meeting itself at an angle (a teardrop's tip) | **Mitre** (default) or **Swept** (option) |
 | **Ball** | three equal rounds of one convexity at a vertex of three faces, the vertex not set back | the corner ball's sphere |
 | **Chamfer** | every edge at the vertex chamfered, each chamfer a plane between two planes | **Mitre** (default): the chamfer planes run on to their common point; or **Facet** (option): one plane through the rails' crossings |
-| **Roll-over** | a convex round and a concave round sharing a face at the vertex, with no crossing to mitre on, every other edge at the vertex unblended | the convex round ends as it would alone; the concave round rolls over the convex round's surface and end face, and any overflow is trimmed at the crease (§3.4). The order is fixed by convexity, convex first, so the result does not depend on the order of selection. Every face is exact: the corner is a `Circle`-class torus where the convex round is a cylinder square to the end face, otherwise a procedural blend; the crease is certified with its pcurve (designed in SolidCraft #10876, built in SolidCraft #16286). Until SolidCraft #16286 lands, this corner is refused with a typed Unsupported (SolidCraft #16005) |
-| **Setback** | every corner not named above: unequal radii, four or more blends, mixed convexity with every edge rounded, any corner where G2 is selected, and three equal constant rounds of one convexity between planes at a vertex set back by a given distance (marked set back with no distance, such a vertex stays the N x N corner; a marked corner of rounds the Setback does not take, such as variable rounds or G1 rounds of mixed convexity, keeps the N x N corner's uncertified patch. A marked corner beside a curved face keeps that patch too until the curved Setback is the default; the design makes it a Setback, and SolidCraft #13832 step 4 implements that) | the setback hole and its certified fill: convex at a corner of one convexity, a saddle with a certified normal at a mixed one |
+| **Roll-over** | a convex round and a concave round sharing a face at the vertex, with no crossing to mitre on, every other edge at the vertex unblended | one Roll-over event runs the convex pass, then the concave pass: the convex round ends as it would alone; the concave round rolls over the convex round's surface and end face, and any overflow is trimmed at the crease (§3.4). The order is fixed by convexity, convex first, so the result does not depend on the order of selection. Every face is exact: the corner is a `Circle`-class torus where the convex round is a cylinder square to the end face, otherwise a procedural blend; the crease is certified with its pcurve (`crease.rs` of the Roll-over build). Until that build lands, this corner is refused with `CornerUnsupported` (`FilletErrorType`, from `session/trim_at_creases.rs`: "a corner's face between blends that add and blends that take off material"; `tests/fork_smlib125_open_setbacks.rs`) |
+| **Setback** | every corner not named above: unequal radii, four or more blends, mixed convexity with every edge rounded, any corner where G2 is selected, and three equal constant rounds of one convexity between planes at a vertex set back by a given distance (marked set back with no distance, such a vertex stays the N x N corner; a marked corner of rounds the Setback does not take, such as variable rounds or G1 rounds of mixed convexity, keeps the N x N corner's uncertified patch. A marked corner beside a curved face keeps that patch too until the curved Setback is the default; the design makes it a Setback, and the curved Setback of `blend_setback/curved.rs` is that step) | the setback hole and its certified fill: convex at a corner of one convexity, a saddle with a certified normal at a mixed one |
 
 ![Plan views of the four corner kinds: mitre crease, swept torus, ball sphere patch, setback hole.](generic-blend/corner-events.svg)
 
@@ -412,7 +412,7 @@ meeting the rim's pipe) is a possible future option, never the default.
 
 Concave overflow is designed to keep the cliff edge instead: the added material is trimmed flush
 with the cliff faces continued, so it never passes the cliff, the default of T-FLEX on Parasolid
-[52]. This is the Roll-over's trim (§3.2), and SolidCraft #16286 builds it; until it lands, no
+[52]. This is the Roll-over's trim (§3.2), and the Roll-over build provides it; until it lands, no
 concave overflow is trimmed this way. Convex overflow still moves the sharp edge.
 
 A round bigger than the wall it rolls on ends on the body's outline (#2541, opt-in
@@ -509,10 +509,10 @@ given.
 - **Ball corners are one rational patch on the sphere**, box corners included.
 - **Overflow keeps the blend and moves the sharp edge**, matching the constant-radius overflow mode
   common CAD practice offers; keeping the edge is a future option. Concave overflow is designed to
-  keep the cliff edge (§3.4; SolidCraft #16286 builds it).
+  keep the cliff edge (§3.4; the Roll-over build provides it).
 - **A convex and a concave round meeting with the other edges sharp are designed to roll over,
-  convex first** (§3.2; SolidCraft #16286 builds it, and until it lands the corner is refused with
-  a typed Unsupported, SolidCraft #16005).
+  convex first** (§3.2; the Roll-over build provides it, and until it lands the corner is refused with
+  `CornerUnsupported`, `session/trim_at_creases.rs`).
   The two orders give different solids, because rounding is an opening and filleting a closing and
   the two do not commute [37]; so the order is fixed by convexity, never by selection, and the other
   order is never tried. Convex first is T-FLEX's documented default and NX's recorded default,
@@ -556,7 +556,7 @@ certificate), `fillet_solver` (the trace and the §3.3 checks), `fillet_overflow
 |---|---|
 | [#2400](https://github.com/tangency-labs/solidcore/issues/2400) | delete the old corner hierarchy |
 | [#2361](https://github.com/tangency-labs/solidcore/issues/2361) | several concave rounds at one vertex; mixed corners with every edge blended |
-| [#2343](https://github.com/tangency-labs/solidcore/issues/2343) | the Setback beside curved faces. SolidCraft [#13832](https://github.com/tangency-labs/solidcraft/issues/13832) carries it in steps: [#16327](https://github.com/tangency-labs/solidcraft/pull/16327) (step 1), [#16331](https://github.com/tangency-labs/solidcraft/pull/16331) (step 2), [#16328](https://github.com/tangency-labs/solidcraft/pull/16328) (step 4), and the ledge corner's Roll-over [#16286](https://github.com/tangency-labs/solidcraft/pull/16286) (under [#10876](https://github.com/tangency-labs/solidcraft/issues/10876)); step 3 (the cylinder's free coefficient) and step 5 (four or more rounds, and the cone grown or placed) are queued |
+| [#2343](https://github.com/tangency-labs/solidcore/issues/2343) | the Setback beside curved faces. The curved Setback is carried in steps (`blend_setback/curved.rs` is the fill; the ledge corner's Roll-over is a separate build); step 3 (the cylinder's free coefficient) and step 5 (four or more rounds, and the cone grown or placed) are queued |
 | [#2344](https://github.com/tangency-labs/solidcore/issues/2344) | the least certifying setback scale; streamed QP rows |
 | [#2345](https://github.com/tangency-labs/solidcore/issues/2345) | chamfers meeting at a vertex |
 | [#2346](https://github.com/tangency-labs/solidcore/issues/2346) | a G2 setback fill beside circular rounds |
