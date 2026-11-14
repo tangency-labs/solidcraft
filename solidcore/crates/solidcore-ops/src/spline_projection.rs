@@ -160,6 +160,35 @@ pub fn projected_edge(
     limit: usize,
     max_coord: f64,
 ) -> Result<Option<Vec<crate::conic_projection::Projection>>> {
+    if let Some(edge) = body
+        .edges
+        .get(index)
+        .filter(|e| matches!(e.curve, Curve::Ellipse { .. }))
+    {
+        let definition = convert::curve(&edge.curve).map_err(|e| Error::Record(e.to_string()))?;
+        let form = edge
+            .nurbs
+            .as_ref()
+            .map(convert::curve)
+            .transpose()
+            .map_err(|e| Error::Record(e.to_string()))?;
+        if let Some(projections) = kernel::full_ellipse_projection(
+            &definition,
+            form.as_ref(),
+            edge.interval,
+            &convert::plane(plane),
+            max_coord,
+        )
+        .map_err(crate::error::status)?
+        {
+            return Ok(Some(
+                projections
+                    .into_iter()
+                    .map(crate::conic_projection::record_projection)
+                    .collect(),
+            ));
+        }
+    }
     let Some(pieces) = project_edges(body, plane, &[index], tol)
         .into_iter()
         .next()

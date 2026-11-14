@@ -342,6 +342,68 @@ pub fn project_curve(
     crate::prism::read::planar_curves(&k, &run, frame, tol, work)
 }
 
+/// Preserve a full analytic ellipse's identity without interpreting its NURBS
+/// interval as angles. An open or partial selection keeps its exact spline form.
+pub fn full_ellipse_projection(
+    definition: &Curve,
+    form: Option<&Curve>,
+    interval: [f64; 2],
+    target: &Frame,
+    max_coord: f64,
+) -> Result<Option<Vec<super::conic_projection::Projection>>> {
+    let Curve::Ellipse { frame, radii } = definition else {
+        return Ok(None);
+    };
+    let k = crate::Kernel::default();
+    if let Some(form) = form {
+        let (knots, count, closed) = match form {
+            Curve::Spline { knots, points } => {
+                (knots, points.len(), points.first() == points.last())
+            }
+            Curve::RationalSpline { knots, homogeneous } => (
+                knots,
+                homogeneous.len(),
+                homogeneous.first() == homogeneous.last(),
+            ),
+            _ => return Ok(None),
+        };
+        let Some(degree) = knots.len().checked_sub(count + 1) else {
+            return Err(invalid("invalid ellipse parameter form"));
+        };
+        if !closed
+            || count <= degree
+            || count > MAX_CONTROLS
+            || !(1..=MAX_DEGREE).contains(&degree)
+            || knots.get(degree).copied() != Some(interval[0])
+            || knots.get(count).copied() != Some(interval[1])
+            || knots.iter().take(degree + 1).any(|t| *t != interval[0])
+            || knots.iter().skip(count).any(|t| *t != interval[1])
+        {
+            return Ok(None);
+        }
+        let mut repeated = 0;
+        let mut previous = None;
+        for t in knots
+            .iter()
+            .copied()
+            .filter(|t| interval[0] < *t && *t < interval[1])
+        {
+            repeated = if previous == Some(t) { repeated + 1 } else { 1 };
+            if repeated > degree {
+                return Ok(None);
+            }
+            previous = Some(t);
+        }
+        crate::curve::from_parameters::conic_on_form(&k, definition, form)?;
+    } else {
+        if interval[1] - interval[0] != core::f64::consts::TAU {
+            return Ok(None);
+        }
+        crate::curve::from_parameters::from_parameters(&k, definition, interval)?;
+    }
+    super::conic_projection::project_ellipse(frame, *radii, target, max_coord)
+}
+
 /// Propose a source plane from samples and project only its whole-span-certified arcs.
 /// Samples never decide a circle's closure, radius or trimmed extent.
 pub fn circle_projection(
@@ -409,6 +471,204 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    fn labelled_ellipse() -> (Curve, Curve) {
+        let definition = Curve::Ellipse {
+            frame: frame(),
+            radii: [3.0, 2.0],
+        };
+        let points = [
+            [3., 0.],
+            [3., 2.],
+            [0., 2.],
+            [-3., 2.],
+            [-3., 0.],
+            [-3., -2.],
+            [0., -2.],
+            [3., -2.],
+            [3., 0.],
+        ];
+        let homogeneous = points
+            .into_iter()
+            .enumerate()
+            .map(|(i, [x, y])| {
+                let w = if i % 2 == 0 {
+                    1.0
+                } else {
+                    core::f64::consts::FRAC_1_SQRT_2
+                };
+                [x * w, y * w, 0.0, w]
+            })
+            .collect();
+        let form = Curve::RationalSpline {
+            knots: vec![2., 2., 2., 3., 3., 4., 4., 5., 5., 6., 6., 6.],
+            homogeneous,
+        };
+        (definition, form)
+    }
+
+    #[test]
+    fn analytic_ellipse_keeps_its_shifted_nurbs_interval_and_projected_image() {
+        use super::super::conic_projection::Projection;
+        let (definition, form) = labelled_ellipse();
+        for target in [
+            frame(),
+            Frame {
+                origin: [1., 2., 3.],
+                x_axis: [0.6, 0.8, 0.],
+                y_axis: [-0.48, 0.36, 0.8],
+            },
+        ] {
+            let geometry =
+                full_ellipse_projection(&definition, Some(&form), [2., 6.], &target, 1e9)
+                    .unwrap()
+                    .unwrap();
+            let [Projection::Ellipse {
+                center,
+                major,
+                minor,
+            }] = geometry.as_slice()
+            else {
+                panic!("{geometry:?}")
+            };
+            let a = major.distance(*center);
+            let axis = (*major - *center) / a;
+            let Curve::RationalSpline { homogeneous, .. } = &form else {
+                unreachable!()
+            };
+            for span in homogeneous.windows(3).step_by(2) {
+                let h: Vec<_> = span
+                    .iter()
+                    .map(|p| {
+                        let q =
+                            to_local(&target, Vec3::new(p[0] / p[3], p[1] / p[3], 0.0)) - *center;
+                        [
+                            q.dot(axis) / a * p[3],
+                            (-q.x * axis.y + q.y * axis.x) / minor * p[3],
+                            p[3],
+                        ]
+                    })
+                    .collect();
+                for k in 0..=4 {
+                    let mut coefficient = 0.0;
+                    for i in 0..=2 {
+                        if k >= i && k - i <= 2 {
+                            let j = k - i;
+                            let product = h[i][0] * h[j][0] + h[i][1] * h[j][1] - h[i][2] * h[j][2];
+                            coefficient += [1., 2., 1.][i] * [1., 2., 1.][j]
+                                / [1., 4., 6., 4., 1.][k]
+                                * product;
+                        }
+                    }
+                    assert!(
+                        coefficient.abs() < 2e-14,
+                        "whole-span coefficient {coefficient}"
+                    );
+                }
+            }
+        }
+        for interval in [
+            [2., 5.9],
+            [2.1, 6.],
+            [2., f64::from_bits(6.0_f64.to_bits() - 1)],
+        ] {
+            assert!(
+                full_ellipse_projection(&definition, Some(&form), interval, &frame(), 1e9)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        assert!(
+            full_ellipse_projection(&form, None, [2., 6.], &frame(), 1e9)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn ellipse_label_does_not_hide_a_perturbed_form_or_a_collapsed_image() {
+        let (definition, mut form) = labelled_ellipse();
+        let edge_on = Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 0., 1.],
+        };
+        assert!(
+            full_ellipse_projection(&definition, Some(&form), [2., 6.], &edge_on, 1e9)
+                .unwrap()
+                .is_none()
+        );
+        if let Curve::RationalSpline { homogeneous, .. } = &mut form {
+            homogeneous[1][0] += 1e-8;
+        }
+        assert!(
+            full_ellipse_projection(&definition, Some(&form), [2., 6.], &frame(), 1e9).is_err()
+        );
+    }
+
+    #[test]
+    fn unclamped_ellipse_controls_do_not_prove_the_selected_curve_is_closed() {
+        let (definition, _) = labelled_ellipse();
+        let points = [
+            [3., -2.],
+            [3., 0.],
+            [3., 2.],
+            [0., 2.],
+            [-3., 2.],
+            [-3., 0.],
+            [-3., -2.],
+            [0., -2.],
+            [3., -2.],
+        ];
+        let homogeneous = points
+            .into_iter()
+            .enumerate()
+            .map(|(i, [x, y])| {
+                let w = if i % 2 == 1 {
+                    1.0
+                } else {
+                    core::f64::consts::FRAC_1_SQRT_2
+                };
+                [x * w, y * w, 0.0, w]
+            })
+            .collect();
+        let form = Curve::RationalSpline {
+            knots: vec![-1., -1., 0., 0., 1., 1., 2., 2., 3., 3., 4., 4.],
+            homogeneous,
+        };
+        assert!(
+            full_ellipse_projection(&definition, Some(&form), [0., 3.], &frame(), 1e9)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn projected_ellipse_respects_the_sketch_ceiling_and_storage_precision() {
+        let mut source = frame();
+        let boundary = Curve::Ellipse {
+            frame: source.clone(),
+            radii: [1e9, 1e8],
+        };
+        assert!(full_ellipse_projection(
+            &boundary,
+            None,
+            [0., core::f64::consts::TAU],
+            &frame(),
+            1e9
+        )
+        .is_err());
+        source.origin = [9e8, 0., 0.];
+        let tiny = Curve::Ellipse {
+            frame: source,
+            radii: [1.3e-7, 1.1e-7],
+        };
+        assert!(
+            full_ellipse_projection(&tiny, None, [0., core::f64::consts::TAU], &frame(), 1e9)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
