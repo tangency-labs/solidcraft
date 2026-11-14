@@ -127,6 +127,7 @@ drawing.view.base                 a drawing: its tests in crates/engine/src/cmd/
 drawing.view.copy_to_sheet        a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.edit                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.inspect              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.view.move                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.move_to_sheet        a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.projected            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.snapshot             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs

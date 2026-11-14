@@ -352,6 +352,18 @@ impl Drawing {
         Ok(centre)
     }
 
+    /// Where view `id` goes dragged to `to` on its sheet, one rule for a drag and its preview. A view
+    /// lined up with its parent takes only its free axis, and with `break_alignment` is placed
+    /// apart there; a view placed at a point goes there. The views lined up with it follow by
+    /// [`Self::view_centre`]'s rule, with no change to their records.
+    pub fn place_moved_to(&self, id: u64, to: Vec2, break_alignment: bool) -> Result<ViewPlace> {
+        let view = self.view(id).ok_or_else(|| DocError::Unknown(format!("view {}", ids::encode(id))))?;
+        Ok(match (view.place, view.kind) {
+            (ViewPlace::Aligned(_), ViewKind::Projected { side, .. }) if !break_alignment => ViewPlace::Aligned(side.along(to)),
+            _ => ViewPlace::At([to.x, to.y]),
+        })
+    }
+
     /// The views from `id` up to its base view, nearest first ([`chain`]).
     fn chain_of(&self, id: u64) -> Result<Vec<&View>> {
         chain(id, |id| self.view(id))
