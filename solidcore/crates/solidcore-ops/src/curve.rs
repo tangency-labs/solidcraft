@@ -495,7 +495,8 @@ pub enum CurveExtension {
     /// The same knots and control points, the control polygon stretched along itself from the
     /// other end so each point keeps its share of it (the kernel's
     /// [`solidcore::nurbs::crv_basic::Curve::extend_keeping_proportion`]): the curve grows by the
-    /// length to the kernel's stop, its shape slides along the polygon.
+    /// length, its growth certified within `1e-7` of the growth asked, relatively, its shape slides along the polygon;
+    /// refused ([`Error::NotExact`]) where that is not certified.
     Proportion,
 }
 
@@ -511,7 +512,8 @@ pub enum CurveExtension {
 /// clamped spline or rational spline, a closed one (a periodic curve, or one whose ends meet
 /// to the kernel's model tolerance), or an extension the record cannot hold; the kernel's
 /// status otherwise (a natural extension of a rational curve whose weights leave the
-/// kernel's range).
+/// kernel's range); [`Error::NotExact`] for a proportional extension whose length is not
+/// certified.
 pub fn extend_curve(
     curve: &Curve,
     at: CurveEndAt,
@@ -540,6 +542,7 @@ pub fn extend_curve(
                     extended = match extended.extend_keeping_proportion(length, end) {
                         Ok((curve, _)) => curve,
                         Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+                        Err(SolidError::ExtendRefused { .. }) => return Ok(Err(Error::NotExact)),
                         Err(e) => return Err(e),
                     };
                 }

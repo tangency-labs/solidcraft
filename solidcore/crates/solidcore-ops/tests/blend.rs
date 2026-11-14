@@ -595,6 +595,47 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
     assert!(rel(v, 11000.0 + 60.0 * a - 8.0 * m) < 1e-9, "{v}");
 }
 
+/// tangency-labs/solidcraft#16897: an 80 x 60 x 10.5 plate with a 30 x 3 x 65 tab on it
+/// (x -15..15, y -1.5..1.5), the tab's four base edges rounded. Past r 1.5 the rounds of the
+/// tab's 3 long ends run on past their end face's own extent to meet the long sides' rounds in
+/// their mitres (0.41 built them only up to r 1.5).
+///
+/// The closed form: the plate and tab hold 80 * 60 * 10.5 + 30 * 3 * 65 = 56250. Each base
+/// edge gains the spandrel A = (1 - pi/4) r^2 (the square of side r less its quarter disc)
+/// along its length, 2 * 30 + 2 * 3 = 66 in all. At each of the four upright tab edges the two
+/// mitred rounds add their parts past both walls, 2 M with M = (5/6 - pi/4) r^3, as in
+/// [`rounds_turn_round_a_boss_edge_mitred_or_swept`]. The corners at either end of a 3 long
+/// edge lie on opposite sides of it (y > 1.5 and y < -1.5), so they never overlap however
+/// large r is: V = 56250 + 66 A + 8 M.
+#[test]
+fn rounds_turn_round_a_thin_tab_wider_than_its_end() {
+    all_fixes();
+    let base = [[-15.0, -1.5], [15.0, -1.5], [15.0, 1.5], [-15.0, 1.5]];
+    for r in [1.5, 2.0, 3.0] {
+        let b = built(|k| {
+            let plate = create_box(k, Vec3::new(-40.0, -30.0, 0.0), 80.0, 60.0, 10.5)?;
+            let tab = create_box(k, Vec3::new(-15.0, -1.5, 10.5), 30.0, 3.0, 65.0)?;
+            boolean_union(k, plate, tab)
+        });
+        let (order, edges) = loop_edges(&b, base, 10.5);
+        blend_ordered(
+            &b,
+            &order,
+            Blend::Round,
+            &edges,
+            &[r],
+            &[],
+            Corners::Filled,
+            BlendOptions::default(),
+        )
+        .unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
+        let (a, m) = ((1.0 - PI / 4.0) * r * r, (5.0 / 6.0 - PI / 4.0) * r * r * r);
+        let v = b.volume(1e-10).unwrap();
+        assert!(rel(v, 56250.0 + 66.0 * a + 8.0 * m) < 1e-9, "r {r}: {v}");
+    }
+}
+
 #[test]
 fn chamfers_by_sides_take_the_face_asked() {
     all_fixes();
