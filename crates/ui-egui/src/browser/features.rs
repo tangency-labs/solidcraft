@@ -1018,6 +1018,9 @@ mod tests {
         h.app.session.selection = vec![Sel::Plane { name: "Shelf".into() }];
         h.frames(2);
         assert_eq!(crate::timeline::feature_of_sel(&doc, &h.app.session.selection[0]), Some(plane));
+        // The plane picked in the view is also what a drag, Copy or Delete from its row acts on.
+        assert_eq!(crate::timeline::selected_feature_ids(&h.app), [plane]);
+        assert_eq!(crate::timeline_left::drag_features(&mut h.app, plane, true), [plane]);
         // An origin plane is no feature, and an unknown name maps to nothing.
         assert_eq!(crate::timeline::feature_of_sel(&doc, &Sel::Plane { name: "XY".into() }), None);
     }
