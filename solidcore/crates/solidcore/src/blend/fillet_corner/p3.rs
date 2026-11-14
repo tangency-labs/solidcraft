@@ -346,6 +346,11 @@ pub struct FilletCorner {
     /// Such a cap has an edge for each piece, four or five in all
     /// ([`FilletCorner::turned_back_cap`]).
     pub(crate) turned_back_arcs: [Option<EdgeId>; 2],
+    /// Not upstream (#10876): the corner is made by the second pass of the blend corner's
+    /// Roll-over ([`crate::blend::blend_corner::rollover`]), the concave chain's: a rail end
+    /// is looked for across the cliff's tangent seam as well. Set only on the second pass's corner
+    /// at V, where the concave chain meets the cliff.
+    pub roll_over: bool,
 }
 
 /// What the corner methods operate on besides the corner itself.
@@ -635,6 +640,7 @@ impl FilletCorner {
             mixed: None,
             end_cap: None,
             turned_back_arcs: [None, None],
+            roll_over: false,
         }
     }
 
@@ -788,6 +794,36 @@ impl FilletCorner {
         solver_eus: &[EdgeuseId],
         earlier_pass_faces: &[FaceId],
         solver_of: impl Fn(EdgeuseId) -> Result<&'solver FilletSolver>,
+    ) -> Result<Option<Self>> {
+        Self::create_noting_roll_overs(
+            k,
+            b,
+            vertex,
+            solver_eus,
+            earlier_pass_faces,
+            solver_of,
+            None,
+        )
+    }
+
+    /// [`Self::create_with_solver_lookup`], noting in `roll_overs` (when given) the vertex it
+    /// refuses as a convex and a concave round meeting at four edges
+    /// ([`MIXED_CORNER_OF_FOUR_EDGES`]) where that vertex is the blend corner's Roll-over
+    /// ([`crate::blend::blend_corner::rollover::classify_roll_over`]; not upstream, #10876).
+    /// The refusal is the same either way: the Roll-over is built by the caller, in two
+    /// passes.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::create_with_solver_lookup`] and the classification.
+    pub fn create_noting_roll_overs<'solver>(
+        k: &Kernel,
+        b: &mut Brep,
+        vertex: VertexId,
+        solver_eus: &[EdgeuseId],
+        earlier_pass_faces: &[FaceId],
+        solver_of: impl Fn(EdgeuseId) -> Result<&'solver FilletSolver>,
+        mut roll_overs: Option<&mut Vec<crate::blend::blend_corner::rollover::RollOver>>,
     ) -> Result<Option<Self>> {
         // get number of edgeuses connected to this vertex to be filleted
         let total_solver_eus = solver_eus.len();
@@ -1089,6 +1125,22 @@ impl FilletCorner {
                                 && eu2::is_convex_radial_sector(k, b, eu0, 4, false, 0.0)?
                                     != eu2::is_convex_radial_sector(k, b, eu1_, 4, false, 0.0)?
                             {
+                                // a classification that fails is no Roll-over: the
+                                // refusal stands
+                                if let Some(noted) = roll_overs.as_mut() {
+                                    match crate::blend::blend_corner::rollover::classify_roll_over(
+                                        k,
+                                        b,
+                                        vertex,
+                                        solver_eus,
+                                        &all_eus,
+                                        tan_tol_deg,
+                                    ) {
+                                        Ok(Some(found)) => noted.push(found),
+                                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                                        Ok(None) | Err(_) => {}
+                                    }
+                                }
                                 return Err(SolidError::Unsupported {
                                     operation: OP_CREATE,
                                     reason: MIXED_CORNER_OF_FOUR_EDGES,

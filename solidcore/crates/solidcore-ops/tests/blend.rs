@@ -1574,3 +1574,713 @@ fn the_faces_a_round_is_carried_on_past_are_the_kernels() {
         Err(Error::Argument)
     ));
 }
+
+/// The kernel rig's fix set (`fixes.json`), as the rig runs its entries.
+fn rig_fixes() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../solidcore/tests/kernel_cases/fixes.json"
+    );
+    let fixes: Vec<String> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    solidcore_ops::session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+}
+
+/// The ledge of the kernel case `10876-fillet-ledge-convex-and-concave-edges-at-bore-r0-5`:
+/// its operand body `b255`.
+fn ledge() -> Body {
+    let case = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../solidcore/tests/kernel_cases/fillets/",
+        "10876-fillet-ledge-convex-and-concave-edges-at-bore-r0-5.bodies.json.gz"
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(case).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let record: Record = serde_json::from_value(records["b255"].clone()).unwrap();
+    Body::from_record(&record, true).unwrap().0
+}
+
+/// The ledge's concave edge rounded first (r 0.5, alone: it ends flush on the bore's flat
+/// wall x = 12), then its convex edge's remainder with the concave round's end rib on that
+/// wall rounded as one chain: the second pass's trim leaks past its rails (the convex ball
+/// would have to end where the chain runs into the sharp edge it leaves unselected). The
+/// refusal keeps the kernel's class and statement, not a bare status 1001.
+#[test]
+fn a_ledge_rounded_concave_first_refuses_its_convex_chain_with_its_reason() {
+    rig_fixes();
+    let b = ledge();
+    let concave = nearest_edge(&b, [15.0, 30.0, 33.0]);
+    blend(&b, Blend::Round, &[concave], &[0.5], &[], Corners::Filled).unwrap();
+    let h = 0.5 * std::f64::consts::FRAC_1_SQRT_2;
+    let chain = [
+        nearest_edge(&b, [12.0, 29.5 + h, 33.5 - h]),
+        nearest_edge(&b, [12.0, 25.0, 33.0]),
+    ];
+    assert_ne!(chain[0], chain[1]);
+    let got = blend(&b, Blend::Round, &chain, &[0.5], &[], Corners::Filled);
+    match got {
+        Err(Error::BlendFailed { status, phrase, .. }) => {
+            assert_eq!(status, 1001);
+            assert!(
+                phrase.contains("the faces the rails enclose reach past the rails"),
+                "{phrase}"
+            );
+        }
+        other => panic!("not the trim's typed refusal: {other:?}"),
+    }
+}
+
+/// The ledge's planar twin (#10876): the slab [0, 10] x [-10, 10] x [-10, 0] with the riser
+/// [0, 10] x [0, 10] x [0, 10] on it. Their walls x = 0 are one face, so three edges meet at
+/// V = 0: E1 (the top z = 0 and the wall, convex), E2 (the top and the riser's front y = 0,
+/// concave) and the wall's edge with the riser's front (convex).
+fn stair_twin() -> Body {
+    let slab = make_box([0.0, -10.0, -10.0], [10.0, 20.0, 10.0]).unwrap();
+    let riser = make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+    solidcore_ops::boolean::boolean(slab, riser, solidcore_ops::BooleanOp::Union)
+        .unwrap()
+        .unwrap()
+}
+
+/// The `n` Gauss-Legendre nodes and weights on [-1, 1]: each node the root of the Legendre
+/// polynomial `P_n` from its Chebyshev estimate by Newton's method (the three-term recurrence
+/// for `P_n` and its derivative), to machine precision.
+fn gauss_legendre(n: usize) -> Vec<(f64, f64)> {
+    let mut out = Vec::new();
+    for i in 1..=n {
+        let mut x = (PI * (i as f64 - 0.25) / (n as f64 + 0.5)).cos();
+        let mut dp = 1.0;
+        for _ in 0..100 {
+            let (mut p0, mut p1) = (1.0, x);
+            for j in 2..=n {
+                let p2 = ((2 * j - 1) as f64 * x * p1 - (j - 1) as f64 * p0) / j as f64;
+                p0 = p1;
+                p1 = p2;
+            }
+            dp = n as f64 * (x * p1 - p0) / (x * x - 1.0);
+            let step = p1 / dp;
+            x -= step;
+            if step.abs() < 1e-16 {
+                break;
+            }
+        }
+        out.push((x, 2.0 / ((1.0 - x * x) * dp * dp)));
+    }
+    out
+}
+
+/// `f` integrated over `[a, b]` by the `n`-point Gauss-Legendre rule on `panels` equal panels.
+fn gauss(f: &dyn Fn(f64) -> f64, a: f64, b: f64, n: usize, panels: usize) -> f64 {
+    let rule = gauss_legendre(n);
+    let h = (b - a) / panels as f64;
+    let mut sum = 0.0;
+    for k in 0..panels {
+        let (lo, hi) = (a + h * k as f64, a + h * (k + 1) as f64);
+        for &(x, w) in &rule {
+            sum += w * 0.5 * (hi - lo) * f(0.5 * (lo + hi) + 0.5 * (hi - lo) * x);
+        }
+    }
+    sum
+}
+
+/// The material the blend corner's Roll-over adds on the stair twin (E1 rounded `r1`, E2
+/// `r2`), past E2's fillet strip: about E1's axis A1 (x = r1, z = -r1, along y), the concave
+/// ball's region for each direction `theta` from +z towards -x over the quarter turn the round
+/// spans, in the meridian (distance `rho` from A1, height along y) the fillet section between
+/// the round (`rho = r1`), the riser's front (y = 0) and the ball (centre `rho = R = r1 + r2`,
+/// y = -r2): of height `r2 - sqrt(r2^2 - (R - rho)^2)` at `rho`. The cliff x = 0 keeps
+/// `rho sin(theta) <= r1`, so `theta` up to `asin(r1 / rho)`:
+/// `I = int_r1^R rho (r2 - sqrt(r2^2 - (R - rho)^2)) asin(r1 / rho) d rho`, and with
+/// `rho = R - r2 cos(phi)` (analytic in `phi` over `[0, pi/2]`)
+/// `I = int_0^(pi/2) rho r2^2 (1 - sin phi) sin phi asin(r1 / rho) d phi`. Integrated by two
+/// Gauss-Legendre rules (20 points on 8 panels, 30 points on 16) that agree to 1e-14
+/// relative (asserted; measured 9e-16, the rounding of summing their 160 and 480 terms), a
+/// thousand times under the volume tests' 1e-11: the reference is their mean.
+fn roll_over_material(r1: f64, r2: f64) -> f64 {
+    let big_r = r1 + r2;
+    let f = |phi: f64| {
+        let rho = big_r - r2 * phi.cos();
+        rho * r2 * r2 * (1.0 - phi.sin()) * phi.sin() * (r1 / rho).min(1.0).asin()
+    };
+    let a = gauss(&f, 0.0, PI / 2.0, 20, 8);
+    let b = gauss(&f, 0.0, PI / 2.0, 30, 16);
+    assert!((a - b).abs() <= 1e-14 * a.abs(), "{a} {b}");
+    0.5 * (a + b)
+}
+
+/// The stair twin's volume once E1 is rounded `r1` and E2 `r2` as the blend corner's
+/// Roll-over: 3000, less E1's strip `(1 - pi/4) r1^2` over its length 10, plus E2's fillet
+/// strip `(1 - pi/4) r2^2` over its remainder from x = r1 to 10, plus the material the trimmed
+/// torus adds ([`roll_over_material`]). At r1 = r2 = 1: 3000.047071660769.
+fn rolled_volume(r1: f64, r2: f64) -> f64 {
+    let strip = 1.0 - PI / 4.0;
+    3000.0 - 10.0 * strip * r1 * r1 + (10.0 - r1) * strip * r2 * r2 + roll_over_material(r1, r2)
+}
+
+/// The kernel's certified enclosure of `b`'s volume holds `want`, and is narrower than
+/// `width` (so that it decides `want` against a nearby value).
+fn enclosure_holds(b: &Body, want: f64, width: f64) {
+    let (k, mut brep) = kernel_copy(b);
+    let e = solidcore::mass::enclosure::enclose_volume(&k, &mut brep, width / 4.0).unwrap();
+    assert!(e.lo <= want && want <= e.hi, "{} {want} {}", e.lo, e.hi);
+    assert!(e.hi - e.lo <= width, "{} {}", e.lo, e.hi);
+}
+
+/// The torus face's edges of `brep` are exactly `ends`, each the two points its edge runs
+/// between (either way round, each within 1e-9) and the kind of the face beside it.
+fn torus_edges_are(brep: &solidcore::Brep, torus: FaceId, ends: &[([f64; 3], [f64; 3], &str)]) {
+    let edges = solidcore::topology::face::p4::edges(brep, torus, None, false, None).unwrap();
+    assert_eq!(edges.len(), ends.len(), "the torus face's edges");
+    let near = |p: Vec3, q: [f64; 3]| (p - Vec3::new(q[0], q[1], q[2])).length() <= 1e-9;
+    for &(a, b, kind) in ends {
+        let found = edges.iter().any(|&e| {
+            let v0 = edge::start_vertex(brep, e).unwrap().unwrap();
+            let v1 = edge::end_vertex(brep, e).unwrap().unwrap();
+            let (p, q) = (
+                brep.vertex(v0).unwrap().point,
+                brep.vertex(v1).unwrap().point,
+            );
+            let faces = edge::faces(brep, e, None).unwrap();
+            let other = *faces.iter().find(|&&f| f != torus).unwrap();
+            let beside = surface_kind_name(brep.face(other).unwrap().surface.as_ref().unwrap());
+            ((near(p, a) && near(q, b)) || (near(p, b) && near(q, a))) && beside == kind
+        });
+        assert!(found, "no torus edge {a:?} - {b:?} beside a {kind}");
+    }
+}
+
+/// The twin's convex edge E1 rounded at r = 1 alone (it ends on the riser's front continued,
+/// its end cap a spandrel on that plane), then the concave chain it leaves, E2's remainder and
+/// E1's end arc on the riser's front, rounded at r = 1 on its own: the blend corner's
+/// Roll-over's second pass, asked as a feature of its own.
+fn stair_twin_rolled() -> Body {
+    rig_fixes();
+    let b = stair_twin();
+    let e1 = nearest_edge(&b, [0.0, -5.0, 0.0]);
+    blend(&b, Blend::Round, &[e1], &[1.0], &[], Corners::Filled).unwrap();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let chain = [
+        nearest_edge(&b, [5.0, 0.0, 0.0]),
+        nearest_edge(&b, [1.0 - s, 0.0, -1.0 + s]),
+    ];
+    assert_ne!(chain[0], chain[1]);
+    blend(&b, Blend::Round, &chain, &[1.0], &[], Corners::Filled).unwrap();
+    b
+}
+
+/// The twin's torus face, with its torus's centre, axis and radii: the one face on a torus
+/// (an exact torus, or a surface of revolution of a circular arc, read off its arc; the test
+/// below proves the face on that torus through its normals); its other faces planes and
+/// cylinders.
+fn rolled_torus(brep: &solidcore::Brep) -> (FaceId, (Vec3, Vec3, f64, f64)) {
+    let mut tori = Vec::new();
+    for &f in brep.face_list() {
+        let surface = brep.face(f).unwrap().surface.as_ref().unwrap();
+        if let Some(t) =
+            solidcore::surface::procedural_blend::exact::revolved_circle_torus(surface).unwrap()
+        {
+            tori.push((f, t));
+            continue;
+        }
+        match surface.kind() {
+            SurfaceKind::Torus(t) => {
+                let place = t.base().position();
+                tori.push((
+                    f,
+                    (
+                        place.origin(),
+                        place.z_axis(),
+                        t.major_radius(),
+                        t.minor_radius(),
+                    ),
+                ));
+            }
+            SurfaceKind::Plane(_) => {}
+            SurfaceKind::Cone(c) => assert!(c.is_cylinder(), "a face on a cone"),
+            _ => panic!("a face on no exact surface: {}", surface_kind_name(surface)),
+        }
+    }
+    assert_eq!(tori.len(), 1, "one torus face");
+    tori[0]
+}
+
+/// The exact unit normal out of the rolled twin at `p` on its torus (towards the concave
+/// ball's centre, which lies on the circle of radius 2 about E1's axis x = 1, z = -1, in the
+/// plane y = -1), with `p`'s distance `rho` from that axis.
+fn torus_normal(p: Vec3) -> (Vec3, f64) {
+    let (dx, dz) = (p.x - 1.0, p.z + 1.0);
+    let rho = (dx * dx + dz * dz).sqrt();
+    let centre = Vec3::new(1.0 + 2.0 * dx / rho, -1.0, -1.0 + 2.0 * dz / rho);
+    ((centre - p).unitize().unwrap(), rho)
+}
+
+#[test]
+fn a_stair_rounded_convex_first_rolls_its_concave_chain_over_the_round() {
+    let b = stair_twin_rolled();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    let v = b.volume(1e-12).unwrap();
+    let want = rolled_volume(1.0, 1.0);
+    assert!(rel(v, want) < 1e-11, "{v}");
+    enclosure_holds(&b, want, 1e-5);
+    let (k, mut brep) = kernel_copy(&b);
+    let (torus, (o, z, major, minor)) = rolled_torus(&brep);
+    assert!(
+        (major - 2.0).abs() < 1e-12 && (minor - 1.0).abs() < 1e-12,
+        "{major} {minor}"
+    );
+    assert!(
+        (o.x - 1.0).abs() < 1e-12 && (o.z + 1.0).abs() < 1e-12,
+        "{o:?}"
+    );
+    assert!(z.x.abs() < 1e-12 && z.z.abs() < 1e-12, "{z:?}");
+    // its four edges: the crease with the wall x = 0, from where the rail leaves the riser's
+    // front (rho = 2: z = sqrt 3 - 1) to the tangent point on the round (rho = 1, in the balls'
+    // centres' plane y = -1); the rail on the riser's front, the circle rho = 2 at y = 0 from
+    // there to E2's fillet (1, 0, 1); the seam with E2's fillet in the plane x = 1; and the
+    // seam with E1's round in the balls' centres' plane y = -1
+    let lift = 3f64.sqrt() - 1.0;
+    torus_edges_are(
+        &brep,
+        torus,
+        &[
+            ([0.0, 0.0, lift], [0.0, -1.0, -1.0], "plane"),
+            ([0.0, 0.0, lift], [1.0, 0.0, 1.0], "plane"),
+            ([1.0, -1.0, 0.0], [1.0, 0.0, 1.0], "cone"),
+            ([0.0, -1.0, -1.0], [1.0, -1.0, 0.0], "cone"),
+        ],
+    );
+    for e in solidcore::topology::face::p4::edges(&brep, torus, None, false, None).unwrap() {
+        let faces = edge::faces(&brep, e, None).unwrap();
+        let other = *faces.iter().find(|&&f| f != torus).unwrap();
+        let wall = match brep.face(other).unwrap().surface.as_ref().unwrap().kind() {
+            SurfaceKind::Plane(p) => p.is_planar().1.x.abs() > 1.0 - 1e-12,
+            _ => false,
+        };
+        let ivl = brep.edge(e).unwrap().interval;
+        for i in 1..8 {
+            let s = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 8.0;
+            let frame = |f: FaceId, brep: &mut solidcore::Brep| {
+                let eu = edge::edgeuse_of_face(brep, e, Some(f)).unwrap().unwrap();
+                let fu = solidcore::topology::face::p2::outer_faceuse(brep, f)
+                    .unwrap()
+                    .unwrap();
+                let frame =
+                    solidcore::query::api_queries::edgeuse_face_frame(&k, brep, eu, s, fu).unwrap();
+                let at = brep
+                    .face(f)
+                    .unwrap()
+                    .surface
+                    .as_ref()
+                    .unwrap()
+                    .evaluate_point(&k, frame.uv)
+                    .unwrap();
+                (frame.normal, at)
+            };
+            // the exact normal where the torus face's normal is taken: its surface's point at
+            // the edge use's (u, v)
+            let (on_torus, p) = frame(torus, &mut brep);
+            let (exact, rho) = torus_normal(p);
+            assert!(
+                (on_torus.value - exact).length() <= 1e-9 + on_torus.bound,
+                "{p:?} {:?} {exact:?} {} wall {wall}",
+                on_torus.value,
+                on_torus.bound
+            );
+            if wall {
+                let cos_p = 2.0 - rho;
+                let cos_a = on_torus.value.x.abs();
+                assert!((cos_a - cos_p / (2.0 - cos_p)).abs() <= 1e-9, "{p:?}");
+            } else {
+                let (beside, q) = frame(other, &mut brep);
+                // the face beside meets the torus where the edge lies: the same exact normal,
+                // to the edge's own gap between its two faces' points
+                let gap = (q - p).length();
+                assert!(
+                    (beside.value - exact).length() <= 1e-9 + beside.bound + gap,
+                    "{p:?}"
+                );
+            }
+        }
+    }
+}
+
+/// A nearby corner that is not the Roll-over still refuses as before: the riser runs on past
+/// the wall over the void (the riser [-5, 10] x [0, 10] x [0, 10] on the slab), so that at V
+/// the edge beyond the seam is the riser's front on its underside (no cliff rim) and the slab's
+/// wall meets the riser's underside at a concave edge (no tangent seam). The vertex has four
+/// edges, a convex and a concave round meeting there, and is refused as before.
+#[test]
+fn a_stair_whose_riser_overhangs_the_wall_still_refuses_its_corner() {
+    rig_fixes();
+    let slab = make_box([0.0, -10.0, -10.0], [10.0, 20.0, 10.0]).unwrap();
+    let riser = make_box([-5.0, 0.0, 0.0], [15.0, 10.0, 10.0]).unwrap();
+    let b = solidcore_ops::boolean::boolean(slab, riser, solidcore_ops::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let e1 = nearest_edge(&b, [0.0, -5.0, 0.0]);
+    let e2 = nearest_edge(&b, [5.0, 0.0, 0.0]);
+    let got = blend(&b, Blend::Round, &[e1, e2], &[1.0], &[], Corners::Filled);
+    assert!(
+        matches!(&got, Err(Error::Unsupported(r)) if r.contains("vertex of four edges")),
+        "{:?}",
+        got.err()
+    );
+}
+
+/// The stair twin with its wall split along z = 0 under the riser (the wall imprinted with the
+/// box [-5, 0] x [0, 10] x [0, 10]): four edges meet at V = 0, as at the ledge's corner (#10876):
+/// E1 (the top and the slab's wall, convex), E2 (the top and the riser's front, concave), the
+/// tangent seam between the two walls, and the riser's wall's edge with its front (the cliff's
+/// rim, sharp and convex).
+fn stair_twin_of_four_edges() -> Body {
+    let tool = make_box([-5.0, 0.0, 0.0], [5.0, 10.0, 10.0]).unwrap();
+    let (b, changed) = solidcore_ops::boolean::imprint(stair_twin(), tool).unwrap();
+    assert!(changed);
+    let (record, _) = b.to_record().unwrap();
+    Body::from_record(&record, true).unwrap().0
+}
+
+/// The four-edge twin's E1 rounded at 1 and E2 at 0.4 in one call: the corners step refuses
+/// V as a convex and a concave round meeting at four edges, notes it as the blend corner's
+/// Roll-over, and builds it in two passes (E1 first, then E2's remainder with E1's end arc on
+/// the riser's front as one concave chain). At r2 = 0.4 the torus's rail on the riser's front
+/// (rho = R = 1.4 about E1's axis) leaves it across the slab's wall below V (at
+/// z = sqrt(R^2 - 1) - 1 < 0), so the End lies on one cliff face. The result is valid
+/// (level 2), its volume is the closed form's (the certified enclosure holds it), its one
+/// torus has radii 1.4 and 0.4 about E1's axis, and its four edges are the crease with the
+/// wall, the rail on the riser's front and the seams with the two rounds.
+#[test]
+fn a_ledge_twin_of_four_edges_rolls_over_in_one_call() {
+    rig_fixes();
+    let (r1, r2) = (1.0, 0.4);
+    let b = stair_twin_of_four_edges();
+    let e1 = nearest_edge(&b, [0.0, -5.0, 0.0]);
+    let e2 = nearest_edge(&b, [5.0, 0.0, 0.0]);
+    blend(&b, Blend::Round, &[e1, e2], &[r1, r2], &[], Corners::Filled).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    let want = rolled_volume(r1, r2);
+    let v = b.volume(1e-12).unwrap();
+    assert!(rel(v, want) < 1e-11, "{v} {want}");
+    enclosure_holds(&b, want, 1e-5);
+    let (_, brep) = kernel_copy(&b);
+    let (torus, (o, z, major, minor)) = rolled_torus(&brep);
+    assert!(
+        (major - (r1 + r2)).abs() < 1e-12 && (minor - r2).abs() < 1e-12,
+        "{major} {minor}"
+    );
+    assert!(
+        (o.x - r1).abs() < 1e-12 && (o.y + r2).abs() < 1e-12 && (o.z + r1).abs() < 1e-12,
+        "{o:?}"
+    );
+    assert!(z.x.abs() < 1e-12 && z.z.abs() < 1e-12, "{z:?}");
+    let exit = ((r1 + r2) * (r1 + r2) - r1 * r1).sqrt() - r1;
+    torus_edges_are(
+        &brep,
+        torus,
+        &[
+            ([0.0, 0.0, exit], [0.0, -r2, -r1], "plane"),
+            ([0.0, 0.0, exit], [r1, 0.0, r2], "plane"),
+            ([r1, -r2, 0.0], [r1, 0.0, r2], "cone"),
+            ([0.0, -r2, -r1], [r1, -r2, 0.0], "cone"),
+        ],
+    );
+}
+
+/// The four-edge twin rounded at 1 and 1 in one call: the corner is the Roll-over's, but its
+/// two passes do not build (the rail on the riser's front leaves it across the riser's wall,
+/// above V, and the End's rib would span both cliff faces), so the call falls back to the
+/// first call's refusal, the corner's four-edge reason, and leaves the body as it was.
+#[test]
+fn a_ledge_twin_whose_roll_over_does_not_build_keeps_its_refusal() {
+    rig_fixes();
+    let b = stair_twin_of_four_edges();
+    let e1 = nearest_edge(&b, [0.0, -5.0, 0.0]);
+    let e2 = nearest_edge(&b, [5.0, 0.0, 0.0]);
+    let got = blend(&b, Blend::Round, &[e1, e2], &[1.0], &[], Corners::Filled);
+    assert!(
+        matches!(&got, Err(Error::Unsupported(r)) if r.contains("vertex of four edges")),
+        "{:?}",
+        got.err()
+    );
+    assert!(rel(b.volume(1e-12).unwrap(), 3000.0) < 1e-12);
+}
+
+/// A block 30 x 30 x 10 with the pocket [5, 25]^2 x [4, 10], its four vertical edges rounded
+/// `RC`: its floor's edges are four lines and four arcs, each concave, each arc between a
+/// corner's cylinder and the floor (square to the cylinder's axis), each meeting the next
+/// edge G1.
+const RC: f64 = 8.0;
+fn rounded_pocket() -> Body {
+    let block = make_box([0.0, 0.0, 0.0], [30.0, 30.0, 10.0]).unwrap();
+    let cut = make_box([5.0, 5.0, 4.0], [20.0, 20.0, 10.0]).unwrap();
+    let b = solidcore_ops::boolean::boolean(block, cut, solidcore_ops::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let verticals: Vec<usize> = [[5.0, 5.0], [25.0, 5.0], [25.0, 25.0], [5.0, 25.0]]
+        .iter()
+        .map(|p| nearest_edge(&b, [p[0], p[1], 7.0]))
+        .collect();
+    blend(&b, Blend::Round, &verticals, &[RC], &[], Corners::Filled).unwrap();
+    b
+}
+
+/// The rounded pocket's floor loop: its four lines, then its four arcs.
+fn pocket_floor(b: &Body) -> Vec<usize> {
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let mut out = Vec::new();
+    for p in [[15.0, 5.0], [25.0, 15.0], [15.0, 25.0], [5.0, 15.0]] {
+        out.push(nearest_edge(b, [p[0], p[1], 4.0]));
+    }
+    for (cx, cy, dx, dy) in [
+        (5.0 + RC, 5.0 + RC, -1.0, -1.0),
+        (25.0 - RC, 5.0 + RC, 1.0, -1.0),
+        (25.0 - RC, 25.0 - RC, 1.0, 1.0),
+        (5.0 + RC, 25.0 - RC, -1.0, 1.0),
+    ] {
+        out.push(nearest_edge(b, [cx + dx * RC * s, cy + dy * RC * s, 4.0]));
+    }
+    out
+}
+
+/// A pocket floor with rounded vertical corners is not the Roll-over's concave chain: at each
+/// end of a corner's arc on the floor, the floor's next edge runs on concave (G1 into the next
+/// wall's foot), never sharp and convex as the ledge's cliff rim is. So the gate refuses its
+/// loop and any part of it, while the stair twin's chain (E2's remainder with E1's end arc on
+/// the riser's front) passes it with its one V, the arc's end on the wall at (0, 0, -1).
+#[test]
+fn only_the_ledges_chain_is_the_roll_overs_second_pass() {
+    use solidcore::blend::blend_corner::rollover::{concave_chain_ends, is_concave_chain};
+    rig_fixes();
+    let b = rounded_pocket();
+    let floor = pocket_floor(&b);
+    let (k, mut brep) = kernel_copy(&b);
+    let ids = |brep: &solidcore::Brep, picks: &[usize]| -> Vec<EdgeId> {
+        picks.iter().map(|&i| brep.edge_list()[i]).collect()
+    };
+    let all = ids(&brep, &floor);
+    let part = ids(&brep, &[floor[0], floor[4], floor[5]]);
+    for edges in [&all, &part] {
+        assert!(!is_concave_chain(&k, &mut brep, edges).unwrap());
+        assert!(concave_chain_ends(&k, &mut brep, edges).unwrap().is_empty());
+    }
+    let b = stair_twin();
+    let e1 = nearest_edge(&b, [0.0, -5.0, 0.0]);
+    blend(&b, Blend::Round, &[e1], &[1.0], &[], Corners::Filled).unwrap();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let chain = [
+        nearest_edge(&b, [5.0, 0.0, 0.0]),
+        nearest_edge(&b, [1.0 - s, 0.0, -1.0 + s]),
+    ];
+    let (k, mut brep) = kernel_copy(&b);
+    let chain = ids(&brep, &chain);
+    assert!(is_concave_chain(&k, &mut brep, &chain).unwrap());
+    let ends = concave_chain_ends(&k, &mut brep, &chain).unwrap();
+    assert_eq!(ends.len(), 1);
+    let p = brep.vertex(ends[0]).unwrap().point;
+    assert!((p - Vec3::new(0.0, 0.0, -1.0)).length() < 1e-12, "{p:?}");
+}
+
+/// The rounded pocket's floor loop rounded at 1 is rounded as before (not as the Roll-over's
+/// second pass): valid, and its volume the closed form's. The block less the pocket is
+/// 9000 - 2400; each corner's round adds `(1 - pi/4) RC^2` over the wall's height 6; the
+/// floor's round adds its section `A = (1 - pi/4) r^2` along the four lines (each
+/// `20 - 2 RC` long) and, by Pappus, `A (pi / 2) (RC - c)` round each corner, `c` the section's
+/// centroid's distance from the wall, `r (5/6 - pi/4) / (1 - pi/4)` (the square's moment less
+/// the quarter disc's about the wall, over the area).
+#[test]
+fn a_pocket_floor_with_rounded_corners_is_rounded_as_before() {
+    rig_fixes();
+    let r = 1.0;
+    let b = rounded_pocket();
+    let floor = pocket_floor(&b);
+    blend(&b, Blend::Round, &floor, &[r], &[], Corners::Filled).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    let strip = 1.0 - PI / 4.0;
+    let section = strip * r * r;
+    let centroid = r * (5.0 / 6.0 - PI / 4.0) / strip;
+    let want = 9000.0 - 2400.0
+        + 4.0 * strip * RC * RC * 6.0
+        + 4.0 * section * (20.0 - 2.0 * RC)
+        + 4.0 * section * (PI / 2.0) * (RC - centroid);
+    let v = b.volume(1e-12).unwrap();
+    assert!(rel(v, want) < 1e-11, "{v} {want}");
+}
+
+/// The rounded pocket's floor loop rounded at 7, past the walls' height 6, is refused as
+/// before: too large, its rail leaving the wall it rolls on over the pocket's rim (a concave
+/// round adding material, never built as the Roll-over's trimmed cliff overflow), with a
+/// largest size that builds under the walls' height; the body is left as it was.
+#[test]
+fn a_pocket_floor_round_past_its_walls_keeps_its_refusal() {
+    rig_fixes();
+    let b = rounded_pocket();
+    let before = b.volume(1e-12).unwrap();
+    let floor = pocket_floor(&b);
+    let got = blend(&b, Blend::Round, &floor, &[7.0], &[], Corners::Filled);
+    match got {
+        Err(Error::TooLarge {
+            size,
+            kind: FitKind::Radius,
+            why: Some(solidcore_ops::RoomReason::RailLeavesFace),
+            ..
+        }) => assert!(size > 5.9 && size < 6.0, "{size}"),
+        other => panic!("not the too-large refusal: {other:?}"),
+    }
+    assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
+}
+
+/// In the Roll-over's second pass only the corner at V (where the concave chain meets the
+/// cliff) looks for its rail ends across the cliff's tangent seam: on the stair twin's chain
+/// (E1 rounded first), the corner at V = (0, 0, -1) carries the Roll-over's search and the
+/// chain's other end, on the side face x = 10, does not (its rail ends are found as in any
+/// pass, a rail end just past its side edge's end kept where the solve put it).
+#[test]
+fn only_the_corner_at_v_looks_across_the_cliffs_seam() {
+    use solidcore::blend::blend_corner::rollover::concave_chain_ends;
+    use solidcore::blend::fillet_executive::session::FilletSession;
+    rig_fixes();
+    let b = stair_twin();
+    let e1 = nearest_edge(&b, [0.0, -5.0, 0.0]);
+    blend(&b, Blend::Round, &[e1], &[1.0], &[], Corners::Filled).unwrap();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let picks = [
+        nearest_edge(&b, [5.0, 0.0, 0.0]),
+        nearest_edge(&b, [1.0 - s, 0.0, -1.0 + s]),
+    ];
+    let (mut k, mut brep) = kernel_copy(&b);
+    let chain: Vec<EdgeId> = picks.iter().map(|&i| brep.edge_list()[i]).collect();
+    let ends = concave_chain_ends(&k, &mut brep, &chain).unwrap();
+    assert_eq!(ends.len(), 1);
+    let mut session = FilletSession::new(&mut k, &mut brep).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &chain, 1.0, 1, 1, 1.0)
+        .unwrap();
+    session.set_roll_over_pass(ends.clone());
+    session.create_corners(&k, None).unwrap();
+    let (mut at_v, mut far_end) = (0, 0);
+    for id in session.fillet_corners().unwrap() {
+        let corner = session.corner(id).unwrap();
+        let vertex = corner.filleted_vertex().unwrap();
+        assert_eq!(corner.roll_over, vertex == ends[0], "{vertex:?}");
+        at_v += usize::from(vertex == ends[0]);
+        far_end += usize::from(!corner.roll_over);
+    }
+    assert_eq!(at_v, 1, "a corner at V");
+    assert!(far_end >= 1, "a corner away from V");
+}
+
+/// The stair twin's concave chain (E1 rounded at 1 first) rounded at 12, past the riser's
+/// height 10: E2's remainder overflows the riser's top rim, away from V, so even as the
+/// Roll-over's second pass (tried on the first call's refusal) that concave overflow is
+/// refused (only a blend whose edge ends at V overflows as the event's). The call keeps the
+/// first call's refusal, too large with its rail leaving the face, at a size under the riser's
+/// height, and leaves the body as it was.
+#[test]
+fn an_oversized_ledge_chain_keeps_its_refusal() {
+    rig_fixes();
+    let b = stair_twin();
+    let e1 = nearest_edge(&b, [0.0, -5.0, 0.0]);
+    blend(&b, Blend::Round, &[e1], &[1.0], &[], Corners::Filled).unwrap();
+    let before = b.volume(1e-12).unwrap();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let chain = [
+        nearest_edge(&b, [5.0, 0.0, 0.0]),
+        nearest_edge(&b, [1.0 - s, 0.0, -1.0 + s]),
+    ];
+    let got = blend(&b, Blend::Round, &chain, &[12.0], &[], Corners::Filled);
+    match got {
+        Err(Error::TooLarge {
+            size,
+            kind: FitKind::Radius,
+            why: Some(solidcore_ops::RoomReason::RailLeavesFace),
+            ..
+        }) => assert!(size > 0.0 && size < 10.0, "{size}"),
+        other => panic!("not the too-large refusal: {other:?}"),
+    }
+    assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
+}
+
+/// The stair twin with its riser notched beside the wall (the box [0, 0.95] x [0, 10] x
+/// [0.9, 10] taken away): E1 rounded at 1 first, then its concave chain at 1. E2's remainder
+/// (x >= 1) keeps its rail on the riser's front (z = 1 under the height 10), but E1's end arc
+/// at V rolls its rail (the circle of radius 2 about E1's axis on y = 0) above the notch's
+/// floor z = 0.9 for 0.38 < x < 0.95: it leaves the riser's front across the notch's edges,
+/// away from the cliff's rim at V. That concave overflow is not the Roll-over's, so the second
+/// pass refuses it and the call keeps the first call's refusal (too large, its rail leaving
+/// the face), the body as it was.
+#[test]
+fn a_ledge_chain_whose_arc_overflows_away_from_the_cliff_keeps_its_refusal() {
+    rig_fixes();
+    let notch = make_box([0.0, 0.0, 0.9], [0.95, 10.0, 9.1]).unwrap();
+    let b =
+        solidcore_ops::boolean::boolean(stair_twin(), notch, solidcore_ops::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+    let e1 = nearest_edge(&b, [0.0, -5.0, 0.0]);
+    blend(&b, Blend::Round, &[e1], &[1.0], &[], Corners::Filled).unwrap();
+    let before = b.volume(1e-12).unwrap();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let chain = [
+        nearest_edge(&b, [5.0, 0.0, 0.0]),
+        nearest_edge(&b, [1.0 - s, 0.0, -1.0 + s]),
+    ];
+    let got = blend(&b, Blend::Round, &chain, &[1.0], &[], Corners::Filled);
+    match got {
+        Err(Error::TooLarge {
+            size,
+            kind: FitKind::Radius,
+            why: Some(solidcore_ops::RoomReason::RailLeavesFace),
+            ..
+        }) => assert!(size > 0.0 && size < 1.0, "{size}"),
+        other => panic!("not the too-large refusal: {other:?}"),
+    }
+    assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
+}
+
+/// The kernel's decision itself, in the Roll-over's second pass: the stair twin's chain
+/// overflows the riser's front only across the cliff's rim at V, so its concave overflow is
+/// the event's (the session builds); the notched twin's arc, though its edge ends at
+/// V, leaves the front across the notch's edges, away from the rim, so its overflow is refused
+/// as a `ConcaveOverflow`, as on main.
+#[test]
+fn only_an_overflow_across_the_cliffs_rim_at_v_is_the_roll_overs() {
+    use solidcore::blend::blend_corner::rollover::concave_chain_ends;
+    use solidcore::blend::fillet_executive::p3::NoRoomReason;
+    use solidcore::blend::fillet_executive::session::FilletSession;
+    rig_fixes();
+    let notched = {
+        let notch = make_box([0.0, 0.0, 0.9], [0.95, 10.0, 9.1]).unwrap();
+        solidcore_ops::boolean::boolean(stair_twin(), notch, solidcore_ops::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+    };
+    let mut reasons = Vec::new();
+    for b in [stair_twin(), notched] {
+        let e1 = nearest_edge(&b, [0.0, -5.0, 0.0]);
+        blend(&b, Blend::Round, &[e1], &[1.0], &[], Corners::Filled).unwrap();
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let picks = [
+            nearest_edge(&b, [5.0, 0.0, 0.0]),
+            nearest_edge(&b, [1.0 - s, 0.0, -1.0 + s]),
+        ];
+        let (mut k, mut brep) = kernel_copy(&b);
+        let chain: Vec<EdgeId> = picks.iter().map(|&i| brep.edge_list()[i]).collect();
+        let ends = concave_chain_ends(&k, &mut brep, &chain).unwrap();
+        assert_eq!(ends.len(), 1);
+        let mut session = FilletSession::new(&mut k, &mut brep).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &chain, 1.0, 1, 1, 1.0)
+            .unwrap();
+        session.set_roll_over_pass(ends);
+        let done = session.do_fillet(&mut k);
+        reasons.push((done.is_ok(), session.error_info().no_room_reason()));
+    }
+    assert_eq!(reasons[0], (true, None), "{reasons:?}");
+    assert_eq!(
+        reasons[1],
+        (false, Some(NoRoomReason::ConcaveOverflow)),
+        "{reasons:?}"
+    );
+}

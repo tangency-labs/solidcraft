@@ -26,6 +26,9 @@
 use std::collections::{HashMap, HashSet};
 
 use solidcore::blend::band_room::law_fits_band;
+use solidcore::blend::blend_corner::rollover::{
+    concave_chain, concave_chain_ends, is_concave_chain, RollOver,
+};
 use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::faces_along;
@@ -259,6 +262,8 @@ struct Stopped {
     overflow: Option<Vec<EdgeId>>,
     /// The edges of each two rounds mitred at a face's concave corner, two by two.
     mitred: Vec<EdgeId>,
+    /// The Roll-over corners the corners step refused, with [`RollOverStep::Classify`].
+    roll_overs: Vec<RollOver>,
 }
 
 /// The kernel's reason for a blend too large, as ops names it; `None` for the reasons it does
@@ -513,7 +518,9 @@ pub fn session_refusal(
 
 /// A failure of the session as the operation's: the kernel's refusal of an edge, or of a
 /// corner's setback as too long, by its entity's index ([`refused`]), else
-/// [`session_refusal`]'s, the kernel's failures mapped by [`status`].
+/// [`session_refusal`]'s; a failure the kernel states in words ([`failure`]: its typed
+/// `BlendFailure`) keeps its class and statement, and only the kernel's other failures are
+/// mapped by [`status`].
 fn blend_failure(
     s: &FilletSession<'_>,
     e: SolidError,
@@ -526,7 +533,7 @@ fn blend_failure(
     }
     match session_refusal(s, e, call) {
         Ok(r) => (r.refusal.into(), r.edge),
-        Err(e) => (status(e), None),
+        Err(e) => (failure(&e).unwrap_or_else(|| status(e)), None),
     }
 }
 
@@ -794,6 +801,21 @@ struct Pass<'a> {
     turn: Turn,
     /// How chamfers close their corners, set before the corners are made.
     chamfer_corner: ChamferCorner,
+    /// The blend corner's Roll-over step of the pass (#10876).
+    roll_over: RollOverStep<'a>,
+}
+
+/// A pass's part in the blend corner's Roll-over (#10876,
+/// `solidcore::blend::blend_corner::rollover`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RollOverStep<'a> {
+    /// None.
+    No,
+    /// Note the Roll-over corners the corners step refuses ([`Stopped::roll_overs`]).
+    Classify,
+    /// The Roll-over's second pass: the concave chain, with its vertices V where it meets the
+    /// cliff ([`concave_chain_ends`], never empty).
+    Concave(&'a [VertexId]),
 }
 
 /// What one pass made: the faces new after it, and each set-back corner's patch.
@@ -834,9 +856,15 @@ fn pass(
         for &f in p.earlier {
             s.add_earlier_pass_face(f);
         }
+        s.set_roll_over_classify(p.roll_over == RollOverStep::Classify);
+        s.set_roll_over_pass(match p.roll_over {
+            RollOverStep::Concave(ends) => ends.to_vec(),
+            RollOverStep::No | RollOverStep::Classify => Vec::new(),
+        });
         let mut step = prepared
             .and_then(|()| s.create_corners(k, None))
             .map(|()| Ok(Vec::new()));
+        stopped.roll_overs = s.roll_overs().to_vec();
         // a vertex the corners step made no corner for, noted before a later step notes its
         // own failure over it
         let corner =
@@ -973,6 +1001,7 @@ fn together<'a>(
         overflow: None,
         turn,
         chamfer_corner: ChamferCorner::Mitre,
+        roll_over: RollOverStep::No,
     }
 }
 
@@ -1058,6 +1087,7 @@ fn overflow_first(
             }),
             turn,
             chamfer_corner: ChamferCorner::Mitre,
+            roll_over: RollOverStep::No,
         };
         match pass(k, b, alone, &mut stopped)? {
             Err(Refused::Error(why)) if stopped.overflow.is_none() => return Ok(Err(why)),
@@ -1144,6 +1174,106 @@ fn overflow_first(
         // the second pass meets the first rounds as one blend: it is handed their faces
         let second = together(&rest_edges, section(&rest_sizes), turn, &first);
         if let Err(e) = pass_or_refuse(k, &mut fresh, second)? {
+            return Ok(Err(e));
+        }
+    }
+    untagged(&mut fresh)?;
+    Ok(Ok(fresh))
+}
+
+/// The blend corner's Roll-over (#10876, `solidcore::blend::blend_corner::rollover`), which the
+/// first call's corners step refused in `b` at the vertices of `roll_overs` (`edges` the asked
+/// edges, `sizes` theirs): on `fresh` (the untouched input, a copy in `b`'s order), every asked
+/// edge but the concave rounds' of the Roll-overs (B2) goes first, the asked edges tagged
+/// ([`Picked`]). What is left of each B2 is then rounded at its size together with the end
+/// arcs the first pass left on B2's end face ([`concave_chain`]), in a second pass that is the
+/// Roll-over's ([`RollOverStep::Concave`]) and is handed the faces the first made. An asked edge
+/// with nothing left is `dropped`. Every pass turns as `turn`. The result is `fresh`, untagged.
+#[allow(clippy::too_many_arguments)] // as overflow_first
+fn roll_over(
+    k: &mut Kernel,
+    b: &Brep,
+    mut fresh: Brep,
+    edges: &[EdgeId],
+    sizes: &[f64],
+    section: fn(&[f64]) -> Section<'_>,
+    turn: Turn,
+    roll_overs: &[RollOver],
+    dropped: &mut [bool],
+) -> solidcore::Result<Result<Brep>> {
+    let order = b.edge_list().to_vec();
+    let fresh_list = fresh.edge_list().to_vec();
+    let mut again = Vec::new();
+    for e in edges {
+        let at = order.iter().position(|x| x == e);
+        match at.and_then(|i| fresh_list.get(i)) {
+            Some(&to) => again.push(to),
+            None => return Ok(Err(Error::Exception)),
+        }
+    }
+    let (mut lead, mut lead_sizes, mut rest) = (Vec::new(), Vec::new(), Vec::new());
+    for (i, ((&e, &to), &size)) in edges.iter().zip(&again).zip(sizes).enumerate() {
+        fresh.add_attribute(
+            EntityRef::Edge(to),
+            Attribute::application(PICKED_ID, Behavior::Copy, Picked(i)),
+        )?;
+        if roll_overs.iter().any(|r| r.concave == e) {
+            rest.push(i);
+        } else {
+            lead.push(to);
+            lead_sizes.push(size);
+        }
+    }
+    let first = match pass_or_refuse(
+        k,
+        &mut fresh,
+        together(&lead, section(&lead_sizes), turn, &[]),
+    )? {
+        Ok(made) => made.faces,
+        Err(e) => return Ok(Err(e)),
+    };
+    let (mut remnants, mut size_of) = (Vec::new(), Vec::new());
+    for i in rest {
+        let mut left = false;
+        for e in fresh.edge_list().to_vec() {
+            if picked_on(&fresh, e).is_some_and(|(_, p)| p == i) {
+                remnants.push(e);
+                size_of.push(sizes.get(i).copied().unwrap_or(0.0));
+                left = true;
+            }
+        }
+        if !left {
+            if let Some(flag) = dropped.get_mut(i) {
+                *flag = true;
+            }
+        }
+    }
+    if !remnants.is_empty() {
+        let chain = concave_chain(k, &mut fresh, &remnants, &first)?;
+        // the chain's V, where it meets the cliff: none, and it is not the Roll-over's
+        let ends = concave_chain_ends(k, &mut fresh, &chain)?;
+        if ends.is_empty() {
+            return Ok(Err(Error::Unsupported(
+                "a roll-over's concave chain that does not meet the cliff",
+            )));
+        }
+        // an end arc takes the size of the remnant it continues: the chain's own (one size
+        // when the Roll-overs' concave rounds share it, which the second pass needs to be one
+        // blend)
+        let Some(&size) = size_of.first() else {
+            return Ok(Err(Error::Exception));
+        };
+        if size_of.iter().any(|s| s.to_bits() != size.to_bits()) {
+            return Ok(Err(Error::Unsupported(
+                "a roll-over's concave rounds of different sizes",
+            )));
+        }
+        let chain_sizes = vec![size; chain.len()];
+        let p = Pass {
+            roll_over: RollOverStep::Concave(&ends),
+            ..together(&chain, section(&chain_sizes), turn, &first)
+        };
+        if let Err(e) = pass_or_refuse(k, &mut fresh, p)? {
             return Ok(Err(e));
         }
     }
@@ -1380,6 +1510,7 @@ fn blend_on_body(
                 overflow: None,
                 turn,
                 chamfer_corner: options.chamfer_corner,
+                roll_over: RollOverStep::No,
             };
             if let Err(e) = pass_or_refuse(k, b, p)? {
                 return Ok(Err(e));
@@ -1399,6 +1530,17 @@ fn blend_on_body(
     } else {
         None
     };
+    // the blend corner's Roll-over (#10876): its corners are noted where the corners step
+    // refuses them; a round asked of the event's concave chain on its own (B1 rounded by an
+    // earlier feature: [`is_concave_chain`], the ledge's edges once B1 is rounded, never a
+    // pocket floor's) is the event's second pass where the first call refuses it
+    let step = if may_go_first && kind == Blend::Round && turn == Turn::Mitre {
+        RollOverStep::Classify
+    } else {
+        RollOverStep::No
+    };
+    // the input's edge order, for the asked edges' places in a copy of it
+    let input_order = b.edge_list().to_vec();
     let mut stopped = Stopped::default();
     let p = Pass {
         edges: &picked,
@@ -1412,8 +1554,102 @@ fn blend_on_body(
         }),
         turn,
         chamfer_corner: ChamferCorner::Mitre,
+        roll_over: step,
     };
     let made = pass(k, b, p, &mut stopped)?;
+    // the blend corner's Roll-over (#10876): the corners step refused it; it is built in two
+    // passes on a copy of the untouched input; where they do not build or do not finish,
+    // everything below runs as before (`b`, `made`, `stopped` and `fresh` as the first call
+    // left them)
+    if !stopped.roll_overs.is_empty() && made.is_err() {
+        if let Some(input) = fresh.as_ref() {
+            // the faces the sessions log, put back where the passes are given up
+            let log = k.blend_face_log.clone();
+            let rolled_input = brep_copy(k, input)?;
+            let mut rolled_dropped = dropped.clone();
+            let rolled = roll_over(
+                k,
+                b,
+                rolled_input,
+                &picked,
+                each,
+                section,
+                turn,
+                &stopped.roll_overs,
+                &mut rolled_dropped,
+            )
+            .and_then(|r| match r {
+                Ok(rolled) => finish(k, rolled, expect),
+                Err(e) => Ok(Err(e)),
+            });
+            match rolled {
+                Ok(Ok(rolled)) => {
+                    *b = rolled;
+                    return Ok(Ok(Blended {
+                        dropped: rolled_dropped,
+                        holes: Vec::new(),
+                        made: Vec::new(),
+                    }));
+                }
+                Err(e) if e.is_cancelled() => return Err(e),
+                Ok(Err(_)) | Err(_) => k.blend_face_log = log,
+            }
+        }
+    }
+    // a round asked of the event's concave chain on its own that the first call refuses (no
+    // overflow left to go first): built as the event's second pass on a copy of the
+    // untouched input (the asked edges at their places in the copy's order); where it is
+    // not the chain, does not build or does not finish, the first call's refusal stands
+    if step == RollOverStep::Classify
+        && stopped.roll_overs.is_empty()
+        && stopped.overflow.is_none()
+        && made.is_err()
+    {
+        if let Some(input) = fresh.as_ref() {
+            // the faces the sessions log, put back where the copy is given up (its faces
+            // are not the result's)
+            let log = k.blend_face_log.clone();
+            let mut copy = brep_copy(k, input)?;
+            let copy_list = copy.edge_list().to_vec();
+            let mapped: Option<Vec<EdgeId>> = picked
+                .iter()
+                .map(|e| {
+                    input_order
+                        .iter()
+                        .position(|x| x == e)
+                        .and_then(|i| copy_list.get(i).copied())
+                })
+                .collect();
+            let ends = match &mapped {
+                Some(mapped) if is_concave_chain(k, &mut copy, mapped)? => {
+                    concave_chain_ends(k, &mut copy, mapped)?
+                }
+                _ => Vec::new(),
+            };
+            if let (Some(mapped), false) = (mapped, ends.is_empty()) {
+                let p = Pass {
+                    roll_over: RollOverStep::Concave(&ends),
+                    ..together(&mapped, section(each), turn, &[])
+                };
+                match pass_or_refuse(k, &mut copy, p).and_then(|r| match r {
+                    Ok(_) => finish(k, copy, expect),
+                    Err(e) => Ok(Err(e)),
+                }) {
+                    Ok(Ok(rolled)) => {
+                        *b = rolled;
+                        return Ok(Ok(Blended {
+                            dropped,
+                            holes: Vec::new(),
+                            made: Vec::new(),
+                        }));
+                    }
+                    Err(e) if e.is_cancelled() => return Err(e),
+                    Ok(Err(_)) | Err(_) => {}
+                }
+            }
+            k.blend_face_log = log;
+        }
+    }
     if stopped.overflow.is_some() {
         let Some(fresh) = fresh else {
             return Ok(Err(Error::Exception));
@@ -1948,6 +2184,7 @@ fn chamfer_sides_impl(
             // a swept turn is a round's: these are chamfers
             turn: Turn::Mitre,
             chamfer_corner: ChamferCorner::Mitre,
+            roll_over: RollOverStep::No,
         };
         if let Err(e) = pass_or_refuse(k, b, p)? {
             return Ok(Err(e));
@@ -2160,6 +2397,7 @@ fn fillet_variable_impl(
             // one edge: no two rounds meet to turn
             turn: Turn::Mitre,
             chamfer_corner: ChamferCorner::Mitre,
+            roll_over: RollOverStep::No,
         };
         if let Err(e) = pass_or_refuse(k, b, p)? {
             return Ok(Err(e));

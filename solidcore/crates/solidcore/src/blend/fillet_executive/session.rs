@@ -333,6 +333,15 @@ struct SessionObjects<'target> {
     /// The fork's `m_bSweptTurns` (`SetSweptTurns`; WR-697): a blend corner's Turn is
     /// Swept, not Mitred.
     swept_turns: bool,
+    /// Not upstream (#10876): note the blend corner's Roll-over corners the corners step
+    /// refuses ([`FilletSession::set_roll_over_classify`]).
+    roll_over_classify: bool,
+    /// Not upstream (#10876): the Roll-over corners noted.
+    roll_overs: Vec<crate::blend::blend_corner::rollover::RollOver>,
+    /// Not upstream (#10876): the session is the Roll-over's second pass
+    /// ([`FilletSession::set_roll_over_pass`]), and its vertices V, the corners where the
+    /// concave chain meets the cliff (empty: not the second pass).
+    roll_over_ends: Vec<VertexId>,
     /// The fork's `m_vSetBackVertices` (`AddSetBackVertex`; WR-697, 79d4763): the
     /// vertices the caller sets back, where no Ball is built.
     set_back_vertices: Vec<VertexId>,
@@ -1594,6 +1603,9 @@ impl<'target> FilletSession<'target> {
                 self_intersection_handler: None,
                 curve_blend_self_intersection_handler: None,
                 swept_turns: false,
+                roll_over_classify: false,
+                roll_overs: Vec::new(),
+                roll_over_ends: Vec::new(),
                 set_back_vertices: Vec::new(),
                 set_back_fills: Vec::new(),
                 radius_corner_surfaces: Vec::new(),
@@ -2120,9 +2132,14 @@ impl<'target> FilletSession<'target> {
             set_back_vertices,
             chamfer_corner,
             set_back_fills,
+            roll_over_classify,
+            roll_overs,
+            roll_over_ends,
             ..
         } = &mut self.objects;
         let swept_turns = *swept_turns;
+        let roll_over_classify = *roll_over_classify;
+        let roll_over_ends = &*roll_over_ends;
         let chamfer_corner = *chamfer_corner;
         let set_back_vertices = &*set_back_vertices;
         let set_back_fills = &*set_back_fills;
@@ -2157,7 +2174,7 @@ impl<'target> FilletSession<'target> {
                         _ => None,
                     })
                     .collect();
-                let made = FilletCorner::create_with_solver_lookup(
+                let made = FilletCorner::create_noting_roll_overs(
                     k,
                     target,
                     vertex,
@@ -2177,6 +2194,7 @@ impl<'target> FilletSession<'target> {
                             .map(SolverObject::base)
                             .ok_or_else(|| invalid("corner solver is not live"))
                     },
+                    roll_over_classify.then_some(&mut *roll_overs),
                 )?;
                 let Some(mut corner) = made else {
                     // The vertex's point feeds the opt-in vertex error note, as the
@@ -2184,6 +2202,10 @@ impl<'target> FilletSession<'target> {
                     let location = crate::topology::vertex::point(target, vertex).ok();
                     return Ok(CornerCreation::Unsupported { location });
                 };
+                // the Roll-over's second pass (#10876): its corner at V, where the concave
+                // chain meets the cliff, looks for rail ends across the cliff's tangent seam;
+                // its other corners are made as in any pass
+                corner.roll_over = roll_over_ends.contains(&vertex);
                 // Not the fork's (WR-716, #2345): chamfers meeting at a vertex where every
                 // edge is chamfered are the blend corner's chamfer event, closed by their
                 // planes, of the session's corner type; refused where that type does not
@@ -2762,6 +2784,36 @@ impl<'target> FilletSession<'target> {
     /// [`Self::do_fillet`] (the corners are made there).
     pub fn set_swept_turns(&mut self, swept: bool) {
         self.objects.swept_turns = swept;
+    }
+
+    /// Not upstream (#10876): note the blend corner's Roll-over corners
+    /// ([`crate::blend::blend_corner::rollover::classify_roll_over`]) that the corners step
+    /// refuses as a convex and a concave round meeting at four edges; read them with
+    /// [`Self::roll_overs`]. The refusal is unchanged: the caller builds the event in two
+    /// passes. Off by default. Set it before [`Self::create_corners`].
+    pub fn set_roll_over_classify(&mut self, classify: bool) {
+        self.objects.roll_over_classify = classify;
+    }
+
+    /// Not upstream (#10876): the Roll-over corners noted by the corners step
+    /// ([`Self::set_roll_over_classify`]), in vertex order.
+    #[must_use]
+    pub fn roll_overs(&self) -> &[crate::blend::blend_corner::rollover::RollOver] {
+        &self.objects.roll_overs
+    }
+
+    /// Not upstream (#10876): the session is the blend corner's Roll-over's second pass, the
+    /// concave chain (B2's remainder with B1's end arc on its end face), handed the first
+    /// pass's faces, with `ends` its vertices V where the chain meets the cliff
+    /// ([`crate::blend::blend_corner::rollover::concave_chain_ends`]). Its blends' concave
+    /// overflow across the cliff is accepted, built as a cliff overflow and trimmed at the
+    /// creases (with `fixes.fillet_cliff_overflow` and
+    /// `fixes.fillet_refuse_rails_leaving_faces`), and its corners at the vertices of `ends`
+    /// (only those) look for a rail's end across the cliff's tangent seam. Empty `ends`: not
+    /// the second pass (the default). Set it before [`Self::create_corners`].
+    pub fn set_roll_over_pass(&mut self, ends: Vec<VertexId>) {
+        self.executive.set_roll_over_pass(!ends.is_empty());
+        self.objects.roll_over_ends = ends;
     }
 
     /// How chamfers meeting at a vertex where every edge is chamfered close the corner,
@@ -5461,6 +5513,43 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             FilletBody::Target,
             EntityRef::Edge(edge),
         )))
+    }
+    fn geometry_overflows_at_roll_over(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+        left_across: &[Option<EdgeId>],
+    ) -> Result<bool> {
+        if self.roll_over_ends.is_empty() || left_across.is_empty() {
+            return Ok(false);
+        }
+        let FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge)) =
+            self.geometry_edge(solver)?
+        else {
+            return Err(invalid("solver edge is not a target edge"));
+        };
+        let ends = [
+            crate::topology::edge::start_vertex(self.target, edge)?,
+            crate::topology::edge::end_vertex(self.target, edge)?,
+        ];
+        let at: Vec<VertexId> = ends
+            .iter()
+            .flatten()
+            .copied()
+            .filter(|v| self.roll_over_ends.contains(v))
+            .collect();
+        let mut rim = Vec::new();
+        for v in at {
+            rim.extend(crate::blend::blend_corner::rollover::cliff_rim(
+                k,
+                self.target,
+                v,
+                edge,
+            )?);
+        }
+        Ok(left_across
+            .iter()
+            .all(|side| side.is_some_and(|e| rim.contains(&e))))
     }
     fn geometry_mitred_corner_edges(
         &self,

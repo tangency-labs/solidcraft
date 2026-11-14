@@ -2598,6 +2598,24 @@ impl FilletBrep {
             }
             self.fillet_vertexuse_mut(vu1)?.set_tsect_pnt(&tsect1);
 
+            // Not upstream (#10876): in the Roll-over's second pass (its corner at V), a
+            // rail's end found on a straight side edge's line continued past its far end (the
+            // end away from the corner's vertex) is not on the side edge: it is looked for
+            // across the cliff's tangent seam there (below). One found behind the corner's
+            // vertex stays as any pass takes it.
+            if found && corners.corner(corner)?.roll_over {
+                let slack = EFF_ZERO * (1.0 + ivl.length());
+                let far_is_max = edge::start_vertex(target, side_edge)? == cp_vertex;
+                let past_far = if far_is_max {
+                    edgeuse_parameter > ivl.max() + slack
+                } else {
+                    edgeuse_parameter < ivl.min() - slack
+                };
+                if past_far {
+                    found = false;
+                }
+            }
+
             // SolidCraft change (the fork's 63c7962): a side edge
             // split only by a seam ending on it (a cylinder's seam on its rim) continues
             // across that vertex: the rail that runs past the edge's far end ends on the next
@@ -2612,12 +2630,36 @@ impl FilletBrep {
                     None
                 };
                 let tol_deg = crate::math::rad_to_deg(corners.corner(corner)?.tangency_tol_radians);
-                let next = match far {
+                let mut next = match far {
                     Some(far) => crate::blend::blend_corner::end::side_edgeuse_across_seam_vertex(
                         k, target, side_eu1, far, tol_deg,
                     )?,
                     None => None,
                 };
+                // Not upstream (#10876): the Roll-over's concave chain ends on the cliff,
+                // whose faces run on tangentially across a seam that meets the side edge's
+                // far end; the rail that runs past that end ends on the next edge, between
+                // the face beyond the seam and the same face of the rail (the edge the
+                // rolled-over rail's search takes, `side_edgeuse_across_rolled_edge`), its
+                // use on the face that corresponds to the side edge use's
+                if next.is_none() && corners.corner(corner)?.roll_over {
+                    let tol_rad = corners.corner(corner)?.tangency_tol_radians;
+                    let beyond = match far {
+                        Some(far) => {
+                            crate::blend::blend_corner::end::side_edgeuse_across_rolled_edge(
+                                k, target, side_eu1, far, None, tol_rad,
+                            )?
+                        }
+                        None => None,
+                    };
+                    if let Some(b) = beyond {
+                        next = if eu1::face(target, b)? == eu1::face(target, side_eu1)? {
+                            Some(b)
+                        } else {
+                            eu1::radial(target, b)?
+                        };
+                    }
+                }
                 if let (Some(next), Some(far)) = (next, far) {
                     if depth >= crate::blend::blend_corner::end::SIDE_EDGE_CHAIN_STEPS {
                         return Err(SolidError::blend_failed(
