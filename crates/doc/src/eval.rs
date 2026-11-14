@@ -6987,6 +6987,9 @@ fn feature_tools_with_constructor(
                 Some(p) => height_at(&tst, object_face(&tst, from_name, p.0, Some(n)), &ss.plane, centre, p.0),
                 None => 0.0,
             };
+            // Whether the extrusion runs toward the To object: false when a To offset carries the
+            // end back across the start, so the tool never reaches the object's face.
+            let mut toward_to = true;
             let d = match extent.to {
                 Some(p) => {
                     let off = match &extent.to_offset {
@@ -7000,6 +7003,7 @@ fn feature_tools_with_constructor(
                     if (to - start).abs() < 1e-9 {
                         return Err(DocError::Invalid("the To object is where the extrude starts".into()));
                     }
+                    toward_to = (h - start) * (to - start) > 0.0;
                     to - start
                 }
                 None if extent.through_all => {
@@ -7085,8 +7089,10 @@ fn feature_tools_with_constructor(
             // A negative distance flips the side.
             let (mut lo, mut hi) = if a <= b { (a, b) } else { (b, a) };
             // To a curved (or slanted) face: run right through the target body, then keep what
-            // lies before its surface (the tool less the body, the piece at the start).
-            let curved = curved_face(&tst, to_face, Some(n));
+            // lies before its surface (the tool less the body, the piece at the start). An end
+            // the offset carries back across the start, away from that face, never meets it: it
+            // ends at its level, as for a plane, instead of running out through the whole body.
+            let curved = curved_face(&tst, to_face, Some(n)).filter(|_| toward_to);
             // The tool is cut back to that surface below, which removes the part a To offset adds
             // past it: the offset would change nothing, so say so instead of cutting nothing (#12617).
             if curved.is_some()

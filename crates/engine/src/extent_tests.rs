@@ -267,6 +267,32 @@ fn a_to_offset_past_a_curved_face_is_refused_not_ignored() {
     }
 }
 
+/// A To offset that carries the end back across the start, away from a curved To face, ends at
+/// that level as for a plane: the extrusion never meets the face, so it is not run through the
+/// part and trimmed back to it. Here the counterbore's ceiling, extruded down to a point 1 mm up
+/// the bore with an offset of -3, fills the counterbore from 1 mm to 3 mm. It used to keep the
+/// whole run-through tool, a post far out of the plate's bottom, and SMLib refused that join on
+/// an imported plate.
+#[test]
+fn a_to_offset_back_across_the_start_from_a_curved_face_ends_at_its_level() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-20, -20, 0], "length": 40, "width": 40, "height": 6, "body_name": "Plate"}));
+    for (name, radius, depth) in [("Counterbore", 8.0, 3.0), ("Bore", 3.2, 6.0)] {
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": name}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": radius}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": name, "distance": depth, "operation": "cut"}));
+    }
+    let before = body(&mut s, "Plate")["volume_mm3"].as_f64().unwrap();
+    let wall = [3.2 * 0.8_f64.cos(), 3.2 * 0.8_f64.sin(), 4.0];
+    run(&mut s, "solid.extrude", json!({"face": [5, 0, 3], "to": wall, "to_offset": -3, "operation": "join"}));
+    let b = body(&mut s, "Plate");
+    assert!(b["bbox"]["min"][2].as_f64().unwrap().abs() < 1e-6, "nothing below the plate: {b}");
+    let added = b["volume_mm3"].as_f64().unwrap() - before;
+    let expected = PI * (8.0 * 8.0 - 3.2 * 3.2) * 2.0;
+    assert!((added - expected).abs() / expected < 1e-3, "added {added}, expected {expected}");
+}
+
 /// #13188: a stored taper of 0 is a straight extrusion, also for a profile with a hole.
 #[test]
 fn extrude_with_a_taper_of_zero_on_a_profile_with_a_hole_is_straight() {
