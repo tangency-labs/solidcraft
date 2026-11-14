@@ -338,18 +338,19 @@ fn cubics(pieces: &[[[f64; 2]; 4]]) -> Vec<Seg2> {
     pieces.iter().map(|[a, b, c, d]| Seg2::Cubic { p0: v(*a), p1: v(*b), p2: v(*c), p3: v(*d) }).collect()
 }
 
-/// Cubic Béziers as a rail: 200 points per piece.
+/// Cubic Béziers joined end to end as a rail: the B-spline they make, as solidcore's tessellation
+/// samples a curve, every chord within a thousandth of a millimetre of it.
 fn cubic_rail(pieces: &[[[f64; 3]; 4]]) -> Vec<Vec3> {
-    let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
-    let mut out = pieces.first().map(|p| vec![v(p[0])]).unwrap_or_default();
-    for [a, b, c, d] in pieces {
-        for i in 1..=200 {
-            let t = f64::from(i) / 200.0;
-            let s = 1.0 - t;
-            out.push(v(*a) * (s * s * s) + v(*b) * (3.0 * s * s * t) + v(*c) * (3.0 * s * t * t) + v(*d) * (t * t * t));
-        }
+    let mut points: Vec<[f64; 3]> = pieces.first().map(|p| vec![p[0]]).unwrap_or_default();
+    let mut knots = vec![0.0; 4];
+    for (i, p) in pieces.iter().enumerate() {
+        points.extend_from_slice(&p[1..]);
+        knots.extend([(i + 1) as f64; 3]);
     }
-    out
+    knots.push(pieces.len() as f64);
+    let curve = solidcore_record::brep::Curve::Spline { knots, points };
+    let tolerance = solidcore_tess::MeshTolerance::chord(1e-3);
+    solidcore_tess::curve_points(&curve, [0.0, pieces.len() as f64], tolerance).unwrap().into_iter().map(|[x, y, z]| Vec3::new(x, y, z)).collect()
 }
 
 /// A 10 m hull side (#16754): a keel and a sheer as sections, the stem and the transom as rails.
