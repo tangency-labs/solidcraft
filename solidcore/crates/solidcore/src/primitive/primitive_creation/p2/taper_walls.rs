@@ -2072,6 +2072,46 @@ mod tests {
         assert_eq!(crossing(&a, &c, 0.0, Vec3::Z, tip), None);
     }
 
+    /// Two large circles touching inside each other, radii 1e8 and 1e8 - 1 with centres 1
+    /// apart: `ra^2 - rb^2` rounds by 1, which put the touching point half a unit off both.
+    #[test]
+    fn two_large_circles_touching_inside_touch_where_they_do() {
+        let circle = |x: f64, r: f64| Wall {
+            arc: true,
+            center: Point3::new(x, 0.0, 0.0),
+            axis: Vec3::Z,
+            radius: r,
+            ..Wall::default()
+        };
+        let tip = Point3::new(1e8, 0.0, 0.0);
+        let x = crossing(&circle(0.0, 1e8), &circle(1.0, 99_999_999.0), 0.0, Vec3::Z, tip);
+        assert!(x.is_some_and(|x| x.distance(tip) < 1e-6), "{x:?}");
+    }
+
+    /// A line starting 1e8 from a circle of radius 1: `(d.w)^2` and `w.w` are 1e16 and round
+    /// by units, so the discriminant said neither that the line y = 2 misses the circle (it
+    /// touched at (0, 2), a radius off) nor where y = 0.5 crosses it (at (0, 0.5), half a
+    /// radius off).
+    #[test]
+    fn a_line_far_from_its_start_meets_a_circle_where_it_does() {
+        let circle = Wall {
+            arc: true,
+            axis: Vec3::Z,
+            radius: 1.0,
+            ..Wall::default()
+        };
+        let line = |y: f64| Wall {
+            start: Point3::new(1e8, y, 0.0),
+            dir: Vec3::X,
+            ..Wall::default()
+        };
+        assert_eq!(crossing(&line(2.0), &circle, 0.0, Vec3::Z, Point3::ZERO), None);
+        let near = Point3::new(1.0, 0.5, 0.0);
+        let x = crossing(&line(0.5), &circle, 0.0, Vec3::Z, near);
+        let want = Point3::new(0.75_f64.sqrt(), 0.5, 0.0);
+        assert!(x.is_some_and(|x| x.distance(want) < 1e-9), "{x:?}");
+    }
+
     /// A line touching a circle, as at the issue's lower horn's tip (the line from (406, s.y)
     /// to the circle's point t = (c + r, 0), leaning 1.6e-8 off x = 406): the discriminant comes
     /// out -2.2e-11, and they meet at the line's foot from the centre, 5.3e-8 from t (the line
