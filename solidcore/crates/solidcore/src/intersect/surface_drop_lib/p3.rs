@@ -1951,7 +1951,6 @@ mod tests {
             3,
             false,
         ));
-        REDROPS_JUDGED.with(|n| n.set(0));
         let out = surface
             .drop_curve_base::<NoObject>(
                 &k,
@@ -1963,12 +1962,6 @@ mod tests {
                 None,
             )
             .unwrap();
-        // The span loop judges its redrops through `accepted_redrop` (the interior pole and
-        // domain exit rule): a loop that bypassed it would leave this at zero.
-        assert!(
-            REDROPS_JUDGED.with(std::cell::Cell::get) > 0,
-            "the span loop never judged a redrop"
-        );
         assert_eq!(out.uv_curves.len(), 2, "both seam sides remain available");
         for curve in &out.uv_curves {
             let (points, _) = curve.control_polygon().unwrap();
@@ -1979,6 +1972,64 @@ mod tests {
         }
         assert!(out.max_drop_to_surf <= 0.01, "{out:?}");
         assert!(out.max_approx_dev <= 0.01, "{out:?}");
+    }
+
+    #[test]
+    fn a_trace_that_winds_the_closed_tube_judges_its_redrops_through_the_rule() {
+        // The same triangular tube, and a source that runs along its faces from the seam all the
+        // way round (v = 0, 1, 2, 3), slowly at first: the split point is near the start, so the
+        // pending end is more than half the closed domain away from the new start, which is
+        // when the span loop drops it again. It must judge that redrop through
+        // `accepted_redrop` (the interior pole and domain exit rule); a loop that bypassed the
+        // rule would leave the count at zero.
+        let k = Kernel::default();
+        let ring = [(1.0, 0.0), (-0.5, 1.0), (-0.5, -1.0), (1.0, 0.0)];
+        let net = [0.0, 1.0]
+            .into_iter()
+            .map(|z| {
+                ring.iter()
+                    .map(|&(x, y)| CPoint::new(x, y, z, NOW))
+                    .collect()
+            })
+            .collect();
+        let nurb = crate::nurbs::srf_basic::Surface::new(
+            net,
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 2.0, 3.0, 3.0],
+        )
+        .unwrap();
+        let surface = Surface::from(BSplineSurface::from_nurb(nurb, false));
+        let source = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(
+                vec![
+                    CPoint::new(1.0, 0.0, 0.0, NOW),
+                    CPoint::new(-0.5, 1.0, 0.2, NOW),
+                    CPoint::new(-0.5, -1.0, 0.4, NOW),
+                    CPoint::new(1.0, 0.0, 0.6, NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 0.8, 0.9, 1.0, 1.0],
+            )
+            .unwrap(),
+            1,
+            false,
+        ));
+        REDROPS_JUDGED.with(|n| n.set(0));
+        let _ = surface.drop_curve_base::<NoObject>(
+            &k,
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 3.0),
+            &source,
+            &Extent1d::from_min_max(0.0, 1.0),
+            0.01,
+            true,
+            None,
+        );
+        assert!(
+            REDROPS_JUDGED.with(std::cell::Cell::get) > 0,
+            "the span loop never judged a redrop"
+        );
     }
 
     // ---- WR-100: the V degeneracy test ------------------------------------------------
