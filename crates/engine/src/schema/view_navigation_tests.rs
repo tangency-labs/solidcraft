@@ -867,4 +867,3 @@ fn render_panel_refusals_stay_the_handlers_below_strict() {
         assert!(e.to_string().contains("unknown key `off`"), "{id}: {e}");
     }
 }
-
