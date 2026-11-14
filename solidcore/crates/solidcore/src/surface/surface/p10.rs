@@ -540,6 +540,41 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             return Ok(false);
         }
 
+        // Not upstream. A ray has no roots behind its start: only the forward part of the
+        // interval is a candidate. Left whole, a leaf that a ray grazes (it crosses the
+        // convex patch twice) seeded its solve from the middle of the interval, which can
+        // settle on the root behind the start; that root is dropped below and the root
+        // ahead was never looked for, so the ray missed a wall it leaves by.
+        let mut clipped = false;
+        if self.ray_fire {
+            // (a band behind the start as wide as the one the interval is expanded by, so a
+            // root on the surface the ray starts on is found where it was, and dropped below
+            // where it was, rather than clamped to the end of the interval)
+            let behind =
+                EFF_ZERO * (1.0 + self.line_point.max_dimension()) + 2.0 * self.base.tolerance_3d;
+            // A ray that starts on the surface has its root at the start, which the
+            // classification of a point on a face leaves to the leaf solve as it was: the
+            // interval is kept whole there.
+            let on_surface = bound_ivl.min() < -behind && {
+                let natural = srf_eval.natural_uv_domain_with_nurb(k)?;
+                ignored(surface_local_point_solve::<O>(
+                    k,
+                    srf_eval,
+                    &natural,
+                    SolverOperation::Minimize,
+                    self.line_point,
+                    uv_domain.evaluate(0.5, 0.5),
+                ))?
+                .is_some_and(|(found, near)| {
+                    found && near.start.solution_value < self.base.tolerance_3d
+                })
+            };
+            if bound_ivl.min() < -behind && !on_surface {
+                bound_ivl = Extent1d::from_min_max(-behind, bound_ivl.max());
+                clipped = true;
+            }
+        }
+
         // no work - if given, m_cpLineInterval doesn't overlap sBoxIvl
         if let Some(line_ivl) = &self.line_interval {
             if line_ivl.are_disjoint(&bound_ivl, 0.0) {
@@ -717,7 +752,9 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         let natural = cache.surface().natural_uv_domain_with_nurb(k)?;
         for j in 0..2 {
             // Handle curve discontinuities
-            if t_conts.get(j).copied().is_some_and(at_most_c0) {
+            // (the clip's own end is no end of the line: a ray's root at its start is the
+            // leaf solve's, as before the clip)
+            if t_conts.get(j).copied().is_some_and(at_most_c0) && !(j == 0 && clipped) {
                 let t = if j == 1 {
                     leaf.interval.max()
                 } else {

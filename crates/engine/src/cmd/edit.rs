@@ -18,8 +18,8 @@ use crate::schema::edit::{
     TimelineUngroupParams, TimelineUngrouped,
 };
 use crate::schema::select::{
-    PartialPick, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem, SelectMode, SelectSetParams,
-    SelectSetResult, read_item,
+    PartialPick, SameLookParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem, SelectMode,
+    SelectSetParams, SelectSetResult, read_item,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
@@ -215,13 +215,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&SELECT_CLEAR_CONTRACT)
         .output(output_schema_for::<SelectClearResult>),
-    CommandSpec::new("select.same_look", "Select Same Look", select_same_look).icon("select").noundo().doc_only()
+    CommandSpec::new("select.same_look", "Select Same Look", crate::checked!("select.same_look", select_same_look))
+        .icon("select")
+        .noundo()
+        .doc_only()
+        .contract(&SAME_LOOK_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>)
         .params("body?: world body name, face?: face index; defaults to the current body/face selection → selects objects using the resolved appearance"),
 ];
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
 const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
+const SAME_LOOK_CONTRACT: TypedContract<SameLookParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<TimelineRenameParams> = TypedContract::new();
@@ -1623,13 +1629,7 @@ fn select_filter(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Request {
-        body: Option<String>,
-        face: Option<usize>,
-    }
-    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("select.same_look", e.to_string()))?;
+    let request: SameLookParams = serde_json::from_value(p.clone()).map_err(|e| bad("select.same_look", e.to_string()))?;
     let selected = s.selection.last();
     let name = request
         .body

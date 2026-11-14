@@ -1,8 +1,9 @@
-//! Booleans of planar regions (lines, circular arcs and free-form curves) and the extrusion of
-//! planar material from them, both on SMLib's 2D boolean: each operand a sheet of planar faces
-//! built from its loops' own curves, combined as regions of the plane, its faces read back. The
-//! result's boundaries are the operands' curves, cut at their crossings and never refitted.
-//! Also the test of whether a record surface is a wall swept along a direction.
+//! Booleans of planar regions (lines, circular arcs and free-form curves), solidcore's
+//! ([`solidcore_ops::prism`]), and the extrusion of planar material from them on SMLib's 2D
+//! boolean: each operand a sheet of planar faces built from its loops' own curves, combined as
+//! regions of the plane, its faces read back. The result's boundaries are the operands' curves,
+//! cut at their crossings and never refitted. Also the test of whether a record surface is a wall
+//! swept along a direction.
 
 use solidcore_record::{Plane, Region2, Seg2, Vec2};
 use solidcraft_geom::prelude::*;
@@ -18,25 +19,21 @@ pub const PLANAR_FIT_TOL: f64 = 1e-3;
 
 /// Boolean of planar regions bounded by straight lines, circular arcs and free-form segments,
 /// exact: every boundary of the result is a piece of a boundary of `a` or `b`, cut where it
-/// crosses the other (SMLib's 2D boolean). Disjoint results and retained islands are returned as
-/// separate regions. `tolerance` (mm, 1e-9 to 1) is how far apart a loop's segments may end and
-/// still close it.
+/// crosses the other. Disjoint results and retained islands are returned as separate regions, in
+/// a canonical order. `tolerance` (mm, 1e-9 to 1) is how far apart a loop's segments may end and
+/// still close it. solidcore's ([`solidcore_ops::prism::planar_regions_boolean`]).
 pub fn planar_regions_boolean(a: &[Region2], b: &[Region2], op: BoolOp, tolerance: f64) -> Result<Vec<Region2>> {
+    let op = match op {
+        BoolOp::Union => solidcore_ops::BooleanOp::Union,
+        BoolOp::Cut => solidcore_ops::BooleanOp::Subtract,
+        BoolOp::Intersect => solidcore_ops::BooleanOp::Intersect,
+    };
     crate::guard("planar region boolean", || {
-        if !tolerance.is_finite() || !(1e-9..=1.0).contains(&tolerance) {
-            return Err(KernelError::Invalid("planar boolean tolerance must be finite and between 1e-9 and 1 mm".into()));
-        }
-        check_regions(a.iter().chain(b), tolerance)?;
-        match (a.is_empty(), b.is_empty(), op) {
-            (true, _, BoolOp::Union) => return Ok(b.to_vec()),
-            (true, _, _) | (false, true, BoolOp::Intersect) => return Ok(Vec::new()),
-            (false, true, _) => return Ok(a.to_vec()),
-            _ => {}
-        }
-        let r = sheets::combine(&sheets::sheet(a, tolerance)?, &sheets::sheet(b, tolerance)?, op)?;
-        Ok(match r {
-            Some(sheet) => sheets::regions(&sheet, tolerance)?.regions,
-            None => Vec::new(),
+        solidcore_ops::prism::planar_regions_boolean(a, b, op, tolerance).map_err(|e| match e {
+            solidcore_ops::Error::Argument => KernelError::Invalid("planar boolean tolerance must be finite and between 1e-9 and 1 mm".into()),
+            solidcore_ops::Error::Profile(_) => KernelError::Invalid(format!("planar boolean: {e}")),
+            solidcore_ops::Error::Internal(m) => KernelError::Internal(format!("planar regions: {m}")),
+            e => KernelError::Failed(format!("planar regions: {e}")),
         })
     })
 }
@@ -200,7 +197,7 @@ mod sheets {
     }
 
     /// `a` and `b` combined by `op`; `None` when nothing is left.
-    pub(super) fn combine(a: &Brep, b: &Brep, op: BoolOp) -> Result<Option<Brep>> {
+    fn combine(a: &Brep, b: &Brep, op: BoolOp) -> Result<Option<Brep>> {
         let op = match op {
             BoolOp::Union => BooleanOp::Union,
             BoolOp::Cut => BooleanOp::Subtract,

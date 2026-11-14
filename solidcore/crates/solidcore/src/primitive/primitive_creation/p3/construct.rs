@@ -48,7 +48,6 @@ use crate::curve::curve::Curve;
 use crate::error::{ignore_status, passed_on, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::ZONE_TOL_3D;
-use crate::geom::vector2d::Point2;
 use crate::math::{Point3, Vec3, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
@@ -898,6 +897,9 @@ impl PrimitiveCreation {
             let mut placed = [Axis2Placement::IDENTITY; 3];
             // each composite's side faces (WR-404's caps)
             let mut groups = Vec::new();
+            let mut closed_sections = options.cap_ends
+                && a.kernel(brep)?.fixes.curve_sweep_closed_path_joins_ends
+                && !composites.composites.is_empty();
             for (index, mut composite) in composites.composites.into_iter().enumerate() {
                 let profile = composite.make_composite_nurb()?;
                 let want_placements = index == 0 && opt_placements.is_some();
@@ -939,6 +941,16 @@ impl PrimitiveCreation {
                     };
                     (net, fitted)
                 };
+                // Compare complete sections before the surface is split into faces.
+                // A closed sweep's individual path pieces need not close on themselves.
+                if closed_sections {
+                    closed_sections = sweep_ends_coincide(
+                        a.kernel(brep)?,
+                        &net,
+                        options.translational_sweep,
+                        a.brep(brep)?.tolerance(),
+                    )?;
+                }
                 let mut surface = Surface::from(net);
                 if let Some(definition) = definition {
                     surface.set_sweep_definition(definition);
@@ -973,9 +985,7 @@ impl PrimitiveCreation {
             }
             // not upstream (#2192, opt-in): a closed path whose end sections lie on its
             // start sections gets no caps; the stitch joins the ends instead
-            let cap_ends = options.cap_ends
-                && !(a.kernel(brep)?.fixes.curve_sweep_closed_path_joins_ends
-                    && sweep_ends_coincide(&*a, brep, side_faces, options.translational_sweep)?);
+            let cap_ends = options.cap_ends && !closed_sections;
             if cap_ends {
                 // not upstream (WR-404, #411)
                 let (mut starts, mut ends) = sweep_end_curves(
@@ -1103,66 +1113,91 @@ fn sweep_end_curves(
     Ok((starts, ends))
 }
 
-/// Whether every side face of a curve sweep spans the whole sweep and its section at the
-/// sweep's end lies on its section at the start, within the B-rep's tolerance: the path
-/// closes on itself and the profile comes back where it started (tangency-labs/solidcore#2192).
-/// The sweep runs along v for a translational sweep, else along u.
+/// Whether a complete swept surface's terminal sections coincide within the B-rep's
+/// tolerance. Run before partitioning the surface into faces: a split face may span only
+/// one path piece even when the complete sweep closes (WR-675).
 fn sweep_ends_coincide(
-    a: &impl PrimitiveAccess,
-    brep: BrepId,
-    side_faces: &[FaceId],
+    k: &crate::kernel::Kernel,
+    surface: &BSplineSurface,
     translational: bool,
+    tol: f64,
 ) -> Result<bool> {
-    // sections compared at this many intervals across each face
-    const SAMPLES: u32 = 16;
-    let k = a.kernel(brep)?;
-    let tol = a.brep(brep)?.tolerance();
-    let mut faces = Vec::new();
-    for &face in side_faces {
-        let surface = face_surface(a, (brep, face))?;
-        let domain = surface.natural_uv_domain_with_nurb(k)?;
-        let (along, across) = if translational {
-            (
-                (domain.min().y, domain.max().y),
-                (domain.min().x, domain.max().x),
-            )
-        } else {
-            (
-                (domain.min().x, domain.max().x),
-                (domain.min().y, domain.max().y),
-            )
-        };
-        faces.push((surface, along, across));
-    }
-    if faces.is_empty() {
+    use crate::nurbs::b_spline_surface::p2::IsoCurveOptions;
+    use crate::nurbs::math::gamma;
+
+    let domain = surface.natural_uv_domain();
+    let (direction, interval) = if translational {
+        (SurfParamType::V, domain.v_interval())
+    } else {
+        (SurfParamType::U, domain.u_interval())
+    };
+    let start = surface
+        .create_iso_parametric_curve(k, direction, interval.min(), IsoCurveOptions::default())?
+        .curve
+        .canonical()?;
+    let end = surface
+        .create_iso_parametric_curve(k, direction, interval.max(), IsoCurveOptions::default())?
+        .curve
+        .canonical()?;
+    // With the same rational basis, the largest control-point gap bounds the
+    // section gap. Proportional weights describe that same basis; bound any
+    // rounding difference in their ratios as well.
+    if start.degree != end.degree
+        || start.knots != end.knots
+        || start.knot_multiplicities != end.knot_multiplicities
+        || start.weights.len() != end.weights.len()
+        || start
+            .weights
+            .iter()
+            .chain(&end.weights)
+            .any(|w| !w.is_finite() || *w <= 0.0)
+        || start.control_points.is_empty()
+        || start.control_points.len() != end.control_points.len()
+    {
         return Ok(false);
     }
-    let first = faces.iter().map(|f| f.1 .0).fold(f64::INFINITY, f64::min);
-    let last = faces
-        .iter()
-        .map(|f| f.1 .1)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let span_tol = EFF_ZERO_SQRT * (1.0 + first.abs().max(last.abs()));
-    for (surface, (low, high), (from, to)) in faces {
-        if low - first > span_tol || last - high > span_tol {
+    let Some(anchor) = end.control_points.first() else {
+        return Ok(false);
+    };
+    let mut gap_bound = 0.0_f64;
+    let mut radius = 0.0_f64;
+    for (a, b) in start.control_points.iter().zip(&end.control_points) {
+        let gap = a.distance(*b);
+        let reach = anchor.distance(*b);
+        if !gap.is_finite() || !reach.is_finite() {
             return Ok(false);
         }
-        for i in 0..=SAMPLES {
-            let s = from + (to - from) * (f64::from(i) / f64::from(SAMPLES));
-            let (start, end) = if translational {
-                (Point2::new(s, low), Point2::new(s, high))
-            } else {
-                (Point2::new(low, s), Point2::new(high, s))
-            };
-            let gap = surface
-                .evaluate_point(k, start)?
-                .distance(surface.evaluate_point(k, end)?);
-            if gap.is_nan() || gap > tol {
+        gap_bound = gap_bound.max(gap);
+        radius = radius.max(reach);
+    }
+    let mut ratio_min = 1.0_f64;
+    let mut ratio_max = 1.0_f64;
+    if !start.weights.is_empty() {
+        ratio_min = f64::INFINITY;
+        ratio_max = 0.0;
+        for (a, b) in start.weights.iter().zip(&end.weights) {
+            let ratio = b / a;
+            if !ratio.is_finite() || ratio <= 0.0 {
                 return Ok(false);
             }
+            ratio_min = ratio_min.min(ratio);
+            ratio_max = ratio_max.max(ratio);
         }
     }
-    Ok(true)
+    // R_end[i] = R_start[i] * ratio[i] / sum(R_start * ratio).
+    // Thus sum |R_end - R_start| <= (ratio_max - ratio_min) / ratio_min.
+    // Subtracting an anchor makes the bound independent of world coordinates.
+    // Every bound includes its rounding: each computed ratio is within a factor
+    // (1 +- gamma(1)) of the exact one, so the exact ratios lie in [lo, hi] below,
+    // and two ratios that round to the same value still leave a weight gap. Each
+    // distance carries at most gamma(4) relative error, and the subtraction,
+    // division, product and sum here at most gamma(4) more: the computed bound
+    // times (1 + gamma(8)) encloses the exact one.
+    let lo = ratio_min * (1.0 - gamma(1));
+    let hi = ratio_max * (1.0 + gamma(1));
+    let weight_gap = (hi - lo) / lo;
+    let bound = (gap_bound + radius * weight_gap) * (1.0 + gamma(8));
+    Ok(bound.is_finite() && bound <= tol)
 }
 
 /// Each of `faces`' V interval: its surface's natural domain across the sections
@@ -1189,6 +1224,57 @@ mod tests {
     use crate::curve::line::Line;
     use crate::geom::extent1d::Extent1d;
     use crate::kernel::Kernel;
+
+    #[test]
+    fn closed_sections_allow_proportional_rational_weights() {
+        use crate::nurbs::b_spline_curve::p1::KnotType;
+        use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
+
+        let k = Kernel::default();
+        let mut points = [Vec3::ZERO, Vec3::Y, Vec3::Z, Vec3::ZERO, Vec3::Y, Vec3::Z];
+        for expected in [true, false] {
+            if !expected {
+                points[4] += 0.1 * Vec3::X;
+            }
+            let surface = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+                u_degree: 1,
+                v_degree: 2,
+                control_points: &points,
+                form: BSplineSurfaceForm::Unspecified,
+                u_multiplicities: &[2, 2],
+                v_multiplicities: &[3, 3],
+                u_knots: &[0.0, 1.0],
+                v_knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: Some(&[1.0, 0.5, 1.0, 2.0, 1.0, 2.0]),
+                uv_domain: None,
+            })
+            .unwrap();
+            assert_eq!(
+                sweep_ends_coincide(&k, &surface, false, 1e-6).unwrap(),
+                expected
+            );
+        }
+        // Equal control points far from the anchor whose weight ratios both round to 3:
+        // the exact bases differ, and the sections lie about 1.85e-7 apart midway.
+        let far = 1e10 * Vec3::X;
+        let points = [Vec3::ZERO, far, Vec3::ZERO, far];
+        let surface = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &points,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0, 1.0 + f64::EPSILON, 3.0, 3.0 + 2.0 * f64::EPSILON]),
+            uv_domain: None,
+        })
+        .unwrap();
+        assert!(!sweep_ends_coincide(&k, &surface, false, 1e-8).unwrap());
+    }
 
     // An imported line may have last-bit differences between its analytic data
     // and cached NURB. Virtual evaluations must continue to use the analytic data.

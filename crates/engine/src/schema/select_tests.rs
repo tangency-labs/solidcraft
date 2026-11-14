@@ -1,7 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem, SelectMode, SelectSetParams, SelectSetResult, read_item,
+    SameLookParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem, SelectMode, SelectSetParams,
+    SelectSetResult, read_item,
 };
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -12,6 +13,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<SelectSetParams>(), &["add", "items"]);
     assert_keys(input_schema_for::<SelectClearParams>(), &[]);
     assert_keys(input_schema_for::<SelectFilterParams>(), &["mode"]);
+    assert_keys(input_schema_for::<SameLookParams>(), &["body", "face"]);
 }
 
 /// #16536: `select.filter` takes one of three words and answers it, and says so: the published
@@ -93,6 +95,9 @@ fn strict_keeps_todays_errors() {
         ("select.filter", json!({"mode": ""})),
         ("select.filter", json!({"mode": "edge"})),
         ("select.filter", json!({"mode": "Body"})),
+        ("select.same_look", json!({})),
+        ("select.same_look", json!({"body": "Missing"})),
+        ("select.same_look", json!({"body": "Box1", "face": 99})),
     ]);
 }
 
@@ -150,6 +155,20 @@ fn the_schemas_take_what_the_handler_reads() {
     ];
     check(input_schema_for::<SelectSetParams>(), &cases);
     check(input_schema_for::<SelectClearParams>(), &[(json!({}), true), (json!({"add": true}), false)]);
+    check(
+        input_schema_for::<SameLookParams>(),
+        &[
+            (json!({}), true),
+            (json!({"body": "Box1"}), true),
+            (json!({"face": 0}), true),
+            (json!({"body": "Box1", "face": 2}), true),
+            (json!({"body": null, "face": null}), true),
+            (json!({"body": 5}), false),
+            (json!({"face": -1}), false),
+            (json!({"face": 1.5}), false),
+            (json!({"bodyy": "Box1"}), false),
+        ],
+    );
     // The schema differs from the type in two cases: a face or edge with neither `index` nor
     // `point`, which the type leaves to the handler (its message depends on the design), and an
     // unknown key, which the key check reports, not the type.
@@ -211,6 +230,53 @@ fn replies_match_the_output_schema() {
     assert!(error.contains("`ad`"), "{error}");
     let error = s.execute("select.clear", &json!({"all": true})).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`all`"), "{error}");
+}
+
+/// #16578: `select.same_look` reads its two optional keys through the published type and answers the
+/// reply `select.set` publishes. What a body, a face or the current selection means stays the handler's.
+#[test]
+fn same_look_selects_the_objects_with_that_appearance() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Box1"})).unwrap();
+    s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0], "body_name": "Box2"})).unwrap();
+    let described = s.execute("engine.describe", &json!({"command": "select.same_look"})).unwrap();
+    assert_eq!(described["input"]["additionalProperties"], false, "the command reads two keys and nothing else");
+    assert_eq!(described["input"]["properties"].as_object().map(|p| p.len()), Some(2), "both keys are described");
+    assert!(described["input"].get("required").is_none(), "neither key is required: the call may name a body, a face, or neither");
+    let spec = crate::find_command("select.same_look").unwrap();
+    assert!(spec.contract.is_some() && spec.output.is_some(), "the command describes its call and its reply");
+
+    // Both boxes use the design's default look, so naming one of them selects both.
+    let output = output_schema_for::<SelectSetResult>().as_value().clone();
+    for p in [json!({"body": "Box1"}), json!({"body": "Box2"})] {
+        let r = s.execute("select.same_look", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert_eq!(r, json!({"selected": 2}), "{p} selects the objects with that look");
+        assert!(conforms(&output, &output, &r), "{r} doesn't match {output}");
+    }
+    // The current selection is the default: a face of Box1, then the same look with no keys at all.
+    s.execute("select.set", &json!({"items": [{"type": "face", "body": "Box1", "index": 0}]})).unwrap();
+    let r = s.execute("select.same_look", &json!({})).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(r, json!({"selected": 2}), "the selected face's look is the default too");
+    assert_eq!(s.selection.len(), 2);
+    // A body or a face that isn't there, and no selection at all, stay the handler's refusals.
+    s.execute("select.clear", &json!({})).unwrap();
+    for p in [json!({}), json!({"body": "Missing"}), json!({"body": "Box1", "face": 99})] {
+        let off = s.execute("select.same_look", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(!off.is_empty(), "{p} should be refused");
+        s.param_check = ParamCheck::Strict;
+        let strict = s.execute("select.same_look", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        s.param_check = ParamCheck::Warn;
+        assert_eq!(strict, off, "{p}");
+    }
+    // A key the command doesn't take is refused at every level: with the check off by the handler's
+    // own `deny_unknown_fields`, in warn after the warning, in strict by the contract. Each names
+    // the key the caller wrote.
+    let p = json!({"bodyy": "Box1"});
+    for (level, name) in [(ParamCheck::Off, "off"), (ParamCheck::Warn, "warn"), (ParamCheck::Strict, "strict")] {
+        s.param_check = level;
+        let e = s.execute("select.same_look", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("bodyy"), "{name}: {e}");
+    }
 }
 
 /// One item of every `Sel` variant, as `Sel` serializes it (and the forms it also reads): each is

@@ -7013,7 +7013,7 @@ fn feature_tools_with_constructor(
             // The face names follow `face_points`: To, then From.
             let name = |k: usize| f.face_names.get(k).map(String::as_str);
             let (to_name, from_name) = if extent.to.is_some() { (name(0), name(1)) } else { (None, name(0)) };
-            let to_face = extent.to.and_then(|p| object_face(&tst, to_name, p.0, Some(n)));
+            let to_face = extent.to.and_then(|p| object_face_at_level(&tst, to_name, p.0, &ss.plane));
             // The body the extent runs to: a Join to it joins that body too (#6424), unless the
             // design was built before it did (#8151).
             *to_body = to_face.filter(|_| !extent.to_body_apart).and_then(|(bi, _)| tst.bodies.get(bi)).map(|b| b.name.clone());
@@ -7023,7 +7023,7 @@ fn feature_tools_with_constructor(
                 ss.plane.to_world(c)
             };
             let from = match extent.from {
-                Some(p) => height_at(&tst, object_face(&tst, from_name, p.0, Some(n)), &ss.plane, centre, p.0),
+                Some(p) => height_at(&tst, object_face_at_level(&tst, from_name, p.0, &ss.plane), &ss.plane, centre, p.0),
                 None => 0.0,
             };
             // Whether the extrusion runs toward the To object: false when a To offset carries the
@@ -7182,9 +7182,12 @@ fn feature_tools_with_constructor(
                     tools = vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())];
                 }
             }
-            if let Some(tb) = curved.and_then(|bi| tst.bodies.get(bi)) {
+            if let Some(tb) = curved.and_then(|bi| tst.bodies.get(bi))
+                && let Some((_, fi)) = to_face
+            {
                 let start = if hi > 0.0 { lo + off } else { hi + off };
-                tools = trim_to_body(tools, tb, |q: Vec3| ((q - ss.plane.origin).dot(n) - start).abs())?;
+                let far = if hi > 0.0 { hi + off } else { lo + off };
+                tools = trim_to_face(tools, tb, fi, &ss.plane, start, far)?;
             }
             // A join's profile grows into the material it joins; its sketch plane and depth as drawn
             // still serve a join into sheet metal (`sheet_join`), which takes the sketch's regions.
@@ -8823,7 +8826,9 @@ fn replay(
     // A source's named faces are looked up in the model as it was before any copy was made: the
     // copy of an earlier source (a boss joined to the body) changes the faces a later source (a cut
     // starting on the boss) names, though the later source means the original's (#11792).
-    let named_from = plan.iter().any(|(src, _, _)| src.face_names.iter().any(|n| !n.is_empty())).then(|| st.clone());
+    // A hole placed from edges names those edges too (#16799): the second hole's edge names
+    // mean the original's edges, which the first hole's copy has already cut into.
+    let named_from = plan.iter().any(|(src, _, _)| src.face_names.iter().chain(&src.edge_names).any(|n| !n.is_empty())).then(|| st.clone());
     for (src, mats, first) in &plan {
         // A fillet or chamfer repeats at the copied edges.
         if let FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } = &src.kind {
@@ -8946,7 +8951,7 @@ fn replay(
             // A hole is drilled again at each copy of its spot (found on the surface there), so
             // a blind hole's depth counts from the face at the copy, not from the bottom of the
             // original hole under the original spot.
-            let (spots, dir) = hole_spots_raw(vals, st, src)?;
+            let (spots, dir) = hole_spots_raw(vals, named_from.as_ref().unwrap_or(st), src)?;
             // Copies start where the original does (#11538).
             let from_inside = hole_from_inside(doc, src);
             // A hole at sketch points drills into the material, judged at each copy's spots as
@@ -9093,18 +9098,25 @@ pub fn object_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3) -> f
     height_at(st, face_at(st, p, Some(plane.normal())), plane, centre, p)
 }
 
+/// How far `q` lies along `plane`'s normal from its origin.
+fn level_along(plane: &Plane, q: Vec3) -> f64 {
+    (q - plane.origin).dot(plane.normal())
+}
+
+/// The level along `plane`'s normal of face `(body, face)` when it is a plane square to the
+/// normal, and the face's own tolerance, from solidcore ([`Body::face_square_level`]).
+fn square_face_level(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane) -> Option<solidcore_ops::SquareFaceLevel> {
+    st.bodies.get(bi)?.body.face_square_level(fi, plane.normal(), plane.origin).ok()?
+}
+
 /// [`object_height`] of the point `p` on `face` (`(body index, face index)`, see [`object_face`]).
 fn height_at(st: &ModelState, face: Option<(usize, usize)>, plane: &Plane, centre: Vec3, p: Vec3) -> f64 {
     let n = plane.normal();
-    let h = |q: Vec3| (q - plane.origin).dot(n);
+    let h = |q: Vec3| level_along(plane, q);
     let Some((bi, fi)) = face else { return h(p) };
     let Some(b) = st.bodies.get(bi) else { return h(p) };
-    let tol = (b.body.size() * 1e-3).max(1e-3);
-    let Ok(faces) = b.body.faces(tol) else { return h(p) };
-    if let Some(f) = faces.iter().find(|f| f.index == fi)
-        && f.plane_normal.is_some_and(|fnrm| fnrm.cross(n).len() < 1e-6)
-    {
-        return h(f.centroid);
+    if let Some(square) = square_face_level(st, (bi, fi), plane) {
+        return square.level;
     }
     // A curved or slanted face: where the profile's middle meets it.
     let m = b.mesh();
@@ -9181,6 +9193,19 @@ fn object_face(st: &ModelState, name: Option<&str>, p: Vec3, normal: Option<Vec3
     face_at(st, p, normal)
 }
 
+/// The face a From / To Object point stands for ([`object_face`]), unless that face is a plane
+/// square to the extrude direction that lies at another level than the point: then the point is
+/// on a plane of its own (a construction plane near a face, within the pick tolerance of it), and
+/// its level, not the face's, is where the extent starts or ends.
+fn object_face_at_level(st: &ModelState, name: Option<&str>, p: Vec3, plane: &Plane) -> Option<(usize, usize)> {
+    let face = object_face(st, name, p, Some(plane.normal()))?;
+    match square_face_level(st, face, plane) {
+        // At the face's own tolerance: the one the kernel takes a point for on that face.
+        Some(square) if (square.level - level_along(plane, p)).abs() > square.tolerance => None,
+        _ => Some(face),
+    }
+}
+
 /// The body of `face` when that face is not a plane (with `n`: not a plane square to `n`), so To
 /// Object must follow its shape.
 fn curved_face(st: &ModelState, face: Option<(usize, usize)>, n: Option<Vec3>) -> Option<usize> {
@@ -9220,6 +9245,37 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
                 out.push(Traced { body: lump, lineage, recipe: None });
             }
         }
+    }
+    if out.is_empty() {
+        return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
+    }
+    Ok(out)
+}
+
+/// Tools run to a curved To face, one construction chosen by the exact on-face test, not by a
+/// failed attempt: the kernel's [`kernel::face_split_if_on_face`] splits each tool's prism at the
+/// face's extended surface and says whether its section lies wholly on the face. When every
+/// tool's does, those pieces (the one that starts at `start`, whether that lies in air or inside
+/// the target's material) are the result; otherwise the tool is trimmed to the target body
+/// ([`trim_to_body`], as a profile only partly over the face always was), refused when a piece
+/// still has its end cap at `far`.
+fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Vec<Traced>> {
+    let mut out = Vec::new();
+    let mut on_face = true;
+    for t in &tools {
+        let Some(parts) = kernel::face_split_if_on_face(&t.body, &target.body, face, plane, start, far)? else {
+            on_face = false;
+            break;
+        };
+        out.extend(parts.into_iter().map(|part| Traced::step(part, &[t])));
+    }
+    if !on_face {
+        let n = plane.normal();
+        let trimmed = trim_to_body(tools, target, |q: Vec3| ((q - plane.origin).dot(n) - start).abs())?;
+        if trimmed.iter().any(|t| kernel::has_cap_at(&t.body, plane, far, far - start)) {
+            return Err(DocError::Invalid("the profile reaches past the To face".into()));
+        }
+        return Ok(trimmed);
     }
     if out.is_empty() {
         return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
@@ -10391,6 +10447,21 @@ fn eval_feature(
                 let Some(name) = name else { continue };
                 let carried = f.link_faces.get(k).map_or(&[][..], Vec::as_slice);
                 let b = crate::lineage::linked_tool(b.body.clone().with_import_certificate(&digest, f.id)?, f.id, carried);
+                for record in f.link_threads.get(k).into_iter().flatten() {
+                    if !record.axis_point.is_finite()
+                        || !record.start.is_finite()
+                        || !record.end.is_finite()
+                        || record.end <= record.start
+                        || !(1..=8).contains(&record.starts)
+                        || [record.major_diameter, record.radius, record.pitch].iter().any(|v| !v.is_finite() || *v <= 0.0)
+                    {
+                        return Err(DocError::Invalid("invalid cosmetic thread record in linked body".into()));
+                    }
+                    let mut thread = record.clone();
+                    thread.feature = f.id;
+                    thread.body.clone_from(&name);
+                    st.threads.push(thread);
+                }
                 st.bodies.push(ModelBody::traced_new(name, b, f.id));
             }
             if !imp.warnings.is_empty() {
@@ -10786,15 +10857,29 @@ pub fn face_point_state<'a>(doc: &Document, st: &'a ModelState, kind: &FeatureKi
 /// resting a hair from the picked face would otherwise take its name. Another feature's point is
 /// named on the bodies of the feature's own component first: each component's bodies lie in its
 /// own coordinates there, where a part inserted twice has a face at the same point in each.
+/// A feature that names the body whose faces it picks ([`FeatureKind::face_body`]) names each
+/// point on that body first: another body with a face a hair from the pick (#16871) would
+/// otherwise take the name, and evaluation would move the pick onto that body's face.
 pub fn face_point_names(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64) -> Result<Vec<String>> {
     let pts = kind.face_points();
     if !matches!(kind, FeatureKind::Extrude { .. } | FeatureKind::Revolve { .. }) {
+        let named =
+            kind.face_body().map(|n| ModelState { bodies: st.bodies.iter().filter(|b| b.name == n).cloned().collect(), ..ModelState::default() });
+        let on_named: Vec<String> = match &named {
+            Some(one) if !one.bodies.is_empty() => crate::naming::face_names_at(one, &pts),
+            _ => vec![String::new(); pts.len()],
+        };
         let own = ModelState { bodies: st.bodies.iter().filter(|b| doc.model_body_component(b) == comp).cloned().collect(), ..ModelState::default() };
-        let names = crate::naming::face_names_at(&own, &pts);
-        return Ok(names
+        return Ok(on_named
             .into_iter()
             .zip(&pts)
-            .map(|(name, p)| if name.is_empty() { crate::naming::face_names_at(st, std::slice::from_ref(p)).pop().unwrap_or_default() } else { name })
+            .map(|(name, p)| {
+                if !name.is_empty() {
+                    return name;
+                }
+                let name = crate::naming::face_names_at(&own, std::slice::from_ref(p)).pop().unwrap_or_default();
+                if name.is_empty() { crate::naming::face_names_at(st, std::slice::from_ref(p)).pop().unwrap_or_default() } else { name }
+            })
             .collect());
     }
     let fst = face_point_state(doc, st, kind, comp)?;

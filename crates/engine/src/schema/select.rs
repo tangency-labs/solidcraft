@@ -1,5 +1,5 @@
 //! Contracts and result types for the selection commands in `cmd/edit.rs`: `select.set`,
-//! `select.filter` and `select.clear`.
+//! `select.filter`, `select.clear` and `select.same_look`.
 //!
 //! `select.set` reads `items` and `add` from the raw JSON. Each item reads as the handler reads
 //! it ([`read_item`] is the handler's own first step, so a call the handler takes is a call the
@@ -129,6 +129,27 @@ pub struct SelectSetResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// Select the objects that use the same appearance as a body, or as one face of it. `body` names a
+/// body in the design and defaults to the body of the current selection; `face` says which face to
+/// take the appearance from and defaults to the selected face when the call doesn't name another
+/// body. A call with neither and no selection is refused, as is a body or face that isn't there and
+/// more than 10,000 matches. What it selects is `select.set`'s own reply. Not an undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct SameLookParams {
+    // Unknown keys are refused by serde here, not only by the check: the handler read this type
+    // through a `deny_unknown_fields` struct before, and a key it doesn't take stays refused with
+    // the same message at every parameter-check level. The keys are `Option` without
+    // `serde(default)`, as that struct's were: a call whose parameters aren't an object at all,
+    // such as `[]`, keeps the same "missing field" refusal.
+    /// The name of a body in the design. Default: the body of the current selection.
+    pub body: Option<String>,
+    /// Which face of that body to take the appearance from. Default: the face of the current
+    /// selection, when the call doesn't name another body.
+    pub face: Option<usize>,
 }
 
 /// `select.clear` takes no parameters: it deselects everything. Not an undo step.
