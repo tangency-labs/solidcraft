@@ -89,7 +89,49 @@ fn issue_3012_cut_of_filleted_boxes_a_sliver_apart() {
             // 4.8e-8 at 1e-4, 5.0e-6 at 1e-3). 1e-8 is the tolerance the volume is asked for.
             let h = 10.0;
             let expected = dx * 30.0 * h;
-            let v = volume(&r);
+            // #14170: the volume is the closed surface's. Along each of the four fillet arcs the
+            // sliver's faces stop dx^2 / 4 short of each other, within the edges' tolerance (the
+            // check above passes), and the strips across those gaps carry the tips' triangles
+            // back (5 dx^2 in all): the closed sliver is the slab dx * 30 * h to second order in
+            // dx (measured 2e-10 at 1e-3), the area check's 0.05 dx^2 at most. The faces' flux
+            // alone, which upstream measures, is the closed volume less the strips' flux.
+            let v_closed = volume(&r);
+            assert!(
+                (v_closed - expected).abs() < 0.05 * dx * dx + 1e-8,
+                "dx {dx} reversed {reversed}: closed {v_closed} vs {expected}"
+            );
+            let strips = {
+                use solidcore::mass::integrator::properties::{
+                    brep_properties, MassPropertyBehavior, PropertyAttributes, VolumeClosure,
+                };
+                let (k, mut kb) = kernel_copy(&r);
+                let store = solidcore::geom::attribute::AttributeStore::default();
+                let attrs = PropertyAttributes {
+                    store: &store,
+                    key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
+                };
+                let mid = solidcore::query::brep::calculate_bounding_box(
+                    &k,
+                    &mut kb,
+                    solidcore::query::brep::BoundingBoxOptions::default(),
+                )
+                .unwrap()
+                .mid();
+                let p = brep_properties(
+                    &k,
+                    &mut kb,
+                    1e-8,
+                    mid,
+                    MassPropertyBehavior::default(),
+                    &attrs,
+                )
+                .unwrap();
+                let VolumeClosure::Bounded(c) = p.closure else {
+                    panic!("dx {dx} reversed {reversed}: closure {:?}", p.closure)
+                };
+                c.strip_volume
+            };
+            let v = v_closed - strips;
             assert!(
                 (expected - v) > -1e-8 && (expected - v) < 10.0 * dx * dx + 1e-8,
                 "dx {dx} reversed {reversed}: {v} vs {expected}"

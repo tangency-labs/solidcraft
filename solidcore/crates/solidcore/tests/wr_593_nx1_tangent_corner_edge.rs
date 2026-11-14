@@ -119,10 +119,12 @@ fn residue_round_with_the_fix() {
 
 #[test]
 fn exact_round_builds() {
-    // main's volume, bit-identical with the flag on and off there; the closed form holds
-    // to the round's approximation, as for the residue round
+    // the volume measured here, since #14170 the faces' flux closed across their gaps:
+    // 6.1e-6 (1.7e-9 relative) below the faces' flux alone (3581.9837276735275); the
+    // closed form holds only to the round's approximation, as for the residue round, so it
+    // does not decide that move
     let v = fillet(0.0).unwrap();
-    let pinned = 3_581.983_727_673_527_5_f64;
+    let pinned = 3_581.983_721_592_165_2_f64;
     assert_eq!(v.to_bits(), pinned.to_bits(), "{v} vs {pinned}");
     let want = expected_volume();
     assert!((v - want).abs() < 1e-3 * want, "{v} vs {want}");

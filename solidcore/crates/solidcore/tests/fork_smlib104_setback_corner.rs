@@ -621,7 +621,10 @@ fn eased_asked_setback_is_the_setback_fill() {
     let ask = asked(8.0, 2.0);
     let mut k = all_fixes();
     let r = blend_box(&mut k, [60.0, 40.0, 20.0], &ASKED_AT, &[5.0; 3], Some(&ask));
-    built(&mut k, r, (15, 36, 23), 47413.5259896674);
+    // the faces' gaps closed (#14170): the fork prints 47413.5259896674, the faces' flux
+    // alone about the box's middle; their open vector area `C_z` 9.65e-6 moves that by
+    // `C_z dO_z`, and the strips across the gaps add 9.65e-5 about the middle
+    built(&mut k, r, (15, 36, 23), 47413.52608616606);
 }
 
 /// A setback asked for that does not fit on the corner's edges (20, the upright edge's

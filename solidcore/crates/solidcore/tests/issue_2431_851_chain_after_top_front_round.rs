@@ -41,7 +41,7 @@ const WALL: f64 = 21.0;
 /// The three edges rounded R2 together on the in-code part
 /// (`issue_2403_chain_over_end_curve::three_edges_together_end_on_the_corner_ball`);
 /// SolidCraft's grid gives 9524.342896 to 5e-3.
-const THREE_TOGETHER: f64 = 9524.343664763;
+const THREE_TOGETHER: f64 = 9524.34380558411;
 
 /// Every fix but `geometric_g2_continuity`.
 fn kernel() -> Kernel {

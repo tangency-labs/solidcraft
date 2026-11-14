@@ -429,10 +429,13 @@ fn retry_rail_search_holds_the_radius_as_the_first_does() {
         turned.0,
         forward.0
     );
-    // the laws that do not reach the retry, against main's volumes
+    // the laws that do not reach the retry, against main's volumes. #14170: the closed
+    // surface's; the faces' flux alone gave 47770.70574722577 and 47737.95880696548, an open
+    // surface's, whose volume moves 1.7e-7 and 1.8e-7 relative with its origin raised 1e3,
+    // where these move 7.5e-10 and 1.0e-9
     for (r0, r1, main) in [
-        (5.0, 1.0, 47_770.705_747_225_77),
-        (5.0, 2.0, 47_737.958_806_965_48),
+        (5.0, 1.0, 47_770.705_655_899_9),
+        (5.0, 2.0, 47_737.958_709_689_77),
     ] {
         let (v, manifold) = round_into_a_rounded_corner(r0, r1, false).unwrap();
         assert!(

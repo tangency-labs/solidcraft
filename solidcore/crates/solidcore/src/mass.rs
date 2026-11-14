@@ -5,6 +5,7 @@
 //! `SmVertexProps`, `SmObjProps` in `source/SMLib`, and the area/volume queries of
 //! `SM_API/SmApiQueries`.
 
+pub mod closure;
 pub mod enclosure;
 pub mod integrator;
 pub mod loop_area;

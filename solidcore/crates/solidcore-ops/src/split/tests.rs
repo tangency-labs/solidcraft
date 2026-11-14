@@ -457,6 +457,34 @@ fn corpus_split_face_by_another_bodys_face() {
     );
 }
 
+/// A body's faces' flux alone (#14170): its volume less the strips that close the faces' gaps,
+/// about `brep_volume`'s origin, the body's box's middle. The rig measures a body's faces as
+/// upstream does, without the strips.
+fn faces_flux(b: &Body) -> f64 {
+    use solidcore::mass::integrator::properties::{
+        brep_properties, MassPropertyBehavior, PropertyAttributes, VolumeClosure,
+    };
+    crate::session::measure_body("faces_flux", b, |k, kb| {
+        let store = solidcore::geom::attribute::AttributeStore::default();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
+        };
+        let mid = solidcore::query::brep::calculate_bounding_box(
+            k,
+            &mut *kb,
+            solidcore::query::brep::BoundingBoxOptions::default(),
+        )?
+        .mid();
+        let p = brep_properties(k, kb, 1e-8, mid, MassPropertyBehavior::default(), &attrs)?;
+        let VolumeClosure::Bounded(c) = p.closure else {
+            panic!("the closure is not bounded: {:?}", p.closure)
+        };
+        Ok(p.volume - c.strip_volume)
+    })
+    .unwrap()
+}
+
 /// A body split: both parts' volume and area summed are the rig's (the rig's counts are after
 /// a later merge of faces, so the parts' counts are checked against the corpus's record of the
 /// part that merge took, `merged`, and the other part's counts are added).
@@ -496,7 +524,11 @@ fn body_case(
     valid(case, &back);
     valid(case, &front);
     let m = rig(&e);
-    let (v, mut a) = (volume(&back) + volume(&front), area(&back) + area(&front));
+    // the rig's volume is the faces' flux (#14170: the volume closes their gaps)
+    let (v, mut a) = (
+        faces_flux(&back) + faces_flux(&front),
+        area(&back) + area(&front),
+    );
     let mut counts = [0, 1, 2].map(|i| back.counts().unwrap()[i] + front.counts().unwrap()[i]);
     if let Some(c) = carried {
         // a sheet: an area and no volume

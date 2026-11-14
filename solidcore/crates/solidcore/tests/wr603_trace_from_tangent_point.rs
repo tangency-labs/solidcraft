@@ -80,8 +80,10 @@ fn peg() -> (f64, usize) {
 
 #[test]
 fn arc_round_from_a_tangent_point_adds_the_concave_material() {
-    // the concave round adds 4.29958 (r 1), as without WR-603's start direction
+    // the concave round adds 4.2995255 (r 1), as without WR-603's start direction. #14170: the
+    // closed surface's; the faces' flux alone gave 4.29958, an open surface's, whose volume
+    // moves 2.1e-6 relative with its origin raised 1e3 where this one moves 1.8e-9
     let (added, faces) = peg();
     assert_eq!(faces, 10);
-    assert!((added - 4.29958).abs() < 1e-5, "{added}");
+    assert!((added - 4.299_525_5).abs() < 1e-5, "{added}");
 }
