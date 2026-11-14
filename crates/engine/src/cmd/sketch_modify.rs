@@ -17,7 +17,7 @@ use crate::schema::sketch_modify::{
     BreakParams, BreakResult, ChamferDistanceAngleParams, ChamferEqualParams, ChamferResult, ChamferTwoParams, CircularPatternParams, ExtendParams,
     ExtendResult, FilletParams, FilletResult, MAX_BREAK_POINTS, MAX_COPIES, MAX_INSTANCES, MAX_PATH_POINTS, MirrorParams, MirrorResult, MoveParams,
     MoveResult, OffsetBreakParams, OffsetBreakResult, OffsetParams, OffsetResult, OffsetSide, PatternResult, RectangularPatternParams, ScaleParams,
-    ScaleResult, TrimOutcome, TrimParams, TrimPathParams, TrimPathResult, TrimResult,
+    ScaleResult, TransformParams, TransformResult, TrimOutcome, TrimParams, TrimPathParams, TrimPathResult, TrimResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -40,6 +40,7 @@ const OFFSET_BREAK_CONTRACT: TypedContract<OffsetBreakParams> = TypedContract::n
 const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
 const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
 const SCALE_CONTRACT: TypedContract<ScaleParams> = TypedContract::new();
+const TRANSFORM_CONTRACT: TypedContract<TransformParams> = TypedContract::new();
 const CIRCULAR_PATTERN_CONTRACT: TypedContract<CircularPatternParams> = TypedContract::new();
 const RECTANGULAR_PATTERN_CONTRACT: TypedContract<RectangularPatternParams> = TypedContract::new();
 
@@ -129,7 +130,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_scale")
         .enabled(in_sketch)
         .params("entities: [curve/point ids], base: [x,y] or point ref, factor: number; the driving length and radius dimensions wholly inside the selection scale too (a formula becomes `(formula) * factor`)"),
-    CommandSpec::new("sketch.transform", "Transform", transform)
+    CommandSpec::new("sketch.transform", "Transform", crate::checked!("sketch.transform", transform))
+        .contract(&TRANSFORM_CONTRACT)
+        .output(output_schema_for::<TransformResult>)
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
         .key("G")
@@ -4035,7 +4038,7 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(ids_of(sk, &cs))
     })?;
     s.doc_mut().prune_model_params();
-    Ok(json!({"curves": out, "sketch": info}))
+    reply(cmd, TransformResult { curves: out, sketch: info, param_warnings: Vec::new() })
 }
 
 /// The driving lengths wholly inside a transformed selection scale with it. Keep formulas
