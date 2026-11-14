@@ -332,7 +332,14 @@ impl TrackpadScroll {
     }
 }
 
+pub use solidcraft_engine::schema::ui_prefs::BrowserScrollWheel;
+
 impl Prefs {
+    /// Whether browser scrolling should bypass automatic wheel and trackpad detection.
+    pub fn browser_wheel_always_zooms(&self) -> bool {
+        self.browser_scroll_wheel == BrowserScrollWheel::AlwaysZoom
+    }
+
     /// Touchpad scroll zooms without overwriting the user's preference for other presets.
     pub fn trackpad_pans(&self) -> bool {
         self.nav != TOUCHPAD_NAV && self.trackpad_pan
@@ -1481,6 +1488,8 @@ preference_settings! {
     zoom_stop_at_model: bool = false, PAGE_NAVIGATION => check_id("prefs.zoom_stop_at_model");
     /// Spread discrete wheel input across frames (off: apply each event immediately).
     smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
+    /// Browser-only wheel classification; native platforms keep their scroll phases.
+    browser_scroll_wheel: BrowserScrollWheel = BrowserScrollWheel::Automatic, PAGE_NAVIGATION;
     /// The face under the pointer keeps its highlight while the view moves under it (#2130).
     keep_hover_while_navigating: bool = true, PAGE_NAVIGATION;
     /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
@@ -4953,6 +4962,31 @@ mod tests {
         let mut restored = crate::SolveApp::new(Default::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
         assert!(restored.preferences.keep_unsaved_in_browser, "it is saved with the settings");
+    }
+
+    #[test]
+    fn browser_scroll_wheel_roundtrips_validates_and_resets() {
+        assert_eq!(Prefs::default().browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        assert_eq!(lenient(&json!({})).browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let initial = control(&mut app, &json!({})).unwrap();
+        assert_eq!(initial["browser_scroll_wheel"], "automatic");
+        control(&mut app, &json!({"open":"Navigation", "browser_scroll_wheel":"always_zoom", "button":"apply"})).unwrap();
+        assert!(app.preferences.browser_wheel_always_zooms());
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert_eq!(restored.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+        for invalid in [json!("future"), json!(""), json!(42), json!(null)] {
+            assert!(set(&mut app, &json!({"browser_scroll_wheel": invalid})).is_err());
+            assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+            assert_eq!(lenient(&json!({"browser_scroll_wheel": invalid})).browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        }
+        control(&mut app, &json!({"open":"Navigation", "button":"defaults"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+        set(&mut app, &json!({"browser_scroll_wheel":"automatic"})).unwrap();
+        assert!(!app.preferences.browser_wheel_always_zooms());
     }
 
     #[test]

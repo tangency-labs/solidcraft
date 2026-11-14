@@ -1153,7 +1153,7 @@ mod web {
             // First, so everything after sees the buttons the browser holds.
             crate::mouse_buttons::reconcile(&self.mouse_buttons, ctx, raw);
             let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
-            if let Some(delay) = self.wheel_gestures.update(raw, now) {
+            if let Some(delay) = self.wheel_gestures.update(raw, now, self.app.preferences.browser_wheel_always_zooms()) {
                 ctx.request_repaint_after(delay);
             }
             if self.launch.persists() {

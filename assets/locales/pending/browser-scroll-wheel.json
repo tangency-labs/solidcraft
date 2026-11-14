@@ -1,0 +1,8 @@
+{
+  "en": {
+    "prefs.browser_scroll_wheel": "Scroll wheel in the browser",
+    "prefs.browser_scroll_wheel.always_zoom": "Always zoom",
+    "prefs.browser_scroll_wheel.automatic": "Automatic",
+    "prefs.browser_scroll_wheel.help": "Automatic detects mouse wheels and two-finger swipes. Always zoom makes vertical scrolling zoom, including smooth mouse wheels; hold Shift or the navigation modifiers to pan with two fingers."
+  }
+}

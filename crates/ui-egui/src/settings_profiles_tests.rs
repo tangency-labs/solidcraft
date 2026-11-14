@@ -803,6 +803,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     let expected = [
         "browser_bodies_folders",
         "browser_eye_left",
+        "browser_scroll_wheel",
         "center_arc_follows_cursor",
         "color_vision",
         "dialog_buttons",
@@ -901,7 +902,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 97);
+    assert_eq!(expected.len(), 98);
     assert_eq!(actual, expected);
 }
 
