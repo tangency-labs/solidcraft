@@ -1887,3 +1887,23 @@ fn cut_removes_a_target_inside_its_tools() {
         }
     }
 }
+
+/// #15913: eight fins thickened from a lofted blade surface and patterned round a hub's axis,
+/// joined into the hub in one Combine. The fins' tips overlap in slivers at the axis, inside the
+/// hub. The kernel's union paired fins with each other first and refused ("the union would delete
+/// face 20"); the join now takes them into the hub one at a time, where each overlap lies inside.
+#[test]
+fn fins_meeting_at_the_axis_join_into_their_hub() {
+    let s = replay(include_str!("../../../examples/regressions/fins_joined_into_their_hub.json"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    let names: Vec<&str> = state.bodies.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, ["Body1", "Body2"], "the fins went into the hub; the blade surface stays");
+    let hub = &state.body("Body1").unwrap().body;
+    assert_eq!(hub.shell_count(), 1);
+    assert!(hub.validity().is_empty(), "{:?}", hub.validity());
+    // R10 x 10 hub (3141.59) and eight 278.10 fins, less what lies inside the hub and the tips'
+    // overlaps.
+    let v = volume(&s, "Body1");
+    assert!((v - 4624.24).abs() < 0.05, "{v}");
+}
