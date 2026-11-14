@@ -98,11 +98,6 @@ crates/engine/src/cmd/contact_sweep.rs:ContactGeometry::placed places meshes for
 crates/engine/src/cmd/contact_sweep.rs:contact_mesh tessellates bodies for contact checks
 crates/engine/src/cmd/edit.rs:selection_item keeps a selection's face or edge index through the display mesh
 crates/engine/src/cmd/face.rs:face_at_state picks the face at a point by the display mesh
-crates/engine/src/cmd/face.rs:face_is_planar decides whether a face is planar by mesh triangles
-crates/engine/src/cmd/face.rs:face_normal_in takes a planar face's normal from mesh triangles
-crates/engine/src/cmd/face.rs:face_normal_world takes a planar face's normal from mesh triangles
-crates/engine/src/cmd/face.rs:in_a_planar_face_outline decides whether a point lies in a planar face by mesh triangles
-crates/engine/src/cmd/face.rs:on_a_face decides whether a point lies on a face by the display mesh
 crates/engine/src/cmd/face.rs:sketch_of_face finds the planar face a sketch starts on by mesh triangles
 crates/engine/src/cmd/face.rs:sketch_of_faces groups coplanar picked faces by mesh triangles
 crates/engine/src/cmd/features.rs:edge_points turns edge references into points on a mesh
