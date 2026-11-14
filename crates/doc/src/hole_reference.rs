@@ -137,13 +137,56 @@ pub fn reference_frame(st: &ModelState, at: Vec3, dir: Vec3, edges: &[(Vec3, Opt
 /// Whether `p` lies on the flat face a reference frame was made for.
 pub fn on_reference_face(st: &ModelState, frame: &ReferenceFrame, p: Vec3) -> bool {
     let Some(b) = st.bodies.iter().find(|b| b.name == frame.body) else { return false };
-    let m = b.mesh();
+    if b.body.is_mesh() {
+        return false;
+    }
     let tol = (b.body.size() * 1e-4).max(1e-6);
-    m.triangles
-        .iter()
-        .zip(&m.tri_face)
-        .filter(|(_, f)| **f as usize == frame.face)
-        .any(|(t, _)| m.tri(t).is_some_and(|[a, bb, c]| crate::appearance::closest_on_triangle(p, a, bb, c).dist(p) <= tol))
+    let Some(plane) = b.body.planar_face(frame.face).or_else(|| b.body.face_plane(frame.face)) else {
+        return false;
+    };
+    if plane.height(p).abs() > tol {
+        return false;
+    }
+    let rec = b.body.record();
+    let Some(face) = rec.faces.get(frame.face) else { return false };
+    let local = plane.to_local(p);
+    let p2 = solidcore_record::Vec2::new(local.x, local.y);
+
+    let mut inside = false;
+    let mut on_edge = false;
+    for lp in &face.loops {
+        let solidcore_record::brep::Loop::Edges { edges } = lp else { continue };
+        let mut pts = Vec::new();
+        for u in edges {
+            let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+            let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()) else { continue };
+            let [t0, t1] = if u.forward { edge.interval } else { [edge.interval[1], edge.interval[0]] };
+            let n = match &eval {
+                solidcraft_geom::brep::eval::CurveEval::Line { .. } => 1,
+                _ => 16,
+            };
+            for k in 0..n {
+                let t = t0 + (t1 - t0) * (k as f64 / n as f64);
+                if let Some(pt) = eval.point(t) {
+                    let q = plane.to_local(pt);
+                    pts.push(solidcore_record::Vec2::new(q.x, q.y));
+                }
+            }
+        }
+        if pts.len() >= 3 {
+            let ring = solidcraft_geom::Ring::new(pts);
+            for (a, b) in ring.edges() {
+                if p2.extend(0.0).dist_to_segment(a.extend(0.0), b.extend(0.0)) <= tol {
+                    on_edge = true;
+                    break;
+                }
+            }
+            if ring.contains(p2) {
+                inside = !inside;
+            }
+        }
+    }
+    on_edge || inside
 }
 
 /// The persistent names of the edges at `edges`, on the body the hole at `at` is drilled into
