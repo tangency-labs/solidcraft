@@ -1097,6 +1097,16 @@ impl OffsetExecutive {
             // (not upstream) each kept edge is the original edge on both its faces
             self.restore_kept_edges(kernel, original, notifications)?;
 
+            // Opposing inset patches contribute no cavity where they coincide.
+            // Preserve their non-overlapping regions before stitching the sheets.
+            if self.inset() && self.operation() == OffsetOperation::SolidOffset {
+                let mut temporary = required(self.take_offset_brep(), OP_EXTENDED)?;
+                let status =
+                    super::cancel::coincident_opposites(kernel, &mut temporary, notifications);
+                self.set_offset_brep(temporary);
+                status?;
+            }
+
             let mut result = self.piecewise_merge(kernel, original, Some(&mut *notifications))?;
             // (WR-341: with the opt-in this also runs for a solid input whatever
             // `m_bCreateOffsetSolid` says: a sheet's side walls, built for an offset solid,
@@ -2030,7 +2040,7 @@ fn configured_executive(original: &Brep, options: OffsetOptions) -> OffsetExecut
     executive
 }
 
-fn configured_shell_executive(
+pub(super) fn configured_shell_executive(
     original: &Brep,
     options: ShellOptions,
     faces: &[FaceId],
@@ -2048,15 +2058,36 @@ fn run_shell_offset(
     faces: &[FaceId],
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<Brep> {
-    let mut executive = configured_shell_executive(original, options, faces);
-    executive.use_creator_tangency_tol(kernel);
-    // Unlike offset_brep, shelling must not collapse ordinary inner statuses.
-    executive.do_solid_offset(
-        kernel,
-        Some(original),
-        SolidOffsetOptions::default(),
-        notifications,
-    )
+    // A consumed protrusion contributes no inner cavity. Rebuild only the private
+    // offset source: shell_difference must still subtract from the original solid.
+    let regularized = if options.offset.distance < 0.0
+        && options.offset.extend_convex_edges
+        && brep_is_manifold_solid(original)?
+    {
+        let mut attributed = original.clone_standing_for_self()?;
+        attributes::write_back_attributes(
+            &mut attributed,
+            notifications.original_key_of,
+            notifications.attributes,
+        )?;
+        super::consumed::regularize(kernel, &attributed, faces, -options.offset.distance)?
+    } else {
+        None
+    };
+    let (mut source, open) = match regularized {
+        Some(source) => source,
+        None => {
+            let mut executive = configured_shell_executive(original, options, faces);
+            executive.use_creator_tangency_tol(kernel);
+            return executive.do_solid_offset(
+                kernel,
+                Some(original),
+                SolidOffsetOptions::default(),
+                notifications,
+            );
+        }
+    };
+    super::isolated::shell_offset(kernel, &mut source, options, &open, notifications)
 }
 
 fn shell_difference(

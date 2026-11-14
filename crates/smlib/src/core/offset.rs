@@ -56,6 +56,7 @@ const INVALID_INPUT: i32 = 1007;
 /// (`SM_ERR_OFFSET_EDGE_VANISHES`, fork 34318f4: `SMLIB_ERR_UNSUPPORTED`); anything else as the
 /// blends pass it on, which carries ops' other offset refusals as they are.
 fn status(e: SolidError) -> Error {
+    log::debug!(target: "smlib", "offset diagnostic: {e:?}");
     use solidcore_ops::Error as Ops;
     match solidcore_ops::offset::refusal(&e) {
         Some(Ops::WallsTouch) => Error::WallsTouch,
