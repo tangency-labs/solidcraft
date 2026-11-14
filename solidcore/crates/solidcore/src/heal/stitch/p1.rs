@@ -721,6 +721,13 @@ pub(crate) trait StitchEditContext {
         t: f64,
     ) -> Result<(Option<EdgeId>, Option<EdgeId>, Option<VertexId>)>;
     fn brep_pre_edit(&mut self, k: &mut Kernel, b: &mut Brep) -> Result<()>;
+    fn replace_edge_curve(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        e: EdgeId,
+        curve: Curve,
+    ) -> Result<()>;
     fn delete_face(
         &mut self,
         k: &mut Kernel,
@@ -855,6 +862,15 @@ impl StitchEditContext for BorrowedStitchEdits<'_, '_> {
             NotifyOperation::PreEdit,
             [this, None, None],
         )
+    }
+    fn replace_edge_curve(
+        &mut self,
+        _k: &mut Kernel,
+        b: &mut Brep,
+        e: EdgeId,
+        curve: Curve,
+    ) -> Result<()> {
+        edge::replace_3d_curve(b, e, Some(curve), self.env)
     }
     fn delete_face(
         &mut self,
@@ -1124,6 +1140,22 @@ impl<'c> Stitch<'c> {
             edits.split_edge(k, b, e, t)
         } else {
             make_vertex_split_edge(k, b, e, t)
+        }
+    }
+    /// Replaces the curve of `e` (and its interval, and the edge uses' trim curves) with `curve`.
+    pub(crate) fn edit_replace_edge_curve(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        e: EdgeId,
+        curve: Curve,
+    ) -> Result<()> {
+        if let Some(edits) = self.edits.as_deref_mut() {
+            edits.replace_edge_curve(k, b, e, curve)
+        } else {
+            crate::topology::brep::p3::with_kernel_callbacks(k, b, |_k, b, env| {
+                edge::replace_3d_curve(b, e, Some(curve), env)
+            })
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -3044,6 +3076,15 @@ mod tests {
             panic!("unexpected edit in cancellation propagation test")
         }
         fn brep_pre_edit(&mut self, _k: &mut Kernel, _b: &mut Brep) -> Result<()> {
+            panic!("unexpected edit in cancellation propagation test")
+        }
+        fn replace_edge_curve(
+            &mut self,
+            _k: &mut Kernel,
+            _b: &mut Brep,
+            _e: EdgeId,
+            _curve: Curve,
+        ) -> Result<()> {
             panic!("unexpected edit in cancellation propagation test")
         }
         fn delete_face(

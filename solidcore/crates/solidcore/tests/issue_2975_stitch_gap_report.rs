@@ -645,9 +645,9 @@ fn a_planar_conic_disc_in_a_holed_face_reports_its_gap() {
 }
 
 /// Two unit squares in the plane `z = 0` meeting along the line `x = 1`, the second face's
-/// surface then moved up by `lift`: the seam edge is one curve, exact on the first face and
-/// `lift` from the second face's surface (two surfaces fitted to one curve).
-fn lifted_pair(k: &mut Kernel, lift: f64) -> Brep {
+/// surface then replaced by `plane`: the seam edge is one curve, exact on the first face and off
+/// the second face's surface (two surfaces fitted to one curve).
+fn pair_with_second_surface(k: &mut Kernel, plane: Plane) -> Brep {
     let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT).unwrap();
     add_square(k, &mut b, 0.0, 0.0);
     add_square(k, &mut b, 1.0, 0.0);
@@ -655,15 +655,29 @@ fn lifted_pair(k: &mut Kernel, lift: f64) -> Brep {
         .unwrap()
         .last()
         .unwrap();
-    b.face_mut(second).unwrap().surface = Some(Surface::from(Plane::from_normal(
-        Vec3::new(0.0, 0.0, lift),
-        Vec3::new(0.0, 0.0, 1.0),
-    )));
+    b.face_mut(second).unwrap().surface = Some(Surface::from(plane));
     b
 }
 
-/// The seam edge of [`lifted_pair`] after a stitch (the one both faces use), with its tolerance
-/// and its largest gap to a face surface.
+/// The second surface parallel to the first and `lift` above it: the surfaces never meet.
+fn parallel_pair(k: &mut Kernel, lift: f64) -> Brep {
+    pair_with_second_surface(
+        k,
+        Plane::from_normal(Vec3::new(0.0, 0.0, lift), Vec3::new(0.0, 0.0, 1.0)),
+    )
+}
+
+/// The second surface tilted 45 degrees and crossing the first along the line `x = 1 - lift`,
+/// `lift` from the seam: the surfaces meet near the seam.
+fn crossing_pair(k: &mut Kernel, lift: f64) -> Brep {
+    pair_with_second_surface(
+        k,
+        Plane::from_normal(Vec3::new(1.0, 0.0, lift), Vec3::new(-1.0, 0.0, 1.0)),
+    )
+}
+
+/// The seam edge of a stitched pair (the one both faces use), with its tolerance and its largest
+/// gap to a face surface.
 fn seam(k: &mut Kernel, b: &mut Brep) -> (f64, f64) {
     use solidcore::topology::{edge, edgeuse::p1 as eu1};
     let seam = solidcore::topology::brep::p1::edges(b, None)
@@ -681,27 +695,45 @@ fn seam(k: &mut Kernel, b: &mut Brep) -> (f64, f64) {
 }
 
 #[test]
-fn a_seam_sewn_across_an_edge_surface_gap_carries_that_gap_as_its_tolerance() {
-    // The seam is `lift` from one face's surface: a gap the requested stitch tolerance allows
-    // and the edge's own tolerance does not yet cover.
+fn a_seam_off_a_face_surface_is_recomputed_on_both_surfaces_not_given_a_larger_tolerance() {
+    // The seam is farther from the second surface than its tolerance, within the stitch
+    // tolerance, and the surfaces cross: the seam becomes their intersection.
     let lift = 2e-4;
     let mut k = Kernel::default();
-    let mut b = lifted_pair(&mut k, lift);
+    let mut b = crossing_pair(&mut k, lift);
     solidcore::topology::brep::p4::stitch_faces(&mut k, &mut b, 1e-3, None, false).unwrap();
     let (tolerance, gap) = seam(&mut k, &mut b);
-    assert!((gap - lift).abs() <= 1e-9, "the measured gap {gap:e}");
     assert!(
-        tolerance >= gap && tolerance <= 1.01 * gap,
-        "the seam's tolerance {tolerance:e} is the gap {gap:e} it closed"
+        gap <= tolerance,
+        "the seam's gap {gap:e} is within its tolerance {tolerance:e}"
+    );
+    assert!(
+        tolerance < lift / 100.0,
+        "the tolerance stayed the ordinary one, {tolerance:e}, against the offset {lift:e}"
     );
 }
 
 #[test]
-fn a_seam_across_a_gap_beyond_the_requested_tolerance_keeps_its_tolerance() {
+fn a_seam_across_a_gap_beyond_the_requested_tolerance_is_left_to_the_check() {
     let lift = 2e-4;
     let mut k = Kernel::default();
-    let mut b = lifted_pair(&mut k, lift);
+    let mut b = crossing_pair(&mut k, lift);
     solidcore::topology::brep::p4::stitch_faces(&mut k, &mut b, 1e-5, None, false).unwrap();
+    let (tolerance, gap) = seam(&mut k, &mut b);
+    assert!(
+        tolerance < gap,
+        "tolerance {tolerance:e} against the gap {gap:e}: still refused by the check"
+    );
+}
+
+#[test]
+fn a_seam_between_surfaces_that_never_meet_keeps_its_tolerance() {
+    // Parallel surfaces `lift` apart: no curve lies on both, and none is within the edge's
+    // tolerance of both.
+    let lift = 2e-4;
+    let mut k = Kernel::default();
+    let mut b = parallel_pair(&mut k, lift);
+    solidcore::topology::brep::p4::stitch_faces(&mut k, &mut b, 1e-3, None, false).unwrap();
     let (tolerance, gap) = seam(&mut k, &mut b);
     assert!(
         tolerance < gap,
