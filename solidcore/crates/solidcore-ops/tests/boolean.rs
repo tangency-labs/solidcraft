@@ -1383,6 +1383,7 @@ fn stadium_area() -> f64 {
 /// from z = 12 up over y from -65 to 0: the stadium's part above z = 12 is its area less the
 /// strip 38 h of its flat side and the two half segments of depth h of its circles, one whole
 /// segment r^2 acos((r - h) / r) - (r - h) sqrt(2 r h - h^2).
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 fn block_less_stadium_and_cut(h: f64) -> f64 {
     let r = 16.0;
     let segment = r * r * ((r - h) / r).acos() - (r - h) * (2.0 * r * h - h * h).sqrt();
