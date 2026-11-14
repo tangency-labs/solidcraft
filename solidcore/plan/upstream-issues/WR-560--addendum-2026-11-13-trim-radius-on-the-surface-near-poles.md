@@ -1,4 +1,4 @@
-# WR-560: a trim's radius is certified on its surface over each turn's neighbourhood
+# WR-560: a trim's radius is certified on its surface over the whole trim
 
 Updates: WR-560
 
@@ -12,8 +12,11 @@ tolerance although its image on the surface is smooth.
 
 Change (not upstream, no flag): a test-13 solution below the tolerance on a mapped trim is
 passed over only where a certified lower bound on the radius of curvature of the trim's
-image `S(c(t))` is at least the tolerance over the whole trim, off the zero-speed stretches
-at its ends (WR-668). The bound composes each polynomial piece
+image `S(c(t))` is at least the tolerance over the whole trim. Over the zero-speed stretches
+at its ends (WR-668), where the radius vanishes with the speed, it must be at least half the
+growth line WR-668 reads there, `(tol / stretch) |t - t_end| / 2`, certified on 52 dyadic
+pieces out to `2^-52` of the stretch from the end. The rest of the stretch, which holds the
+zero-speed end itself, is not certified: no positive bound can clear it. The bound composes each polynomial piece
 of the trim with each polynomial patch of the surface in rounded interval arithmetic and
 bounds `|g'|^3 / |g' x g''|` from the composed coefficients (no sampling); pieces that do not
 clear are halved, breadth first, at most 4096 pieces and 64 halvings each, no recursion. A

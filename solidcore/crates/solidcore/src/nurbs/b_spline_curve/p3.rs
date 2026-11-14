@@ -77,9 +77,10 @@
 //!   Not upstream (WR-560 extended): test 13 of a UV trim measured on its surface also
 //!   passes over a solution below the tolerance where the trim's image on the surface,
 //!   `S(c(t))`, is proved by a rounded-interval bound on its composed coefficients to have a radius of at least
-//!   the tolerance from the neighbouring solution below to the one above
+//!   the tolerance over the whole trim, its zero-speed end stretches (WR-668) to at least
+//!   half the growth line they stand for, out to `2^-52` of each stretch from its end
 //!   ([`crate::nurbs::b_spline_curve::trim_image`]; at most 4096 pieces, each halved at
-//!   most 64 times, no recursion): the constant metric WR-560 maps the trim by is exact only on a
+//!   most 64 times, per call, no recursion): the constant metric WR-560 maps the trim by is exact only on a
 //!   plane, and near a pole the exact trim of a smooth curve turns sharply in (u, v).
 //! - **Back-edges.** `HasInternalPole` calls `IsDegenerate` (`p2`); `IsSegmentLine`,
 //!   `IsOnPlane` and `JoinWith` test `IsKindOf(SmLine_TYPE)` (false for a
@@ -537,6 +538,51 @@ fn zero_speed_radius_stretch(
         return Ok(None);
     }
     Ok(Some(stretch))
+}
+
+/// How many dyadic pieces [`stretch_clears_on_surface`] certifies a zero-speed stretch in:
+/// out to `2^-52` of the stretch from its end.
+const STRETCH_PIECES: i32 = 52;
+
+/// Not upstream: whether the image on `surface` of the trim `trim` has, over the
+/// zero-speed stretch of length `stretch` at its end `end` (0: the start, 1: the end of
+/// `domain`), a radius of curvature of at least half the growth line WR-668 reads there,
+/// `r >= (radius_tol / stretch) |t - t_end| / 2`.
+///
+/// The stretch is cut into the dyadic pieces at `stretch 2^-(j+1)` to `stretch 2^-j` from
+/// the end, `j = 0..STRETCH_PIECES`. On each,
+/// [`radius_clears_on_surface`] must clear the growth line's value at the piece's near
+/// edge, `radius_tol 2^-(j+1)`, which is half its value at the far edge, so half the line
+/// holds over the piece. The rest, within `stretch 2^-52` of the end, is not certified:
+/// there the radius vanishes with the speed, and no positive tolerance can clear the
+/// piece that holds the end. `false` at the first piece that does not clear.
+///
+/// # Errors
+///
+/// Those of [`radius_clears_on_surface`].
+fn stretch_clears_on_surface(
+    k: &Kernel,
+    trim: &BSplineCurve,
+    surface: &Surface,
+    domain: &Extent1d,
+    end: usize,
+    stretch: f64,
+    radius_tol: f64,
+) -> Result<bool> {
+    for j in 0..STRETCH_PIECES {
+        let near = stretch * 2f64.powi(-(j + 1));
+        let far = stretch * 2f64.powi(-j);
+        let (lo, hi) = if end == 0 {
+            (domain.min() + near, domain.min() + far)
+        } else {
+            (domain.max() - far, domain.max() - near)
+        };
+        let tol = radius_tol * 2f64.powi(-(j + 1));
+        if !radius_clears_on_surface(k, trim, surface, lo, hi, tol)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// The first fundamental form `[E, F, G]` of `surface` at `uv`, its derivatives taken
@@ -1933,8 +1979,9 @@ impl BSplineCurve {
             // turns there through up to half a period over a few times the pole's
             // distance. A solution below the tolerance is passed over only where the
             // image on the surface is proved to have a radius of at least the tolerance
-            // over the whole trim, off the zero-speed stretches at its ends
-            // ([`radius_clears_on_surface`]). The bound covers the whole trim, not only
+            // over the whole trim, its zero-speed end stretches to at least half the
+            // growth line they stand for ([`radius_clears_on_surface`],
+            // [`stretch_clears_on_surface`]). The bound covers the whole trim, not only
             // the solution's neighbourhood: the analysis finds solutions on the mapped
             // trim, and a corner that is sharp on the surface can read above the
             // tolerance mapped (where a step in u is shorter on the surface than at the
@@ -1950,7 +1997,7 @@ impl BSplineCurve {
                 for s in &solutions {
                     params.push(s.param(0)?);
                 }
-                // the whole trim off the zero-speed stretches, certified once
+                // the whole trim, certified once
                 let mut whole_clears: Option<bool> = None;
                 for (s, &p) in solutions.iter().zip(&params) {
                     let growth = (p - domain.min()).abs() <= stretch[0]
@@ -1962,8 +2009,17 @@ impl BSplineCurve {
                             } else {
                                 let lo = domain.min() + max2(stretch[0], 0.0);
                                 let hi = domain.max() - max2(stretch[1], 0.0);
-                                let c =
+                                let mut c =
                                     radius_clears_on_surface(k, self, surface, lo, hi, radius_tol)?;
+                                // the zero-speed stretches: on the surface, at least half
+                                // the growth line they stand for
+                                for (end, &len) in stretch.iter().enumerate() {
+                                    if c && len >= 0.0 {
+                                        c = stretch_clears_on_surface(
+                                            k, self, surface, &domain, end, len, radius_tol,
+                                        )?;
+                                    }
+                                }
                                 whole_clears = Some(c);
                                 c
                             }
@@ -2652,6 +2708,33 @@ mod tests {
         assert!(!radius_clears_on_surface(&k, &trim, &surface, 0.0, 1.0, tol).unwrap());
         let idx = failed_tests(&k, &trim, Some(&surface));
         assert!(idx.contains(&13), "{idx:?}");
+    }
+
+    /// The zero-speed stretch certificate: over a stretch taken as the whole of a trim, a
+    /// latitude arc halfway up the r 6 ball (radius 6) clears half the growth line of the
+    /// tolerance 1e-3, and the V cusp near the pole of
+    /// [`a_cusp_near_a_sphere_pole_is_reported`] does not, from either end. (A unit test
+    /// of the certificate: a whole trim with a zero-speed tangent end on a tangent edge,
+    /// a corner inside its stretch and a false-alarm turn elsewhere is not built here.)
+    #[test]
+    fn a_corner_inside_a_zero_speed_stretch_is_not_cleared() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let (w, h) = (dom.max().x - dom.min().x, dom.max().y - dom.min().y);
+        let v = dom.min().y + 0.5 * h;
+        let arc = uv_bezier(&[[dom.min().x + 0.1 * w, v], [dom.min().x + 0.7 * w, v]]);
+        let unit = Extent1d::from_raw(0.0, 1.0);
+        for end in [0, 1] {
+            assert!(stretch_clears_on_surface(&k, &arc, &surface, &unit, end, 1.0, 1e-3).unwrap());
+        }
+        let (u, v) = (dom.min().x + 0.5 * w, dom.max().y - 0.015 * h);
+        let (e, hh) = (1e-5 * w, 2e-3 * h);
+        let cusp = uv_bezier(&[[u - e, v + hh], [u, v - hh], [u + e, v + hh]]);
+        for end in [0, 1] {
+            assert!(
+                !stretch_clears_on_surface(&k, &cusp, &surface, &unit, end, 1.0, 1e-3).unwrap()
+            );
+        }
     }
 
     /// A quadratic 2D trim through the control points `pts` with the distinct `knots` and
