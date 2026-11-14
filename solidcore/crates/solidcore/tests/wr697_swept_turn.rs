@@ -288,10 +288,9 @@ use solidcore::surface::procedural_blend::record::{CornerRecord, SupportRecord};
 use solidcore::surface::procedural_blend::BlendNet;
 use solidcore::surface::surface::Surface;
 
-/// The swept boss base, with or without `fillet_round_as_definition`.
-fn swept_boss_base(definition: bool) -> (Kernel, Brep) {
+/// The swept boss base.
+fn swept_boss_base() -> (Kernel, Brep) {
     let mut k = all_fixes();
-    k.fixes.fillet_round_as_definition = definition;
     let mut b = boss_base(&mut k);
     round(&mut k, &mut b, &BASE, &[1.0; 4]).unwrap();
     (k, b)
@@ -307,30 +306,6 @@ fn corner_faces(b: &Brep, kind: CornerKind) -> Vec<Surface> {
             s.procedural_blend()
                 .and_then(|d| d.corner())
                 .is_some_and(|c| c.kind() == kind)
-        })
-        .collect()
-}
-
-/// Every face's surface over a 9 x 9 grid of its natural domain, as bits.
-fn face_bits(k: &Kernel, b: &Brep) -> Vec<Vec<[u64; 3]>> {
-    get_faces(b)
-        .unwrap()
-        .into_iter()
-        .filter_map(|f| face2::surface(b, f).unwrap())
-        .map(|s| {
-            let d = s.natural_uv_domain_with_nurb(k).unwrap();
-            let mut pts = Vec::new();
-            for i in 0..=8 {
-                for j in 0..=8 {
-                    let u = d.min().x + (d.max().x - d.min().x) * f64::from(i) / 8.0;
-                    let v = d.min().y + (d.max().y - d.min().y) * f64::from(j) / 8.0;
-                    let p = s
-                        .evaluate_point(k, solidcore::geom::vector2d::Point2::new(u, v))
-                        .unwrap();
-                    pts.push([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
-                }
-            }
-            pts
         })
         .collect()
 }
@@ -352,7 +327,7 @@ fn moved(rec: &SupportRecord, by: f64) -> SupportRecord {
 
 #[test]
 fn the_swept_tori_are_their_definitions() {
-    let (k, mut b) = swept_boss_base(true);
+    let (k, b) = swept_boss_base();
     let tori = corner_faces(&b, CornerKind::Swept);
     assert_eq!(tori.len(), 4);
     for s in &tori {
@@ -364,16 +339,11 @@ fn the_swept_tori_are_their_definitions() {
         assert!(d.support(0).is_some());
         assert_eq!(d.recertify(&k).unwrap(), 0.0);
     }
-    // the volume and every surface bit for bit as without the definition
-    let (k0, mut b0) = swept_boss_base(false);
-    assert!(corner_faces(&b0, CornerKind::Swept).is_empty());
-    assert_eq!(volume(&k, &mut b).to_bits(), volume(&k0, &mut b0).to_bits());
-    assert_eq!(face_bits(&k, &b), face_bits(&k0, &b0));
 }
 
 #[test]
 fn a_swept_torus_round_trips_through_its_record() {
-    let (k, b) = swept_boss_base(true);
+    let (k, b) = swept_boss_base();
     for s in corner_faces(&b, CornerKind::Swept) {
         let rec = corner_to_record(&k, &s).unwrap();
         let json = serde_json::to_string(&rec).unwrap();
@@ -386,7 +356,7 @@ fn a_swept_torus_round_trips_through_its_record() {
 
 #[test]
 fn a_swept_torus_off_its_common_face_or_its_axis_is_refused() {
-    let (k, b) = swept_boss_base(true);
+    let (k, b) = swept_boss_base();
     let s = &corner_faces(&b, CornerKind::Swept)[0];
     let CornerRecord::Swept(rec) = corner_to_record(&k, s).unwrap() else {
         panic!("not a swept record");
@@ -416,7 +386,7 @@ fn a_swept_torus_off_its_common_face_or_its_axis_is_refused() {
 
 #[test]
 fn a_moved_swept_torus_is_certified_again() {
-    let (k, b) = swept_boss_base(true);
+    let (k, b) = swept_boss_base();
     for s in corner_faces(&b, CornerKind::Swept) {
         let mut s = s.copy(&k).unwrap();
         let mut place = solidcore::geom::axis2_placement::Axis2Placement::default();

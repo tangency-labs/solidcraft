@@ -2762,14 +2762,12 @@ pub fn calc_exact_fillet_geom(
             None => ops.solver().first_fillet_geom()?,
         };
         pseudo.geom_mut(g)?.exact_class = true;
-        if k.fixes.fillet_round_as_definition {
-            keep_definition(ops, k, pseudo, blend, fillet_geom)?;
-        }
+        keep_definition(ops, k, pseudo, blend, fillet_geom)?;
     }
     Ok(built)
 }
 
-/// Not the fork (#2485, with `fillet_round_as_definition`): the round just built by its
+/// Not the fork (#2485): the round just built by its
 /// exact class keeps its definition on its surface ([`ExactRound`]): its supports (the
 /// faces the class was read off), the ball's radius, the ball's circle as its section and
 /// the centre line as its leader. Its net is its exact surface, re-certified at once

@@ -385,7 +385,7 @@ impl FilletSurfaceGenerator {
                     .ok_or_else(|| none("the second side's uv curve"))?
                     .clone();
                 let mut g = *g;
-                // (a blend by its definition with `fillet_round_as_definition`, 4a10ed8)
+                // (a blend by its definition, 4a10ed8)
                 return g.create_surface(
                     k,
                     approx_tol_3d,
@@ -413,7 +413,7 @@ impl FilletSurfaceGenerator {
     /// thumbweight, the certificate), as the fork's generator object does.
     ///
     /// `ball`: what the circular generator reads off the solver (`None` where the caller
-    /// has no such solver); with it and `fixes.fillet_round_as_definition` a constant
+    /// has no such solver); with it a constant
     /// round between NURBS faces is its definition, the rails and uv curves rebuilt on its
     /// stations ([`CircularCrossSectionFsg::definition_surface`], the fork's cc08236).
     /// With it, a round whose centre line or a

@@ -8,7 +8,7 @@
 //! | `Recovery::split_rail` | calls [`super::super::p1::split_rail`] |
 //! | `Recovery::support_edge` | calls [`super::super::p1::compute_support_edge`] |
 //! | `Recovery::retraced_end`, `Recovery::end_sections`, `RecoveryOps::end_vertex`, `RecoveryOps::recalc_through` | none (#2406: a rollover's piece traced again up to an End at a smooth vertex) |
-//! | `Recovery::keeps_round` (private) | none (#2406, with `fillet_round_as_definition`: the piece before a tangent rollover keeps its round by its definition) |
+//! | `Recovery::keeps_round` (private) | none (#2406: the piece before a tangent rollover keeps its round by its definition) |
 //!
 //! Deviations: missing callees have typed call boundaries in `RecoveryOps`;
 //! their callers, mutations, cleanup and continuation are fully represented.
@@ -471,7 +471,7 @@ impl Recovery<'_> {
         let start = self.start(rail)?;
         required(edge::other_vertex(self.fillets.brep(), rail, Some(start))?)
     }
-    /// Not upstream (#2406; with `fixes.fillet_round_as_definition`):
+    /// Not upstream (#2406):
     /// whether geometry `geom`, a piece of the rollover that ends where a rail rolls over
     /// a tangent edge (`hits`) and is not the last, keeps its round. Its ball rolls on the
     /// same two faces as before (its offsets unchanged, `geom_type` the default), and its
@@ -494,12 +494,7 @@ impl Recovery<'_> {
         hits: &[SideHit; 2],
         saved: &FilletSolverOffsetsData,
     ) -> Result<bool> {
-        let fixes = &self.k.fixes;
-        if !fixes.fillet_round_as_definition
-            || last
-            || geom_type != FilletGeomType::Default
-            || !hits.iter().any(|h| h.tangent)
-        {
+        if last || geom_type != FilletGeomType::Default || !hits.iter().any(|h| h.tangent) {
             return Ok(false);
         }
         for which in 0..2 {

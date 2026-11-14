@@ -36,9 +36,7 @@ const L: f64 = 10.0;
 const R: f64 = 2.0;
 
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = true;
-    k
+    Kernel::default()
 }
 
 fn bilinear(p: [Point3; 4]) -> BSplineSurface {

@@ -252,7 +252,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
     f.cone_unbounded_parameterized_as_nurb = true;
-    f.fillet_round_as_definition = true;
     f.fillet_overflow_crease_along_edge = true;
     f.keep_exact_pcurves = true;
     f.planar_section_face_tolerance = true;

@@ -39,7 +39,7 @@
 //! [`crate::surface::ball_patch::BallPatch`] (`SmBallPatch`): the rational patch carrying
 //! its sphere as its definition (its own type, exact offset and database IO). The patch
 //! and its loop are kept in [`BallCorner`] from the edge geometry until the patch takes them.
-//! With `Kernel::fixes.fillet_round_as_definition` the patch also keeps its corner
+//! The patch also keeps its corner
 //! definition (#2357, not the fork's): its sphere and its loop, certified on it
 //! ([`crate::surface::procedural_blend::corner::BallDefinition`]). The fork's
 //! `SmFilletExecutive::IsSetBackVertex` is the caller's `set_back` argument (WR-697). No
@@ -1193,16 +1193,14 @@ pub fn ball_corner_edge_geom(
         // each patch keeps its definition (#2357): the ball's sphere and the patch's own loop,
         // certified on it
         let mut surface = surface;
-        if k.fixes.fillet_round_as_definition {
-            let boundary = trims
-                .curves_3d
-                .iter()
-                .map(|c| nurbs_curve(c).cloned())
-                .collect::<Result<_>>()?;
-            let definition = CornerDefinition::ball(centre, radius, boundary)?;
-            definition.recertify(k, &surface)?;
-            surface.set_corner_definition(definition);
-        }
+        let boundary = trims
+            .curves_3d
+            .iter()
+            .map(|c| nurbs_curve(c).cloned())
+            .collect::<Result<_>>()?;
+        let definition = CornerDefinition::ball(centre, radius, boundary)?;
+        definition.recertify(k, &surface)?;
+        surface.set_corner_definition(definition);
         ball.curves_3d.extend(trims.curves_3d);
         ball.uv_curves
             .extend(trims.uv_curves.iter().cloned().map(Curve::from));

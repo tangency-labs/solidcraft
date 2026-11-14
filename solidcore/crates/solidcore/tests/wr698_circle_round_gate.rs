@@ -46,10 +46,8 @@ const L: f64 = 10.0;
 const R: f64 = 2.0;
 const N: usize = 40;
 
-fn kernel(definition: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = definition;
-    k
+fn kernel() -> Kernel {
+    Kernel::default()
 }
 
 fn plane_a() -> Surface {
@@ -268,7 +266,7 @@ fn dump_for_the_fork() {
     if std::env::var("DUMP").is_err() {
         return;
     }
-    let k = kernel(true);
+    let k = kernel();
     let [r1, r2, w1, w2] = inputs(&k);
     for (name, c) in [("r1", &r1), ("r2", &r2), ("w1", &w1), ("w2", &w2)] {
         for i in [0, 7, 20, 33, 40] {
@@ -310,7 +308,7 @@ const RAIL_037: [f64; 3] = [3.700_000_000_000_001_07, 0.0, 2.090_715_071_385_112
 /// bounds and spans, the replaced rail and the net's and the definition's points).
 #[test]
 fn the_ball_s_build_is_the_fork_s() {
-    let k = kernel(true);
+    let k = kernel();
     let (s, bound, spans, rail) = build(&k, 2.0);
     let s = s.unwrap();
     assert!(matches!(s.kind(), SurfaceKind::ProceduralBlend(_)));
@@ -343,7 +341,7 @@ fn the_ball_s_build_is_the_fork_s() {
 /// nothing is built and the rails are left as they were, as in the fork.
 #[test]
 fn rails_that_are_not_the_ball_s_feet_build_nothing() {
-    let k = kernel(true);
+    let k = kernel();
     let (s, bound, spans, rail) = build(&k, 2.2);
     assert!(s.is_none());
     assert_eq!((spans, bound), (0, -1.0));
@@ -364,7 +362,7 @@ fn is_definition(s: &Surface) -> bool {
 /// stations' (the same as `Build`'s).
 #[test]
 fn the_exact_circle_s_round_is_its_definition() {
-    let k = kernel(true);
+    let k = kernel();
     let (s, rail) = generator_round(&k, &mut exact(), [R, R]);
     assert!(is_definition(&s));
     assert_pt(rail.evaluate_point(0.37).unwrap(), RAIL_037, "rail (0.37)");
@@ -385,14 +383,13 @@ fn otherwise_the_round_is_built_as_before() {
         );
         assert_eq!([a.x, a.y, a.z], [b.x, b.y, b.z], "{what}");
     };
-    let on = kernel(true);
+    let on = kernel();
     before(
         &on,
         &mut FilletSurfaceGenerator::circular_default(),
         [R, R],
         "approximated",
     );
-    before(&kernel(false), &mut exact(), [R, R], "flag off");
     before(&on, &mut exact(), [2.2, 2.2], "not the feet");
     before(&on, &mut exact(), [R, 2.5], "two radii");
 }
@@ -420,7 +417,7 @@ fn quarter(dim: u64, r: f64, z: f64, a: f64, b: f64) -> BSplineCurve {
 /// the ball of radius 2 revolve a torus, which the round stays.
 #[test]
 fn a_revolved_torus_stays_the_torus() {
-    let k = kernel(true);
+    let k = kernel();
     let c = 20.0;
     let grid = |cps: &[Point3], du: usize, w: Option<&[f64]>| {
         Surface::from(

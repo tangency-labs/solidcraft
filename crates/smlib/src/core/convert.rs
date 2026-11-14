@@ -273,7 +273,7 @@ pub(super) fn bspline_curve_part<'c>(k: &Kernel, c: &'c Curve) -> Result<Option<
 fn bspline_surface_part<'s>(k: &Kernel, s: &'s Surface) -> Result<Option<&'s BSplineSurface>> {
     Ok(match s.kind_with_nurb(k).map_err(sc("SmSurface::GetOrCreateGwNurbPointer"))? {
         SurfaceKind::BSpline(b) => Some(b),
-        // A procedural round (solidcore#2274, `fixes.fillet_round_as_definition`) and a Ball corner's
+        // A procedural round (solidcore#2274) and a Ball corner's
         // patch (solidcore#2319, `fixes.fillet_blend_corner`) are their nets, as the fork casts them
         // to `SmBSplineSurface`: the face goes out as that NURBS, exactly.
         SurfaceKind::BallPatch(bp) => Some(bp.net()),

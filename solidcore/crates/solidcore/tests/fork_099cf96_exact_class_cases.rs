@@ -29,9 +29,8 @@
 //! the default kernel with the exact classes but no other fix, builds the pipes (traced, and
 //! failing a validity test), so neither profile has these marks now. Since #2864 the ball's
 //! half rim's round runs on across the sphere's seam into the whole rim. With SolidCraft's
-//! current section fixes, the fitted tee meets its original tolerance even with procedural rounds off.
-//! With `fillet_round_as_definition` enabled (#2274), a fitted round is instead a
-//! `ProceduralBlend`: check its definition's ball contact to 1e-9, and its stored net
+//! current section fixes, a fitted round is a
+//! `ProceduralBlend` (#2274): check its definition's ball contact to 1e-9, and its stored net
 //! against the unchanged fitted tolerance. The historical 1.47e-3 mark describes the
 //! earlier fitted surface, not this definition.
 //!
@@ -634,21 +633,6 @@ fn exact_kernel() -> Kernel {
     k
 }
 
-fn solidcraft_before_definitions() -> Kernel {
-    let mut k = solidcraft_kernel();
-    k.fixes.fillet_round_as_definition = false;
-    k
-}
-
-#[test]
-fn with_solidcraft_s_fixes_without_definitions_the_fitted_round_meets_tolerance() {
-    check_all(
-        mark_with_section_fixes,
-        solidcraft_before_definitions,
-        RoundKind::Fitted,
-    );
-}
-
 #[test]
 fn with_solidcraft_s_fixes_the_fitted_round_is_its_definition() {
     check_all(
@@ -682,10 +666,8 @@ fn the_ball_s_half_rim_runs_on_across_the_seam() {
         .find(|c| c.name == "sphere_plane")
         .unwrap();
     case.points.truncate(1);
-    for kernel in [solidcraft_kernel, solidcraft_before_definitions] {
-        let got = grade(&case, &mut kernel());
-        assert!(holds(Mark::Passes, &got), "{got:?}");
-    }
+    let got = grade(&case, &mut solidcraft_kernel());
+    assert!(holds(Mark::Passes, &got), "{got:?}");
 }
 
 #[test]
@@ -731,11 +713,6 @@ fn the_grading_distinguishes_a_definition_from_a_fitted_surface() {
     for got in [
         graded(&mut solidcraft_kernel(), RoundKind::Fitted, 1.0),
         graded(&mut solidcraft_kernel(), RoundKind::Procedural, 1.00001),
-        graded(
-            &mut solidcraft_before_definitions(),
-            RoundKind::Procedural,
-            1.0,
-        ),
     ] {
         assert!(!holds(Mark::Passes, &got), "{got:?}");
     }

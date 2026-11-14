@@ -2582,7 +2582,6 @@ mod tests {
         use crate::primitive::api_primitives::{create_box, create_cylinder};
         use crate::query::api_queries::{edge_closest_point, get_edges};
         use crate::topology::face;
-        k.fixes.fillet_round_as_definition = true;
         let plate = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
         let mut pipe = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
         let phi = 4.0_f64.to_radians();

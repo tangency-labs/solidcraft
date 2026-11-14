@@ -513,16 +513,14 @@ impl FilletSession<'_> {
             }
             // the zone keeps its corner definition (#2357), as every corner ball's patch does:
             // the ball's sphere and the zone's own loop, certified on it
-            if k.fixes.fillet_round_as_definition {
-                let boundary = curves_3d
-                    .iter()
-                    .flatten()
-                    .map(|c| nurbs_curve(c).cloned())
-                    .collect::<Result<Vec<_>>>()?;
-                let definition = CornerDefinition::ball(corner.centre, corner.radius, boundary)?;
-                definition.recertify(k, &zone)?;
-                zone.set_corner_definition(definition);
-            }
+            let boundary = curves_3d
+                .iter()
+                .flatten()
+                .map(|c| nurbs_curve(c).cloned())
+                .collect::<Result<Vec<_>>>()?;
+            let definition = CornerDefinition::ball(corner.centre, corner.radius, boundary)?;
+            definition.recertify(k, &zone)?;
+            zone.set_corner_definition(definition);
             let input = FaceCurvesInput {
                 loops: vec![2],
                 curves_3d: Some(curves_3d),
