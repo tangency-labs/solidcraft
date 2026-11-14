@@ -468,6 +468,8 @@ impl AppPanelRuntime {
         use super::native_ui::WindowAction;
 
         let (Some(desktop), Some(state)) = (self.desktop.clone(), self.production.clone()) else { return Ok(()) };
+        self.show_drop_window(ctx, &desktop);
+        let drag_back = app.preferences.panel_drag_out;
         if !self.runtime.layout().layout().sections.iter().any(|section| section.location.zone() == Zone::Window) {
             return Ok(());
         }
@@ -499,9 +501,7 @@ impl AppPanelRuntime {
                     return Err(error(Rule::Lifecycle, "native window lost its layout registration"));
                 }
                 let title = self.runtime.instance_presentation(active)?.title;
-                let size = section.size;
-                let preferred =
-                    Size { width: size.width.max(360.0).clamp(min.width, max.width), height: size.height.max(440.0).clamp(min.height, max.height) };
+                let preferred = window_size(section.size, (min, max));
                 let Some(builder) = desktop.builder(ctx, &host, active, title, preferred, (min, max)) else { return Ok(()) };
                 let Some(viewport) = desktop.viewport_id(&host) else { return Ok(()) };
                 let action = match desktop.ready(ctx, &host, &builder) {
@@ -521,7 +521,7 @@ impl AppPanelRuntime {
                             }
                             desktop.observe(ui.ctx(), &host, active);
                             solidcraft_ui_registry::isolated(|| {
-                                super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
+                                super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled, drag_back)
                             })
                         });
                         self.services.set_presentation_viewport(None);
@@ -535,6 +535,14 @@ impl AppPanelRuntime {
                     WindowAction::Expand(section) => Mutation::Collapse { section, collapsed: false },
                     WindowAction::Content(instance, action) => Mutation::HeaderAction { instance, action },
                     WindowAction::Redock => Mutation::NativeClose { host },
+                    WindowAction::Drag(event) => {
+                        // The app's host shows the drop place and commits the drop.
+                        if let Some(root) = self.host.as_mut() {
+                            root.queue_window_drag(event);
+                        }
+                        ctx.request_repaint_of(egui::ViewportId::ROOT);
+                        return Ok(());
+                    }
                 };
                 if let Err(reason) = self.dispatch(&app.session, LayoutAction::Apply { expected_revision: None, mutations: vec![mutation] }) {
                     if close {
@@ -550,6 +558,46 @@ impl AppPanelRuntime {
             }
         }
         failure.map_or(Ok(()), Err)
+    }
+
+    /// While a drag would pop a panel out, show the window it would open, as an
+    /// outline at that screen place: release opens it only where this showed it.
+    /// After the drop, the next window for that panel opens there.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn show_drop_window(&mut self, ctx: &egui::Context, desktop: &super::native::DesktopNativeAdapter) {
+        let Some(host) = self.host.as_mut() else { return };
+        if let Some((instance, outer)) = host.take_window_landing() {
+            desktop.place(ctx, &instance, super::workspace::egui_rect(outer));
+        }
+        let Some((instance, corner)) = host.window_landing_preview() else { return };
+        let layout = self.runtime.layout();
+        let landing = layout.layout().containing(&instance).ok().zip(layout.layout().instance(&instance).ok()).and_then(|(section, panel)| {
+            let bounds = layout.registry().get(&panel.kind).ok()?.size_bounds(Zone::Window);
+            desktop.landing(ctx, &instance, egui::pos2(corner.x, corner.y), window_size(section.size, bounds), bounds)
+        });
+        let Some(outer) = landing else { return };
+        let title = self.runtime.instance_presentation(&instance).map(|presentation| presentation.title).unwrap_or_default();
+        let builder = egui::ViewportBuilder::default()
+            .with_title(title)
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_mouse_passthrough(true)
+            .with_always_on_top()
+            .with_taskbar(false)
+            .with_active(false)
+            .with_resizable(false)
+            .with_position(outer.min)
+            .with_inner_size(outer.size());
+        let viewport = egui::ViewportId::from_hash_of("solidcraft-panel-drop-window");
+        let shown = ctx.show_viewport_immediate(viewport, builder, |ui, class| {
+            crate::ui_kit::panel_host_preview(ui, ui.max_rect(), true, None, 1.0);
+            class != egui::ViewportClass::EmbeddedWindow && ui.input(|input| input.viewport().native_pixels_per_point.is_some())
+        });
+        if shown {
+            host.confirm_window_shown(super::workspace::logical_rect(outer));
+        } else {
+            ctx.request_repaint();
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1129,6 +1177,12 @@ pub(super) fn ensure_production(app: &mut crate::SolveApp) -> PanelResult<()> {
     Ok(())
 }
 
+/// A panel window's first inner size: its dock size, at least a usable window.
+#[cfg(not(target_arch = "wasm32"))]
+fn window_size(size: Size, (min, max): (Size, Size)) -> Size {
+    Size { width: size.width.max(360.0).clamp(min.width, max.width), height: size.height.max(440.0).clamp(min.height, max.height) }
+}
+
 pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
     if let Err(reason) = ensure_production(app) {
         app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
@@ -1156,6 +1210,7 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
         {
             host.set_header_action_visible(InstanceId("history".into()), ControlId("play".into()), app.preferences.history_play_button);
             host.set_live_drag(app.preferences.live_panel_drag_preview);
+            host.set_drag_out(app.preferences.panel_drag_out);
         }
         let result = (|| {
             #[cfg(not(target_arch = "wasm32"))]

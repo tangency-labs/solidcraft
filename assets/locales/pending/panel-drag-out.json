@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "prefs.panel_drag_out": "سحب اللوحات خارج التطبيق إلى نوافذ خاصة بها",
+    "prefs.panel_drag_out_help": "أفلت لوحة خارج التطبيق لفتحها في نافذة يمكنك نقلها إلى شاشة أخرى. اسحب مقبض النافذة إلى التطبيق لإعادة إرسائها. عند الإيقاف، تبقى اللوحة المسحوبة خارج الحافة داخل التطبيق.",
+    "ui.panel_host.dock_grip": "اسحب فوق التطبيق لإرساء اللوحة"
+  },
+  "de": {
+    "prefs.panel_drag_out": "Bereiche aus der App in eigene Fenster ziehen",
+    "prefs.panel_drag_out_help": "Lassen Sie einen Bereich außerhalb der App los, um ihn in einem Fenster zu öffnen, das Sie auf einen anderen Bildschirm verschieben können. Ziehen Sie den Griff des Fensters zurück über die App, um ihn anzudocken. Ist die Option aus, bleibt ein über den Rand gezogener Bereich in der App.",
+    "ui.panel_host.dock_grip": "Zum Andocken über die App ziehen"
+  },
+  "en": {
+    "prefs.panel_drag_out": "Drag panels out of the app into their own windows",
+    "prefs.panel_drag_out_help": "Release a panel outside the app to open it in a window you can move to another screen. Drag the window's grip back over the app to dock it. When off, a panel dragged past the edge stays in the app.",
+    "ui.panel_host.dock_grip": "Drag over the app to dock"
+  },
+  "he": {
+    "prefs.panel_drag_out": "גרירת חלוניות אל מחוץ ליישום לחלונות משלהן",
+    "prefs.panel_drag_out_help": "שחררו חלונית מחוץ ליישום כדי לפתוח אותה בחלון שאפשר להעביר למסך אחר. גררו את הידית של החלון בחזרה אל היישום כדי לעגן אותה. כשהאפשרות כבויה, חלונית שנגררה מעבר לקצה נשארת ביישום.",
+    "ui.panel_host.dock_grip": "גררו אל היישום כדי לעגן"
+  },
+  "ja": {
+    "prefs.panel_drag_out": "パネルをアプリの外にドラッグして別ウィンドウにする",
+    "prefs.panel_drag_out_help": "パネルをアプリの外で離すと、別の画面に移動できるウィンドウで開きます。ウィンドウのグリップをアプリの上までドラッグすると、元の位置にドッキングします。オフにすると、端の外までドラッグしたパネルはアプリ内に残ります。",
+    "ui.panel_host.dock_grip": "アプリの上までドラッグしてドッキング"
+  },
+  "ko": {
+    "prefs.panel_drag_out": "패널을 앱 밖으로 끌어 별도 창으로 열기",
+    "prefs.panel_drag_out_help": "패널을 앱 밖에서 놓으면 다른 화면으로 옮길 수 있는 창으로 열립니다. 창의 손잡이를 앱 위로 다시 끌면 도킹됩니다. 끄면 가장자리 밖으로 끈 패널이 앱 안에 남습니다.",
+    "ui.panel_host.dock_grip": "앱 위로 끌어 도킹"
+  },
+  "vi": {
+    "prefs.panel_drag_out": "Kéo bảng ra khỏi ứng dụng thành cửa sổ riêng",
+    "prefs.panel_drag_out_help": "Thả một bảng bên ngoài ứng dụng để mở nó trong một cửa sổ có thể chuyển sang màn hình khác. Kéo tay nắm của cửa sổ trở lại trên ứng dụng để gắn bảng vào lại. Khi tắt, bảng bị kéo qua mép vẫn ở trong ứng dụng.",
+    "ui.panel_host.dock_grip": "Kéo lên trên ứng dụng để gắn vào lại"
+  },
+  "zh": {
+    "prefs.panel_drag_out": "将面板拖出应用，放入独立窗口",
+    "prefs.panel_drag_out_help": "在应用外松开面板，即可在可移到其他屏幕的窗口中打开它。将窗口的手柄拖回应用上方即可停靠。关闭后，拖过边缘的面板仍留在应用内。",
+    "ui.panel_host.dock_grip": "拖到应用上方以停靠"
+  }
+}

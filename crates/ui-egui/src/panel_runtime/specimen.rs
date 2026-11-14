@@ -746,6 +746,7 @@ fn drop_target_observation(target: &HostDropTargetId) -> Value {
         HostDropTargetId::Dock { zone, before } => json!({"type":"dock","zone":zone,"before":before}),
         HostDropTargetId::Tab { section, before } => json!({"type":"tab","section":section,"before":before}),
         HostDropTargetId::Relative { section, placement } => json!({"type":"relative","section":section,"placement":placement}),
+        HostDropTargetId::Window => json!({"type":"window"}),
     }
 }
 

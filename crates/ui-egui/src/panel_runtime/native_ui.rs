@@ -9,8 +9,12 @@ pub(super) enum WindowAction {
     Expand(SectionId),
     Content(InstanceId, ControlId),
     Redock,
+    /// The grip is dragging the active panel back towards the app.
+    Drag(super::workspace::WindowDragEvent),
 }
 
+/// `drag_back` shows the grip that drags the panel back into the app.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn paint(
     runtime: &mut PanelRuntime,
     services: &mut ContentServices<'_>,
@@ -19,6 +23,7 @@ pub(super) fn paint(
     section: &Section,
     ui: &mut egui::Ui,
     enabled: bool,
+    drag_back: bool,
 ) -> PanelResult<Option<WindowAction>> {
     if ui.input(|input| input.viewport().close_requested()) {
         return Ok(Some(WindowAction::Redock));
@@ -42,8 +47,11 @@ pub(super) fn paint(
             let spec = layout.registry().get(&layout.layout().instance(active)?.kind)?;
             let environment = runtime.environment();
             let tabs = section.tabs.iter().filter(|id| availability.get(*id) == Some(&Availability::Available));
-            if section.tabs.len() > 1 || section.collapsed || !presentation.actions.is_empty() {
+            if drag_back || section.tabs.len() > 1 || section.collapsed || !presentation.actions.is_empty() {
                 ui.horizontal_wrapped(|ui| {
+                    if drag_back {
+                        action = grip(ui, active, environment.direction == Direction::Rtl).map(WindowAction::Drag);
+                    }
                     if section.tabs.len() > 1 {
                         for id in tabs {
                             if let Ok(tab) = runtime.instance_presentation(id)
@@ -117,6 +125,47 @@ pub(super) fn paint(
     })
     .inner?;
     Ok(action)
+}
+
+/// The section grip a docked panel's header has, here dragging the panel back
+/// over the app. Positions are screen points; Escape cancels.
+fn grip(ui: &mut egui::Ui, active: &InstanceId, rtl: bool) -> Option<super::workspace::WindowDragEvent> {
+    use super::workspace::WindowDragEvent;
+    let (id, bounds) = ui.allocate_space(egui::Vec2::splat(Tokens::get().form_close_size));
+    let label = solidcraft_ui_text::tr("ui.panel_host.dock_grip");
+    let chrome = HostChrome {
+        label,
+        icon: None,
+        icon_only: false,
+        attention: false,
+        selected: false,
+        enabled: true,
+        drag: true,
+        // The kit paints a header's section grip only for a title control.
+        title: true,
+        grip_only: true,
+        rtl,
+    };
+    let response = ui_kit::panel_host_control(ui, id, bounds, chrome);
+    response.clone().backing_on_hover_text(label);
+    let at = ui.input(|input| {
+        let pointer = input.pointer.latest_pos()?;
+        let origin = input.viewport().inner_rect?.min;
+        Some(Point { x: origin.x + pointer.x, y: origin.y + pointer.y }).filter(|at| at.validate().is_ok())
+    });
+    if response.drag_started() {
+        return at.map(|at| WindowDragEvent::Begin { instance: active.clone(), at });
+    }
+    if response.drag_stopped() {
+        return Some(at.map_or(WindowDragEvent::Cancel, |at| WindowDragEvent::Release { at }));
+    }
+    if response.dragged() {
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            return Some(WindowDragEvent::Cancel);
+        }
+        return at.map(|at| WindowDragEvent::Move { at });
+    }
+    None
 }
 
 struct NativeContent<'a> {
