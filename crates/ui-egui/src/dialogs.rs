@@ -673,10 +673,10 @@ fn adopt_dialog(app: &mut SolveApp, prepared: solidcraft_engine::ComputedCommand
     app.big_operation = true;
     let made = crate::hole_place::holes_made(&replies);
     for (id, reply) in replies {
-        let stop = (id == "joint.drive").then(|| crate::dialogs_assembly::drive_stop(&reply)).flatten();
+        let note = crate::dialogs_assembly::command_note(&app.session, &id, &reply);
         app.command_completed(&id, Ok(reply))?;
-        if let Some(why) = stop {
-            app.set_status(why, false);
+        if let Some((why, error)) = note {
+            app.set_status(why, error);
         }
     }
     crate::hole_place::group_made(app, d, made);
@@ -5338,11 +5338,9 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
         match app.run(&cmd, params) {
             Ok(reply) => {
                 replies.push((cmd.clone(), reply.clone()));
-                // A drive that stopped short says where, and why.
-                if cmd == "joint.drive"
-                    && let Some(why) = crate::dialogs_assembly::drive_stop(&reply)
-                {
-                    app.set_status(why, false);
+                // A drive that stopped short says where, and why, and a joint that conflicts says why.
+                if let Some((why, error)) = crate::dialogs_assembly::command_note(&app.session, &cmd, &reply) {
+                    app.set_status(why, error);
                 }
                 if matches!(cmd.as_str(), "sketch.intersect" | "sketch.project")
                     && let Some(what) = link_status(app, &cmd, &reply)

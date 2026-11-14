@@ -274,6 +274,80 @@ fn rigid_cycles_solve_and_conflicts_report() {
     assert!(s.execute("joint.create", &json!({"type": "hinge"})).is_err());
 }
 
+fn both_grounded() -> Session {
+    let mut s = two_cubes();
+    let b = occ(&s, "B");
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    s
+}
+
+fn occurrence_name(s: &Session, component: &str) -> String {
+    let id = occ(s, component);
+    s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone()).unwrap_or_default()
+}
+
+/// A joint between two grounded parts moves neither: the conflict and a warning say that, not
+/// that other joints place them elsewhere.
+#[test]
+fn a_joint_between_two_grounded_parts_says_both_are_grounded() {
+    let mut s = both_grounded();
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 0]}, "name": "Stack"}),
+    );
+    let said = format!("both its parts are grounded ({}, {}), so it can move neither", occurrence_name(&s, "A"), occurrence_name(&s, "B"));
+    let c = r["conflicts"].as_array().cloned().unwrap_or_default();
+    assert_eq!(c.len(), 1, "{r}");
+    assert_eq!((c[0]["joint"].clone(), c[0]["why"].as_str()), (r["joint"].clone(), Some(said.as_str())), "{r}");
+    assert_eq!(r["warnings"], json!([format!("Stack: {said}")]), "{r}");
+    assert!(near(place(&s, "B", Vec3::new(20.0, 0.0, 0.0)), Vec3::new(20.0, 0.0, 0.0)), "B stays where it is grounded");
+}
+
+/// A Mate constraint is kept as a joint, so between two grounded parts it says the same, by
+/// its own name.
+#[test]
+fn a_constraint_between_two_grounded_parts_says_both_are_grounded() {
+    let mut s = both_grounded();
+    let r = run(
+        &mut s,
+        "assembly.constraint.create",
+        json!({"type": "mate", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 0]}}),
+    );
+    let said = format!("both its parts are grounded ({}, {}), so it can move neither", occurrence_name(&s, "A"), occurrence_name(&s, "B"));
+    assert_eq!(r["name"], json!("Mate1"), "{r}");
+    assert_eq!(r["warnings"], json!([format!("Mate1: {said}")]), "{r}");
+}
+
+/// The design's base never moves, so a joint from it to a grounded part moves neither. The why
+/// names the base, not occurrence 0.
+#[test]
+fn a_joint_from_the_base_to_a_grounded_part_says_the_base() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut s, "component.create", json!({"name": "B", "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": 0, "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 0]}, "name": "Stack"}),
+    );
+    let said = format!("it joins the design's base to {}, which is grounded, so it can move neither", occurrence_name(&s, "B"));
+    let c = r["conflicts"].as_array().cloned().unwrap_or_default();
+    assert_eq!(c.len(), 1, "{r}");
+    assert_eq!(c[0]["why"].as_str(), Some(said.as_str()), "{r}");
+    assert_eq!(r["warnings"], json!([format!("Stack: {said}")]), "{r}");
+}
+
+/// An as-built joint between two grounded parts holds them where they are: nothing to say.
+#[test]
+fn as_built_between_two_grounded_parts_warns_nothing() {
+    let mut s = both_grounded();
+    let r = run(&mut s, "joint.as_built", json!({"type": "rigid", "a": "A", "b": "B"}));
+    assert_eq!(r["conflicts"], json!([]), "{r}");
+    assert!(r.get("warnings").is_none(), "{r}");
+}
+
 /// A 30 x 30 x 3 plate with a through slot whose x = 20 wall carries one rib (0.3 tall, 0.8
 /// wide), and a peg in the slot with 0.15 clearance all round.
 fn ribbed_slot_and_peg(s: &mut Session, peg_x1: f64) {

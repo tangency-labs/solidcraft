@@ -159,7 +159,7 @@ impl StraightPreview {
             scene,
             sketches: Vec::new(),
             applied: None,
-            stopped: None,
+            reply: None,
             mirror_meets: None,
             placed: None,
             tapered: Vec::new(),
