@@ -79,7 +79,8 @@
 //!   `S(c(t))`, is proved by a rounded-interval bound on its composed coefficients to have a radius of at least
 //!   the tolerance over the whole trim, its zero-speed end stretches (WR-668) to at least
 //!   half the growth line they stand for at each dyadic piece's near edge, out to a sliver
-//!   at each end whose UV length is at the trim's own rounding (`stretch_clears_on_surface`)
+//!   at each end (one polynomial piece, capped at the first knot) whose UV extent is
+//!   certified to be at the trim's own rounding (`stretch_clears_on_surface`)
 //!   ([`crate::nurbs::b_spline_curve::trim_image`]; at most 4096 pieces, each halved at
 //!   most 64 times, per call, no recursion): the constant metric WR-560 maps the trim by is exact only on a
 //!   plane, and near a pole the exact trim of a smooth curve turns sharply in (u, v).
@@ -125,7 +126,7 @@ use crate::math::{max2, max3, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI, UND
 use crate::nurbs::b_spline_curve::analysis::{analysis_key, curve_bounds, BOUND_MARGIN};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_curve::p2::{BoundingBoxRequest, ControlPointForm};
-use crate::nurbs::b_spline_curve::trim_image::radius_clears_on_surface;
+use crate::nurbs::b_spline_curve::trim_image::{piece_within, radius_clears_on_surface};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::geom::dist_cpt_cpt;
 use crate::nurbs::nurbs_crv::to_euclid;
@@ -545,47 +546,51 @@ fn zero_speed_radius_stretch(
 /// out to `2^-52` of the stretch from its end.
 const STRETCH_PIECES: i32 = 52;
 
-/// The UV length, in units of `ε` times the trim's largest control point, below which
-/// [`stretch_clears_on_surface`] leaves the sliver at a zero-speed end uncertified: the
-/// enclosure's coefficients carry absolute widths of a few `ε |P|` (the trim's own
-/// rounding), and a piece whose image coefficients shrink to that cannot clear.
-const STRETCH_SLIVER_ULPS: f64 = 256.0;
+/// The UV extent, in units of `ε` times the trim's largest control point, that the sliver
+/// [`stretch_clears_on_surface`] leaves to a certified extent bound instead of the radius
+/// bound may have: the radius enclosure's coefficients carry absolute widths of a few
+/// `ε |P|` (the trim's own rounding), and a piece whose image shrinks to that cannot clear.
+const STRETCH_SLIVER_ULPS: f64 = 1024.0;
 
 /// Not upstream: whether the image on `surface` of the trim `trim` has, over the
 /// zero-speed stretch of length `stretch` at its end `end` (0: the start, 1: the end of
 /// `domain`), a radius of curvature of at least half the growth line WR-668 reads there,
-/// `r >= (radius_tol / stretch) |t - t_end| / 2`, at each piece's near edge (below).
+/// `r >= (radius_tol / stretch) |t - t_end| / 2`, at each piece's near edge (below),
+/// except within a sliver at the end whose extent is certified at the trim's rounding.
 ///
-/// The stretch is cut into the dyadic pieces at `stretch 2^-(j+1)` to `stretch 2^-j` from
-/// the end. On each, [`radius_clears_on_surface`] must clear `radius_tol 2^-(j+2)`, half
-/// the growth line's value at the piece's near edge (a quarter of its value at the far
-/// edge). A genuine zero-speed end has its radius on the line to first order, so the full
-/// line would leave it no margin at the near edges. That half the line is enough is
-/// ARGUED: it echoes WR-668's own check, which accepts a radius within half the tolerance
-/// of the line at the stretch's far end.
-///
-/// The pieces stop at `cut` from the end (at most [`STRETCH_PIECES`] of them), the
-/// largest of:
+/// **The sliver.** It runs from the end out to `cut`, the largest of
 /// - `ulp(t_end)` and `stretch 2^-52`: nearer the end, the pieces would round onto the
 ///   end itself;
-/// - the parameter length `t` over which the trim `c` covers a UV length of
-///   `L = STRETCH_SLIVER_ULPS ε |P|_max` to second order, `|c'| t + |c''| t² / 2 = L` at
-///   the end (at a zero-speed end, `sqrt(2 L / |c''|)`). The enclosure's coefficients carry
-///   absolute widths of a few `ε |P|`, so a piece whose image is that short cannot clear
-///   (MEASURED: on the cubic of `a_genuine_zero_speed_end_clears_its_stretch`, pieces
-///   from about 1e-7 of the end inward do not clear even an eighth of the line).
+/// - the parameter length over which the trim `c` covers a UV length of `L / 4`,
+///   `L = STRETCH_SLIVER_ULPS ε |P|_max`, to second order (`|c'| t + |c''| t² / 2 = L / 4`
+///   at the end). The radius enclosure's coefficients carry absolute widths of a few
+///   `ε |P|`, so a piece whose image is that short cannot clear (MEASURED: on the cubic of
+///   `a_genuine_zero_speed_end_clears_its_stretch`, pieces from about 1e-7 of the end
+///   inward do not clear even an eighth of the line);
 ///
-/// The sliver within `cut` of the end is not certified: there the radius vanishes with the
-/// speed, and no positive tolerance can clear it. Its UV length is at most about
-/// `STRETCH_SLIVER_ULPS ε |P|_max`, at the trim's own coordinate rounding (ARGUED, the
-/// Taylor term at a zero-speed end), and its image at most that times the surface's
-/// speed: too short for the trim to hold a corner it could represent. `false` at the first
-/// piece that does not clear, and for a stretch that is not finite and positive or an end that is not
-/// finite.
+/// capped at the first knot from the end, so that the sliver is one polynomial piece. Its
+/// extent is then certified: [`piece_within`] bounds its UV diameter from all of its power
+/// coefficients in rounded intervals, and it must be at most `L`, at the trim's own
+/// coordinate rounding. Otherwise (for instance where `ulp(t_end)` binds and the trim
+/// moves farther than `L` within it) the stretch is not certified. Within the sliver the
+/// radius vanishes with the speed, and no positive tolerance can clear it; that a UV
+/// extent of `L` is too short for the trim to hold a corner it could represent is ARGUED.
+///
+/// **The pieces.** From `cut` out, the stretch is cut into the dyadic pieces at
+/// `stretch 2^-(j+1)` to `stretch 2^-j` from the end, the last one's near edge at `cut`
+/// (at most [`STRETCH_PIECES`] of them). On each, [`radius_clears_on_surface`] must clear
+/// half the growth line's value at the piece's near edge (`radius_tol 2^-(j+2)` on a whole
+/// dyadic piece; a quarter of the line's value at its far edge). A genuine zero-speed end
+/// has its radius on the line to first order, so the full line would leave it no margin at
+/// the near edges. That half the line is enough is ARGUED: it echoes WR-668's own check,
+/// which accepts a radius within half the tolerance of the line at the stretch's far end.
+///
+/// `false` at the first piece that does not clear, for a sliver that is not certified,
+/// and for a stretch that is not finite and positive or an end that is not finite.
 ///
 /// # Errors
 ///
-/// Those of [`radius_clears_on_surface`].
+/// Those of [`radius_clears_on_surface`] and [`piece_within`].
 fn stretch_clears_on_surface(
     k: &Kernel,
     trim: &BSplineCurve,
@@ -611,33 +616,82 @@ fn stretch_clears_on_surface(
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(false),
     };
-    // the positive root of `|c''| t² / 2 + |c'| t = L`, in the form that does not cancel
+    let Ok((knots, _)) = trim.knots(None) else {
+        return Ok(false);
+    };
+    // the first knot from the end, inside the domain (the domain's other end if none)
+    let knot = if end == 0 {
+        knots
+            .iter()
+            .copied()
+            .find(|&x| x > t_end && x < domain.max())
+            .unwrap_or(domain.max())
+    } else {
+        knots
+            .iter()
+            .rev()
+            .copied()
+            .find(|&x| x < t_end && x > domain.min())
+            .unwrap_or(domain.min())
+    };
+    let cap = (knot - t_end).abs();
+    // the positive root of `|c''| t² / 2 + |c'| t = L / 4`, in the form that does not cancel
     let length = STRETCH_SLIVER_ULPS * f64::EPSILON * p_max;
-    let sliver = 2.0 * length / (speed + (speed * speed + 2.0 * accel * length).sqrt());
-    let cut = max3(ulp, stretch * 2f64.powi(-STRETCH_PIECES), sliver);
-    // (written to accept: a NaN or infinite stretch, end or sliver certifies nothing)
+    let quarter = 0.25 * length;
+    let sliver = 2.0 * quarter / (speed + (speed * speed + 2.0 * accel * quarter).sqrt());
+    let wanted = max3(ulp, stretch * 2f64.powi(-STRETCH_PIECES), sliver);
+    // (written to accept: a NaN or infinite stretch, end, sliver or knot certifies nothing)
     let finite = stretch > 0.0
         && stretch.is_finite()
         && ulp.is_finite()
         && sliver.is_finite()
-        && cut.is_finite();
+        && wanted.is_finite()
+        && cap > 0.0
+        && cap.is_finite();
     if !finite {
         return Ok(false);
     }
+    let capped = wanted >= cap;
+    let cut = if capped { cap } else { wanted };
+    // the sliver's inner edge: the knot itself where the cap binds
+    let edge = match (capped, end) {
+        (true, _) => knot,
+        (false, 0) => t_end + cut,
+        (false, _) => t_end - cut,
+    };
+    let (slo, shi) = if end == 0 {
+        (t_end, edge)
+    } else {
+        (edge, t_end)
+    };
+    if !piece_within(trim, slo, shi, length)? {
+        return Ok(false);
+    }
     for j in 0..STRETCH_PIECES {
-        let near = stretch * 2f64.powi(-(j + 1));
         let far = stretch * 2f64.powi(-j);
-        if near < cut {
+        if far <= cut {
             break;
         }
-        let (lo, hi) = if end == 0 {
-            (domain.min() + near, domain.min() + far)
-        } else {
-            (domain.max() - far, domain.max() - near)
+        let dyadic = stretch * 2f64.powi(-(j + 1));
+        let last = dyadic <= cut;
+        let near = if last { cut } else { dyadic };
+        let (near_t, far_t) = match (last, end) {
+            (true, 0) => (edge, t_end + far),
+            (true, _) => (edge, t_end - far),
+            (false, 0) => (t_end + near, t_end + far),
+            (false, _) => (t_end - near, t_end - far),
         };
-        let tol = radius_tol * 2f64.powi(-(j + 2));
+        let (lo, hi) = if end == 0 {
+            (near_t, far_t)
+        } else {
+            (far_t, near_t)
+        };
+        let tol = radius_tol * (near / stretch) * 0.5;
         if !radius_clears_on_surface(k, trim, surface, lo, hi, tol)? {
             return Ok(false);
+        }
+        if last {
+            break;
         }
     }
     Ok(true)
@@ -2835,6 +2889,74 @@ mod tests {
                 lo + 1.0
             );
         }
+    }
+
+    /// The sliver at a zero-speed end is one polynomial piece. A quadratic trim on the unit
+    /// plane whose first span (0 to 1e-4) has its three control points within an ulp of
+    /// (0.2, 0.2), so `|c'|` is 0 and `|c''|` about 1e-9 at the start, and whose next spans
+    /// run to (0.5, 0.2) and turn a right angle there at the double knot 1e-3. A sliver from
+    /// the end's derivatives alone would run past 1e-3 (asserted) and cover the corner. The
+    /// cut is capped at the knot 1e-4, so the corner is in the pieces, and the stretch (0.05,
+    /// taken as given) does not clear.
+    #[test]
+    fn a_corner_past_a_collapsed_end_span_is_not_cleared() {
+        let k = Kernel::default();
+        let plane = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let ulp_step = f64::from_bits(0.2_f64.to_bits() + 1);
+        let trim = uv_quadratic(
+            &[
+                [0.2, 0.2],
+                [0.2, 0.2],
+                [ulp_step, 0.2],
+                [0.5, 0.2],
+                [0.5, 0.5],
+                [0.5, 0.8],
+            ],
+            &[0.0, 1e-4, 1e-3, 1.0],
+            &[3, 1, 2, 3],
+        );
+        let d = trim.evaluate(0.0, 2, true, false).unwrap();
+        let (speed, accel) = (d[1].length(), d[2].length());
+        assert!(speed == 0.0 && accel > 0.0, "{speed:e} {accel:e}");
+        let p_max = (0.5_f64 * 0.5 + 0.8 * 0.8).sqrt();
+        let quarter = 0.25 * STRETCH_SLIVER_ULPS * f64::EPSILON * p_max;
+        let uncapped = (2.0 * quarter / accel).sqrt();
+        assert!(uncapped > 1e-3, "{uncapped:e}");
+        let unit = Extent1d::from_raw(0.0, 1.0);
+        assert!(!stretch_clears_on_surface(&k, &trim, &plane, &unit, 0, 0.05, 1e-3).unwrap());
+    }
+
+    /// Where `ulp(t_end)` binds the sliver, the sliver's extent is not at the trim's
+    /// rounding and the stretch is not certified: the cubic of
+    /// [`a_genuine_zero_speed_end_clears_its_stretch`] on [2^33, 2^33 + 1], where
+    /// `ulp(2^33)` = 1.9e-6 is far above the 2e-7 sliver of the domain [0, 1], moves about
+    /// `|c''| ulp² / 2` = 4.3e-12 within it, above `L` = 1.9e-13.
+    #[test]
+    fn a_stretch_whose_sliver_the_ulp_binds_is_not_cleared() {
+        let k = Kernel::default();
+        let plane = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let lo = 2f64.powi(33);
+        let cubic = uv_cubic_on(&[[0.2, 0.2], [0.2, 0.2], [0.6, 0.2], [0.6, 0.6]], lo);
+        let tol = 1e-3;
+        let stretch = tol / 4.8;
+        let domain = Extent1d::from_raw(lo, lo + 1.0);
+        assert!(!stretch_clears_on_surface(&k, &cubic, &plane, &domain, 0, stretch, tol).unwrap());
     }
 
     /// A cubic 2D trim through the control points `pts` on the domain `[lo, lo + 1]`.

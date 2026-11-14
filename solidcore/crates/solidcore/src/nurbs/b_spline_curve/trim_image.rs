@@ -173,6 +173,56 @@ pub(crate) fn radius_clears_on_surface(
     Ok(true)
 }
 
+/// Not upstream: whether the piece `[lo, hi]` of the trim `trim`, inside one of its knot
+/// spans, has a UV extent of at most `length`: a diameter bound from the piece's power
+/// coefficients about its middle, enclosed in rounded intervals as [`piece_clears`]
+/// encloses them (every point is the middle's point plus the higher terms, each at most
+/// its coefficient's magnitude over `s` in `[-1, 1]`). `false` for a rational trim, a piece
+/// that crosses a knot or is not ordered, and a bound that is not finite.
+///
+/// # Errors
+///
+/// A [`crate::error::SolidError::Unported`] or `Cancelled` of the trim's data.
+pub(crate) fn piece_within(trim: &BSplineCurve, lo: f64, hi: f64, length: f64) -> Result<bool> {
+    // (written to accept: a NaN fails)
+    let ordered = lo <= hi;
+    if !ordered || !length.is_finite() {
+        return Ok(false);
+    }
+    let curve = match NurbsCurve::of(trim) {
+        Ok(c) => c,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(false),
+    };
+    let polynomial = curve.pw.chunks(4).all(|c| c.get(3) == Some(&1.0));
+    if !polynomial {
+        return Ok(false);
+    }
+    let m = 0.5 * (lo + hi);
+    let gap = if hi - m > m - lo { hi - m } else { m - lo };
+    let h = Ivl::from(round_up(gap));
+    let span_t = span(&curve.u, curve.p, curve.n, m);
+    let (Some(&k0), Some(&k1)) = (curve.u.get(span_t), curve.u.get(span_t + 1)) else {
+        return Ok(false);
+    };
+    let inside = k0 <= lo && hi <= k1;
+    if !inside {
+        return Ok(false);
+    }
+    let Ok(d) = curve_derivs_over(&curve, Ivl::from(m), curve.p, Some(span_t)) else {
+        return Ok(false);
+    };
+    let (mut ru, mut rv) = (Ivl::from(0.0), Ivl::from(0.0));
+    let mut scale = Ivl::from(1.0);
+    for (j, dj) in d.iter().enumerate().skip(1) {
+        scale = scale * h / Ivl::from(j as f64);
+        ru = ru + Ivl::from((dj.x * scale).mag());
+        rv = rv + Ivl::from((dj.y * scale).mag());
+    }
+    let diameter = (Ivl::from(2.0) * (ru * ru + rv * rv).sqrt()).hi;
+    Ok(diameter.is_finite() && diameter <= length)
+}
+
 /// One piece `[a, b]` of the trim (inside one of its knot spans): `Some(true)` where the
 /// bound clears `tol` on every surface piece the trim's points can lie on, `Some(false)`
 /// where it does not (or the piece meets too many surface pieces), `None` where the piece's
