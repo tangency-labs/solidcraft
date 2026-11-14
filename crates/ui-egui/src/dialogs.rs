@@ -9275,7 +9275,7 @@ mod refused_ok_tests {
         let state = app.session.model.state();
         let sheet = &state.surface_sheets[0];
         let body = state.body(&sheet.body).unwrap();
-        let query = solidcraft_engine::geom::brep::query::Query::new(body.body.record());
+        let (query, order) = solidcore_ops::Body::from_record(body.body.record(), true).unwrap();
         [0, 1].map(|joint| {
             let source = sheet.bend_source_edge(joint, body).unwrap();
             sheet
@@ -9285,7 +9285,9 @@ mod refused_ok_tests {
                     let face = body.body.record().faces.get(index)?;
                     let surface = solidcraft_engine::geom::brep::eval::SurfaceEval::new(face.parameters()).ok()?;
                     let point = surface.point(face.domain.map(|[lo, hi]| 0.5 * (lo + hi)))?;
-                    query.face_contains(index, point, 1e-6).then_some((index, point))
+                    let distances = query.face_distances(&order, index, &[[point.x, point.y, point.z]]).unwrap();
+                    let distance = distances.first().copied().flatten().expect("the trimmed face distance is answered");
+                    (distance.is_finite() && (0.0..=1e-6).contains(&distance)).then_some((index, point))
                 })
                 .expect("a built flange has a point inside one of its faces")
         })

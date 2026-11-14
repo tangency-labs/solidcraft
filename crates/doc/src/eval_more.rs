@@ -1334,7 +1334,6 @@ pub(super) fn sheet_eval(
                         before: std::sync::Arc::new(st.clone()),
                         depth,
                         mats: Vec::new(),
-                        sheets: st.sheets.clone(),
                     })),
                     lineage.map(std::sync::Arc::new),
                 );
