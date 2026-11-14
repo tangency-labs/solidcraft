@@ -44,7 +44,7 @@
 //! stands along the plane's normal, is refused, never filled with wrong geometry. Input is
 //! hostile: sizes are capped and every evaluation checked; nothing here panics.
 
-use crate::bspline::{SplineError, SplineResult, basis_bezier, invalid};
+use crate::bspline::{HPoint, SplineError, SplineResult, basis_bezier, invalid, subdivide};
 use crate::fill::{Band, Grid, LoopFill, LoopFrame, MAX_LOOP_POINTS, SMOOTHNESS, check_projectable, inside_loop, loop_frame, segment_meets_rect};
 use crate::fill_general::Station;
 use crate::prelude::*;
@@ -125,6 +125,9 @@ pub fn fill_matched(
         (0..sides)
             .map(|k| {
                 let got = stations(k, ts).map_err(SplineError::Invalid)?;
+                if got.iter().any(|s| s.clash) {
+                    return Err(SplineError::Unsupported("a matched fill at a corner whose faces' tangent planes disagree".into()));
+                }
                 if got.len() == ts.len() && got.iter().all(finite_station) {
                     Ok(got)
                 } else {
@@ -419,11 +422,12 @@ struct Plane {
 }
 
 /// The planes of the loop's planar neighbours: each side whose stations all carry one unit
-/// normal, no curvature across (`bend` and every jet coefficient, to [`FLAT`] at the loop's
-/// size) and lie on the plane through its first, to [`FLAT`] of that size. Each is turned to the
-/// side the whole loop lies under, to `tol`; a plane the loop reaches past both ways bounds
-/// nothing and is left out.
-fn planes(all: &[(Station, bool)], ends: &[Station], tol: f64) -> Vec<Plane> {
+/// normal (to [`FLAT`]) and no curvature across (`bend` and every jet coefficient, to [`FLAT`] at
+/// the loop's size; a side with no `bend` counts as flat, so it is checked rather than skipped).
+/// Such a side whose stations leave its plane (by more than [`FLAT`] of the loop's size) is
+/// refused. Each plane is turned to the side the whole loop lies under, to `tol`; a plane the
+/// loop reaches past both ways bounds nothing and is left out.
+fn planes(all: &[(Station, bool)], ends: &[Station], tol: f64) -> SplineResult<Vec<Plane>> {
     let per_side = all.len() / ends.len().max(1);
     let first = all.first().map_or(Vec3::ZERO, |(s, _)| s.p);
     let size = all.iter().map(|(s, _)| s.p.dist(first)).fold(0.0, f64::max);
@@ -434,20 +438,22 @@ fn planes(all: &[(Station, bool)], ends: &[Station], tol: f64) -> Vec<Plane> {
         let flat = |s: &&Station| {
             s.across.is_some_and(|a| {
                 a.normal.normalized().is_some_and(|n| n.cross(n0).len() <= FLAT)
-                    && a.bend.is_some_and(|b| b.len() * size <= FLAT)
+                    && a.bend.is_none_or(|b| b.len() * size <= FLAT)
                     && a.jet.is_none_or(|j| j.forms.iter().zip(1..).all(|(form, e)| form.iter().all(|c| c.abs() * size.powi(e) <= FLAT)))
-                    && (s.p - s0.p).dot(n0).abs() <= FLAT * size
             })
         };
         if !side.iter().all(flat) {
             continue;
+        }
+        if !side.iter().all(|s| (s.p - s0.p).dot(n0).abs() <= FLAT * size) {
+            return Err(SplineError::Unsupported("a matched fill beside a flat face whose edge leaves its plane".into()));
         }
         let reach = |n: Vec3| all.iter().map(|(s, _)| (s.p - s0.p).dot(n)).fold(f64::NEG_INFINITY, f64::max);
         if let Some(n) = [n0, n0 * -1.0].into_iter().find(|n| reach(*n) <= tol) {
             out.push(Plane { p: s0.p, n });
         }
     }
-    out
+    Ok(out)
 }
 
 /// How nearly flat (relative to the loop's size) a side's face must be to count as a plane.
@@ -460,10 +466,12 @@ const MAX_SPLITS: usize = 1 << 16;
 /// hulls (NURBS Book §5.4: each span is a bicubic Bézier patch, inside the hull of its control
 /// points, and the distance to a plane is affine, so its 16 values at the control points bound
 /// it there). A patch whose hull is over `tol` is split in four (de Casteljau, exact but for
-/// rounding) while it meets the loop's polygon (a side crosses it, or its middle is inside).
+/// rounding) while it meets the loop: a side of the stations' polygon `poly` crosses it grown by
+/// twice that side's sagitta (the circle through its ends' neighbours; none at a `corner`), or
+/// its middle is inside.
 /// Rounding is counted (`γ` of each coefficient's terms, and of each split). Past `tol` once a
 /// patch's corner (a point of the surface) inside the loop is, or after [`MAX_SPLITS`] splits.
-fn past_planes(grid: &Grid, heights: &[f64], f: &LoopFrame, planes: &[Plane], poly: &[[f64; 2]], tol: f64) -> SplineResult<f64> {
+fn past_planes(grid: &Grid, heights: &[f64], f: &LoopFrame, planes: &[Plane], poly: &[[f64; 2]], corner: &[bool], tol: f64) -> SplineResult<f64> {
     let [cu, cv] = grid.count;
     let spans = [cu - 3, cv - 3];
     let (Some(&lo0), Some(&lo1)) = (grid.knots[0].first(), grid.knots[1].first()) else { return invalid("grid") };
@@ -484,18 +492,30 @@ fn past_planes(grid: &Grid, heights: &[f64], f: &LoopFrame, planes: &[Plane], po
             out.push(m);
         }
     }
-    // The loop's sides (chords between stations) by the spans their boxes reach, for the meet test.
-    let mut near: Vec<Vec<([f64; 2], [f64; 2])>> = vec![Vec::new(); spans[0] * spans[1]];
-    for (k, p) in poly.iter().enumerate() {
-        let Some(q) = poly.get((k + 1) % poly.len()) else { continue };
+    // The loop's sides (chords between stations), each with how far the loop can bow off it
+    // (twice the sagitta `c²κ/8` of the circle through its end's neighbours, at an end not a
+    // corner), by the spans their grown boxes reach, for the meet test.
+    let m = poly.len();
+    let at = |k: usize| poly.get(k % m).copied().unwrap_or([0.0; 2]);
+    let gap = |p: [f64; 2], q: [f64; 2]| ((q[0] - p[0]) * (q[0] - p[0]) + (q[1] - p[1]) * (q[1] - p[1])).sqrt();
+    let bend = |k: usize| {
+        let (a, b, c) = (at(k + m - 1), at(k), at(k + 1));
+        let cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+        let kappa = 2.0 * cross.abs() / (gap(a, b) * gap(b, c) * gap(a, c));
+        if corner.get(k % m).copied().unwrap_or(true) || !kappa.is_finite() { 0.0 } else { kappa }
+    };
+    let mut near: Vec<Vec<([f64; 2], [f64; 2], f64)>> = vec![Vec::new(); spans[0] * spans[1]];
+    for k in 0..m {
+        let (p, q) = (at(k), at(k + 1));
+        let bow = gap(p, q).powi(2) * bend(k).max(bend(k + 1)) / 4.0;
         let range = |d: usize| {
             let at = |x: f64| (((x - lo[d]) / cell[d]).floor().max(0.0) as usize).min(spans[d] - 1);
-            at(p[d].min(q[d]))..=at(p[d].max(q[d]))
+            at(p[d].min(q[d]) - bow)..=at(p[d].max(q[d]) + bow)
         };
         for j in range(1) {
             for i in range(0) {
                 if let Some(list) = near.get_mut(j * spans[0] + i) {
-                    list.push((*p, *q));
+                    list.push((p, q, bow));
                 }
             }
         }
@@ -504,6 +524,7 @@ fn past_planes(grid: &Grid, heights: &[f64], f: &LoopFrame, planes: &[Plane], po
     let mut worst = f64::NEG_INFINITY;
     for plane in planes {
         let (ax, ay, an, a0) = (f.x.dot(plane.n), f.y.dot(plane.n), f.n.dot(plane.n), (f.o - plane.p).dot(plane.n));
+        let offset = (f.o - plane.p).len();
         let mut todo: Vec<([[f64; 4]; 4], [f64; 2], [f64; 2], f64, usize)> = Vec::new();
         let mut splits = 0usize;
         for sj in 0..spans[1] {
@@ -526,7 +547,8 @@ fn past_planes(grid: &Grid, heights: &[f64], f: &LoopFrame, planes: &[Plane], po
                         }
                         let (u, v) = (u0 + cell[0] * k as f64 / 3.0, v0 + cell[1] * l as f64 / 3.0);
                         *slot = a0 + u * ax + v * ay + h * an;
-                        slack = slack.max(gamma * (a0.abs() + (u * ax).abs() + (v * ay).abs() + mag * an.abs()));
+                        // The terms' rounding, and that of `ax`, `ay`, `an`, `a0` (dot products of unit vectors).
+                        slack = slack.max(gamma * (a0.abs() + (u * ax).abs() + (v * ay).abs() + mag * an.abs() + u.abs() + v.abs() + mag + offset));
                     }
                 }
                 todo.push((net, [u0, v0], [u0 + cell[0], v0 + cell[1]], slack, sj * spans[0] + si));
@@ -543,7 +565,8 @@ fn past_planes(grid: &Grid, heights: &[f64], f: &LoopFrame, planes: &[Plane], po
             }
             let list = near.get(at).map_or(&[][..], Vec::as_slice);
             let middle = [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])];
-            let meets = list.iter().any(|(p, q)| segment_meets_rect(*p, *q, a, b)) || inside_loop(middle, poly);
+            let meets =
+                list.iter().any(|&(p, q, w)| segment_meets_rect(p, q, [a[0] - w, a[1] - w], [b[0] + w, b[1] + w])) || inside_loop(middle, poly);
             if !meets {
                 continue;
             }
@@ -570,13 +593,16 @@ fn past_planes(grid: &Grid, heights: &[f64], f: &LoopFrame, planes: &[Plane], po
     Ok(worst)
 }
 
-/// Each row of a Bézier net split at its middle (de Casteljau): the two halves' nets.
+/// Each row of a Bézier net split at its middle (de Casteljau, [`subdivide`]): the halves' nets.
 fn split_rows(net: [[f64; 4]; 4]) -> ([[f64; 4]; 4], [[f64; 4]; 4]) {
-    let halves = net.map(|[a, b, c, d]| {
-        let (ab, bc, cd) = (0.5 * (a + b), 0.5 * (b + c), 0.5 * (c + d));
-        let (abc, bcd) = (0.5 * (ab + bc), 0.5 * (bc + cd));
-        let m = 0.5 * (abc + bcd);
-        ([a, ab, abc, m], [m, bcd, cd, d])
+    let halves = net.map(|row| {
+        let (l, r) = subdivide(&row.map(|x| HPoint::weighted(Vec3::new(x, 0.0, 0.0), 1.0)), 0.5);
+        let back = |h: Vec<HPoint>| {
+            let mut out = [0.0; 4];
+            out.iter_mut().zip(h).for_each(|(o, p)| *o = p.x);
+            out
+        };
+        (back(l), back(r))
     });
     (halves.map(|h| h.0), halves.map(|h| h.1))
 }
@@ -710,7 +736,8 @@ fn fit_round(all: &[(Station, bool)], ends: &[Station], spec: &MatchedSpec, leve
     let frame = loop_frame(&fitted)?;
     let points: Vec<Vec3> = all.iter().map(|(s, _)| s.p).collect();
     let rows = rows(all, ends, &frame, spec.curvature_tol)?;
-    let planes = planes(all, ends, spec.tol);
+    let planes = planes(all, ends, spec.tol)?;
+    let corners: Vec<bool> = rows.iter().map(|r| r.corner).collect();
     let uv: Vec<[f64; 2]> = rows.iter().map(|r| r.q).collect();
     check_projectable(&points, &uv)?;
     let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
@@ -753,7 +780,7 @@ fn fit_round(all: &[(Station, bool)], ends: &[Station], spec: &MatchedSpec, leve
         let heights = solve(&grid, &rows, cell)?;
         let [dev, ang, ang_all, cur, cur_all] = achieved(&grid, &heights, &rows, &frame)?;
         let stations_hold = dev <= spec.tol && ang <= spec.angle_tol && cur <= spec.curvature_tol && holds;
-        let past = if stations_hold { past_planes(&grid, &heights, &frame, &planes, &uv, spec.tol)? } else { f64::NEG_INFINITY };
+        let past = if stations_hold { past_planes(&grid, &heights, &frame, &planes, &uv, &corners, spec.tol)? } else { f64::NEG_INFINITY };
         best = best.min(Shortfall { deviation: dev.max(past), angle: ang, curvature: cur });
         if stations_hold && past <= spec.tol {
             let surface = grid.surface(&heights, frame.o, frame.x, frame.y, frame.n)?;

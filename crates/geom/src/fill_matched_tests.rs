@@ -268,3 +268,36 @@ fn faces_that_disagree_at_a_corner_leave_it_no_curvature() {
     assert!(corner_hessian(&round(5.0, 0.0), &round(5.0, turn), &f, CURVATURE).unwrap().is_some());
     assert_eq!(corner_hessian(&round(3.0, 0.0), &round(5.0, turn), &f, CURVATURE).unwrap(), None);
 }
+
+/// `past_planes` against a field whose highest point over the loop is known: `h = u·v` (its
+/// control heights the products of the knot averages, which a bicubic reproduces exactly) over
+/// [−1, 1]², the loop the square [−½, ½]², the plane `h = 0`. The highest is ¼ at (½, ½) and
+/// (−½, −½); the bound is never under it and comes within 1e-9 of it when asked to.
+#[test]
+fn the_hull_bound_past_a_plane_holds_the_fields_highest_point() {
+    let grid = crate::fill::Grid::new([7, 9], [-1.0, -1.0], [1.0, 1.0]);
+    let [cu, cv] = grid.count;
+    let greville = |d: usize, i: usize| (1..=3).map(|t| grid.knots[d][i + t]).sum::<f64>() / 3.0;
+    let heights: Vec<f64> = (0..cv).flat_map(|j| (0..cu).map(move |i| (i, j))).map(|(i, j)| greville(0, i) * greville(1, j)).collect();
+    let f = LoopFrame { o: Vec3::ZERO, x: Vec3::X, y: Vec3::Y, n: Vec3::Z, counter_clockwise: true };
+    let side = |k: usize| {
+        (0..32).map(move |i| -0.5 + f64::from(i) / 32.0).map(move |t| match k {
+            0 => [t, -0.5],
+            1 => [0.5, t],
+            2 => [-t, 0.5],
+            _ => [-0.5, -t],
+        })
+    };
+    let poly: Vec<[f64; 2]> = (0..4).flat_map(side).collect();
+    let corner: Vec<bool> = (0..poly.len()).map(|k| k % 32 == 0).collect();
+    let plane = [Plane { p: Vec3::ZERO, n: Vec3::Z }];
+    let at = derivatives(&grid, &heights, [0.5, 0.5]).unwrap()[0];
+    assert!((at - 0.25).abs() < 1e-14, "{at}");
+    let held = past_planes(&grid, &heights, &f, &plane, &poly, &corner, 0.25 + 1e-9).unwrap();
+    assert!((0.25..=0.25 + 1e-9).contains(&held), "{held}");
+    let refused = past_planes(&grid, &heights, &f, &plane, &poly, &corner, 0.2).unwrap();
+    assert!(refused > 0.2, "{refused}");
+    // Turned over, the field's highest point over the loop is ¼ again, at (½, −½).
+    let under = [Plane { p: Vec3::ZERO, n: Vec3::Z * -1.0 }];
+    assert!((0.25..=0.25 + 1e-9).contains(&past_planes(&grid, &heights, &f, &under, &poly, &corner, 0.25 + 1e-9).unwrap()));
+}

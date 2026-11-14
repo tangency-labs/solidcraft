@@ -431,7 +431,7 @@ pub fn bezier_segment(ctrl: &[HPoint], a: f64, b: f64) -> SplineResult<Vec<HPoin
 }
 
 /// Split a Bézier curve at `x` (de Casteljau): control points of `[0, x]` and `[x, 1]`.
-fn subdivide(ctrl: &[HPoint], x: f64) -> (Vec<HPoint>, Vec<HPoint>) {
+pub(crate) fn subdivide(ctrl: &[HPoint], x: f64) -> (Vec<HPoint>, Vec<HPoint>) {
     let mut left = Vec::with_capacity(ctrl.len());
     let mut right = Vec::with_capacity(ctrl.len());
     let mut pts = ctrl.to_vec();
