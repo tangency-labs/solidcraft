@@ -229,7 +229,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
             let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
             vec![
                 SelInput::new("Profiles or curves", PROFILES | CURVES, true),
-                SelInput::new("Path", CURVES | EDGES, true),
+                SelInput::new("Path", CURVES | EDGES, true).chains(),
                 crate::dialogs_sweep::direction_input(),
                 rail,
                 rail2,
@@ -237,15 +237,21 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
         }
         Surf::Loft { .. } => {
             let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
-            vec![SelInput::new("Sections", PROFILES | CURVES | EDGES, true), rail, rail2]
+            vec![SelInput::new("Sections", PROFILES | CURVES | EDGES, true).chains(), rail, rail2]
         }
-        Surf::Blend { .. } => vec![SelInput::new("From edges", EDGES, true), SelInput::new("To edges", EDGES, true)],
-        Surf::Boundary { .. } => vec![SelInput::new("Curves", CURVES | EDGES, true), SelInput::new("Cross curves", CURVES | EDGES, true)],
-        Surf::Patch { .. } => vec![SelInput::new("Boundary", PROFILES | EDGES, true), SelInput::new("Pass through", VERTICES | FACES, true)],
+        Surf::Blend { .. } => vec![SelInput::new("From edges", EDGES, true).chains(), SelInput::new("To edges", EDGES, true).chains()],
+        Surf::Boundary { .. } => {
+            vec![SelInput::new("Curves", CURVES | EDGES, true).chains(), SelInput::new("Cross curves", CURVES | EDGES, true).chains()]
+        }
+        Surf::Patch { .. } => vec![SelInput::new("Boundary", PROFILES | EDGES, true).chains(), SelInput::new("Pass through", VERTICES | FACES, true)],
         Surf::Unstitch => vec![SelInput::new("Body, or faces to take out", BODIES | FACES, true)],
         Surf::ReverseNormal => vec![SelInput::new("Surface, or faces to turn over", BODIES | FACES, true)],
         Surf::Ruled { .. } => {
-            vec![SelInput::new("Edges", EDGES, true), SelInput::new("Reference face", FACES, false), SelInput::new("Direction", AXES | EDGES, false)]
+            vec![
+                SelInput::new("Edges", EDGES, true).chains(),
+                SelInput::new("Reference face", FACES, false),
+                SelInput::new("Direction", AXES | EDGES, false),
+            ]
         }
         Surf::Trim { .. } => vec![
             SelInput::new("Surface", BODIES, false),

@@ -1090,7 +1090,7 @@ impl Dialog {
                 let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
                 vec![
                     SelInput::new("Profile", PROFILES, true),
-                    SelInput::new("Path", CURVES | EDGES, true),
+                    SelInput::new("Path", CURVES | EDGES, true).chains(),
                     crate::dialogs_sweep::direction_input(),
                     rail,
                     rail2,
@@ -2064,6 +2064,58 @@ impl Dialog {
         self.error = None;
     }
 
+    /// Keep each input with Tangent Chain on ([`SelInput::chain`]) holding its picks' curve
+    /// chains, whichever way its items changed (a click, a marquee, the selection the dialog
+    /// opened with, a listed row's remove button): a new item is a pick, and brings its chain
+    /// unless an earlier pick's chain already holds it; an item gone takes out the picks whose
+    /// chain held it, with their chains, as picking a chain's edge again does.
+    pub fn sync_input_chains(&mut self, s: &Session) {
+        for inp in &mut self.inputs {
+            if inp.chain != Some(true) || inp.items == inp.chain_written {
+                continue;
+            }
+            let held = |seeds: &[(Sel, Vec<Sel>)], x: &Sel| seeds.iter().any(|(_, chain)| chain.iter().any(|y| selection::same_item(x, y)));
+            let gone: Vec<Sel> = inp.chain_written.iter().filter(|x| !inp.items.iter().any(|y| selection::same_item(x, y))).cloned().collect();
+            inp.chain_seeds.retain(|(_, chain)| !gone.iter().any(|g| chain.iter().any(|y| selection::same_item(g, y))));
+            let new: Vec<Sel> = inp.items.iter().filter(|x| !inp.chain_written.iter().any(|y| selection::same_item(x, y))).cloned().collect();
+            for x in new {
+                if !held(&inp.chain_seeds, &x) {
+                    let chain = curve_edges(s, &x);
+                    inp.chain_seeds.push((x, chain));
+                }
+            }
+            let mut items: Vec<Sel> = Vec::new();
+            for (_, chain) in &inp.chain_seeds {
+                for y in chain {
+                    if !items.iter().any(|z| selection::same_item(z, y)) {
+                        items.push(y.clone());
+                    }
+                }
+            }
+            inp.items = items.clone();
+            inp.chain_written = items;
+        }
+    }
+
+    /// Tick or untick input `i`'s Tangent Chain: ticked, each item picked so far brings its
+    /// chain; unticked, the input goes back to the items picked by hand.
+    pub fn set_input_chain(&mut self, s: &Session, i: usize, on: bool) {
+        let Some(inp) = self.inputs.get_mut(i) else { return };
+        if inp.chain.is_none() || inp.chain == Some(on) {
+            return;
+        }
+        inp.chain = Some(on);
+        if on {
+            inp.chain_seeds.clear();
+            inp.chain_written.clear();
+        } else {
+            inp.items = inp.chain_seeds.drain(..).map(|(x, _)| x).collect();
+            inp.chain_written.clear();
+        }
+        self.error = None;
+        self.sync_input_chains(s);
+    }
+
     /// What input `i`'s list of picked items shows, one row each (#3683): what its chip counts.
     /// A rim or a surface split into pieces is one row, as it is one pick; a Shell with Tangent
     /// Chain lists every face it opens.
@@ -2159,6 +2211,26 @@ fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
         }
     }
     picked
+}
+
+/// What a pick into an input with Tangent Chain on stands for: an edge with every edge that
+/// continues it smoothly as a curve, from the model's exact edges
+/// ([`solidcraft_engine::doc::ModelBody::curve_chain`]), the pick first; anything else alone.
+fn curve_edges(s: &Session, sel: &Sel) -> Vec<Sel> {
+    let mut out = vec![sel.clone()];
+    if let Sel::Edge { body, index, point } = sel
+        && let Some(b) = crate::open_meshing::session_world(s).body(body)
+    {
+        let m = b.mesh();
+        for i in b.curve_chain(*index, *point) {
+            if i != *index
+                && let Some(e) = m.edges.get(i)
+            {
+                out.push(Sel::Edge { body: body.clone(), index: i, point: polyline_mid(e) });
+            }
+        }
+    }
+    out
 }
 
 /// How close two edge ends are to be one vertex (mm).
@@ -3321,6 +3393,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let text_focus = crate::ui_kit::editor_has_focus(ui.ctx());
     let mut toggle_list: Option<usize> = None;
     let mut hovered: Option<(usize, Sel)> = None;
+    let mut chain_set: Option<(usize, bool)> = None;
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
         let stored_reference = stored_input_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
@@ -3408,6 +3481,14 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 }
             });
         });
+        // Tangent Chain, right under the input it is for (several inputs may each have one).
+        if let Some(on) = inp.chain {
+            let mut ticked = on;
+            form_row(ui, "", |ui| crate::ui_kit::checkbox_grid(ui, &mut [("Tangent Chain", &mut ticked)], 1));
+            if ticked != on {
+                chain_set = Some((i, ticked));
+            }
+        }
         if inp.multi && d.listed == Some(i) && !inp.items.is_empty() {
             let rows = d.listed_items(s, i);
             egui::ScrollArea::vertical().id_salt(("picked_items", i)).max_height(t.control_height * 6.5).show(ui, |ui| {
@@ -3437,6 +3518,9 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     }
     if let Some((input, item)) = remove {
         d.remove_listed(s, input, &item);
+    }
+    if let Some((input, on)) = chain_set {
+        d.set_input_chain(s, input, on);
     }
     if let Some(i) = activate {
         d.active = i;
@@ -4219,12 +4303,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             let body = |ui: &mut egui::Ui| {
                 d.sync_fillet_chain(&app.session);
+                d.sync_input_chains(&app.session);
                 crate::hole_presets::rows(ui, &mut d, &mut app.preferences.hole_presets, &app.session.doc, reset_scroll);
                 crate::personal_sheet_rules::rows(ui, &mut d, &mut app.preferences.personal_sheet_rules, &app.session.doc, reset_scroll);
                 let (accepted, fields) = crate::ui_kit::value_fields(ctx, || dense::rows(app, ctx, &mut d, ui));
                 enter |= accepted;
                 value_fields = fields;
                 d.sync_fillet_chain(&app.session);
+                d.sync_input_chains(&app.session);
                 if cell_enter {
                     ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
                 }
