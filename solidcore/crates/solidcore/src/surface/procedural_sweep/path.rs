@@ -18,14 +18,12 @@
 //! it at 12 parameters (a line to `1e-11` of the path's size for degree up to 3, a circle for
 //! a conic); the frame itself is the exact closed form (a rigid rotation of the span's start frame), so the classification only decides which closed form a span has, and a span that is a line or an arc within that tolerance is taken as one. A path with any other span (a
 //! general spline: the rotation-minimizing equation has no closed form there, and its
-//! certified enclosure is not here yet) or a closed one has no definition: the #2505
-//! ledger's `path-spline` and `path-closed`.
+//! certified enclosure is not here yet), or a closed one whose transported frame does
+//! not close, has no definition: the #2505 ledger's `path-spline` and `path-closed`.
 //!
-//! **The map.** The net's parameter across the sweep is the skin's chord length, not the
-//! path's `t`. The definition carries nodes `(v_k, t_k)`, the net's parameter at each
-//! placed section (the skin's own, replayed; the bound below holds for whatever map is
-//! stored), and reads `t` by interpolating them linearly: the bound is that of
-//! `|B(u, v) - S(u, t(v))|`.
+//! **The map.** The fitted net uses the trajectory parameters at every section, with
+//! derivatives in that same parameter. Contiguous pieces join without a parameter shift,
+//! so the map from the fitted net to the path is the identity at the traced stations.
 //!
 //! **The bound.** Every section of the net is the profile's control points moved by one
 //! motion, in the same rational basis `R_i(u)` (non-negative, summing to 1) for every `v`,
@@ -56,7 +54,7 @@ use crate::nurbs::b_spline_curve::p1::KnotType;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
 use crate::nurbs::b_spline_surface::BSplineSurface;
-use crate::nurbs::math::{gamma, MODEL_TOL};
+use crate::nurbs::math::gamma;
 use crate::nurbs::srf_adv::p6::SweepTrace;
 
 use crate::blend::fillet_section::interval::round_up;
@@ -497,7 +495,8 @@ impl PathMotion {
     /// # Errors
     ///
     /// `InvalidInput` for a net that is not the profile's sections moved along the path (its
-    /// control points per section, its weights or its knots differ), a closed path, a path
+    /// control points per section, its weights or its knots differ), a closed path whose
+    /// transported frame does not close, a path
     /// with a span that is neither a line nor a circular arc (the frame of a general spline
     /// has no closed form yet: the #2505 ledger's `path-spline`) or a vanishing tangent or a
     /// joint that is not G1, a section whose net parameter is not found or a bound that is
@@ -508,7 +507,7 @@ impl PathMotion {
         trace: &SweepTrace,
         net: &BSplineSurface,
     ) -> Result<(Self, f64, bool)> {
-        let (path, spans) = open_path_spans(path, trace.start_normal)?;
+        let (path, spans) = path_spans(path, trace.start_normal)?;
         let mut motion = Self {
             path,
             spans,
@@ -533,7 +532,8 @@ impl PathMotion {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` for a closed path, a span that is neither a line nor an arc, a joint
+    /// `InvalidInput` for a closed path whose transported frame does not close,
+    /// a span that is neither a line nor an arc, a joint
     /// that is not G1, an arc of half a turn or more in one span or a bound that is not
     /// finite; those of reading the curves.
     pub(crate) fn create_exact(
@@ -541,7 +541,7 @@ impl PathMotion {
         path: &BSplineCurve,
         start_normal: Vec3,
     ) -> Result<(Self, BSplineSurface, f64)> {
-        let (path, spans) = open_path_spans(path, start_normal)?;
+        let (path, spans) = path_spans(path, start_normal)?;
         let mut nodes: Vec<(f64, f64)> = spans.iter().map(|s| (s.from, s.from)).collect();
         if let Some(last) = spans.last() {
             nodes.push((last.to, last.to));
@@ -662,105 +662,32 @@ impl PathMotion {
         })
     }
 
-    /// The net's parameter at each section: the skin's own. Each piece of the path is
-    /// skinned with parameters in `[0, 1]` that are the averaged normalised chord lengths of
-    /// the sections' control points (`interp_params`, in homogeneous coordinates), and the
-    /// pieces are joined with their parameters shifted to follow one another: the `k`-th
-    /// piece's are `k + tl`. The map is data (the bound holds for any), so where the net's
-    /// own is not these (a wall whose domain does not end at the piece count) the sweep has
-    /// no definition rather than a loose one.
+    /// Sweep skins interpolate at the trajectory parameters and preserve the supplied
+    /// derivatives in that parameter. Adjacent pieces have contiguous domains, so joining
+    /// them adds no parameter offset: the net-to-path map is the identity.
     fn find_nodes(&self, cols: &NetView, pieces: &[Vec<f64>]) -> Result<Vec<(f64, f64)>> {
-        let (v0, v1) = cols.domain;
-        let count = f64::from(u32::try_from(pieces.len()).unwrap_or(u32::MAX));
-        if pieces.is_empty() || !(v0 == 0.0 && (v1 - count).abs() <= 1e-9 * count) {
+        let domain = self.path.natural_interval();
+        if pieces.is_empty() || cols.domain != (domain.min(), domain.max()) {
             return Err(bad(
-                "a net's parameter across the sweep is not its pieces' skins",
+                "a net's parameter across the sweep is not the path's parameter",
             ));
         }
         let mut nodes: Vec<(f64, f64)> = Vec::new();
-        for (k, piece) in pieces.iter().enumerate() {
-            let offset = f64::from(u32::try_from(k).unwrap_or(u32::MAX));
-            let tl = self.chord_parameters(cols, piece)?;
-            for (&t, &p) in piece.iter().zip(&tl) {
-                let v = offset + p;
+        for piece in pieces {
+            if piece.len() < 2 {
+                return Err(bad("a piece has at least two sections"));
+            }
+            for &t in piece {
                 match nodes.last() {
-                    Some(&(pv, pt)) if v == pv && t == pt => {}
-                    Some(&(pv, pt)) if !(v > pv && t > pt) => {
+                    Some(&(_, previous)) if t == previous => {}
+                    Some(&(_, previous)) if !t.is_finite() || t <= previous => {
                         return Err(bad("the net's sections are not in the path's order"));
                     }
-                    _ => nodes.push((v, t)),
+                    _ => nodes.push((t, t)),
                 }
             }
         }
         Ok(nodes)
-    }
-
-    /// `interp_params` of the sections of one piece: the sections' control points in
-    /// homogeneous coordinates, the cumulative chord lengths normalised per control point
-    /// and averaged over those with a length above `MODEL_TOL`.
-    fn chord_parameters(&self, cols: &NetView, piece: &[f64]) -> Result<Vec<f64>> {
-        let n = piece.len();
-        if n < 2 {
-            return Err(bad("a piece has at least two sections"));
-        }
-        let mut sections: Vec<Vec<[f64; 4]>> = Vec::with_capacity(n);
-        for &t in piece {
-            let frame = self.frame(t)?;
-            sections.push(
-                cols.profile
-                    .iter()
-                    .zip(&cols.weights)
-                    .map(|(c, &w)| {
-                        let p = frame.place(*c);
-                        if cols.rational {
-                            [w * p.x, w * p.y, w * p.z, w]
-                        } else {
-                            [p.x, p.y, p.z, 0.0]
-                        }
-                    })
-                    .collect(),
-            );
-        }
-        let mut t = vec![0.0_f64; n];
-        let mut used = 0.0_f64;
-        for i in 0..cols.profile.len() {
-            let mut cum = vec![0.0_f64; n];
-            let mut sum = 0.0;
-            for k in 1..n {
-                let (Some(a), Some(b)) = (
-                    sections.get(k - 1).and_then(|s| s.get(i)),
-                    sections.get(k).and_then(|s| s.get(i)),
-                ) else {
-                    return Err(bad("a section lacks a control point"));
-                };
-                let d = a
-                    .iter()
-                    .zip(b)
-                    .map(|(x, y)| (x - y) * (x - y))
-                    .sum::<f64>()
-                    .sqrt();
-                sum += d;
-                if let Some(slot) = cum.get_mut(k) {
-                    *slot = sum;
-                }
-            }
-            if sum > MODEL_TOL {
-                used += 1.0;
-                for (slot, c) in t.iter_mut().zip(&cum) {
-                    *slot += c / sum;
-                }
-            }
-        }
-        if !(used > 0.0) {
-            return Err(bad("a piece's sections are apart"));
-        }
-        for slot in &mut t {
-            *slot /= used;
-        }
-        if let Some(last) = t.last_mut() {
-            *last = 1.0;
-        }
-        Ok(t)
     }
 
     /// The certified bound (module docs).
@@ -927,10 +854,6 @@ struct NetView {
     columns: Vec<Column>,
     /// The profile's control points, in the frame's coordinates.
     profile: Vec<Vec3>,
-    /// Their weights (1 for a polynomial profile).
-    weights: Vec<f64>,
-    /// Whether the profile is rational.
-    rational: bool,
     unique_knots: Vec<f64>,
     domain: (f64, f64),
     swapped: bool,
@@ -1018,8 +941,6 @@ impl NetView {
             .ok_or_else(|| bad("a net has sections"))?;
         Ok(Self {
             columns,
-            weights: (0..pc.control_points.len()).map(pw).collect(),
-            rational: !pc.weights.is_empty(),
             profile: pc.control_points,
             unique_knots: along_knots.clone(),
             domain,
@@ -1246,9 +1167,9 @@ impl Column {
     }
 }
 
-/// A copy of `path` and its spans, for a 3D path that is not closed: the checks both ways of
-/// making a motion ([`PathMotion::create`], [`PathMotion::create_exact`]) share.
-fn open_path_spans(path: &BSplineCurve, start_normal: Vec3) -> Result<(BSplineCurve, Vec<Span>)> {
+/// A copy of a 3D path and its spans, with a closing frame when the path is closed:
+/// the checks both ways of making a motion ([`PathMotion::create`], [`PathMotion::create_exact`]) share.
+fn path_spans(path: &BSplineCurve, start_normal: Vec3) -> Result<(BSplineCurve, Vec<Span>)> {
     let pc = path.canonical()?;
     if pc.dim != 3 {
         return Err(bad("a path is a 3D curve"));
@@ -1257,13 +1178,29 @@ fn open_path_spans(path: &BSplineCurve, start_normal: Vec3) -> Result<(BSplineCu
         (Some(a), Some(b)) => (*a - *b).length() <= 1e-9 * (1.0 + a.length()),
         _ => true,
     };
-    if closed {
-        return Err(bad("a closed path's frame is corrected, not the rule's"));
-    }
     let mut path = path.copy();
     path.set_out_of_bounds_enabled(false);
     let spans = spans_of(&path, &pc.knots, pc.degree, start_normal)?;
-    Ok((path, spans))
+    let motion = PathMotion {
+        path,
+        spans,
+        nodes: Vec::new(),
+    };
+    if closed {
+        // A closed path needs no frame correction when parallel transport returns
+        // the entire frame to its start. Otherwise the fitted sweep's distributed
+        // correction is a different motion and cannot use this definition.
+        let domain = motion.path.natural_interval();
+        let start = motion.frame_side(domain.min(), false)?;
+        let end = motion.frame_side(domain.max(), true)?;
+        if start.axes.iter().zip(&end.axes).any(|(a, b)| {
+            let gap = (*a - *b).length();
+            !gap.is_finite() || gap > G1_TANGENTS
+        }) {
+            return Err(bad("a closed path's transported frame does not close"));
+        }
+    }
+    Ok((motion.path, motion.spans))
 }
 
 /// The weights `[w0, w1, w2]` of each knot span of `path` as a quadratic rational Bezier
