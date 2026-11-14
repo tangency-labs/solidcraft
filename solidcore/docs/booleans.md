@@ -99,7 +99,7 @@ vertex used by one common edge (`close_intersection_loop`) and, with more than o
 closes the gaps (`fix_gaps`); it repeats at most ten times. A pass goes on past each closure that
 deleted no topology, so ten passes are not a limit of ten gaps, and a loop end is closed first along
 an edge to another loop end, which closes the gap between them rather than branching the loop at a
-vertex it already passes through (#16935). The classify and select steps also repeat
+vertex it already passes through. The classify and select steps also repeat
 (at most ten times) when a coincidence repair changes the topology (§5).
 
 After the cleanup of step 5, `place_vertices_on_face_corners` (`merge/p1.rs`) moves a vertex that lies
