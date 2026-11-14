@@ -294,6 +294,9 @@ struct Feature {
     walls: Vec<FaceId>,
     /// Where its walls meet the round.
     creases: Vec<Curve>,
+    /// A boss whose walls are not upright: its own walls in the target, which the band
+    /// reaches only where the round crosses one of them (nothing is continued from it).
+    tilted_walls: Vec<FaceId>,
 }
 
 /// The edit-notification reference of a new edge's curve in `b`.
@@ -657,6 +660,7 @@ impl FilletSession<'_> {
                         boss,
                         walls,
                         creases: Vec::new(),
+                        tilted_walls: Vec::new(),
                     });
                     continue;
                 }
@@ -689,6 +693,7 @@ impl FilletSession<'_> {
                         boss,
                         walls: Vec::new(),
                         creases: Vec::new(),
+                        tilted_walls: walls,
                     });
                     continue;
                 }
@@ -723,6 +728,7 @@ impl FilletSession<'_> {
                     boss,
                     walls,
                     creases: Vec::new(),
+                    tilted_walls: Vec::new(),
                 });
             }
         }
@@ -751,26 +757,46 @@ impl FilletSession<'_> {
         );
         for feature in &mut features {
             if feature.boss && feature.walls.is_empty() {
-                // a boss whose walls aren't upright: reached when its footprint's rim crosses a
-                // sheet face's box
-                let mut rim_box = Extent3d::default();
-                for rim_curve in &feature.rim_curves {
-                    let ivl = rim_curve.natural_interval();
-                    for j in 0..=8u32 {
-                        rim_box.add_point(
-                            rim_curve.evaluate_point(k, ivl.evaluate(f64::from(j) / 8.0))?,
-                        );
+                // A boss whose walls aren't upright: nothing is continued from it, so it is
+                // refused only when the band really reaches it, the round crossing one of
+                // its own walls. A band elsewhere on the support face leaves it alone.
+                for &wall in &feature.tilted_walls {
+                    let (copy, wall_cache) = (&mut target_copy, &mut target_copy_cache);
+                    let wall_body: &Brep = if let Some(copy) = copy {
+                        copy
+                    } else {
+                        k.work_counters.add_wall_body_copy();
+                        copy.insert(self.objects.target.clone_standing_for_self()?)
+                    };
+                    let wall_box =
+                        crate::query::api_queries::face_bounding_box(k, wall_body, wall, false)?;
+                    for (sheet_box, &sheet_face) in sheet_boxes.iter().zip(&sheet_faces) {
+                        if sheet_box.are_disjoint(&wall_box, on_tol) {
+                            continue;
+                        }
+                        // the surfaces meet over both domains; the band reaches the wall only
+                        // where a piece of that crease lies in both faces
+                        let found = creases(k, sheet, sheet_face, wall_body, wall, crease_tol)?;
+                        let mut reached = false;
+                        for curve in &found {
+                            for piece in pieces_in_face(k, wall_body, wall, curve, tol, wall_cache)?
+                            {
+                                let mut fresh = CurveOnClassifyCache::default();
+                                if !pieces_in_face(k, sheet, sheet_face, &piece, tol, &mut fresh)?
+                                    .is_empty()
+                                {
+                                    reached = true;
+                                }
+                            }
+                        }
+                        if reached {
+                            self.note_keep_refusal(FilletErrorType::NotExact, NOT_UPRIGHT);
+                            return Err(SolidError::blend_failed(
+                                OP,
+                                "a kept boss's walls are not upright",
+                            ));
+                        }
                     }
-                }
-                if sheet_boxes
-                    .iter()
-                    .any(|b| !b.are_disjoint(&rim_box, on_tol))
-                {
-                    self.note_keep_refusal(FilletErrorType::NotExact, NOT_UPRIGHT);
-                    return Err(SolidError::blend_failed(
-                        OP,
-                        "a kept boss's walls are not upright",
-                    ));
                 }
                 continue;
             }

@@ -308,6 +308,60 @@ fn a_boss_leaning_past_the_angular_tolerance_is_refused_as_the_fork() {
     }
 }
 
+/// A round on the rim of a round block (#16636): its one sheet face is a ring whose box covers the
+/// whole top, so every boss on the top lay inside that box. A boss with leaning walls is refused
+/// only where the round really reaches it, not wherever the boxes meet. A 20 x 10 cylinder, its
+/// top rim rounded r 1.5, a boss 4 tall on the top about (8, 0), 12 in from the band: the round is
+/// the closed form's, the boss stays whole.
+fn rounded_rim_with_boss(boss: fn(&mut Kernel) -> Result<Brep>) -> (f64, f64) {
+    let mut k = Kernel::default();
+    k.fixes = UpstreamFixes::all();
+    k.fixes.fillet_refuse_rounds_breaking_through = false;
+    let block = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0).unwrap();
+    let feature = boss(&mut k).unwrap();
+    let mut b = boolean_union(&mut k, block, feature).unwrap();
+    let e = pick(&k, &b, Point3::new(0.0, 20.0, 10.0));
+    fillet_edges(&mut k, &mut b, &[e], 1.5, 1, 1, 1.0).unwrap();
+    assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert_eq!(
+        (
+            b.face_list().len(),
+            b.edge_list().len(),
+            b.vertex_list().len()
+        ),
+        (6, 8, 5)
+    );
+    // the spandrel's area, revolved about its centroid (Pappus)
+    let r = 1.5;
+    let area = (1.0 - PI / 4.0) * r * r;
+    let centroid = 20.0 - r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
+    (volume_of(&k, &mut b), 2.0 * PI * centroid * area)
+}
+
+#[test]
+fn a_leaning_boss_clear_of_a_rim_round_is_left_alone() {
+    let (v, taken) =
+        rounded_rim_with_boss(|k| create_cone(k, Point3::new(8.0, 0.0, 10.0), 3.0, 1.5, 4.0));
+    let frustum = PI * 4.0 / 3.0 * (9.0 + 4.5 + 2.25);
+    let want = PI * 400.0 * 10.0 + frustum - taken;
+    println!("volume {v:.12}, want {want:.12}");
+    assert!((v - want).abs() <= 1e-6 * want, "volume {v}, want {want}");
+}
+
+/// The same round past an upright boss: the control, the ordinary path.
+#[test]
+fn an_upright_boss_clear_of_a_rim_round_is_left_alone() {
+    let (v, taken) =
+        rounded_rim_with_boss(|k| create_cylinder(k, Point3::new(8.0, 0.0, 10.0), 3.0, 4.0));
+    let want = PI * 400.0 * 10.0 + PI * 9.0 * 4.0 - taken;
+    println!("volume {v:.12}, want {want:.12}");
+    assert!((v - want).abs() <= 1e-6 * want, "volume {v}, want {want}");
+}
+
 /// A boss astride the round's contact line: refused, as the fork.
 #[test]
 fn a_boss_astride_the_contact_line_is_refused_as_the_fork() {
