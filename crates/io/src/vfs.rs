@@ -159,6 +159,23 @@ pub use imp::*;
 pub struct PathScope {
     roots: Vec<std::path::PathBuf>,
     design_roots: Vec<std::path::PathBuf>,
+    /// Folders named on purpose that could not be resolved (#16662), kept to explain a refusal.
+    rejected: Vec<RejectedRoot>,
+}
+
+/// A folder named for a [`PathScope`] that could not be used, and why (#16662).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RejectedRoot {
+    /// The folder as it was given.
+    pub path: std::path::PathBuf,
+    /// Why it was left out, in words for the user ("it doesn't exist").
+    pub reason: String,
+}
+
+impl std::fmt::Display for RejectedRoot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ignored: {}", self.path.display(), self.reason)
+    }
 }
 
 /// At most this many design folders in a scope; the oldest gives way.
@@ -226,19 +243,61 @@ impl PathScope {
         for path in self.roots.iter().chain(&self.design_roots) {
             bytes = bytes.checked_add(path.capacity()).ok_or_else(fail)?;
         }
+        let rejected = self.rejected.capacity().checked_mul(std::mem::size_of::<RejectedRoot>()).ok_or_else(fail)?;
+        bytes = bytes.checked_add(rejected).ok_or_else(fail)?;
+        for r in &self.rejected {
+            bytes = bytes.checked_add(r.path.capacity()).and_then(|b| b.checked_add(r.reason.capacity())).ok_or_else(fail)?;
+        }
         u64::try_from(bytes).map_err(|_| fail())
     }
 
-    /// Confine file access to `roots` (resolved now; folders that don't exist are left out, so an
-    /// empty scope refuses every path).
+    /// Confine file access to `roots` (resolved now). A folder that can't be resolved is left out
+    /// but remembered ([`PathScope::rejected`]), so a refusal under it names it. Callers that
+    /// take folders from a person or an agent's configuration use [`PathScope::new_reporting`] and
+    /// tell them; this form is for folders the program itself chose, where an empty scope
+    /// refusing everything is the right answer.
     pub fn new(roots: impl IntoIterator<Item = std::path::PathBuf>) -> PathScope {
+        PathScope::new_reporting(roots).0
+    }
+
+    /// [`PathScope::new`], also returning each folder that was left out with the reason. A folder
+    /// that doesn't exist yet is left out too, even if it is meant to be created: a scope is
+    /// resolved once, and trusting the name of a folder that isn't there would let whatever later
+    /// appears under it (a link included) be reached. Create the folder, then name it.
+    pub fn new_reporting(roots: impl IntoIterator<Item = std::path::PathBuf>) -> (PathScope, Vec<RejectedRoot>) {
         let mut out = PathScope::default();
-        for r in roots.into_iter().filter_map(|r| canonical(&r)) {
-            if !out.roots.contains(&r) {
-                out.roots.push(r);
+        for r in roots {
+            match std::fs::canonicalize(&r) {
+                Ok(c) => {
+                    if !out.roots.contains(&c) {
+                        out.roots.push(c);
+                    }
+                }
+                Err(e) => {
+                    let reason = if e.kind() == ErrorKind::NotFound { "it doesn't exist".to_string() } else { format!("it can't be resolved ({e})") };
+                    let rej = RejectedRoot { path: r, reason };
+                    if !out.rejected.contains(&rej) {
+                        out.rejected.push(rej);
+                    }
+                }
             }
         }
-        out
+        let rejected = out.rejected.clone();
+        (out, rejected)
+    }
+
+    /// Like [`PathScope::new_reporting`], failing when `roots` is not empty and none of it could
+    /// be used (the scope would refuse everything).
+    pub fn new_strict(roots: impl IntoIterator<Item = std::path::PathBuf>) -> std::result::Result<(PathScope, Vec<RejectedRoot>), Vec<RejectedRoot>> {
+        let roots: Vec<std::path::PathBuf> = roots.into_iter().collect();
+        let given = roots.len();
+        let (scope, rejected) = PathScope::new_reporting(roots);
+        if given > 0 && scope.roots.is_empty() { Err(rejected) } else { Ok((scope, rejected)) }
+    }
+
+    /// The folders named for this scope that were left out, with the reason.
+    pub fn rejected(&self) -> &[RejectedRoot] {
+        &self.rejected
     }
 
     /// Also the folder of the design at `path` (the open design), when
@@ -299,6 +358,24 @@ impl PathScope {
     pub fn check(&self, path: &str) -> Result<()> {
         let refused = || {
             let roots: Vec<String> = self.roots.iter().chain(&self.design_roots).map(|r| r.display().to_string()).collect();
+            // A rejected folder is named by its supplied spelling and by its absolute one, so
+            // `exports` given relative also matches a request for `/work/exports/x.sc`.
+            let request = std::path::absolute(path).ok();
+            let names_root = |r: &RejectedRoot| {
+                std::path::Path::new(path).starts_with(&r.path)
+                    || matches!((&request, std::path::absolute(&r.path).ok()), (Some(q), Some(a)) if q.starts_with(&a))
+            };
+            if let Some(r) = self.rejected.iter().find(|r| names_root(r)) {
+                return Error::new(
+                    ErrorKind::PermissionDenied,
+                    format!(
+                        "{path}: outside the folders this agent may use ({}); the folder {} was named with `--allow-path` but {}, so it was left out",
+                        if roots.is_empty() { "none".into() } else { roots.join(", ") },
+                        r.path.display(),
+                        r.reason
+                    ),
+                );
+            }
             Error::new(
                 ErrorKind::PermissionDenied,
                 format!(
@@ -805,6 +882,24 @@ mod tests {
         assert!(super::current_scope().is_none());
         assert_eq!(super::read(&s(out.join("secret.txt")), 16).unwrap(), b"secret");
         assert!(PathScope::new([base.join("nonexistent")]).check(&s(root.join("sub/a.txt"))).is_err());
+        // #16662: a folder that doesn't exist is reported, not dropped silently; the valid ones stay.
+        let missing = base.join("nonexistent");
+        let (scope, rejected) = PathScope::new_reporting([missing.clone(), root.clone()]);
+        assert_eq!(rejected.len(), 1);
+        assert_eq!((&rejected[0].path, rejected[0].reason.as_str()), (&missing, "it doesn't exist"));
+        assert_eq!(scope.roots().len(), 1);
+        assert!(scope.check(&s(root.join("sub/a.txt"))).is_ok());
+        let err = scope.check(&s(missing.join("x.txt"))).unwrap_err().to_string();
+        assert!(err.contains("--allow-path") && err.contains("doesn't exist") && err.contains("nonexistent"), "{err}");
+        // A relative rejected folder is also named for an absolute request under it.
+        let cwd = std::env::current_dir().unwrap();
+        let rel = PathScope::new_reporting([std::path::PathBuf::from("no-such-exports-16662")]).0;
+        let err = rel.check(&s(cwd.join("no-such-exports-16662/x.sc"))).unwrap_err().to_string();
+        assert!(err.contains("no-such-exports-16662 was named") && err.contains("doesn't exist"), "{err}");
+        // All given folders invalid: strict fails with every reason; none given is fine.
+        assert_eq!(PathScope::new_strict([missing.clone()]).unwrap_err().len(), 1);
+        assert!(PathScope::new_strict([missing.clone(), root.clone()]).is_ok());
+        assert!(PathScope::new_strict([]).is_ok());
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -1210,7 +1305,7 @@ mod tests {
         let expected = ((roots.capacity() + design_roots.capacity()) * std::mem::size_of::<std::path::PathBuf>()
             + roots[0].capacity()
             + design_roots[0].capacity()) as u64;
-        let scope = super::PathScope { roots, design_roots };
+        let scope = super::PathScope { roots, design_roots, rejected: Vec::new() };
         let before = scope.clone();
         assert_eq!(scope.retained_heap_bytes().unwrap(), expected);
         assert_eq!(scope, before);
