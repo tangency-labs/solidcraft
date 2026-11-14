@@ -397,3 +397,16 @@ fn symmetric_extrude_with_symmetric_offset_leaves_clearance_gap_and_follows_para
     // 64000 - 2 * (10 * 10 * 5) = 63000
     assert!((m_cut.volume - 63000.0).abs() < 1e-5, "volume {}", m_cut.volume);
 }
+
+#[test]
+fn symmetric_offset_with_second_distance_is_rejected() {
+    let s = fixture(json!({
+        "distance": "10 mm",
+        "distance2": "4 mm",
+        "direction": "symmetric",
+        "start_offset": "3 mm",
+        "symmetric_offset": true,
+    }));
+    let err = s.model.results.iter().find_map(|r| r.error.clone()).unwrap_or_default();
+    assert!(err.contains("symmetric offset with a second distance"), "unexpected error: {err}");
+}
