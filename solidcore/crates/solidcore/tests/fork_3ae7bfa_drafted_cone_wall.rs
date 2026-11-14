@@ -717,11 +717,13 @@ fn a_horn_drafted_from_its_touching_tip_builds() {
 #[test]
 fn a_large_crescent_drafted_from_its_touching_tip_is_refused() {
     let mut k = Kernel::default();
-    let (ra, dd) = (1e8, 1.0);
+    let (ra, rb) = (1e8, 99_999_999.0);
+    let a = Point3::new(-ra, 0.0, 0.0);
+    let b = Point3::new(1.0 - rb, 0.0, 0.0);
     let cs = [
         arc_in(&k, Point3::new(0.0, 0.0, 0.0), ra, Vec3::X, Vec3::Y, 180.0),
-        line(Point3::new(-ra, 0.0, 0.0), Point3::new(2.0 * dd - ra, 0.0, 0.0)),
-        arc_in(&k, Point3::new(dd, 0.0, 0.0), ra - dd, -Vec3::X, Vec3::Y, 180.0),
+        line(a, b),
+        arc_in(&k, Point3::new(1.0, 0.0, 0.0), rb, -Vec3::X, Vec3::Y, 180.0),
     ];
     let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
     let out = create_taper_extrude_with_corner(
