@@ -6,6 +6,7 @@ SolidCraft is a clean-room, pure-Rust parametric 3D CAD app (sketch solver, feat
 Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`.
 
 ## Hard rules (what enforces each)
+- No integrations with other platforms or services (someone's cloud, sync, hosting, WebDAV or Nextcloud, accounts, embedding the app in another product, host-page/postMessage file bridges, community servers) unless you asked the maintainer first and got a yes; they are reserved for the maintainer, and unasked PRs are closed. Established distribution and OS mechanisms are fine (Flatpak, Snap, winget, Homebrew, AUR, OS keyrings, file dialogs). The only official external host is the ArtCraft launcher, which just downloads our release binaries.
 - Independent: never copy another product's code, icons, text or templates; never drive or take data from commercial CAD. `skills/solidcraft-ground-rules/SKILL.md`.
 - No GPL/LGPL/AGPL code, not even reading it (OpenCASCADE, FreeCAD, SolveSpace, CadQuery, LibreCAD, QCAD): `cargo xtask licences --check`.
 - Every asset is original or openly licensed with a row in ATTRIBUTION.md; read `assets/AGENTS.md` before icon work: `cargo xtask assets`, `cargo xtask icons`.
