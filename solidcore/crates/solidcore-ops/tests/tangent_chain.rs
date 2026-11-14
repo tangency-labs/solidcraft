@@ -1,4 +1,5 @@
-//! `blend::tangent_chain` and `tangent::tangent_face_chain_ordered` (#3141), on record order.
+//! `blend::tangent_chain`, `tangent::tangent_face_chain_ordered` (#3141) and
+//! `tangent::curve_chain_ordered`, on record order.
 //!
 //! A stadium prism: two straight walls and two half-cylinders, 4 high. Its top outline is
 //! four edges each running on tangentially into the next, so a pick of one top edge chains
@@ -22,7 +23,7 @@
 use solidcore_ops::blend::tangent_chain;
 use solidcore_ops::boolean::{boolean, BooleanOp};
 use solidcore_ops::sweep::{extrude, Curve, DraftCorner};
-use solidcore_ops::tangent::tangent_face_chain_ordered;
+use solidcore_ops::tangent::{curve_chain_ordered, tangent_face_chain_ordered};
 use solidcore_ops::{make_box, Body};
 use solidcore_record::brep::{Brep as Record, Surface};
 use std::f64::consts::{FRAC_PI_2, PI};
@@ -350,4 +351,71 @@ fn a_chain_stops_where_it_would_turn_over() {
     }
     let front = edge(&r, [-20.0, -5.0, 10.0], [20.0, -5.0, 10.0]);
     assert!(!chain.members.contains(&front), "{chain:?}");
+}
+
+/// Curve chains (`curve_chain_ordered`): the stadium's top outline is one chain as a blend's
+/// is, and a box's edge chains alone.
+#[test]
+fn a_curve_chain_follows_the_stadium_s_top_outline() {
+    let b = stadium();
+    let (r, order) = b.to_record().unwrap();
+    let front = edge(&r, [0.0, 0.0, H], [20.0, 0.0, H]);
+    let chain = curve_chain_ordered(&b, &order, &[front], ANGLE).unwrap();
+    assert_eq!(chain.members.len(), 4, "{chain:?}");
+    assert_eq!(chain.members[0], front);
+    assert!(chain.members.iter().all(|&e| on_top(&r, e)), "{chain:?}");
+    let square = make_box([0.0; 3], [10.0, 6.0, H]).unwrap();
+    let (r, order) = square.to_record().unwrap();
+    let front = edge(&r, [0.0, 0.0, H], [10.0, 0.0, H]);
+    let chain = curve_chain_ordered(&square, &order, &[front], ANGLE).unwrap();
+    assert_eq!(chain.members, vec![front]);
+}
+
+/// A curve chain does not care for the faces: the sheet stadium's one-face top edges chain
+/// (a blend's chain does not, `a_sheet_s_one_face_edges_do_not_join`), and so does the
+/// overhanging boss's whole base outline, concave and convex (a blend's chain stops where it
+/// would turn over, `a_chain_stops_where_it_would_turn_over`).
+#[test]
+fn a_curve_chain_runs_on_where_a_blend_s_chain_stops() {
+    let sheet = extrude(
+        &stadium_profile(),
+        [0.0, 0.0, 1.0],
+        H,
+        0.0,
+        DraftCorner::default(),
+        false,
+    )
+    .unwrap();
+    let (r, order) = sheet.to_record().unwrap();
+    let front = edge(&r, [0.0, 0.0, H], [20.0, 0.0, H]);
+    let chain = curve_chain_ordered(&sheet, &order, &[front], ANGLE).unwrap();
+    assert_eq!(chain.members.len(), 4, "{chain:?}");
+    assert!(chain.members.iter().all(|&e| on_top(&r, e)), "{chain:?}");
+
+    let base = make_box([-40.0, 0.0, 0.0], [80.0, 40.0, 10.0]).unwrap();
+    let b = boolean(base, stadium_boss(), BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let (r, order) = b.to_record().unwrap();
+    let back = edge(&r, [20.0, 5.0, 10.0], [-20.0, 5.0, 10.0]);
+    let front = edge(&r, [-20.0, -5.0, 10.0], [20.0, -5.0, 10.0]);
+    let chain = curve_chain_ordered(&b, &order, &[back], ANGLE).unwrap();
+    assert!(chain.members.contains(&front), "{chain:?}");
+    for &e in &chain.members {
+        for v in r.edges[e].vertices {
+            let q = r.vertices[v as usize].point;
+            assert!((q[2] - 10.0).abs() < 1e-9, "{e}: {q:?}");
+        }
+    }
+}
+
+/// Hostile picks are refused, never a panic: none, an index past the edges, a bad angle.
+#[test]
+fn a_curve_chain_refuses_bad_picks() {
+    let b = stadium();
+    let (_, order) = b.to_record().unwrap();
+    assert!(curve_chain_ordered(&b, &order, &[], ANGLE).is_err());
+    assert!(curve_chain_ordered(&b, &order, &[usize::MAX], ANGLE).is_err());
+    assert!(curve_chain_ordered(&b, &order, &[0], f64::NAN).is_err());
+    assert!(curve_chain_ordered(&b, &order, &[0], 2.0).is_err());
 }

@@ -116,16 +116,41 @@ pub struct SelInput {
     /// (#11476): a corner, an edge's middle or a hole's centre of that face, with the face, its
     /// outward normal and the edge. A joint origin there lies on the face and follows it by name.
     pub from_face: Vec<(Sel, solidcraft_engine::snap::SnapKind, solidcraft_engine::snap::SnapSource)>,
+    /// Whether the input offers Tangent Chain, and whether it is on: `None` for no switch. On,
+    /// an edge picked into it brings every edge that continues it smoothly as a curve (a path,
+    /// rail or boundary to run along: [`crate::dialogs::Dialog::sync_input_chains`]).
+    pub chain: Option<bool>,
+    /// While Tangent Chain is on: each pick, with the edges its chain brought in.
+    pub(crate) chain_seeds: Vec<(Sel, Vec<Sel>)>,
+    /// The items as the chains last wrote them: a difference is a pick or a removal to follow.
+    pub(crate) chain_written: Vec<Sel>,
 }
 
 impl SelInput {
     pub fn new(label: &'static str, accept: Accept, multi: bool) -> SelInput {
-        SelInput { label, accept, multi, places: false, tip: None, items: Vec::new(), from_face: Vec::new() }
+        SelInput {
+            label,
+            accept,
+            multi,
+            places: false,
+            tip: None,
+            items: Vec::new(),
+            from_face: Vec::new(),
+            chain: None,
+            chain_seeds: Vec::new(),
+            chain_written: Vec::new(),
+        }
     }
 
     /// This input with face picks as places (see [`SelInput::places`]).
     pub fn places(mut self) -> SelInput {
         self.places = true;
+        self
+    }
+
+    /// This input with a Tangent Chain switch, off (see [`SelInput::chain`]).
+    pub fn chains(mut self) -> SelInput {
+        self.chain = Some(false);
         self
     }
 

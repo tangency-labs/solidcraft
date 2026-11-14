@@ -71,7 +71,7 @@ pub fn start(app: &SolveApp) -> (Asm, Vec<SelInput>) {
         phase: 0.0,
     };
     let inputs = vec![
-        SelInput::new("Profile", PROFILES | EDGES, true),
+        SelInput::new("Profile", PROFILES | EDGES, true).chains(),
         SelInput::new("Roller (optional)", ROUND, false),
         SelInput::new("Tip (optional)", FACES | EDGES | VERTICES, false),
     ];
