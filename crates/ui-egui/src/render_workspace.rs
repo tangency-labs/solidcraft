@@ -3953,6 +3953,12 @@ pub(crate) fn interactive_command_info(app: &SolveApp, command: &solidcraft_engi
 pub(crate) fn comparison_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     compare::controls(app, ui);
 }
+/// Whether the Render ribbon starts command `id` its own way (opening the Render workspace on
+/// the command's settings), so it runs from command search without values (#9734).
+pub(crate) fn ribbon_starts(id: &str) -> bool {
+    ribbon::handled(id)
+}
+
 pub(crate) fn start_interactive(app: &mut SolveApp, id: &str) -> bool {
     assign::start(app, id) || ribbon::start(app, id)
 }

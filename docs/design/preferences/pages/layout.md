@@ -78,5 +78,6 @@ The interaction states (drag onto the bar, drop targets, reorder) stay as in `Na
 * The board implies per-workspace navigation bars; the app stores one shared slot list. Design/Render only changes its preview.
 * "Compact" on the board is `LayoutMode::Docked` (serialised `compact`) in the code.
 * The History choice is three booleans in the code, one card group on the board.
+* "List script-only commands in search" (`Prefs.search_lists_script_commands`, default `false`, #9734) is a checkbox on the Layout page today, after the ribbon menu options; the board does not draw it.
 * The status chips ("Analysis", "Section", "Live details", "Fold items") are not on this page; they
   are on Graphics under "In the view".
