@@ -327,6 +327,77 @@ fn blends_turn_round_a_corner_a_ten_thousandth_of_a_degree_off_straight() {
     }
 }
 
+/// #16627: the plate of [`blends_turn_round_a_shallow_sharp_corner`] with corners a thousandth
+/// to a hundredth of a degree off straight, both top edges rounded r 1 or chamfered 1. Each
+/// result passes every check, each round lies on its own closed-form cylinder, and the volume
+/// taken off is the mitred corner's closed form within the sibling tests' 1e-6. Where the two
+/// blends' sections at the corner stand 1 x kink apart, a Join puts one vertex there for both,
+/// which the check holds within the B-rep's intersection tolerance (2e-5): concave corners
+/// 1.5e-3 and 2e-3 degrees off straight (2.6e-5 and 3.5e-5 apart) used to be joined and failed
+/// `SmVertex`'s gap test; now they are mitred. The bound is 2e-5 rad, 1.146e-3 degrees:
+/// 1.14e-3 still joins, 1.15e-3 is mitred (`wr697_end_and_join.rs` asserts which). Asymmetric
+/// chamfers (setbacks 1 and 0.5 either way round) stand at most their larger setback times the
+/// kink apart and pass the check on both sides of the bound too.
+#[test]
+fn blends_join_at_a_near_straight_corner_only_within_the_vertex_check() {
+    all_fixes();
+    let round = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+    let chamfer = (0.5, 1.0 / 6.0);
+    for kink in [1e-3, 1.14e-3, 1.15e-3, 1.5e-3, 2e-3] {
+        for convex in [false, true] {
+            for (top, side) in [(1.0, 0.5), (0.5, 1.0)] {
+                let (b, edges) = shallow_corner_plate(kink, convex);
+                let along: Vec<usize> = edges
+                    .iter()
+                    .map(|&e| {
+                        let faces = edge_faces_along(&b, e, [0.0, 0.0, 1.0]).unwrap();
+                        if faces[0].1 > faces[1].1 {
+                            faces[0].0
+                        } else {
+                            faces[1].0
+                        }
+                    })
+                    .collect();
+                chamfer_sides(&b, &edges, &along, top, ChamferSecond::Distance(side))
+                    .unwrap_or_else(|e| {
+                        panic!("chamfer {top} x {side} at {kink} degrees (convex {convex}): {e:?}")
+                    });
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(
+                    report.is_valid(),
+                    "chamfer {top} x {side} at {kink} degrees (convex {convex}): {report}"
+                );
+            }
+        }
+    }
+    for kink in [1e-3, 1.14e-3, 1.15e-3, 1.5e-3, 2e-3, 3e-3, 5e-3, 1e-2] {
+        for convex in [false, true] {
+            for (kind, (a, m)) in [(Blend::Round, round), (Blend::Chamfer, chamfer)] {
+                let (b, edges) = shallow_corner_plate(kink, convex);
+                let before = volume(&b);
+                blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap_or_else(|e| {
+                    panic!("{kind:?} at a {kink} degree corner (convex {convex}): {e:?}")
+                });
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(
+                    report.is_valid(),
+                    "{kind:?} at a {kink} degree corner (convex {convex}): {report}"
+                );
+                if kind == Blend::Round {
+                    rounds_on_their_cylinders(&b, kink, convex);
+                }
+                let corner = 2.0 * m * (kink.to_radians() / 2.0).tan();
+                let want = 90.0 * a + if convex { -corner } else { corner };
+                let off = before - volume(&b);
+                assert!(
+                    rel(off, want) < 1e-6,
+                    "{kind:?} at a {kink} degree corner (convex {convex}): {off} off, want {want}"
+                );
+            }
+        }
+    }
+}
+
 /// A sketch outline with a near-tangent corner, the whole top rim rounded: a four-sided plate 5
 /// thick, its top outline 40 along x, then 40 on at 3.8 degrees off it (two lines meeting at
 /// 176.2 degrees), then back to (0, -30) and up to the start. All four top edges rounded r 1.5
