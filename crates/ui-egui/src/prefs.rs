@@ -1383,6 +1383,12 @@ preference_settings! {
     /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
     /// as the rest of the title bar does, as before.
     tab_double_click_renames: bool = true, PAGE_LAYOUT;
+    /// Windows only: while the window is dragged by its title bar, nothing is drawn, so the window
+    /// follows the pointer smoothly; animations and progress pause and the picture catches up when
+    /// the drag ends (#13991). Off (the default): the window keeps drawing during the drag and
+    /// every move step renders a frame, as before. Passed to winit at once, no restart
+    /// ([`WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE`]).
+    windows_smooth_window_drag: bool = false, PAGE_LAYOUT;
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
     dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_LAYOUT;
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
@@ -2862,6 +2868,36 @@ pub fn request_graphics_restart(app: &mut SolveApp) -> Result<(), String> {
     Ok(())
 }
 
+/// Pausing drawing while the window is dragged (`windows_smooth_window_drag`) is a choice on
+/// Windows only: the row is drawn and `ui.prefs` lists and sets it there and nowhere else.
+pub const WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE: bool = cfg!(target_os = "windows");
+
+const WINDOWS_SMOOTH_WINDOW_DRAG_UNAVAILABLE: &str =
+    "`windows_smooth_window_drag` is available on Windows only: elsewhere the system decides how a dragged window moves";
+
+/// `ui.prefs` refuses `windows_smooth_window_drag` where it doesn't exist (`available`:
+/// [`WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE`]).
+fn refuse_unavailable_preferences(p: &serde_json::Value, available: bool) -> Result<(), String> {
+    if !available && p.get("windows_smooth_window_drag").is_some() {
+        return Err(WINDOWS_SMOOTH_WINDOW_DRAG_UNAVAILABLE.into());
+    }
+    Ok(())
+}
+
+/// A reply listing the preferences, without the ones this system doesn't have.
+fn preferences_reply(p: &Prefs) -> Result<serde_json::Value, String> {
+    preferences_reply_where(p, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE)
+}
+
+/// [`preferences_reply`], with `windows_smooth_window_drag` listed only where it is `available`.
+fn preferences_reply_where(p: &Prefs, available: bool) -> Result<serde_json::Value, String> {
+    let mut out = serde_json::to_value(p).map_err(|e| e.to_string())?;
+    if !available && let Some(o) = out.as_object_mut() {
+        o.remove("windows_smooth_window_drag");
+    }
+    Ok(out)
+}
+
 /// Write ordinary startup settings without changing a backend choice or its recovery record.
 fn save_graphics(app: &SolveApp) {
     if let Some(path) = &app.services.graphics_path {
@@ -3532,7 +3568,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     if button.is_some() {
         // Cancel and Restore Defaults can change the angle too.
         follow_view_fov(app);
-        out = serde_json::to_value(&app.preferences).map_err(|e| e.to_string())?;
+        out = preferences_reply(&app.preferences)?;
     }
     if let Some(o) = out.as_object_mut() {
         if let serde_json::Value::Object(options) = serde_json::to_value(theme_options_reply(app)).map_err(|e| e.to_string())? {
@@ -4342,6 +4378,7 @@ fn prepare_preferences(
             return Err(format!("`{key}` must be 0.001…180 degrees"));
         }
     }
+    refuse_unavailable_preferences(p, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE)?;
     let mut cur = serde_json::to_value(base).map_err(|e| e.to_string())?;
     if let (Some(o), Some(src)) = (cur.as_object_mut(), p.as_object()) {
         for (k, v) in src {
@@ -4569,7 +4606,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
         up_axis_changed(app);
     }
     follow_view_fov(app);
-    serde_json::to_value(&app.preferences).map_err(|e| e.to_string())
+    preferences_reply(&app.preferences)
 }
 
 #[cfg(test)]
@@ -10941,6 +10978,95 @@ mod tests {
         assert!(h.app.preferences.construct_menu_groups);
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(!h.app.preferences.construct_menu_groups);
+    }
+
+    /// Pausing drawing while the window is dragged: off by default (also for settings saved before
+    /// it existed), set by `ui.prefs` and saved, put back by Layout's reset and that reset taken back by
+    /// Cancel. On other systems the preference doesn't exist for scripts.
+    #[test]
+    fn windows_smooth_window_drag_is_set_saved_and_reset_with_layout_on_windows_only() {
+        assert!(!Prefs::default().windows_smooth_window_drag);
+        assert!(!lenient(&json!({"theme":"light"})).windows_smooth_window_drag, "settings without it read as off");
+        let mut h = crate::scenario::Harness::new();
+        let listed = h.call("ui.prefs", json!({}));
+        assert_eq!(listed["result"].get("windows_smooth_window_drag").is_some(), WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE, "{listed}");
+        let out = h.call("ui.prefs", json!({"windows_smooth_window_drag": true}));
+        if WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE {
+            assert_eq!(out["result"]["windows_smooth_window_drag"], true, "{out}");
+            assert!(h.app.preferences.windows_smooth_window_drag);
+            let mut restored = SolveApp::new(Default::default(), Default::default());
+            restored.load_prefs(&h.app.prefs());
+            assert!(restored.preferences.windows_smooth_window_drag, "saved");
+            let reset = h.call("ui.prefs", json!({"open": "Layout", "button": "defaults"}));
+            assert!(!h.app.preferences.windows_smooth_window_drag, "Layout's reset turns it off");
+            assert_eq!(reset["result"]["windows_smooth_window_drag"], false, "{reset}");
+            h.call("ui.prefs", json!({"button": "cancel"}));
+            assert!(h.app.preferences.windows_smooth_window_drag, "Cancel takes the reset back");
+            assert!(h.call("ui.prefs", json!({"windows_smooth_window_drag": "on"}))["error"].as_str().is_some(), "a refused value");
+            assert!(h.app.preferences.windows_smooth_window_drag, "changes nothing");
+        } else {
+            let error = out["error"].as_str().unwrap_or_default();
+            assert!(error.contains("windows_smooth_window_drag") && error.contains("Windows only"), "{out}");
+            assert!(!h.app.preferences.windows_smooth_window_drag, "a refused value changes nothing");
+            let reset = h.call("ui.prefs", json!({"open": "Layout", "button": "defaults"}));
+            assert!(reset["result"].get("windows_smooth_window_drag").is_none(), "{reset}");
+            h.call("ui.prefs", json!({"button": "cancel"}));
+        }
+    }
+
+    /// Where `windows_smooth_window_drag` exists and where it doesn't, decided from an explicit input
+    /// so both sides run on every system: the refusal, the reply and the row; and Layout's reset.
+    #[test]
+    fn windows_smooth_window_drag_exists_where_available_for_scripts_and_the_row() {
+        let set = json!({"windows_smooth_window_drag": true});
+        // `ui.prefs` sets it where it exists and refuses it elsewhere, with a message that says so.
+        assert_eq!(refuse_unavailable_preferences(&set, true), Ok(()));
+        let refused = refuse_unavailable_preferences(&set, false).unwrap_err();
+        assert!(refused.contains("windows_smooth_window_drag") && refused.contains("Windows only"), "{refused}");
+        assert_eq!(refuse_unavailable_preferences(&json!({"msaa": 4}), false), Ok(()), "other keys are not refused");
+        // Replies list it where it exists only, and nothing else changes.
+        let p = Prefs { windows_smooth_window_drag: true, ..Prefs::default() };
+        let (listed, stripped) = (preferences_reply_where(&p, true).unwrap(), preferences_reply_where(&p, false).unwrap());
+        assert_eq!(listed["windows_smooth_window_drag"], true);
+        assert!(stripped.get("windows_smooth_window_drag").is_none(), "{stripped}");
+        let mut without = listed.clone();
+        if let Some(o) = without.as_object_mut() {
+            o.remove("windows_smooth_window_drag");
+        }
+        assert_eq!(stripped, without, "only that key goes");
+        // Layout's reset turns it off; the other pages' resets leave it alone.
+        for page in 0..PAGES.len() {
+            let mut reset = p.clone();
+            reset_preferences(&mut reset, page);
+            assert_eq!(reset.windows_smooth_window_drag, page != PAGE_LAYOUT, "page {page}");
+        }
+        // The row is drawn where the preference exists only.
+        let mut h = crate::scenario::Harness::new();
+        for available in [false, true] {
+            let _ = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+                crate::scenario::clear_handles();
+                super::interface::windows_smooth_window_drag_row(&mut h.app, ui, available);
+            });
+            assert_eq!(crate::scenario::handle_at("prefs:windows_smooth_window_drag").is_some(), available, "available: {available}");
+        }
+    }
+
+    /// The row is on Layout on Windows only, and it changes the preference.
+    #[test]
+    fn the_windows_smooth_window_drag_row_is_drawn_on_windows_only() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open": "Layout"}));
+        h.frames(4);
+        if !WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE {
+            assert!(crate::scenario::handle_at("prefs:windows_smooth_window_drag").is_none(), "the row is on Windows only");
+            return;
+        }
+        super::reveal_preference(&mut h, "prefs:windows_smooth_window_drag");
+        let checkbox = crate::scenario::handle_at("prefs:windows_smooth_window_drag").unwrap();
+        h.call("ui.click", json!({"x": checkbox.x, "y": checkbox.y}));
+        assert!(h.app.preferences.windows_smooth_window_drag, "the row turns it on");
+        h.call("ui.click", json!({"x": checkbox.x, "y": checkbox.y}));
+        assert!(!h.app.preferences.windows_smooth_window_drag, "and off");
     }
 
     #[test]
