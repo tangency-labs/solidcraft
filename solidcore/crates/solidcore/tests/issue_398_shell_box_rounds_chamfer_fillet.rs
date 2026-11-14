@@ -262,11 +262,14 @@ fn issue_398_open_top_shell_with_edges_on_analytics_exact() {
     // are exact (the source bit for bit, no least squares fit or knot removal moving a
     // face's own part); it was 13701.73449509504 (2.3e-8 above) on the fitted extensions,
     // 13701.735330849975 (8.4e-8 above) with the flag off. With the rims' chamfer stored as
-    // its cone (WR-572, unconditional since its flag was retired) it is 13701.734697389531,
-    // 3.7e-8 above, where the revolution gave 13701.734182305687 (2.2e-10 below): the
-    // offset corner cones meet the cavity floor 1.2e-6 below it (tangency-labs/solidcraft#16587)
-    let pinned = 13701.734697389531;
-    assert!((v - pinned).abs() <= 1e-9 * pinned, "{v} vs {pinned}");
+    // its cone (WR-572, unconditional since its flag was retired) the offset corner cones
+    // meet the cavity floor in their exact circles (tangency-labs/solidcraft#16587, asserted
+    // by `issue_398_open_top_shell_floor_meets_the_corner_cones_in_exact_circles`), so the
+    // body is the closed form's: that test integrates it to within 1e-10 of the closed form at
+    // accuracy 1e-12. At this test's accuracy (1e-6) it reads 13701.734183222, 1.5e-10 below
+    // (integration error). Pinned to the closed form with the earlier pin's 1e-9 band, not to
+    // a measurement.
+    assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
 }
 
 /// Narrows the open-top failure: the shell after each step of the recipe, open at the
@@ -337,7 +340,6 @@ fn issue_398_open_top_shell_floor_meets_the_corner_cones_in_exact_circles() {
     use std::f64::consts::{PI, SQRT_2};
     let mut k = Kernel::default();
     k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.fillet_chamfer_cone_stored_as_cone = true;
     let b = part(&mut k);
     k.fixes.shell_edges_on_analytics_exact = true;
     let mut got = shell_of(&mut k, b, true).unwrap();
