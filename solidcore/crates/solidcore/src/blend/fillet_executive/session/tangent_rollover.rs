@@ -11,6 +11,7 @@
 //! |------------------------------------------|----------|
 //! | `FilletSession::roll_over_tangent_edges` | none     |
 //! | `rails_wholly_past`, `sides_wholly_off`, `carried` (private) | none (the tangent case `ProcessFullRollOver` refuses as "Unimplemented Tangent Rollover Case") |
+//! | `is_ball_at`, `offset_proved_regular`, `nurb_offset_unfolded` (private) | none |
 //! | `SessionObjects::rolled_rails_on_their_faces`, `rail_within_face`, `rail_clear_of` (private) | none |
 //!
 //! The sections only propose such a rollover: it is accepted after the trace, once each rolled
@@ -18,10 +19,13 @@
 //! face, and the whole rail farther than the solver's fit tolerance and twice the face's
 //! largest edge tolerance (each at least the body's tolerance) from every other face across an
 //! edge of the face, by the certified distance bounds of [`crate::query::distance_bound`] on
-//! the rail's Bézier pieces), or the blend is refused.
+//! the rail's Bézier pieces), or the blend is refused. The proposal's "the face beyond's offset
+//! by the ball does not fold" is a bound too (`nurb_offset_unfolded`: `I - d II` positive
+//! definite at every point of the face's parameter box, by rounded interval arithmetic).
 //!
 //! Deviations: none of upstream's; there is no recursion (the rail's pieces wait on a stack, at
-//! most `RAIL_PIECES` of them for each face, each halved at most `RAIL_DEPTH` times).
+//! most `RAIL_PIECES` of them for each face, each halved at most `RAIL_DEPTH` times; the fold
+//! bound's boxes likewise, at most `FOLD_BOXES`, each halved at most `FOLD_DEPTH` times).
 
 use super::ball_regular::ball_section_at;
 use super::{FilletObject, FilletSession, SessionObjects, SolverObject};
@@ -564,8 +568,8 @@ fn carried(
 }
 
 /// [`carried`]'s trial, which leaves the solver rolled on the faces beyond. A face beyond
-/// without a surface carries nothing; one whose offset by the ball is not proved regular over
-/// the face ([`offset_proved_regular`]) neither.
+/// without a surface carries nothing; one whose offset by the ball is not proved regular and
+/// not inside out over the face ([`offset_proved_regular`]) neither.
 ///
 /// # Errors
 /// Those of the rolls, the section solves, the classifications, the evaluations and
@@ -625,19 +629,23 @@ fn carried_rolled(
     Ok(true)
 }
 
+/// The most boxes [`nurb_offset_unfolded`] encloses for one face.
+const FOLD_BOXES: usize = 131_072;
+
+/// The most times one of [`nurb_offset_unfolded`]'s boxes is halved.
+const FOLD_DEPTH: u32 = 32;
+
 /// Whether the offset of `face`'s surface by `offset` (along the surface's normal, as
-/// [`crate::blend::fillet_tangent_rollover`]'s fold test takes it) is proved regular over the
-/// whole face: its NURB is the surface (a B-spline, a plane, a cone, a sphere, a torus, a surface
-/// of revolution or of extrusion; not a net standing in for a definition), and
-/// [`certify_regular`] proves `(1 - k1 d)(1 - k2 d) > 0` over the face's parameter box (which
-/// lies in the NURB's domain and holds `at`, a point of the face) by the Bernstein forms of its
-/// patches, `d` the offset along the NURB's normal `Su x Sv`. The box is connected, so neither
-/// factor changes sign on it; at `at` their sum, `2 - offset (k1 + k2)` from the fundamental
-/// forms, is positive, so both are, everywhere: the ball's offset does not fold over the face,
-/// nor turn inside out. Any other answer, or a frame that degenerates at `at`, is not proved.
+/// [`crate::blend::fillet_tangent_rollover`]'s fold test takes it) is proved regular and not
+/// inside out at every point of the face's parameter box ([`nurb_offset_unfolded`]). Only a
+/// surface whose NURB is the surface (a B-spline, a plane, a cone, a sphere, a torus, a surface
+/// of revolution or of extrusion; not a net standing in for a definition) is judged. The
+/// offset is taken along the NURB's normal `Su x Sv`: the surface's normal is that or its
+/// reverse over the whole surface, read at `at`, a point of the face, where the two must agree
+/// to within 60 degrees. Anything else is not proved.
 ///
 /// # Errors
-/// Those of the evaluations, the NURB and [`certify_regular`]; a cancellation.
+/// Those of the evaluations, the NURB and the bound; a cancellation.
 fn offset_proved_regular(
     k: &Kernel,
     target: &Brep,
@@ -645,7 +653,6 @@ fn offset_proved_regular(
     offset: f64,
     at: Point2,
 ) -> Result<bool> {
-    use crate::offset::construction::sheets::{certify_regular, Regularity};
     use crate::surface::surface::SurfaceKind;
     let Some(surface) = crate::topology::face::p2::surface(target, face)? else {
         return Ok(false);
@@ -669,9 +676,67 @@ fn offset_proved_regular(
     let Some(nurb) = with.gw_nurb() else {
         return Ok(false);
     };
+    let [_, du, dv, _, _, _] = surface.evaluate_2nd_derivatives(k, at, true, true)?;
+    let n = surface.evaluate_normal(
+        k,
+        at,
+        crate::nurbs::knots::Side::Left,
+        crate::nurbs::knots::Side::Left,
+    )?;
+    let cross = du.cross(dv);
+    let (facing, length) = (cross.dot(n), cross.length());
+    if facing.is_nan() || length.is_nan() || facing.abs() <= 0.5 * length {
+        return Ok(false);
+    }
+    let d = if facing > 0.0 { offset } else { -offset };
     let domain = crate::topology::face::p2::uv_domain(target, face)?;
     let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
-    let (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) = (
+    nurb_offset_unfolded(k, nurb, d, uv_box)
+}
+
+/// Whether the offset of the NURB surface `nurb` by `d` along its normal `Su x Sv` is proved
+/// regular and not inside out at every point of the parameter box `uv_box` (`[u0, u1, v0,
+/// v1]`, within the knots' range): both factors `1 - k_i d` positive, `k_i` the principal
+/// curvatures along that normal. That holds at a point exactly where `I - d II` is positive
+/// definite (`II v = k I v` gives `v.(I - d II) v = (1 - k d) v.I v`), and with `X = |Su x
+/// Sv|` (`II` is the unnormalised form over `X`) where `A = X I - d II'` is: `A11 > 0` and
+/// `det A > 0`. Both are proved on boxes by rounded interval arithmetic
+/// ([`crate::blend::fillet_section::interval`]) over the partials' enclosures
+/// ([`nurbs_partials_over_box`]), each box within one polynomial piece (the box is first cut
+/// at the knot lines inside it), at every point of the box: no point is sampled and no sign is
+/// carried across a knot, where a C1 surface's curvature can jump. A box neither proved nor
+/// refused is halved across `u` or `v`, whichever halving leaves it nearer to proved; a box
+/// where `A11` or `det A` is proved negative refuses. At most [`FOLD_BOXES`] boxes are
+/// enclosed, each halved at most [`FOLD_DEPTH`] times, on an explicit stack; past either, or
+/// for a non-finite value anywhere in the net, its knots or `d`, nothing is proved.
+///
+/// # Errors
+/// A cancellation.
+fn nurb_offset_unfolded(
+    k: &Kernel,
+    nurb: &crate::nurbs::srf_basic::Surface,
+    d: f64,
+    uv_box: [f64; 4],
+) -> Result<bool> {
+    if !d.is_finite() {
+        return Ok(false);
+    }
+    // the enclosures' min and max folds drop a NaN: none may reach them
+    let finite_knots = nurb
+        .u_knots()
+        .iter()
+        .chain(nurb.v_knots())
+        .all(|x| x.is_finite());
+    let finite_net = nurb
+        .cpts()
+        .iter()
+        .flatten()
+        .all(|c| c.x.is_finite() && c.y.is_finite() && c.z.is_finite() && c.w.is_finite());
+    if !finite_knots || !finite_net {
+        return Ok(false);
+    }
+    let [u0, u1, v0, v1] = uv_box;
+    let (Some(&ku0), Some(&ku1), Some(&kv0), Some(&kv1)) = (
         nurb.u_knots().first(),
         nurb.u_knots().last(),
         nurb.v_knots().first(),
@@ -679,42 +744,162 @@ fn offset_proved_regular(
     ) else {
         return Ok(false);
     };
-    let [bu0, bu1, bv0, bv1] = uv_box;
-    let inside = u0 <= bu0
-        && bu0 <= at.x
-        && at.x <= bu1
-        && bu1 <= u1
-        && v0 <= bv0
-        && bv0 <= at.y
-        && at.y <= bv1
-        && bv1 <= v1;
-    if !inside || bu0 >= bu1 || bv0 >= bv1 {
+    let within = ku0 <= u0 && u0 < u1 && u1 <= ku1 && kv0 <= v0 && v0 < v1 && v1 <= kv1;
+    if !within {
         return Ok(false);
     }
-    let [_, du, dv, duv, duu, dvv] = surface.evaluate_2nd_derivatives(k, at, true, true)?;
-    let n = surface.evaluate_normal(
-        k,
-        at,
-        crate::nurbs::knots::Side::Left,
-        crate::nurbs::knots::Side::Left,
-    )?;
-    let facing = du.cross(dv).dot(n);
-    if facing.is_nan() || facing == 0.0 {
+    let Ok(net) = crate::offset::construction::sheets::witness_net(nurb) else {
         return Ok(false);
+    };
+    // the box cut at the knot lines inside it: each cell on one polynomial piece
+    let cuts = |knots: &[f64], lo: f64, hi: f64| {
+        let mut at = vec![lo];
+        for &x in knots {
+            if x > lo && x < hi && at.last() != Some(&x) {
+                at.push(x);
+            }
+        }
+        at.push(hi);
+        at
+    };
+    let (us, vs) = (cuts(nurb.u_knots(), u0, u1), cuts(nurb.v_knots(), v0, v1));
+    let mut examined = 0usize;
+    let mut stack: Vec<([f64; 4], u32, Open)> = Vec::new();
+    for (&a, &b) in us.iter().zip(us.iter().skip(1)) {
+        for (&c, &e) in vs.iter().zip(vs.iter().skip(1)) {
+            k.check_cancelled(OP)?;
+            examined += 1;
+            if examined > FOLD_BOXES {
+                return Ok(false);
+            }
+            let cell = [a, b, c, e];
+            match unfolded_on(&net, d, cell) {
+                Unfolded::Proved => {}
+                Unfolded::Refused => return Ok(false),
+                Unfolded::Open(open) => stack.push((cell, 0, open)),
+            }
+        }
     }
-    let d = if facing > 0.0 { offset } else { -offset };
-    if certify_regular(k, nurb, d, Some(uv_box))? != Regularity::Regular {
-        return Ok(false);
+    // an open box is halved across `u` or across `v`, whichever leaves its halves the nearer
+    // to proved (the larger of the two halvings' least lower bound; on a tie, across its larger
+    // extent); a half refused anywhere refuses
+    while let Some((cell, depth, open)) = stack.pop() {
+        k.check_cancelled(OP)?;
+        if depth >= FOLD_DEPTH {
+            return Ok(false);
+        }
+        let [a, b, c, e] = cell;
+        let (mu, mv) = (0.5 * (a + b), 0.5 * (c + e));
+        let mut best: Option<((f64, f64), Halving)> = None;
+        let across = [
+            ([[a, mu, c, e], [mu, b, c, e]], open.u_extent),
+            ([[a, b, c, mv], [a, b, mv, e]], open.v_extent),
+        ];
+        for (halves, extent) in across {
+            examined += 2;
+            if examined > FOLD_BOXES {
+                return Ok(false);
+            }
+            let judged = halves.map(|half| (half, unfolded_on(&net, d, half)));
+            let mut least = f64::INFINITY;
+            for (_, verdict) in &judged {
+                match verdict {
+                    Unfolded::Proved => {}
+                    Unfolded::Refused => return Ok(false),
+                    Unfolded::Open(o) => least = least.min(o.score),
+                }
+            }
+            let better = best.as_ref().is_none_or(|((score, longest), _)| {
+                least > *score || (least == *score && extent > *longest)
+            });
+            if better {
+                best = Some(((least, extent), judged));
+            }
+        }
+        if let Some((_, judged)) = best {
+            for (half, verdict) in judged {
+                if let Unfolded::Open(o) = verdict {
+                    stack.push((half, depth + 1, o));
+                }
+            }
+        }
     }
-    // k1 + k2 = (E N - 2 F M + G L) / (E G - F^2), with the surface's normal
-    let (e, f, g) = (du.dot(du), du.dot(dv), dv.dot(dv));
-    let (l, m, nn) = (duu.dot(n), duv.dot(n), dvv.dot(n));
-    let det = e * g - f * f;
-    if det.is_nan() || det <= 0.0 {
-        return Ok(false);
+    Ok(true)
+}
+
+/// A box halved, each half with [`unfolded_on`]'s answer.
+type Halving = [([f64; 4], Unfolded); 2];
+
+/// [`unfolded_on`]'s answer for one box.
+enum Unfolded {
+    /// Regular and not inside out at every point of the box.
+    Proved,
+    /// Proved to fold or turn inside out somewhere in the box, or not enclosed.
+    Refused,
+    /// Neither, with what chooses how to halve the box.
+    Open(Open),
+}
+
+/// An open box of [`nurb_offset_unfolded`]: what chooses how to halve it.
+#[derive(Debug, Clone, Copy)]
+struct Open {
+    /// The lesser of the two lower bounds (`A11`, `det A`; minus infinity where the normal is
+    /// not proved non-zero).
+    score: f64,
+    /// Its extent across `u`: its side times the largest magnitude of `Su` over it.
+    u_extent: f64,
+    /// Its extent across `v`.
+    v_extent: f64,
+}
+
+/// [`nurb_offset_unfolded`]'s test on the box `[ua, ub] x [va, vb]` of the net `net`.
+fn unfolded_on(
+    net: &crate::blend::fillet_section::station::Nurbs,
+    d: f64,
+    [ua, ub, va, vb]: [f64; 4],
+) -> Unfolded {
+    use crate::blend::fillet_section::interval::Ivl;
+    use crate::blend::fillet_section::series::V3;
+    let dot = |a: V3<Ivl>, b: V3<Ivl>| a.x * b.x + a.y * b.y + a.z * b.z;
+    let Ok(p) = crate::blend::fillet_section::certificate::nurbs_partials_over_box(
+        net, ua, ub, va, vb, 2, 0,
+    ) else {
+        return Unfolded::Refused;
+    };
+    let (su, sv) = (p.at(1, 0), p.at(0, 1));
+    let size = |a: V3<Ivl>| a.x.mag().max(a.y.mag()).max(a.z.mag());
+    let open = |score: f64| {
+        Unfolded::Open(Open {
+            score,
+            u_extent: (ub - ua) * size(su),
+            v_extent: (vb - va) * size(sv),
+        })
+    };
+    let normal = V3 {
+        x: su.y * sv.z - su.z * sv.y,
+        y: su.z * sv.x - su.x * sv.z,
+        z: su.x * sv.y - su.y * sv.x,
+    };
+    let x2 = dot(normal, normal);
+    if !x2.is_positive() {
+        return open(f64::NEG_INFINITY);
     }
-    let sum = 2.0 - offset * ((e * nn - 2.0 * f * m + g * l) / det);
-    Ok(sum > 0.0)
+    let x = x2.sqrt();
+    let di = Ivl::from(d);
+    let a11 = x * dot(su, su) - di * dot(p.at(2, 0), normal);
+    let a12 = x * dot(su, sv) - di * dot(p.at(1, 1), normal);
+    let a22 = x * dot(sv, sv) - di * dot(p.at(0, 2), normal);
+    let det = a11 * a22 - a12 * a12;
+    if a11.hi < 0.0 || det.hi < 0.0 {
+        return Unfolded::Refused;
+    }
+    if a11.is_positive() && det.is_positive() {
+        Unfolded::Proved
+    } else if a11.lo.is_nan() || det.lo.is_nan() {
+        open(f64::NEG_INFINITY)
+    } else {
+        open(a11.lo.min(det.lo))
+    }
 }
 
 /// The most pieces one rolled rail is cut into for one face's bound ([`rail_clear_of`]).
@@ -1160,5 +1345,100 @@ mod tests {
         assert!(offset_proved_regular(&k, &b, face, 4.5 * inward, at).unwrap());
         assert!(offset_proved_regular(&k, &b, face, -20.0 * inward, at).unwrap());
         assert!(!offset_proved_regular(&k, &b, face, 5.1 * inward, at).unwrap());
+    }
+
+    /// The NURB of the one face of a radius 5 sphere about the origin, a box of its parameters
+    /// clear of its poles (the middle third of `v`, all of `u`), and the sign of the offset
+    /// along the NURB's normal that moves toward the centre.
+    fn sphere_net(k: &mut Kernel) -> (crate::nurbs::srf_basic::Surface, [f64; 4], f64) {
+        let b = crate::primitive::api_primitives::create_sphere(k, Point3::new(0.0, 0.0, 0.0), 5.0)
+            .unwrap();
+        let face = b
+            .faces()
+            .ids()
+            .find(|&f| crate::topology::face::p2::surface(&b, f).unwrap().is_some())
+            .unwrap();
+        let surface = crate::topology::face::p2::surface(&b, face)
+            .unwrap()
+            .unwrap();
+        let with = crate::topology::brep::p3::with_nurb(k, surface)
+            .unwrap()
+            .unwrap();
+        let nurb = with.gw_nurb().unwrap().clone();
+        let (u0, u1) = (nurb.u_knots()[0], *nurb.u_knots().last().unwrap());
+        let (v0, v1) = (nurb.v_knots()[0], *nurb.v_knots().last().unwrap());
+        let third = (v1 - v0) / 3.0;
+        let uv_box = [u0, u1, v0 + third, v1 - third];
+        // the NURB's normal at the box's middle, against the way out of the sphere
+        let at = Point2::new(0.5 * (u0 + u1), 0.5 * (v0 + v1));
+        let [p, du, dv, _, _, _] = surface.evaluate_2nd_derivatives(k, at, true, true).unwrap();
+        (nurb, uv_box, -p.dot(du.cross(dv)).signum())
+    }
+
+    /// A ball of radius 12 rolling inside a radius 5 sphere: both factors `1 - d / 5` are
+    /// negative, so their product is positive (a product test alone passes it), and the offset
+    /// is the sphere of radius 7 turned inside out. The bound refuses it, and proves 2 toward
+    /// the centre and 12 away from it.
+    #[test]
+    fn a_sphere_s_offset_past_its_centre_is_refused() {
+        let mut k = Kernel::default();
+        let (nurb, uv_box, inward) = sphere_net(&mut k);
+        assert!(nurb_offset_unfolded(&k, &nurb, 2.0 * inward, uv_box).unwrap());
+        assert!(nurb_offset_unfolded(&k, &nurb, -12.0 * inward, uv_box).unwrap());
+        assert!(!nurb_offset_unfolded(&k, &nurb, 12.0 * inward, uv_box).unwrap());
+    }
+
+    /// A non-finite offset, control point or knot is not proved (the enclosures' folds would
+    /// drop a NaN).
+    #[test]
+    fn the_fold_bound_refuses_a_nan() {
+        let mut k = Kernel::default();
+        let (nurb, uv_box, inward) = sphere_net(&mut k);
+        assert!(nurb_offset_unfolded(&k, &nurb, 2.0 * inward, uv_box).unwrap());
+        assert!(!nurb_offset_unfolded(&k, &nurb, f64::NAN, uv_box).unwrap());
+        let mut net = nurb.cpts();
+        net[1][1].x = f64::NAN;
+        let (p, q) = nurb.degrees();
+        let broken = crate::nurbs::srf_basic::Surface::new(
+            net,
+            p,
+            q,
+            nurb.u_knots().to_vec(),
+            nurb.v_knots().to_vec(),
+        )
+        .unwrap();
+        assert!(!nurb_offset_unfolded(&k, &broken, 2.0 * inward, uv_box).unwrap());
+    }
+
+    /// A rail with a NaN control point gives no pieces, and a piece with one no ball: the
+    /// control-point folds (`f64::min`, `f64::max`) would drop it and leave a finite ball.
+    #[test]
+    fn the_rail_certificate_refuses_a_nan() {
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let curve = |y: f64| {
+            let pw = vec![
+                CPoint::new(0.0, 0.0, 0.0, NOW),
+                CPoint::new(1.0, y, 0.0, NOW),
+                CPoint::new(2.0, 0.0, 0.0, NOW),
+            ];
+            let nl = NlCurve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
+            Curve::from(crate::nurbs::b_spline_curve::BSplineCurve::from_nurb(
+                nl, 3, false,
+            ))
+        };
+        let pieces = rail_pieces(&curve(1.0), 0.0, 1.0).unwrap().unwrap();
+        assert!(pieces.iter().all(|p| p.ball().is_some()));
+        assert!(rail_pieces(&curve(f64::NAN), 0.0, 1.0).unwrap().is_none());
+        let piece = RailPiece {
+            h: vec![
+                [0.0, 0.0, 0.0, 1.0],
+                [f64::NAN, 1.0, 0.0, 1.0],
+                [2.0, 0.0, 0.0, 1.0],
+            ],
+            err: 0.0,
+            depth: 0,
+        };
+        assert!(piece.ball().is_none());
     }
 }

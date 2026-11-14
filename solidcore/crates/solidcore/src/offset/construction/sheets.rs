@@ -1094,7 +1094,7 @@ pub struct Singular {
 
 /// The face's net in the form its interval partials take ([`nurbs_partials_over_box`]):
 /// degrees, full knot vectors and homogeneous control points `(x w, y w, z w, w)`, u-major.
-fn witness_net(s: &Nurb) -> Result<Nurbs> {
+pub(crate) fn witness_net(s: &Nurb) -> Result<Nurbs> {
     let (p, q) = s.degrees();
     let (n, m) = (s.n(), s.m());
     let u = s.u_knots().to_vec();
