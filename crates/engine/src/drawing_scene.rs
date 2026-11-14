@@ -85,6 +85,7 @@ use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb2, ArcMap};
 use solidcraft_sketch::PaperFonts;
 
+use crate::drawing_dimension_paper::{Layout, OnPaper};
 use crate::drawing_picture::{picture_items, view_parts};
 use crate::drawing_table_paper::SheetTables;
 use crate::drawing_view::{
@@ -889,6 +890,10 @@ fn draw_flat(s: &Session, id: u64, view: &ResolvedView, of: &FlatOf) -> Drawn {
 pub(crate) const NOT_DRAWN: &str = "its view isn't drawn";
 /// Why a sheet leaves out a dimension that measures something its view has no place to draw.
 pub(crate) const NO_PLACE: &str = "what it measures has no place to draw on its view";
+/// Why a dimension or a note has no layout, and a dimension's text isn't dragged, while the search
+/// for a font to fall back to runs: the search is never waited for there, as add and its dry run run
+/// on the window thread.
+pub(crate) const TEXT_WAITS: &str = "its text waits for a font to fall back to; drawing.scene draws it when one is found";
 
 /// `records` (each its id and its view's) of `d` as `read` gives them: each on the session its view
 /// draws from in `sessions` ([`ViewSessions::read_on`]), or with none, all on `s`, which is then the
@@ -1033,8 +1038,7 @@ fn drawn_notes(
         let (Some(resolved), Some((frame, group))) = (resolved, frame(view)) else { return base };
         let text =
             d.sheet_of(&note.anchor).and_then(|at| title_block_text::read(s, tree, d, at, std::iter::once(&note.content)).pop()).unwrap_or_default();
-        let tips: Vec<Vec2> =
-            std::iter::once(&resolved.anchor).chain(&resolved.branches).filter_map(|end| end.point).map(|p| frame.to_paper(p)).collect();
+        let tips = crate::drawing_note_paper::note_tips(resolved, &frame);
         // Centred on the view, as its frame is: the scene moves it to the view's centre.
         let paper = crate::drawing_note_paper::note_group(note, &text, &tips, LineKind::Thin.width_mm(group), lettering);
         DrawnDimension { group: Some(Arc::new(paper.group)), fonts: paper.fonts, why: paper.why, pending: paper.pending, ..base }
@@ -1113,7 +1117,7 @@ struct SheetNote {
 fn sheet_notes(s: &Session, d: &Drawing, sheet: u64, lettering: &Lettering, wait: bool) -> (Vec<SheetNote>, bool) {
     let on: Vec<&Arc<Note>> = d.notes.iter().filter(|note| note.anchor == Anchor::Sheet(sheet)).collect();
     let Some(at) = d.sheets.iter().position(|one| one.id == sheet).filter(|_| !on.is_empty()) else { return (Vec::new(), false) };
-    let line_mm = LineKind::Thin.width_mm(d.sheets.get(at).and_then(|one| one.line_group).unwrap_or(d.line_group));
+    let line_mm = sheet_note_line_mm(d, at);
     let state = s.model.state();
     let texts = title_block_text::read(s, &mut Tree::new(&s.doc, &state), d, at, on.iter().map(|note| &note.content));
     let fonts = PaperFonts::new(&lettering.font, &lettering.language, wait);
@@ -1183,6 +1187,12 @@ pub(crate) fn label_box(d: &Drawing, id: u64, centre: Vec2, boundary: Aabb2) -> 
     let around = Aabb2 { min: boundary.min - centre, max: boundary.max - centre };
     let at = centre + label_place(label.offset, label.half, Some(around));
     Some(group_bounds(&moved(&label.group, at), &label.fonts))
+}
+
+/// How wide a note on sheet `at` of `d` draws its lines: its sheet's line group's thin lines, or the
+/// drawing's.
+pub(crate) fn sheet_note_line_mm(d: &Drawing, at: usize) -> f64 {
+    LineKind::Thin.width_mm(d.sheets.get(at).and_then(|one| one.line_group).unwrap_or(d.line_group))
 }
 
 /// The dimensions, the notes and the balloons of `views` of `d`, by view and id.
@@ -1525,6 +1535,27 @@ fn group_bounds(group: &Group, fonts: &[Font]) -> Aabb2 {
         }
     }
     bounds
+}
+
+/// Where `paper`'s parts sit on a sheet `size_mm`, moved to `centre` (its view's, or none for a note
+/// on the sheet) as the sheet takes its group ([`Assembly::add`]): or the sheet's words for why it
+/// has none. None at all while its text waits for a font ([`TEXT_WAITS`]), as a short span's lines
+/// depend on its text's width; none when its group alone fails the paper scene's checks. Each point
+/// is plus `centre`, as [`moved`] moves the group, so the two are the same numbers.
+pub(crate) fn on_sheet_layout(paper: &OnPaper, centre: Vec2, size_mm: Vec2) -> std::result::Result<Layout, String> {
+    if paper.pending {
+        return Err(TEXT_WAITS.to_string());
+    }
+    let mut alone = Scene::new(size_mm, vec![moved(&paper.group, centre)]);
+    alone.add_fonts(paper.fonts.iter().cloned());
+    alone.validate().map_err(|e| e.to_string())?;
+    let at = |p: &Vec2| *p + centre;
+    let Layout { lines, arrows, text_boxes } = &paper.layout;
+    Ok(Layout {
+        lines: lines.iter().map(|(role, line)| (*role, line.iter().map(at).collect())).collect(),
+        arrows: arrows.iter().map(|(tip, dir)| (at(tip), *dir)).collect(),
+        text_boxes: text_boxes.iter().map(|corners| corners.each_ref().map(at)).collect(),
+    })
 }
 
 /// `group` moved `by` on paper: each point plus `by`, exactly, so the same lines moved to the same

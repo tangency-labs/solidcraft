@@ -304,6 +304,14 @@ impl<'a> ViewSessions<'a> {
         ViewSessions { placed, matches: OnceCell::new(), copies: BTreeMap::new() }
     }
 
+    /// `read` on the views' sessions of `s` as the design places its parts, as the sheet draws them:
+    /// with occurrence moves not captured yet, a copy that leaves them out (`drawing_scene::designed`).
+    /// One command's read and layout share them, so each view's copy is made once.
+    pub fn designed<T>(s: &Session, read: impl FnOnce(&mut ViewSessions<'_>) -> T) -> T {
+        let copy = (!s.pending_moves.is_empty()).then(|| crate::drawing_scene::designed(s));
+        read(&mut ViewSessions::new(copy.as_ref().unwrap_or(s)))
+    }
+
     /// The key of the session saved view `view` draws from: what it draws ([`Choice::of`]), less a row
     /// that is the design's active row while the design still matches it ([`ViewSessions::matches`]),
     /// which draws the design itself, with no copy. A row that isn't the active one, or that the design
@@ -711,17 +719,14 @@ pub(crate) struct ViewOnSheet {
 }
 
 /// Where saved view `id` of `d` puts what it draws on its sheet, as the sheet draws it: its frame,
-/// centre, sheet size and line group, measured from where the design places its parts ([`on_sheet`];
-/// an occurrence move not captured yet is left out). Or, in the sheet's words
-/// ([`crate::drawing_scene::NOT_DRAWN`]), that it isn't drawn: no such view, a style the sheet can't
-/// draw yet, a section view (what points at its cut faces is in no part yet, #13046), or nothing to
-/// measure. A view that draws no model edges, a flat
-/// pattern view ([`no_model_edges`]), has no place for what points at the model
-/// ([`crate::drawing_scene::NO_PLACE`]).
-pub(crate) fn on_its_sheet(s: &Session, d: &Drawing, id: u64, cmd: &str) -> std::result::Result<ViewOnSheet, &'static str> {
-    use crate::drawing_scene::{NO_PLACE, NOT_DRAWN, designed};
-    let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
-    let s = copy.as_ref().unwrap_or(s);
+/// centre, sheet size and line group, measured on `sessions` ([`on_sheet_from`]): the caller's read's,
+/// from where the design places its parts ([`ViewSessions::designed`]), so the view's copy is made
+/// once. Or, in the sheet's words ([`crate::drawing_scene::NOT_DRAWN`]), that it isn't drawn: no such
+/// view, a style the sheet can't draw yet, a section view (what points at its cut faces is in no part
+/// yet, #13046), or nothing to measure. A view that draws no model edges, a flat pattern view
+/// ([`no_model_edges`]), has no place for what points at the model ([`crate::drawing_scene::NO_PLACE`]).
+pub(crate) fn on_its_sheet(sessions: &mut ViewSessions, d: &Drawing, id: u64, cmd: &str) -> std::result::Result<ViewOnSheet, &'static str> {
+    use crate::drawing_scene::{NO_PLACE, NOT_DRAWN};
     let view = d.resolve_view(id).map_err(|_| NOT_DRAWN)?;
     if d.view(id).and_then(no_model_edges).is_some() {
         return Err(NO_PLACE);
@@ -731,7 +736,7 @@ pub(crate) fn on_its_sheet(s: &Session, d: &Drawing, id: u64, cmd: &str) -> std:
     if unstyled.or_else(|| not_drawable_apart(&view)).is_some() || view.cut.is_some() {
         return Err(NOT_DRAWN);
     }
-    let on = on_sheet(s, d, id, cmd).ok().filter(|on| on.unmeasured.is_none()).ok_or(NOT_DRAWN)?;
+    let on = on_sheet_from(sessions, d, id, cmd).ok().filter(|on| on.unmeasured.is_none()).ok_or(NOT_DRAWN)?;
     let sheet = d.views.iter().find(|v| v.id == id).and_then(|v| d.sheets.iter().find(|sheet| sheet.id == v.sheet));
     let (Ok(through), Ok(centre), Some(Ok(size))) =
         (frame(view.basis, view.scale.value, &on.extents.model, Vec2::ZERO, cmd), d.view_centre(id), sheet.map(|sheet| sheet.sheet.size_mm()))

@@ -7,18 +7,25 @@
 use std::sync::Arc;
 
 use serde_json::Value;
+use solidcore_record::Vec2;
 use solidcraft_doc::bom::Tree;
+use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::fields::{FieldState, Values, no_field};
-use solidcraft_doc::drawing::note::{Anchor, Branch, End, Note, leaders_refused};
+use solidcraft_doc::drawing::note::{Anchor, Branch, End, Note, Resolved, leaders_refused};
 use solidcraft_doc::ids;
 use solidcraft_geom::cell::{Content, Part};
+use solidcraft_geom::paper::line::LineKind;
+use solidcraft_sketch::PaperFonts;
 
 use super::CommandSpec;
-use super::drawing_dimension::status_words;
+use super::drawing_dimension::{arrow_result, status_words, xy};
 use super::drawing_view::{check_drawn, drawn_warning};
+use crate::drawing_note_paper::{note_group, note_tips};
+use crate::drawing_scene::{on_sheet_layout, sheet_note_line_mm};
+use crate::drawing_view::{ViewSessions, on_its_sheet};
 use crate::params::bad;
 use crate::schema::drawing_note::{
-    AddParams, AnchorParam, BranchParam, BranchResult, BranchesSet, EditParams, EditResult, FieldResult, InspectParams, NoteResult,
+    AddParams, AnchorParam, BranchParam, BranchResult, BranchesSet, EditParams, EditResult, FieldResult, InspectParams, NoteLayoutResult, NoteResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -69,8 +76,13 @@ pub static COMMANDS: &[CommandSpec] = &[
              (a lost one loses only its own leader), text: what it says now, its fields read for its sheet, \
              fields?: [{source, key, state: shown, empty, lost (its sheet documents a component the design no longer has) or unknown \
              (its source has no such field), value?, why?}], \
-             warnings?: its view edited since to leave out a part a leader points at}. A lost reference keeps the note and its text in place, without a \
-             leader. Read-only; no model is evaluated.",
+             warnings?: its view edited since to leave out a part a leader points at, layout?: where it sits on its sheet now, in \
+             paper mm from the sheet's lower-left corner: {leaders: [[[x, y], ..]] each from its arrow's tip through its elbow to \
+             its end by the text, its landing included, arrows: [{tip, points: the unit direction}], text_box?: [4 corners]: start \
+             and end along its foot, then end and start along its top} (none when it isn't drawn; none while its text \
+             waits for a font, which is never waited for here), layout_why?: why it has no layout, or no box for its text, or a \
+             leader, when status doesn't say}. A lost reference keeps the note and its text in place, without a leader. \
+             Read-only; no model is evaluated.",
         ),
 ];
 
@@ -195,15 +207,19 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
 fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     let d = s.drawing(cmd)?;
     let note = d.notes.by_id(id).ok_or_else(|| bad(cmd, format!("the drawing has no note {}", ids::encode(id))))?;
-    let resolved = crate::drawing_view::ViewSessions::new(s)
-        .read_on(d, &[(id, note.anchor.view().unwrap_or_default())], solidcraft_doc::Document::resolve_notes)
-        .map_err(|e| bad(cmd, e.to_string()))?;
-    let r = resolved.into_iter().next().ok_or_else(|| bad(cmd, format!("note {} wasn't read", ids::encode(id))))?;
-    let (status, why, candidates) = status_words(r.anchor.status);
     let state = s.model.state();
     let read = |values: &Values| (values.text(&note.content), fields(values, &note.content));
     let at = d.sheet_of(&note.anchor).ok_or_else(|| bad(cmd, format!("note {} is on no sheet", ids::encode(id))))?;
     let (text, fields) = crate::title_block_text::with_values(s, &mut Tree::new(&s.doc, &state), d, at, std::iter::once(&note.content), read);
+    // Read and laid out on one set of the views' sessions: a view's copy is made once.
+    let (r, (layout, layout_why)) = ViewSessions::designed(s, |sessions| {
+        let on = [(id, note.anchor.view().unwrap_or_default())];
+        let resolved = sessions.read_on(d, &on, solidcraft_doc::Document::resolve_notes).map_err(|e| bad(cmd, e.to_string()))?;
+        let r = resolved.into_iter().next().ok_or_else(|| bad(cmd, format!("note {} wasn't read", ids::encode(id))))?;
+        let layout = layout_on_sheet(sessions, d, note, &r, &text, at);
+        Ok::<_, EngineError>((r, layout))
+    })?;
+    let (status, why, candidates) = status_words(r.anchor.status);
     let reply = NoteResult {
         note: ids::encode(id),
         record: serde_json::to_value(note).map_err(|e| EngineError::Other(e.to_string()))?,
@@ -215,10 +231,53 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
         branches: r.branches.into_iter().map(branch_result).collect(),
         text,
         fields,
+        layout,
+        layout_why,
         warnings: note.anchor.view().map(|view| drawn_warning(d, view, note.paths())).unwrap_or_default(),
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// Where `note` of `d`, read as `r` and saying `text`, sits on its sheet now (sheet `at` of `d`), as
+/// the sheet draws it ([`note_group`]): on a view, through the view's frame, its leaders ending where
+/// `r` finds what they point at, moved to the view's centre; on a sheet, from the sheet's corner. Or
+/// none, with why when its status doesn't say it, in the sheet's words: its view isn't drawn, or its
+/// group alone fails the paper scene's checks; or its text still waits for a font. A text that can't
+/// be set has no box, and a leader too near its text none, and say why. It measures the view on
+/// `sessions`, the ones `r` was read on, and reads the model as it is evaluated.
+fn layout_on_sheet(
+    sessions: &mut ViewSessions,
+    d: &Drawing,
+    note: &Note,
+    r: &Resolved,
+    text: &str,
+    at: usize,
+) -> (Option<NoteLayoutResult>, Option<String>) {
+    let (tips, centre, size, line_mm) = match note.anchor.view() {
+        Some(view) => match on_its_sheet(sessions, d, view, INSPECT) {
+            Ok(on) => (note_tips(r, &on.frame), on.centre, on.size, LineKind::Thin.width_mm(on.line_group)),
+            Err(why) => return (None, Some(why.to_string())),
+        },
+        None => match d.sheets.get(at).map(|sheet| sheet.sheet.size_mm()) {
+            Some(Ok(size)) => (Vec::new(), Vec2::ZERO, size, sheet_note_line_mm(d, at)),
+            Some(Err(e)) => return (None, Some(e.to_string())),
+            None => return (None, None),
+        },
+    };
+    // Asks for a font to fall back to and doesn't wait: add and its dry run run on the window thread.
+    let paper = note_group(note, text, &tips, line_mm, &PaperFonts::new(&d.font, &d.language, false));
+    match on_sheet_layout(&paper, centre, size) {
+        Ok(layout) => {
+            let reply = NoteLayoutResult {
+                leaders: layout.lines.iter().map(|(_, line)| line.iter().map(xy).collect()).collect(),
+                arrows: layout.arrows.iter().map(arrow_result).collect(),
+                text_box: layout.text_boxes.first().map(|corners| corners.each_ref().map(xy)),
+            };
+            (Some(reply), paper.why)
+        }
+        Err(why) => (None, Some(why)),
+    }
 }
 
 /// A branch's end in a reply's words.
