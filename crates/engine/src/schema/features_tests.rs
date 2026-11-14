@@ -3,9 +3,9 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 
 use super::{
-    BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams, FeatureResult,
-    FilletParams, FilletResult, MoveParams, MoveResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult,
-    RevolveParams, ScaleParams, SphereParams, TorusParams,
+    BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, DeleteFaceParams, ExtrudeParams,
+    FeatureResult, FilletParams, FilletResult, MoveParams, MoveResult, OffsetFaceParams, OffsetPlaneParams, PipeParams, PlaneAtAngleParams,
+    PressPullParams, PressPullResult, RevolveParams, ScaleParams, SphereParams, TorusParams,
 };
 use super::{PatternCircularParams, PatternCircularResult};
 use super::{SurfaceSweepParams, SweepParams};
@@ -15,6 +15,14 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<DeleteFaceParams>(),
+        &["body", "body_name", "body_names", "faces", "heal", "name", "participants"],
+    );
+    assert_keys(
+        input_schema_for::<OffsetFaceParams>(),
+        &["body", "body_name", "body_names", "distance", "faces", "name", "participants"],
+    );
     assert_keys(
         input_schema_for::<MoveParams>(),
         &[
@@ -190,6 +198,12 @@ fn combine_schema_and_the_key_check_agree() {
 #[test]
 fn strict_keeps_todays_errors() {
     assert_strict_keeps_todays_errors(&[
+        ("face.delete", json!({"faces": []})),
+        ("face.delete", json!({"faces": null})),
+        ("face.delete", json!({"faces": "not-a-list"})),
+        ("solid.offset_face", json!({"faces": []})),
+        ("solid.offset_face", json!({"faces": null})),
+        ("solid.offset_face", json!({"faces": "not-a-list"})),
         ("solid.box", json!({"length": 5, "width": 5, "height": 5, "operation": "bogus"})),
         ("solid.box", json!({"length": true, "width": 5, "height": 5})),
         ("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [1, 2]})),

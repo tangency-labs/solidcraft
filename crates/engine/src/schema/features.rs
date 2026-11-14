@@ -14,8 +14,8 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FacesParam,
-    FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr, NumberExpr,
+    AngleExpr, AxisDir, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FaceRefs,
+    FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr, NumberExpr,
     OperationParam, PatternAxis, PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam,
     ToPoint, TouchingParam, feature_common, present,
 };
@@ -1088,6 +1088,41 @@ pub enum MoveResult {
         #[serde(skip_serializing_if = "Option::is_none")]
         bodies: Option<FeatureResult>,
     },
+}
+
+/// Delete faces of a body, optionally healing neighbouring faces to close the gap.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DeleteFaceParams {
+    /// The faces to delete, specified by coordinates on the faces or face names from model.faces.
+    pub faces: FaceRefs,
+    /// The body the faces are on, by name: where faces of several bodies meet at a point, whose
+    /// face it is. Default: the body each point or name finds.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Whether neighbouring faces close the gap. Default: true (the neighbouring planes close the
+    /// gap, as when a fillet, hole or boss is taken off; false: the gap stays open and the faces
+    /// left are a surface body).
+    #[serde(default)]
+    pub heal: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Offset faces of a body along their normals by a distance.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct OffsetFaceParams {
+    /// The faces to offset, specified by coordinates on the faces or face names from model.faces.
+    pub faces: FaceRefs,
+    /// The offset distance (positive: outward, expanding the body; negative: inward).
+    pub distance: LengthExpr,
+    /// The body the faces are on, by name: where faces of several bodies meet at a point, whose
+    /// face it is. Default: the body each point or name finds.
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
 }
 
 /// What a feature command returns.
