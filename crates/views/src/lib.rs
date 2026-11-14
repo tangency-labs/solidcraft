@@ -8,5 +8,5 @@
 mod tiles;
 mod view_set;
 
-pub use tiles::{Axis, Edge, MAX_TILES, Preset, Rect, Splitter, Tiles};
+pub use tiles::{Axis, EMPTY, Edge, MAX_TILES, Preset, Rect, Splitter, Tiles};
 pub use view_set::{DesignView, MAX_NAME, MAX_VIEWS, ViewKind, ViewSet};

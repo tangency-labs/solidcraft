@@ -754,6 +754,11 @@ pub struct TabStrip<'a> {
     /// The id of the layout shown now, outlined in the menu; empty for none.
     pub layout_current: &'a str,
     pub layout_tip: &'a str,
+    /// The id of the choice of what an empty place of a layout shows (a row of `layout_menu`
+    /// whose id starts with `fill.`, listed under the miniatures as a choice of one); empty for none.
+    pub layout_fill: &'a str,
+    /// The heading over those choices.
+    pub layout_fill_heading: &'a str,
     pub switcher_menu: &'a [TabMenuRow<'a>],
     /// A design tab released this far below the bar is torn off ([`is_tear_off`]); 0 turns it off.
     pub tear_off_below: f32,
@@ -1498,12 +1503,12 @@ fn layout_grid(ui: &mut egui::Ui, strip: &TabStrip) -> Option<String> {
     crate::menu::list_row(ui, &crate::Item::heading(strip.layout_tip));
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
-        ui.set_max_width((THUMB.x + 12.0) * COLUMNS as f32);
+        ui.set_max_width((THUMB.x + 30.0) * COLUMNS as f32);
         ui.spacing_mut().item_spacing = vec2(6.0, 8.0);
-        for row in strip.layout_menu.iter().filter(|row| !row.heading) {
-            let (rect, resp) = ui.allocate_exact_size(vec2(THUMB.x + 6.0, THUMB.y + 20.0), Sense::click());
+        for row in strip.layout_menu.iter().filter(|row| !row.heading && !row.id.starts_with("fill.")) {
+            let (rect, resp) = ui.allocate_exact_size(vec2(THUMB.x + 24.0, THUMB.y + 20.0), Sense::click());
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, solidcraft_ui_text::tr_label(row.label)));
-            let thumb = Rect::from_min_size(rect.min + vec2(3.0, 0.0), THUMB);
+            let thumb = Rect::from_min_size(rect.min + vec2(12.0, 0.0), THUMB);
             let current = row.id == strip.layout_current;
             if resp.hovered() {
                 ui.painter().rect_filled(thumb.expand(2.0), 6u8, t.app_bar_hover_button);
@@ -1524,6 +1529,29 @@ fn layout_grid(ui: &mut egui::Ui, strip: &TabStrip) -> Option<String> {
             }
         }
     });
+    let fills: Vec<_> = strip.layout_menu.iter().filter(|row| row.id.starts_with("fill.")).collect();
+    if !fills.is_empty() {
+        ui.add_space(6.0);
+        ui.separator();
+        crate::menu::list_row(ui, &crate::Item::heading(strip.layout_fill_heading));
+        for row in fills {
+            let (rect, resp) = ui.allocate_exact_size(vec2((THUMB.x + 30.0) * COLUMNS as f32, 24.0), Sense::click());
+            let label = solidcraft_ui_text::tr_label(row.label);
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::RadioButton, true, label));
+            if resp.hovered() {
+                ui.painter().rect_filled(rect, 5u8, t.app_bar_hover_button);
+            }
+            let dot = pos2(rect.left() + 12.0, rect.center().y);
+            ui.painter().circle_stroke(dot, 6.0, Stroke::new(1.5, if row.id == strip.layout_fill { t.accent } else { t.text_dim }));
+            if row.id == strip.layout_fill {
+                ui.painter().circle_filled(dot, 3.0, t.accent);
+            }
+            ui.painter().text(pos2(rect.left() + 26.0, rect.center().y), Align2::LEFT_CENTER, label, FontId::proportional(VIEW_FONT), t.text);
+            if resp.clicked() {
+                chosen = Some(row.id.to_string());
+            }
+        }
+    }
     chosen
 }
 
