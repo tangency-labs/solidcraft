@@ -100,7 +100,8 @@
 //!   counted as upstream. A vertex that ends a coincident edge lying on the curve (the
 //!   seam's own edge) is that edge's end, so its gap across the curve is bounded by the
 //!   vertex's tolerance, not by the fixed `1000 * SM_EFF_ZERO`: a near miss only past the
-//!   tolerance. A cut wall whose seam edge ends on a body edge 1e-7 to 1e-5 across the
+//!   tolerance. This applies at a shared interval boundary from either side of
+//!   its coincident edge. A cut wall whose seam edge ends on a body edge 1e-7 to 1e-5 across the
 //!   seam (the cut's sketch circle that far off the edge) read as a near miss; its loop
 //!   closes at the vertex within tolerance, and no sliver lies beside the seam.
 //! - **Recursion.** None.
@@ -724,6 +725,25 @@ impl<O: ClassObject> CurveClassification<O> {
                     Some(s) => self.gap_across_curve(k, geometry, pc, t, end, s)?,
                     None => None,
                 };
+                // A shared classification boundary is the same vertex from
+                // either neighboring interval. Its coincident edge may be on
+                // the other side of the interval being visited.
+                let mut on_curve = on_curve;
+                if !on_curve && pc.object().is_some() {
+                    for adjacent in self.intervals() {
+                        let shared_start =
+                            adjacent.interval.min() == t && adjacent.start.object() == pc.object();
+                        let shared_end =
+                            adjacent.interval.max() == t && adjacent.end.object() == pc.object();
+                        if (shared_start || shared_end)
+                            && adjacent.mid.point_class() == PointClassType::Edge
+                            && adjacent.mid.gap_3d(k, geometry, surface)? < near_miss_dist_3d
+                        {
+                            on_curve = true;
+                            break;
+                        }
+                    }
+                }
                 let threshold = if on_curve && !self.edge_runs_beside(k, geometry, pc)? {
                     max2(
                         near_miss_dist_3d,
@@ -2939,6 +2959,9 @@ mod tests {
         fn classification_vertex_point(&self, _vertex: H) -> Option<Point3> {
             Some(self.vertex)
         }
+        fn topology_zone_tol_3d(&self, _object: H) -> Option<f64> {
+            Some(1e-6)
+        }
     }
 
     /// Whether the circle's first quarter, ending at a vertex 1e-8 from its end point
@@ -2996,5 +3019,70 @@ mod tests {
         // no UV curve or no surface to measure across in: the whole gap counts
         assert!(quarter_ending_off([1.0, 0.0, 0.0], 5, 0));
         assert!(quarter_ending_off([1.0, 0.0, 0.0], 1, 5));
+    }
+
+    #[test]
+    fn a_seam_vertex_uses_its_coincident_interval_from_either_side() {
+        use crate::geom::extent2d::Extent2d;
+        use crate::math::Vec2;
+
+        let k = Kernel::default();
+        let mut geo = SeamGeo {
+            curves: vec![
+                line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+                line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+            ],
+            plane: Surface::from(crate::surface::plane::Plane::new(
+                Vec3::ZERO,
+                Vec3::X,
+                Vec3::Y,
+                Vec2::new(1.0, 1.0),
+                &Extent2d::from_bounds(-1.0, -1.0, 2.0, 1.0),
+            )),
+            vertex: Point3::new(0.5, 1e-8, 0.0),
+        };
+        for coincident in [0, 1] {
+            let mut cc = classification(&k, &[0.0, 0.5, 1.0]);
+            cc.set_uv_curve1(Some(H(1, K::Curve)));
+            cc.set_surface1(Some(H(0, K::Surface)));
+            for (i, end) in [(0, true), (1, false)] {
+                let ivl = cc.at_mut(i).unwrap();
+                let pc = if end { &mut ivl.end } else { &mut ivl.start };
+                pc.set_class_object(PointClassType::Vertex, Some(H(0, K::Vertex)));
+                pc.set_t_param(0.5, false);
+                pc.set_gap_3d(1e-8);
+            }
+            cc.at_mut(coincident)
+                .unwrap()
+                .mid
+                .set_class_object(PointClassType::Edge, Some(H(0, K::Edge)));
+            // The unknown interval ends at the coincident interval's own vertex,
+            // within its stored zone. Visiting that interval first must not
+            // turn the same shared boundary into a near miss.
+            assert!(!cc.has_near_misses(&k, &geo, false).unwrap());
+            geo.vertex.y = 2e-6;
+            cc.at_mut(0).unwrap().end.set_gap_3d(2e-6);
+            cc.at_mut(1).unwrap().start.set_gap_3d(2e-6);
+            assert!(cc.has_near_misses(&k, &geo, false).unwrap());
+            geo.vertex.y = 1e-8;
+            cc.at_mut(0).unwrap().end.set_gap_3d(1e-8);
+            cc.at_mut(1).unwrap().start.set_gap_3d(1e-8);
+            // A different vertex at the same parameter does not establish
+            // that this boundary ends the coincident interval.
+            let ivl = cc.at_mut(coincident).unwrap();
+            let boundary = if coincident == 0 {
+                &mut ivl.end
+            } else {
+                &mut ivl.start
+            };
+            boundary.set_class_object(PointClassType::Vertex, Some(H(9, K::Vertex)));
+            assert!(cc.has_near_misses(&k, &geo, false).unwrap());
+            // Without a coincident interval the same offset is a near miss.
+            cc.at_mut(coincident)
+                .unwrap()
+                .mid
+                .set_class_object(PointClassType::Unknown, None);
+            assert!(cc.has_near_misses(&k, &geo, false).unwrap());
+        }
     }
 }

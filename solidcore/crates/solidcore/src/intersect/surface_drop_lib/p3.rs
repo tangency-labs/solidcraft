@@ -68,6 +68,11 @@
 //! - **Curve on surface.** The final distance check builds an `SmCrvOnSurf` of each UV
 //!   curve on an evaluation copy of the surface (`clone_for_evaluation`, which keeps
 //!   the owner and so the face tolerance).
+//! - **Subdivision endpoint state.** Pending endpoints retain their complete drop
+//!   point, including 3D derivatives and boundary classification. Once a split
+//!   point changes the start, the pending endpoint is dropped again from that start
+//!   before testing its span. An unresolved closed-direction seam jump cannot use
+//!   the inaccurate-short-span escape: subdivision must resolve its branch.
 //! - **Bounded subdivision.** The span stack of the subdivision loop is at most
 //!   [`MAX_SPAN_DEPTH`] drop points deep (upstream fixtures reach about 15: a span
 //!   passes once shorter than `1/8000` of the interval; upstream is unbounded,
@@ -105,8 +110,8 @@ use crate::surface::surface::Surface;
 use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled;
 
 use super::p1::{
-    pop_stack, push_point, remove_duplicate_drop_point_solutions, stack_look, DropFailRecord,
-    DropPt, SM_ERR_OUTSIDE_OF_DOMAIN, SM_SUCCESS,
+    remove_duplicate_drop_point_solutions, DropFailRecord, DropPt, SM_ERR_OUTSIDE_OF_DOMAIN,
+    SM_SUCCESS,
 };
 use super::p2::{
     add_to_curve, flush_curve, DropOffset, SM_ERR_INVALID_INPUT, SM_ERR_NOT_WITHIN_TOLERANCE,
@@ -1329,12 +1334,37 @@ impl Surface {
                 }
 
                 // subdivide the span until every piece passes the accuracy test
-                let mut stack: Vec<f64> = Vec::new();
-                push_point(end.t, end.uv_pd, &mut stack);
+                let mut stack = vec![(start.t, end)];
                 let mut stop_spans = false;
                 while !stack.is_empty() {
-                    // set SpanEnd values from the top of the stack
-                    (end.t, end.uv_pd) = stack_look(&stack)?;
+                    // A pending endpoint was dropped relative to an earlier start.
+                    // After accepting a split point, restore its complete state and
+                    // drop it again from the actual start. In particular, seam-side
+                    // choices and entering/leaving flags cannot be inherited from
+                    // the last midpoint evaluated during subdivision.
+                    let (queued_start_t, saved_end) = *stack.last().ok_or_else(|| {
+                        SolidError::intersect_missing(OP, "the pending span endpoint")
+                    })?;
+                    end = saved_end;
+                    let endpoint_t = end.t;
+                    let endpoint_ready = queued_start_t == start.t
+                        || match start.get_next_point(
+                            k,
+                            this,
+                            &mut offset,
+                            singularities,
+                            Some(&pole_points),
+                            &s_uv_domain,
+                            srf_closure,
+                            curve,
+                            approx_tol_3d,
+                            endpoint_t,
+                            &mut end,
+                        ) {
+                            Ok(code) => code == SM_SUCCESS,
+                            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                            Err(_) => false,
+                        };
                     ignore_status(ivl.set_min_max(start.t, end.t))?;
 
                     // fix boundary tangents
@@ -1347,23 +1377,44 @@ impl Surface {
                     );
 
                     // test the span
-                    let acc = start.test_span_accuracy(
-                        k,
-                        this,
-                        &s_uv_domain,
-                        curve,
-                        &end,
-                        approx_tol_3d,
-                        uv_tol_x,
-                        uv_tol_y,
-                        true,
-                    )?;
+                    let acc = if endpoint_ready {
+                        start.test_span_accuracy(
+                            k,
+                            this,
+                            &s_uv_domain,
+                            curve,
+                            &end,
+                            approx_tol_3d,
+                            uv_tol_x,
+                            uv_tol_y,
+                            true,
+                        )?
+                    } else {
+                        super::p1::SpanAccuracy {
+                            passes: false,
+                            max_drop_to_surf: 0.0,
+                            max_approx_dev: 0.0,
+                            max_drop_to_surf_param: start.t,
+                        }
+                    };
                     let mut span_passes = acc.passes;
                     let drop_to_surf = acc.max_drop_to_surf;
                     let approx_dev = acc.max_approx_dev;
 
                     // accept very short spans
-                    if !span_passes && (end.t - start.t).abs() < s_interval.length() / 8000.0 {
+                    let crosses_closed_seam = ((srf_closure == SurfParamType::U
+                        || srf_closure == SurfParamType::Both)
+                        && (end.uv_pd[0].x - start.uv_pd[0].x).abs()
+                            > srf_nat_domain.u_interval().length() / 2.0)
+                        || ((srf_closure == SurfParamType::V
+                            || srf_closure == SurfParamType::Both)
+                            && (end.uv_pd[0].y - start.uv_pd[0].y).abs()
+                                > srf_nat_domain.v_interval().length() / 2.0);
+                    if !span_passes
+                        && endpoint_ready
+                        && !crosses_closed_seam
+                        && (end.t - start.t).abs() < s_interval.length() / 8000.0
+                    {
                         span_passes = true;
                     }
 
@@ -1396,7 +1447,7 @@ impl Surface {
                         start.from_left_u = Some(!truthy(end.from_left_u));
                         start.from_left_v = Some(!truthy(end.from_left_v));
                         have_start_uv_tan = true;
-                        (end.t, end.uv_pd) = pop_stack(&mut stack)?;
+                        let _ = stack.pop();
                         continue;
                     }
 
@@ -1460,13 +1511,13 @@ impl Surface {
                     }
 
                     // the split point becomes the new span end
-                    if stack.len() / 5 >= MAX_SPAN_DEPTH {
+                    if stack.len() >= MAX_SPAN_DEPTH {
                         return Err(SolidError::NotConverged {
                             operation: OP,
                             iterations: MAX_SPAN_DEPTH as u32,
                         });
                     }
-                    push_point(end.t, end.uv_pd, &mut stack);
+                    stack.push((start.t, end));
                 }
                 if stop_spans {
                     break;
@@ -1676,6 +1727,68 @@ mod tests {
             run(crate::geom::tol::USE_DEFAULT),
             run(k.tolerances.zone_tol_3d / 2.0)
         );
+    }
+
+    #[test]
+    fn subdivided_tolerant_seam_traces_keep_their_parameter_side() {
+        // A closed, nonperiodic triangular tube. The source crosses its seam
+        // tangentially within the drop tolerance, but its initial three-degree
+        // departure defeats the one-degree iso-curve shortcut.
+        let k = Kernel::default();
+        let ring = [(1.0, 0.0), (-0.5, 1.0), (-0.5, -1.0), (1.0, 0.0)];
+        let net = [0.0, 1.0]
+            .into_iter()
+            .map(|z| {
+                ring.iter()
+                    .map(|&(x, y)| CPoint::new(x, y, z, NOW))
+                    .collect()
+            })
+            .collect();
+        let nurb = crate::nurbs::srf_basic::Surface::new(
+            net,
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 2.0, 3.0, 3.0],
+        )
+        .unwrap();
+        let surface = Surface::from(BSplineSurface::from_nurb(nurb, false));
+        let source = Curve::from(crate::nurbs::b_spline_curve::BSplineCurve::from_nurb(
+            NurbCurve::new(
+                vec![
+                    CPoint::new(1.0, 0.0, 0.0, NOW),
+                    CPoint::new(1.0, 0.02, 1.0 / 3.0, NOW),
+                    CPoint::new(1.0, -0.02, 2.0 / 3.0, NOW),
+                    CPoint::new(1.0, 0.0, 1.0, NOW),
+                ],
+                3,
+                vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ));
+        let out = surface
+            .drop_curve_base::<NoObject>(
+                &k,
+                &Extent2d::from_bounds(0.0, 0.0, 1.0, 3.0),
+                &source,
+                &Extent1d::from_min_max(0.0, 1.0),
+                0.01,
+                true,
+                None,
+            )
+            .unwrap();
+        assert_eq!(out.uv_curves.len(), 2, "both seam sides remain available");
+        for curve in &out.uv_curves {
+            let (points, _) = curve.control_polygon().unwrap();
+            assert!(
+                points.windows(2).all(|p| (p[1].y - p[0].y).abs() < 1.5),
+                "an arbitrarily short span must not carry a full seam jump: {points:?}"
+            );
+        }
+        assert!(out.max_drop_to_surf <= 0.01, "{out:?}");
+        assert!(out.max_approx_dev <= 0.01, "{out:?}");
     }
 
     // ---- WR-100: the V degeneracy test ------------------------------------------------
