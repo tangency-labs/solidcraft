@@ -1250,6 +1250,27 @@ impl Stitch<'_> {
                             }
                             set_none(&mut v_edges, kk)?;
                             done_with_vertex = false;
+                            // (not upstream) the sewn edge now serves both faces: where a
+                            // face's surface is off its curve by more than its tolerance, the
+                            // curve is recomputed from the surfaces, never the tolerance grown
+                            if let Some(curve) = recomputed_seam_curve(k, b, e, this_tol)? {
+                                let mut trimmed = Vec::new();
+                                for eu in edge::edgeuses(b, e, None, None)? {
+                                    if crate::topology::edgeuse::p1::uv_trim_curve_pointer(b, eu)?
+                                        .is_some()
+                                    {
+                                        trimmed.push(eu);
+                                    }
+                                }
+                                self.edit_replace_edge_curve(k, b, e, curve)?;
+                                for eu in trimmed {
+                                    ignore_status(
+                                        crate::topology::edgeuse::p2::rebuild_uv_trim_curve(
+                                            k, b, eu,
+                                        ),
+                                    )?;
+                                }
+                            }
                             if let Some((pre, bound)) = edge_report {
                                 let after = edge::tolerance(b, e)?;
                                 self.record_gap(
@@ -1648,6 +1669,228 @@ impl Stitch<'_> {
         }
         Ok(out)
     }
+}
+
+/// Samples along a recomputed seam curve (the curve through them is a cubic).
+const SEAM_SAMPLES: usize = 33;
+/// Rounds of projecting a seam point onto the faces' surfaces in turn.
+const SEAM_ROUNDS: usize = 40;
+
+/// The faces' surfaces at `e`, with their parameter domains: one entry per loop edge use of
+/// `e` on a distinct face.
+fn seam_surfaces(
+    b: &Brep,
+    e: EdgeId,
+) -> Result<
+    Vec<(
+        crate::surface::surface::Surface,
+        crate::geom::extent2d::Extent2d,
+    )>,
+> {
+    let mut out = Vec::new();
+    let mut seen: Vec<FaceId> = Vec::new();
+    for eu in edge::edgeuses(b, e, None, None)? {
+        let Some(f) = crate::topology::edgeuse::p1::face(b, eu)? else {
+            continue;
+        };
+        if seen.contains(&f) {
+            continue;
+        }
+        seen.push(f);
+        let rec = b.face(f)?;
+        if let Some(surface) = rec.surface.as_ref() {
+            out.push((surface.clone_for_evaluation()?, rec.uv_domain));
+        }
+    }
+    Ok(out)
+}
+
+/// The point of `surface` nearest `point`, its parameters and its distance from `point`;
+/// `None` when the surface cannot be dropped to or evaluated.
+fn nearest_on_surface(
+    k: &Kernel,
+    surface: &crate::surface::surface::Surface,
+    domain: &crate::geom::extent2d::Extent2d,
+    point: Vec3,
+    guess: Option<crate::math::Point2>,
+) -> Result<Option<(Vec3, crate::math::Point2, f64)>> {
+    use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+    use crate::nurbs::knots::Side;
+    use crate::surface::surface::p5::DropPointOptions;
+    let opts = DropPointOptions {
+        guess_uv: guess,
+        ..DropPointOptions::default()
+    };
+    let Some(drop) = ignored(
+        surface.drop_point::<crate::surface::surface::p4::NoObject>(k, point, domain, &opts),
+    )?
+    else {
+        return Ok(None);
+    };
+    if !drop.success {
+        return Ok(None);
+    }
+    let flags = EvaluateFlags {
+        u_side: Side::Left,
+        v_side: Side::Left,
+        only_upper_half: true,
+        non_zero_tangents: true,
+    };
+    let Some(on) = ignored(surface.evaluate(k, drop.result_uv, 0, 0, flags))?
+        .and_then(|d| d.into_iter().next().and_then(|row| row.into_iter().next()))
+    else {
+        return Ok(None);
+    };
+    if !(on.x.is_finite() && on.y.is_finite() && on.z.is_finite()) {
+        return Ok(None);
+    }
+    Ok(Some((on, drop.result_uv, point.distance(on))))
+}
+
+/// (Not upstream.) The seam curve of edge `e`, just sewn between two faces, recomputed from the
+/// faces' surfaces; `None` when `e` needs none or no such curve exists.
+///
+/// The glued edges' curves coincide, but each face's surface may sit off that curve by more than
+/// the edge's tolerance (and within `limit`, the stitch tolerance). A tolerance is not grown to
+/// cover that: the edge's curve is replaced by one that lies on the surfaces. Each of
+/// [`SEAM_SAMPLES`] points of the old curve is projected onto the surfaces in turn until it lies
+/// on all of them (their intersection near the old curve); where the surfaces do not meet, the
+/// point halfway between the nearest points on them, which makes the larger of the deviations as
+/// small as it can be. A cubic is interpolated through the points. The result stands only when
+/// it stays within `limit` of the old curve and within the edge's own tolerance of every
+/// surface, at the samples and halfway between them; otherwise the surfaces do not meet within
+/// that tolerance and the validity check keeps refusing the edge.
+fn recomputed_seam_curve(k: &Kernel, b: &mut Brep, e: EdgeId, limit: f64) -> Result<Option<Curve>> {
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::nurbs::crv_fit::p1::ParamMethod;
+
+    let tol = edge::tolerance(b, e)?;
+    // Only an edge whose curve is farther from a face than its tolerance needs a new curve.
+    let mut widest = 0.0_f64;
+    for eu in edge::edgeuses(b, e, None, None)? {
+        let Some(gap) = ignored(crate::topology::edgeuse::p1::max_edge_face_gap(
+            k, b, eu, true,
+        ))?
+        .flatten() else {
+            continue;
+        };
+        if gap.gap_3d.is_finite() {
+            widest = widest.max(gap.gap_3d);
+        }
+    }
+    if widest <= tol || widest > limit {
+        return Ok(None);
+    }
+    let surfaces = seam_surfaces(b, e)?;
+    if surfaces.len() < 2 {
+        return Ok(None);
+    }
+    let interval = b.edge(e)?.interval;
+    let (lo, hi) = (interval.min(), interval.max());
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+        return Ok(None);
+    }
+    let Some(old) = b.edge(e)?.curve.as_ref().map(Curve::clone_for_evaluation) else {
+        return Ok(None);
+    };
+    let old = old?;
+
+    // The point of each sample on every surface at once, or as near as they come.
+    let mut guesses: Vec<Option<crate::math::Point2>> = vec![None; surfaces.len()];
+    let mut centres = Vec::with_capacity(SEAM_SAMPLES);
+    for i in 0..SEAM_SAMPLES {
+        let t = lo + (hi - lo) * (i as f64) / ((SEAM_SAMPLES - 1) as f64);
+        let Some(start) =
+            ignored(old.evaluate(k, t, 0, true, false))?.and_then(|d| d.into_iter().next())
+        else {
+            return Ok(None);
+        };
+        let Some(centre) = seam_point(k, &surfaces, &mut guesses, start, tol)? else {
+            return Ok(None);
+        };
+        if centre.distance(start) > limit {
+            return Ok(None);
+        }
+        centres.push(centre);
+    }
+    let Ok(curve) = BSplineCurve::interpolate_points(
+        &centres,
+        None,
+        3,
+        None,
+        None,
+        false,
+        ParamMethod::ChordLength,
+    ) else {
+        return Ok(None);
+    };
+    let curve = Curve::from(curve);
+
+    // Hold the new curve to the edge's own tolerance, halfway between the samples too.
+    let natural = curve.natural_interval();
+    let (nlo, nhi) = (natural.min(), natural.max());
+    for i in 0..SEAM_SAMPLES - 1 {
+        let t = nlo + (nhi - nlo) * (i as f64 + 0.5) / ((SEAM_SAMPLES - 1) as f64);
+        let Some(p) =
+            ignored(curve.evaluate(k, t, 0, true, false))?.and_then(|d| d.into_iter().next())
+        else {
+            return Ok(None);
+        };
+        for (surface, domain) in &surfaces {
+            match nearest_on_surface(k, surface, domain, p, None)? {
+                Some((_, _, d)) if d <= tol => {}
+                _ => return Ok(None),
+            }
+        }
+    }
+    Ok(Some(curve))
+}
+
+/// The point near `start` that lies on every surface, or, where they do not meet, the centre of
+/// their nearest points: `None` when the surfaces stay farther apart than `2 * tol` there.
+fn seam_point(
+    k: &Kernel,
+    surfaces: &[(
+        crate::surface::surface::Surface,
+        crate::geom::extent2d::Extent2d,
+    )],
+    guesses: &mut [Option<crate::math::Point2>],
+    start: Vec3,
+    tol: f64,
+) -> Result<Option<Vec3>> {
+    let mut q = start;
+    let mut centre = start;
+    for _ in 0..SEAM_ROUNDS {
+        let mut sum = Vec3::new(0.0, 0.0, 0.0);
+        let mut nearest = Vec::with_capacity(surfaces.len());
+        for ((surface, domain), guess) in surfaces.iter().zip(guesses.iter_mut()) {
+            let Some((on, uv, _)) = nearest_on_surface(k, surface, domain, q, *guess)? else {
+                return Ok(None);
+            };
+            *guess = Some(uv);
+            sum = sum + on;
+            nearest.push(on);
+        }
+        centre = sum * (1.0 / nearest.len() as f64);
+        let spread = nearest
+            .iter()
+            .map(|p| p.distance(centre))
+            .fold(0.0_f64, f64::max);
+        if spread <= 0.01 * tol {
+            return Ok(Some(centre));
+        }
+        // project the next round from the nearest point on the last surface
+        q = centre;
+    }
+    // not met: the centre is good enough when no surface is farther than the tolerance from it
+    let mut worst = 0.0_f64;
+    for (surface, domain) in surfaces {
+        match nearest_on_surface(k, surface, domain, centre, None)? {
+            Some((_, _, d)) => worst = worst.max(d),
+            None => return Ok(None),
+        }
+    }
+    Ok((worst <= tol).then_some(centre))
 }
 
 /// The squeeze/glue decision of `DoStitching` and `StitchVertexPairs` for two
