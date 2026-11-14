@@ -17,8 +17,8 @@ use crate::schema::inspect::{
     CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail, DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentSketch,
     FaceCylinder, KernelCounts, ListedMaterial, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams,
     MeasureResult, MeasureTotal, Measured, MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces,
-    ModelThread, ModelThreads, ModelThreadsParams, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile,
-    SketchWire, SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
+    ModelThread, ModelThreads, ModelThreadsParams, PointFixedBy, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint,
+    SketchProfile, SketchWire, SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -410,6 +410,7 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
             world: plane.to_world(p.pos).into(),
             fixed: locked.get(i).copied().unwrap_or(false),
             link: p.link.clone(),
+            fixed_by: p.exprs.as_deref().map(|e| PointFixedBy { x: e.x.clone(), y: e.y.clone() }),
             fully_constrained: ss.report.point_determined.get(i).copied().unwrap_or(false),
         })
         .collect();

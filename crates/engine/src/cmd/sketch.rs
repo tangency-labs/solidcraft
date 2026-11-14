@@ -287,7 +287,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&FIX_CONTRACT)
         .output(output_schema_for::<FixResult>)
-        .params("entity: point or curve | entities: [points and curves]; fixed?: bool (default: fix them all unless all are fixed, then unfix)"),
+        .params("entity: point or curve | entities: [points and curves]; fixed?: bool (default: fix them all unless all are fixed, then unfix); unfixing a point placed by parameter expressions (`sketch.inspect` shows them as its `fixed_by`) frees it where they come to now, as plain numbers"),
     CommandSpec::new("sketch.constraint.midpoint", "MidPoint", crate::checked!("sketch.constraint.midpoint", c_midpoint))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_midpoint")
@@ -338,7 +338,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.move_points", "Move Sketch Points", move_points).icon("sketch_move").enabled(in_sketch).params(
         "moves: [{point: ref | near: [x,y], to: [x,y]}] (each point to its own target; `near`: the sketch point closest to it, \
          refused when none lies within `tolerance` or two are as close), tolerance?: mm (default 0.1); sketch? → moved: \
-         [{point, to, at, reached}] (`at`: where it ended up after the one solve; `reached`: whether that is `to`)",
+         [{point, to, at, reached}] (`at`: where it ended up after the one solve; `reached`: whether that is `to`); a point placed by parameter expressions is refused, naming them (unfix it with sketch.constraint.fix first)",
     ),
     CommandSpec::new("sketch.drag", "Drag Sketch Geometry", crate::checked!("sketch.drag", drag))
         .icon("sketch_move")
@@ -1607,9 +1607,10 @@ fn rect_result(sk_out: (Vec<String>, Vec<String>), (sides, corners): (RectSides,
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-/// A rectangle corner: `[x, y]` of numbers, or with a coordinate typed as an expression (as a
-/// `sketch.line` point is): where it is now and the expressions that place it.
-fn corner_arg(doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str) -> Result<(Vec2, PointExprs)> {
+/// A rectangle corner (or an ellipse's centre and major end): `[x, y]` of numbers, or with a
+/// coordinate typed as an expression (as a `sketch.line` point is): where it is now and the
+/// expressions that place it.
+pub(super) fn corner_arg(doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str) -> Result<(Vec2, PointExprs)> {
     let v = p.get(k).ok_or_else(|| bad(cmd, format!("`{k}` must be a point [x, y]")))?;
     match expr_point(doc, v, cmd)? {
         Some((at, exprs)) => Ok((at, exprs.unwrap_or_default())),
@@ -1618,7 +1619,7 @@ fn corner_arg(doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str) -> 
 }
 
 /// Holds sketch point `i` where `exprs` place it, when it has any (see [`add_placed_point`]).
-fn place_point(sk: &mut Sketch, i: Option<&usize>, exprs: PointExprs) {
+pub(super) fn place_point(sk: &mut Sketch, i: Option<&usize>, exprs: PointExprs) {
     if exprs.x.is_none() && exprs.y.is_none() {
         return;
     }
@@ -1830,14 +1831,22 @@ fn circle_size(s: &Session, p: &Value, cmd: &str) -> Result<(f64, Option<(String
     if !p.get(key).is_some_and(Value::is_string) {
         return Ok((radius_arg(p, cmd)?, None));
     }
-    let e = s.doc.with_design_unit(req_expr(cmd, p, key)?.as_str(), Kind::Length);
-    let v = s.doc.eval(&e, Kind::Length).map_err(|e| bad(cmd, format!("{key}: {e}")))?;
+    let (v, e) = length_expr(s, p, key, cmd)?;
     let r = if key == "diameter" { v / 2.0 } else { v };
     if !(r > 1e-9 && r < 1e8) {
         return Err(bad(cmd, "radius must be positive"));
     }
+    Ok((r, e.map(|e| (e, key == "diameter"))))
+}
+
+/// A length `key` typed as an expression over the design's parameters: what it comes to, and
+/// the expression when it names a parameter (then a dimension driven by them). A bare number
+/// reads in the design's unit, and an expression naming no parameter is just the number.
+pub(super) fn length_expr(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<(f64, Option<String>)> {
+    let e = s.doc.with_design_unit(req_expr(cmd, p, key)?.as_str(), Kind::Length);
+    let v = s.doc.eval(&e, Kind::Length).map_err(|e| bad(cmd, format!("{key}: {e}")))?;
     let driven = !solidcraft_doc::expr::references(&e).is_empty();
-    Ok((r, driven.then_some((e, key == "diameter"))))
+    Ok((v, driven.then_some(e)))
 }
 
 fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3266,7 +3275,7 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
     if refs.is_empty() {
         return Err(bad(cmd, "`entity` or `entities` must name sketch points or curves"));
     }
-    let (n, info) = edit(s, p, cmd, false, |sk, _| {
+    let (n, info) = edit(s, p, cmd, false, |sk, doc| {
         // Points and curves; a point is fixed by a Fix constraint, a curve by its flag (which
         // also holds its radius). Projected geometry is always fixed.
         let mut pts = Vec::new();
@@ -3281,16 +3290,35 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
         let all_fixed = pts.iter().all(|q| *q == 0 || sk.point_locked(*q)) && curves.iter().all(|c| sk.curve_locked(*c));
         let fix = want.unwrap_or(!all_fixed);
         let mut n = 0;
+        // A point placed by parameters is released where its expressions come to now, as plain
+        // numbers (#16554).
+        if !fix && pts.iter().any(|q| sk.points.get(*q).is_some_and(|x| x.exprs.is_some())) {
+            doc.apply_point_values(&doc.param_values().0, sk)?;
+        }
         for q in pts {
-            let own = sk.points.get(q).is_some_and(|x| x.fixed || x.link.is_some());
-            if q == 0 || own {
-                continue;
-            }
+            let Some(pt) = sk.points.get(q).filter(|pt| q != 0 && pt.link.is_none()) else { continue };
+            let own = pt.fixed;
             let has = sk.constraints.iter().any(|c| c.kind == ConstraintKind::Fix { p: q });
-            if fix && !has {
+            if fix && !own && !has {
                 add_c(sk, ConstraintKind::Fix { p: q })?;
                 n += 1;
-            } else if !fix && has {
+            } else if !fix && (own || has) {
+                // An equation curve's fit points are placed by its formulas at every solve.
+                if let Some(eq) =
+                    sk.equations.iter().find(|e| sk.curve_index(&e.curve).and_then(|ci| sk.curves.get(ci)).is_some_and(|c| c.kind.uses(q)))
+                {
+                    return Err(bad(
+                        cmd,
+                        format!(
+                            "point `{}` is placed by the equation of curve `{}`, so it cannot be released; edit or delete the equation curve",
+                            pt.id, eq.curve
+                        ),
+                    ));
+                }
+                if let Some(pt) = sk.points.get_mut(q) {
+                    pt.fixed = false;
+                    pt.exprs = None;
+                }
                 sk.constraints.retain(|c| c.kind != ConstraintKind::Fix { p: q });
                 n += 1;
             }
@@ -4315,6 +4343,22 @@ fn move_points(s: &mut Session, p: &Value) -> Result<Value> {
                 None => point_ref(sk, m.get("point"), cmd, "point")?,
             };
             picked.push((q, to));
+        }
+        // A point placed by parameters follows them, so it does not move (#16554).
+        for (q, _) in &picked {
+            if let Some(pt) = sk.points.get(*q)
+                && let Some(e) = pt.exprs.as_deref()
+            {
+                return Err(bad(
+                    cmd,
+                    format!(
+                        "point `{}` is placed by the expression {}, so it follows the parameters and does not move; release it with sketch.constraint.fix {{entity: \"{}\", fixed: false}} first",
+                        pt.id,
+                        e.describe(),
+                        pt.id
+                    ),
+                ));
+            }
         }
         let mut left = Left::Unsolved;
         for (q, to) in &picked {

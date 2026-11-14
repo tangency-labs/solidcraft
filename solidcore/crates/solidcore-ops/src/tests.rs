@@ -36,9 +36,10 @@ fn a_volume_accuracy_is_the_kernels_to_refuse() {
         (at - 4.0 / 3.0 * std::f64::consts::PI * 125.0).abs() < 1e-6,
         "{at}"
     );
-    assert_eq!(
-        ball.volume(f64::INFINITY).err(),
-        Some(Error::Status(crate::error::INVALID_INPUT))
+    let refused = ball.volume(f64::INFINITY).err();
+    assert!(
+        matches!(refused, Some(Error::Refused { reason, .. }) if !reason.is_empty()),
+        "{refused:?}"
     );
 }
 

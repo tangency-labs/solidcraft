@@ -280,6 +280,15 @@ impl ModelBody {
         out
     }
 
+    /// The display edges that are one edge to the user with display edge `edge`, sorted, `edge`
+    /// among them: the pieces a seam of a curved surface splits it into, as a sphere's seam
+    /// ending on a slot's rim splits that rim's arc in two ([`kernel::whole_edge`], decided from
+    /// the exact record). The kernel names them by the record's edge indices, which are the
+    /// display edges'. Just `edge` for a mesh body, a seam or an edge the body does not have.
+    pub fn whole_edge(&self, edge: usize) -> Vec<usize> {
+        kernel::whole_edge(&self.body, edge)
+    }
+
     /// The display plan of this body at the viewport's display quality
     /// ([`crate::display_quality::current`]; at Normal, the same tolerance and angle as
     /// [`ModelBody::mesh`]), made once per level; `None` when the body has no plan (a mesh body,
@@ -4259,6 +4268,19 @@ fn union_all(operands: &[&Traced]) -> Result<Traced> {
     Ok(Traced::step(kernel::union_all(&bodies)?, operands))
 }
 
+/// The union of `operands` when no two of them meet or touch: the bodies side by side as one body
+/// of several pieces, keeping their lineage, with no intersection work. They are apart when
+/// their exact boxes, each grown by twice its body's tolerance, do not meet
+/// ([`kernel::union_apart`]). `None` when that cannot be shown (two boxes meet, a mesh body, a
+/// box that cannot be measured): the caller runs the kernel's union.
+fn union_all_apart(operands: &[&Traced]) -> Option<Traced> {
+    let bodies: Vec<Body> = operands.iter().map(|t| t.body.clone()).collect();
+    let one = kernel::union_apart(&bodies).ok().flatten()?;
+    #[cfg(test)]
+    cost_tests::count(|c| c.joined_apart += 1);
+    Some(Traced::step(one, operands))
+}
+
 /// After a cut handled some sheet bodies as flat machining, apply it to the other targets.
 fn apply_beside_sheet_cut(
     doc: &Document,
@@ -4591,7 +4613,6 @@ fn apply_traced_with(
     targets: &[String],
     extra: &[String],
 ) -> Result<()> {
-    let tools = if op == Operation::Intersect { intersection_tool_union(tools)? } else { tools };
     // Participants: the feature's own targets, else its explicit participants, else the bodies
     // of its component (and what it made itself): other components are left alone.
     let targets: &[String] = if targets.is_empty() { &f.participants } else { targets };
@@ -4629,6 +4650,21 @@ fn apply_traced_with(
         }
         return Ok(());
     }
+    // #9867: a named surface body is no solid to cut or intersect; say how to get one.
+    if matches!(op, Operation::Cut | Operation::Intersect) && named {
+        for &i in &target_idx {
+            if let Some(b) = state.bodies.get(i).filter(|b| b.body.is_surface()) {
+                let verb = if op == Operation::Cut { "a cut" } else { "an intersect" };
+                return Err(DocError::Invalid(format!(
+                    "{} is a surface body, and {verb} needs a solid: cut it with Surface › Trim, or Thicken it first",
+                    b.name
+                )));
+            }
+        }
+    }
+    // An intersect's tools act as one body. Unioned after the refusals above, so a union that
+    // fails or runs out of time never hides them and is not paid for a refused feature.
+    let tools = if op == Operation::Intersect { intersection_tool_union(tools)? } else { tools };
     if matches!(op, Operation::Cut | Operation::Intersect) {
         // A cut that cannot reach a sheet leaves it as it is (#10226): a sheet whose box lies
         // clear of every tool's, in its own frame, needs no boolean to show it. An intersect
@@ -4796,7 +4832,12 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
         let into_keep = tool_frame(keep);
         let tools = tools.iter().map(|tool| tool_in(tool, into_keep)).collect::<Result<Vec<_>>>()?;
         let operands: Vec<&Traced> = std::iter::once(&base).chain(&tools).collect();
-        let acc = union_all(&operands)?;
+        // Bodies that are all apart need no intersection work: they are one body of several
+        // pieces as they stand (#3455: joining 64 separate pegs took the kernel's union 4.5 s).
+        let acc = match union_all_apart(&operands) {
+            Some(acc) => acc,
+            None => union_all(&operands)?,
+        };
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
             *mb = mb.remade(acc);
         }
@@ -5030,8 +5071,9 @@ fn named_pieces_of(
     out
 }
 
-/// Distance that reaches through every target body from the sketch plane (either side).
-pub fn through_all_distance(st: &ModelState, plane: &Plane, targets: &[String]) -> Result<f64> {
+/// Distance that reaches through every target body from the plane `start` along the normal from
+/// the sketch plane (the From Object level plus any start offset), on either side.
+pub fn through_all_distance(st: &ModelState, plane: &Plane, start: f64, targets: &[String]) -> Result<f64> {
     let mut far: f64 = 0.0;
     let mut any = false;
     for b in st.bodies.iter().filter(|b| targets.is_empty() || targets.contains(&b.name)) {
@@ -5046,7 +5088,7 @@ pub fn through_all_distance(st: &ModelState, plane: &Plane, targets: &[String]) 
                 if i & 2 == 0 { bb.min.y } else { bb.max.y },
                 if i & 4 == 0 { bb.min.z } else { bb.max.z },
             );
-            far = far.max(plane.height(p).abs());
+            far = far.max((plane.height(p) - start).abs());
         }
     }
     if !any {
@@ -6946,6 +6988,9 @@ fn feature_tools_with_constructor(
                 Some(p) => height_at(&tst, object_face(&tst, from_name, p.0, Some(n)), &ss.plane, centre, p.0),
                 None => 0.0,
             };
+            // Whether the extrusion runs toward the To object: false when a To offset carries the
+            // end back across the start, so the tool never reaches the object's face.
+            let mut toward_to = true;
             let d = match extent.to {
                 Some(p) => {
                     let off = match &extent.to_offset {
@@ -6959,11 +7004,14 @@ fn feature_tools_with_constructor(
                     if (to - start).abs() < 1e-9 {
                         return Err(DocError::Invalid("the To object is where the extrude starts".into()));
                     }
+                    toward_to = (h - start) * (to - start) > 0.0;
                     to - start
                 }
                 None if extent.through_all => {
                     // The reach is a length; a negative saved distance keeps its side (#10415).
-                    let reach = through_all_distance(st, &ss.plane, &crate::plain(targets))?;
+                    // Measured from where the extrude starts, so an offset leaves no side short (#16556).
+                    let start = from + extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
+                    let reach = through_all_distance(st, &ss.plane, start, &crate::plain(targets))?;
                     if val(vals, &extent.distance, Kind::Length).is_ok_and(|saved| saved < 0.0) { -reach } else { reach }
                 }
                 None => val(vals, &extent.distance, Kind::Length)?,
@@ -7044,8 +7092,10 @@ fn feature_tools_with_constructor(
             // A negative distance flips the side.
             let (mut lo, mut hi) = if a <= b { (a, b) } else { (b, a) };
             // To a curved (or slanted) face: run right through the target body, then keep what
-            // lies before its surface (the tool less the body, the piece at the start).
-            let curved = curved_face(&tst, to_face, Some(n));
+            // lies before its surface (the tool less the body, the piece at the start). An end
+            // the offset carries back across the start, away from that face, never meets it: it
+            // ends at its level, as for a plane, instead of running out through the whole body.
+            let curved = curved_face(&tst, to_face, Some(n)).filter(|_| toward_to);
             // The tool is cut back to that surface below, which removes the part a To offset adds
             // past it: the offset would change nothing, so say so instead of cutting nothing (#12617).
             if curved.is_some()

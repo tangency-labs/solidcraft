@@ -639,6 +639,45 @@ fn a_band_narrower_than_its_tolerance_at_a_vertex_gets_its_seam_where_it_is_wide
     }
 }
 
+/// A cylinder band between a rim on the cylinder and one the file has 0.2 um outside it (a rim
+/// written to less than the file's stated 0.01 um), their vertices half a turn apart. The seam
+/// from the lower vertex up its ruling ends on the upper rim where that is split, 0.2 um off the
+/// cylinder, so its middle is 0.1 um off: the face was left out with "a seam off its surface".
+/// A seam is as far off as its ends are, and its tolerance says so.
+#[test]
+fn a_seam_to_a_rim_a_little_off_its_cylinder_is_no_farther_off_than_the_rim() {
+    let mut w = W::default();
+    let (r, off) = (10.0, 2e-4);
+    let v_low = w.vertex([r, 0.0, 0.0]);
+    let low = arc_about_z(&mut w, (v_low, v_low), r, 0.0);
+    let v_high = w.vertex([-(r + off), 0.0, 5.0]);
+    let k = w.circle([0.0, 0.0, 5.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], r + off);
+    let high = w.add(format!("EDGE_CURVE('',#{v_high},#{v_high},#{k},.T.)"));
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let cylinder = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+    let (x, y) = (w.oe(low, true), w.oe(high, false));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let face = w.face(&[bx, by], cylinder, true);
+    let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('band',(#{open}))"));
+    let s = one_solid(&w.file_with_uncertainty(&[model], 1e-5));
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    // The seam: the one edge from the lower rim's height to the upper's (the halves of the
+    // upper rim, split where the seam ends, also join two vertices), its tolerance covering
+    // its gap.
+    let seams: Vec<_> = s
+        .brep
+        .edges
+        .iter()
+        .filter(|e| {
+            let [a, b] = e.vertices.map(|v| s.brep.vertices[v as usize].point);
+            (a[2] - b[2]).abs() > 4.0
+        })
+        .collect();
+    let [seam] = seams.as_slice() else { panic!("{} edges between the rims", seams.len()) };
+    assert!(seam.tolerance >= 0.5 * off && seam.tolerance < 10.0 * off, "{}", seam.tolerance);
+}
+
 /// A spherical band (a dome with a ring of holes round a centre one) between a circle at its foot
 /// and one round its top, both with their vertex at angle 0, and a hole straddling that angle
 /// between them. The meridian through both vertices crosses the hole, so a seam there cut it in
@@ -1131,10 +1170,63 @@ fn spline_edges_get_their_vertices_parameters() {
         let [a, z] = e.vertices.map(|v| s.brep.vertices[v as usize].point);
         assert_eq!((a, z), if same_sense { ([1.0, 0.0, 0.0], [1.0, 1.0, 0.0]) } else { ([1.0, 1.0, 0.0], [1.0, 0.0, 0.0]) });
     }
-    // An edge across a closed spline's seam is refused, for now.
-    let r = read_solids(&spline_sheet(true, true));
-    assert_eq!(r.solids.len(), 0);
-    assert!(r.failures[0].message.contains("across a closed spline's seam"), "{:?}", r.failures);
+    // This closed polygon spline's right edge crosses its original seam.
+    let s = one_solid(&spline_sheet(true, true));
+    assert_eq!(counts(&s.brep), [1, 1, 1, 4, 4]);
+    let edge = s.brep.edges.iter().find(|e| matches!(e.curve, BCurve::Spline { .. })).unwrap();
+    let eval = CurveEval::new(&edge.curve).unwrap();
+    let [a, b] = edge.interval;
+    for i in 0..=16 {
+        let p = eval.point(a + (b - a) * f64::from(i) / 16.0).unwrap();
+        assert!((p.x - 1.0).abs() < 1e-12 && p.z.abs() < 1e-12, "{p:?}");
+        assert!((p.y - f64::from(i) / 16.0).abs() < 1e-12, "{p:?}");
+    }
+}
+
+/// The issue's exact rational circles have their seam at +X and edge ends at ±Y.
+/// Both caps and one side used to be discarded when their edges crossed that seam.
+#[test]
+fn a_cylinder_with_edges_across_closed_spline_seams_is_solid() {
+    let ex = p21::parse(include_str!("../tests/fixtures/closed-spline-cylinder.step")).unwrap();
+    let s = one_solid(&ex);
+    assert_eq!(counts(&s.brep), [2, 1, 4, 6, 4]);
+    assert!(!s.sheet);
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    let mass = body.mass_properties(1e-6).unwrap();
+    assert!((mass.volume - 2.0 * PI).abs() < 1e-3, "{mass:?}");
+    assert!((mass.area - 6.0 * PI).abs() < 1e-3, "{mass:?}");
+}
+
+#[test]
+fn closed_spline_seam_mapping_preserves_sense_and_geometry() {
+    let points = vec![[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.], [0., 0., 0.]];
+    let knots = vec![0., 0., 1., 2., 3., 4., 4.];
+    let polynomial = BCurve::Spline { knots: knots.clone(), points: points.clone() };
+    let rational = BCurve::RationalSpline {
+        knots,
+        homogeneous: points.iter().zip([2., 3., 4., 2., 1.]).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, w]).collect(),
+    };
+    for curve in [polynomial, rational, BCurve::Polyline { points }] {
+        let original = CurveEval::new(&curve).unwrap();
+        let lo = original.point(3.25).unwrap();
+        let hi = original.point(0.75).unwrap();
+        let array = |p: Vec3| [p.x, p.y, p.z];
+        for sense in [true, false] {
+            let (ps, pe) = if sense { (array(lo), array(hi)) } else { (array(hi), array(lo)) };
+            let mapped = open_or_closed(curve.clone(), ps, pe, sense, false, 1e-7).unwrap();
+            assert_eq!(mapped.with_step, sense);
+            assert!(!mapped.sense_mismatch);
+            assert_eq!(mapped.interval, [3.25, 4.75], "retain exact sampled parameters");
+            let rotated = CurveEval::new(&mapped.curve).unwrap();
+            for i in 0..=32 {
+                let t = 3.25 + 1.5 * f64::from(i) / 32.;
+                let old_t = if t >= 4. { t - 4. } else { t };
+                assert!(rotated.point(t).unwrap().dist(original.point(old_t).unwrap()) < 1e-12, "{t}");
+            }
+        }
+        assert!(open_or_closed(curve.clone(), array(lo), array(lo), true, false, 1e-7).is_err());
+    }
 }
 
 #[test]
@@ -2042,8 +2134,13 @@ fn an_edge_to_a_vertex_a_hair_off_a_closed_splines_seam_ends_at_the_seam() {
     let m = open_or_closed(square(), off, mid, false, false, tol).unwrap();
     assert!((m.interval[0] - 1.5).abs() < 1e-9 && m.interval[1] == 4.0, "{:?}", m.interval);
     // Farther off than the tolerance it is a vertex of the curve like any other: the edge from
-    // the middle to it, the curve's way, crosses the seam.
-    assert!(open_or_closed(square(), mid, [5e-3, 0.0, 0.0], true, false, tol).is_err());
+    // the middle to it, the curve's way, crosses the seam, so the curve restarts at the middle
+    // and the edge runs from there round to that vertex.
+    let far = [5e-3, 0.0, 0.0];
+    let m = open_or_closed(square(), mid, far, true, false, tol).unwrap();
+    let eval = CurveEval::new(&m.curve).unwrap();
+    let at = |t: f64, q: [f64; 3]| eval.point(t).unwrap().dist(v3(q)) < 1e-9;
+    assert!(at(m.interval[0], mid) && at(m.interval[1], far), "{:?}", m.interval);
 }
 
 /// A spline surface whose first and last control columns lie within the tolerance of each other
@@ -2178,4 +2275,14 @@ fn a_walk_past_the_start_covers_the_gap_found_before_it() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn restarted_curve_errors_keep_their_step_messages() {
+    let line = BCurve::Line { start: [0.; 3], end: [1.; 3] };
+    assert_eq!(crate::kernel::restart_curve(&line, 0.5).unwrap_err(), "only splines and polylines can be restarted");
+    let closed = BCurve::Polyline { points: vec![[0.; 3], [1.; 3], [0.; 3]] };
+    assert_eq!(crate::kernel::restart_curve(&closed, 0.).unwrap_err(), "spline restart outside the open domain");
+    let open = BCurve::Polyline { points: vec![[0.; 3], [1.; 3], [2.; 3]] };
+    assert_eq!(crate::kernel::restart_curve(&open, 0.5).unwrap_err(), "spline seam endpoints do not coincide");
 }

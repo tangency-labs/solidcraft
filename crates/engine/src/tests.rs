@@ -479,6 +479,7 @@ mod flush_join_loft;
 mod gltf_import;
 mod import_component;
 mod kernel_pool;
+mod kicad_import;
 mod large_step_import;
 mod loft_ring;
 mod loft_spacing;
@@ -2025,6 +2026,67 @@ fn measure_items() {
     assert!(s.execute("inspect.measure", &json!({"items": [{"type": "nonsense"}]})).is_err());
 }
 
+/// The closest distance between a face and an edge, line or face that ends (#16270, #16271): a
+/// line is not counted as running on to the face's plane, and two faces meet where they cross
+/// or come nearest along an edge, not only at a corner. Values worked out by hand on a
+/// 60 × 40 × 10 block whose top face is z = 10, x from -30 to 30, y from -20 to 20.
+#[test]
+fn measure_closest_between_items_that_end() {
+    let block = |s: &mut Session| {
+        run(s, "solid.box", json!({"length": 60, "width": 40, "height": 10, "corner": [-30, -20, 0], "name": "Block", "body_name": "Block"}));
+    };
+    let top = json!({"type": "face", "body": "Block", "point": [20, 15, 10]});
+    let min = |r: &Value| r["min"].as_f64().unwrap_or(f64::NAN);
+    let at = |r: &Value, k: &str| -> Vec3 { serde_json::from_value(r[k].clone()).unwrap_or_else(|e| panic!("{k}: {e} in {r}")) };
+    // A sketch line on the YZ plane (sketch y is world z): above the face, beside it, past its edge.
+    for (points, want) in [
+        (json!([[10, 25], [10, 50]]), 15.0),
+        (json!([[10, 25], [30, 45]]), 15.0),
+        (json!([[30, 25], [30, 50]]), (10.0f64 * 10.0 + 15.0 * 15.0).sqrt()),
+        (json!([[30, 0], [30, 50]]), 10.0),
+        (json!([[10, 0], [10, 50]]), 0.0),
+        (json!([[-10, 30], [10, 30]]), 20.0),
+    ] {
+        let mut s = Session::default();
+        block(&mut s);
+        run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Line"}));
+        run(&mut s, "sketch.line", json!({"points": points}));
+        let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "sketch_curve", "sketch": 2, "id": "l1"}, top]}));
+        assert!((min(&r) - want).abs() < 1e-9, "{points}: want {want}, {r}");
+        assert!((at(&r, "from").dist(at(&r, "to")) - want).abs() < 1e-9, "{points}: {r}");
+    }
+    // A body's straight edge 15 above the face: from its lower end straight down.
+    let mut s = Session::default();
+    block(&mut s);
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 1, "width": 1, "height": 25, "corner": [0, 10, 25], "operation": "new", "name": "Probe", "body_name": "Probe"}),
+    );
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "edge", "body": "Probe", "point": [0, 10, 40]}, top]}));
+    assert!((min(&r) - 15.0).abs() < 1e-9 && at(&r, "from").dist(Vec3::new(0.0, 10.0, 25.0)) < 1e-9, "{r}");
+    // The side face (x = 1) of a 2 wide fin, against the block's top face.
+    for (width, corner, pick, want) in [
+        (20, [-1, -10, -15], [1, 0, 5], 0.0),
+        (60, [-1, -30, -15], [1, 0, 5], 0.0),
+        (60, [-1, -30, 10], [1, 0, 30], 0.0),
+        (60, [-1, -30, 13], [1, 0, 33], 3.0),
+        (20, [-1, -10, 13], [1, 0, 33], 3.0),
+    ] {
+        let mut s = Session::default();
+        block(&mut s);
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 2, "width": width, "height": 40, "corner": corner, "operation": "new", "name": "Fin", "body_name": "Fin"}),
+        );
+        let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "face", "body": "Fin", "point": pick}, top]}));
+        assert!((min(&r) - want).abs() < 1e-9, "fin {width} at {corner:?}: want {want}, {r}");
+        let (from, to) = (at(&r, "from"), at(&r, "to"));
+        assert!((from.x - 1.0).abs() < 1e-9 && (to.z - 10.0).abs() < 1e-9 && to.y.abs() <= 20.0 + 1e-9, "fin {width} at {corner:?}: {r}");
+    }
+}
+
 /// Section Analysis sets and clears the view cut without touching the design or history.
 #[test]
 fn section_analysis() {
@@ -2365,6 +2427,73 @@ fn pipe_scale_offset_bounding_and_materials() {
     assert!((m["bodies"][0]["mass_g"].as_f64().unwrap() - 10_000.0 * 2.7 / 1000.0).abs() < 1e-6, "{m}");
     assert_eq!(m["bodies"][0]["material"], "Aluminum");
     assert!(s.execute("material.assign", &json!({"bodies": ["Cube"], "material": "unobtainium"})).is_err());
+}
+
+/// A body stretched by a non-uniform `solid.scale` keeps its flat faces flat, so a boolean whose
+/// tool crosses a stretched side wall comes out right (#14409). The faces used to become free-form
+/// surfaces, and then a cylinder standing on the x side wall made the join and the cut fail SMLib's
+/// check and the intersect silently return the whole cylinder segment, twice the volume.
+#[test]
+fn booleans_across_the_walls_of_a_non_uniformly_scaled_body() {
+    let planes = |s: &Session, name: &str| {
+        let st = s.model.state();
+        let body = st.bodies.iter().find(|b| b.name == name).unwrap();
+        body.body.record().faces.iter().all(|f| matches!(f.surface, solidcore_record::brep::Surface::Plane { .. }))
+    };
+    let measured = |s: &mut Session, name: &str| run(s, "inspect.measure", json!({"bodies": [name]}))["total"]["volume_mm3"].as_f64().unwrap();
+    // A 20 x 20 x 10 box scaled by [a, b, c], and a cylinder r5 from z = -5 to 35, its axis at
+    // (x, 10 b): on the scaled box's x = 20 a wall for x = 20 a, through the middle for x = 10 a.
+    let combined = |factors: [f64; 3], x: f64, operation: &str| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "X"}));
+        run(&mut s, "solid.scale", json!({"bodies": ["X"], "factors": factors}));
+        assert!(planes(&s, "X"), "{factors:?}: the scaled box's faces are not all planes");
+        let base = [x, 10.0 * factors[1], -5.0];
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 40, "base": base, "axis": "Z", "body_name": "Z"}));
+        run(&mut s, "solid.combine", json!({"target": "X", "tools": ["Z"], "operation": operation}));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{factors:?} {operation}: {:?}", s.model.results);
+        let st = s.model.state();
+        let body = st.bodies.iter().find(|b| b.name == "X").unwrap();
+        assert!(body.body.validity().is_empty(), "{factors:?} {operation}: {:?}", body.body.validity());
+        let faces = body.body.face_count();
+        (measured(&mut s, "X"), faces)
+    };
+    // The cylinder through the middle crosses only the top and bottom.
+    let (got, _) = combined([1.0, 1.0, 2.0], 10.0, "join");
+    assert!(rel(got, 8000.0 + 500.0 * PI) < 1e-5, "{got}");
+    for factors in [[1.0, 1.0, 0.5], [1.0, 1.0, 2.0], [2.0, 1.0, 1.0], [1.0, 2.0, 1.0], [2.0, 2.0, 1.0], [1.5, 1.5, 0.4], [1.5, 1.5, 1.0]] {
+        let [a, b, c] = factors;
+        let (stretched, cylinder, inside) = (4000.0 * a * b * c, 1000.0 * PI, 125.0 * PI * c);
+        let x = 20.0 * a;
+        let (got, _) = combined(factors, x, "join");
+        assert!(rel(got, stretched + cylinder - inside) < 1e-5, "{factors:?} join: {got} vs {}", stretched + cylinder - inside);
+        let (got, faces) = combined(factors, x, "intersect");
+        assert!(rel(got, inside) < 1e-5, "{factors:?} intersect: {got} vs {inside}");
+        // A flat side, the wall (one face or two, by where the cylinder's seams fall), top and
+        // bottom; the whole cylinder segment that came out before had three.
+        assert!(faces >= 4, "{factors:?} intersect: {faces} faces, the flat side is missing");
+        let (got, _) = combined(factors, x, "cut");
+        assert!(rel(got, stretched - inside) < 1e-5, "{factors:?} cut: {got} vs {}", stretched - inside);
+    }
+    // An L prism extruded 12 and scaled to 24 tall joins a cylinder as the same prism extruded 24.
+    let l_prism = |distance: f64, factors: Option<[f64; 3]>| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "L"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 10], [10, 10], [10, 40], [0, 40]], "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "L", "distance": distance, "body_name": "X"}));
+        if let Some(factors) = factors {
+            run(&mut s, "solid.scale", json!({"bodies": ["X"], "factors": factors}));
+            assert!(planes(&s, "X"), "the scaled L prism's faces are not all planes");
+        }
+        run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 30, "base": [8, 12, -5], "axis": "Z", "body_name": "Z"}));
+        run(&mut s, "solid.combine", json!({"target": "X", "tools": ["Z"], "operation": "join"}));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "L prism {factors:?}: {:?}", s.model.results);
+        measured(&mut s, "X")
+    };
+    let (scaled, built) = (l_prism(12.0, Some([1.0, 1.0, 2.0])), l_prism(24.0, None));
+    assert!(rel(scaled, built) < 1e-6, "{scaled} vs {built}");
+    assert!(scaled > 700.0 * 24.0, "{scaled}");
 }
 
 /// Regression: deleting a pipe's path sketch left the pipe in the timeline ("unknown sketch").
@@ -5387,6 +5516,9 @@ fn an_older_pattern_of_several_bodies_opens_with_the_names_it_was_saved_with() {
     if let Some(pending) = file["format_pending"].as_array_mut() {
         pending.retain(|change| change != "pattern-names-by-source");
     }
+    // 0.42.0 folded the change into format 56, so a build before it wrote 55.
+    file["format"] = serde_json::Value::String(solidcraft_doc::format::format_string(55));
+    file.as_object_mut().unwrap().remove("format_pending");
     let pattern = file["features"].as_array_mut().unwrap().iter_mut().find(|f| f["name"] == "Pat").unwrap();
     pattern["body_names"] = json!(["Base (2)", "Base (3)", "Base (4)", "Post (2)", "Post (3)", "Post (4)"]);
     let doc = solidcraft_doc::Document::from_json(&file.to_string()).unwrap();

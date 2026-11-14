@@ -2487,8 +2487,12 @@ fn open_or_closed(curve: BCurve, ps: P3, pe: P3, same_sense: bool, closed: bool,
             to = b;
         }
     }
-    if !(from + eps < to) {
-        return Err(unsupported("an edge across a closed spline's seam"));
+    if (from - to).abs() <= eps {
+        return Err("a degenerate edge on a closed spline".into());
+    }
+    if from > to {
+        let curve = crate::kernel::restart_curve(&curve, from)?;
+        return Ok(Mapped { curve, interval: [from, to + (b - a)], with_step: same_sense, sense_mismatch: false });
     }
     Ok(Mapped { curve, interval: [from, to], with_step: same_sense, sense_mismatch: false })
 }
@@ -2541,8 +2545,10 @@ fn project(c: &CurveEval, a: f64, b: f64, knots: &[f64], p: Vec3) -> Option<f64>
         }
     }
     let t = 0.5 * (x0 + x1);
-    // The ends themselves when they are as near (a vertex at the end of the curve).
-    let t = [a, b, t].into_iter().min_by(|x, y| dist(*x).total_cmp(&dist(*y)))?;
+    // Keep the best sampled parameter: an exact point on an interior knot must
+    // not be replaced by a less accurate refinement beside that knot.
+    let t = [a, b, *ts.get(best)?, t].into_iter().min_by(|x, y| dist(*x).total_cmp(&dist(*y)))?;
+    // Prefer the domain's ends when they are just as near (a vertex at the seam).
     let near_end = |e: f64| (dist(e) - dist(t)).abs() <= 1e-12 * (1.0 + p.len());
     Some(
         if near_end(a) {

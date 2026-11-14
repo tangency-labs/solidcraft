@@ -193,6 +193,16 @@ fn offset_error_id<'a>(text: &'a str, middle: &str, end: &str) -> Option<&'a str
     (rest.contains(middle) && rest.ends_with(end)).then_some(id)
 }
 
+/// The id of the sketch point an engine error names: ``point `{id}` `` at the start, then the
+/// reason it cannot move.
+fn point_error_id<'a>(text: &'a str, reason: &str) -> Option<&'a str> {
+    let rest = text.strip_prefix("point `")?;
+    let (id, rest) = rest.split_once('`')?;
+    let rest = rest.strip_prefix(" is ")?;
+    let rest = rest.strip_suffix(" and cannot move")?;
+    (rest == reason).then_some(id)
+}
+
 /// Translate known engine error messages using i18n keys.
 /// If the error message is not recognized, returns it unchanged.
 pub fn tr_engine_error(error: &str) -> String {
@@ -225,6 +235,12 @@ pub fn tr_engine_error(error: &str) -> String {
     }
     if text == "a closed curve needs two crossings to trim" {
         return tr("sketch.error.closed_curve_two_crossings").to_string();
+    }
+    if let Some(id) = point_error_id(text, "projected") {
+        return format("sketch.error.point_is_projected", &[("id", id)]);
+    }
+    if let Some(id) = point_error_id(text, "fixed") {
+        return format("sketch.error.point_is_fixed", &[("id", id)]);
     }
     error.to_string()
 }
@@ -269,6 +285,20 @@ mod tests {
         let expected = format!("Mehrere Komponenten heißen `{name}`. Verwende eine numerische Komponenten-ID: 1, 3.");
         assert_eq!(super::tr_engine_error(&message), expected);
         assert_eq!(super::tr_engine_error(&format!("invalid parameters for `component.delete`: {message}")), expected);
+        assert_eq!(super::tr_engine_error("another error"), "another error");
+    }
+
+    /// #16164: the refusal to move a point the sketch holds fixed, or projects from a body, says
+    /// which of the two it is; the translation names the point as well.
+    #[test]
+    fn the_refusal_to_move_a_fixed_or_projected_point_is_translated() {
+        install();
+        let _scope = scope("de");
+        assert_eq!(
+            super::tr_engine_error("invalid parameters for `sketch.move`: point `p8` is projected and cannot move"),
+            "Der Punkt `p8` ist projiziert und kann nicht verschoben werden"
+        );
+        assert_eq!(super::tr_engine_error("point `origin` is fixed and cannot move"), "Der Punkt `origin` ist fest und kann nicht verschoben werden");
         assert_eq!(super::tr_engine_error("another error"), "another error");
     }
 
@@ -1388,6 +1418,7 @@ mod tests {
         KitCall { name: "hint_row", args: &[1], id: false, trim: &[1] },
         KitCall { name: "text_row", args: &[1], id: false, trim: &[1] },
         KitCall { name: "choice_row", args: &[1, 4], id: false, trim: &[1] },
+        KitCall { name: "action_row", args: &[2], id: false, trim: &[] },
         KitCall { name: "section", args: &[2], id: false, trim: &[] },
         KitCall { name: "section_count", args: &[2], id: false, trim: &[] },
         // fields.rs
@@ -2066,7 +2097,7 @@ mod tests {
         "multiline_text_field, dropdown, cell_editor, bounded_cell_editor, search_field, menu_filter, placement_field, ",
         "library_cell, icon_button_at, icon_button_colored, footer, button, primary_button, ",
         "wide_primary_button, action_menu, compact_button, icon_label_button, command_menu_button, ",
-        "checkbox_grid, options, checkbox_row, toggle_icon, removable_header, bin_button, ",
+        "checkbox_grid, options, checkbox_row, action_row, toggle_icon, removable_header, bin_button, ",
         "Column, Menu, MenuItem, CommandSearch};"
     );
 
@@ -2118,6 +2149,7 @@ mod tests {
             ("checkbox_grid(ui, &mut [(\"checkbox_grid\", value)], 1)", &["checkbox_grid"]),
             ("options(ui, id, &mut [(\"options\", value)])", &["options"]),
             ("checkbox_row(ui, key, \"checkbox_row\", true)", &["checkbox_row"]),
+            ("action_row(ui, key, \"action_row\")", &["action_row"]),
             ("toggle_icon(ui, row, \"toggle_icon\", selected, icon)", &["toggle_icon"]),
             ("Column::new(\"Column::new\", 1.0)", &["Column::new"]),
             ("table.add_prompt(ui, \"add_prompt\", \"add_prompt tooltip\")", &["add_prompt", "add_prompt tooltip"]),

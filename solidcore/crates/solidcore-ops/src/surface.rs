@@ -188,11 +188,25 @@ fn looped(curves: &mut [BSplineCurve], tol: f64) -> solidcore::Result<Out<()>> {
 
 /// A sheet of one face on `surface`, over its whole natural box.
 pub(crate) fn sheet(k: &mut Kernel, surface: BSplineSurface) -> solidcore::Result<Out<Brep>> {
+    sheet_starting(k, surface, None)
+}
+
+/// [`sheet`], its loop starting at the edge on side `first` of the box when given (the kernel's
+/// `start_at_side`): a sheet made again on an edited surface lists its edges as the one it
+/// replaces did.
+pub(crate) fn sheet_starting(
+    k: &mut Kernel,
+    surface: BSplineSurface,
+    first: Option<solidcore::surface::side::BoxSide>,
+) -> solidcore::Result<Out<Brep>> {
     let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
     let surface = Surface::from(surface);
     let bx = surface.natural_uv_domain_with_nurb(k)?;
-    face_on(k, &mut b, surface, &bx)?;
+    let f = face_on(k, &mut b, surface, &bx)?;
     b.refresh_cached_topology();
+    if let Some(first) = first {
+        solidcore::topology::brep::sheet::start_at_side(k, &mut b, f, first)?;
+    }
     finish(k, b, Expect::FACES)
 }
 

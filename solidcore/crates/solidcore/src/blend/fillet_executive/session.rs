@@ -263,6 +263,21 @@ impl SolverObject {
         }
     }
 
+    /// Not upstream (#15906): the fixed offset distances of a constant-radius solver's two
+    /// surfaces ([`ConstantRadiusFs::oriented_offsets`]); `None` for a solver whose offsets
+    /// change along the blend (constant distance: its offset is solved at each section;
+    /// variable radius: its law's).
+    ///
+    /// # Errors
+    /// Those of [`ConstantRadiusFs::oriented_offsets`].
+    pub fn constant_offsets(&self) -> Result<Option<[f64; 2]>> {
+        match self {
+            Self::ConstantRadius(solver) => Ok(Some(solver.oriented_offsets()?)),
+            Self::SurfaceSurface(solver) => Ok(Some(solver.base.oriented_offsets()?)),
+            Self::ConstantDistance(_) | Self::VariableRadius(_) => Ok(None),
+        }
+    }
+
     /// Borrow the same base for a native member write.
     pub fn base_mut(&mut self) -> &mut FilletSolver {
         match self {
@@ -578,6 +593,13 @@ impl crate::blend::blend_corner::swept::SweptSolvers for SweptSessionSolvers<'_>
             .and_then(Option::as_ref)
             .map(SolverObject::base)
             .ok_or_else(|| invalid("swept turn solver is not live"))
+    }
+    fn constant_offsets(&self, id: FilletSolverId) -> Result<Option<[f64; 2]>> {
+        self.solvers
+            .get(id.0 as usize)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| invalid("swept turn solver is not live"))?
+            .constant_offsets()
     }
 }
 
@@ -2088,7 +2110,7 @@ impl<'target> FilletSession<'target> {
         // (not upstream, solidcore #2541) a lone round's solver takes the rims it may end
         // on before the corners trace it
         self.end_round_on_outline(k)?;
-        // (not upstream) a lone round rolls over its faces' smooth far edges, the whole length
+        // (not upstream) a round rolls over its faces' smooth far edges, the whole length
         self.roll_over_tangent_edges(k)?;
         let SessionObjects {
             target,
@@ -2298,7 +2320,6 @@ impl<'target> FilletSession<'target> {
                         &lookup,
                         crate::math::rad_to_deg(corner.tangency_tol_radians),
                         set_back_fills,
-                        false,
                     );
                     match classified {
                         Err(_) => {
@@ -2799,7 +2820,7 @@ impl<'target> FilletSession<'target> {
     /// (`blend_edges_stopping`, then `corners`), and the goldens runner's
     /// `setback_fillet_edges`. Where the corner is the Setback it takes the N x N
     /// corner's place, with its fill asked as [`Self::set_set_back_fill`] asks one; elsewhere
-    /// (beside a curved face, no setback set) it stays the N x N corner.
+    /// (a corner `classify_setback` does not take, no setback set) it stays the N x N corner.
     ///
     /// # Errors
     /// Those of the classification.
@@ -2857,7 +2878,6 @@ impl<'target> FilletSession<'target> {
                 &lookup,
                 crate::math::rad_to_deg(corner.tangency_tol_radians),
                 &asked,
-                true,
             )?;
             if class.event == crate::blend::blend_corner::BlendCornerEvent::Setback {
                 *corner = setback_corner_of(corner, class.order);
@@ -3274,6 +3294,15 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             if crate::blend::blend_corner::end::end_awaits_rollover(
                 k, target, pseudo, corner, &lookup, rolls_over,
             )? {
+                // in the adjusted corner's pass the rollover has run: an End that would wait
+                // again would be left without edges, its cap built on none (#15906). A stage
+                // failure with no reason the kernel names (a defect), built on purpose
+                if executive.rollover_adjusting {
+                    return Err(SolidError::blend(
+                        "SmBlendCorner::CalcEndEdgeGeom",
+                        crate::error::blend::BlendFailure::StageFailed,
+                    ));
+                }
                 return Ok(());
             }
             let refusal = crate::blend::blend_corner::end::calc_end_edge_geom(
@@ -3313,15 +3342,8 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             }
         } else {
             // WR-674: a round's end where its edge runs on tangentially is left open too.
-            let tangent_ends = k.fixes.fillet_round_ends_at_tangent_continuation;
-            let dropped = corner.drop_end_rib(
-                k,
-                target,
-                pseudo,
-                cliff_overflow,
-                tangent_ends,
-                &mut note_open_end,
-            )?;
+            let dropped =
+                corner.drop_end_rib(k, target, pseudo, cliff_overflow, true, &mut note_open_end)?;
             executive.open_ends.append(&mut open_ends);
             if dropped == EndRibDrop::GlobalMerge {
                 executive.options.global_merge = true;
@@ -4873,7 +4895,9 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
                     corner.kind,
                     FilletCornerKind::NByOne | FilletCornerKind::Open
                 );
-                let end_patch = nx1 && corner.edges.len() == 3 && corner.extended_surface_patch;
+                let end_patch = nx1
+                    && (corner.edges.len() == 3 || corner.turned_back_cap())
+                    && corner.extended_surface_patch;
                 // The fork's (WR-697, 79d4763): a Ball's patch is its sphere's
                 // (SmBlendCorner::CreateBallPatch)
                 if corner
@@ -5373,6 +5397,18 @@ impl RailTrimAccess<FilletObject> for SessionObjects<'_> {
         solver.trim_rails_with(|geometry, actual_solver| {
             pseudo.trim_rail_curves_with_solver(k, geometry, id, actual_solver, target)
         })
+    }
+    fn rails_rolled_on_their_faces(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+        executive: &mut FilletExecutive<FilletObject>,
+    ) -> Result<bool> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let lone = executive.solvers.len() == 1;
+        self.rolled_rails_on_their_faces(k, id, lone)
     }
 }
 
@@ -7374,6 +7410,31 @@ mod tests {
     use crate::topology::brep::p8::{create_planar_face_with_3d_curves, FaceBuildEnv};
     use crate::topology::loopuse;
     use crate::topology::topology_traverser::Marks;
+
+    /// Only the constant-radius solvers have fixed offsets an End's rail end can be solved
+    /// with (#15906): a constant-distance solver solves its offset at each section and a
+    /// variable-radius one takes it from its law.
+    #[test]
+    fn only_constant_radius_solvers_have_constant_offsets() {
+        use crate::blend::fillet_standard_solver::p1::{
+            CurveBasedFs, FilletLawKind, VariableRadiusFs,
+        };
+        let constant_distance = SolverObject::ConstantDistance(Box::new(ConstantDistanceFs {
+            solver: FilletSolver::new(1e-6, 0.5, 0.03),
+            distance: 2.0,
+        }));
+        assert_eq!(constant_distance.constant_offsets().unwrap(), None);
+        let variable = SolverObject::VariableRadius(Box::new(VariableRadiusFs {
+            curve_based: CurveBasedFs::new(1e-6, 0.5, 0.03),
+            law: FilletLaw::new(FilletLawKind::Linear {
+                start_radius: 1.0,
+                end_radius: 2.0,
+            }),
+            law_orientation: false,
+            law_interval: crate::geom::extent1d::Extent1d::from_min_max(0.0, 1.0),
+        }));
+        assert_eq!(variable.constant_offsets().unwrap(), None);
+    }
 
     /// An empty edge list is a typed refusal of the value, with the status of the bare
     /// `SM_ERR_INVALID_INPUT` it replaced (#13790), for every prepare that checks it.

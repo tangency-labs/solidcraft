@@ -1759,7 +1759,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "delete_vertex_joins_seam_iso_curve" => &mut k.fixes.delete_vertex_joins_seam_iso_curve,
         "cover_refuses_folded_continuation" => &mut k.fixes.cover_refuses_folded_continuation,
         "cover_wraps_across_closed_seam" => &mut k.fixes.cover_wraps_across_closed_seam,
-        "fillet_refuse_non_manifold_result" => &mut k.fixes.fillet_refuse_non_manifold_result,
         "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
         "boolean_new_face_closure_both_sides" => &mut k.fixes.boolean_new_face_closure_both_sides,
         "loops_go_on_round_the_vertex" => &mut k.fixes.loops_go_on_round_the_vertex,
@@ -1768,9 +1767,7 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "ssi_low_angle_start_on_probation" => &mut k.fixes.ssi_low_angle_start_on_probation,
         "fillet_rails_meet_at_one_end_point" => &mut k.fixes.fillet_rails_meet_at_one_end_point,
         "fillet_nx1_tangent_side_edge" => &mut k.fixes.fillet_nx1_tangent_side_edge,
-        "fillet_nx1_tangent_corner_edge" => &mut k.fixes.fillet_nx1_tangent_corner_edge,
         "fillet_3x2_mixed_concave_side_edge" => &mut k.fixes.fillet_3x2_mixed_concave_side_edge,
-        "fillet_3x2_tangent_side_edge_roles" => &mut k.fixes.fillet_3x2_tangent_side_edge_roles,
         "fillet_mitre_concave_face_corners" => &mut k.fixes.fillet_mitre_concave_face_corners,
         "fillet_mitre_gap_patch" => &mut k.fixes.fillet_mitre_gap_patch,
         "fillet_corner_per_vertex_fan" => &mut k.fixes.fillet_corner_per_vertex_fan,
@@ -1778,7 +1775,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "fillet_rail_end_on_continued_surface" => &mut k.fixes.fillet_rail_end_on_continued_surface,
         "fillet_cliff_overflow" => &mut k.fixes.fillet_cliff_overflow,
         "offset_extension_as_itself" => &mut k.fixes.offset_extension_as_itself,
-        "fillet_run_on_past_far_end_only" => &mut k.fixes.fillet_run_on_past_far_end_only,
         _ => k
             .fixes
             .flag_mut(name)
@@ -2501,10 +2497,8 @@ mod tests {
         let mut k = Kernel::default();
         enable_fix(&mut k, "imprint_extends_edge_to_proto_vertex").unwrap();
         enable_fix(&mut k, "cover_refuses_folded_continuation").unwrap();
-        enable_fix(&mut k, "fillet_refuse_non_manifold_result").unwrap();
         assert!(k.fixes.imprint_extends_edge_to_proto_vertex);
         assert!(k.fixes.cover_refuses_folded_continuation);
-        assert!(k.fixes.fillet_refuse_non_manifold_result);
         assert!(enable_fix(&mut k, "no_such_fix").is_err());
     }
 

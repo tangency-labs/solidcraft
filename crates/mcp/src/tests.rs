@@ -4298,15 +4298,16 @@ fn inspect_text(s: &mut Server, args: Value) -> (bool, String) {
     (r["result"]["isError"] == json!(true), r["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string())
 }
 
-/// No tool argument has a list of types and an `enum` together: some OpenAI-compatible
-/// endpoints (Moonshot) refuse every tool when one does, so the agent chat could not start
-/// a turn (#15306). The tool itself checks the words such an argument takes.
+/// No tool schema has a list of types, and no argument of several types has an `enum`. Gemini
+/// refuses a list of types (#16257); some OpenAI-compatible endpoints (Moonshot) refuse every
+/// tool when an argument of several types has an `enum` (#15306), so the agent chat could not
+/// start a turn. Several types are an `anyOf`; the tool itself checks the words it takes.
 #[test]
-fn no_tool_argument_has_a_list_of_types_with_an_enum() {
+fn no_tool_schema_has_a_list_of_types() {
     fn mixed(path: &str, schema: &Value, found: &mut Vec<String>) {
         match schema {
             Value::Object(o) => {
-                if o.get("type").is_some_and(Value::is_array) && o.contains_key("enum") {
+                if o.get("type").is_some_and(Value::is_array) || (o.contains_key("anyOf") && o.contains_key("enum")) {
                     found.push(path.to_string());
                 }
                 for (k, v) in o {
@@ -4338,7 +4339,7 @@ fn inspect_design_is_unchanged_without_compact_output() {
     let defs = tool_definitions();
     let def = defs.iter().find(|d| d["name"] == "inspect_design").unwrap();
     assert_eq!(def["inputSchema"]["properties"]["sketches"]["type"], "boolean", "{def}");
-    assert_eq!(def["inputSchema"]["properties"]["bodies"]["type"], json!(["boolean", "string"]), "no list of names: {def}");
+    assert_eq!(def["inputSchema"]["properties"]["bodies"]["anyOf"], json!([{"type": "boolean"}, {"type": "string"}]), "no list of names: {def}");
     let listed = call(&mut s, 1, "tools/list", json!({}));
     assert!(listed["result"]["tools"].as_array().unwrap().iter().any(|t| t == def), "tools/list serves the default definition");
 
@@ -4433,7 +4434,7 @@ impl crate::Backend for AppWithPrefs {
 fn inspect_design_is_compact(s: &mut Server) -> bool {
     let listed = call(s, 1, "tools/list", json!({}));
     let def = listed["result"]["tools"].as_array().and_then(|t| t.iter().find(|d| d["name"] == "inspect_design")).cloned().unwrap_or_default();
-    def["inputSchema"]["properties"]["bodies"]["type"].as_array().is_some_and(|t| t.contains(&json!("array")))
+    def["inputSchema"]["properties"]["bodies"]["anyOf"].as_array().is_some_and(|t| t.iter().any(|alt| alt["type"] == "array"))
 }
 
 /// The app's Preferences turn compact output on for a bridged server; it asks until the app

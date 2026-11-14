@@ -18,6 +18,7 @@
 //! | [`OffsetFailure::ToleranceUnresolved`] | `SM_ERR_INVALID_INPUT` (solidcore-native, WR-749) |
 //! | [`OffsetFailure::SeamOpened`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ExactCurveUncut`]     | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::TangentBranchUncertified`] | `SM_ERR` (solidcore-native)            |
 //! | [`OffsetFailure::TangentEndOffCurve`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
@@ -27,13 +28,19 @@
 //! | [`OffsetFailure::Missing`]             | `SM_ERR_NULL_POINTER`                     |
 //! | [`OffsetFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`                    |
 //! | [`OffsetFailure::Inconsistent`]        | `SM_ERR_ASSERT_FAILURE`                   |
+//! | [`OffsetFailure::StageFailed`]         | the site's (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`) |
+//!
+//! A stage of an offset routine that fails with no reason the kernel names is an
+//! [`OffsetFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping the
+//! error of the call it made as its cause where it has one.
 //!
 //! Deviations: not upstream. Entity ids are those of the operation's input B-rep. The
 //! last four describe, in a phrase, the failures of offset routines that returned a bare
 //! status ([`OffsetFailure::replaces_upstream_status`]); the failure's `operation` path
 //! says which routine and its entity, where the site named one, which face. The files
-//! with open work elsewhere (`offset_executive/{p1,p2,step_gaps,reach}`,
-//! `offset_faces`, `offset_geometry_creation`) do not use them yet.
+//! with open work elsewhere (`offset_executive/{p1,p2}`, `offset_faces`) do not use
+//! them yet, nor do the sites of `offset_geometry_creation`'s shared `SM_ERR` helper, each of
+//! which needs its own cause (several are refusals, not defects).
 
 use super::{
     EntityRef, ErrorKind, Failure, Reason, SM_ERR, SM_ERR_ASSERT_FAILURE, SM_ERR_BAD_INTERSECTIONS,
@@ -106,7 +113,7 @@ pub enum OffsetFailure {
         radius: f64,
     },
     /// Loops of the offset of `face` touch without crossing, so the offset walls they
-    /// come from meet there (opt-in `fixes.offset_walls_touch_refused`).
+    /// come from meet there (with `fixes.offset_resolve_crossing_loops`).
     WallsTouch {
         /// The face whose offset's loops touch, when known.
         face: Option<FaceId>,
@@ -169,6 +176,9 @@ pub enum OffsetFailure {
     /// vertex on the curve: the end is not where the edges meet, and no cut chosen by
     /// distance stands in for it.
     TangentEndOffCurve,
+    /// Two curved faces tangent at the old edge now cross, but the intersection
+    /// branch on their retained sides has not been certified.
+    TangentBranchUncertified,
     /// In a local operation, the new surfaces of `face` and of its neighbour across an
     /// edge meet nowhere near the edge, so no extension of either makes them meet there
     /// and the edge cannot be found again. (The reach,
@@ -215,6 +225,11 @@ pub enum OffsetFailure {
     /// A consistency check of an offset routine's own data did not hold, as the phrase
     /// says.
     Inconsistent(&'static str),
+    /// A stage of an offset routine failed with no reason the kernel names: a defect
+    /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
+    /// reports (for the goldens only), where it was built, and the error of the call it made
+    /// where it has one.
+    StageFailed,
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
@@ -305,25 +320,32 @@ impl OffsetFailure {
             Self::LoopGapUncertified { face } => face.map(EntityRef::Face),
             Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::TangentBranchUncertified
             | Self::Unsound { .. }
             | Self::DistanceUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
-            | Self::Inconsistent(_) => None,
+            | Self::Inconsistent(_)
+            | Self::StageFailed => None,
         }
     }
 
     /// True for a failure that replaced a bare status an offset routine returned
     /// ([`OffsetFailure::Failed`], [`OffsetFailure::Missing`],
-    /// [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`]): it answers with
+    /// [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`],
+    /// [`OffsetFailure::StageFailed`]): it answers with
     /// that status as the `Upstream` it replaced did. The refusals replaced none.
     #[must_use]
     pub const fn replaces_upstream_status(&self) -> bool {
         matches!(
             self,
-            Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_)
+            Self::Failed(_)
+                | Self::Missing(_)
+                | Self::InvalidValue(_)
+                | Self::Inconsistent(_)
+                | Self::StageFailed
         )
     }
 
@@ -348,10 +370,12 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::TangentBranchUncertified
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
-            | Self::Unsound { .. } => false,
+            | Self::Unsound { .. }
+            | Self::StageFailed => false,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 true
             }
@@ -359,13 +383,14 @@ impl OffsetFailure {
     }
 
     /// True for a failure that is the kernel's fault, not a fact of the input: a consistency
-    /// check of a routine's own data that did not hold ([`OffsetFailure::Inconsistent`]).
-    /// Report it. Said per cause, as its class ([`ErrorKind::Failed`]) does not say it, until
+    /// check of a routine's own data that did not hold ([`OffsetFailure::Inconsistent`]), or a
+    /// stage that failed with no reason the kernel names ([`OffsetFailure::StageFailed`],
+    /// whose class [`ErrorKind::StageFailed`] says it too). Report it. Said per cause, as its class ([`ErrorKind::Failed`]) does not say it, until
     /// offset failures move onto a class of their own.
     #[must_use]
     pub const fn is_defect(&self) -> bool {
         match self {
-            Self::Inconsistent(_) => true,
+            Self::Inconsistent(_) | Self::StageFailed => true,
             Self::Folds { .. }
             | Self::NotCertified { .. }
             | Self::TubeFolds { .. }
@@ -379,6 +404,7 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::TangentBranchUncertified
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
@@ -402,9 +428,11 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::TangentBranchUncertified
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
-            | Self::Failed(_) => SM_ERR,
+            | Self::Failed(_)
+            | Self::StageFailed => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
@@ -434,11 +462,13 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::TangentBranchUncertified
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. } => ErrorKind::Unsupported,
             Self::DistanceUnresolved { .. } | Self::ToleranceUnresolved { .. } => {
                 ErrorKind::InvalidInput
             }
+            Self::StageFailed => ErrorKind::StageFailed,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 ErrorKind::of_status(self.comparison_status())
             }
@@ -667,6 +697,10 @@ impl core::fmt::Display for OffsetFailure {
                  cut into its pieces with their UV curves, so the edge's offsets cannot be \
                  mated",
             ),
+            Self::TangentBranchUncertified => f.write_str(
+                "two curved faces tangent at the old edge now cross, but the intersection \
+                 branch on their retained sides has no certificate",
+            ),
             Self::TangentEndOffCurve => f.write_str(
                 "an edge ends beside a tangent edge whose new faces now cross, and that edge's new \
                  vertex is not on the edge's new curve, so the edge cannot end there",
@@ -680,6 +714,7 @@ impl core::fmt::Display for OffsetFailure {
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::InvalidValue(what) => write!(f, "invalid input: {what}"),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
+            Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
         }
     }
 }
@@ -687,8 +722,20 @@ impl core::fmt::Display for OffsetFailure {
 impl crate::SolidError {
     /// [`crate::SolidError::Failed`] for an offset routine that fails with `failure`.
     #[must_use]
+    #[track_caller]
     pub(crate) fn offset(operation: &'static str, failure: OffsetFailure) -> Self {
         Failure::new(operation, failure).into_error()
+    }
+
+    /// [`crate::SolidError::Failed`] for a stage of an offset routine that failed with no
+    /// reason the kernel names ([`OffsetFailure::StageFailed`], a defect), with `status`, the
+    /// one the C++ reports (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`).
+    #[must_use]
+    #[track_caller]
+    pub(crate) fn offset_stage_failed(operation: &'static str, status: i32) -> Self {
+        Failure::new(operation, OffsetFailure::StageFailed)
+            .with_status(status)
+            .into_error()
     }
 
     /// [`crate::SolidError::Failed`] for something an offset routine needs that is not
@@ -935,6 +982,14 @@ mod tests {
             (O::InvalidValue("x"), ErrorKind::InvalidInput, true, false),
             // a consistency check of the kernel's own data that did not hold: its fault
             (O::Inconsistent("x"), ErrorKind::Failed, true, true),
+            (
+                O::TangentBranchUncertified,
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
+            // a stage that failed with no reason the kernel names: its fault, in its class
+            (O::StageFailed, ErrorKind::StageFailed, false, true),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -959,6 +1014,8 @@ mod tests {
                 O::Missing(_) => 18,
                 O::InvalidValue(_) => 19,
                 O::Inconsistent(_) => 20,
+                O::TangentBranchUncertified => 21,
+                O::StageFailed => 22,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
@@ -966,8 +1023,21 @@ mod tests {
             assert_eq!(o.kind(), *class, "{o:?}");
             assert_eq!(o.is_phrase(), *phrase, "{o:?}");
             assert_eq!(o.is_defect(), *defect, "{o:?}");
-            // a phrase is what replaced a bare status, and only a phrase
-            assert_eq!(o.replaces_upstream_status(), *phrase, "{o:?}");
+            // what replaced a bare status is a phrase, or a stage failure built on purpose
+            assert_eq!(
+                o.replaces_upstream_status(),
+                *phrase || matches!(o, O::StageFailed),
+                "{o:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_stage_failure_is_a_defect_with_its_sites_status() {
+        for status in [SM_ERR, SM_ERR_NULL_POINTER] {
+            let e = SolidError::offset_stage_failed("offset::op", status);
+            super::super::tests::assert_stage_failure(&e, "offset::op", status);
+            assert_eq!(e.offset_failure(), Some(&OffsetFailure::StageFailed));
         }
     }
 
@@ -982,10 +1052,8 @@ mod tests {
             &[
                 ("offset/offset_executive/p1.rs", 9),
                 ("offset/offset_executive/p2.rs", 9),
-                ("offset/offset_executive/reach.rs", 1),
-                ("offset/offset_executive/step_gaps.rs", 1),
                 ("offset/offset_faces.rs", 4),
-                ("offset/offset_geometry_creation.rs", 17),
+                ("offset/offset_geometry_creation.rs", 1),
             ],
         );
     }

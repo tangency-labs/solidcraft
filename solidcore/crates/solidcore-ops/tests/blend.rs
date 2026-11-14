@@ -227,6 +227,85 @@ fn blends_turn_round_a_shallow_sharp_corner() {
     }
 }
 
+/// A sketch outline with a near-tangent corner, the whole top rim rounded: a four-sided plate 5
+/// thick, its top outline 40 along x, then 40 on at 3.8 degrees off it (two lines meeting at
+/// 176.2 degrees), then back to (0, -30) and up to the start. All four top edges rounded r 1.5
+/// and r 3, one closed chain through the 3.8 degree corner and the three sharp ones. Every corner
+/// is convex and mitred: as in [`blends_turn_round_a_shallow_sharp_corner`], the rim loses
+/// A = (1 - pi/4) r^2 along its perimeter P, less 2 M tan(theta / 2) at each corner turning
+/// theta, M = (5/6 - pi/4) r^3. The rounds become 4 faces on the plate's 6. Before the shallow
+/// corner was mitred, the two rounds meeting at it were given one shared section and the blend
+/// failed with status 1001.
+#[test]
+fn a_rim_round_runs_through_a_near_tangent_corner() {
+    all_fixes();
+    let t = (-3.8_f64).to_radians();
+    let p = [
+        [0.0, 0.0],
+        [40.0, 0.0],
+        [40.0 + 40.0 * t.cos(), 40.0 * t.sin()],
+        [0.0, -30.0],
+    ];
+    let side = |i: usize| {
+        let (a, b) = (p[i], p[(i + 1) % 4]);
+        [b[0] - a[0], b[1] - a[1]]
+    };
+    let len = |v: [f64; 2]| (v[0] * v[0] + v[1] * v[1]).sqrt();
+    let perimeter: f64 = (0..4).map(|i| len(side(i))).sum();
+    // tan of half the turn at each corner, from the sides into and out of it
+    let half_turns: f64 = (0..4)
+        .map(|i| {
+            let (a, b) = (side((i + 3) % 4), side(i));
+            let cos = (a[0] * b[0] + a[1] * b[1]) / (len(a) * len(b));
+            (cos.acos() / 2.0).tan()
+        })
+        .sum();
+    let area = 0.5
+        * (0..4)
+            .map(|i| {
+                let (a, b) = (p[i], p[(i + 1) % 4]);
+                a[0] * b[1] - b[0] * a[1]
+            })
+            .sum::<f64>()
+            .abs();
+    for r in [1.5, 3.0] {
+        let profile: Vec<Curve> = (0..4)
+            .map(|i| {
+                let (a, b) = (p[i], p[(i + 1) % 4]);
+                Curve::Line {
+                    start: [a[0], a[1], 0.0],
+                    end: [b[0], b[1], 0.0],
+                }
+            })
+            .collect();
+        let b = extrude(
+            &profile,
+            [0.0, 0.0, 1.0],
+            5.0,
+            0.0,
+            DraftCorner::default(),
+            true,
+        )
+        .unwrap();
+        let before = b.volume(1e-10).unwrap();
+        assert!(rel(before, 5.0 * area) < 1e-12, "r {r}: plate {before}");
+        let edges: Vec<usize> = (0..4)
+            .map(|i| {
+                let (a, c) = (p[i], p[(i + 1) % 4]);
+                edge_at(&b, [(a[0] + c[0]) / 2.0, (a[1] + c[1]) / 2.0, 5.0])
+            })
+            .collect();
+        blend(&b, Blend::Round, &edges, &[r], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("r {r}: {e:?}"));
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
+        assert_eq!(b.counts().unwrap()[0], 10, "r {r}");
+        let want = (1.0 - PI / 4.0) * r * r * perimeter
+            - 2.0 * (5.0 / 6.0 - PI / 4.0) * r.powi(3) * half_turns;
+        let off = before - b.volume(1e-10).unwrap();
+        assert!(rel(off, want) < 1e-9, "r {r}: {off} off, want {want}");
+    }
+}
+
 /// A 40 x 30 x 10 plate with a 10 x 10 x 5 boss on it (x 15..25, y 10..20), the boss's four
 /// base edges rounded r 1: at each upright boss edge two concave rounds turn round the sharp
 /// convex edge. Each base edge gains the spandrel A = (1 - pi/4) r^2 along its 10, and each
@@ -1494,4 +1573,24 @@ fn the_faces_a_round_is_carried_on_past_are_the_kernels() {
         solidcore_ops::carried_faces(&b, inner, 0.0),
         Err(Error::Argument)
     ));
+}
+
+/// A session's failure says what the session noted of the step that failed
+/// ([`solidcore_ops::blend::session_failure`]). The session here is asked to fillet with no
+/// edge set up: it makes no fillet face, and what it noted says so after the kernel's statement.
+#[test]
+fn a_session_failure_says_what_its_session_noted() {
+    use solidcore::blend::fillet_executive::session::FilletSession;
+    let (mut k, mut brep) = kernel_copy(&block());
+    let mut s = FilletSession::new(&mut k, &mut brep).unwrap();
+    let e = s.do_filleting(&mut k, None).unwrap_err();
+    assert_eq!(
+        blend::failure(&e).unwrap().to_string(),
+        "the blend failed (status 1001): the fillet body has no faces"
+    );
+    assert_eq!(
+        blend::session_failure(&s, &e).unwrap().to_string(),
+        "the blend failed (status 1001): the fillet body has no faces: Fillet Surface \
+         Computation Failure: no fillet faces were made"
+    );
 }

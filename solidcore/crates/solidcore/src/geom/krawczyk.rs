@@ -302,3 +302,70 @@ pub(crate) fn inverse_of_columns2(j: &[[f64; 2]; 2]) -> Option<[[f64; 2]; 2]> {
     let inv = [[d / det, -b / det], [-c / det, a / det]];
     inv.iter().flatten().all(|x| x.is_finite()).then_some(inv)
 }
+
+#[cfg(test)]
+mod tests {
+    //! Closed forms of the one operator (#15140): `x² − 2` has its root √2 bracketed;
+    //! over `[2, 3]` its operator lies wholly below the box, so the box holds no root; a
+    //! singular Jacobian has no inverse, and Newton refuses it.
+    #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // test
+
+    use super::*;
+
+    /// `x² − 2` at a point box.
+    fn value(x: [Ivl; 1]) -> [Ivl; 1] {
+        [x[0] * x[0] - Ivl::from(2.0)]
+    }
+
+    /// Its derivative `2x` over a box, as columns.
+    fn jacobian(x: [Ivl; 1]) -> [[Ivl; 1]; 1] {
+        [[Ivl::from(2.0) * x[0]]]
+    }
+
+    #[test]
+    fn the_root_of_x_squared_minus_two_is_proved_in_a_box_about_root_two() {
+        let mid = core::f64::consts::SQRT_2;
+        let c = [[1.0 / (2.0 * mid)]];
+        let f = |x| -> Result<Option<[Ivl; 1]>> { Ok(Some(value(x))) };
+        let j = |x| -> Result<Option<[[Ivl; 1]; 1]>> { Ok(Some(jacobian(x))) };
+        let b = krawczyk([mid], c, &f, &j).unwrap().unwrap()[0];
+        // the box holds √2 (its square brackets 2) and is no wider than the first box
+        assert!(b.lo * b.lo < 2.0 && 2.0 < b.hi * b.hi, "{b:?}");
+        assert!(b.hi - b.lo < 1e-10, "{b:?}");
+    }
+
+    #[test]
+    fn a_box_whose_operator_lies_outside_it_holds_no_root() {
+        // over X = [2, 3] about 2.5, with y = 1 / (2 · 2.5): C = 1 − y [4, 6] = [−0.2, 0.2],
+        // q = 0.2, and K = 2.5 − y · 4.25 + C · [−0.5, 0.5] = [1.55, 1.75], below X
+        let (mid, y) = ([2.5], [[0.2]]);
+        let x = [Ivl::new(2.0, 3.0)];
+        let (c, q) = contraction(&y, &jacobian(x));
+        // the closed forms, to the operations' outward rounding
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-12;
+        assert!(near(c[0][0].lo, -0.2) && near(c[0][0].hi, 0.2), "{c:?}");
+        assert!(near(q, 0.2), "{q}");
+        let g = value([Ivl::from(2.5)]);
+        let k = k_operator(&mid, &y, &g, &c, &x)[0];
+        assert!(near(k.lo, 1.55) && near(k.hi, 1.75), "{k:?}");
+        // K misses X: by Krawczyk's theorem every root in X lies in K ∩ X, which is empty
+        assert!(k.hi < x[0].lo);
+    }
+
+    #[test]
+    fn a_singular_jacobian_has_no_inverse_and_newton_refuses_it() {
+        assert_eq!(inverse_of_columns2(&[[1.0, 2.0], [2.0, 4.0]]), None);
+        assert_eq!(
+            inverse_of_columns3(&[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0]]),
+            None
+        );
+        // F(x, y) = (x + y − 1, 2x + 2y − 2): its Jacobian's columns are dependent everywhere
+        let at = |p: [f64; 2]| -> Result<Linearised<2>> {
+            Ok(Some((
+                [p[0] + p[1] - 1.0, 2.0 * p[0] + 2.0 * p[1] - 2.0],
+                [[1.0, 2.0], [1.0, 2.0]],
+            )))
+        };
+        assert_eq!(newton([0.0, 0.0], &at, &inverse_of_columns2).unwrap(), None);
+    }
+}
