@@ -191,6 +191,50 @@ fn slider_limits_clamp() {
     assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 0.0)), Vec3::new(5.0, 5.0, 19.0)), "{:?}", place(&s, "B", Vec3::new(25.0, 5.0, 0.0)));
 }
 
+/// The box an occurrence is shown in (`occurrence.properties`, which reads a move not captured).
+fn shown_box(s: &mut Session, component: &str) -> [Vec3; 2] {
+    let id = occ(s, component);
+    let r = run(s, "occurrence.properties", json!({"occurrence": id}));
+    let corner =
+        |k: &str| serde_json::from_value::<[f64; 3]>(r["total"]["bbox"][k].clone()).map_or(Vec3::new(f64::NAN, f64::NAN, f64::NAN), Vec3::from);
+    [corner("min"), corner("max")]
+}
+
+fn shown_at(s: &mut Session, component: &str, min: [f64; 3], max: [f64; 3]) -> bool {
+    let [lo, hi] = shown_box(s, component);
+    near(lo, Vec3::from(min)) && near(hi, Vec3::from(max))
+}
+
+/// A joint solve that moves a part drops the part's move not captured, so the part is shown where
+/// the joints put it; an exploded view's placement stays shown.
+#[test]
+fn a_joint_solve_drops_the_move_not_captured_of_a_part_it_moves() {
+    let mut s = two_cubes();
+    let b = occ(&s, "B");
+    run(&mut s, "occurrence.move", json!({"occurrence": b, "translate": [0, 30, 0], "capture": false}));
+    assert!(shown_at(&mut s, "B", [20.0, 30.0, 0.0], [30.0, 40.0, 10.0]), "{:?}", shown_box(&mut s, "B"));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 35, 0]}, "name": "Stack"}),
+    );
+    assert!(shown_at(&mut s, "B", [0.0, 0.0, 10.0], [10.0, 10.0, 20.0]), "{:?}", shown_box(&mut s, "B"));
+    assert!(!s.pending_moves.contains_key(&b));
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": "B", "translate": [0, 0, 20]}]}));
+    run(&mut s, "explode.show", json!({"view": "Apart"}));
+    let shown = s.pending_moves.get(&b).copied();
+    assert!(shown.is_some() && shown == s.exploded.get(&b).copied());
+    let mut doc = (*s.doc).clone();
+    if let Some(o) = doc.occurrences.iter_mut().find(|o| o.id == b) {
+        o.transform = solidcraft_doc::rigid(Vec3::new(40.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    }
+    *s.doc_mut() = doc;
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 0.0)), Vec3::new(5.0, 5.0, 10.0)), "the solve puts B back on A");
+    assert_eq!(s.pending_moves.get(&b).copied(), shown);
+}
+
 #[test]
 fn capture_position_saves_joint_values_and_revert_position_puts_them_back() {
     // #14275: Capture Position also saves every joint's values; Revert Position puts them back.
