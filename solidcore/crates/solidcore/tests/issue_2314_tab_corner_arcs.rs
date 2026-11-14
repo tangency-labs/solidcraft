@@ -1,6 +1,5 @@
 //! tangency-labs/solidcore#2314: a tabbed plate's two R2 corner arcs rounded r 0.5 together
-//! (the tab's 4 mm straight top between them, no vertex shared), with WR-706
-//! (`UpstreamFixes::fillet_section_end_trim_at_creases`).
+//! (the tab's 4 mm straight top between them, no vertex shared), with WR-706.
 //!
 //! The plate is #2223's. Each corner arc runs on tangentially into the tab's side at one end
 //! and into the tab's top at the other, so WR-674 ends each round at its two sections, and
@@ -53,14 +52,13 @@ const CORNER: [f64; 3] = [3.414_213_56, 32.525_324_7, 2.0];
 /// pins the fork's 7.958672926831696: 18e96f1 and 63c7962, `SmApiFilletEdges` r 0.5).
 const RIM_REMOVED: f64 = 7.958_672_926_831_696;
 
-/// Every opt-in fix on (as in the issue), with WR-706 as given.
-fn kernel(wr706: bool) -> Kernel {
+/// Every opt-in fix on (as in the issue).
+fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
         *f.flag_mut(name).unwrap() = true;
     }
-    f.fillet_section_end_trim_at_creases = wr706;
     k.fixes = f;
     k
 }
@@ -130,8 +128,8 @@ fn pappus() -> f64 {
 
 /// The fillet of the edges nearest `picks`: the volume it removes and the body's face count,
 /// the body checked sound.
-fn removed(wr706: bool, picks: &[[f64; 3]]) -> Result<(f64, usize), SolidError> {
-    let mut k = kernel(wr706);
+fn removed(picks: &[[f64; 3]]) -> Result<(f64, usize), SolidError> {
+    let mut k = kernel();
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);
     let es: Vec<EdgeId> = picks.iter().map(|p| pick(&k, &b, *p)).collect();
@@ -156,7 +154,7 @@ fn the_pappus_wedge_is_the_closed_form() {
 /// the plate's 8 faces, the two rounds and their four flat ends.
 #[test]
 fn both_corner_arcs_round_together() {
-    let (both, faces) = removed(true, &[CORNER, CORNER_L]).unwrap();
+    let (both, faces) = removed(&[CORNER, CORNER_L]).unwrap();
     let expected = 2.0 * pappus();
     assert!(
         (both - expected).abs() <= 1e-7,
@@ -168,7 +166,7 @@ fn both_corner_arcs_round_together() {
 /// Picked the other way round, the same body.
 #[test]
 fn both_corner_arcs_picked_the_other_way_round() {
-    let (both, faces) = removed(true, &[CORNER_L, CORNER]).unwrap();
+    let (both, faces) = removed(&[CORNER_L, CORNER]).unwrap();
     assert!((both - 2.0 * pappus()).abs() <= 1e-7, "removed {both}");
     assert_eq!(faces, 14);
 }
@@ -179,8 +177,8 @@ fn both_corner_arcs_picked_the_other_way_round() {
 /// 0.159135839575356 for the arc at x > 0 and 0.159135839836381 for the one at x < 0.
 #[test]
 fn the_pair_is_the_sum_of_each_alone() {
-    let (a, fa) = removed(true, &[CORNER]).unwrap();
-    let (b, fb) = removed(true, &[CORNER_L]).unwrap();
+    let (a, fa) = removed(&[CORNER]).unwrap();
+    let (b, fb) = removed(&[CORNER_L]).unwrap();
     // from the Pappus wedge: x > 0 1.15e-10 less, x < 0 5.5e-11 more (asserted a decade
     // above, so a later drift is caught)
     assert!((a - pappus()).abs() <= 1.2e-9, "x > 0 alone {a}");
@@ -200,7 +198,7 @@ fn the_pair_is_the_sum_of_each_alone() {
         "x < 0 alone {b}"
     );
     assert_eq!((fa, fb), (11, 11));
-    let (both, _) = removed(true, &[CORNER, CORNER_L]).unwrap();
+    let (both, _) = removed(&[CORNER, CORNER_L]).unwrap();
     assert!((both - a - b).abs() <= 1e-7, "{both} vs {}", a + b);
 }
 
@@ -208,7 +206,7 @@ fn the_pair_is_the_sum_of_each_alone() {
 /// with the plate's 8 faces, three rounds and the corners' four flat ends.
 #[test]
 fn rim_and_both_corner_arcs_round_together() {
-    let (all, faces) = removed(true, &[RIM, CORNER, CORNER_L]).unwrap();
+    let (all, faces) = removed(&[RIM, CORNER, CORNER_L]).unwrap();
     let expected = RIM_REMOVED + 2.0 * pappus();
     assert!(
         (all - expected).abs() <= 1e-7,

@@ -1,10 +1,9 @@
 //! tangency-labs/solidcore#2223: the R25 rim and an R2 corner arc of a tabbed plate rounded
-//! r 0.5 together (two edges apart, sharing no vertex), WR-706
-//! (`UpstreamFixes::fillet_section_end_trim_at_creases`).
+//! r 0.5 together (two edges apart, sharing no vertex), WR-706.
 //!
 //! The plate is #2176's: an R25 disc with a tab (sides x = +-4, R2 corners, top y = 280/9 + 2),
 //! extruded 2. Each end of the corner arc runs on tangentially into a straight top edge that
-//! is not picked, so WR-674 (`fillet_round_ends_at_tangent_continuation`) ends that round at
+//! is not picked, so WR-674 ends that round at
 //! its section through the vertex. The subtraction that builds WR-674's section ends builds
 //! only a lone round both of whose ends are section ends, so with the rim picked too the
 //! fillet was refused (`FilletErrorType::NoRoom`, 1001 in `cliff_overflow`). With WR-706 the
@@ -67,14 +66,13 @@ const RIM_REMOVED: f64 = 7.958_672_926_831_696;
 /// [`RIM_REMOVED`], the solidcore-native exact spine.
 const RIM_MEASURED: f64 = 7.958_672_926_877_170_5;
 
-/// Every opt-in fix on (as in the issue), with WR-706 as given.
-fn kernel(wr706: bool) -> Kernel {
+/// Every opt-in fix on (as in the issue).
+fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
         *f.flag_mut(name).unwrap() = true;
     }
-    f.fillet_section_end_trim_at_creases = wr706;
     k.fixes = f;
     k
 }
@@ -144,8 +142,8 @@ fn pappus() -> f64 {
 
 /// The fillet of the edges nearest `picks`: the volume it removes and the body's face count,
 /// the body checked sound.
-fn removed(wr706: bool, picks: &[[f64; 3]]) -> Result<(f64, usize), SolidError> {
-    let mut k = kernel(wr706);
+fn removed(picks: &[[f64; 3]]) -> Result<(f64, usize), SolidError> {
+    let mut k = kernel();
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);
     let es: Vec<EdgeId> = picks.iter().map(|p| pick(&k, &b, *p)).collect();
@@ -169,7 +167,7 @@ fn the_pappus_wedge_is_the_closed_form() {
 /// The issue's case: both rounds built, the rim's volume plus the corner arc's wedge.
 #[test]
 fn rim_and_corner_arc_round_together() {
-    let (both, faces) = removed(true, &[RIM, CORNER]).unwrap();
+    let (both, faces) = removed(&[RIM, CORNER]).unwrap();
     let expected = RIM_REMOVED + pappus();
     assert!(
         (both - expected).abs() <= 1e-7,
@@ -182,7 +180,7 @@ fn rim_and_corner_arc_round_together() {
 /// The two edges picked the other way round build the same body.
 #[test]
 fn corner_arc_and_rim_round_together() {
-    let (both, faces) = removed(true, &[CORNER, RIM]).unwrap();
+    let (both, faces) = removed(&[CORNER, RIM]).unwrap();
     assert!(
         (both - RIM_REMOVED - pappus()).abs() <= 1e-7,
         "removed {both}"
@@ -193,13 +191,13 @@ fn corner_arc_and_rim_round_together() {
 /// Each edge alone, through the trim, removes what it removes by the subtraction.
 #[test]
 fn each_edge_alone_is_unchanged() {
-    let (rim, faces) = removed(true, &[RIM]).unwrap();
+    let (rim, faces) = removed(&[RIM]).unwrap();
     assert!((rim - RIM_REMOVED).abs() <= 1e-9, "rim {rim}");
     // pinned at the value measured here, 4.5e-11 more than the fork's `RIM_REMOVED`
     // (the solidcore-native exact spine)
     assert!((rim - RIM_MEASURED).abs() <= 1e-12, "rim {rim}");
     assert_eq!(faces, 9);
-    let (corner, faces) = removed(true, &[CORNER]).unwrap();
+    let (corner, faces) = removed(&[CORNER]).unwrap();
     assert!(
         (corner - pappus()).abs() <= 1e-7,
         "corner {corner}, Pappus {}",
@@ -207,26 +205,4 @@ fn each_edge_alone_is_unchanged() {
     );
     // the plate's 8 faces, the round and its two flat ends
     assert_eq!(faces, 11);
-}
-
-/// Without WR-706, the blend corner's End at a smooth vertex (the fork's 41a39ec) builds
-/// both: the fork at 18e96f1 and 63c7962 removes 8.117808766409325 (its rim 7.958672926831696 plus the
-/// wedge, each to the fork's volume accuracy).
-#[test]
-fn without_the_fix_the_blend_corner_builds_both() {
-    let (both, faces) = removed(false, &[RIM, CORNER]).unwrap();
-    // the rim plus the Pappus wedge: here 1.02e-10 less (asserted a decade above)
-    assert!(
-        (both - RIM_MEASURED - pappus()).abs() <= 1.1e-9,
-        "removed {both}"
-    );
-    // pinned at the value measured here: 8.3e-11 more than the fork's 8.117808766409325,
-    // of which the rim's round alone is 4.5e-11, the solidcore-native exact spine. Since
-    // #2890 (precise properties integrate from the trims' base) 1.065e-10 below the rim plus
-    // the Pappus wedge; it was 8.117808766496637, 1.025e-10 below
-    assert!(
-        (both - 8.117_808_766_492_544).abs() <= 1e-12,
-        "removed {both}"
-    );
-    assert_eq!(faces, 12);
 }
