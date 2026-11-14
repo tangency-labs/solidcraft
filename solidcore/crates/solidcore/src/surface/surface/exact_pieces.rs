@@ -2859,14 +2859,10 @@ mod tests {
             Err(SolidError::Unsupported { operation: OP, .. })
         ));
 
-        // `WR-713`: asymmetric unbounded inside-out `Cone` without `cone_unbounded_parameterized_as_nurb`
-        let cone_srf = Surface::from(
-            Cone::new_unbounded(&k, Point3::ZERO, Vec3::X, Vec3::Y, 5.0, 30.0, false, true)
-                .unwrap(),
-        );
-        assert!(exact_nurbs_surface(&k, &cone_srf).unwrap().is_none());
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.cone_unbounded_parameterized_as_nurb = true;
+        // `WR-713`: an asymmetric unbounded inside-out `Cone` has its exact NURB
+        // (`cone_unbounded_parameterized_as_nurb`, on by default; SMLib has none)
+        let k_fixed = Kernel::default();
+        assert!(k_fixed.fixes.cone_unbounded_parameterized_as_nurb);
         let cone_fixed = Surface::from(
             Cone::new_unbounded(
                 &k_fixed,

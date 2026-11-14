@@ -4867,29 +4867,18 @@ mod tests {
         }
     }
 
-    fn issue_2009_kernels() -> (Kernel, Kernel) {
-        let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        (off, on)
-    }
-
     #[test]
     fn issue_2009_unevaluable_surface_is_not_shown_degenerate_or_a_flat_corner() {
         // tangency-labs/smlib 21dcf69 (IsDegeneratePoint, IsDegenerateCurve,
         // IsFlatCorner): a surface that cannot be evaluated is not shown degenerate or
-        // flat. Without the fix the port returns the evaluation's error (upstream reads
-        // the unset derivatives).
+        // flat (SMLib reads the unset derivatives).
         let s = Surface::from(BSplineSurface::default());
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let uv = Point2::new(0.0, 0.0);
-        let (off, on) = issue_2009_kernels();
-        assert!(s.evaluate_point(&off, uv).is_err());
-        assert!(base_is_degenerate_point(&off, &s, 1e-6, Some(&dom)).is_err());
+        let on = Kernel::default();
+        assert!(s.evaluate_point(&on, uv).is_err());
         assert!(!base_is_degenerate_point(&on, &s, 1e-6, Some(&dom)).unwrap());
-        assert!(base_is_degenerate_curve(&off, &s, 1.0, Some(&dom), 0.0).is_err());
         assert!(!base_is_degenerate_curve(&on, &s, 1.0, Some(&dom), 0.0).unwrap());
-        assert!(s.is_flat_corner(&off, uv, 1.0).is_err());
         assert!(!s.is_flat_corner(&on, uv, 1.0).unwrap());
     }
 
@@ -4899,23 +4888,17 @@ mod tests {
         // is not shown periodic.
         let s = Surface::from(BSplineSurface::default());
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let (off, on) = issue_2009_kernels();
-        // upstream compares the unset samples, which agree
-        assert!(s.is_periodic(&off, &dom, SurfParamType::U).unwrap());
+        // (SMLib compares the unset samples, which agree)
+        let on = Kernel::default();
         assert!(!s.is_periodic(&on, &dom, SurfParamType::U).unwrap());
     }
 
     #[test]
     fn issue_2009_unevaluable_param_direction_is_passed_on() {
         // tangency-labs/smlib 21dcf69 (ComputeParamDirection: SER on the evaluation).
-        // Coverage only: without the fix the decomposition of the cleared derivatives
-        // fails too.
         let s = Surface::from(BSplineSurface::default());
         let uv = Point2::new(0.5, 0.5);
-        let (off, on) = issue_2009_kernels();
-        assert!(s
-            .compute_param_direction(&off, uv, Vec3::new(1.0, 0.0, 0.0))
-            .is_err());
+        let on = Kernel::default();
         assert!(s
             .compute_param_direction(&on, uv, Vec3::new(1.0, 0.0, 0.0))
             .is_err());
@@ -5078,11 +5061,12 @@ mod tests {
         }
     }
 
-    /// `IsPeriodic` ignores its evaluation statuses: on a bicubic surface collapsed to
-    /// one point the zero-tangent repair fails, the raw derivatives are compared and
-    /// both directions are periodic; the offset constructor that asks then succeeds.
+    /// On a bicubic surface collapsed to one point the zero-tangent repair fails, and
+    /// `IsPeriodic` passes that on (WR-663): neither direction is shown periodic (SMLib
+    /// ignores the statuses, compares the raw derivatives and shows both periodic); the
+    /// offset constructor that asks still succeeds.
     #[test]
-    fn is_periodic_ignores_failed_tangent_repairs() {
+    fn is_periodic_passes_on_failed_tangent_repairs() {
         use crate::nurbs::math::{CPoint, NOW};
         use crate::nurbs::srf_basic::Surface as NlSurface;
         let k = &Kernel::default();
@@ -5095,11 +5079,11 @@ mod tests {
         assert!(s
             .evaluate(k, Point2::new(0.5, 0.5), 1, 1, upper_flags(true))
             .is_err());
-        assert!(s.is_periodic(k, &dom, SurfParamType::U).unwrap());
-        assert!(s.is_periodic(k, &dom, SurfParamType::V).unwrap());
+        assert!(!s.is_periodic(k, &dom, SurfParamType::U).unwrap());
+        assert!(!s.is_periodic(k, &dom, SurfParamType::V).unwrap());
         let k = Kernel::default();
         let off = OffsetSurface::new(&k, 1.0, s, true, 0).unwrap();
-        assert_eq!(off.is_periodic(), [1, 1]);
+        assert_eq!(off.is_periodic(), [0, 0]);
     }
 
     /// A B-spline surface runs the base body: an owning `SmOffsetSurface`.

@@ -2588,10 +2588,8 @@ mod tests {
             .unwrap();
             sols.get(0).unwrap().end
         };
-        let mut k = Kernel::default();
-        let end = run(&k);
-        assert_eq!((end.parameters[0], end.solution_value), (1.0, 0.001));
-        k.fixes.refine_cc_range_ends = true;
+        let k = Kernel::default();
+        assert!(k.fixes.refine_cc_range_ends);
         let end = run(&k);
         assert!((end.parameters[0] - 0.999).abs() < 1e-9, "{end:?}");
         assert!(end.solution_value < 1e-9, "{end:?}");
@@ -2970,15 +2968,18 @@ mod tests {
                 }
             }
         }
-        // the other operations on the field are not refused
-        let nearest = solve(
-            &field,
-            (0.0, 1.0),
-            SolverOperation::Minimize,
-            SolutionRequested::Single,
-        )
-        .unwrap();
-        assert_eq!(nearest.len(), 1);
+        // the plain nearest point on the field is refused too, by the field: its local
+        // solve takes the second derivative, which a field does not have (its first is a
+        // divided difference), and the statuses are passed on (WR-663)
+        assert!(matches!(
+            solve(
+                &field,
+                (0.0, 1.0),
+                SolverOperation::Minimize,
+                SolutionRequested::Single,
+            ),
+            Err(SolidError::Failed(_))
+        ));
     }
 
     /// #13677: with a tolerance wide enough to hold every point of that curve, All

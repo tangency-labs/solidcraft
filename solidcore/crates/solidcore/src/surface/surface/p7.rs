@@ -3291,39 +3291,26 @@ mod tests {
     use crate::curve::hermite_curve::HermiteCurve;
     use crate::surface::plane::Plane;
 
-    fn issue_2009_kernels() -> (Kernel, Kernel) {
-        let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        (off, on)
-    }
-
     #[test]
     fn issue_2009_unevaluable_samples_give_no_derivative_lengths() {
         // tangency-labs/smlib 21dcf69 (ApproxDerivativeLengths): the samples that
-        // evaluate are averaged, SM_UNDEF_DOUBLE when none does. Upstream averages the
-        // unset derivatives.
+        // evaluate are averaged, SM_UNDEF_DOUBLE when none does (SMLib averages the
+        // unset derivatives).
         let s = Surface::from(BSplineSurface::default());
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let (off, on) = issue_2009_kernels();
-        let len_off = approx_derivative_lengths(&off, &s, &dom).unwrap();
-        let len_on = approx_derivative_lengths(&on, &s, &dom).unwrap();
+        let len_on = approx_derivative_lengths(&Kernel::default(), &s, &dom).unwrap();
         assert_eq!(len_on, Vec2::new(UNDEF_DOUBLE, UNDEF_DOUBLE));
-        assert_ne!(len_off, len_on);
     }
 
     #[test]
     fn issue_2009_unevaluable_points_are_not_shown_converged() {
         // tangency-labs/smlib 21dcf69 (sm_PassSSConvergenceTest, sm_PassSCConvergenceTest):
-        // a point that cannot be evaluated is not shown converged. Upstream compares the
-        // unset values, which agree.
+        // a point that cannot be evaluated is not shown converged (SMLib compares the
+        // unset values, which agree).
         let s = Surface::from(BSplineSurface::default());
         let uv = Point2::new(0.5, 0.5);
-        let (off, on) = issue_2009_kernels();
-        let ss_off = pass_ss_convergence_test(&off, &s, uv, &s, uv).unwrap();
-        let ss_on = pass_ss_convergence_test(&on, &s, uv, &s, uv).unwrap();
+        let ss_on = pass_ss_convergence_test(&Kernel::default(), &s, uv, &s, uv).unwrap();
         assert!(!ss_on);
-        assert!(ss_off);
     }
 
     #[test]
@@ -3336,27 +3323,20 @@ mod tests {
         assert!(s
             .evaluate_point(&Kernel::default(), Point2::new(0.0, 0.0))
             .is_err());
-        let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        let closed_off = s
-            .is_closed(&off, &dom, SurfParamType::U, None, false)
-            .unwrap()
-            .0;
+        let on = Kernel::default();
         let closed_on = s
             .is_closed(&on, &dom, SurfParamType::U, None, false)
             .unwrap()
             .0;
         assert!(!closed_on);
-        assert!(!closed_off);
     }
 
-    /// tangency-labs/solidcore#525 (WR-384): with the corner points wanted, upstream's
+    /// tangency-labs/solidcore#525 (WR-384): with the corner points wanted, SMLib's
     /// `if (lRtn &= bit)` clears the other corners' bits (4 flat corners come back as
-    /// none, with only the first point); the opt-in tests each bit.
+    /// none, with only the first point); solidcore tests each bit.
     #[test]
     fn issue_525_flat_corners_keep_their_bits() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         // a degenerate bilinear patch: every corner's derivatives are parallel
         let s = Surface::from(
             BSplineSurface::create_bilinear_surface(
@@ -3368,9 +3348,6 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(s.flat_corners(&k, 1.0, false).unwrap().flags, 15);
-        let up = s.flat_corners(&k, 1.0, true).unwrap();
-        assert_eq!(up.flags, 0);
-        k.fixes.flat_corners_test_bits = true;
         let fixed = s.flat_corners(&k, 1.0, true).unwrap();
         assert_eq!(fixed.flags, 15);
         assert!(fixed.points.unwrap().iter().all(|p| *p != Vec3::UNDEF));
@@ -3500,26 +3477,23 @@ mod tests {
         // guess (0.5, 0.5)
         let nearer_guess = Point2::new(0.3, 0.5);
         let foot_guess = Point2::new(0.5, 0.5);
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let good = |k: &Kernel, guess: Point2| {
             good_drop_result(k, &s, &domain, point, guess, &sol).unwrap()
         };
-        // upstream: the nearer result is refused, the farther one taken
-        assert!(!good(&k, nearer_guess));
-        assert!(good(&k, foot_guess));
-        // With the opt-in, a result 5e-4 off along the surface is not one the local
-        // solve converged to (tight tolerance 6e-12 here), whatever the guess
-        // (tangency-labs/smlib@eaa998a); the distance test is covered on the domain
-        // boundary by `issue_1852_good_drop_compares_the_actual_guess_distance`.
-        k.fixes.good_drop_result_distances_in_order = true;
+        // (SMLib refuses the nearer result and takes the farther one.) A result 5e-4 off
+        // along the surface is not one the local solve converged to (tight tolerance
+        // 6e-12 here), whatever the guess (tangency-labs/smlib@eaa998a); the distance
+        // test is covered on the domain boundary by
+        // `issue_1852_good_drop_compares_the_actual_guess_distance`.
         assert!(!good(&k, nearer_guess));
         assert!(!good(&k, foot_guess));
     }
 
-    /// WR-56 (tangency-labs/smlib@eaa998a): with the opt-in, `sm_GoodDropResult` takes
-    /// a local result as the foot only when `|Fu| + |Fv|` is under the local solve's
-    /// tight tolerance `EFF_ZERO * (1 + max|P|)`, and refuses an interior result with
-    /// either component over it; upstream takes any foot whose components sum under
+    /// WR-56 (tangency-labs/smlib@eaa998a): `sm_GoodDropResult` takes a local result
+    /// as the foot only when `|Fu| + |Fv|` is under the local solve's tight tolerance
+    /// `EFF_ZERO * (1 + max|P|)`, and refuses an interior result with either component
+    /// over it; SMLib takes any foot whose components sum under
     /// 1e-4 (and an interior one each under 1e-3). The point lies on the plane `d`
     /// from the result along `S_u`; the guess is the result itself, so the distance
     /// test never refuses.
@@ -3527,7 +3501,7 @@ mod tests {
     fn wr_56_good_drop_result_takes_only_a_tightly_converged_foot() {
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let s = Surface::from(Plane::from_normal(Point3::ZERO, Vec3::Z));
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let result_uv = Point2::new(0.5, 0.5);
         let (result_point, su, _) =
             evaluate_1st_derivatives(&k, &s, result_uv, Side::Left, Side::Left).unwrap();
@@ -3541,15 +3515,7 @@ mod tests {
         };
         let tight = EFF_ZERO * (1.0 + (result_point + 1e-6 * su).max_dimension());
         assert!(tight < 1e-11);
-        // Upstream: every foot within 1e-4 is taken, and an interior one up to 1e-3
-        // that passes the distance test.
-        assert!(good(&k, 1e-6));
-        assert!(good(&k, 5e-5));
-        assert!(good(&k, 5e-4));
-        assert!(good(&k, 1e-13));
-        assert!(!good(&k, 2e-3));
-        // Opt-in: only the foot within the tight tolerance.
-        k.fixes.good_drop_result_distances_in_order = true;
+        // only the foot within the tight tolerance
         assert!(!good(&k, 1e-6));
         assert!(!good(&k, 5e-5));
         assert!(!good(&k, 5e-4));
@@ -3677,9 +3643,9 @@ mod tests {
 
     /// tangency-labs/solidcore#1852 (WR-56): `sm_GoodDropResult` stores the result
     /// distance in `dDsqGuess` and the guess distance in `dDsqResult`, so its last
-    /// test rejects a drop that improved on the guess. The opt-in
-    /// `Kernel::fixes.good_drop_result_distances_in_order` compares the actual
-    /// guess and result distances. Every case reaches the final comparison: the
+    /// test rejects a drop that improved on the guess. solidcore
+    /// (`Kernel::fixes.good_drop_result_distances_in_order`, on by default) compares the
+    /// actual guess and result distances. Every case reaches the final comparison: the
     /// result lies on the domain's `u = 0` side and the point on the plane `1/2048`
     /// beyond it along `-S_u`, so `Fu` is `-1/2048` (allowed on that side) and `Fv`
     /// is zero, past the residual early return in both modes. On that side the
@@ -3690,7 +3656,7 @@ mod tests {
         let h = 1.0 / 2048.0;
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let s = Surface::from(Plane::from_normal(Point3::ZERO, Vec3::Z));
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let result_uv = Point2::new(0.0, 0.5);
         let (result_point, su, _) =
             evaluate_1st_derivatives(&k, &s, result_uv, Side::Left, Side::Left).unwrap();
@@ -3700,20 +3666,15 @@ mod tests {
         *sol.param_mut(0).unwrap() = result_uv.x;
         *sol.param_mut(1).unwrap() = result_uv.y;
 
-        // The result is closer than the guess: upstream rejects it (its swapped
-        // names make the guess look farther); the fix accepts it.
+        // The result is closer than the guess: accepted (SMLib rejects it: its swapped
+        // names make the guess look farther).
         let nearer_guess = result_uv + Point2::new(0.1, 0.0);
-        // The guess is closer than the result: upstream accepts it; the fix
-        // rejects it, as the final test intends.
+        // The guess is closer than the result: rejected, as the final test intends
+        // (SMLib accepts it).
         let farther_guess = result_uv - Point2::new(h, 0.0);
-        // Equidistant: both accept.
+        // Equidistant: accepted.
         let equal_guess = result_uv - Point2::new(2.0 * h, 0.0);
 
-        assert!(!good_drop_result(&k, &s, &domain, pt_to_drop, nearer_guess, &sol).unwrap());
-        assert!(good_drop_result(&k, &s, &domain, pt_to_drop, farther_guess, &sol).unwrap());
-        assert!(good_drop_result(&k, &s, &domain, pt_to_drop, equal_guess, &sol).unwrap());
-
-        k.fixes.good_drop_result_distances_in_order = true;
         assert!(good_drop_result(&k, &s, &domain, pt_to_drop, nearer_guess, &sol).unwrap());
         assert!(!good_drop_result(&k, &s, &domain, pt_to_drop, farther_guess, &sol).unwrap());
         assert!(good_drop_result(&k, &s, &domain, pt_to_drop, equal_guess, &sol).unwrap());
@@ -3768,69 +3729,44 @@ mod tests {
         )
     }
 
-    /// WR-57 (#2209): `UpstreamFixes::degen_param_tiebreak_uses_actual_param` defaults to
-    /// `false`, is enabled by `UpstreamFixes::all()`, and can be toggled through
-    /// `UpstreamFixes::flag_mut`.
+    /// WR-57 (#2209): `UpstreamFixes::degen_param_tiebreak_uses_actual_param` is on by
+    /// default (not held back) and in `UpstreamFixes::all()`, and is listed by name.
     #[test]
-    fn wr57_flag_default_off_and_lookup_by_name() {
+    fn wr57_flag_default_on_and_lookup_by_name() {
         use crate::kernel::UpstreamFixes;
 
-        let mut k = Kernel::default();
-        assert!(!k.fixes.degen_param_tiebreak_uses_actual_param);
+        let k = Kernel::default();
+        assert!(k.fixes.degen_param_tiebreak_uses_actual_param);
         assert!(UpstreamFixes::all().degen_param_tiebreak_uses_actual_param);
         assert!(UpstreamFixes::NAMES.contains(&"degen_param_tiebreak_uses_actual_param"));
-
-        let flag = k
-            .fixes
-            .flag_mut("degen_param_tiebreak_uses_actual_param")
-            .unwrap();
-        assert!(!*flag);
-        *flag = true;
-        assert!(k.fixes.degen_param_tiebreak_uses_actual_param);
-
-        *k.fixes
-            .flag_mut("degen_param_tiebreak_uses_actual_param")
-            .unwrap() = false;
-        assert!(!k.fixes.degen_param_tiebreak_uses_actual_param);
+        assert!(!UpstreamFixes::HELD_BACK.contains(&"degen_param_tiebreak_uses_actual_param"));
     }
 
     /// WR-57 (#2209): on a sphere reparameterized to `[0, 360]` or `[0, 2 * PI]` in `u`,
     /// the south-pole seam tie-break (`ii = 0` vs `ii = 9` for `+X`) compares `[0, 1]`
-    /// fractions against `dS` by default (flipping `input_s = 5.0` to `360.0` and
-    /// `input_s = 0.8` to `2 * PI`), whereas the opt-in compares the mapped singular
-    /// parameters and keeps `u = 0.0`; on `[0, 1]` both modes agree identically.
+    /// the mapped singular parameters against `dS` and keeps `u = 0.0` (SMLib compares
+    /// `[0, 1]` fractions, flipping `input_s = 5.0` to `360.0` and `input_s = 0.8` to
+    /// `2 * PI`).
     #[test]
     fn wr57_sphere_pole_seam_tiebreak_on_non_unit_and_unit_domains() {
         use crate::geom::axis2_placement::Axis2Placement;
         use crate::math::PI;
         use crate::surface::sphere::Sphere;
 
-        let k_off = Kernel::default();
-        let mut k_on = Kernel::default();
-        k_on.fixes.degen_param_tiebreak_uses_actual_param = true;
+        let k_on = Kernel::default();
 
-        let sphere = Sphere::create_canonical(&k_off, &Axis2Placement::default(), 1.0).unwrap();
+        let sphere = Sphere::create_canonical(&k_on, &Axis2Placement::default(), 1.0).unwrap();
 
-        // Native `[0, 1]` singular domain: default and opt-in behave identically.
+        // Native `[0, 1]` singular domain.
         let unit_surf = Surface::from(sphere.clone());
         assert_eq!(
             unit_surf
-                .natural_uv_domain_with_nurb(&k_off)
+                .natural_uv_domain_with_nurb(&k_on)
                 .unwrap()
                 .u_interval(),
             Extent1d::from_min_max(0.0, 1.0)
         );
         for input_s in [-2.0, 0.0, 0.1, 0.49, 0.51, 0.9, 1.0, 5.0] {
-            let off = unit_surf
-                .find_degen_param_for_direction(
-                    &k_off,
-                    Point2::new(input_s, 0.0),
-                    Vec3::X,
-                    true,
-                    SurfParamType::U,
-                    1e-9,
-                )
-                .unwrap();
             let on = unit_surf
                 .find_degen_param_for_direction(
                     &k_on,
@@ -3841,29 +3777,18 @@ mod tests {
                     1e-9,
                 )
                 .unwrap();
-            assert_eq!(off, on);
-            assert!(off.converged);
+            assert!(on.converged);
             let expected = if input_s < 0.5 { 0.0 } else { 1.0 };
-            assert!((off.uv.x - expected).abs() < 1e-9);
+            assert!((on.uv.x - expected).abs() < 1e-9);
         }
 
         // `[0, 360]` angular domain with `input_s = 5.0`: `5.0` is `5.0` from `0.0` vs
         // `355.0` from `360.0`, yet `|1.0 - 5.0| = 4.0 < |0.0 - 5.0| = 5.0`.
         let mut sphere_deg = sphere.clone();
         sphere_deg
-            .reparameterize(&k_off, &Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0))
+            .reparameterize(&k_on, &Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0))
             .unwrap();
         let surf_deg = Surface::from(sphere_deg);
-        let off_deg = surf_deg
-            .find_degen_param_for_direction(
-                &k_off,
-                Point2::new(5.0, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
         let on_deg = surf_deg
             .find_degen_param_for_direction(
                 &k_on,
@@ -3874,8 +3799,6 @@ mod tests {
                 1e-9,
             )
             .unwrap();
-        assert!(off_deg.converged);
-        assert!((off_deg.uv.x - 360.0).abs() < 1e-9);
         assert!(on_deg.converged);
         assert!(on_deg.uv.x.abs() < 1e-9);
 
@@ -3883,19 +3806,9 @@ mod tests {
         // `2 * PI - 0.8` from `2 * PI`, yet `|1.0 - 0.8| = 0.2 < |0.0 - 0.8| = 0.8`).
         let mut sphere_rad = sphere;
         sphere_rad
-            .reparameterize(&k_off, &Extent2d::from_bounds(0.0, 0.0, 2.0 * PI, 1.0))
+            .reparameterize(&k_on, &Extent2d::from_bounds(0.0, 0.0, 2.0 * PI, 1.0))
             .unwrap();
         let surf_rad = Surface::from(sphere_rad);
-        let off_rad = surf_rad
-            .find_degen_param_for_direction(
-                &k_off,
-                Point2::new(0.8, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
         let on_rad = surf_rad
             .find_degen_param_for_direction(
                 &k_on,
@@ -3906,35 +3819,20 @@ mod tests {
                 1e-9,
             )
             .unwrap();
-        assert!(off_rad.converged);
-        assert!((off_rad.uv.x - 2.0 * PI).abs() < 1e-9);
         assert!(on_rad.converged);
         assert!(on_rad.uv.x.abs() < 1e-9);
     }
 
     /// WR-57 (#2209): on B-spline degenerate patches with interior double solutions on
     /// `[10, 20]` and `[-20, -10]` (for both `SurfParamType::U` and `SurfParamType::V`),
-    /// default mode chooses the sample fraction closer in `[0, 1]` while opt-in chooses
-    /// the mapped singular parameter closer to `dS`, and `[0, 1]` patches match bit for
-    /// bit across both modes.
+    /// the mapped singular parameter closer to `dS` is chosen (SMLib chooses the sample
+    /// fraction closer in `[0, 1]`).
     #[test]
     fn wr57_nurbs_degenerate_patch_shifted_domains_and_both_singular_directions() {
-        let k_off = Kernel::default();
-        let mut k_on = Kernel::default();
-        k_on.fixes.degen_param_tiebreak_uses_actual_param = true;
+        let k_on = Kernel::default();
 
         // Positive shifted `U` domain `[10, 20]`, interior roots at `12.5` and `17.5`.
         let pos_u = wr57_double_root_patch_u(10.0, 20.0);
-        let off_pos = pos_u
-            .find_degen_param_for_direction(
-                &k_off,
-                Point2::new(12.0, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
         let on_pos = pos_u
             .find_degen_param_for_direction(
                 &k_on,
@@ -3945,23 +3843,11 @@ mod tests {
                 1e-9,
             )
             .unwrap();
-        assert!(off_pos.converged);
-        assert!((off_pos.uv.x - 17.5).abs() < 1e-9);
         assert!(on_pos.converged);
         assert!((on_pos.uv.x - 12.5).abs() < 1e-9);
 
         // Inbound direction (`dir_from_pole = false` with `-X`) exercises the negated
         // direction branch with the same tie-break.
-        let off_in = pos_u
-            .find_degen_param_for_direction(
-                &k_off,
-                Point2::new(12.0, 0.0),
-                -Vec3::X,
-                false,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
         let on_in = pos_u
             .find_degen_param_for_direction(
                 &k_on,
@@ -3972,20 +3858,9 @@ mod tests {
                 1e-9,
             )
             .unwrap();
-        assert!((off_in.uv.x - 17.5).abs() < 1e-9);
         assert!((on_in.uv.x - 12.5).abs() < 1e-9);
 
         // When `input_s = 18.0` is genuinely near `17.5`, both modes pick `17.5`.
-        let off_upper = pos_u
-            .find_degen_param_for_direction(
-                &k_off,
-                Point2::new(18.0, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
         let on_upper = pos_u
             .find_degen_param_for_direction(
                 &k_on,
@@ -3996,23 +3871,12 @@ mod tests {
                 1e-9,
             )
             .unwrap();
-        assert!((off_upper.uv.x - 17.5).abs() < 1e-9);
         assert!((on_upper.uv.x - 17.5).abs() < 1e-9);
 
         // Negative shifted `U` domain `[-20, -10]`, interior roots at `-17.5` and `-12.5`:
         // at `input_s = -12.0`, default keeps `2/9` (`-17.5`) because `-12.0 < 0.5`,
         // whereas opt-in switches to `7/9` (`-12.5`).
         let neg_u = wr57_double_root_patch_u(-20.0, -10.0);
-        let off_neg = neg_u
-            .find_degen_param_for_direction(
-                &k_off,
-                Point2::new(-12.0, 0.0),
-                Vec3::X,
-                true,
-                SurfParamType::U,
-                1e-9,
-            )
-            .unwrap();
         let on_neg = neg_u
             .find_degen_param_for_direction(
                 &k_on,
@@ -4023,23 +3887,11 @@ mod tests {
                 1e-9,
             )
             .unwrap();
-        assert!(off_neg.converged);
-        assert!((off_neg.uv.x + 17.5).abs() < 1e-9);
         assert!(on_neg.converged);
         assert!((on_neg.uv.x + 12.5).abs() < 1e-9);
 
         // `SurfParamType::V` on `[0, 1] x [10, 20]`, interior roots at `v = 12.5` and `17.5`.
         let pos_v = wr57_double_root_patch_v(10.0, 20.0);
-        let off_v = pos_v
-            .find_degen_param_for_direction(
-                &k_off,
-                Point2::new(0.0, 12.0),
-                Vec3::X,
-                true,
-                SurfParamType::V,
-                1e-9,
-            )
-            .unwrap();
         let on_v = pos_v
             .find_degen_param_for_direction(
                 &k_on,
@@ -4050,24 +3902,12 @@ mod tests {
                 1e-9,
             )
             .unwrap();
-        assert!(off_v.converged);
-        assert!((off_v.uv.y - 17.5).abs() < 1e-9);
         assert!(on_v.converged);
         assert!((on_v.uv.y - 12.5).abs() < 1e-9);
 
         // `[0, 1]` singular `U` domain: bit-identical in both modes.
         let unit_u = wr57_double_root_patch_u(0.0, 1.0);
         for input_s in [-2.0, 0.0, 0.2, 0.49, 0.51, 0.8, 1.0, 5.0] {
-            let off = unit_u
-                .find_degen_param_for_direction(
-                    &k_off,
-                    Point2::new(input_s, 0.0),
-                    Vec3::X,
-                    true,
-                    SurfParamType::U,
-                    1e-9,
-                )
-                .unwrap();
             let on = unit_u
                 .find_degen_param_for_direction(
                     &k_on,
@@ -4078,10 +3918,9 @@ mod tests {
                     1e-9,
                 )
                 .unwrap();
-            assert_eq!(off, on);
-            assert!(off.converged);
+            assert!(on.converged);
             let expected = if input_s < 0.5 { 0.25 } else { 0.75 };
-            assert!((off.uv.x - expected).abs() < 1e-9);
+            assert!((on.uv.x - expected).abs() < 1e-9);
         }
     }
 

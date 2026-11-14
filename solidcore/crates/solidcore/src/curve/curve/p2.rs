@@ -4936,16 +4936,12 @@ mod tests {
     #[test]
     fn issue_2009_unevaluable_curve_has_no_length() {
         // tangency-labs/smlib 8311f8e (SmCurve::ApproximateLength): a curve that cannot
-        // be evaluated has no length (SM_UNDEF_DOUBLE); upstream sums distances
+        // be evaluated has no length (SM_UNDEF_DOUBLE), where SMLib sums distances
         // between unset points.
         let empty = Curve::from(BSplineCurve::new(3));
         let ivl = Extent1d::from_min_max(0.0, 1.0);
-        let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        let (len_off, _) = approximate_length(&off, &empty, &ivl, 5, false).unwrap();
-        assert_ne!(len_off, crate::math::UNDEF_DOUBLE);
-        let (len_on, turn) = approximate_length(&on, &empty, &ivl, 5, false).unwrap();
+        let k = Kernel::default();
+        let (len_on, turn) = approximate_length(&k, &empty, &ivl, 5, false).unwrap();
         assert_eq!(len_on, crate::math::UNDEF_DOUBLE);
         assert!(turn.is_none());
     }

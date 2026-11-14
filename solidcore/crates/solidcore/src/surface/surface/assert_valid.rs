@@ -2794,20 +2794,15 @@ mod tests {
     }
 
     /// WR-539 (the fork's tangency-labs/smlib@daba678): the spindle torus R 1, r 2 has its
-    /// apexes at V = +-120. Upstream fails every spindle torus with a whole turn of U and
-    /// reports nothing; with `torus_check_spindle_apex` V [0, 360] reports test 5 and the
-    /// outer sheet V [-120, 120] passes.
+    /// apexes at V = +-120. With `torus_check_spindle_apex` (on by default) V [0, 360]
+    /// reports test 5 and the outer sheet V [-120, 120] passes it (SMLib fails every
+    /// spindle torus with a whole turn of U and reports nothing).
     #[test]
     fn wr_539_spindle_torus_reports_an_apex_inside() {
         let whole = torus_over(0.0, 360.0, 1.0, 2.0);
         let outer = torus_over(-120.0, 120.0, 1.0, 2.0);
-        let mut k = Kernel::default();
-        for s in [&whole, &outer] {
-            let (ok, upstream) = failed_tests(&k, s);
-            assert!(!ok);
-            assert!(!upstream.contains(&(TORUS_TYPE, 5)), "{upstream:?}");
-        }
-        k.fixes.torus_check_spindle_apex = true;
+        let k = Kernel::default();
+        assert!(k.fixes.torus_check_spindle_apex);
         let (ok, fixed) = failed_tests(&k, &whole);
         assert!(!ok);
         assert!(fixed.contains(&(TORUS_TYPE, 5)), "{fixed:?}");
@@ -2820,7 +2815,7 @@ mod tests {
     /// tangency-labs/solidcore#1515 (WR-505): a horn torus (major radius = minor radius)
     /// touches its axis, where the corner rows of its NURB coincide. Upstream's
     /// `HasInternalPole` tests one row one step too far at each repeated knot and reports
-    /// a pole there; with `internal_pole_row_through_knot` it finds none.
+    /// a pole there; with `internal_pole_row_through_knot` (on by default) it finds none.
     #[test]
     fn issue_1515_horn_torus_has_no_internal_pole() {
         use crate::geom::axis2_placement::Axis2Placement;
@@ -2842,9 +2837,8 @@ mod tests {
             has_internal_pole(k, &s, &part, ZONE_TOL_3D / 10.0).unwrap()
         };
 
-        let mut k = Kernel::default();
-        assert!(horn(&k), "upstream reports a pole on the horn torus");
-        k.fixes.internal_pole_row_through_knot = true;
+        let k = Kernel::default();
+        assert!(k.fixes.internal_pole_row_through_knot);
         assert!(!horn(&k), "no internal pole on the horn torus");
     }
 
@@ -3244,14 +3238,17 @@ mod tests {
         expect(&cone(-1.0), 2, &[radius, pole]);
         // SM_LEVEL_GIVEN skips the base classes' checks
         expect(&cone(-1.0), LEVEL_GIVEN, &[radius, pole]);
-        // with the NURB form, the net through the apex also folds back
-        let fold = (
-            B_SPLINE_SURFACE_TYPE,
-            5,
-            "Bad NonMonotonic CPts",
-            "SmBSplineSurface Control Net doubles back on itself probably making a self intersecting surface",
+        // with the NURB form, its closure is not shown: the evaluations through the apex
+        // fail and are passed on (WR-663), so it is open in u and v, and its seam's
+        // boundaries coincide. (SMLib ignores those statuses, shows it closed both ways,
+        // and its control net, read as closed, doubles back: B-spline test 5.)
+        let seam = (
+            SURFACE_TYPE,
+            6,
+            "Bad Surf Coincidence at Seam",
+            "Open surface has partially coincident boundaries",
         );
-        expect(&with_nurb(cone(-1.0)), 2, &[fold, radius, pole]);
+        expect(&with_nurb(cone(-1.0)), 2, &[seam, radius, pole]);
     }
 
     /// A ring of radial width 2.65 a hair off flat (heights 1.3e-5 and 2.1e-5, a revolved
@@ -3465,13 +3462,12 @@ mod curve_bounded_tests {
             .unwrap());
         assert!(list.is_empty());
         assert!(!list.last_add());
+        // the base checks' continuity, which cannot be computed here, fails its test
+        // (WR-663; SMLib reads it uninitialised, refused as `InvalidInput`)
         for level in [0, 1, 2] {
             assert!(matches!(
                 surface.assert_valid(&k, None, level, ObjectKey(1)),
-                Err(SolidError::InvalidInput {
-                    reason: "continuity output never written (upstream reads it uninitialised)",
-                    ..
-                })
+                Ok(false)
             ));
         }
     }

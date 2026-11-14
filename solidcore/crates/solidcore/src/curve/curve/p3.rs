@@ -2413,10 +2413,8 @@ mod tests {
                 )
             })
             .collect();
-        let mut k = Kernel::default();
-        assert!(!k.fixes.curve_loop_normal_from_area);
-        assert_eq!(compute_crvs_normal(&k, &curves).unwrap(), -Vec3::Z);
-        k.fixes.curve_loop_normal_from_area = true;
+        let k = Kernel::default();
+        assert!(k.fixes.curve_loop_normal_from_area);
         assert_eq!(compute_crvs_normal(&k, &curves).unwrap(), Vec3::Z);
 
         let reversed: Vec<_> = points
@@ -2431,8 +2429,6 @@ mod tests {
             })
             .collect();
         assert_eq!(compute_crvs_normal(&k, &reversed).unwrap(), -Vec3::Z);
-        k.fixes.curve_loop_normal_from_area = false;
-        assert_eq!(compute_crvs_normal(&k, &reversed).unwrap(), Vec3::Z);
     }
 
     #[test]
@@ -2529,13 +2525,10 @@ mod tests {
     /// upstream's `(0, 0, 1)`; a single line is `SM_ERR` on both.
     #[test]
     fn area_normal_reports_a_zero_area_and_keeps_the_single_line_error() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let a = line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.0, 1.0);
         let b = line([1.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.0, 1.0);
         let collinear = [a.clone(), b];
-        assert_eq!(compute_crvs_normal(&k, &[]).unwrap(), Vec3::Z);
-        assert_eq!(compute_crvs_normal(&k, &collinear).unwrap(), Vec3::Z);
-        k.fixes.curve_loop_normal_from_area = true;
         let zero_area = |r: Result<Vec3>| matches!(r, Err(SolidError::InvalidInput { .. }));
         assert!(zero_area(compute_crvs_normal(&k, &[])));
         assert!(zero_area(compute_crvs_normal(&k, &collinear)));
@@ -2551,7 +2544,7 @@ mod tests {
     /// (upstream ignores the status there).
     #[test]
     fn area_normal_returns_a_failed_point_evaluation() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let segment = line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.0, 1.0);
         let composite = Curve::from(
             crate::curve::composite_curve::CompositeCurve::with_curves(
@@ -2565,8 +2558,6 @@ mod tests {
         );
         let side = line([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0.0, 1.0);
         let curves = [side, composite];
-        assert!(compute_crvs_normal(&k, &curves).is_ok());
-        k.fixes.curve_loop_normal_from_area = true;
         assert!(matches!(
             compute_crvs_normal(&k, &curves),
             Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)

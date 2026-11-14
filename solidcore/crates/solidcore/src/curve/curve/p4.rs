@@ -2357,12 +2357,7 @@ mod tests {
                 Some(seg([2.0, 0.0, 0.0], [1.0, 0.0, 0.0])),
             ]
         };
-        let off = fix_chain_curves_list(&Kernel::default(), curves(), 1e-6, true).unwrap();
-        assert_eq!(off.chain_starts, vec![0]);
-        assert_eq!(off.origin, vec![0, 1]);
-        let mut on_k = Kernel::default();
-        on_k.fixes.query_statuses_pass_on = true;
-        let on = fix_chain_curves_list(&on_k, curves(), 1e-6, true).unwrap();
+        let on = fix_chain_curves_list(&Kernel::default(), curves(), 1e-6, true).unwrap();
         assert_eq!(on.chain_starts, vec![0, 1]);
         assert_eq!(on.origin, vec![0, 1]);
     }
@@ -2374,18 +2369,12 @@ mod tests {
         // deleting one); ApproximatePolarBox passes on its evaluations. Both
         // discriminating.
         let empty = || Curve::from(crate::nurbs::b_spline_curve::BSplineCurve::new(3));
-        let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        let r_off =
-            fix_chain_curves_list(&off, vec![Some(empty()), Some(empty())], 1e-6, true).unwrap();
-        assert_eq!(r_off.deleted, 1);
+        let on = Kernel::default();
         let r_on =
             fix_chain_curves_list(&on, vec![Some(empty()), Some(empty())], 1e-6, true).unwrap();
         assert_eq!((r_on.deleted, r_on.chain_starts.len()), (0, 2));
 
         let ivl = Extent1d::from_min_max(0.0, 1.0);
-        assert!(approximate_polar_box(&off, &empty(), &ivl, 5).is_ok());
         assert!(approximate_polar_box(&on, &empty(), &ivl, 5).is_err());
     }
 
@@ -2408,14 +2397,8 @@ mod tests {
         let empty = Curve::from(crate::nurbs::b_spline_curve::BSplineCurve::new(3));
         let ivl = Extent1d::from_min_max(0.0, 1.0);
         assert!(empty.evaluate_point(&Kernel::default(), 0.0).is_err());
-        let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        // IsDegenerate: discriminating
-        assert!(is_degenerate_base(&off, &empty, 0.0, Some(&ivl)).unwrap());
+        let on = Kernel::default();
         assert!(!is_degenerate_base(&on, &empty, 0.0, Some(&ivl)).unwrap());
-        // IsClosed: coverage only (the coincident unset points fail the mid test too)
-        assert!(!is_closed_base(&off, &empty, &ivl, 0.0).unwrap());
         assert!(!is_closed_base(&on, &empty, &ivl, 0.0).unwrap());
     }
 
