@@ -21,7 +21,8 @@ order, so the full line would leave it no margin; that half is enough is ARGUED 
 WR-668's own check, which accepts a radius within half the tolerance of the line). The
 pieces stop at a cut from the end: the largest of `ulp(t_end)` and `stretch 2^-52` (below
 which they would round onto the end), and the parameter length over which the trim covers
-a UV length of `256 ε |P|_max`, `sqrt(512 ε |P|_max / |c''(t_end)|)`. The enclosure's
+a UV length of `256 ε |P|_max` to second order (`sqrt(512 ε |P|_max / |c''(t_end)|)` at a
+zero-speed end). The enclosure's
 coefficients carry absolute widths of a few `ε |P|`, so shorter pieces cannot clear
 (measured: on a cubic with `P0 = P1`, pieces from about 1e-7 of the end inward do not
 clear even an eighth of the line). That sliver, which holds the zero-speed end itself, is

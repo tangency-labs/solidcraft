@@ -568,9 +568,9 @@ const STRETCH_SLIVER_ULPS: f64 = 256.0;
 /// largest of:
 /// - `ulp(t_end)` and `stretch 2^-52`: nearer the end, the pieces would round onto the
 ///   end itself;
-/// - `sqrt(2 STRETCH_SLIVER_ULPS ε |P|_max / |c''(t_end)|)`, where the trim `c` covers a
-///   UV length of `STRETCH_SLIVER_ULPS ε |P|_max` (its speed is zero at the end, so the
-///   length is `|c''| cut² / 2` to leading order). The enclosure's coefficients carry
+/// - the parameter length `t` over which the trim `c` covers a UV length of
+///   `L = STRETCH_SLIVER_ULPS ε |P|_max` to second order, `|c'| t + |c''| t² / 2 = L` at
+///   the end (at a zero-speed end, `sqrt(2 L / |c''|)`). The enclosure's coefficients carry
 ///   absolute widths of a few `ε |P|`, so a piece whose image is that short cannot clear
 ///   (MEASURED: on the cubic of `a_genuine_zero_speed_end_clears_its_stretch`, pieces
 ///   from about 1e-7 of the end inward do not clear even an eighth of the line).
@@ -601,12 +601,17 @@ fn stretch_clears_on_surface(
         return Ok(false);
     };
     let p_max = points.iter().fold(0.0_f64, |m, p| m.max(p.length()));
-    let accel = match trim.evaluate(t_end, 2, end == 0, false) {
-        Ok(d) => d.get(2).map_or(f64::NAN, |a| a.length()),
+    let (speed, accel) = match trim.evaluate(t_end, 2, end == 0, false) {
+        Ok(d) => (
+            d.get(1).map_or(f64::NAN, |a| a.length()),
+            d.get(2).map_or(f64::NAN, |a| a.length()),
+        ),
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(false),
     };
-    let sliver = (2.0 * STRETCH_SLIVER_ULPS * f64::EPSILON * p_max / accel).sqrt();
+    // the positive root of `|c''| t² / 2 + |c'| t = L`, in the form that does not cancel
+    let length = STRETCH_SLIVER_ULPS * f64::EPSILON * p_max;
+    let sliver = 2.0 * length / (speed + (speed * speed + 2.0 * accel * length).sqrt());
     let cut = max3(ulp, stretch * 2f64.powi(-STRETCH_PIECES), sliver);
     // (written to accept: a NaN or infinite stretch, end or sliver certifies nothing)
     let finite = stretch > 0.0 && stretch.is_finite() && sliver.is_finite() && cut.is_finite();
