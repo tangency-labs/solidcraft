@@ -1683,6 +1683,26 @@ fn scale_scales_the_dimensions_it_takes_with_it() {
     assert!(close(s.doc.eval(&radius, solidcraft_doc::expr::Kind::Length).unwrap(), 5.0), "one undo restores the radius");
 }
 
+/// #16611: a filleted rectangle scaled about a base point other than the origin keeps its
+/// shape: the fillet's virtual corner left on the curves' extensions at the sketch origin is
+/// let go when the scale moves away from it, instead of the solver bending the profile back.
+#[test]
+fn scale_about_another_base_point_keeps_the_profile() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 20], [0, 20]], "closed": true}));
+    run(&mut s, "sketch.fillet", json!({"points": ["l1.end", "l2.end", "l3.end", "l4.end"], "radius": 5}));
+    let curves = ["l1", "l2", "l3", "l4", "a1", "a2", "a3", "a4"];
+    let out = run(&mut s, "sketch.scale", json!({"entities": curves, "base": [20, 10], "factor": 2}));
+    assert_eq!(out["sketch"]["solved"], true, "{out}");
+    let sk = sketch(&s);
+    let ids: Vec<String> = curves.iter().map(|c| c.to_string()).collect();
+    assert!(box_is(&sk, &ids, [-20.0, -10.0], [60.0, 30.0]), "{:?}", bounds(&sk, &ids));
+    let (p, q) = (sk.point(sk.resolve_point("l1.start").unwrap()).unwrap(), sk.point(sk.resolve_point("l1.end").unwrap()).unwrap());
+    assert!(p.dist(Vec2::new(-10.0, -10.0)) < 1e-6 && q.dist(Vec2::new(50.0, -10.0)) < 1e-6, "l1: {p:?} {q:?}");
+    let area = 80.0 * 40.0 - (4.0 - std::f64::consts::PI) * 100.0;
+    assert!((profiles(&s)[0] - area).abs() < 1e-6, "{:?}", profiles(&s));
+}
+
 /// #1485: after a circle is trimmed between two construction lines, clicking the trimmed end
 /// picks the construction line's end lying there, not the arc's own; the tangent arc still starts
 /// from the trimmed arc, tangent to it.
