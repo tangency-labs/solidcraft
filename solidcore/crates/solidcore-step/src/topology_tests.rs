@@ -2194,6 +2194,30 @@ fn an_edge_to_a_vertex_a_hair_off_a_closed_splines_seam_ends_at_the_seam() {
     assert!(at(m.interval[0], mid) && at(m.interval[1], far), "{:?}", m.interval);
 }
 
+/// A closed edge (one vertex at both ends) on a closed spline whose vertex is half way round
+/// the curve, not at its seam (a thread's end loop as some exporters write it): the edge is the
+/// whole curve started at its vertex, so both its ends are the vertex. It was read from the
+/// curve's own seam, its vertex 5 mm off both ends, and the face refused (#16930).
+#[test]
+fn a_closed_edge_whose_vertex_is_off_its_closed_splines_seam_starts_there() {
+    let square = || BCurve::Spline {
+        knots: vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0],
+        points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]],
+    };
+    let mid = [10.0, 5.0, 0.0];
+    let m = open_or_closed(square(), mid, mid, true, true, 1e-3).unwrap();
+    assert!((m.interval[1] - m.interval[0] - 4.0).abs() < 1e-12, "{:?}", m.interval);
+    let eval = CurveEval::new(&m.curve).unwrap();
+    for t in m.interval {
+        assert!(eval.point(t).unwrap().dist(v3(mid)) < 1e-12, "{t}");
+    }
+    // Half way round from the vertex: the opposite side's middle, the curve's shape kept.
+    assert!(eval.point(m.interval[0] + 2.0).unwrap().dist(v3([0.0, 5.0, 0.0])) < 1e-12);
+    // A vertex at the seam keeps the curve as it is.
+    let m = open_or_closed(square(), [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], true, true, 1e-3).unwrap();
+    assert_eq!(m.interval, [0.0, 4.0]);
+}
+
 /// A spline surface whose first and last control columns lie within the tolerance of each other
 /// is made closed (both become their mean, the surface moving by half the gap at most), so it is
 /// periodic; one closed exactly, one whose ends are farther apart, or one with a weight that
