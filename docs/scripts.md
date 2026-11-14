@@ -14,6 +14,33 @@ A script is a JSON list of commands, the same ones the UI runs:
 
 Run one with `solidcraft-cli run script.json --out part.step`; see [building](building.md) and the [command list](features.md).
 
+## File paths
+
+By default, relative file paths in commands resolve against the folder where you run the CLI.
+Use `--script-relative` to resolve them against the script's folder instead:
+
+```sh
+solidcraft-cli run --script-relative parts/import.json --out exported.step
+```
+
+For example, put `cap.step` beside `parts/import.json`, containing:
+
+```json
+{"commands": [
+  {"command": "file.insert_step", "params": {"path": "cap.step"}},
+  {"command": "file.export", "params": {"path": "cap.stl"}}
+]}
+```
+
+This reads `parts/cap.step` and writes `parts/cap.stl`. The command-line `--out` writes
+`exported.step` in the folder where you ran the CLI. The same rule keeps command-line
+`--in`, `--save`, `--json-out` and `--profile-out` paths relative to that folder.
+Absolute paths are unchanged.
+
+`--script-relative` requires a positional JSON command script or recipe. A saved design alone,
+or `--in` without a positional script, cannot use the option. Other CLI commands keep their
+existing path behavior.
+
 ## Moving bodies
 
 `solid.move` rotates about `origin` and then applies `translate`.
