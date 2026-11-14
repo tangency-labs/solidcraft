@@ -84,6 +84,31 @@ fn scratch_dir() -> PathBuf {
     d
 }
 
+fn widget_centres(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], text: &str) -> Vec<[f64; 2]> {
+    let centre = |n: &egui::accesskit::Node| n.bounds().filter(|b| b.x1 > b.x0 && b.y1 > b.y0).map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]);
+    let mut exact: Vec<_> = nodes
+        .iter()
+        .rev()
+        .filter(|(_, n)| n.label() == Some(text) || n.value() == Some(text))
+        .filter_map(|(_, n)| centre(n).map(|at| (!n.supports_action(egui::accesskit::Action::Click), at)))
+        .collect();
+    if !exact.is_empty() {
+        // AccessKit node order is not paint order. A tooltip can repeat its button's text;
+        // prefer the click target, but retain plain labels for row and visibility lookups.
+        exact.sort_by_key(|(passive, _)| *passive);
+        return exact.into_iter().map(|(_, at)| at).collect();
+    }
+    // A menu button's label ends with its shortcut ("Save Ctrl+S").
+    nodes
+        .iter()
+        .rev()
+        .filter(|(_, n)| {
+            n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.strip_prefix(text).is_some_and(|r| r.starts_with(' ')))
+        })
+        .filter_map(|(_, n)| centre(n))
+        .collect()
+}
+
 /// The app in a headless egui context.
 pub struct Harness {
     pub app: SolveApp,
@@ -294,8 +319,8 @@ impl Harness {
         out
     }
 
-    /// The centre of the visible widget whose label or value is `text` (the last one drawn wins:
-    /// popups are drawn after what opened them).
+    /// The centre of the visible widget whose label or value is `text`, preferring click targets
+    /// over matching text labels such as tooltips.
     pub fn widget(&self, text: &str) -> Option<[f64; 2]> {
         self.widgets(text).into_iter().next()
     }
@@ -337,25 +362,10 @@ impl Harness {
         Err(format!("widget `{text}` could not be revealed in its page"))
     }
 
-    /// Centres of the visible widgets whose label or value is `text`, last drawn first.
+    /// Centres of the visible widgets whose label or value is `text`, with click targets first.
     pub fn widgets(&self, text: &str) -> Vec<[f64; 2]> {
         let Some(tree) = self.output.accesskit_update.as_ref() else { return Vec::new() };
-        let centre =
-            |n: &egui::accesskit::Node| n.bounds().filter(|b| b.x1 > b.x0 && b.y1 > b.y0).map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]);
-        let exact: Vec<[f64; 2]> =
-            tree.nodes.iter().rev().filter(|(_, n)| n.label() == Some(text) || n.value() == Some(text)).filter_map(|(_, n)| centre(n)).collect();
-        if !exact.is_empty() {
-            return exact;
-        }
-        // A menu button's label ends with its shortcut ("Save Ctrl+S").
-        tree.nodes
-            .iter()
-            .rev()
-            .filter(|(_, n)| {
-                n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.strip_prefix(text).is_some_and(|r| r.starts_with(' ')))
-            })
-            .filter_map(|(_, n)| centre(n))
-            .collect()
+        widget_centres(&tree.nodes, text)
     }
 
     /// A step's point on screen.
