@@ -22,6 +22,16 @@ pub(crate) fn same_item(a: &Sel, b: &Sel) -> bool {
     }
 }
 
+/// Whether the selection holds the body `body`: selected on its own, or through a selected
+/// occurrence (the bodies its placement shows, as its Browser row lists them).
+pub(crate) fn holds_body(session: &solidcraft_engine::Session, body: &str) -> bool {
+    session.selection.iter().any(|s| match s {
+        Sel::Body { name } => name == body,
+        Sel::Occurrence { path } => session.occurrence_bodies_shared(path, true).is_ok_and(|b| b.iter().any(|n| n == body)),
+        _ => false,
+    })
+}
+
 /// Two distinct point intents for the alignment command, without creating sketch points.
 pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 2]> {
     let [a, b] = selection else { return None };
