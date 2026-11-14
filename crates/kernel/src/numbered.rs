@@ -1,6 +1,6 @@
 //! Profile loops whose segments carry the profile segments they come from, through every way the
-//! builders reshape a loop before building (turning it round, re-seaming a circle, re-splitting
-//! it to match another section). [`FaceOrigin::Profile`](crate::history::FaceOrigin::Profile)
+//! builders reshape a loop before building (turning it round, re-seaming a circle, matching it to
+//! another section). [`FaceOrigin::Profile`](crate::history::FaceOrigin::Profile)
 //! numbers are defined here: the segments of the caller's regions in order, each region its outer
 //! loop and then its holes ([`profile_loops`]).
 
@@ -79,48 +79,14 @@ impl NumberedLoop {
         }
     }
 
-    /// This loop (a full circle) re-split as `pieces` (arcs of the same circle): each piece runs
-    /// over every arc of this loop it overlaps.
-    pub(crate) fn resplit_circle(&self, pieces: Loop2) -> NumberedLoop {
-        let from = arc_overlaps(&pieces.segs, &self.lp.segs).into_iter().map(|js| union(js.iter().map(|j| self.numbers(*j)))).collect();
-        NumberedLoop { lp: pieces, from }
-    }
-
-    /// Re-split into exactly `n` segments, other loops split their longest segments in half. A
-    /// full circle is split once round (one turn, every arc a positive sweep) to follow a lead
-    /// loop: at the lead's vertex directions `angles` when they go round in order (counter-
-    /// clockwise, or clockwise when `clockwise`), otherwise from the first of them at the lead's
-    /// perimeter `fractions` (the share of the lead's length before each vertex; evenly when
-    /// those are unusable).
-    pub(crate) fn resample(&self, n: usize, angles: &[f64], fractions: &[f64], clockwise: bool) -> NumberedLoop {
-        let lp = &self.lp;
-        let circle = lp.segs.iter().all(|s| matches!(s, Seg2::Arc { .. }))
-            && lp.segs.windows(2).all(|w| match (w.first(), w.get(1)) {
-                (Some(Seg2::Arc { center: c1, radius: r1, .. }), Some(Seg2::Arc { center: c2, radius: r2, .. })) => {
-                    c1.dist(*c2) < 1e-9 && (r1 - r2).abs() < 1e-9
-                }
-                _ => false,
-            });
-        if circle
-            && n > 0
-            && let Some(Seg2::Arc { center, radius, .. }) = lp.segs.first().copied()
-        {
-            let a = circle_breaks(n, angles, fractions, clockwise);
-            let segs: Vec<Seg2> = (0..a.len())
-                .filter_map(|i| {
-                    let s = *a.get(i)?;
-                    let e = if i + 1 < a.len() { *a.get(i + 1)? } else { a.first()? + std::f64::consts::TAU };
-                    Some(Seg2::Arc { center, radius, start: s, sweep: e - s })
-                })
-                .collect();
-            return self.resplit_circle(Loop2 { segs });
-        }
-        let mut out = self.clone();
-        while out.lp.segs.len() < n {
-            let Some((k, _)) = out.lp.segs.iter().enumerate().max_by(|a, b| a.1.length().total_cmp(&b.1.length())) else { break };
-            out.split_half(k);
-        }
-        out
+    /// The loop as matched for a loft (`solidcore_ops::sweep::match_loft_sections`): `segs`, each
+    /// over the numbers of the segments of this loop `from` names.
+    pub(crate) fn matched(&self, segs: Vec<Seg2>, from: &[Vec<usize>]) -> NumberedLoop {
+        let from = from
+            .iter()
+            .map(|ix| if let [i] = ix.as_slice() { self.numbers(*i).to_vec() } else { union(ix.iter().map(|i| self.numbers(*i))) })
+            .collect();
+        NumberedLoop { lp: Loop2 { segs }, from }
     }
 
     /// Each run of lines that `joins` says continue one another as a single line, over what
@@ -164,19 +130,6 @@ impl NumberedLoop {
         }
         out
     }
-
-    /// Split segment `k` in half, both halves over what it ran over.
-    fn split_half(&mut self, k: usize) {
-        if k >= self.lp.segs.len() || k >= self.from.len() {
-            return;
-        }
-        let s = self.lp.segs.remove(k);
-        let (p, q) = s.split_half();
-        self.lp.segs.insert(k, q);
-        self.lp.segs.insert(k, p);
-        let from = self.from.get(k).cloned().unwrap_or_default();
-        self.from.insert(k, from);
-    }
 }
 
 impl NumberedRegion {
@@ -201,94 +154,7 @@ impl NumberedRegion {
     }
 }
 
-/// The smallest arc a circle is split into (radians).
-const MIN_SWEEP: f64 = 1e-9;
-
-/// `n` increasing break angles of one turn round a circle (each step and the closing step back
-/// to the first, one turn on, positive) for a circle following a lead loop: `angles` (the lead's
-/// vertex directions) when they go round once in order in the lead's direction (counter-clockwise,
-/// or clockwise when `clockwise`), otherwise from the first of them at the lead's perimeter
-/// `fractions`, or evenly. A non-star-shaped lead's directions turn back on themselves: forcing
-/// them to increase wound the circle round many times (#2570).
-fn circle_breaks(n: usize, angles: &[f64], fractions: &[f64], clockwise: bool) -> Vec<f64> {
-    use std::f64::consts::TAU;
-    let sign = if clockwise { -1.0 } else { 1.0 };
-    // Angles measured in the lead's direction of travel.
-    let along: Vec<f64> = angles.iter().map(|a| sign * a).collect();
-    let run = (along.len() == n).then(|| one_turn(&along)).flatten().unwrap_or_else(|| {
-        let start = along.first().copied().filter(|a| a.is_finite()).unwrap_or(0.0);
-        let even = || (0..n).map(|i| i as f64 / n as f64).collect::<Vec<f64>>();
-        let f = if usable_fractions(n, fractions) { fractions.to_vec() } else { even() };
-        f.iter().map(|f| start + TAU * f).collect()
-    });
-    let mut breaks: Vec<f64> = run.into_iter().map(|a| sign * a).collect();
-    if clockwise {
-        breaks.reverse();
-    }
-    breaks
-}
-
-/// `along` unwrapped into one increasing turn (each step the shortest positive one), or `None`
-/// when they do not go round once in order.
-fn one_turn(along: &[f64]) -> Option<Vec<f64>> {
-    let mut out: Vec<f64> = Vec::with_capacity(along.len());
-    for &x in along {
-        if !x.is_finite() {
-            return None;
-        }
-        let next = match out.last() {
-            Some(&prev) => {
-                let step = (x - prev).rem_euclid(std::f64::consts::TAU);
-                if step <= MIN_SWEEP {
-                    return None;
-                }
-                prev + step
-            }
-            None => x,
-        };
-        out.push(next);
-    }
-    let (first, last) = (*out.first()?, *out.last()?);
-    (last - first < std::f64::consts::TAU - MIN_SWEEP).then_some(out)
-}
-
-/// `fractions` are `n` finite, strictly increasing shares of a turn from 0, all under one.
-fn usable_fractions(n: usize, fractions: &[f64]) -> bool {
-    fractions.len() == n
-        && fractions.first().is_some_and(|f| f.abs() < MIN_SWEEP)
-        && fractions.windows(2).all(|w| matches!(w, [a, b] if b - a > MIN_SWEEP))
-        && fractions.last().is_some_and(|f| f.is_finite() && *f < 1.0 - MIN_SWEEP)
-}
-
 /// Every number of `sets`, once each, in order.
 fn union<'a>(sets: impl IntoIterator<Item = &'a [usize]>) -> Vec<usize> {
     sets.into_iter().flatten().copied().collect::<BTreeSet<usize>>().into_iter().collect()
-}
-
-/// Which arcs of `originals` (arcs of one circle) each arc of `pieces` (arcs of the same
-/// circle) runs over: a circle re-split at other angles comes from every original arc it
-/// overlaps.
-fn arc_overlaps(pieces: &[Seg2], originals: &[Seg2]) -> Vec<Vec<usize>> {
-    use std::f64::consts::TAU;
-    // An arc as its counter-clockwise start angle and (positive) sweep.
-    let span = |s: &Seg2| match *s {
-        Seg2::Arc { start, sweep, .. } => Some(if sweep < 0.0 { (start + sweep, -sweep) } else { (start, sweep) }),
-        _ => None,
-    };
-    let eps = 1e-9;
-    pieces
-        .iter()
-        .map(|p| {
-            let Some((p0, pw)) = span(p) else { return Vec::new() };
-            (0..originals.len())
-                .filter(|&j| {
-                    originals.get(j).and_then(span).is_some_and(|(o0, ow)| {
-                        // The original's start, seen from the piece's start going round.
-                        let d = (o0 - p0).rem_euclid(TAU);
-                        d < pw - eps || d + ow > TAU + eps || ow >= TAU - eps
-                    })
-                })
-                .collect()
-        })
-        .collect()
 }

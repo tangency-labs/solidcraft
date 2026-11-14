@@ -1012,6 +1012,10 @@ crates/solidcore/src/nurbs/certificate.rs	interval_bound	f64::clamp	1	proven	cla
 crates/solidcore/src/nurbs/certificate.rs	interval_bound	with_capacity	1	proven	Vec::with_capacity(4)	constant capacity
 crates/solidcore/src/nurbs/certificate.rs	interval_bound	with_capacity	2	proven	Vec::with_capacity(4)	constant capacity
 crates/solidcore/src/nurbs/certificate.rs	interval_bound	with_capacity	3	proven	Vec::with_capacity(4)	constant capacity
+crates/solidcore/src/sweep/loft_sections.rs	Cursor::to	f64::clamp	1	proven	clamp(1e-9, 1.0 - 1e-9)	constant bounds, min <= max
+crates/solidcore/src/sweep/loft_sections.rs	between	int-div	1	proven	(high.0 - low.0) / 2	constant non-zero divisor
+crates/solidcore/src/sweep/loft_sections.rs	nearest	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
+crates/solidcore/src/sweep/loft_sections.rs	nearest	f64::clamp	2	proven	clamp(0.0, 1.0)	constant bounds, min <= max
 crates/solidcore/src/sweep/rotational_sweep_geometry.rs	RotationalSweepGeometry::edge_sweep_higher	swap	1	proven	swap(1, 3)	a3d, a_uv and a_orients lengths checked >= 4; roles is a four-element array
 crates/solidcore/src/sweep/rotational_sweep_geometry.rs	RotationalSweepGeometry::edge_sweep_higher	swap	2	proven	swap(1, 3)	a3d, a_uv and a_orients lengths checked >= 4; roles is a four-element array
 crates/solidcore/src/sweep/rotational_sweep_geometry.rs	RotationalSweepGeometry::edge_sweep_higher	swap	3	proven	swap(1, 3)	a3d, a_uv and a_orients lengths checked >= 4; roles is a four-element array
