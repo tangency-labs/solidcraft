@@ -22,6 +22,7 @@ mod chain;
 pub mod compare;
 pub mod drawing_measure;
 pub mod drawing_sheet;
+pub mod drawing_thread;
 pub mod drawing_view;
 pub mod env;
 pub mod fill;
