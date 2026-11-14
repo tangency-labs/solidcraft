@@ -250,16 +250,28 @@ const MAX_CHAIN_RULE_CONDITION: f64 = 1.0 / EFF_ZERO_SQRT;
 /// `σ_max / σ_min = σ_max² / (σ_max σ_min) = σ_max² / |S_u × S_v|`, and
 /// `σ_max² ≤ |S_u|² + |S_v|²` (the Frobenius norm), so it is at most
 /// `(|S_u|² + |S_v|²) / |S_u × S_v|`. That bound must be at most
-/// [`MAX_CHAIN_RULE_CONDITION`]. The comparison takes the rounding of the two sides' few
-/// operations into account by a factor `1 + 16 ε` on the left, so a computed pass implies
-/// the bound up to that margin. Written to accept: a NaN, an infinite derivative or a
-/// vanishing cross product fails.
+/// [`MAX_CHAIN_RULE_CONDITION`].
+///
+/// Rounding: the cross product cancels, so its error is absolute. Each component
+/// `a_y b_z - a_z b_y` is off by at most `γ_2 (|a_y b_z| + |a_z b_y|)`, and those sums have
+/// a Euclidean norm of at most `√2 |a| |b|`, so the computed cross product is within
+/// `√2 γ_2 |S_u| |S_v|` (below `3 ε |S_u| |S_v|`) of the exact one. Its length adds a
+/// relative error below `4 ε`. So the exact `|S_u × S_v|` is at least
+/// `area (1 - 8 ε) - 4 ε |S_u| |S_v|` (the computed lengths' own rounding is inside these
+/// margins), and that lower bound is what is compared. The sum of squares, a few
+/// additions and multiplications of non-negative terms, is within `1 + 16 ε` of the exact
+/// one, so the left side is raised by that factor. A computed pass therefore implies that
+/// the exact bound `(|S_u|² + |S_v|²) / |S_u × S_v|` is at most the limit. Written to
+/// accept: a NaN, an infinite derivative, or a cross product that does not clear its
+/// rounding fails.
 fn chain_rule_well_conditioned(su: Vec3, sv: Vec3) -> bool {
     let squares = su.length_squared() + sv.length_squared();
     let area = su.cross(sv).length();
+    let area_lo =
+        area * (1.0 - 8.0 * f64::EPSILON) - 4.0 * f64::EPSILON * su.length() * sv.length();
     let lhs = squares * (1.0 + 16.0 * f64::EPSILON);
-    let rhs = MAX_CHAIN_RULE_CONDITION * area;
-    area > 0.0 && lhs.is_finite() && rhs.is_finite() && lhs <= rhs
+    let rhs = MAX_CHAIN_RULE_CONDITION * area_lo;
+    area_lo > 0.0 && lhs.is_finite() && rhs.is_finite() && lhs <= rhs
 }
 
 const fn other(s: SrfIndex) -> SrfIndex {
@@ -2282,6 +2294,16 @@ mod tests {
                 failed.push(format!(
                     "delta {delta:e} turn {turn:.3}: {worst:e} rad, {near} near"
                 ));
+            }
+        }
+        // the pole 1e-9 off the line: knots too close to it for a well-conditioned solve
+        // are stepped back from and keep finite tangents; the others keep their own
+        for turn in [0.0, PI / 2.0] {
+            let (worst, _) = knot_image_turn(1e-9, turn);
+            // (written to accept: a NaN fails)
+            let ok = worst <= 1e-5;
+            if !ok {
+                failed.push(format!("delta 1e-9 turn {turn:.3}: {worst:e} rad"));
             }
         }
         assert!(failed.is_empty(), "{failed:#?}");
