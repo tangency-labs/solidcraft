@@ -39,7 +39,11 @@ Updates: WR-588
   control-point hull, raised by the net's certified bound (`|B - S| <= bound`, 0 for a ball
   patch), and skipped where that is no higher than the box so far (rule 1). A cell with no
   solution goes on to rule 4 as a B-spline's does, and at the limits counts with that raised
-  hull. The cells are still solved on the face's own surface, not on the net.
+  hull. The cells are still solved on the face's own surface, not on the net. Rule 4 decides
+  a blend's cell by `cell_monotone`, as for every face that is not a B-spline open both
+  ways; the net's subpatch above is not taken for it directly. (`cell_monotone` reads the
+  B-spline base `patch_base` gives, which for a procedural blend or ball patch is its net, as
+  the fork's `sm_CellMonotone` does through `IsKindOf(SmBSplineSurface)`.)
 - **Tests:** `trim_cover_of_a_square_tells_cells_outside_the_face` and
   `search_passes_over_cells_outside_the_trim_and_keeps_the_peak` (`query/face/p3.rs`). The
   crowned face, trimmed to `[-10, 10]^2` in `[-20, 20]^2` and rising to 50 at the outer corner,

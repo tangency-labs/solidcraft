@@ -1200,10 +1200,12 @@ fn unsolved_cell_top(
 /// taken.
 ///
 /// A blend face (a procedural blend or ball patch, #16394) is divided at its net's knots
-/// and bounded (1.), decided (4.) and, unsolved at the limits, bounded by its net's subpatch
-/// over the cell, the hull raised by the net's distance from the surface
-/// ([`blend_net_slack`]); its cells are solved on the face's own surface. A cell of it with
-/// no solution goes on to 4. as a B-spline's does, not straight to its loose box.
+/// and bounded (1.) and, unsolved at the limits, bounded by its net's subpatch over the
+/// cell, the hull raised by the net's distance from the surface ([`blend_net_slack`]); its
+/// cells are solved on the face's own surface and decided (4.) by [`cell_monotone`], as any
+/// face that is not a B-spline open both ways (which reads a blend's net, [`patch_base`]).
+/// A cell of it with no solution goes on to 4. as a B-spline's does, not straight to its
+/// loose box.
 fn face_directed_max(
     k: &Kernel,
     lb: &mut LazyBrep<'_>,
@@ -1348,9 +1350,11 @@ fn face_directed_max_with<'b>(
         }
         // (a cell whose subpatch gives no solution, its greatest value on its sides, is
         // left to the tests below and its parts, as one whose greatest is outside the face)
+        // A B-spline's subpatch is its own surface; any other face, a blend's too (whose
+        // `patch` is its net's), is decided by [`cell_monotone`].
         let monotone = match &patch {
-            Some((patch, _)) => patch_monotone(patch, dir),
-            None => cell_monotone(k, surface, &cell, dir)?,
+            Some((patch, _)) if by_patch => patch_monotone(patch, dir),
+            _ => cell_monotone(k, surface, &cell, dir)?,
         };
         if monotone {
             continue;
