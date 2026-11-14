@@ -842,6 +842,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let parts = !app.session.doc.components.is_empty();
     let mut items = vec![
         act("ui.extrudeSketch", "Extrude", "extrude").key("E").with(json!({ "sketch": id })).on(has_profiles && !editing),
+        act("ui.revolveSketch", "Revolve", "revolve").with(json!({ "sketch": id })).on(has_profiles && !editing),
         Item::sep(),
         act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing),
         act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id })),
@@ -1987,12 +1988,10 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.pick_save_command(&format!("{name}.dxf"), &["dxf"], "sketch.export_dxf", json!({"sketch": id}));
             }
         }
-        "ui.extrudeSketch" => {
+        "ui.extrudeSketch" | "ui.revolveSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
-                let n = crate::open_meshing::session_world(&app.session).sketch(id).map_or(0, |s| s.profiles.len());
-                let items: Vec<Value> = (0..n).map(|i| json!({"type": "profile", "sketch": id, "index": i})).collect();
-                let _ = app.run("select.set", json!({ "items": items }));
-                app.start("solid.extrude");
+                let command = if item.id == "ui.revolveSketch" { "solid.revolve" } else { "solid.extrude" };
+                crate::dialogs::start_from_sketch(app, command, id);
             }
         }
         "ui.lookAt" => {

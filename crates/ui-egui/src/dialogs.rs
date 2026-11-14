@@ -605,9 +605,10 @@ pub struct Dialog {
     /// Where the face that reopened this fillet or chamfer was clicked (Press Pull): its arrow
     /// sits on the edge nearest it. UI state only, never saved.
     pub(crate) anchor_hint: Option<Vec3>,
-    /// The open sketch an Extrude or Revolve ended on its way to opening (#14128). It stays
-    /// shown while this dialog is open, as an edited feature's sketch does, so its profiles can
-    /// be picked even when an earlier feature uses the sketch and hides it.
+    /// The sketch an Extrude or Revolve works from: the open sketch it ended on its way to opening
+    /// (#14128), or the one whose menu started it (#6940). It stays shown while this dialog is
+    /// open, as an edited feature's sketch does, so its profiles can be picked even when an
+    /// earlier feature uses the sketch and hides it. Apply keeps it for the next feature.
     pub(crate) started_from_sketch: Option<u64>,
 }
 
@@ -1409,6 +1410,14 @@ impl Dialog {
 
     pub fn edit_param(s: &Session, name: &str) -> Dialog {
         Dialog::new(Kind::EditParam { name: name.into(), expr: s.doc.param(name).map(|p| p.expr.clone()).unwrap_or_default() }, vec![])
+    }
+
+    /// An Extrude or Revolve works from `sketch`: it stays shown while the dialog is open, as an
+    /// edited feature's sketch does (#6940).
+    pub(crate) fn work_from_sketch(&mut self, sketch: u64) {
+        if matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. }) {
+            self.started_from_sketch = Some(sketch);
+        }
     }
 
     /// An Extrude or Revolve started from inside a sketch takes that sketch's profile, as it would
@@ -2881,6 +2890,40 @@ fn title(k: &Kind) -> &'static str {
 
 /// Whether the dialog is an extrude opened by Press Pull (the Q shortcut), which says
 /// PRESS PULL, not EXTRUDE (#11705).
+/// Whether a new feature of this dialog's kind can be applied and the dialog kept open for the
+/// next one (#6940): several extrusions from one sketch, fillets or holes in a row. Press Pull
+/// works on the face it was opened on, so it ends with OK.
+fn repeatable(d: &Dialog) -> bool {
+    match &d.kind {
+        Kind::SketchModify(k) => crate::sketch_modify_ui::repeatable(k),
+        Kind::Extrude { .. } => !press_pull_extrude(d),
+        Kind::Revolve { .. } | Kind::Fillet { .. } | Kind::Hole { .. } => true,
+        _ => false,
+    }
+}
+
+/// Starts an Extrude or Revolve on a sketch from its menu in the history tree, or from
+/// `ui.start` with `sketch` (#6940): the sketch's profiles start picked, as they always have
+/// from the menu, and the sketch stays shown while the dialog is open, even when an earlier
+/// feature uses it and hides it, so its regions can be clicked. With Apply, one sketch gives
+/// several features in a row.
+pub(crate) fn start_from_sketch(app: &mut SolveApp, command: &str, sketch: u64) {
+    let n = crate::open_meshing::session_world(&app.session).sketch(sketch).map_or(0, |s| s.profiles.len());
+    let items: Vec<Value> = (0..n).map(|i| json!({"type": "profile", "sketch": sketch, "index": i})).collect();
+    let _ = app.run("select.set", json!({ "items": items }));
+    app.start(command);
+    if let Some(d) = app.dialog.as_mut() {
+        if n == 0
+            && let Some(input) = d.inputs.first_mut()
+        {
+            // The sketch has no profile: drop the default pick from another sketch.
+            input.items.clear();
+        }
+        d.work_from_sketch(sketch);
+    }
+    sync_feature_edit(app);
+}
+
 fn press_pull_extrude(d: &Dialog) -> bool {
     d.press_pull && matches!(d.kind, Kind::Extrude { .. })
 }
@@ -4176,8 +4219,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let panel =
         panel.reset_scroll(reset_scroll && matches!(d.kind, Kind::Appearance(_) | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })));
     let window = panel.window(ctx);
-    let repeatable =
-        matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
+    let repeatable = d.editing.is_none() && !d.extra.contains_key("pattern") && repeatable(&d);
     let mut painted = false;
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
@@ -4464,6 +4506,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         for input in &mut d.inputs {
             input.items.clear();
         }
+        // The edges picked for the feature just applied belong to it: a Tangent Chain toggle must
+        // not bring them back into the next one.
+        d.picked_edges.clear();
         d.active = 0;
         d.error = None;
         d.refused = None;
