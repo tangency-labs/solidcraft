@@ -110,16 +110,16 @@
         "13": 4,
         "2": 6,
         "4": 241,
-        "5": 4,
+        "5": 6,
         "7": 2,
         "8": 1
       },
-      "expressible": 62,
-      "not_expressible": 18,
-      "operation_expressible": 269,
+      "expressible": 64,
+      "not_expressible": 16,
+      "operation_expressible": 271,
       "reasons": {
         "SolidCraft has no command for it yet": 2,
-        "refused or failed in SolidCraft, not in a kernel operation": 16
+        "refused or failed in SolidCraft, not in a kernel operation": 14
       },
       "ungraded": {
         "continuity": 204,
@@ -881,18 +881,6 @@
       "case": "crashes/5022-snap-fit-near-zero-thickness",
       "why": [
         "the failure is SolidCraft's, not a kernel operation's: step 2 (plastic.snap_fit): the snap fit's thickness must be at least 0.01 mm (got 1e-9 mm)"
-      ]
-    },
-    {
-      "case": "fillets/15858-round-loft-circle-to-ellipse-rim-normal-jump-7e-11",
-      "why": [
-        "the failure is SolidCraft's, not a kernel operation's: step 8 (solid.fillet): body `LoftBody`: the operation failed: SMLib fillet: SMLib's check refuses the result: 1 failed tests:\nSmBSplineSurface::Test #5 Bad NonMonotonic CPts: SmBSplineSurface Control Net doubles back on itself probably making a self intersecting surface [owner SmProceduralBlend]\n"
-      ]
-    },
-    {
-      "case": "fillets/15858-round-loft-circle-to-ellipse-rim-normal-jump-7e-9",
-      "why": [
-        "the failure is SolidCraft's, not a kernel operation's: step 8 (solid.fillet): body `LoftBody`: the operation failed: SMLib fillet: SMLib's check refuses the result: 1 failed tests:\nSmBSplineSurface::Test #5 Bad NonMonotonic CPts: SmBSplineSurface Control Net doubles back on itself probably making a self intersecting surface [owner SmProceduralBlend]\n"
       ]
     },
     {

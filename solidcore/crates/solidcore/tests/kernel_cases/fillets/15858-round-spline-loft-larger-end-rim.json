@@ -1041,11 +1041,13 @@
    }
   },
   {
-   "error": "the blend failed (status 1001): the fillet body is not built: Fillet Surface Computation Failure: blend::fillet_solver::p5: the rail's curve is missing",
    "inputs": [
     "b5"
    ],
    "op": "blend_dropping",
+   "outputs": [
+    "b6"
+   ],
    "params": {
     "edges": {
      "kind": "edge",
@@ -1097,18 +1099,33 @@
  "expressible": true,
  "operation_expressible": true,
  "outcome": {
-  "engine_error": "step 8 (solid.fillet): SMLib fillet: operation: the blend failed (status 1001): the fillet body is not built: Fillet Surface Computation Failure: blend::fillet_solver::p5: the rail's curve is missing",
-  "kernel_error": "the blend failed (status 1001): the fillet body is not built: Fillet Surface Computation Failure: blend::fillet_solver::p5: the rail's curve is missing",
-  "ran": false
+  "ran": true,
+  "raw_counts": {
+   "edges": 5,
+   "faces": 4,
+   "vertices": 3
+  }
  },
  "records": "15858-round-spline-loft-larger-end-rim.bodies.json.gz",
- "result": [],
+ "result": [
+  {
+   "body": "LoftBody",
+   "made": "b6"
+  }
+ ],
  "rig": {
-  "error": "step 8 (solid.fillet): SMLib fillet: operation: the blend failed (status 1001): the fillet body is not built: Fillet Surface Computation Failure: blend::fillet_solver::p5: the rail's curve is missing",
+  "error": null,
   "known_failing": null,
-  "measured": null,
+  "measured": {
+   "area_mm2": 8450.088923448513,
+   "body_count": 1,
+   "edges": 5,
+   "faces": 4,
+   "vertices": 3,
+   "volume_mm3": 57979.693908741516
+  },
   "refused_with": null,
-  "status": "fail"
+  "status": "pass"
  },
  "sources": [
   "tangency-labs/solidcraft#15858"

@@ -1716,7 +1716,6 @@ fn bezier_circle(x: f64, r: f64, phase: f64, skew: f64) -> Vec<Curve> {
 /// `r^2 (cot(alpha / 2) - (pi - alpha) / 2)` = 1.0393 for r = 2, swept round at its
 /// centroid's radius, 19.46: 127.1.
 #[test]
-#[ignore = "fails until tangency-labs/solidcraft#15858 is fixed"]
 fn a_round_runs_over_knot_lines_where_a_loft_face_s_normal_turns() {
     all_fixes();
     let sections = [
