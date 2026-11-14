@@ -192,6 +192,7 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
             setting::space_mouse_sketch_orbit(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_sketch_orbit_tip"));
+            setting::space_mouse_horizon_lock(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_horizon_lock_tip"));
         });
     });
 }
@@ -382,6 +383,7 @@ fn advanced(app: &mut SolveApp, ui: &mut egui::Ui) {
 
         // The calibrated device moving as it does, with the test model beside it, then its dead zones.
         let (device, raw) = (app.space_mouse.device.clone(), app.space_mouse.raw.into());
+        let horizon_lock = app.preferences.space_mouse_horizon_lock;
         let (boat, motion, free_orbit) = (&mut app.space_mouse.boat, app.space_mouse.motion, app.preferences.free_orbit);
         if let Some(calibration) = device.as_ref().and_then(|device| app.preferences.space_mouse_calibrations.get_mut(device)) {
             ui_kit::divider(ui, "space_mouse_picture");
@@ -392,11 +394,11 @@ fn advanced(app: &mut SolveApp, ui: &mut egui::Ui) {
                 crate::space_mouse_calibration::dead_zone_pads(ui, calibration, raw, false, &stories);
                 ui_kit::text(ui, &help, ui_kit::Text::Hint("space_mouse_circles_help"));
             };
-            picture_and_boat(ui, boat, motion, free_orbit, true, |ui| crate::space_mouse_model::live(ui, calibration, raw), pads);
+            picture_and_boat(ui, boat, motion, free_orbit, horizon_lock, true, |ui| crate::space_mouse_model::live(ui, calibration, raw), pads);
         } else if device.is_some() {
             // Not calibrated: the test model alone.
             ui_kit::divider(ui, "space_mouse_picture");
-            picture_and_boat(ui, boat, motion, free_orbit, false, |_| {}, |_| {});
+            picture_and_boat(ui, boat, motion, free_orbit, horizon_lock, false, |_| {}, |_| {});
         }
     });
 }
