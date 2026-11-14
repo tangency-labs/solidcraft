@@ -64,6 +64,7 @@ const PROFILE_KEYS: &[&str] = &[
     "keep_work_on_tab_switch",
     "language",
     "layout",
+    "library_thumbnail_size",
     "line_drag_draws_one",
     "line_hover_tangent_arc",
     "live_panel_drag_preview",

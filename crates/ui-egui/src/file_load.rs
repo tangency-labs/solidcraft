@@ -501,7 +501,7 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
         return Ok(());
     }
     default_reuse_import(app, &mut request);
-    if app.file_load.idle() && reuse_open(app, &request) {
+    if !app.file_picker_busy() && app.file_load.idle() && reuse_open(app, &request) {
         return Ok(());
     }
     if matches!(request.kind, Kind::Open | Kind::Insert) {
@@ -764,7 +764,7 @@ fn recovered_behind(app: &mut SolveApp, uid: u64, id: &str, dir: Option<&str>) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn start(app: &mut SolveApp) {
-    if app.file_load.running.is_some() {
+    if app.file_load.running.is_some() || app.file_picker_busy() {
         return;
     }
     // A request for a tab that was closed has nowhere to land: answer it so it does not wait for
@@ -940,7 +940,7 @@ fn start(app: &mut SolveApp) {
 /// Start the next queued STEP file as a [`Staged`] import (see [`step_staged`]).
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn start_staged(app: &mut SolveApp) {
-    if app.file_load.running.is_some() {
+    if app.file_load.running.is_some() || app.file_picker_busy() {
         return;
     }
     // The first that can start: one for a design in a tab not shown waits for it.

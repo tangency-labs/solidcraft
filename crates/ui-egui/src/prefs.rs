@@ -1054,6 +1054,10 @@ preference_settings! {
         agent_chat_width: f32 = 380.0;
         agent_chat_minimized: bool = false;
     }
+    /// Show Home on an ordinary empty launch and after closing the last design.
+    show_home_on_startup: bool = true, PAGE_GENERAL;
+    /// Preview card density in the document browser; Large preserves the existing layout.
+    library_thumbnail_size: crate::library::ThumbnailSize = crate::library::ThumbnailSize::Large, PAGE_LAYOUT;
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
@@ -1864,6 +1868,13 @@ impl MiddleDoubleClick {
 
     pub fn label(self) -> &'static str {
         Self::ALL.iter().find(|(m, _, _)| *m == self).map_or("Home", |(_, _, l)| l)
+    }
+}
+
+impl Prefs {
+    /// Explicit files, samples and control clients keep their existing launch behavior.
+    pub fn home_on_launch(&self, has_file: bool, sample: bool, controlled: bool) -> bool {
+        self.show_home_on_startup && !has_file && !sample && !controlled
     }
 }
 
@@ -4958,6 +4969,90 @@ mod tests {
         let mut restored = crate::SolveApp::new(Default::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
         assert!(restored.preferences.keep_unsaved_in_browser, "it is saved with the settings");
+    }
+
+    #[test]
+    fn startup_choice_general_picker_obeys_cancel_and_ok() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open": "General"}));
+        for button in ["cancel", "ok"] {
+            let picker = crate::scenario::rect_of("prefs:startup").unwrap().center();
+            h.call("ui.click", json!({"x": picker.x, "y": picker.y}));
+            let design = crate::scenario::rect_of("prefs:startup_design").unwrap().center();
+            h.call("ui.click", json!({"x": design.x, "y": design.y}));
+            assert!(!h.app.preferences.show_home_on_startup);
+            h.call("ui.prefs", json!({"button": button}));
+            assert_eq!(h.app.preferences.show_home_on_startup, button == "cancel");
+            h.call("ui.prefs", json!({"open": "General"}));
+        }
+    }
+
+    #[test]
+    fn library_thumbnail_size_picker_obeys_cancel_and_ok() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        for button in ["cancel", "ok"] {
+            h.call("ui.prefs", json!({"open": "Layout"}));
+            h.app.prefs_window.shell.filter = "Document browser".into();
+            h.frames(3);
+            h.step(&json!({"click": {"handle": "prefs:document_browser:small"}})).unwrap();
+            assert_eq!(h.app.preferences.library_thumbnail_size, crate::library::ThumbnailSize::Small);
+            h.call("ui.prefs", json!({"button": button}));
+            assert_eq!(
+                h.app.preferences.library_thumbnail_size,
+                if button == "cancel" { crate::library::ThumbnailSize::Large } else { crate::library::ThumbnailSize::Small }
+            );
+        }
+    }
+
+    #[test]
+    fn library_thumbnail_size_defaults_persists_and_resets() {
+        use crate::library::ThumbnailSize;
+        let legacy: super::Prefs = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(legacy.library_thumbnail_size, ThumbnailSize::Large);
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        for (name, size) in [("small", ThumbnailSize::Small), ("medium", ThumbnailSize::Medium), ("large", ThumbnailSize::Large)] {
+            super::set(&mut app, &serde_json::json!({"library_thumbnail_size": name})).unwrap();
+            let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            restored.load_prefs(&app.prefs());
+            assert_eq!(restored.preferences.library_thumbnail_size, size);
+        }
+        assert!(super::set(&mut app, &serde_json::json!({"library_thumbnail_size": "invalid"})).is_err());
+        app.preferences.library_thumbnail_size = ThumbnailSize::Small;
+        super::reset_preferences(&mut app.preferences, super::PAGE_LAYOUT);
+        assert_eq!(app.preferences.library_thumbnail_size, ThumbnailSize::Large);
+    }
+
+    #[test]
+    fn startup_choice_defaults_persists_and_resets() {
+        use serde_json::json;
+        let legacy: super::Prefs = serde_json::from_value(json!({"default_units": "in"})).unwrap();
+        assert!(legacy.show_home_on_startup);
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        for home in [false, true, false] {
+            super::set(&mut app, &json!({"show_home_on_startup": home, "default_units": "in"})).unwrap();
+            let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            restored.load_prefs(&app.prefs());
+            assert_eq!(restored.preferences.show_home_on_startup, home);
+            assert_eq!(restored.preferences.default_units, "in");
+        }
+        super::defaults(&mut app, 0);
+        assert!(app.preferences.show_home_on_startup);
+    }
+
+    #[test]
+    fn startup_choice_only_affects_an_ordinary_empty_launch() {
+        for home in [true, false] {
+            let prefs = super::Prefs { show_home_on_startup: home, ..Default::default() };
+            for has_file in [true, false] {
+                for sample in [true, false] {
+                    for controlled in [true, false] {
+                        assert_eq!(prefs.home_on_launch(has_file, sample, controlled), home && !has_file && !sample && !controlled);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

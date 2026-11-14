@@ -129,6 +129,8 @@ pub struct AppBar<'a> {
     /// The app's mark, painted centred at the point given, and its name beside it.
     pub mark: &'a dyn Fn(&Painter, Pos2),
     pub name: &'a str,
+    /// Optional space for an app-owned control before Home.
+    pub leading: Option<egui::Vec2>,
     pub home: BarButton<'a>,
     /// The File button's label; it is enabled with `home`, and drawn held while its menu is open.
     pub file: &'a str,
@@ -209,6 +211,8 @@ pub enum BarAction {
 /// The bar drawn: what was chosen, and the places it leaves to the app.
 #[derive(Debug)]
 pub struct BarOut {
+    /// Space reserved for the app-owned control before Home.
+    pub leading: Option<Rect>,
     pub actions: Vec<BarAction>,
     /// The File button, where its menu opens.
     pub file: Rect,
@@ -411,6 +415,11 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         // Home's button starts 20 before its place (32 wide, centred 4 before it).
         (left + HOME_MIN).max(name.right() + NAME_GAP + 20.0)
     };
+    let leading = data.leading.map(|size| {
+        let rect = Rect::from_center_size(pos2(x, r.center().y), size);
+        x += size.x + 8.0;
+        rect
+    });
     // Home.
     let home = Rect::from_center_size(pos2(x - 4.0, r.center().y), vec2(32.0, 32.0));
     let idle = data.home.enabled;
@@ -586,7 +595,7 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
             actions.push(BarAction::Version);
         }
     }
-    BarOut { actions, file, quick, offer, offer_labeled, tabs_start, controls_left, search, assistant, plugins_in_file }
+    BarOut { leading, actions, file, quick, offer, offer_labeled, tabs_start, controls_left, search, assistant, plugins_in_file }
 }
 
 /// Where the tab strip publishes its parts: each prefix is followed by the tab's place.

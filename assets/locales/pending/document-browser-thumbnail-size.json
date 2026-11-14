@@ -1,0 +1,58 @@
+{
+  "ar": {
+    "library.thumbnail_help": "اختر حجم الصور المصغرة ومتصفح المستندات. تترك الأحجام الأصغر مساحة أكبر للتصميم.",
+    "library.thumbnail_large": "كبير",
+    "library.thumbnail_medium": "متوسط",
+    "library.thumbnail_section": "متصفح المستندات",
+    "library.thumbnail_small": "صغير"
+  },
+  "de": {
+    "library.thumbnail_help": "Wählen Sie die Größe der Vorschaubilder und des Dokumentenbrowsers. Kleinere Größen lassen mehr Platz für den Entwurf.",
+    "library.thumbnail_large": "Groß",
+    "library.thumbnail_medium": "Mittel",
+    "library.thumbnail_section": "Dokumentenbrowser",
+    "library.thumbnail_small": "Klein"
+  },
+  "en": {
+    "library.thumbnail_help": "Choose the thumbnail and document browser size. Smaller sizes leave more room for the design.",
+    "library.thumbnail_large": "Large",
+    "library.thumbnail_medium": "Medium",
+    "library.thumbnail_section": "Document browser",
+    "library.thumbnail_small": "Small"
+  },
+  "he": {
+    "library.thumbnail_help": "בחרו את גודל התמונות הממוזערות ודפדפן המסמכים. גדלים קטנים יותר משאירים יותר מקום לתכנון.",
+    "library.thumbnail_large": "גדול",
+    "library.thumbnail_medium": "בינוני",
+    "library.thumbnail_section": "דפדפן מסמכים",
+    "library.thumbnail_small": "קטן"
+  },
+  "ja": {
+    "library.thumbnail_help": "サムネイルとドキュメントブラウザーのサイズを選択します。小さいサイズでは設計の表示領域が広がります。",
+    "library.thumbnail_large": "大",
+    "library.thumbnail_medium": "中",
+    "library.thumbnail_section": "ドキュメントブラウザー",
+    "library.thumbnail_small": "小"
+  },
+  "ko": {
+    "library.thumbnail_help": "썸네일과 문서 브라우저 크기를 선택합니다. 크기를 줄이면 설계 공간이 넓어집니다.",
+    "library.thumbnail_large": "크게",
+    "library.thumbnail_medium": "중간",
+    "library.thumbnail_section": "문서 브라우저",
+    "library.thumbnail_small": "작게"
+  },
+  "vi": {
+    "library.thumbnail_help": "Chọn kích thước hình thu nhỏ và trình duyệt tài liệu. Kích thước nhỏ hơn dành thêm không gian cho thiết kế.",
+    "library.thumbnail_large": "Lớn",
+    "library.thumbnail_medium": "Vừa",
+    "library.thumbnail_section": "Trình duyệt tài liệu",
+    "library.thumbnail_small": "Nhỏ"
+  },
+  "zh": {
+    "library.thumbnail_help": "选择缩略图和文档浏览器的大小。较小尺寸可为设计留出更多空间。",
+    "library.thumbnail_large": "大",
+    "library.thumbnail_medium": "中",
+    "library.thumbnail_section": "文档浏览器",
+    "library.thumbnail_small": "小"
+  }
+}
