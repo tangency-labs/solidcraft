@@ -241,8 +241,13 @@ pub(crate) fn update(app: &mut SolveApp, ctx: &egui::Context, proj: &crate::view
             repaint.request_repaint();
         }
     });
+    // The browser has no threads to work beside the window ([`enabled`] is false there, so this
+    // is not reached): the same work in place.
     #[cfg(target_arch = "wasm32")]
-    let _ = (input, cancel, result, cache, repaint, progress);
+    if let Ok(mut r) = result.lock() {
+        *r = Some(run(input, &cache, &cancel, &progress));
+        repaint.request_repaint();
+    }
     ctx.request_repaint_after(std::time::Duration::from_millis(30));
     None
 }

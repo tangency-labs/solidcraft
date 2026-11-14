@@ -6507,6 +6507,56 @@ mod glass_tests {
     }
 
     #[test]
+    fn an_edge_layer_draws_in_place_of_its_bodies_block_lines_while_its_scene_is_drawn() {
+        let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
+        let depth = crate::depth_format(&device, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let mut renderer = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false }, None);
+        // One block with two bodies' edges: a red line above, a green line below.
+        let mut scene = GpuScene::default();
+        let (red, green, blue) = (scene.color([255, 0, 0, 255]), scene.color([0, 255, 0, 255]), scene.color([0, 0, 255, 255]));
+        let mut block = BlockBuilder::default();
+        let mut ranges = Vec::new();
+        for (c, y) in [(red, 3.0), (green, -3.0)] {
+            let start = block.lines_len();
+            block.begin_body();
+            block.line([-6.0, y, 0.0], [6.0, y, 0.0], c, 3.0);
+            block.end_edges();
+            block.end_body();
+            ranges.push(start..block.lines_len());
+        }
+        scene.blocks.push(SceneBlock { key: 7, bytes: block.freeze() });
+        let mut frame = test_frame(scene, 1.0);
+        // The red body's edges as a view sees them: only its left half, in blue to tell them apart.
+        let mut layer = EdgeLayer { scene_key: frame.key, ..EdgeLayer::default() };
+        layer.line([-6.0, 3.0, 0.0], [0.0, 3.0, 0.0], blue, 3.0);
+        layer.replaced.push(ReplacedLines { block: 7, lines: ranges[0].clone(), hidden: 0..0 });
+        let layer = Arc::new(layer);
+        frame.edge_layer = Some(layer.clone());
+        let count = |img: &[u8], f: &dyn Fn(&[u8; 4]) -> bool| img.as_chunks::<4>().0.iter().filter(|p| f(p)).count();
+        let (is_red, is_green, is_blue) = (
+            |p: &[u8; 4]| p[0] > 200 && p[1] < 60 && p[2] < 60,
+            |p: &[u8; 4]| p[1] > 200 && p[0] < 60 && p[2] < 60,
+            |p: &[u8; 4]| p[2] > 200 && p[0] < 60 && p[1] < 60,
+        );
+        let drawn = render_frame(&mut renderer, &device, &queue, &frame, true);
+        assert_eq!(count(&drawn, &is_red), 0, "the red body's block lines give way to the layer's");
+        assert!(count(&drawn, &is_green) > 40, "the other body's lines stay");
+        assert!(count(&drawn, &is_blue) > 20, "the layer's lines are drawn");
+        // A layer made for another scene (the model changed since) is not drawn.
+        frame.edge_layer = Some(Arc::new(EdgeLayer {
+            scene_key: frame.key + 1,
+            lines: layer.lines.clone(),
+            replaced: layer.replaced.clone(),
+            ..EdgeLayer::default()
+        }));
+        let stale = render_frame(&mut renderer, &device, &queue, &frame, true);
+        assert!(count(&stale, &is_red) > 40 && count(&stale, &is_blue) == 0, "a stale layer leaves the block lines as they are");
+        frame.edge_layer = None;
+        assert_eq!(count(&render_frame(&mut renderer, &device, &queue, &frame, true), &is_blue), 0, "no layer, no layer lines");
+    }
+
+    #[test]
     fn a_cached_cloud_picture_follows_its_style_without_uploading_again() {
         let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);

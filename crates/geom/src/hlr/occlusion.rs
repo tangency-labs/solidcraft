@@ -7,9 +7,11 @@
 //! samples disagree, the change is found by bisection.
 //!
 //! A face hides a point only when the point lies deeper under it than [`Occluders::touch`]
-//! (measured along the face's normal at the hit), so an edge lying on its own faces, on a face
-//! it ends on or on another body's face it rests against is seen. A hit on a face's boundary,
-//! a grazing hit and a face whose trim is not understood decide nothing: such a point is seen.
+//! (under its tangent plane where the ray meets it) or the ray meets it farther out than
+//! [`Occluders::graze`], so an edge lying on its own faces, on a face
+//! it ends on or on another body's face it rests against is seen. A hit on a face's boundary
+//! hides (behind the meeting of two faces, or within the trim's accuracy of a body's outline); a
+//! grazing hit and a face whose trim is not understood decide nothing.
 //! A hidden stretch shorter than the sample spacing between two seen samples can be missed.
 
 use super::{EdgeKind, HlrError, Placement, Prepared, slab};
@@ -31,8 +33,19 @@ pub enum Eye {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Seen {
     Visible,
-    Hidden,
+    /// Hidden by this face of this placement.
+    Hidden([u32; 2]),
 }
+
+impl Seen {
+    fn visible(self) -> bool {
+        self == Seen::Visible
+    }
+}
+
+/// Halvings when two neighbouring samples are hidden by different faces: a visible gap between
+/// them as narrow as this many halvings of the sample spacing is found.
+const GAP_HALVINGS: u32 = 5;
 
 /// The bodies of a view that can hide edges, by face, with the placements whose edges are asked
 /// about. Built once for a view's bodies and read from any number of threads.
@@ -46,8 +59,13 @@ pub struct Occluders<'a> {
     /// `(placement, face)` of each item in `bvh`.
     items: Vec<(u32, u32)>,
     bvh: Bvh,
-    /// How far under a face (mm, along its normal) a point must lie to be hidden by it.
+    /// How far under a face (mm, under its tangent plane where the ray meets it) a point must
+    /// lie to be hidden by it.
     pub touch: f64,
+    /// How far along the ray (mm) a face hides a point whatever its tangent plane: a point that
+    /// rests on a face seen within a degree or two of edge on stays seen; a round seen edge on,
+    /// or a face wrapping round in front, hides.
+    pub graze: f64,
     /// Hits on another body nearer than this (mm along the ray) are rounding: ignored.
     eps_other: f64,
 }
@@ -66,7 +84,10 @@ pub struct EdgePieces {
 
 /// Default for [`Occluders::touch`]: a point less than this deep under a face is on it (contact
 /// between parts as modelled, a fitted record's rounding).
-pub const TOUCH_MM: f64 = 0.02;
+pub const TOUCH_MM: f64 = 0.05;
+
+/// Default for [`Occluders::graze`].
+pub const GRAZE_MM: f64 = 0.5;
 
 /// Most samples along one edge (before bisection).
 const MAX_SAMPLES: usize = 2048;
@@ -122,7 +143,16 @@ impl<'a> Occluders<'a> {
             }
         }
         let scale = if local.is_empty() { 1. } else { (hi - lo).len().max(1e-6) };
-        Ok(Occluders { defs: defs.to_vec(), scene: local, origin, bvh: Bvh::new(&boxes), items, touch: TOUCH_MM, eps_other: 1e-12 * scale })
+        Ok(Occluders {
+            defs: defs.to_vec(),
+            scene: local,
+            origin,
+            bvh: Bvh::new(&boxes),
+            items,
+            touch: TOUCH_MM,
+            graze: GRAZE_MM,
+            eps_other: 1e-12 * scale,
+        })
     }
 
     /// Whether edge `edge` of placement `placement` is drawn in a view of the scene (seams
@@ -238,24 +268,38 @@ impl<'a> Occluders<'a> {
             params.push(t1);
         }
         let mut out = EdgePieces::default();
-        let mut states = Vec::with_capacity(params.len());
+        let mut samples: Vec<(f64, Seen)> = Vec::with_capacity(params.len());
         for (i, t) in params.iter().enumerate() {
             if i % 64 == 0 && cancel() {
                 return Err(HlrError::Cancelled);
             }
-            states.push(seen(*t));
+            samples.push((*t, seen(*t)));
             out.rays += 1;
         }
+        // Two neighbours hidden by different faces may have a gap between those faces where
+        // the edge shows: look for it by halving toward where the hiding face changes.
+        let mut found = Vec::new();
+        for w in samples.windows(2) {
+            if let [(a, Seen::Hidden(fa)), (b, Seen::Hidden(fb))] = *w
+                && fa != fb
+            {
+                gap(&seen, (a, fa), (b, fb), GAP_HALVINGS, &mut found, &mut out.rays);
+            }
+        }
+        if !found.is_empty() {
+            samples.extend(found);
+            samples.sort_by(|a, b| a.0.total_cmp(&b.0));
+        }
         let mut start = t0;
-        for k in 0..params.len() {
-            let (Some(&s), Some(&x)) = (states.get(k), params.get(k)) else { continue };
-            match (states.get(k + 1), params.get(k + 1)) {
-                (Some(&next), Some(&nx)) if next != s => {
+        for k in 0..samples.len() {
+            let Some(&(x, s)) = samples.get(k) else { continue };
+            match samples.get(k + 1) {
+                Some(&(nx, next)) if next.visible() != s.visible() => {
                     let (mut lo, mut hi) = (x, nx);
                     for _ in 0..4 {
                         let mid = 0.5 * (lo + hi);
                         out.rays += 1;
-                        if seen(mid) == s {
+                        if seen(mid).visible() == s.visible() {
                             lo = mid;
                         } else {
                             hi = mid;
@@ -265,8 +309,8 @@ impl<'a> Occluders<'a> {
                     push(&mut out, s, [start, cut]);
                     start = cut;
                 }
-                (Some(_), Some(_)) => {}
-                _ => push(&mut out, s, [start, t1]),
+                Some(_) => {}
+                None => push(&mut out, s, [start, t1]),
             }
         }
         [out.tests, out.spline_tests] = tests.get();
@@ -283,12 +327,12 @@ impl<'a> Occluders<'a> {
             },
         };
         let reach = |b: &Aabb3| slab(point, dir, b.min, b.max).is_some_and(|[l0, _]| l0 <= far);
-        let hidden = std::cell::Cell::new(false);
+        let hidden: std::cell::Cell<Option<[u32; 2]>> = std::cell::Cell::new(None);
         let mut hits = Vec::new();
         self.bvh.visit(
-            |b| !hidden.get() && reach(b),
+            |b| hidden.get().is_none() && reach(b),
             |i| {
-                if hidden.get() {
+                if hidden.get().is_some() {
                     return;
                 }
                 let Some(&(qi, fi)) = self.items.get(i as usize) else { return };
@@ -307,32 +351,62 @@ impl<'a> Occluders<'a> {
                 hits.clear();
                 f.surface.ray_as(&f.analytic, p0, dl, range, &mut hits);
                 for h in &hits {
-                    // Deep enough under the face: along its normal, not along the ray, so a
-                    // point resting on a face seen at a grazing angle stays seen.
-                    let depth = f.surface.normal(h.uv).map_or(0., |n| h.lam * n.dot(dl).abs());
-                    if h.grazing || !(depth > self.touch) {
+                    if h.grazing || h.lam <= self.touch {
                         continue;
                     }
+                    // Deep enough under the face, measured under its tangent plane at the hit so a
+                    // point resting on a face seen at a slant stays seen; or far enough along the
+                    // ray, so a round seen almost edge on (its tangent plane nearly along the ray)
+                    // or a face wrapping round in front still hides.
+                    let depth = f.surface.normal(h.uv).map_or(h.lam, |n| h.lam * n.dot(dl).abs());
+                    if !(depth > self.touch || h.lam > self.graze) {
+                        continue;
+                    }
+                    // Inside the face, or on its boundary to within its trim's accuracy: where two
+                    // faces of a body meet the point is behind both, and at a body's outline it
+                    // is hidden or seen by less than that accuracy.
                     let s = f.surface.point(h.uv);
-                    if f.trim.near(s, 2. * f.trim.chord_error + 1e-7 * (f.hi - f.lo).len()) {
-                        continue;
-                    }
-                    if f.trim.contains(h.uv) == Some(true) {
-                        hidden.set(true);
+                    let near = f.trim.near(s, 2. * f.trim.chord_error + 1e-7 * (f.hi - f.lo).len());
+                    if f.trim.unsupported.is_none() && (near || f.trim.contains(h.uv) == Some(true)) {
+                        hidden.set(Some([qi as u32, fi as u32]));
                         return;
                     }
                 }
             },
         );
-        if hidden.get() { Seen::Hidden } else { Seen::Visible }
+        hidden.get().map_or(Seen::Visible, Seen::Hidden)
+    }
+}
+
+/// Look between `a` and `b`, hidden by faces `fa` and `fb`, for a sample that is seen, halving
+/// toward where the hiding face changes at most `halvings` times; the samples taken go to `found`.
+fn gap(
+    seen: &dyn Fn(f64) -> Seen,
+    (a, fa): (f64, [u32; 2]),
+    (b, fb): (f64, [u32; 2]),
+    halvings: u32,
+    found: &mut Vec<(f64, Seen)>,
+    rays: &mut usize,
+) {
+    if halvings == 0 {
+        return;
+    }
+    let m = 0.5 * (a + b);
+    let s = seen(m);
+    *rays += 1;
+    found.push((m, s));
+    if let Seen::Hidden(fm) = s {
+        if fm != fa {
+            gap(seen, (a, fa), (m, fm), halvings - 1, found, rays);
+        }
+        if fm != fb {
+            gap(seen, (m, fm), (b, fb), halvings - 1, found, rays);
+        }
     }
 }
 
 fn push(out: &mut EdgePieces, s: Seen, r: [f64; 2]) {
-    let list = match s {
-        Seen::Visible => &mut out.visible,
-        Seen::Hidden => &mut out.hidden,
-    };
+    let list = if s.visible() { &mut out.visible } else { &mut out.hidden };
     if r[1] > r[0] {
         list.push(r);
     }

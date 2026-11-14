@@ -2969,3 +2969,37 @@ fn an_edge_resting_on_another_bodys_face_is_seen() {
         }
     }
 }
+
+#[test]
+fn an_edge_just_behind_a_round_seen_edge_on_is_hidden() {
+    // A rod of radius 2 seen from the side (along +y) and a block 3 mm behind it whose edge lies
+    // a hundredth of a micrometre inside the rod's outline: the rod's side is seen almost edge on
+    // there, so the edge is barely under the side's tangent plane, but it is 1.6 mm from the side
+    // itself and hidden by it along its whole length.
+    let rod = prepare(&cylinder(2., 10.), &Options::default()).unwrap();
+    let block = prepare(&cuboid([-1.99999, 3., 1.], [-0.99999, 4., 9.]), &Options::default()).unwrap();
+    let defs = [rod, block];
+    let scene = [identity(0, [0.; 3]), identity(1, [0.; 3])];
+    for eye in [occlusion::Eye::Along(Vec3::new(0., 1., 0.)), occlusion::Eye::At(Vec3::new(-1.99999, -400., 5.))] {
+        // Edge 8 of the block joins corners 0 (-1.99999, 3, 1) and 4 (-1.99999, 3, 9).
+        let got = seen_pieces(&defs, &scene, 1, 8, eye, 0.05);
+        assert!(got.visible.is_empty() && got.hidden == vec![[0., 1.]], "{eye:?}: {got:?}");
+    }
+}
+
+#[test]
+fn an_edge_shows_through_a_slit_narrower_than_its_samples_between_two_bodies() {
+    // An edge 10 mm long behind two blocks with a 0.2 mm slit between them (x from 5.6 to 5.8),
+    // sampled every millimetre: no sample falls in the slit, but its neighbours are hidden by
+    // different faces, so the slit is looked for and the edge shows through it.
+    let back = prepare(&cuboid([0., 0., 0.], [10., 1., 1.]), &Options::default()).unwrap();
+    let left = prepare(&cuboid([-1., -3., -1.], [5.6, -2., 2.]), &Options::default()).unwrap();
+    let right = prepare(&cuboid([5.8, -3., -1.], [11., -2., 2.]), &Options::default()).unwrap();
+    let defs = [back, left, right];
+    let scene = [identity(0, [0.; 3]), identity(1, [0.; 3]), identity(2, [0.; 3])];
+    // Edge 0 of the back block runs from (0,0,0) to (10,0,0): its parameter is x / 10.
+    let got = seen_pieces(&defs, &scene, 0, 0, occlusion::Eye::Along(Vec3::new(0., 1., 0.)), 1.0);
+    assert_eq!(got.visible.len(), 1, "{got:?}");
+    let [a, b] = got.visible[0];
+    assert!((a - 0.56).abs() < 0.003 && (b - 0.58).abs() < 0.003, "{got:?}");
+}
