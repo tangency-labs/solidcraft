@@ -110,3 +110,114 @@ fn boolean_2d_intersection_keeps_the_split_edges_marks() {
         vec![[(5, 10), (10, 10)], [(10, 5), (10, 10)]]
     );
 }
+
+#[test]
+fn boolean_2d_preserves_attributes_from_both_operands() {
+    use solidcore::geom::attribute::AttributeValue;
+    const A_MARK: u64 = 20_001;
+    const B_MARK: u64 = 20_002;
+    for op in [
+        Boolean2d::Union,
+        Boolean2d::Intersection,
+        Boolean2d::Difference,
+        Boolean2d::ExclusiveOr,
+    ] {
+        let mut k = Kernel::default();
+        let mut a = sheet(&mut k, 0.0, 0.0, 10.0);
+        let mut b = sheet(&mut k, 5.0, 5.0, 10.0);
+        let mut sources = Vec::new();
+        for (operand, id) in [(&mut a, A_MARK), (&mut b, B_MARK)] {
+            let mut positions = Vec::new();
+            for (index, edge) in operand.edge_list().to_vec().into_iter().enumerate() {
+                let vertices = operand.edge(edge).unwrap().vertices;
+                positions.push(vertices.map(|v| operand.vertex(v).unwrap().point));
+                operand
+                    .add_attribute(
+                        EntityRef::Edge(edge),
+                        Attribute::long(id, index as i64, Behavior::Copy),
+                    )
+                    .unwrap();
+            }
+            sources.push(positions);
+        }
+        let Boolean2dOutcome::Result(result) = boolean_2d(&mut k, a, b, op).unwrap() else {
+            panic!("no result")
+        };
+        let mut counts = [0, 0];
+        for &edge in result.edge_list() {
+            let vertices = result.edge(edge).unwrap().vertices;
+            let ends = vertices.map(|v| result.vertex(v).unwrap().point);
+            let attrs = result.entity_attributes(EntityRef::Edge(edge));
+            let mut matched = false;
+            for (_, attr) in attrs {
+                let operand = match attr.attribute_id() {
+                    A_MARK => 0,
+                    B_MARK => 1,
+                    _ => continue,
+                };
+                let AttributeValue::Long(index) = attr.value() else {
+                    panic!("invalid source attribute")
+                };
+                let [a, b] = sources[operand][*index as usize];
+                let v = b - a;
+                for point in ends {
+                    let u = point - a;
+                    assert!(
+                        u.cross(v).length() < 1e-6
+                            && u.dot(v) >= -1e-6
+                            && u.dot(v) <= v.dot(v) + 1e-6,
+                        "{op:?}: incorrect source for edge {edge:?}"
+                    );
+                }
+                counts[operand] += 1;
+                matched = true;
+            }
+            assert!(matched, "{op:?}: result edge {edge:?} has no source");
+        }
+        assert!(
+            counts[0] > 0 && counts[1] > 0,
+            "{op:?}: missing one operand"
+        );
+    }
+}
+
+#[test]
+fn boolean_2d_coincident_edges_keep_both_sources() {
+    for op in [Boolean2d::Union, Boolean2d::Intersection] {
+        let mut k = Kernel::default();
+        let mut a = sheet(&mut k, 0.0, 0.0, 10.0);
+        let mut b = sheet(&mut k, 0.0, 0.0, 10.0);
+        for (operand, id) in [(&mut a, 20_011), (&mut b, 20_012)] {
+            for edge in operand.edge_list().to_vec() {
+                operand
+                    .add_attribute(
+                        EntityRef::Edge(edge),
+                        Attribute::long(id, 1, Behavior::Copy),
+                    )
+                    .unwrap();
+            }
+        }
+        let Boolean2dOutcome::Result(result) = boolean_2d(&mut k, a, b, op).unwrap() else {
+            panic!("no result")
+        };
+        for &edge in result.edge_list() {
+            let attrs = result.entity_attributes(EntityRef::Edge(edge));
+            assert_eq!(
+                attrs
+                    .iter()
+                    .filter(|(_, attr)| attr.attribute_id() == 20_011)
+                    .count(),
+                1,
+                "{op:?}: expected one A mark"
+            );
+            assert_eq!(
+                attrs
+                    .iter()
+                    .filter(|(_, attr)| attr.attribute_id() == 20_012)
+                    .count(),
+                1,
+                "{op:?}: expected one B mark"
+            );
+        }
+    }
+}
