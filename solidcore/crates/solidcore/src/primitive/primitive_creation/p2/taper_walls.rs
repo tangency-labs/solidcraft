@@ -2088,7 +2088,13 @@ mod tests {
             ..Wall::default()
         };
         let tip = Point3::new(1e8, 0.0, 0.0);
-        let x = crossing(&circle(0.0, 1e8), &circle(1.0, 99_999_999.0), 0.0, Vec3::Z, tip);
+        let x = crossing(
+            &circle(0.0, 1e8),
+            &circle(1.0, 99_999_999.0),
+            0.0,
+            Vec3::Z,
+            tip,
+        );
         assert!(x.is_some_and(|x| x.distance(tip) < 1e-6), "{x:?}");
     }
 
@@ -2109,7 +2115,10 @@ mod tests {
             dir: Vec3::X,
             ..Wall::default()
         };
-        assert_eq!(crossing(&line(2.0), &circle, 0.0, Vec3::Z, Point3::ZERO), None);
+        assert_eq!(
+            crossing(&line(2.0), &circle, 0.0, Vec3::Z, Point3::ZERO),
+            None
+        );
         let near = Point3::new(1.0, 0.5, 0.0);
         let x = crossing(&line(0.5), &circle, 0.0, Vec3::Z, near);
         let want = Point3::new(0.75_f64.sqrt(), 0.5, 0.0);
