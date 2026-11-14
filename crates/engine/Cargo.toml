@@ -36,6 +36,7 @@ name = "sketch_target_bench"
 required-features = ["solver-profiling"]
 
 [dependencies]
+solidcore-ops = { workspace = true }
 craft-plugin = { workspace = true }
 solidcraft-viewport = { workspace = true }
 solidcore-record = { workspace = true }

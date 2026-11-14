@@ -62,6 +62,7 @@ fn face_tris(m: &Mesh, f: usize) -> Vec<[Vec3; 3]> {
 /// description and exact shape.
 struct Item {
     geo: Geo,
+    topology: Vec<usize>,
     dir: Option<Vec3>,
     json: Value,
     shape: Shape,
@@ -204,7 +205,7 @@ fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
             None
         }
     };
-    Some(Item { geo: Geo::Points(pts), dir, json, shape, slot: None })
+    Some(Item { topology: Vec::new(), geo: Geo::Points(pts), dir, json, shape, slot: None })
 }
 
 /// A curve drawn in a 3D sketch, or a linked 3D curve (a wire, #14051), whose points are in world
@@ -224,17 +225,24 @@ fn sketch_wire(sk: &solidcraft_sketch::Sketch, id: &str) -> Option<Item> {
         json["length_mm"] = json!(curve_len(&shape, true, 0.0));
         add_round(&mut json, &shape);
         let pts = arc_points(arc.center, axis, arc.start, angle);
-        return Some(Item { geo: Geo::Points(pts), dir: None, json, shape, slot: None });
+        return Some(Item { topology: Vec::new(), geo: Geo::Points(pts), dir: None, json, shape, slot: None });
     }
     match w.pts.as_slice() {
         [] | [_] => None,
         [a, b] => {
             json["length_mm"] = json!(a.dist(*b));
-            Some(Item { geo: Geo::Points(densify(&[*a, *b])), dir: (*b - *a).normalized(), json, shape: Shape::Line { a: *a, b: *b }, slot: None })
+            Some(Item {
+                topology: Vec::new(),
+                geo: Geo::Points(densify(&[*a, *b])),
+                dir: (*b - *a).normalized(),
+                json,
+                shape: Shape::Line { a: *a, b: *b },
+                slot: None,
+            })
         }
         pts => {
             json["length_mm"] = json!(polyline_len(pts));
-            Some(Item { geo: Geo::Points(pts.to_vec()), dir: None, json, shape: Shape::Other, slot: None })
+            Some(Item { topology: Vec::new(), geo: Geo::Points(pts.to_vec()), dir: None, json, shape: Shape::Other, slot: None })
         }
     }
 }
@@ -288,7 +296,7 @@ fn profile(ss: &solidcraft_doc::SolvedSketch, index: usize) -> Option<Item> {
     let planar = Some(*normal);
     let geo = Geo::Points(densify(&outline));
     let shape = if matches!(shape, Shape::Other) { Shape::Plane { point: ss.plane.origin, normal } } else { shape };
-    Some(Item { geo, dir: planar, json, shape, slot })
+    Some(Item { topology: Vec::new(), geo, dir: planar, json, shape, slot })
 }
 
 /// A slot this cylindrical face is one end of, from the body's other faces.
@@ -310,11 +318,12 @@ fn face_slot(b: &solidcraft_doc::ModelBody, m: &Mesh, shape: &Shape, pts: &[Vec3
 
 /// `sel` in the placed model `st`.
 fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<Item> {
-    let plain = |geo, dir, json| Some(Item { geo, dir, json, shape: Shape::Other, slot: None });
+    let plain = |geo, dir, json| Some(Item { topology: Vec::new(), geo, dir, json, shape: Shape::Other, slot: None });
     match sel {
         Sel::Plane { name } => {
             let (point, normal) = plane_named(s, name)?;
             Some(Item {
+                topology: Vec::new(),
                 geo: Geo::Points(vec![point]),
                 dir: Some(normal),
                 json: json!({"type": "plane", "point": point, "normal": normal}),
@@ -326,6 +335,7 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             let (origin, dir) = axis_named(s, name)?;
             let (a, b) = (origin - dir * 1e6, origin + dir * 1e6);
             Some(Item {
+                topology: Vec::new(),
                 geo: Geo::Points(vec![origin, a, b]),
                 dir: Some(dir),
                 json: json!({"type": "axis", "origin": origin, "direction": dir}),
@@ -335,9 +345,17 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
         }
         Sel::ConstructionPoint { name } => {
             let p = crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)?;
-            Some(Item { geo: Geo::Points(vec![p]), dir: None, json: json!({"type": "point", "position": p}), shape: Shape::Point(p), slot: None })
+            Some(Item {
+                topology: Vec::new(),
+                geo: Geo::Points(vec![p]),
+                dir: None,
+                json: json!({"type": "point", "position": p}),
+                shape: Shape::Point(p),
+                slot: None,
+            })
         }
         Sel::Vertex { point, .. } => Some(Item {
+            topology: Vec::new(),
             geo: Geo::Points(vec![*point]),
             dir: None,
             json: json!({"type": "vertex", "position": point}),
@@ -357,7 +375,7 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
                 let (shape, exact) = edge_round(b, &m, index, true).unwrap_or((Shape::Other, false));
                 let mut json = json!({"type": "edge", "length_mm": curve_len(&shape, exact, len)});
                 add_round(&mut json, &shape);
-                return Some(Item { geo: Geo::Points(points), dir: None, json, shape, slot: None });
+                return Some(Item { topology: rim, geo: Geo::Points(points), dir: None, json, shape, slot: None });
             }
             let (a, z) = (*pts.first()?, *pts.last()?);
             let straight = (z - a).normalized().filter(|d| pts.iter().all(|p| (*p - a).cross(*d).len() < 1e-6 * (1.0 + a.dist(z))));
@@ -367,7 +385,7 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             };
             let mut json = json!({"type": "edge", "length_mm": curve_len(&shape, exact, polyline_len(pts))});
             add_round(&mut json, &shape);
-            Some(Item { geo: Geo::Points(densify(pts)), dir: straight, json, shape, slot: None })
+            Some(Item { topology: vec![index], geo: Geo::Points(densify(pts)), dir: straight, json, shape, slot: None })
         }
         Sel::Face { body, index, .. } => {
             let b = st.body(body)?;
@@ -414,7 +432,7 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             if let Some(sl) = &slot {
                 json["slot"] = sl.json();
             }
-            Some(Item { geo: Geo::Tris(tris), dir: planar.map(Vec3::from), json, shape, slot })
+            Some(Item { topology: patch, geo: Geo::Tris(tris), dir: planar.map(Vec3::from), json, shape, slot })
         }
         Sel::Body { name } => {
             let body = st.body(name)?;
@@ -446,6 +464,7 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             let ss = sketch_of(s, st, given, |sk| sk.point_index(id).is_some())?;
             let p = ss.plane.to_world(ss.sketch.points.get(ss.sketch.point_index(id)?)?.pos);
             Some(Item {
+                topology: Vec::new(),
                 geo: Geo::Points(vec![p]),
                 dir: None,
                 json: json!({"type": "sketch_point", "id": id, "position": p}),
@@ -619,6 +638,115 @@ fn resolve_pick(st: &solidcraft_doc::ModelState, face: bool, value: &Value) -> s
     Ok(Sel::Edge { body, index, point })
 }
 
+/// The exact record and bounded topology of an item. Display samples never enter this query.
+fn exact_selection(
+    st: &solidcraft_doc::ModelState,
+    sel: &Sel,
+    item: &Item,
+) -> Result<Option<(solidcore_record::brep::Brep, solidcore_ops::measure::Selection)>> {
+    use solidcore_ops::measure::Selection;
+    use solidcore_record::brep::{Brep, Curve, Edge, Region, Shell, VERSION, Vertex};
+    let picked = match sel {
+        Sel::Face { body, .. } => {
+            let Some(b) = st.body(body) else { return Ok(None) };
+            if b.body.is_mesh() {
+                return Ok(None);
+            }
+            return Ok(Some((b.body.record().clone(), Selection { faces: item.topology.clone(), ..Selection::default() })));
+        }
+        Sel::Edge { body, .. } => {
+            let Some(b) = st.body(body) else { return Ok(None) };
+            if b.body.is_mesh() {
+                return Ok(None);
+            }
+            return Ok(Some((b.body.record().clone(), Selection { edges: item.topology.clone(), ..Selection::default() })));
+        }
+        Sel::Body { name } => {
+            let Some(b) = st.body(name) else { return Ok(None) };
+            if b.body.is_mesh() {
+                return Ok(None);
+            }
+            return Ok(Some((b.body.record().clone(), Selection { faces: (0..b.body.record().faces.len()).collect(), ..Selection::default() })));
+        }
+        Sel::Axis { .. } | Sel::Plane { .. } => return Ok(None),
+        _ => item.shape,
+    };
+    let tolerance = 1e-9;
+    let (vertices, edges, shell, selection) = match picked {
+        Shape::Line { a, b } => (
+            vec![Vertex { point: a.into(), tolerance }, Vertex { point: b.into(), tolerance }],
+            vec![Edge {
+                curve: Curve::Line { start: a.into(), end: b.into() },
+                nurbs: None,
+                interval: [0.0, 1.0],
+                vertices: [0, 1],
+                tolerance,
+                uses: Vec::new(),
+            }],
+            Shell::Wire { edges: vec![0] },
+            Selection { edges: vec![0], ..Selection::default() },
+        ),
+        Shape::Round { center, axis, planar: true, .. } => {
+            let Geo::Points(points) = &item.geo else { return Ok(None) };
+            let Some(&start) = points.first() else { return Ok(None) };
+            let Some(&last) = points.last() else { return Ok(None) };
+            let end = if picked.full() { start } else { last };
+            let curve = solidcore_ops::curve::arc_about(center.into(), axis.vec().into(), start.into(), end.into())
+                .map_err(|e| bad("inspect.measure", e.to_string()))?;
+            let vertices = if picked.full() {
+                vec![Vertex { point: start.into(), tolerance }]
+            } else {
+                vec![Vertex { point: start.into(), tolerance }, Vertex { point: end.into(), tolerance }]
+            };
+            let ends = if picked.full() { [0, 0] } else { [0, 1] };
+            (
+                vertices,
+                vec![Edge { curve, nurbs: None, interval: [0., 1.], vertices: ends, tolerance, uses: Vec::new() }],
+                Shell::Wire { edges: vec![0] },
+                Selection { edges: vec![0], ..Selection::default() },
+            )
+        }
+        Shape::Point(p) => (
+            vec![Vertex { point: p.into(), tolerance }],
+            Vec::new(),
+            Shell::Vertex { vertex: 0 },
+            Selection { vertices: vec![0], ..Selection::default() },
+        ),
+        _ => return Ok(None),
+    };
+    Ok(Some((
+        Brep {
+            version: VERSION,
+            tolerance,
+            regions: vec![Region { shells: vec![0], void: false }],
+            shells: vec![shell],
+            faces: Vec::new(),
+            edges,
+            vertices,
+        },
+        selection,
+    )))
+}
+
+/// Curved faces use the kernel's trimmed topology solve; mesh bodies keep their mesh query.
+fn curved_min(st: &solidcraft_doc::ModelState, sels: &[Sel], a: &Item, b: &Item) -> Result<Option<(f64, Vec3, Vec3)>> {
+    let curved = |sel: &Sel| match sel {
+        Sel::Face { body, index, .. } => st.body(body).is_some_and(|b| {
+            !b.body.is_mesh() && !matches!(solidcraft_kernel::face_surface(&b.body, *index), Some(solidcraft_kernel::FaceSurface::Plane { .. }))
+        }),
+        _ => false,
+    };
+    let [first, second] = sels else { return Ok(None) };
+    if !curved(first) && !curved(second) {
+        return Ok(None);
+    }
+    let (Some((ar, sa)), Some((br, sb))) = (exact_selection(st, first, a)?, exact_selection(st, second, b)?) else {
+        return Ok(None);
+    };
+    let (distance, [p, q]) = solidcore_ops::measure::closest_pair(&ar, &sa, &br, &sb, 1e-9).map_err(|e| bad("inspect.measure", e.to_string()))?;
+    Ok(Some((distance, p.into(), q.into())))
+}
+
 /// `inspect.measure` with `items` (one or two selections).
 pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
     let cmd = "inspect.measure";
@@ -670,7 +798,8 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
         }
     }
     if let [a, b] = described.as_slice() {
-        let near = closest(a, b);
+        let exact_near = curved_min(&world, &sels, a, b)?;
+        let near = exact_near.map(|(_, p, q)| (p, q)).or_else(|| closest(a, b));
         let far = farthest(&a.geo, &b.geo);
         let c = centre(&a.shape, &b.shape);
         // An exact closest or farthest distance stands only where the mesh agrees with it to
@@ -696,6 +825,9 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
         if let Some((d, p, q)) = exact_min(&a.shape, &b.shape, near.map(|(p, _)| p), (unbounded(0), unbounded(1)))
             .filter(|(d, p, q)| d.is_finite() && p.is_finite() && q.is_finite())
         {
+            out.set_closest(d, p, q);
+        }
+        if let Some((d, p, q)) = exact_near {
             out.set_closest(d, p, q);
         }
         if let (Some((p, q)), Some(d)) = (far, max) {

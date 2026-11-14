@@ -554,6 +554,17 @@ fn index(i: usize) -> Result<u32> {
 /// order: what bodies apart from each other are together. The part's `faces`, `edges` and
 /// `vertices` number the inputs one after another (input 0's items first).
 pub fn compound(records: &[&Brep]) -> Result<Part> {
+    let all = joined_record(records)?;
+    all.part(&all.material_regions())
+}
+
+/// Records joined in canonical order, including open, wire and vertex shells.
+/// The source maps number inputs consecutively, as [`compound`] does.
+pub fn joined(records: &[&Brep]) -> Result<Part> {
+    joined_record(records)?.canonical()
+}
+
+fn joined_record(records: &[&Brep]) -> Result<Brep> {
     let mut all = Brep {
         version: super::VERSION,
         tolerance: records.iter().map(|r| r.tolerance).fold(0.0, f64::max),
@@ -620,5 +631,5 @@ pub fn compound(records: &[&Brep]) -> Result<Part> {
         }));
         all.vertices.extend(r.vertices.iter().cloned());
     }
-    all.part(&all.material_regions())
+    Ok(all)
 }

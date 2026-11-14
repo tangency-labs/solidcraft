@@ -31,6 +31,7 @@ use crate::session::{answer, measure_body, with_body, Answer};
 use crate::{Error, Result};
 
 impl Answer for Vec<q::EdgeFaceGapSample> {}
+impl Answer for (f64, [Point3; 2]) {}
 impl Answer for Distance {}
 impl Answer for solidcore::geom::extent3d::Extent3d {}
 impl Answer for [f64; 3] {}
@@ -820,6 +821,109 @@ pub(crate) fn outer_faceuse(b: &Brep, f: FaceId) -> solidcore::Result<Result<Fac
     })
 }
 
+/// A bounded selection in a body's record order. Faces include their trimming edges.
+#[derive(Clone, Debug, Default)]
+pub struct Selection {
+    /// Face indices; each face includes its trimming edges and vertices.
+    pub faces: Vec<usize>,
+    /// Edge indices; each edge includes its endpoints.
+    pub edges: Vec<usize>,
+    /// Isolated vertex indices.
+    pub vertices: Vec<usize>,
+}
+
+/// Closest distance and points of two selections on exact trimmed geometry, solved at
+/// `tolerance` in model units. The solve does not certify a lower distance bound.
+///
+/// # Errors
+/// Invalid record indices, import refusals and errors of the kernel's distance solve.
+pub fn closest_pair(
+    a: &solidcore_record::brep::Brep,
+    first: &Selection,
+    b: &solidcore_record::brep::Brep,
+    second: &Selection,
+    tolerance: f64,
+) -> Result<(f64, [[f64; 3]; 2])> {
+    let valid = |record: &solidcore_record::brep::Brep, selection: &Selection| {
+        selection.faces.iter().all(|&i| i < record.faces.len())
+            && selection.edges.iter().all(|&i| i < record.edges.len())
+            && selection
+                .vertices
+                .iter()
+                .all(|&i| i < record.vertices.len())
+    };
+    if !valid(a, first) || !valid(b, second) {
+        return Err(Error::Argument);
+    }
+    let part = solidcore_record::brep::part::joined(&[a, b]).map_err(|_| Error::Argument)?;
+    let remap = |indices: &[usize], map: &[u32], offset: usize| -> Result<Vec<usize>> {
+        indices
+            .iter()
+            .map(|i| {
+                let source = i.checked_add(offset).ok_or(Error::Argument)?;
+                map.iter()
+                    .position(|&j| j as usize == source)
+                    .ok_or(Error::Argument)
+            })
+            .collect()
+    };
+    let mapped = |sel: &Selection, f, e, v| -> Result<Selection> {
+        Ok(Selection {
+            faces: remap(&sel.faces, &part.faces, f)?,
+            edges: remap(&sel.edges, &part.edges, e)?,
+            vertices: remap(&sel.vertices, &part.vertices, v)?,
+        })
+    };
+    let first = mapped(first, 0, 0, 0)?;
+    let second = mapped(second, a.faces.len(), a.edges.len(), a.vertices.len())?;
+    let (body, order) = Body::from_record(&part.brep, true)?;
+    let (distance, points) = with_body("closest_pair", &body, |k, brep| {
+        let id = BrepId::from_index(0);
+        let make_shape = |k: &mut Kernel, sel: &Selection| {
+            let faces = sel
+                .faces
+                .iter()
+                .map(|&i| {
+                    order.faces.get(i).copied().map(|f| (id, f)).ok_or_else(|| {
+                        solidcore::SolidError::invalid_input("closest_pair", "face index")
+                    })
+                })
+                .collect::<solidcore::Result<Vec<_>>>()?;
+            let edges = sel
+                .edges
+                .iter()
+                .map(|&i| {
+                    order.edges.get(i).copied().map(|e| (id, e)).ok_or_else(|| {
+                        solidcore::SolidError::invalid_input("closest_pair", "edge index")
+                    })
+                })
+                .collect::<solidcore::Result<Vec<_>>>()?;
+            let vertices = sel
+                .vertices
+                .iter()
+                .map(|&i| {
+                    order
+                        .vertices
+                        .get(i)
+                        .copied()
+                        .map(|v| (id, v))
+                        .ok_or_else(|| {
+                            solidcore::SolidError::invalid_input("closest_pair", "vertex index")
+                        })
+                })
+                .collect::<solidcore::Result<Vec<_>>>()?;
+            Shape::new(k, &(id, &*brep), &[], &faces, &edges, &vertices)
+        };
+        let first = make_shape(k, &first)?;
+        let second = make_shape(k, &second)?;
+        let query = BrepQuery::of_brep(brep);
+        let identity = query.effective_identity();
+        let objects = LiveBrepObjects::new(brep, &identity, None)?;
+        q::shape_closest_pair(k, &objects, &first, &second, tolerance)
+    })?;
+    Ok((distance, points.map(|p| [p.x, p.y, p.z])))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -827,6 +931,163 @@ pub(crate) mod tests {
 
     fn all_fixes() {
         session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    }
+
+    #[test]
+    fn exact_curved_measurement_respects_trimmed_edges() {
+        use solidcore_record::brep::{Brep, Curve, Edge, Region, Shell, Surface, Vertex, VERSION};
+        all_fixes();
+        for sphere in [false, true] {
+            let body = if sphere {
+                crate::make_sphere([0.0; 3], 20.0).unwrap()
+            } else {
+                crate::make_cylinder([0.0; 3], 20.0, 20.0).unwrap()
+            };
+            let (record, _) = body.to_record().unwrap();
+            let faces = Selection {
+                faces: record
+                    .faces
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, f)| {
+                        matches!(f.surface, Surface::Sphere { .. } | Surface::Cylinder { .. })
+                    })
+                    .map(|(i, _)| i)
+                    .collect(),
+                ..Selection::default()
+            };
+            assert!(!faces.faces.is_empty());
+            for invalid in [
+                Selection {
+                    faces: vec![record.faces.len()],
+                    ..Selection::default()
+                },
+                Selection {
+                    edges: vec![record.edges.len()],
+                    ..Selection::default()
+                },
+                Selection {
+                    vertices: vec![record.vertices.len()],
+                    ..Selection::default()
+                },
+            ] {
+                assert!(matches!(
+                    closest_pair(&record, &invalid, &record, &faces, 1e-9),
+                    Err(Error::Argument)
+                ));
+                assert!(matches!(
+                    closest_pair(&record, &faces, &record, &invalid, 1e-9),
+                    Err(Error::Argument)
+                ));
+            }
+            for (start, end, want) in [
+                ([0., 10., 10.], [50., 10., 10.], 0.),
+                ([0., 25., 0.], [0., 25., 10.], 5.),
+                (
+                    [0., 25., 30.],
+                    [0., 25., 40.],
+                    if sphere {
+                        1525_f64.sqrt() - 20.
+                    } else {
+                        125_f64.sqrt()
+                    },
+                ),
+            ] {
+                let tolerance = 1e-9;
+                let wire = Brep {
+                    version: VERSION,
+                    tolerance,
+                    regions: vec![Region {
+                        shells: vec![0],
+                        void: false,
+                    }],
+                    shells: vec![Shell::Wire { edges: vec![0] }],
+                    faces: vec![],
+                    edges: vec![Edge {
+                        curve: Curve::Line { start, end },
+                        nurbs: None,
+                        interval: [0., 1.],
+                        vertices: [0, 1],
+                        tolerance,
+                        uses: vec![],
+                    }],
+                    vertices: vec![
+                        Vertex {
+                            point: start,
+                            tolerance,
+                        },
+                        Vertex {
+                            point: end,
+                            tolerance,
+                        },
+                    ],
+                };
+                let edge = Selection {
+                    edges: vec![0],
+                    ..Selection::default()
+                };
+                for reversed in [false, true] {
+                    let (distance, points) = if reversed {
+                        closest_pair(&wire, &edge, &record, &faces, 1e-9)
+                    } else {
+                        closest_pair(&record, &faces, &wire, &edge, 1e-9)
+                    }
+                    .unwrap();
+                    assert!(
+                        (point_distance(points[0], points[1]).unwrap().value - distance).abs()
+                            < 1e-12
+                    );
+                    assert!(
+                        (distance - want).abs() < 1e-6,
+                        "sphere={sphere}, reversed={reversed}: {points:?}, {distance}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn exact_curved_measurement_between_faces() {
+        use solidcore_record::brep::Surface;
+        all_fixes();
+        for sphere in [false, true] {
+            let records: Vec<_> = [0., 50.]
+                .into_iter()
+                .map(|x| {
+                    let body = if sphere {
+                        crate::make_sphere([x, 0., 0.], 20.).unwrap()
+                    } else {
+                        crate::make_cylinder([x, 0., 0.], 20., 20.).unwrap()
+                    };
+                    body.to_record().unwrap().0
+                })
+                .collect();
+            let selection = |record: &solidcore_record::brep::Brep| Selection {
+                faces: record
+                    .faces
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, f)| {
+                        matches!(f.surface, Surface::Sphere { .. } | Surface::Cylinder { .. })
+                    })
+                    .map(|(i, _)| i)
+                    .collect(),
+                ..Selection::default()
+            };
+            let (distance, points) = closest_pair(
+                &records[0],
+                &selection(&records[0]),
+                &records[1],
+                &selection(&records[1]),
+                1e-9,
+            )
+            .unwrap();
+            assert!(
+                (distance - 10.).abs() < 1e-6,
+                "sphere={sphere}: {distance}, {points:?}"
+            );
+            assert!((point_distance(points[0], points[1]).unwrap().value - 10.).abs() < 1e-6);
+        }
     }
 
     /// The order of a body made in the kernel with no record between: the kernel's own lists.
