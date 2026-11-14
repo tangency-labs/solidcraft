@@ -396,7 +396,7 @@ pub fn leader_series_tm(
     let piece = piece.unwrap_or_else(|| span(&leader.u, leader.p, leader.n, m));
     let d = curve_derivs_tm(leader, m, delta, tr.s() + 1, piece)?;
     let mut l = VSer::constant(zero_v());
-    let mut d1 = l;
+    let mut d1 = l.clone();
     let mut fact = 1.0_f64;
     for j in 0..=tr.s() {
         if j > 0 {
@@ -458,8 +458,8 @@ fn system_tm<'a>(
     let [p0, p1] = p;
     GnSystem {
         p: [p0, p1],
-        leader: *leader,
-        tangent: *tangent,
+        leader: leader.clone(),
+        tangent: tangent.clone(),
         r,
         side,
         hold: false,
@@ -670,7 +670,7 @@ pub fn gn_enclose_tm(
             if kk > tr.e() || (n >= 1 && kk >= n) {
                 continue;
             }
-            let b = minus_y_times(&y, &sg.map(|g| g.at(i, kk)));
+            let b = minus_y_times(&y, &sg.each_ref().map(|g| g.at(i, kk)));
             // P: close to the root, b + C P iterated on the middles
             let mut pp = b.map(|x| x.mid_poly());
             for _ in 0..4 {

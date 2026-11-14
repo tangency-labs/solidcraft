@@ -568,7 +568,7 @@ pub fn surface_partials_pinned(
 /// leader's point and unit tangent as series in sigma, the offsets `r_i` and the sides
 /// `s_i`. `hold`: the offsets held at `tau = 1` (no eps in them).
 #[derive(Clone, Debug)]
-pub struct GnSystem<'a, T> {
+pub struct GnSystem<'a, T: GnScalar> {
     /// The faces' partials at the feet.
     pub p: [&'a Partials<T>; 2],
     /// The leader's point.
@@ -652,8 +652,8 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                 "the station's system has no foot for the face",
             ));
         };
-        let mut du = *xu;
-        let mut dv = *xv;
+        let mut du = xu.clone();
+        let mut dv = xv.clone();
         du.set(0, 0, T::of(0.0));
         dv.set(0, 0, T::of(0.0));
         // du^a and dv^b are 0 below degree a and b (du, dv have no constant term): the
@@ -662,7 +662,7 @@ pub fn gn_evaluate_vn<T: GnScalar>(
         let mut pu = vec![Ser::constant(T::of(1.0))];
         let mut pv = vec![Ser::constant(T::of(1.0))];
         for a in 1..=top {
-            let (Some(lu), Some(lv)) = (pu.last().copied(), pv.last().copied()) else {
+            let (Some(lu), Some(lv)) = (pu.last(), pv.last()) else {
                 return Err(SolidError::blend_failed(
                     OP,
                     "the face's powers are missing",
@@ -672,8 +672,8 @@ pub fn gn_evaluate_vn<T: GnScalar>(
             pv.push(lv.mul_valued(&dv, a - 1, 1, tr));
         }
         let mut s = VSer::constant(zero);
-        let mut su = s;
-        let mut sv = s;
+        let mut su = s.clone();
+        let mut sv = s.clone();
         let mut fa = 1.0_f64;
         for (a, pua) in pu.iter().enumerate() {
             if a > 0 {
@@ -726,7 +726,7 @@ pub fn gn_evaluate_vn<T: GnScalar>(
     let diff = v0.sub(v1, tr);
     let [g0, g1, g2] = diff.a;
     let g3 = v0.sub(&sys.leader, tr).dot(&sys.tangent, tr);
-    Ok(([g0, g1, g2, g3], f_out, *v0, n_out))
+    Ok(([g0, g1, g2, g3], f_out, v0.clone(), n_out))
 }
 
 /// [`gn_evaluate_vn`]'s values: G, the feet, V and the faces' unit normals.
@@ -734,7 +734,7 @@ pub type GnValuesVN<T> = ([Ser<T>; 4], [VSer<T>; 2], VSer<T>, [VSer<T>; 2]);
 
 /// One face's series that [`GnIncremental`] keeps between evaluations.
 #[derive(Clone, Debug)]
-struct GnFaceSeries<T> {
+struct GnFaceSeries<T: GnScalar> {
     /// `du^a`, `dv^a`: index 0 is 1.
     pu: Vec<Ser<T>>,
     pv: Vec<Ser<T>>,
@@ -752,19 +752,21 @@ struct GnFaceSeries<T> {
 impl<T: GnScalar> GnFaceSeries<T> {
     fn new() -> Self {
         let z = Ser::constant(T::of(0.0));
-        let vz = VSer { a: [z; 3] };
+        let vz = VSer {
+            a: core::array::from_fn(|_| z.clone()),
+        };
         let one = vec![Ser::constant(T::of(1.0))];
         Self {
             pu: one.clone(),
             pv: one,
-            s: vz,
-            su: vz,
-            sv: vz,
-            nrm: vz,
-            nn: z,
+            s: vz.clone(),
+            su: vz.clone(),
+            sv: vz.clone(),
+            nrm: vz.clone(),
+            nn: z.clone(),
             inv: InvSqrtSeries::default(),
             w: z,
-            v: vz,
+            v: vz.clone(),
             n: vz,
         }
     }
@@ -787,7 +789,7 @@ fn merge_v<T: GnScalar>(v: &mut VSer<T>, src: &VSer<T>, tr: Trunc) {
 /// quadrant, and the evaluation's operations, their order and so every value are
 /// [`gn_evaluate_vn`]'s, bit for bit: the two must change together (a test compares them).
 #[derive(Clone, Debug)]
-pub struct GnIncremental<'s, 'a, T> {
+pub struct GnIncremental<'s, 'a, T: GnScalar> {
     sys: &'s GnSystem<'a, T>,
     /// The orders of the kept series (`Trunc::s`, `Trunc::e`), none before the first.
     orders: Option<(usize, usize)>,
@@ -812,11 +814,13 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
         Self {
             sys,
             orders: None,
-            x: [z; 4],
+            x: core::array::from_fn(|_| z.clone()),
             valid: 0,
             faces: [GnFaceSeries::new(), GnFaceSeries::new()],
-            g: [z; 4],
-            t: VSer { a: [z; 3] },
+            g: core::array::from_fn(|_| z.clone()),
+            t: VSer {
+                a: core::array::from_fn(|_| z.clone()),
+            },
             computed: 0,
         }
     }
@@ -866,7 +870,7 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
                 }
             }
         }
-        self.x = *x;
+        self.x.clone_from(x);
         let all = tr.computed_mask();
         let btr = tr.skipping(self.valid);
         self.computed = self
@@ -875,7 +879,9 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
         let lm = tr.s() + tr.e();
         let top = lm.min(tr.degree());
         let zero = Ser::constant(T::of(0.0));
-        let vzero = VSer { a: [zero; 3] };
+        let vzero = VSer {
+            a: core::array::from_fn(|_| zero.clone()),
+        };
         let sys = self.sys;
         let rows = x.chunks_exact(2).zip(sys.p).zip(sys.r.iter().zip(sys.side));
         for (fs, ((xf, pf), (&rf, sidef))) in self.faces.iter_mut().zip(rows) {
@@ -885,8 +891,8 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
                     "the station's system has no foot for the face",
                 ));
             };
-            let mut du = *xu;
-            let mut dv = *xv;
+            let mut du = xu.clone();
+            let mut dv = xv.clone();
             du.set(0, 0, T::of(0.0));
             dv.set(0, 0, T::of(0.0));
             for a in 1..=top {
@@ -901,8 +907,8 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
                     lv.mul_valued(&dv, a - 1, 1, btr),
                 );
                 if fs.pu.len() <= a {
-                    fs.pu.push(zero);
-                    fs.pv.push(zero);
+                    fs.pu.push(zero.clone());
+                    fs.pv.push(zero.clone());
                 }
                 let (Some(pua), Some(pva)) = (fs.pu.get_mut(a), fs.pv.get_mut(a)) else {
                     return Err(SolidError::blend_failed(
@@ -940,7 +946,7 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
             }
             merge_v(&mut fs.nrm, &fs.su.cross(&fs.sv, btr), btr);
             fs.nn.merge_computed(&fs.nrm.dot(&fs.nrm, btr), btr);
-            let inv_len = *fs.inv.update(&fs.nn, btr)?;
+            let inv_len = fs.inv.update(&fs.nn, btr)?.clone();
             let mut d = Ser::constant(T::of(rf * sidef));
             if let Some(law) = sys.law {
                 for i in 0..=tr.s() {
@@ -993,7 +999,7 @@ pub fn gn_top_jets<T: GnScalar>(top: usize, tr: Trunc, n: &[VSer<T>; 2], f: &mut
     }
     let sigma = Trunc::new(tr.s(), 0).unwrap_or(tr);
     for (ff, nf) in f.iter_mut().zip(n) {
-        let mut sn = *nf;
+        let mut sn = nf.clone();
         for comp in &mut sn.a {
             for i in 0..=MAX_S {
                 for kk in 1..=MAX_E {
@@ -1002,7 +1008,7 @@ pub fn gn_top_jets<T: GnScalar>(top: usize, tr: Trunc, n: &[VSer<T>; 2], f: &mut
             }
         }
         for kk in top..=tr.e() {
-            let mut sc = sn;
+            let mut sc = sn.clone();
             for (cc, fc) in sc.a.iter_mut().zip(&ff.a) {
                 for i in 0..=MAX_S {
                     for k2 in 0..=MAX_E {
@@ -1037,7 +1043,7 @@ pub fn gn_jacobian<T: GnScalar>(sys: &GnSystem<'_, T>, x: &[Ser<T>; 4]) -> Resul
     held.hold = true;
     let mut jac = [[T::of(0.0); 4]; 4];
     for j in 0..4 {
-        let mut sx = [Ser::constant(T::of(0.0)); 4];
+        let mut sx = core::array::from_fn(|_| Ser::constant(T::of(0.0)));
         for (q, (sq, xq)) in sx.iter_mut().zip(x).enumerate() {
             *sq = Ser::constant(xq.at(0, 0));
             if q == j {
@@ -1799,7 +1805,7 @@ mod tests {
     /// rounding): each end is the double next to the exact result on its side, or the
     /// result itself when it is a double. An enclosure that holds under it holds by
     /// construction, not by spare width.
-    #[derive(Clone, Copy, Debug)]
+    #[derive(Clone, Copy, Debug, PartialEq)]
     struct Directed {
         lo: f64,
         hi: f64,
@@ -1861,6 +1867,7 @@ mod tests {
     }
 
     impl GnScalar for Directed {
+        type Storage = [[Self; STORE_E + 1]; MAX_S + 1];
         fn of(d: f64) -> Self {
             Self { lo: d, hi: d }
         }

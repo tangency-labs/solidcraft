@@ -604,7 +604,7 @@ pub fn leader_series_over(
     let piece = piece.unwrap_or_else(|| span(&leader.u, leader.p, leader.n, s.mid()));
     let d = curve_derivs_over(leader, s, tr.s() + 1, Some(piece))?;
     let mut l = VSer::constant(VZ);
-    let mut d1 = l;
+    let mut d1 = l.clone();
     let mut fact = 1.0_f64;
     for j in 0..=tr.s() {
         if j > 0 {
@@ -644,7 +644,7 @@ pub fn leader_series_piecewise(
 ) -> Result<(VSer<Ivl>, VSer<Ivl>)> {
     let hull = |a: &mut VSer<Ivl>, b: &VSer<Ivl>| {
         for (sa, sb) in a.a.iter_mut().zip(&b.a) {
-            for (ra, rb) in sa.c.iter_mut().zip(&sb.c) {
+            for (ra, rb) in sa.c.iter_mut().zip(sb.c.iter()) {
                 for (x, y) in ra.iter_mut().zip(rb) {
                     *x = x.hull(*y);
                 }
@@ -790,7 +790,7 @@ pub fn inverse4(a: &[[f64; 4]; 4]) -> Result<[[f64; 4]; 4]> {
 }
 
 /// The proved enclosure of a span (`sm_GnEnclose`'s outputs).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Enclosure {
     /// The feet's series over the span (`rF`).
     pub f: [VSer<Ivl>; 2],
@@ -821,8 +821,8 @@ fn system<'a>(
     let [p0, p1] = p;
     GnSystem {
         p: [p0, p1],
-        leader: *leader,
-        tangent: *tangent,
+        leader: leader.clone(),
+        tangent: tangent.clone(),
         r,
         side,
         hold: false,
@@ -1639,7 +1639,7 @@ fn boxes_meet(a: &[Ivl; 4], b: &[Ivl; 4]) -> bool {
 }
 
 fn ser_hull(a: &mut Ser<Ivl>, b: &Ser<Ivl>) {
-    for (ra, rb) in a.c.iter_mut().zip(&b.c) {
+    for (ra, rb) in a.c.iter_mut().zip(b.c.iter()) {
         for (ca, cb) in ra.iter_mut().zip(rb) {
             *ca = ca.hull(*cb);
         }
@@ -2268,7 +2268,7 @@ pub fn gn_fourth_over(
 /// The series `sm_GnFourthOver` hands a varying thumbweight's row terms (its `pF`, `pV`,
 /// `pFm`, `pVm`, `pdMid`, 7102bc5): the feet's and V's over the span to order
 /// `4 + SM_GN_TAYLOR` in s, at its middle to one less, and the middle.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PieceSeries {
     /// `pF`: the feet over the span.
     pub f: [VSer<Ivl>; 2],
@@ -2433,10 +2433,10 @@ fn fourth_of(
     mid: f64,
 ) -> (Fourth, Option<PieceSeries>) {
     let series = PieceSeries {
-        f: e5.f,
-        v: e5.v,
-        fm: e4.f,
-        vm: e4.v,
+        f: e5.f.clone(),
+        v: e5.v.clone(),
+        fm: e4.f.clone(),
+        vm: e4.v.clone(),
         mid,
     };
     let (mut m4, mut uv4, mut m4_lo, mut uv4_lo, mut uv4_fork, mut uv4_lo_fork) = UNPROVED_FOURTH;
@@ -3251,7 +3251,7 @@ fn meet_fourth(old: &Fourth, tm: &Fourth) -> Fourth {
 /// where one is empty (they do not both hold the same function).
 fn meet_vser(a: &mut VSer<Ivl>, b: &VSer<Ivl>) -> bool {
     for (sa, sb) in a.a.iter_mut().zip(&b.a) {
-        for (ra, rb) in sa.c.iter_mut().zip(&sb.c) {
+        for (ra, rb) in sa.c.iter_mut().zip(sb.c.iter()) {
             for (x, y) in ra.iter_mut().zip(rb) {
                 let (lo, hi) = (cmax(x.lo, y.lo), cmin(x.hi, y.hi));
                 let common = lo <= hi;
@@ -5507,7 +5507,9 @@ mod tests {
                 judged += 1;
             }
         }
-        eprintln!("{judged} samples, {unenclosed} pieces not enclosed, {old_unproved} of {wedges} wedges unproved by the interval terms");
+        eprintln!(
+            "{judged} samples, {unenclosed} pieces not enclosed, {old_unproved} of {wedges} wedges unproved by the interval terms"
+        );
         assert_eq!(unenclosed, 0);
         assert_eq!(judged, 48 * 101);
         assert!(2 * old_unproved > wedges, "{old_unproved} of {wedges}");
@@ -5888,6 +5890,18 @@ mod tests {
     /// the Hermite remainder's) are orders of magnitude wider.
     #[test]
     fn feet_taylor_models_hold_every_sampled_station_on_curved_faces() {
+        // The certificate used over half a megabyte in a single frame, before its
+        // station solver and incremental workspace. Exercise the same path with
+        // synthetic curved supports on the stack available to a Windows main thread.
+        std::thread::Builder::new()
+            .stack_size(1 << 20)
+            .spawn(check_feet_taylor_models_on_curved_faces)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn check_feet_taylor_models_on_curved_faces() {
         let k = Kernel::default();
         let mut next = rng(0x5bd1_e995_a3c6_4f2b);
         let order = 4 + TAYLOR;
