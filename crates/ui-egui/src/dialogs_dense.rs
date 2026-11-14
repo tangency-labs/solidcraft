@@ -1350,6 +1350,44 @@ mod tests {
         h.frames(2);
         assert!(scenario::handle_at("dialog:Tangent Chain").is_some());
     }
+    /// #15939: with Tangent Chain unticked, one picked edge is rounded alone, not with the edges
+    /// that run on from it smoothly. A 40 x 30 x 20 box with one upright edge rounded: its top
+    /// back edge runs on into the round's top edge, and that into the top right edge.
+    #[test]
+    fn a_fillet_with_tangent_chain_off_rounds_the_picked_edge_alone() {
+        use solidcraft_engine::geom::MeshGeom;
+        let volume = |h: &Harness| crate::open_meshing::session_world(&h.app.session).body("Body1").unwrap().mesh().measure().volume;
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1400,"height":1000}));
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.run("solid.fillet", json!({"edges": [[40, 30, 10]], "radius": "5"})).unwrap();
+        let before = volume(&h);
+        h.step(&json!({"start":"solid.fillet"})).unwrap();
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+        assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::Fillet { chain: false, .. }));
+        let edge = edge_sel(&h.app.session, Vec3::new(17.5, 30.0, 20.0)).unwrap();
+        let session = &h.app.session;
+        h.app.dialog.as_mut().unwrap().pick(session, edge);
+        assert_eq!(h.app.dialog.as_ref().unwrap().items().len(), 1);
+        let p = parameters(&h);
+        assert_eq!(p["tangent_chain"], json!(false), "{p}");
+        h.app.run("solid.fillet", p).unwrap();
+        // A 2 mm round along the 35 mm straight edge takes (1 - pi/4) r^2 L = 30.0 mm^3; with
+        // the chain, the round's top edge and the 25 mm right edge go too (59 mm^3).
+        let removed = before - volume(&h);
+        assert!((27.0..33.0).contains(&removed), "removed {removed} mm^3");
+        // Editing it keeps the chain off; a fillet a script saved with the chain on keeps it on.
+        let saved = h.app.session.doc.features.last().unwrap().id;
+        h.app.edit_feature(saved);
+        assert_eq!(parameters(&h)["tangent_chain"], json!(false));
+        h.step(&json!({"widget":"Cancel"})).unwrap();
+        h.app.run("solid.fillet", json!({"edges": [[0, 15, 0]], "radius": "1"})).unwrap();
+        let scripted = h.app.session.doc.features.last().unwrap().id;
+        h.app.edit_feature(scripted);
+        assert_ne!(parameters(&h)["tangent_chain"], json!(false));
+    }
+
     fn fillet_harness() -> Harness {
         let mut h = Harness::new();
         h.call("ui.resize", json!({"width":1400,"height":1000}));
