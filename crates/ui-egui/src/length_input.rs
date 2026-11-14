@@ -69,13 +69,21 @@ pub(crate) fn stored(doc: &Document, text: &str) -> String {
     }
 }
 
-/// A computed model-space value written back to an editable field. Use all significant digits:
-/// display precision must never round a value that will be sent back to the model. Snapped
+/// A computed model-space value written back to an editable field. Keeps 12 significant digits:
+/// display precision must never round a value that will be sent back to the model, but binary
+/// noise ("2.8000000000000003") must not reach the field or the stored command (#15195). Snapped
 /// drag writes go through [`model_drag`] instead (#9035).
 pub(crate) fn model(doc: &Document, mm: f64) -> String {
     let unit = unit(doc);
     let scale = unit_info(unit).map(|(_, scale)| scale).unwrap_or(1.0);
-    format!("{} {unit}", mm / scale)
+    let v = mm / scale;
+    if !v.is_finite() || v == 0.0 {
+        return format!("{} {unit}", if v == 0.0 { 0.0 } else { v });
+    }
+    let places = (11 - v.abs().log10().floor() as i32).clamp(0, 17) as usize;
+    let text = format!("{v:.places$}");
+    let text = if text.contains('.') { text.trim_end_matches('0').trim_end_matches('.') } else { &text };
+    format!("{} {unit}", if text == "-0" { "0" } else { text })
 }
 
 /// A snapped-drag length for an editable field: rounded to Preferences › Length decimals, but
