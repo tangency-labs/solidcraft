@@ -34,12 +34,14 @@ use solidcore::geom::object::ObjectRef;
 use solidcore::geom::solution_array::{Solution, SolutionArray};
 use solidcore::heal::heal_data::p1::api_heal_brep;
 use solidcore::intersect::adv_surface_intersector::{AdvSurfaceIntersector, NoSurfaceHandle};
+use solidcore::intersect::point_class::PointClassType;
 use solidcore::intersect::surface_intersector::p5::do_intersection;
 use solidcore::mass::integrator::properties::{
     brep_mass_properties, brep_volume, PropertyAttributes,
 };
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_torus};
+use solidcore::query::brep::BrepQuery;
 use solidcore::query::tess::TessSrfCache;
 use solidcore::surface::surface_cache::p1::{SurfaceCache, SurfaceCacheOptions};
 use solidcore::topology::brep::p1::{edges, faces, tessellate_boundaries, vertices};
@@ -486,6 +488,51 @@ fn tessellation_caches_and_global_solver_parity_and_cancellation() {
     let err = assert_cancelled_err("mid-solve branch cancel", probe.solve_it(&req, &mut sols));
     assert_eq!(err.operation(), "geom::global_solver::solve_branch");
     assert!(probe.solver().branches_visited >= 33);
+}
+
+/// A classification ray from just inside a cylinder near the top of its circle crosses a
+/// leaf of the wall it may cross twice, which the line/surface solve halves into parts
+/// (WR-758). Cancelled at every poll the classification makes, it returns `Cancelled`, never
+/// a class, and some of those polls are the part loop's own.
+#[test]
+fn ray_classification_part_loop_parity_and_cancellation() {
+    const LEAF_PARTS: &str = "surface::surface::p10::LsiGlobalSolver::local_solve_branch";
+    let r = 30.475;
+    let a = 89.0_f64.to_radians();
+    let point = Point3::new((r - 0.075) * a.cos(), (r - 0.075) * a.sin(), 10.0);
+    let classify = |token: Option<CancelToken>| {
+        let mut setup = Kernel::default();
+        let mut cyl = create_cylinder(&mut setup, Point3::new(0.0, 0.0, 0.0), r, 45.0).unwrap();
+        let mut k = Kernel::default();
+        if let Some(token) = token {
+            k.set_cancel_token(token);
+        }
+        BrepQuery::of_brep(&cyl)
+            .point_3d_classify(&k, &mut cyl, point, 1e-6, false)
+            .map(|pc| (pc.point_class(), format!("{:?}", pc.object())))
+    };
+
+    let plain = classify(None).unwrap();
+    assert_eq!(plain.0, PointClassType::Region);
+    let counter = CancelToken::after_polls(u64::MAX);
+    assert_eq!(classify(Some(counter.clone())).unwrap(), plain);
+    let polls = counter.polls().unwrap();
+    assert!(polls > 0);
+
+    let mut in_part_loop = 0;
+    for n in 1..=polls {
+        let err = assert_cancelled_err(
+            &format!("ray classification cancelled at poll {n} of {polls}"),
+            classify(Some(CancelToken::after_polls(n))),
+        );
+        if err.operation() == LEAF_PARTS {
+            in_part_loop += 1;
+        }
+    }
+    assert!(
+        in_part_loop > 0,
+        "none of {polls} polls stopped in the leaf's part loop"
+    );
 }
 
 #[test]
