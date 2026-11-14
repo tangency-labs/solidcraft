@@ -193,6 +193,55 @@ fn a_sweep_round_a_closed_path_starts_where_the_profile_is() {
     }
 }
 
+/// #13330: a 2 x 2 profile partway along an open path, swept along all of it, follows the whole
+/// path from its start, instead of starting the path at the profile and standing off it by the
+/// distance between the two.
+///
+/// On an L path (40 along X, then 30 along Y), turning with the path: at the middle of the first
+/// line, the tube on the path (Pappus: A L = 4 x 70, the walls meeting in a mitre at the
+/// corner); at the middle of the second line with the profile's plane 3 mm to the right of the
+/// path, carried back a quarter turn clockwise to the start, so the tube runs 3 mm to the right
+/// of the whole path: 4 x (43 + 33), y from -4 and x to 44 (turned the wrong way it would run
+/// inside the turn, 4 x (37 + 27); not carried sideways it would start 3 mm along the path).
+///
+/// Parallel, on a path of 40 along X then 30 along each of X and Y: the profile partway along
+/// the slanted line, 3 mm to the side, is only moved to the start: a sheared prism of 4 x 70
+/// from y 2 to 34.
+#[test]
+fn a_sweep_from_a_profile_partway_along_an_open_path_follows_the_path() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]], "infer": false, "ids": ["l1"]}));
+    run(&mut s, "sketch.line", json!({"points": [[40, 0], [40, 30]], "infer": false, "ids": ["l2"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Slant"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]], "infer": false, "ids": ["s1"]}));
+    run(&mut s, "sketch.line", json!({"points": [[40, 0], [70, 30]], "infer": false, "ids": ["s2"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let cases = [
+        // (profile, plane origin, its x, path sketch, path, orientation, volume, [min x, max x, min y, max y])
+        ("A", [20, 0, 0], [0, 1, 0], "Path", ["l1", "l2"], "perpendicular", 280.0, [0.0, 41.0, -1.0, 30.0]),
+        ("B", [43, 15, 0], [1, 0, 0], "Path", ["l1", "l2"], "perpendicular", 304.0, [0.0, 44.0, -4.0, 30.0]),
+        ("C", [55, 18, 0], [0, 1, 0], "Slant", ["s1", "s2"], "parallel", 280.0, [0.0, 70.0, 2.0, 34.0]),
+    ];
+    for (name, origin, x_dir, path_sketch, path, orientation, volume, bounds) in cases {
+        run(&mut s, "sketch.create", json!({"plane": {"origin": origin, "x_dir": x_dir, "y_dir": [0, 0, 1]}, "name": name}));
+        run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [1, 1]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let body = format!("Tube{name}");
+        run(
+            &mut s,
+            "solid.sweep",
+            json!({"sketch": name, "path_sketch": path_sketch, "path": path, "operation": "new", "body_name": body, "orientation": orientation}),
+        );
+        let m = measure(&s, &body);
+        assert!((m.volume - volume).abs() < volume * 1e-6, "{name}: {}", m.volume);
+        for (got, want) in [m.bbox.min.x, m.bbox.max.x, m.bbox.min.y, m.bbox.max.y].into_iter().zip(bounds) {
+            assert!((got - want).abs() < 0.05, "{name}: {:?}", m.bbox);
+        }
+    }
+}
+
 /// #2216: a sweep whose path is a closed loop of a body's edges is followed from the profile,
 /// like a closed sketch path: the tube stays on the loop, within the profile's half width of
 /// it, instead of standing off it by the distance between the profile and the vertex the
