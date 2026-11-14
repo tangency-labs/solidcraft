@@ -571,18 +571,113 @@ pub fn composite(fill: Color32, background: Color32) -> Color32 {
     Color32::from_rgb(channel(0), channel(1), channel(2))
 }
 
-pub fn panel_fallback_tokens(mut authored: Tokens) -> Tokens {
+/// The panel palette used when the authored inks cannot read on the authored surface.
+///
+/// The authored surface is kept whenever the theme's own inks can be moved onto it,
+/// so a panel keeps the tint the theme exists for. Only an ink that cannot move at
+/// all — an ink that is the surface itself, an invisible ink, or a surface that
+/// leaves no room for 4.5:1 — falls back to the known built-in pair.
+pub fn panel_fallback_tokens(authored: Tokens) -> Tokens {
+    if let Some(tokens) = panel_tint_tokens(&authored) {
+        return tokens;
+    }
     // Bypass custom/published themes. These existing built-in pairs have their own
     // contrast tests. Copy only surface/ink roles to retain captured layout metrics.
     let known = if is_dark() { Tokens::dark() } else { Tokens::light() };
-    authored.panel = known.file_background.to_opaque();
-    authored.panel_header = authored.panel;
-    authored.text = known.file_primary_ink;
-    authored.form_ink = known.file_primary_ink;
-    authored.dialog_label = known.file_primary_ink;
-    authored.text_dim = known.file_dim;
-    authored.form_dim = known.file_dim;
-    authored
+    let mut tokens = authored;
+    tokens.panel = known.file_background.to_opaque();
+    tokens.panel_header = tokens.panel;
+    tokens.text = known.file_primary_ink;
+    tokens.form_ink = known.file_primary_ink;
+    tokens.dialog_label = known.file_primary_ink;
+    tokens.text_dim = known.file_dim;
+    tokens.form_dim = known.file_dim;
+    tokens
+}
+
+/// The authored palette with its own surface kept and its inks moved onto it.
+///
+/// None reports a theme whose canonical inks cannot all read on its own surface, so
+/// the caller falls back to the known built-in pair.
+fn panel_tint_tokens(authored: &Tokens) -> Option<Tokens> {
+    let known = if is_dark() { Tokens::dark() } else { Tokens::light() };
+    // The fallback surface is opaque, so a translucent panel keeps its tint over the
+    // background the built-in pair would have used.
+    let surface = if authored.panel.a() == 255 { authored.panel } else { composite(authored.panel, known.file_background.to_opaque()) };
+    let mut tokens = *authored;
+    tokens.panel = surface;
+    for ink in [&mut tokens.text, &mut tokens.text_dim, &mut tokens.form_ink, &mut tokens.form_dim, &mut tokens.dialog_label] {
+        if panel_ink_readable_on(*ink, surface) {
+            continue;
+        }
+        *ink = panel_ink_moved_onto(*ink, surface)?;
+    }
+    panel_surface_readable(surface, &tokens).then_some(tokens)
+}
+
+/// Whether `ink` reads on the opaque `surface` at 4.5:1.
+///
+/// A translucent ink is judged by the bounds of every colour it can composite to, the
+/// same way [`panel_surface_readable`] judges one.
+fn panel_ink_readable_on(ink: Color32, surface: Color32) -> bool {
+    let background = panel_luminance(surface);
+    let (low, high) = panel_composite_bounds(ink, surface);
+    let (ink_low, ink_high) = (panel_luminance(low), panel_luminance(high));
+    if ink_low <= background && ink_high >= background {
+        return false;
+    }
+    if ink_low > background { (ink_low + 0.05) / (background + 0.05) >= 4.5 } else { (background + 0.05) / (ink_high + 0.05) >= 4.5 }
+}
+
+/// Move `ink` along its own colour until it reads at 4.5:1 on `surface`.
+///
+/// Scaling the ink's linear-light channels together keeps its hue, and the smallest
+/// scale that reaches the target is the smallest change. None reports an ink that
+/// cannot reach it: an invisible ink, an ink as light as the surface, or a surface
+/// that leaves no room for 4.5:1 (neither white nor black reaches it).
+fn panel_ink_moved_onto(ink: Color32, surface: Color32) -> Option<Color32> {
+    if ink.a() == 0 {
+        return None;
+    }
+    // A translucent ink is replaced by the colour it actually draws as.
+    let ink = if ink.a() == 255 { ink } else { composite(ink, surface) };
+    let background = panel_luminance(surface);
+    let light = panel_luminance(ink);
+    if light == background {
+        return None;
+    }
+    let brighter = light > background;
+    // The ink's own ray ends at white or black, and a surface with no room for
+    // 4.5:1 on that end cannot host the ink.
+    let reach = if brighter { Color32::WHITE } else { Color32::BLACK };
+    if contrast_ratio(reach, surface) < 4.5 {
+        return None;
+    }
+    let scaled = |factor: f64| {
+        let mut rgb = [0_u8; 3];
+        for (index, channel) in [ink.r(), ink.g(), ink.b()].into_iter().enumerate() {
+            rgb[index] = solidcraft_color::srgb::encode8((solidcraft_color::srgb::decode8(channel) * factor).min(1.0));
+        }
+        Color32::from_rgb(rgb[0], rgb[1], rgb[2])
+    };
+    // Bisect the linear-light scale: a brighter ink brightens, a darker ink darkens.
+    let (mut low, mut high) = if brighter { (1.0_f64, 1.0e6_f64) } else { (0.0_f64, 1.0_f64) };
+    if brighter && contrast_ratio(scaled(high), surface) < 4.5 {
+        // The ink's own hue, taken all the way to white, still cannot read.
+        return None;
+    }
+    for _ in 0..48 {
+        let middle = 0.5 * (low + high);
+        let reads = contrast_ratio(scaled(middle), surface) >= 4.5;
+        if brighter {
+            if reads { high = middle } else { low = middle }
+        } else if reads {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    Some(scaled(if brighter { high } else { low }))
 }
 
 /// Raise a captured panel fill to the first quantized alpha that protects all
