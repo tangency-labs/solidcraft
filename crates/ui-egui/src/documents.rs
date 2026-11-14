@@ -828,6 +828,11 @@ pub fn view_close(app: &mut SolveApp, id: u64) -> bool {
     change_views(app, |views| views.close(id))
 }
 
+/// Stop showing the view `id` beside the others; it stays open, reached from the bar.
+pub fn view_unshow(app: &mut SolveApp, id: u64) -> bool {
+    change_views(app, |views| views.unshow(id))
+}
+
 /// Close the other views of the shown design, keeping `id`.
 pub fn view_close_others(app: &mut SolveApp, id: u64) {
     change_views(app, |views| views.close_others(id));

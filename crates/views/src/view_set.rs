@@ -355,6 +355,16 @@ impl ViewSet {
         self.tiles.as_mut().is_some_and(|tiles| tiles.swap(a, b))
     }
 
+    /// Stop showing `id` beside the others: it stays open as a view of its own, reached from the
+    /// bar. False when it is not one of the views shown together.
+    pub fn unshow(&mut self, id: u64) -> bool {
+        let removed = self.tiles.as_mut().is_some_and(|tiles| tiles.remove(id));
+        if removed && self.tiles.as_ref().is_some_and(|tiles| tiles.len() < 2) {
+            self.tiles = None;
+        }
+        removed
+    }
+
     /// One view at a time again; the views stay open.
     pub fn untile(&mut self) {
         self.tiles = None;
@@ -785,6 +795,20 @@ mod tests {
         assert!(set.tiles().unwrap().contains(set.active().id), "the active view is always among the shown");
         assert_eq!(set.set_layout(Preset::Single), 1);
         assert!(set.tiles().is_none() && !set.is_tiled());
+    }
+
+    #[test]
+    fn a_view_taken_out_of_the_layout_stays_open() {
+        let mut set = models(3);
+        set.set_layout(Preset::Grid);
+        let other = set.views().iter().map(|view| view.id).find(|id| *id != set.active().id).unwrap();
+        assert!(set.unshow(other));
+        assert_eq!(set.len(), 3, "no view closes");
+        assert!(!set.tiles().unwrap().contains(other));
+        let last = set.tiles().unwrap().views().into_iter().find(|id| *id != set.active().id).unwrap();
+        assert!(set.unshow(last));
+        assert!(!set.is_tiled(), "under two views there is no layout");
+        assert!(!set.unshow(last), "it is not shown any more");
     }
 
     #[test]
