@@ -82,8 +82,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
     f.proto_vertex_miss_is_false = true;
-    f.check_loop_vertex_tolerance = true;
-    f.check_loop_projected_seam_ends = true;
     f.oscillating_skips_failed_guesses = true;
     f.refine_cc_range_ends = true;
     f.flat_corners_test_bits = true;
@@ -153,7 +151,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.imprint_reuses_coincident_face_edge = true;
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
-    f.loops_go_on_round_the_vertex = true;
     f.revolve_splits_curves_on_axis = true;
     f.cover_wraps_across_closed_seam = true;
     f.fillet_rails_meet_at_one_end_point = true;
@@ -193,11 +190,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ellipse_step_interval_checks = true;
     f.corner_patch_face_side_twist = true;
     f.boolean_union_refuses_solid_leak = true;
-    f.curve_loop_start_after_previous_end = true;
-    f.loop_use_reports_open_gaps = true;
     f.face_points_span_domain = true;
     f.drop_curve_v_domain_degeneracy = true;
-    f.mirror_curve_keeps_euclidean_control_points = true;
     f.dupin_bottom_hyperbola_axis = true;
     f.offset_swap_uv_extended_distance = true;
     f.validation_does_not_make_uv_trims = true;

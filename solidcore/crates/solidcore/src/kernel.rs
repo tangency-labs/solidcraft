@@ -506,9 +506,6 @@ pub struct UpstreamFixes {
     /// `SmPlane::IsNurbSurfacePlane` places a recognised surface's origin after
     /// orthogonalising its axes (WR-652, upstream issue #1056).
     pub plane_recognition_origin_after_axes: bool,
-    /// `SmCurveLoops::GetLoopStartEnd` starts a later loop after the previous loop
-    /// ends, keeping adjacency within that loop (WR-96). Off by default for C++ parity.
-    pub curve_loop_start_after_previous_end: bool,
     /// `SmFilletGeom::Trim` returns the first curve/surface trim or interval-intersection error instead of dropping it and continuing with an unset interval (WR-604, #483). Earlier successful edits remain; off by default for pinned C++ parity.
     pub fillet_trim_status: bool,
     /// `SmCurve::ComputeCrvsNormal` uses the sampled polygon's area vector, so a
@@ -585,18 +582,6 @@ pub struct UpstreamFixes {
     pub degen_param_tiebreak_uses_actual_param: bool,
     /// `RemoveCoincidentNoEdgeProtoVertex` reports a miss as `false` (WR-73, #848).
     pub proto_vertex_miss_is_false: bool,
-    /// `CheckLoop` measures a gap against at least its vertex's zone tolerance (WR-381, #476).
-    pub check_loop_vertex_tolerance: bool,
-    /// `CheckLoop` compares an end projected from its vertex (no UV trim) with its neighbour on the nearest natural period of a closed direction, so a one-period seam jump is not an `SM_ERR` (WR-440, #530).
-    pub check_loop_projected_seam_ends: bool,
-    /// `SmLoopuse::IsClosed3d` reports a loop open when an end-to-end gap exceeds its
-    /// cross-section tolerance: the over-tolerance value is `gap - tolerance`, where the
-    /// pinned C++ computes `tolerance - gap` (never above its zero initial maximum, so
-    /// it always reports closed). The reported gap is the actual gap, with its edge use
-    /// and tolerance; `bCheckAllGaps == FALSE` still stops at the first over-tolerance
-    /// gap (WR-93). Off by default for pinned C++ parity; callers inherit the kernel's
-    /// setting.
-    pub loop_use_reports_open_gaps: bool,
     /// `SmEdge::AssertValid` test 9 orders the faces round an edge by the direction to each face's point 20 edge tolerances into it (square to the edge) where two of them leave the edge within `SM_ANG_TOL_DEG` of each other, instead of by the binormals alone, which tie for faces tangent along the edge (a cylinder resting on a plane, kept by a boolean as a four-face edge) and fail the valid order (WR-540, #383; the fork's tangency-labs/smlib@5533bbb).
     pub edge_check_orders_tangent_faces: bool,
     /// `SmEllipse::AdjustSTEPInterval` rejects inverted STEP edits and collapsed or non-finite converted NURBS intervals before mutation, and revolution edits install their domain only after their generator accepts it (WR-211, #428).
@@ -670,14 +655,6 @@ pub struct UpstreamFixes {
     pub revolve_holed_profile_void: bool,
     /// A partial-turn rotational sweep first splits each profile curve where it meets the axis inside itself (`IntersectWithLine` on the axis at the B-rep tolerance, as `CheckCurveSweep` finds them), joining a closed curve's last piece back onto its first; upstream's `CheckCurveSweep` refuses such a curve (`SM_SC_ROT_ON_CURVE`) and the sweep fails with `SM_ERR`, so a whole circle tangent to the axis (a horn torus) turned part way fails unless its seam lies on the axis (WR-590; the fork's tangency-labs/smlib@e4f1377).
     pub revolve_splits_curves_on_axis: bool,
-    /// `SmTrimmingTools::OrderCurvesIntoLoops`, at a vertex where several curve ends meet (a hole whose corner touches the outline), goes on from the end (of a curve it has not used, or its first curve's start) whose leaving tangent comes next round the vertex from the arriving curve's, counterclockwise about one normal for the whole list, from the curves' area vectors and turned against the loops' area, so loops touching from outside each other close apart (ends leaving tangent to each other in the order they bend; tangency-labs/smlib@b0ee3f9). Upstream takes the first such end by index in the input, so the input order decides whether the loop closes, ends on a curve it already used (`SM_ERR`) or runs round the hole the wrong way, crossing itself and counting the hole as material (WR-591; the fork's tangency-labs/smlib@9209e76).
-    pub loops_go_on_round_the_vertex: bool,
-    /// `SmTrimmingTools::MirrorCurve` keeps the Euclidean control points `GetCanonical`
-    /// returns instead of dividing each one by its weight a second time, so a rational UV
-    /// curve is reflected rather than moved and distorted (WR-98; see
-    /// `plan/upstream-issues/WR-98--addendum-2026-10-31-euclidean-mirror.md`). Off by
-    /// default: the pinned C++ divides twice.
-    pub mirror_curve_keeps_euclidean_control_points: bool,
     /// A curve sweep along a closed path whose end sections lie on its start sections
     /// (within the B-rep's tolerance) leaves both caps off, so the stitch joins the side
     /// faces' end edges to their start edges: one closed tube, where upstream caps both
