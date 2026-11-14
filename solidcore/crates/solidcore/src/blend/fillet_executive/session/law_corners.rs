@@ -25,9 +25,13 @@
 //! | `faces_of_pieces` (private) | `sm_PieceOfFace`, in `BuildLawCorners`' two loops |
 //! | `edge_between` (private) | `sm_EdgeBetween` |
 //!
-//! Deviations: the noted copies and their pieces are one list of pairs
+//! Deviations: the noted copies and their pieces are one list of triples
 //! (`m_vRadiusCornerSurfaces`, `m_vRadiusCornerPieces`), owned by the session and emptied
-//! by the split. The split's loop passes over a face the rebuild of an earlier one removed
+//! by the split. Not the fork's (#16651): a chamfer by its definition whose chord creases
+//! where a foot crosses a face's G1-only knot line
+//! ([`crate::surface::procedural_blend::ProceduralBlend::chord_creases`]) is noted too,
+//! with those knots, and split at them alone; each side keeps the definition, its net
+//! trimmed to the side. The split's loop passes over a face the rebuild of an earlier one removed
 //! (the fork's list would hold a deleted face there). With `Kernel::blend_face_log` on, a
 //! dip's zone is marked as a corner ball's patch (#2489; not the fork's). No recursion.
 
@@ -51,7 +55,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::procedural_blend::corner::CornerDefinition;
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1::faces as brep_faces;
 use crate::topology::brep::p2::OldSurface;
 use crate::topology::brep::p3::{self, orient_trimmed_surfaces};
@@ -66,8 +70,13 @@ use crate::topology::{Brep, EdgeId, FaceId};
 const OP: &str = "blend::fillet_executive::session::law_corners";
 
 /// A fillet surface noted before the merge (a copy), with its kept pieces where a law
-/// corner dips or peaks.
-pub(super) type RadiusCornerSurface = (Surface, Option<LawCornerPieces>);
+/// corner dips or peaks, and (not the fork's, #16651) the knots `(u, v)` to split it at
+/// where they are a chamfer's creases rather than the surface's C0 knots.
+pub(super) type RadiusCornerSurface = (
+    Surface,
+    Option<LawCornerPieces>,
+    Option<(Vec<f64>, Vec<f64>)>,
+);
 
 impl FilletSession<'_> {
     /// `NoteRadiusCornerSurfaces` (the fork's 6eecf04, 58d03ef): copies of the fillet
@@ -115,7 +124,30 @@ impl FilletSession<'_> {
                     .and_then(|i| base.law_corner_pieces.get(i))
                     .filter(|kept| kept.has_dip_or_peak())
                     .cloned();
-                noted.push((copy, pieces));
+                noted.push((copy, pieces, None));
+            }
+        }
+        // (not the fork's, #16651) a chamfer by its definition whose feet's s-derivatives
+        // jump where a face is only G1 creases along the chord there
+        // ([`ProceduralBlend::chord_creases`]): its face is split there as at a radius
+        // corner, each side keeping the definition (the net trimmed to it)
+        for index in 0..self.objects.solvers.len() {
+            let geoms = match self.objects.solvers.get(index).and_then(Option::as_ref) {
+                Some(SolverObject::VariableRadius(_)) | None => continue,
+                Some(solver) => solver.base().fillet_geoms(),
+            };
+            for geom in geoms {
+                let Some(surface) = self.objects.fillet_surface(geom)? else {
+                    continue;
+                };
+                let SurfaceKind::ProceduralBlend(pb) = surface.kind() else {
+                    continue;
+                };
+                let creases = pb.chord_creases()?;
+                if creases.0.is_empty() && creases.1.is_empty() {
+                    continue;
+                }
+                noted.push((surface.clone(), None, Some(creases)));
             }
         }
         self.objects.radius_corner_surfaces.extend(noted);
@@ -170,8 +202,8 @@ impl FilletSession<'_> {
                 continue;
             };
             let mut fillet = None;
-            for (index, (copy, _)) in noted.iter().enumerate() {
-                if copy.approx_eq(k, surface)? {
+            for (index, (copy, _, _)) in noted.iter().enumerate() {
+                if copy.approx_eq(k, surface)? || same_procedural_blend(k, copy, surface)? {
                     fillet = Some(index);
                     break;
                 }
@@ -179,20 +211,26 @@ impl FilletSession<'_> {
             let Some(index) = fillet else {
                 continue;
             };
+            let creases = noted.get(index).and_then(|(_, _, c)| c.as_ref());
             let mut pieces = with_target_env_of(&mut self.objects, k, |k, b, env, _| {
                 let key_of = env.key_of;
                 let curve_ref = |e: EdgeId, kind: i64| ObjectRef {
                     key: key_of(EntityRef::Edge(e)).key,
                     type_code: kind,
                 };
-                crate::topology::brep::p10::subdivide_face_at_discontinuities(
-                    k,
-                    b,
-                    env,
-                    &curve_ref,
-                    face,
-                    ContinuityType::C0,
-                )
+                match creases {
+                    Some((u, v)) => crate::topology::brep::p10::subdivide_face_at_knots(
+                        k, b, env, &curve_ref, face, u, v,
+                    ),
+                    None => crate::topology::brep::p10::subdivide_face_at_discontinuities(
+                        k,
+                        b,
+                        env,
+                        &curve_ref,
+                        face,
+                        ContinuityType::C0,
+                    ),
+                }
             })?;
             if !pieces.contains(&face) {
                 pieces.push(face);
@@ -210,7 +248,10 @@ impl FilletSession<'_> {
                     .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
                 let domain = surface.natural_uv_domain_with_nurb(k)?;
                 let (mut lo, mut hi) = (domain.min(), domain.max());
-                let (u, v) = surface.find_knots_by_max_continuity(k, ContinuityType::C0, false)?;
+                let (u, v) = match creases {
+                    Some(c) => c.clone(),
+                    None => surface.find_knots_by_max_continuity(k, ContinuityType::C0, false)?,
+                };
                 for knot in u {
                     if knot <= lo.x || knot >= hi.x {
                         continue;
@@ -269,7 +310,7 @@ impl FilletSession<'_> {
             }
 
             // where the law dips or peaks, the exact round there (the faces are rebuilt)
-            if let Some(kept) = noted.get(index).and_then(|(_, kept)| kept.as_ref()) {
+            if let Some(kept) = noted.get(index).and_then(|(_, kept, _)| kept.as_ref()) {
                 self.build_law_corners(k, &pieces, kept)?;
             }
         }
@@ -640,6 +681,23 @@ fn faces_of_pieces(
     of.into_iter()
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| SolidError::blend_missing(OP, "a face of each law corner piece"))
+}
+
+/// Not the fork's (#16651): whether `a` and `b` are both blends by their definitions with
+/// the same definition and nets equal as B-spline surfaces (the fork's
+/// `SmProceduralBlend` is an `SmBSplineSurface`, whose `operator==` compares the nets;
+/// [`Surface::approx_eq`] answers false for the pair), as a noted chamfer is found again
+/// after the merge.
+///
+/// # Errors
+///
+/// Those of [`crate::surface::procedural_blend::ProceduralBlend::same_definition`].
+fn same_procedural_blend(k: &Kernel, a: &Surface, b: &Surface) -> Result<bool> {
+    let (SurfaceKind::ProceduralBlend(a), SurfaceKind::ProceduralBlend(b)) = (a.kind(), b.kind())
+    else {
+        return Ok(false);
+    };
+    Ok(a.net().approx_eq(b.net()) && a.same_definition(k, b)?)
 }
 
 /// The edges of face `f`, in the face's order (`SmFace::GetEdges`).

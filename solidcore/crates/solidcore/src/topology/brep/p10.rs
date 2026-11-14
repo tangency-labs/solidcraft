@@ -2641,7 +2641,32 @@ pub fn subdivide_face_at_discontinuities(
     // enable Brep editing during this method
     let editing = b.editing_enabled();
     b.set_editing_enabled(true);
-    let result = subdivide_face_body(k, b, env, curve_ref, face, continuity);
+    let result = surface_of_face(b, face)
+        .and_then(|s| s.find_knots_by_max_continuity(k, continuity, false))
+        .and_then(|(u, v)| subdivide_face_body(k, b, env, curve_ref, face, &u, &v));
+    b.set_editing_enabled(editing);
+    result
+}
+
+/// Not upstream (#16651): [`subdivide_face_at_discontinuities`] along the iso lines at
+/// the given knots of the face's surface, `u_knots` and `v_knots`, instead of those its
+/// knot search finds (a chamfer's creases, [`crate::surface::procedural_blend::ProceduralBlend::chord_creases`]).
+///
+/// # Errors
+///
+/// Those of [`subdivide_face_at_discontinuities`].
+pub fn subdivide_face_at_knots(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
+    face: FaceId,
+    u_knots: &[f64],
+    v_knots: &[f64],
+) -> Result<Vec<FaceId>> {
+    let editing = b.editing_enabled();
+    b.set_editing_enabled(true);
+    let result = subdivide_face_body(k, b, env, curve_ref, face, u_knots, v_knots);
     b.set_editing_enabled(editing);
     result
 }
@@ -2652,14 +2677,12 @@ fn subdivide_face_body(
     env: &mut NotifyEnv<'_>,
     curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
     face: FaceId,
-    continuity: ContinuityType,
+    u_knots: &[f64],
+    v_knots: &[f64],
 ) -> Result<Vec<FaceId>> {
     // locals
     let surface = surface_of_face(b, face)?;
     let domain = surface.natural_uv_domain_with_nurb(k)?;
-
-    // get all surface Knot discontinuties
-    let (u_knots, v_knots) = surface.find_knots_by_max_continuity(k, continuity, false)?;
 
     // no work - no discontinuities
     if u_knots.is_empty() && v_knots.is_empty() {

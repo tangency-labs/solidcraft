@@ -593,6 +593,107 @@ impl ProceduralBlend {
         self.def.chamfer.as_ref()
     }
 
+    /// Not the fork's (#16651): the knots of a chamfer's net (order 0, the chord) across
+    /// which the chamfer may crease, as `(u, v)`, the one of them along its rails holding
+    /// them. Each station of the chord's net is a full-multiplicity knot whose row is the
+    /// chord between the feet there. Where a foot sits on a knot line of a face that is
+    /// only G1 (the old boundary of a face's extension) its s-derivative jumps with the
+    /// face's curvature, and the chord's normal `C x ((1 - w) A_1 + w A_2)` (`C` along the
+    /// chord, `A_i` the feet's tangents, `w` across) turns with it; the ball's circle does
+    /// not (its normal is `(P - c) / r`, continuous with the point and the centre).
+    ///
+    /// At each such knot the two sides' normals, from the net's rows either side of it,
+    /// are linear in `w`: their dot and cross products are quadratics bounded by their
+    /// Bernstein coefficients, and each normal is at least its segment's distance from the
+    /// origin. That bounds the sine of the turn over the whole chord (in exact arithmetic
+    /// over the net's control points). A knot is listed where the bound exceeds the sine
+    /// of [`crate::geom::tol::ANG_TOL_DEG`] (`SM_CONTINUITY_ANGLE`, the G1 angle
+    /// `CalculateContinuities` and `check_brep`'s Test #4 judge knots by), or where it is
+    /// no bound (a dot coefficient that is not positive, a value that is not finite):
+    /// splitting at a knot that is G1 after all only adds an edge between faces that meet
+    /// smoothly. Nothing for a blend of another order, or a net that is not the chord's
+    /// (not of degree 1 and two control points across, or rational with unequal weights).
+    ///
+    /// # Errors
+    ///
+    /// Those of the net's knots and control points.
+    pub fn chord_creases(&self) -> Result<(Vec<f64>, Vec<f64>)> {
+        let mut out = (Vec::new(), Vec::new());
+        if self.def.order != 0 || self.def.chamfer.is_none() {
+            return Ok(out);
+        }
+        let net = &self.net;
+        let cpn = net.control_point_net()?;
+        if let Some(&w0) = cpn.weights.first() {
+            if cpn.weights.iter().any(|&w| w != w0) {
+                return Ok(out);
+            }
+        }
+        // the direction along the rails: the other is the chord's, degree 1, two points
+        let (along, rows, across) = if net.degree(SurfParamType::V) == 1 && cpn.v_count == 2 {
+            (SurfParamType::U, cpn.u_count, false)
+        } else if net.degree(SurfParamType::U) == 1 && cpn.u_count == 2 {
+            (SurfParamType::V, cpn.v_count, true)
+        } else {
+            return Ok(out);
+        };
+        let at = |i: usize, j: usize| -> Option<Vec3> {
+            let index = if across {
+                j.checked_mul(cpn.v_count)?.checked_add(i)?
+            } else {
+                i.checked_mul(cpn.v_count)?.checked_add(j)?
+            };
+            cpn.points.get(index).copied()
+        };
+        let p = net.degree(along);
+        let (knots, mults) = net.knots(along, None)?;
+        let sin_turn = (crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0)).sin();
+        let last = knots.len().saturating_sub(1);
+        let mut first = mults.first().copied().unwrap_or(0);
+        for (kk, (&u, &m)) in knots.iter().zip(&mults).enumerate() {
+            if kk == 0 || kk >= last {
+                continue;
+            }
+            // the knot's row: its first place in the full knot vector, less one
+            let i = first.checked_sub(1);
+            first = first.saturating_add(m);
+            if m < p {
+                continue; // G1 or better by its multiplicity
+            }
+            let rows_at = i.and_then(|i| {
+                let (b, c, d) = (i.checked_sub(1)?, i, i.checked_add(1)?);
+                if d >= rows {
+                    return None;
+                }
+                Some([
+                    at(b, 0)?,
+                    at(b, 1)?,
+                    at(c, 0)?,
+                    at(c, 1)?,
+                    at(d, 0)?,
+                    at(d, 1)?,
+                ])
+            });
+            let creases = match rows_at {
+                Some([b0, b1, c0, c1, d0, d1]) => {
+                    let chord = c1 - c0;
+                    let before = [chord.cross(c0 - b0), chord.cross(c1 - b1)];
+                    let after = [chord.cross(d0 - c0), chord.cross(d1 - c1)];
+                    normal_turn_sine(before, after).is_none_or(|sine| sine > sin_turn)
+                }
+                None => true,
+            };
+            if creases {
+                if across {
+                    out.1.push(u);
+                } else {
+                    out.0.push(u);
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// `GetSupport(i)`: the surface S1 (0) or S2 (1) the ball rolls on.
     #[must_use]
     pub fn support(&self, i: usize) -> Option<&Surface> {
@@ -1759,6 +1860,48 @@ fn pow_index(x: f64, n: usize) -> f64 {
     #[allow(clippy::cast_precision_loss)]
     let e = n as f64;
     x.powf(e)
+}
+
+/// A bound on the sine of the angle between `n_a(w) = (1 - w) a_0 + w a_1` and
+/// `n_b(w) = (1 - w) b_0 + w b_1` over `w` in `[0, 1]` ([`ProceduralBlend::chord_creases`]):
+/// their cross product is a quadratic in `w` bounded by its Bernstein coefficients, and
+/// each is at least its segment's distance from the origin. `None` where that is no bound
+/// on an angle below a quarter turn: a dot coefficient that is not positive, or a value
+/// that is not finite.
+fn normal_turn_sine(a: [Vec3; 2], b: [Vec3; 2]) -> Option<f64> {
+    let [a0, a1] = a;
+    let [b0, b1] = b;
+    let dots = [a0.dot(b0), 0.5 * (a0.dot(b1) + a1.dot(b0)), a1.dot(b1)];
+    if !dots.iter().all(|&x| x > 0.0) {
+        return None;
+    }
+    let crosses = [
+        a0.cross(b0),
+        (a0.cross(b1) + a1.cross(b0)) * 0.5,
+        a1.cross(b1),
+    ];
+    let mut top = 0.0_f64;
+    for x in crosses {
+        let l = x.length();
+        if !l.is_finite() {
+            return None;
+        }
+        top = top.max(l);
+    }
+    let low = segment_distance(a0, a1) * segment_distance(b0, b1);
+    let sine = top / low;
+    (low > 0.0 && sine.is_finite()).then_some(sine)
+}
+
+/// The distance from the origin to the segment from `p` to `q`.
+fn segment_distance(p: Vec3, q: Vec3) -> f64 {
+    let e = q - p;
+    let ee = e.length_squared();
+    if ee == 0.0 {
+        return p.length();
+    }
+    let t = (-p.dot(e) / ee).clamp(0.0, 1.0);
+    (p + e * t).length()
 }
 
 #[cfg(test)]
