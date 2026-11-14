@@ -540,6 +540,20 @@ pub fn system_title_bar(windows: bool, backends: eframe::wgpu::Backends) -> bool
     windows && backends.contains(Backends::GL) && !backends.intersects(Backends::DX12 | Backends::VULKAN)
 }
 
+/// Windows: Preferences > Layout's `windows_native_frame` as `graphics.json` keeps it (read before
+/// the window opens: which part of the window is Windows' is fixed when it is created). On unless
+/// it is saved as `false`; a missing or unreadable value is the default.
+pub fn windows_native_frame(saved: Option<&serde_json::Value>) -> bool {
+    saved.and_then(|v| v.get("windows_native_frame")).and_then(serde_json::Value::as_bool).unwrap_or(true)
+}
+
+/// Windows: the frame the window opens with. Safe mode starts with the default, as it does with
+/// the other start-up settings it reads from `graphics.json` (anti-aliasing).
+#[cfg(any(target_os = "windows", test))]
+pub fn windows_native_frame_at_start(saved: Option<&serde_json::Value>, safe_mode: bool) -> bool {
+    windows_native_frame(saved.filter(|_| !safe_mode))
+}
+
 /// The `--max-file-size` value (#4086): a size such as `2GB` or `1500MB`, at most 16 GB. It raises
 /// the largest STEP/import and design file this run reads, over the saved preference, without
 /// saving anything. A missing or bad value stops the start with this error.
@@ -568,6 +582,27 @@ mod tests {
 
     fn cards() -> Vec<AdapterChoice> {
         ["Integrated", "Discrete small", "Discrete large"].into_iter().map(|name| AdapterChoice { name: name.into(), compatible: true }).collect()
+    }
+
+    /// Windows' frame (Preferences > Layout) is read from `graphics.json` before the window opens:
+    /// on unless saved off, and safe mode starts with the default.
+    #[test]
+    fn the_window_frame_is_chosen_from_graphics_json_before_the_window_opens() {
+        use serde_json::json;
+        let off = json!({"windows_native_frame": false});
+        for (saved, safe_mode, native) in [
+            (None, false, true),
+            (Some(json!({})), false, true),
+            (Some(json!(null)), false, true),
+            (Some(json!({"windows_native_frame": "no"})), false, true),
+            (Some(json!({"windows_native_frame": true})), false, true),
+            (Some(off.clone()), false, false),
+            (Some(off.clone()), true, true),
+        ] {
+            assert_eq!(windows_native_frame_at_start(saved.as_ref(), safe_mode), native, "{saved:?}, safe mode {safe_mode}");
+        }
+        // Preferences shows the saved choice, also when safe mode did not use it.
+        assert!(!windows_native_frame(Some(&off)));
     }
 
     #[test]

@@ -1005,6 +1005,8 @@ fn restore_graphics_preferences(app: &mut SolveApp, saved: Option<&serde_json::V
         .filter(|choice| matches!(*choice, "wayland" | "x11"))
         .unwrap_or("auto")
         .to_string();
+    // Windows: so is the window's frame (Preferences > Layout).
+    app.preferences.windows_native_frame = startup::windows_native_frame(saved);
 }
 
 /// The viewport scene's sample count, by the rule the web app shares
@@ -1242,6 +1244,12 @@ fn main() -> eframe::Result {
         _ => eframe::wgpu::Backends::all(),
     };
     let custom_titlebar = CUSTOM_TITLEBAR && app_titlebar_wanted() && !startup::system_title_bar(cfg!(target_os = "windows"), started);
+    // Windows: which part of the window is Windows' (Preferences > Layout, `windows_native_frame`)
+    // is fixed when the window is created, so the vendored winit is told before it opens.
+    #[cfg(target_os = "windows")]
+    let window_frame = native_frame::Frame::from_preference(startup::windows_native_frame_at_start(graphics().as_ref(), safe_mode));
+    #[cfg(target_os = "windows")]
+    native_frame::choose(window_frame);
     eframe::egui_wgpu::set_startup_hook(startup_step);
     solidcraft_engine::crash::phase("window");
     let options = eframe::NativeOptions {
@@ -1328,8 +1336,9 @@ fn main() -> eframe::Result {
                     solidcraft_engine::note!("SolidCraft window: no class icon; the taskbar may show a generic one");
                 }
                 // The OS hit test offers the resize border, at the window's DPI, from the first
-                // message (#1381).
-                app.native_resize_border = custom_titlebar && native_frame::install(cc);
+                // message (#1381), and with the native frame the caption and maximize button too.
+                app.native_resize_border = custom_titlebar && native_frame::install(cc, window_frame);
+                app.native_caption = app.native_resize_border && window_frame == native_frame::Frame::Native;
                 if custom_titlebar && !app.native_resize_border {
                     solidcraft_engine::note!("SolidCraft window: no native resize border; egui edge zones instead");
                 }
@@ -2183,7 +2192,12 @@ mod msaa_tests {
             assert_eq!(h.call("ui.prefs", json!({"msaa": 1}))["ok"], true);
             assert_eq!(h.call("ui.prefs", json!({"button": "ok"}))["ok"], true);
             let after: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-            assert_eq!(after, json!({"window_system": choice, "adapter": "Selected GPU", "backend": "vulkan", "msaa": 1}));
+            let mut expected = json!({"window_system": choice, "adapter": "Selected GPU", "backend": "vulkan", "msaa": 1});
+            if cfg!(target_os = "windows") {
+                // Windows keeps the window's frame there too (Preferences > Layout), unchanged here.
+                expected["windows_native_frame"] = json!(true);
+            }
+            assert_eq!(after, expected);
 
             let mut normal = Harness::new();
             super::restore_preferences(&mut normal.app, Some(&stored_ui), Some(&after), false);
@@ -2191,6 +2205,20 @@ mod msaa_tests {
             assert_eq!(normal.app.preferences.graphics_adapter, "Selected GPU");
             assert_eq!(normal.app.preferences.display_quality, "fine", "normal startup still restores UI settings");
         }
+    }
+
+    /// Preferences shows the window's frame as `graphics.json` keeps it (Preferences > Layout; the
+    /// start-up choice itself: `startup::tests::the_window_frame_is_chosen_from_graphics_json_before_the_window_opens`).
+    #[test]
+    fn preferences_show_the_saved_window_frame() {
+        use serde_json::json;
+        let off = json!({"windows_native_frame": false});
+        let mut app = super::SolveApp::new(super::Session::default(), super::Services::default());
+        assert!(app.preferences.windows_native_frame, "on by default");
+        super::restore_graphics_preferences(&mut app, Some(&off));
+        assert!(!app.preferences.windows_native_frame, "Preferences shows the saved choice");
+        super::restore_graphics_preferences(&mut app, None);
+        assert!(app.preferences.windows_native_frame);
     }
 
     #[test]

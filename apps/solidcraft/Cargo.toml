@@ -92,6 +92,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 winreg = "0.56"
+# The vendored winit's choice of the undecorated window's non-client area, made before the window
+# opens (src/native_frame.rs, Preferences > Layout; already in the tree through eframe).
+winit = { version = "0.30", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.21.2", default-features = false }

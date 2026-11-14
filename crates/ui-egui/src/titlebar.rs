@@ -442,4 +442,55 @@ mod tests {
         let cmds = w.gesture(&[p, p + vec2(6.0, 0.0)]);
         assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::BeginResize(_))), "{cmds:?}");
     }
+
+    /// Windows with Preferences > Layout's `windows_native_frame` off: the window procedure still
+    /// answers the resize border, but the title bar is egui's, as before the native caption. No
+    /// layout is published for Windows' hit test (so nothing is `HTCAPTION` or `HTMAXBUTTON`, and
+    /// the window procedure has no caption press to report), and a drag on the bare bar moves the
+    /// window through egui, once past its drag threshold. The same window with the native caption
+    /// is the control: there every frame publishes the bar, the bare bar as Windows' caption and
+    /// the maximize button as Windows' own.
+    ///
+    /// What a frame published is read from the app (`caption_published`), not from the caption
+    /// map: that is one per process, and under `cargo test` the frames of every other test clear it.
+    #[test]
+    fn with_the_earlier_frame_the_title_bar_stays_egui_s() {
+        let starts = |cmds: &[ViewportCommand]| cmds.iter().filter(|c| matches!(c, ViewportCommand::StartDrag)).count();
+        let window = |native_caption: bool| {
+            let mut w = Win::new(1600.0);
+            w.full = true;
+            w.app.home.open = false;
+            w.app.native_resize_border = true;
+            w.app.native_caption = native_caption;
+            w.frame(vec![]);
+            w
+        };
+        let bare = pos2(900.0, 17.0);
+        // The control: with the native caption every frame publishes the bar. The bare bar is a
+        // drag area (HTCAPTION) and the maximize button Windows' (HTMAXBUTTON, snap layouts);
+        // neither is one of the bar's own controls.
+        let mut native = window(true);
+        for _ in 0..3 {
+            native.frame(vec![]);
+            let ppp = native.ctx.pixels_per_point();
+            let px = |p: Pos2| ((p.x * ppp) as i32, (p.y * ppp) as i32);
+            let ((bx, by), (mx, my)) = (px(bare), px(native.caption(Caption::Maximize).center()));
+            let layout = native.app.caption_published.as_ref().expect("the native caption publishes the bar");
+            assert!(layout.drag.iter().any(|r| r.contains(bx, by)), "the bare bar is Windows' caption: {layout:?}");
+            assert!(layout.maximize.as_ref().is_some_and(|r| r.contains(mx, my)), "the maximize button is Windows': {layout:?}");
+            assert!(!layout.interactive.iter().any(|r| r.contains(bx, by) || r.contains(mx, my)), "{layout:?}");
+        }
+        // The earlier frame, frame after frame: nothing is published, so Windows' hit test finds
+        // no caption and no maximize button anywhere.
+        let mut w = window(false);
+        for _ in 0..3 {
+            w.frame(vec![]);
+            assert_eq!(w.app.caption_published, None, "no title bar for Windows' hit test");
+        }
+        // Within egui's drag threshold the window stays; past it, egui starts the move.
+        assert_eq!(starts(&w.gesture(&[bare, bare + vec2(2.0, 0.0)])), 0);
+        w.time += 1.0;
+        let cmds = w.gesture(&[bare, bare + vec2(12.0, 4.0), bare + vec2(30.0, 8.0)]);
+        assert_eq!(starts(&cmds), 1, "{cmds:?}");
+    }
 }

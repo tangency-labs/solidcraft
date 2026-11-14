@@ -114,9 +114,15 @@ SolidCraft changes:
 - `src/event.rs`, `src/changelog/unreleased.md`: the platform notes of both events and the
   changelog entry.
 - `src/platform_impl/windows/event_loop.rs` (`WM_NCCALCSIZE`), `window_state.rs`
-  (`WindowFlags::adjust_rect`): an undecorated window with the undecorated shadow keeps the
+  (`WindowFlags::adjust_rect`): an undecorated window with the undecorated shadow can keep the
   system frame on the left, right and bottom (its invisible resize borders and drop shadow) and
   none at the top. This replaces winit's 1 px non-client row at the top, with which Windows 11
   offered no snap layouts on a restored window's maximize button, although the hit test answered
   `HTMAXBUTTON`. `adjust_rect` grows an inner size by the same frame, so requested and saved
   sizes and DPI changes keep the client area's size.
+- `src/platform/windows.rs` (`set_undecorated_shadow_side_frame`), `window_state.rs`,
+  `platform_impl/windows/mod.rs`: a process-wide switch between the two non-client areas, read
+  in `WM_NCCALCSIZE` and in `adjust_rect`. Off (the default) is winit's own calculation, so
+  anything built on this copy is unchanged until it opts in; SolidCraft sets it once, before its
+  window is created, from Preferences > Layout's `windows_native_frame` (eframe builds the
+  window's attributes, so there is no per-window route).

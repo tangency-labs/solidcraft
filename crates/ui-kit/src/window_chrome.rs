@@ -11,16 +11,18 @@
 //!
 //! The resize zones are as wide as Windows' own resize border at the window's scale
 //! ([`resize_border_px`]), corners win where they overlap the edges ([`resize_hit`]). An app that
-//! answers the system's hit test itself (SolidCraft's `apps/solidcraft/src/native_frame.rs`) keeps
-//! the system's own frame for the left, right and bottom edges and uses the zones for the top
-//! edge, so the OS shows its resize cursors and resizes from the first frame; elsewhere egui zones
-//! above everything else start an OS resize ([`resize_zones`]). The web build has neither.
+//! answers the system's hit test itself (SolidCraft's `apps/solidcraft/src/native_frame.rs`) uses
+//! them there, so the OS shows its resize cursors and resizes from the first frame: for every edge,
+//! or, with the system's own frame kept on the left, right and bottom, for the top edge only.
+//! Elsewhere egui zones above everything else start an OS resize ([`resize_zones`]). The web build
+//! has neither.
 //!
-//! Such an app also answers the hit test from the bar's layout, which the UI publishes every frame
-//! ([`publish_caption`]): the bare bar is the caption, so Windows drags the window from the first
-//! pixel, and the maximize button is the OS's, so hovering it shows Windows 11's snap layouts. A
-//! right-click on the bare bar asks for the window menu ([`open_window_menu`]), and a press the OS
-//! takes on the frame closes the UI's menus as a press outside them would ([`window_frame_pressed`]).
+//! With the system's frame kept, such an app can also answer the hit test from the bar's layout,
+//! which the UI publishes every frame ([`publish_caption`]): the bare bar is the caption, so
+//! Windows drags the window from the first pixel, and the maximize button is the OS's, so hovering
+//! it shows Windows 11's snap layouts. A right-click on the bare bar asks for the window menu
+//! ([`open_window_menu`]), and a press the OS takes on the frame closes the UI's menus as a press
+//! outside them would ([`window_frame_pressed`]).
 //!
 //! Nothing here knows an app's state: closing is a [`WindowAction::Close`] the app answers (it may
 //! ask about unsaved work first).
@@ -350,6 +352,8 @@ pub fn resize_zones(ui: &mut Ui) {
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+pub use solidcraft_frame::caption::CaptionLayout;
+
 static CAPTION: std::sync::LazyLock<solidcraft_frame::CaptionMap> = std::sync::LazyLock::new(solidcraft_frame::CaptionMap::new);
 static CAPTION_CTX: std::sync::OnceLock<egui::Context> = std::sync::OnceLock::new();
 static MAX_HOVER: AtomicBool = AtomicBool::new(false);
@@ -384,15 +388,16 @@ const MAX_RECTS: usize = solidcraft_frame::caption::MAX_INTERACTIVE;
 
 /// Publish this frame's title bar layout. Call at the end of the frame, after everything that can
 /// lie over the bar (menus, popups, windows) is laid out. `native` is false where the OS doesn't
-/// ask the map (no native frame): the map is then cleared.
-pub fn publish_caption(ctx: &egui::Context, native: bool) {
+/// ask the map (no native frame): the map is then cleared. The layout it published, `None` when
+/// it published none.
+pub fn publish_caption(ctx: &egui::Context, native: bool) -> Option<CaptionLayout> {
     let _ = CAPTION_CTX.set(ctx.clone());
     let bar = ctx.data(|d| d.get_temp::<(Rect, u64)>(bar_key())).filter(|(_, pass)| *pass == ctx.cumulative_pass_nr()).map(|(r, _)| r);
     let Some(bar) = bar.filter(|_| native) else {
         if CAPTION.is_published() {
             CAPTION.clear();
         }
-        return;
+        return None;
     };
     let drag_id = Id::unique("titlebar-drag");
     let max_id = caption_id(Caption::Maximize);
@@ -426,7 +431,9 @@ pub fn publish_caption(ctx: &egui::Context, native: bool) {
         )
     };
     let interactive = merge_rects(interactive.into_iter().map(px).collect(), MAX_RECTS);
-    CAPTION.publish(&solidcraft_frame::caption::CaptionLayout { bar: px(bar), drag: vec![px(bar)], interactive, maximize: maximize.map(px) });
+    let layout = CaptionLayout { bar: px(bar), drag: vec![px(bar)], interactive, maximize: maximize.map(px) };
+    CAPTION.publish(&layout);
+    Some(layout)
 }
 
 /// Merge overlapping rectangles, then (while there are more than `max`) the two nearest along x,
@@ -784,6 +791,40 @@ mod tests {
         // A drag from a caption button doesn't move the window.
         let (cmds, _) = w.gesture(&[min, min + vec2(-30.0, 8.0)]);
         assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::StartDrag)), "{cmds:?}");
+    }
+
+    /// The only test here that publishes: the caption map is one per process.
+    #[test]
+    fn publishing_the_caption_returns_the_layout_the_hit_test_then_reads() {
+        use solidcraft_frame::CaptionHit;
+        let ctx = crate::test_support::context();
+        let bar = Rect::from_min_size(Pos2::ZERO, vec2(1200.0, BAR));
+        let own = TitleBar { traffic_lights: false, caption_buttons: true };
+        let frame = |native: bool| {
+            let mut published = None;
+            let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 700.0))), ..Default::default() };
+            let _ = ctx.run_ui(input, |ui| {
+                let _ = own.show(ui, bar, |_, _| {});
+                published = publish_caption(ui.ctx(), native);
+            });
+            published
+        };
+        let ppp = ctx.pixels_per_point();
+        let hit = |p: Pos2| caption_map().hit((p.x * ppp) as i32, (p.y * ppp) as i32);
+        let at = |c: Caption| ctx.read_response(caption_id(c)).map(|r| r.rect.center()).unwrap_or(Pos2::ZERO);
+        // With the native caption the bar laid out this frame is published and returned.
+        let layout = frame(true).expect("the bar laid out this frame is published");
+        assert_eq!(caption_map().bar_and_maximize(), Some((layout.bar, layout.maximize)));
+        assert!(layout.maximize.is_some(), "{layout:?}");
+        assert_eq!(hit(pos2(600.0, BAR / 2.0)), CaptionHit::Drag, "the bare bar is the caption");
+        assert_eq!(hit(at(Caption::Maximize)), CaptionHit::MaximizeButton);
+        assert_eq!(hit(at(Caption::Minimize)), CaptionHit::Client);
+        assert_eq!(hit(at(Caption::Close)), CaptionHit::Client);
+        assert_eq!(hit(pos2(600.0, 300.0)), CaptionHit::Outside);
+        // Without it nothing is published, and the layout published before is forgotten.
+        assert_eq!(frame(false), None);
+        assert!(!caption_map().is_published());
+        assert_eq!(hit(pos2(600.0, BAR / 2.0)), CaptionHit::Outside);
     }
 
     #[test]

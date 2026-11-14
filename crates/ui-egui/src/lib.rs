@@ -815,6 +815,15 @@ pub struct SolveApp {
     /// The OS hit test already offers the resize border ([`titlebar`]; the Windows desktop app),
     /// so no egui resize zones are laid out.
     pub native_resize_border: bool,
+    /// Windows owns the title bar's caption and maximize button, and the frame's presses are
+    /// reported ([`titlebar::publish_caption`]; the Windows desktop app with Preferences > Layout's
+    /// `windows_native_frame` on when it started). Off, the bar is egui's, as before.
+    pub native_caption: bool,
+    /// Tests: the title bar layout the latest frame published for Windows' hit test
+    /// ([`titlebar::publish_caption`]), `None` when it published none. The published map itself is
+    /// one per process, which the frames of every test running in it share.
+    #[cfg(test)]
+    pub(crate) caption_published: Option<window_chrome::CaptionLayout>,
     /// macOS: the traffic lights sit over the application bar's left end.
     pub integrated_titlebar: bool,
     /// The desktop host installed native menus alongside the application bar controls.
@@ -1045,6 +1054,9 @@ impl SolveApp {
             autosave_minutes: 5.0,
             custom_titlebar: false,
             native_resize_border: false,
+            native_caption: false,
+            #[cfg(test)]
+            caption_published: None,
             integrated_titlebar: false,
             native_file_menu: false,
             header: toolbar::HeaderLayout::DESKTOP,
@@ -3732,7 +3744,13 @@ impl SolveApp {
         }
         control::publish_design(self, &control::DOCUMENT_WATCH);
         // Last: everything that can lie over the title bar is laid out by now.
-        titlebar::publish_caption(ui.ctx(), self.custom_titlebar && self.native_resize_border);
+        let published = titlebar::publish_caption(ui.ctx(), self.custom_titlebar && self.native_caption);
+        #[cfg(test)]
+        {
+            self.caption_published = published;
+        }
+        #[cfg(not(test))]
+        let _ = published;
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());

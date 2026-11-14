@@ -245,6 +245,25 @@ impl MouseProperties {
     }
 }
 
+// SolidCraft: which non-client area an undecorated window with the undecorated shadow gets,
+// for the whole process (the app's windows are built by eframe, so there is no per-window route).
+// `false`, the default, is winit's own: a 1 px non-client row at the top. `true` keeps the system
+// frame on the left, right and bottom and none at the top. Read in `WM_NCCALCSIZE` and in
+// `WindowFlags::adjust_rect`; set it before the first window is created
+// (`platform::windows::set_undecorated_shadow_side_frame`).
+static UNDECORATED_SHADOW_SIDE_FRAME: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// SolidCraft: see [`UNDECORATED_SHADOW_SIDE_FRAME`].
+pub(crate) fn set_undecorated_shadow_side_frame(on: bool) {
+    UNDECORATED_SHADOW_SIDE_FRAME.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// SolidCraft: see [`UNDECORATED_SHADOW_SIDE_FRAME`].
+pub(crate) fn undecorated_shadow_side_frame() -> bool {
+    UNDECORATED_SHADOW_SIDE_FRAME.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 impl WindowFlags {
     fn mask(mut self) -> WindowFlags {
         if self.contains(WindowFlags::MARKER_EXCLUSIVE_FULLSCREEN) {
@@ -432,8 +451,10 @@ impl WindowFlags {
 
             // Frameless style implemented by manually overriding the non-client area in
             // `WM_NCCALCSIZE`.
-            // SolidCraft: with the undecorated shadow, that keeps the frame but not its top.
-            let side_frame = !self.contains(WindowFlags::MARKER_DECORATIONS)
+            // SolidCraft: with the undecorated shadow and the side frame chosen
+            // (`undecorated_shadow_side_frame`), that keeps the frame but not its top.
+            let side_frame = undecorated_shadow_side_frame()
+                && !self.contains(WindowFlags::MARKER_DECORATIONS)
                 && self.contains(WindowFlags::MARKER_UNDECORATED_SHADOW);
             let top = rect.top;
             if !self.contains(WindowFlags::MARKER_DECORATIONS) && !side_frame {
