@@ -2161,6 +2161,25 @@ fn a_cylinder_whose_rims_are_splines_of_two_half_circles_keeps_its_wall() {
     assert!(rel(m.volume, volume) < 1e-6, "volume {} vs {volume}", m.volume);
 }
 
+/// `cylinder_rim_off_its_wall` (tests/step-regressions): a cylinder of radius 10 and height 5
+/// whose upper rim is a circle of radius 10.0002, 0.2 um outside the wall, in a file stating
+/// 0.01 um; the rims' vertices are half a turn apart. The wall's seam runs from the lower vertex
+/// up its ruling to the upper rim, split there 0.2 um off the cylinder, so the seam's middle is
+/// 0.1 um off: held to the file's 0.01 um, the wall was left out ("a seam off its surface") and
+/// the part came in as two discs. A seam is as far off as its ends are, and the part reads whole.
+#[test]
+fn a_cylinder_whose_rim_lies_a_little_off_its_wall_keeps_its_wall() {
+    let text = include_str!("../../../../tests/step-regressions/cylinder_rim_off_its_wall.step");
+    let imp = step_import(text).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!imp.warnings.iter().any(|w| w.contains("left out") || w.contains("not imported") || w.contains("as surfaces")), "{:?}", imp.warnings);
+    assert_eq!(imp.bodies.len(), 1);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert_eq!(m.faces, 3);
+    // Between the cylinder's volume and that of one as wide as the upper rim.
+    let (low, high) = (std::f64::consts::PI * 10.0 * 10.0 * 5.0, std::f64::consts::PI * 10.0002 * 10.0002 * 5.0);
+    assert!(m.volume > low * (1.0 - 1e-6) && m.volume < high * (1.0 + 1e-6), "volume {} outside {low}..{high}", m.volume);
+}
+
 /// The volume of the one solid `solidcore_step::topology` reads from `text` into schema 4,
 /// measured as the body of that record.
 pub(super) fn schema_4_volume(text: &str) -> f64 {

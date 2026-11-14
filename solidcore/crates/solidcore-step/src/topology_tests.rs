@@ -639,6 +639,45 @@ fn a_band_narrower_than_its_tolerance_at_a_vertex_gets_its_seam_where_it_is_wide
     }
 }
 
+/// A cylinder band between a rim on the cylinder and one the file has 0.2 um outside it (a rim
+/// written to less than the file's stated 0.01 um), their vertices half a turn apart. The seam
+/// from the lower vertex up its ruling ends on the upper rim where that is split, 0.2 um off the
+/// cylinder, so its middle is 0.1 um off: the face was left out with "a seam off its surface".
+/// A seam is as far off as its ends are, and its tolerance says so.
+#[test]
+fn a_seam_to_a_rim_a_little_off_its_cylinder_is_no_farther_off_than_the_rim() {
+    let mut w = W::default();
+    let (r, off) = (10.0, 2e-4);
+    let v_low = w.vertex([r, 0.0, 0.0]);
+    let low = arc_about_z(&mut w, (v_low, v_low), r, 0.0);
+    let v_high = w.vertex([-(r + off), 0.0, 5.0]);
+    let k = w.circle([0.0, 0.0, 5.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], r + off);
+    let high = w.add(format!("EDGE_CURVE('',#{v_high},#{v_high},#{k},.T.)"));
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let cylinder = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+    let (x, y) = (w.oe(low, true), w.oe(high, false));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let face = w.face(&[bx, by], cylinder, true);
+    let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('band',(#{open}))"));
+    let s = one_solid(&w.file_with_uncertainty(&[model], 1e-5));
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    // The seam: the one edge from the lower rim's height to the upper's (the halves of the
+    // upper rim, split where the seam ends, also join two vertices), its tolerance covering
+    // its gap.
+    let seams: Vec<_> = s
+        .brep
+        .edges
+        .iter()
+        .filter(|e| {
+            let [a, b] = e.vertices.map(|v| s.brep.vertices[v as usize].point);
+            (a[2] - b[2]).abs() > 4.0
+        })
+        .collect();
+    let [seam] = seams.as_slice() else { panic!("{} edges between the rims", seams.len()) };
+    assert!(seam.tolerance >= 0.5 * off && seam.tolerance < 10.0 * off, "{}", seam.tolerance);
+}
+
 /// A spherical band (a dome with a ring of holes round a centre one) between a circle at its foot
 /// and one round its top, both with their vertex at angle 0, and a hole straddling that angle
 /// between them. The meridian through both vertices crosses the hole, so a seam there cut it in
