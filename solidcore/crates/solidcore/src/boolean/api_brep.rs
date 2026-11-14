@@ -204,14 +204,9 @@ enum MergeMethod {
     NonManifold,
 }
 
-/// The body shared by the two-B-rep entry points after validation: build the merge
-/// (`SmMerge sMerge(*pContext, pBrep1, pBrep2)`, or with `0, 0, &sOptions` when
-/// `options` is given), then run `ManifoldBoolean` when both operands are manifold
-/// solids (`SmBrep::IsManifoldSolid`) and `NonManifoldBoolean` otherwise.
 /// One edge of a boolean operand, as [`glue_self_touching_edges`] compares them: its
-/// vertices (the lower index first), its shell, its faces, its curve's kind and three
-/// points along it (the kind and points only for an edge that shares its vertices with
-/// another).
+/// vertices (the lower index first), its shell, its faces and its curve's kind (the shell,
+/// faces and kind only for an edge that shares its vertices with another).
 struct TouchingEdge {
     edge: EdgeId,
     start: crate::topology::VertexId,
@@ -219,64 +214,109 @@ struct TouchingEdge {
     shell: Option<crate::topology::ShellId>,
     faces: Vec<crate::topology::FaceId>,
     kind: Option<core::mem::Discriminant<crate::curve::curve::p2::CurveKind>>,
-    samples: [crate::Point3; 3],
 }
 
 impl TouchingEdge {
-    /// Whether `other` is a second copy of this edge: the same vertices and curve kind,
-    /// points within `tol`, both on faces (not wires), and no face in common (two faces
-    /// meeting across the line, the kernel's crack edges, are not copies). The shells may
-    /// differ: the record round trip leaves a solid touching itself in two shells joined
-    /// along the line, and the kernel shares one edge between shells that touch.
-    fn is_copy_of(&self, other: &Self, tol: f64) -> bool {
-        if self.shell.is_none()
-            || other.shell.is_none()
-            || self.ends != other.ends
-            || self.kind.is_none()
-            || self.kind != other.kind
-            || self.faces.iter().any(|f| other.faces.contains(f))
-        {
-            return false;
-        }
-        if self.start == other.start {
-            self.samples
-                .iter()
-                .zip(&other.samples)
-                .all(|(a, c)| a.distance(*c) <= tol)
-        } else {
-            self.samples
-                .iter()
-                .zip(other.samples.iter().rev())
-                .all(|(a, c)| a.distance(*c) <= tol)
-        }
+    /// Whether `other` may be a second copy of this edge, before its geometry is compared:
+    /// the same vertices and curve kind, both on faces (not wires), and no face in common
+    /// (two faces meeting across the line, the kernel's crack edges, are not copies). The
+    /// shells may differ: the record round trip leaves a solid touching itself in two shells
+    /// joined along the line, and the kernel shares one edge between shells that touch.
+    fn may_copy(&self, other: &Self) -> bool {
+        self.shell.is_some()
+            && other.shell.is_some()
+            && self.ends == other.ends
+            && self.kind.is_some()
+            && self.kind == other.kind
+            && !self.faces.iter().any(|f| other.faces.contains(f))
     }
 }
 
-/// Not upstream (opt-in, `Kernel::fixes.boolean_glues_self_touching_edges`, WR-754): the
-/// coincident edges along which a solid touches itself, glued back into one edge each.
+/// Not upstream: a bound `d` such that every point of curve `a` over `ia` is within `d` of a
+/// point of curve `b` over `ib` and every point of `b` over `ib` within `d` of a point of `a`
+/// over `ia` (their Hausdorff distance), every rounding of computing it included; `None` when
+/// no bound is certain for the pair, which then is not glued.
+///
+/// - Two lines: each edge is the segment between its curve's points at its interval's ends
+///   ([`Line::segment_over`](crate::curve::line::Line::segment_over), each end with the error
+///   bound of its coordinates). With the ends paired either way round, the distance between
+///   `(1 - s) a0 + s a1` and `(1 - s) b0 + s b1` is at most `(1 - s)|a0 - b0| + s|a1 - b1|`
+///   (the triangle inequality), so at most the larger end distance at every `s`: both
+///   segments lie within it of each other. The pairing with the smaller bound is taken; each
+///   end's coordinate error `e` moves it by at most `sqrt(3) e < 2 e`.
+/// - Two B-splines (no other kind: their evaluation is their NURB's) on the same interval,
+///   inside both NURBs' domains: at every parameter of the NURBs' common domain the two are
+///   within [`certified_distance`](crate::nurbs::crv_deviation::certified_distance) of each
+///   other, so each edge's point at `t` is within it of the other's point at the same `t`.
+///   Rational and 2D NURBs, and NURBs on different domains, have no bound.
+/// - Every other pair: no bound.
+fn coincidence_bound(
+    a: &crate::curve::curve::p2::Curve,
+    ia: &crate::geom::extent1d::Extent1d,
+    b: &crate::curve::curve::p2::Curve,
+    ib: &crate::geom::extent1d::Extent1d,
+) -> Option<f64> {
+    use crate::curve::curve::p2::CurveKind;
+    use crate::nurbs::crv_deviation::{certified_distance, norm_up};
+    use crate::nurbs::math::gamma;
+
+    match (a.kind(), b.kind()) {
+        (CurveKind::Line(la), CurveKind::Line(lb)) => {
+            let [(a0, ea0), (a1, ea1)] = la.segment_over(ia)?;
+            let [(b0, eb0), (b1, eb1)] = lb.segment_over(ib)?;
+            let dist =
+                |p: crate::Point3, q: crate::Point3| norm_up(p.x - q.x, p.y - q.y, p.z - q.z);
+            let along = dist(a0, b0)?.max(dist(a1, b1)?);
+            let across = dist(a0, b1)?.max(dist(a1, b0)?);
+            let err = 2.0 * (ea0.max(ea1) + eb0.max(eb1));
+            let bound = (along.min(across) + err) * (1.0 + gamma(2));
+            bound.is_finite().then_some(bound)
+        }
+        (CurveKind::BSpline(ca), CurveKind::BSpline(cb)) => {
+            if ia != ib {
+                return None;
+            }
+            let (na, nb) = (ca.nurb_ref().ok()?, cb.nurb_ref().ok()?);
+            let inside = |n: &crate::nurbs::crv_basic::Curve| {
+                matches!(
+                    (n.knots().first(), n.knots().last()),
+                    (Some(&lo), Some(&hi)) if lo <= ia.min() && ia.max() <= hi
+                )
+            };
+            if !(inside(na) && inside(nb)) {
+                return None;
+            }
+            certified_distance(na, nb).ok()
+        }
+        _ => None,
+    }
+}
+
+/// Not upstream (WR-754): the coincident edges along which a solid touches itself, glued back
+/// into one edge each.
 ///
 /// A solid touching itself along a line (a hole's bottom meeting two pocket walls along a
-/// segment of their corner edge) is one edge of four faces in the kernel's own results, and
-/// its merge handles that form. The record format writes such an edge as one edge per face
-/// pair (`split_touching`), and the merge of an operand in that form gives a body that is not
-/// a closed solid, or fails in `topology_intersector::p1::relate`
-/// (tangency-labs/solidcraft#12785). So each group of edges with the same two vertices, the
-/// same curve kind and coincident points (three samples within the B-rep tolerance), whose
-/// faces are all distinct, is glued into its first edge (`GlueEdgesGeneral`, no gap, with
+/// segment of their corner edge) is one edge of four faces in the form the merge handles. The
+/// record format writes such an edge as one edge per face pair (`split_touching`), and the
+/// merge of an operand in that form gives a body that is not a closed solid, or
+/// fails in `topology_intersector::p1::relate` (1001). So each group of edges with the same
+/// two vertices and curve kind, whose faces are all distinct and whose curves are proved
+/// within the B-rep tolerance of each other over their whole intervals
+/// ([`coincidence_bound`]: a bound over the whole edge, never samples; a pair with no bound,
+/// or a NaN, is not glued), is glued into its first edge (`GlueEdgesGeneral`, no gap, with
 /// region nesting), whether the copies lie in one shell or in two shells that touch along the
-/// line (the round trip leaves a self-touching solid in two). Edges whose faces repeat (a face
-/// on both sides of the line: the kernel's crack edges, which its check refuses glued) are
-/// left alone. Returns the number of edges glued away.
+/// line (the round trip leaves a self-touching solid in two). Edges whose faces repeat (a
+/// face on both sides of the line: the kernel's crack edges, which its check refuses glued)
+/// are left alone. Returns the number of edges glued away.
 ///
 /// The edges are bucketed by their vertex pair; only a bucket of two or more edges has its
-/// curves evaluated and its pairs compared, so a body without self-touch costs one pass over
-/// its edges.
+/// pairs compared, so a body without self-touch costs one pass over its edges.
 ///
 /// # Errors
 ///
-/// Those of the topology walk, the curve evaluations and `GlueEdgesGeneral`.
+/// Those of the topology walk and of `GlueEdgesGeneral`.
 fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{BTreeMap, BTreeSet};
 
     use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use crate::topology::brep::p2::ArenaNotifyState;
@@ -285,9 +325,9 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
     use crate::topology::edgeuse::p1 as eu1;
 
     let tol = b.tolerance();
-    // Every edge with two vertices, by vertex pair.
+    // Every edge with a curve and two vertices, by vertex pair.
     let mut touches: Vec<TouchingEdge> = Vec::new();
-    let mut buckets: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
+    let mut buckets: BTreeMap<(u32, u32), Vec<usize>> = BTreeMap::new();
     for &e in b.edge_list() {
         let data = b.edge(e)?;
         if data.curve.is_none() {
@@ -312,12 +352,10 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
             shell: None,
             faces: Vec::new(),
             kind: None,
-            samples: [crate::Point3::ZERO; 3],
         });
     }
-    let mut crowded: Vec<Vec<usize>> = buckets.into_values().filter(|v| v.len() > 1).collect();
-    crowded.sort_unstable();
-    // The shells, faces, curve kinds and points of the edges that share their vertices.
+    let crowded: Vec<Vec<usize>> = buckets.into_values().filter(|v| v.len() > 1).collect();
+    // The shells, faces and curve kinds of the edges that share their vertices.
     for &i in crowded.iter().flatten() {
         let Some(touch) = touches.get_mut(i) else {
             continue;
@@ -326,10 +364,6 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
         let Some(curve) = data.curve.as_ref() else {
             continue;
         };
-        let interval = data.interval;
-        for (s, t) in touch.samples.iter_mut().zip([0.25, 0.5, 0.75]) {
-            *s = curve.evaluate_point(k, interval.evaluate(t))?;
-        }
         touch.kind = Some(core::mem::discriminant(curve.kind()));
         for &eu in &data.edgeuses {
             let Some(fu) = eu1::faceuse(b, eu)? else {
@@ -345,8 +379,17 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
         touch.faces.sort_unstable();
         touch.faces.dedup();
     }
+    // Whether the two edges' curves are proved within `tol` of each other.
+    let coincide = |b: &Brep, x: EdgeId, y: EdgeId| -> Result<bool> {
+        let (dx, dy) = (b.edge(x)?, b.edge(y)?);
+        let (Some(cx), Some(cy)) = (dx.curve.as_ref(), dy.curve.as_ref()) else {
+            return Ok(false);
+        };
+        // written so that a NaN bound or tolerance refuses
+        Ok(coincidence_bound(cx, &dx.interval, cy, &dy.interval).is_some_and(|d| d <= tol))
+    };
     let mut pairs: Vec<(EdgeId, EdgeId, OrientType)> = Vec::new();
-    let mut taken: HashSet<EdgeId> = HashSet::new();
+    let mut taken: BTreeSet<EdgeId> = BTreeSet::new();
     for bucket in &crowded {
         for (n, &i) in bucket.iter().enumerate() {
             let Some(first) = touches.get(i) else {
@@ -359,7 +402,10 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
                 let Some(other) = touches.get(j) else {
                     continue;
                 };
-                if taken.contains(&other.edge) || !first.is_copy_of(other, tol) {
+                if taken.contains(&other.edge)
+                    || !first.may_copy(other)
+                    || !coincide(b, first.edge, other.edge)?
+                {
                     continue;
                 }
                 let orientation = if first.start == other.start {
@@ -399,6 +445,10 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
     Ok(pairs.len())
 }
 
+/// The body shared by the two-B-rep entry points after validation: build the merge
+/// (`SmMerge sMerge(*pContext, pBrep1, pBrep2)`, or with `0, 0, &sOptions` when
+/// `options` is given), then run `ManifoldBoolean` when both operands are manifold
+/// solids (`SmBrep::IsManifoldSolid`) and `NonManifoldBoolean` otherwise.
 fn merge_boolean(
     k: &mut Kernel,
     brep1: Brep,
@@ -423,11 +473,9 @@ fn merge_boolean_by(
     // SmMerge sMerge(*pContext, pBrep1, pBrep2) (or 0, 0, &sOptions): tolerance and
     // angle 0, both computed by the constructor.
     use crate::boolean::merge::p3::BooleanDriver;
-    // (not upstream, opt-in: WR-754) the operands' self-touch edge copies glued first
-    if k.fixes.boolean_glues_self_touching_edges {
-        glue_self_touching_edges(k, &mut brep1)?;
-        glue_self_touching_edges(k, &mut brep2)?;
-    }
+    // (not upstream: WR-754) the operands' self-touch edge copies glued first
+    glue_self_touching_edges(k, &mut brep1)?;
+    glue_self_touching_edges(k, &mut brep2)?;
     // (not upstream) the driver carries the operands' attributes through the merge, as
     // upstream's live on the objects the merge edits
     let mut driver = crate::boolean::merge::p3::DependencyMerge::carrying_attributes();
@@ -815,6 +863,103 @@ pub fn tessellate_boundaries(
 mod tests {
     use super::*;
     use crate::geom::context::MarkType;
+
+    /// A geometry curve over a cubic NURB on `knots` with the control points `pts`.
+    fn cubic(pts: &[[f64; 3]], knots: Vec<f64>) -> crate::curve::curve::p2::Curve {
+        use crate::curve::curve::p2::{Curve, CurveKind};
+        use crate::nurbs::b_spline_curve::p1::BSplineCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let pw = pts
+            .iter()
+            .map(|p| CPoint::new(p[0], p[1], p[2], NOW))
+            .collect();
+        let nurb = crate::nurbs::crv_basic::Curve::new(pw, 3, knots).unwrap();
+        Curve::new(CurveKind::BSpline(BSplineCurve::from_nurb(nurb, 3, false)))
+    }
+
+    fn segment(a: [f64; 3], z: [f64; 3]) -> crate::curve::curve::p2::Curve {
+        use crate::curve::curve::p2::{Curve, CurveKind};
+        let p = |v: [f64; 3]| crate::math::Point3::new(v[0], v[1], v[2]);
+        Curve::new(CurveKind::Line(crate::curve::line::Line::from_points(
+            p(a),
+            p(z),
+            3,
+        )))
+    }
+
+    /// Two lines between the same ends, either way round, are within rounding of each other;
+    /// a line whose far end is 3e-6 off is bounded by at least that (the bound is sound) and
+    /// barely more (it is tight), so with a tolerance of 1e-6 it is not glued.
+    #[test]
+    fn the_coincidence_bound_of_two_lines_is_their_end_distance() {
+        let ivl = crate::geom::extent1d::Extent1d::from_min_max(0.0, 1.0);
+        let a = segment([1.0, 2.0, 3.0], [11.0, 2.0, 3.0]);
+        let same = segment([1.0, 2.0, 3.0], [11.0, 2.0, 3.0]);
+        let reversed = segment([11.0, 2.0, 3.0], [1.0, 2.0, 3.0]);
+        for b in [&same, &reversed] {
+            let d = coincidence_bound(&a, &ivl, b, &ivl).unwrap();
+            assert!(d <= 1e-13, "{d}");
+        }
+        let off = segment([1.0, 2.0, 3.0], [11.0, 2.0 + 3e-6, 3.0]);
+        let d = coincidence_bound(&a, &ivl, &off, &ivl).unwrap();
+        assert!((3e-6..=3e-6 + 1e-13).contains(&d), "{d}");
+        assert!(d > 1e-6);
+        // a NaN end has no bound
+        let nan = segment([1.0, 2.0, 3.0], [f64::NAN, 2.0, 3.0]);
+        assert!(coincidence_bound(&a, &ivl, &nan, &ivl).is_none());
+    }
+
+    /// The real defect three samples miss: two cubics between the same ends, one straight and
+    /// one with a bump of 1e-4 confined to its first eighth (one control point lifted, whose
+    /// basis function vanishes outside [0, 1/8]). At t = 1/4, 1/2 and 3/4 they agree exactly,
+    /// which the sampled check accepted; the bound over the whole span is at least the bump's
+    /// height there, so the pair is not glued. A copy of the straight cubic is within the bound's rounding allowance.
+    #[test]
+    fn a_bump_between_the_samples_is_not_coincident() {
+        let knots = vec![
+            0.0, 0.0, 0.0, 0.0, 0.0625, 0.125, 0.1875, 0.25, 0.5, 0.75, 1.0, 1.0, 1.0, 1.0,
+        ];
+        // the Greville abscissae, so the straight cubic is the line x = 10 t
+        let greville: Vec<f64> = (0..10)
+            .map(|i| (knots[i + 1] + knots[i + 2] + knots[i + 3]) / 3.0)
+            .collect();
+        let straight: Vec<[f64; 3]> = greville.iter().map(|&g| [10.0 * g, 0.0, 0.0]).collect();
+        let mut bumped = straight.clone();
+        bumped[1][1] = 1e-4;
+        let (a, b) = (
+            cubic(&straight, knots.clone()),
+            cubic(&bumped, knots.clone()),
+        );
+        let k = Kernel::default();
+        for t in [0.25, 0.5, 0.75] {
+            let (p, q) = (
+                a.evaluate_point(&k, t).unwrap(),
+                b.evaluate_point(&k, t).unwrap(),
+            );
+            assert_eq!(p.distance(q), 0.0, "t = {t}");
+        }
+        let peak = (0..=1000)
+            .map(|i| {
+                let t = 0.125 * f64::from(i) / 1000.0;
+                a.evaluate_point(&k, t)
+                    .unwrap()
+                    .distance(b.evaluate_point(&k, t).unwrap())
+            })
+            .fold(0.0, f64::max);
+        let ivl = crate::geom::extent1d::Extent1d::from_min_max(0.0, 1.0);
+        let d = coincidence_bound(&a, &ivl, &b, &ivl).unwrap();
+        assert!(peak > 1e-5 && d >= peak, "bound {d}, peak {peak}");
+        assert!(d > 1e-6);
+        let copy = cubic(&straight, knots.clone());
+        let d = coincidence_bound(&a, &ivl, &copy, &ivl).unwrap();
+        // the hull bound charges the rounding of its refinement and elevation
+        assert!(d <= 1e-11, "{d}");
+        // on different intervals, or a line against a cubic, there is no bound
+        let half = crate::geom::extent1d::Extent1d::from_min_max(0.0, 0.5);
+        assert!(coincidence_bound(&a, &ivl, &copy, &half).is_none());
+        let line = segment([0.0; 3], [10.0, 0.0, 0.0]);
+        assert!(coincidence_bound(&a, &ivl, &line, &ivl).is_none());
+    }
 
     /// `TestSmTessellateBoundaries` (`tests/SM_API_test/src/TestSmBrep.cpp:1328`): a
     /// box's 12 edges are 2 points each; an edge without curve has none and makes the
