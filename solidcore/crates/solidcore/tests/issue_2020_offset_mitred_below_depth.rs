@@ -211,11 +211,9 @@ fn flags_off_build_the_depths_above_the_floor() {
 /// SolidCraft's `UpstreamFixes` preset (183 flags).
 fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.analytic_copy_keeps_parameterization = true;
-    k.fixes.boolean2d_plane_covers_far_faces = true;
     k.fixes.boolean_cleanup_removes_slits = true;
     k.fixes.boolean_new_face_closure_both_sides = true;
     k.fixes.boolean_outer_shell_first = true;
-    k.fixes.boolean_skips_faces_apart = true;
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.box_face_failures_propagate = true;
@@ -234,7 +232,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.extrusion_origin_scaled_zero = true;
     k.fixes.face_tight_box_searches_trim = true;
-    k.fixes.fillet_3x2_mixed_concave_side_edge = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_chamfer_cone_stored_as_cone = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
@@ -243,7 +240,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
     k.fixes.fillet_mitre_gap_patch = true;
-    k.fixes.fillet_nx1_opposite_continuation_side_edge = true;
     k.fixes.fillet_nx1_tangent_side_edge = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_point_step_per_point = true;

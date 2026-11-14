@@ -98,7 +98,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.nurb_cylinder_inside_out_frame = true;
     f.local_operation_refuses_loose_tangent_edges = true;
     f.torus_major_radius_from_origin = true;
-    f.fillet_nx1_opposite_continuation_side_edge = true;
     f.torus_iso_circle_axis_from_midpoint = true;
     f.internal_pole_row_through_knot = true;
     f.extrusion_origin_scaled_zero = true;
@@ -125,7 +124,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_extension_from_base = true;
     f.fillet_cleanup_keeps_target_faces = true;
     f.fillet_nx1_tangent_side_edge = true;
-    f.fillet_3x2_mixed_concave_side_edge = true;
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.shell_empty_cavity_fails = true;
@@ -133,12 +131,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_trace_tangent_curves_once = true;
     f.ssi_singular_start_inside_direction = true;
     f.found_torus_sphere_keep_tested_nurb = true;
-    f.boolean_skips_faces_apart = true;
     f.local_operation_box_holds_new_surfaces = true;
     f.shell_edges_on_analytics_exact = true;
     f.ssi_pole_point_keeps_its_tangent = true;
     f.fillet_patch_keeps_fillet_edges = true;
-    f.boolean2d_plane_covers_far_faces = true;
     f.boolean_splits_definition_across_split = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
@@ -200,10 +196,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.drop_curve_v_domain_degeneracy = true;
     f.mirror_curve_keeps_euclidean_control_points = true;
     f.dupin_bottom_hyperbola_axis = true;
-    f.twist_simple_duw_sign = true;
     f.offset_swap_uv_extended_distance = true;
     f.validation_does_not_make_uv_trims = true;
-    f.analytic_corner_failure_is_false = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
     f.bspline_trim_keeps_rational_end_spans = true;
@@ -236,7 +230,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_round_as_definition = true;
     f.fillet_overflow_crease_along_edge = true;
     f.keep_exact_pcurves = true;
-    f.planar_section_face_tolerance = true;
     f.face_swap_uv_transposes_trims = true;
     f.closed_smooth_pole_tangent_limit = true;
     // Held back: see `HELD_BACK`.

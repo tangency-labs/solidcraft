@@ -38,6 +38,7 @@ pub mod blend_surface;
 pub mod body;
 pub mod boolean;
 pub mod cancel;
+pub mod cap;
 pub mod cell_grid;
 pub mod check;
 pub mod contact;
@@ -87,7 +88,7 @@ pub use error::{
 };
 pub use measure::{
     point_distance, Distance, EdgePoint, EdgeRayPoint, FaceCentroid, GapSample,
-    MassPropertiesEstimate, Normal, PointClass,
+    MassPropertiesEstimate, Normal, PointClass, SquareFaceLevel,
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;

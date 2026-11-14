@@ -18,8 +18,8 @@ use crate::schema::edit::{
     TimelineUngroupParams, TimelineUngrouped,
 };
 use crate::schema::select::{
-    PartialPick, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem, SelectMode, SelectSetParams,
-    SelectSetResult, read_item,
+    PartialPick, SameLookParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem, SelectMode,
+    SelectSetParams, SelectSetResult, read_item,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
@@ -215,13 +215,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&SELECT_CLEAR_CONTRACT)
         .output(output_schema_for::<SelectClearResult>),
-    CommandSpec::new("select.same_look", "Select Same Look", select_same_look).icon("select").noundo().doc_only()
+    CommandSpec::new("select.same_look", "Select Same Look", crate::checked!("select.same_look", select_same_look))
+        .icon("select")
+        .noundo()
+        .doc_only()
+        .contract(&SAME_LOOK_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>)
         .params("body?: world body name, face?: face index; defaults to the current body/face selection → selects objects using the resolved appearance"),
 ];
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
 const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
+const SAME_LOOK_CONTRACT: TypedContract<SameLookParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<TimelineRenameParams> = TypedContract::new();
@@ -1504,6 +1510,13 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if nf.kind.face_points() != f.kind.face_points() || f.kind.face_point_fields().iter().any(|path| sets_path(set, path)) {
         nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component)?;
     }
+    // A new To or From Object pick measures against the placements shown now (#16732).
+    if let (FeatureKind::Extrude { extent: a, .. }, FeatureKind::Extrude { extent: b, .. }) = (&nf.kind, &f.kind)
+        && (a.to != b.to || a.from != b.from)
+    {
+        let before = s.model.state_before(id);
+        super::component::pin_picked_placements_in(s, &mut nf.kind, nf.component, &before);
+    }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
     }
@@ -1616,13 +1629,7 @@ fn select_filter(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Request {
-        body: Option<String>,
-        face: Option<usize>,
-    }
-    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("select.same_look", e.to_string()))?;
+    let request: SameLookParams = serde_json::from_value(p.clone()).map_err(|e| bad("select.same_look", e.to_string()))?;
     let selected = s.selection.last();
     let name = request
         .body
@@ -2166,6 +2173,17 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("old_surface_start").or_insert_with(|| json!(true));
+    }
+    // The Hole window sends no tolerance class: an edit that gives none keeps the hole's while its
+    // new thread takes it, and drops it with a size that doesn't (#16336).
+    if let FeatureKind::Hole { thread_class: Some(class), .. } = &old.kind
+        && cid == "solid.hole"
+        && let Some(parameters) = params.as_object_mut()
+        && !parameters.contains_key("thread_class")
+        && let Some(tapped) = parameters.get("thread").and_then(Value::as_str).and_then(solidcraft_doc::parse_tapped_thread)
+        && tapped.check_class(class).is_ok()
+    {
+        parameters.insert("thread_class".into(), json!(class));
     }
     // Members keep their names through an edit, unless it gives them another name.
     if let FeatureKind::FrameMember { names, body_name, .. } = &old.kind

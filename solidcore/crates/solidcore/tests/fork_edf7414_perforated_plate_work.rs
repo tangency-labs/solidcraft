@@ -8,18 +8,19 @@
 //!
 //! The fork's test checked a ratio of times (`t256 <= 8 t64 + 0.1`), which tripped under
 //! load. It now counts the work (`SmWorkCounters`, here [`Kernel::work_counters`]) and
-//! prints the time without checking it. With `boolean_skips_faces_apart` the holes' boxes
+//! prints the time without checking it. With WR-527's box tests the holes' boxes
 //! lie apart, so the unions pair no faces, and the cut pairs the plate's one face with each
 //! hole: k^2 face pairs, 64 and 256, four times the pairs for four times the holes. Each
 //! hole imprinted in the plate lies outside the other holes' boxes, so no inner loop is
-//! classified: 0 and 0. With that box test switched off the same run classifies
-//! 4032 = 64 x 63 and 65280 = 256 x 255 loops, the n^2 the count is there to catch (the
-//! fork's numbers and the port's). With the flag off (upstream) the port also pairs every
-//! face, 2080 = 64 x 65 / 2 and 32896 = 256 x 257 / 2 pairs, so the test fails. The plate
+//! classified: 0 and 0. Without that box test (the fork before edf7414, and this port
+//! before it became the only path) the same run classified 4032 = 64 x 63 and
+//! 65280 = 256 x 255 loops, the n^2 the count is there to catch. Upstream also pairs every face, 2080 = 64 x 65 / 2 and
+//! 32896 = 256 x 257 / 2 pairs, which this test refuses. The plate
 //! keeps its exact area either way.
 //!
 //! Not the fork's: the same plate as a solid, 12 thick, with its holes cut in 3D by one
-//! `boolean_lists` call (`plate_cut_marks_one_face_for_each_face_it_deletes`).
+//! `boolean_lists` call (`plate_cut_marks_one_face_for_each_face_it_deletes`,
+//! `plate_cut_solves_no_proto_vertex_that_has_proto_edges`).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -84,7 +85,6 @@ fn plate(k: &mut Kernel, w: f64) -> Brep {
 /// and its inner loops classified (none), and returns the face pairs.
 fn plate_pairs(n: u32) -> u64 {
     let mut k = Kernel::default();
-    k.fixes.boolean_skips_faces_apart = true;
     let t0 = Instant::now();
     k.work_counters.reset();
     let mut holes = Vec::new();
@@ -177,7 +177,6 @@ fn plate_and_hole_curves(k: &mut Kernel, n: u32) -> (Vec<Curve>, f64) {
 fn plate_in_one_call_walks(n: u32) -> u64 {
     let mut k = Kernel::new(&solidcore::kernel::KernelOptions::default());
     k.memoize_curve_caches = true; // the count is the shortcut's, whatever `curve-memo-off` says
-    k.fixes.boolean_skips_faces_apart = true;
     let (curves, w) = plate_and_hole_curves(&mut k, n);
     let t0 = Instant::now();
     k.work_counters.reset();
@@ -376,8 +375,9 @@ fn an_extruded_plate_walks_each_hole_a_fixed_number_of_times() {
 /// The solid plate, 12 thick, minus `n` x `n` cylinders r 4 through it on the 20 mm
 /// pitch, in one `boolean_lists` call with SolidCraft's fixes: checks the cut (a wall
 /// for each hole, three edges for each hole, the exact volume) and returns the faces its
-/// shell traversals marked.
-fn plate_cut_traversal_faces(n: u32) -> u64 {
+/// shell traversals marked and the point solves it ran of a proto vertex against a proto
+/// edge.
+fn plate_cut_counts(n: u32) -> (u64, u64) {
     let mut fixes = UpstreamFixes::all();
     fixes.fillet_refuse_rounds_breaking_through = false;
     fixes.fillet_round_ends_on_outline = false;
@@ -401,6 +401,7 @@ fn plate_cut_traversal_faces(n: u32) -> u64 {
         .unwrap()
         .breps;
     let marked = k.work_counters.shell_traversal_faces();
+    let solves = k.work_counters.proto_vertex_point_solves();
     assert_eq!(cut.len(), 1);
     let cut = &mut cut[0];
     assert_eq!(p1::faces(cut, None).unwrap().len(), holes + 6);
@@ -409,11 +410,12 @@ fn plate_cut_traversal_faces(n: u32) -> u64 {
     let exact = w * w * thick - holes as f64 * PI * radius * radius * thick;
     println!("plate minus {holes} cylinders: volume {volume:.6}, exact {exact:.6}");
     println!("  {marked} faces marked by shell traversals");
+    println!("  {solves} point solves of a proto vertex against a proto edge");
     assert!(
         (volume - exact).abs() <= 1e-6 * exact,
         "volume {volume}, exact {exact}"
     );
-    marked
+    (marked, solves)
 }
 
 /// The cut deletes the two discs each cylinder cuts out of the plate's top and bottom,
@@ -423,6 +425,18 @@ fn plate_cut_traversal_faces(n: u32) -> u64 {
 /// (7/2) N^2 + (23/2) N faces: 2475 for 25 holes and 36150 for 100.
 #[test]
 fn plate_cut_marks_one_face_for_each_face_it_deletes() {
-    let marked = (plate_cut_traversal_faces(5), plate_cut_traversal_faces(10));
+    let marked = (plate_cut_counts(5).0, plate_cut_counts(10).0);
     assert_eq!(marked, (2 * 25, 2 * 100));
+}
+
+/// Each cylinder meets the plate's top and bottom in a circle: a closed proto edge that
+/// starts and ends at its one proto vertex, 2 N of each for N holes. The boolean removes
+/// a proto vertex lying on a proto edge only when it has no proto edges of its own, and
+/// here every proto vertex has one, so nothing can be removed and no point solve is
+/// needed: 0 and 0. Solving each proto vertex against every other proto edge ran
+/// 4 N^2 - 2 N solves: 2450 for 25 holes and 39800 for 100.
+#[test]
+fn plate_cut_solves_no_proto_vertex_that_has_proto_edges() {
+    let solves = (plate_cut_counts(5).1, plate_cut_counts(10).1);
+    assert_eq!(solves, (0, 0));
 }

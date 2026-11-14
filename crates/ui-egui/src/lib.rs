@@ -3900,6 +3900,8 @@ impl SolveApp {
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
         if render_workspace::active(self) {
+            // The model view is not drawn, so no shown dimension can be double-clicked.
+            dim_view::set_model_drawn(Vec::new());
             render_workspace::show(self, ui);
         } else {
             viewport::show(self, ui);

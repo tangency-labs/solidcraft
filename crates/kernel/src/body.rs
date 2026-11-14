@@ -1434,6 +1434,22 @@ impl Body {
         }
     }
 
+    /// Where face `face_index` lies along `direction` when it is a plane square to it: its level
+    /// from `origin` and the face's own tolerance ([`solidcore_ops::Body::face_square_level`]),
+    /// exact, no mesh. `None` for a face that is not, a mesh body, an index out of range or a
+    /// direction or origin that is not usable; `Err` for the kernel's failure.
+    pub fn face_square_level(&self, face_index: usize, direction: Vec3, origin: Vec3) -> Result<Option<solidcore_ops::SquareFaceLevel>> {
+        let Some((body, order)) = self.ops_body() else { return Ok(None) };
+        if face_index >= self.record.faces.len() {
+            return Ok(None);
+        }
+        match body.face_square_level(order, face_index, [direction.x, direction.y, direction.z], [origin.x, origin.y, origin.z]) {
+            Ok(found) => Ok(found),
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(e) => Err(KernelError::Failed(format!("face square level: {e}"))),
+        }
+    }
+
     /// [`Body::classify_point`] for each of `points`, in order, through one classification of
     /// the body: SMLib's copy of it and its search structures are made once for all the points,
     /// where a call a point makes them again each time (on a large body far more work than a
