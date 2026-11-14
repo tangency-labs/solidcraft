@@ -124,7 +124,8 @@ pub static COMMANDS: &[CommandSpec] = &[
              appearance?: library name or stable starter.* ID (appearance.library) | color: \"#rrggbb\" or [r, g, b] (0–255), opacity? (0–1, default 1); \
              name?: inert copied look label (requires color, mutually exclusive with appearance); pbr?: {metallic:0..1, roughness:0.045..1, dielectric_ior:1..3} (requires color/appearance and opacity 1); a starter ID or registered starter name resolves its recipe before color overrides; omitted pbr retains that response and pbr: null explicitly clears it. Unavailable glass recipes refuse through either selector. Other custom labels with an explicit color retain legacy scalar behavior. Neither appearance nor color (or color: null): clear, so the face follows its body, the body its component, the component its material",
     ),
-    CommandSpec::new("appearance.copy", "Copy Look", appearance_gestures::copy).icon("copy").noundo().key("Ctrl+Alt+C")
+    CommandSpec::new("appearance.copy", "Copy Look", crate::checked!("appearance.copy", appearance_gestures::copy)).icon("copy").noundo().key("Ctrl+Alt+C")
+        .contract(&COPY_CONTRACT).output(crate::schema::output_schema_for::<AppearanceCopyResult>)
         .params("target: appearance.chain target. Copies its resolved look to a transient session clipboard. No document change or dialogs."),
     CommandSpec::new("appearance.paste", "Paste Look", appearance_gestures::paste).icon("paste").key("Ctrl+Alt+V")
         .params("bodies/faces/components: appearance.assign targets. Applies the copied look atomically in one undo step; no dialogs."),
@@ -844,14 +845,15 @@ pub(crate) fn color_param(v: &Value) -> Option<[u8; 3]> {
 }
 
 use crate::schema::appearance::{
-    AppearanceAssignParams, AppearanceAssignResult, AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult,
-    BodyLooks, ComponentLookReply, FaceIndexLook, FaceLookReply, FaceSpot, LibraryAppearance, LookInDesign, LookReply, PbrReply, PlainAppearance,
-    StarterAppearance,
+    AppearanceAssignParams, AppearanceAssignResult, AppearanceCopyParams, AppearanceCopyResult, AppearanceLibraryParams, AppearanceLibraryResult,
+    AppearanceListParams, AppearanceListResult, BodyLooks, ComponentLookReply, FaceIndexLook, FaceLookReply, FaceSpot, LibraryAppearance,
+    LookInDesign, LookReply, PbrReply, PlainAppearance, StarterAppearance,
 };
 
 const ASSIGN_CONTRACT: TypedContract<AppearanceAssignParams> = TypedContract::new();
 const LIBRARY_CONTRACT: TypedContract<AppearanceLibraryParams> = TypedContract::new();
 const LIST_CONTRACT: TypedContract<AppearanceListParams> = TypedContract::new();
+const COPY_CONTRACT: TypedContract<AppearanceCopyParams> = TypedContract::new();
 
 /// An appearance command's reply, built from its schema's type so the two can't drift apart.
 fn appearance_reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {

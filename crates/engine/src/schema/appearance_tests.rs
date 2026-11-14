@@ -1,8 +1,9 @@
 use serde_json::{Value, json};
 
 use super::{
-    AppearanceAssignParams, AppearanceAssignResult, AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult,
-    AppearancePaintParams, AppearancePaintResult, AppearancePickUpParams, AppearancePickUpResult, ChainTarget,
+    AppearanceAssignParams, AppearanceAssignResult, AppearanceCopyParams, AppearanceCopyResult, AppearanceLibraryParams, AppearanceLibraryResult,
+    AppearanceListParams, AppearanceListResult, AppearancePaintParams, AppearancePaintResult, AppearancePickUpParams, AppearancePickUpResult,
+    ChainTarget,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -203,4 +204,73 @@ fn the_gestures_answer_with_their_schemas() {
     assert_eq!(warned["look"]["color"], "#ff0000", "{warned}");
     assert!(warned["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{warned}");
     matches(output_schema_for::<AppearancePaintResult>(), "appearance.paint", &warned);
+}
+
+/// Copying a look from a body and from one of its faces, in Warn: the look is the object the
+/// pick-up answers with, the reply matches the published output schema, and what was copied is what
+/// `appearance.paste` applies. The published input schema says the target is required, because a
+/// copy has no ask-the-UI form.
+#[test]
+fn a_copied_look_answers_with_its_schema() {
+    assert_keys(input_schema_for::<AppearanceCopyParams>(), &["target"]);
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    let matches = |schema: schemars::Schema, id: &str, reply: &Value| {
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, reply), "{id}: {reply} doesn't match {schema}");
+    };
+    let described = run("engine.describe", json!({"command": "appearance.copy"}));
+    assert_eq!(described["input"]["required"], json!(["target"]), "a copy always names a target");
+    assert_eq!(described["input"]["additionalProperties"], false);
+    let made = run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]}));
+    let body = made["created_bodies"][0].as_str().unwrap_or_default().to_string();
+    let pbr = json!({"metallic": 0.2, "roughness": 0.3, "dielectric_ior": 1.6});
+    run("appearance.assign", json!({"bodies": [body], "color": "#345678", "name": "Copied", "pbr": pbr.clone()}));
+    let copied = run("appearance.copy", json!({"target": {"body": body}}));
+    assert_eq!(copied["look"], json!({"name": "Copied", "color": "#345678", "opacity": 1.0, "pbr": pbr}), "{copied}");
+    assert!(copied.get("param_warnings").is_none(), "{copied}");
+    matches(output_schema_for::<AppearanceCopyResult>(), "appearance.copy", &copied);
+    // A face of that body reads the same look, and the clipboard is what paste applies.
+    let face = run("appearance.copy", json!({"target": {"body": body, "face": 0}}));
+    assert_eq!(face, copied, "a face with no look of its own follows its body");
+    let other = run("solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [20, 0, 0]}));
+    let other = other["created_bodies"][0].as_str().unwrap_or_default().to_string();
+    run("appearance.paste", json!({"bodies": [other]}));
+    let pasted = run("appearance.pick_up", json!({"target": {"body": other}}));
+    assert_eq!(pasted["look"], copied["look"], "pasting applies the copied look");
+    // A key the command doesn't take is a warning, not a refusal: the chain ignores it, as it does
+    // with the pick-up.
+    let warned = run("appearance.copy", json!({"target": {"body": body}, "targt": 1}));
+    assert_eq!(warned["look"], copied["look"], "{warned}");
+    assert!(warned["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{warned}");
+    matches(output_schema_for::<AppearanceCopyResult>(), "appearance.copy", &warned);
+}
+
+/// A target the chain can't read keeps the chain's own message with the check off and in warn, which
+/// is what it has always been; in strict the contract answers first and names the command that was
+/// called. That is the one difference, and it is the same one #16481 documents for
+/// `appearance.pick_up`.
+#[test]
+fn copy_refusals_stay_the_chains_below_strict() {
+    let error = |p: Value, level: ParamCheck| {
+        let mut s = Session { param_check: level, ..Session::default() };
+        s.execute("appearance.copy", &p).err().map(|e| e.to_string())
+    };
+    for (target, message) in [
+        (json!([]), "give one target object"),
+        (json!({"body": "Box1", "face": "front"}), "face must be a zero-based unsigned index"),
+        (json!({"body": "Box1", "other": 1}), "target must be {body}, {body, face}, or {component}"),
+    ] {
+        let p = json!({"target": target});
+        for level in [ParamCheck::Off, ParamCheck::Warn] {
+            assert_eq!(error(p.clone(), level), bad_params("appearance.chain", message), "{p}");
+        }
+        // The schema reads the target the same way, so only the command it names changes.
+        assert_eq!(error(p.clone(), ParamCheck::Strict), bad_params("appearance.copy", message), "{p}");
+    }
+    // No target at all: refused at every level, by the chain below strict and by the schema in it.
+    for level in [ParamCheck::Off, ParamCheck::Warn] {
+        assert_eq!(error(json!({}), level), bad_params("appearance.chain", "give one target object"));
+    }
+    assert_eq!(error(json!({}), ParamCheck::Strict), bad_params("appearance.copy", "`target` is required"));
 }
