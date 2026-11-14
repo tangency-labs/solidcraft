@@ -1,0 +1,32 @@
+{
+  "en": {
+    "Relief": "Relief",
+    "Straight": "Straight",
+    "Obround": "Obround"
+  },
+  "ar": {
+    "Relief": "التخفيف",
+    "Straight": "مستقيم",
+    "Obround": "مستدير الأطراف"
+  },
+  "he": {
+    "Relief": "הקלה",
+    "Straight": "ישר",
+    "Obround": "סגלגל"
+  },
+  "ja": {
+    "Relief": "逃げ",
+    "Straight": "直線",
+    "Obround": "長円"
+  },
+  "vi": {
+    "Relief": "Rãnh giảm ứng suất",
+    "Straight": "Thẳng",
+    "Obround": "Bầu dục"
+  },
+  "zh": {
+    "Relief": "让位",
+    "Straight": "直线",
+    "Obround": "长圆"
+  }
+}

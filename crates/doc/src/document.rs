@@ -676,6 +676,32 @@ pub struct FlangeSegment {
     /// direction and `Some(true)` the other one, whatever the feature's `flip` is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flip: Option<bool>,
+    /// The relief this segment asks for where it ends, at the junction with the next stretch of
+    /// the edge (`sheet`'s `JunctionRelief`). Left out: no relief, and the junction builds as
+    /// designs had it before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relief: Option<FlangeRelief>,
+}
+
+/// The bend relief a segment asks for at the junction after it: a notch `width` across the
+/// junction, cut `depth` into the base past the deeper of the two bend lines, out to the nearer
+/// far edge (`sheet.flange`'s `segments[].relief`). The build refuses the feature when the notch
+/// cannot be cut where the segment stands; it never clamps one.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(deny_unknown_fields)]
+pub struct FlangeRelief {
+    /// `straight`, `rectangular`, `obround`, `tear` or `notch` (`sheet::ReliefShape`); a `round` is
+    /// refused at a junction.
+    pub shape: String,
+    /// How far across the junction the notch is (mm); the rule's `relief_width` where left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Segment relief width")]
+    pub width: Option<Expr>,
+    /// How far past the deeper bend line the notch reaches into the base (mm); the rule's
+    /// `relief_depth` where left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Segment relief depth")]
+    pub depth: Option<Expr>,
 }
 
 impl Serialize for FlangeEdge {

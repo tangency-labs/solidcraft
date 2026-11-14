@@ -260,6 +260,14 @@ fn flange_edges(s: &Session, p: &Value, cmd: &str) -> Result<Vec<FlangeEdge>> {
                     check_expr(s, e, kind, cmd, &format!("edges[{i}].segments[{j}].{k}"))?;
                 }
             }
+            // A junction relief's width and depth are lengths of this segment's own.
+            if let Some(relief) = &seg.relief {
+                for (k, e) in [("width", &relief.width), ("depth", &relief.depth)] {
+                    if let Some(e) = e {
+                        check_expr(s, e, Kind::Length, cmd, &format!("edges[{i}].segments[{j}].relief.{k}"))?;
+                    }
+                }
+            }
         }
         edges.push(edge);
     }
@@ -312,7 +320,7 @@ pub(crate) fn flange_edge(i: usize, v: &Value) -> std::result::Result<FlangeEdge
 /// still has there, so they are read here; the angle and height expressions are checked by the
 /// handler. Every refusal says which segment it is about, never clamps a value.
 pub(crate) fn flange_segments(i: usize, v: &Value) -> std::result::Result<Vec<FlangeSegment>, String> {
-    let list = format!("edges[{i}].segments must list segments {{from, to, angle?, height?, flip?}}");
+    let list = format!("edges[{i}].segments must list segments {{from, to, angle?, height?, flip?, relief?}}");
     let a = v.as_array().ok_or_else(|| list.clone())?;
     if a.is_empty() || a.len() > MAX_SEGMENTS {
         return Err(format!("edges[{i}].segments must list 1…{MAX_SEGMENTS} segments"));
@@ -321,8 +329,8 @@ pub(crate) fn flange_segments(i: usize, v: &Value) -> std::result::Result<Vec<Fl
     let mut last_to = 0.0;
     for (j, seg) in a.iter().enumerate() {
         let o = seg.as_object().ok_or_else(|| format!("edges[{i}].segments[{j}]: {list}"))?;
-        if let Some(k) = o.keys().find(|k| !matches!(k.as_str(), "from" | "to" | "angle" | "height" | "flip")) {
-            return Err(format!("edges[{i}].segments[{j}]: unknown key `{k}` (a segment takes from, to, angle, height and flip)"));
+        if let Some(k) = o.keys().find(|k| !matches!(k.as_str(), "from" | "to" | "angle" | "height" | "flip" | "relief")) {
+            return Err(format!("edges[{i}].segments[{j}]: unknown key `{k}` (a segment takes from, to, angle, height, flip and relief)"));
         }
         let fraction = |k: &str| -> std::result::Result<f64, String> {
             o.get(k)
@@ -354,8 +362,45 @@ pub(crate) fn flange_segments(i: usize, v: &Value) -> std::result::Result<Vec<Fl
         };
         let angle = own("angle")?;
         let height = own("height")?;
+        // The relief this segment asks for at the junction after it. Its shape is read here so an
+        // unknown one is refused with the segment named; its width and depth are expressions, and
+        // the handler checks what they are.
+        let relief = match o.get("relief").filter(|v| !v.is_null()) {
+            None => None,
+            Some(v) => {
+                let r = v.as_object().ok_or_else(|| format!("edges[{i}].segments[{j}].relief must be {{shape, width?, depth?}}"))?;
+                if let Some(k) = r.keys().find(|k| !matches!(k.as_str(), "shape" | "width" | "depth")) {
+                    return Err(format!("edges[{i}].segments[{j}].relief: unknown key `{k}` (a relief takes shape, width and depth)"));
+                }
+                let shape = match r.get("shape") {
+                    None | Some(Value::Null) => {
+                        return Err(format!("edges[{i}].segments[{j}].relief needs a shape (straight, rectangular, obround, tear or notch)"));
+                    }
+                    Some(Value::String(shape)) => shape.clone(),
+                    Some(_) => return Err(format!("edges[{i}].segments[{j}].relief.shape must be straight, rectangular, obround, tear or notch")),
+                };
+                // Refused here, where the segment is known, rather than at the build: neither name is
+                // one a junction takes.
+                if !solidcraft_doc::sheet::ReliefShape::JUNCTION.contains(&shape.trim().to_ascii_lowercase().as_str()) {
+                    if shape.trim().eq_ignore_ascii_case("round") {
+                        return Err(format!(
+                            "edges[{i}].segments[{j}].relief.shape: a round relief is a closed hole and does not part the junction; use obround with a depth of half its width"
+                        ));
+                    }
+                    return Err(format!("edges[{i}].segments[{j}].relief.shape must be straight, rectangular, obround, tear or notch"));
+                }
+                let length = |k: &str| -> std::result::Result<Option<solidcraft_doc::Expr>, String> {
+                    if r.get(k).is_none_or(Value::is_null) {
+                        return Ok(None);
+                    }
+                    expr(v, k).map(Some).ok_or_else(|| format!("edges[{i}].segments[{j}].relief: `{k}` {}", expr_problem(r.get(k))))
+                };
+                let (width, depth) = (length("width")?, length("depth")?);
+                Some(solidcraft_doc::FlangeRelief { shape, width, depth })
+            }
+        };
         last_to = to;
-        out.push(FlangeSegment { from, to, angle, height, flip });
+        out.push(FlangeSegment { from, to, angle, height, flip, relief });
     }
     if (last_to - 1.0).abs() > sheet::SEGMENT_JOIN_EPS {
         let n = out.len() - 1;

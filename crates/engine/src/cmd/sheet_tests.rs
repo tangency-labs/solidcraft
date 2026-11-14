@@ -7188,12 +7188,12 @@ fn flange_segments_refuse_what_is_not_a_partition() {
             json!({"type":"base","sketch":"Base","segments":[{"from":0,"to":1}]}),
             "segments is only for edge flanges (a base or contour flange has no edge to divide)",
         ),
-        (edge(json!("x")), "edges[0].segments must list segments {from, to, angle?, height?, flip?}"),
+        (edge(json!("x")), "edges[0].segments must list segments {from, to, angle?, height?, flip?, relief?}"),
         (edge(json!([])), "edges[0].segments must list 1…64 segments"),
         (edge(Value::Array(many)), "edges[0].segments must list 1…64 segments"),
         (
             edge(json!([{"from":0,"to":0.5,"radius":"1 mm"},{"from":0.5,"to":1}])),
-            "edges[0].segments[0]: unknown key `radius` (a segment takes from, to, angle, height and flip)",
+            "edges[0].segments[0]: unknown key `radius` (a segment takes from, to, angle, height, flip and relief)",
         ),
         (edge(json!([{"to":0.5},{"from":0.5,"to":1}])), "edges[0].segments[0].from must be a fraction from 0 to 1"),
         (edge(json!([{"from":-0.1,"to":0.5},{"from":0.5,"to":1}])), "edges[0].segments[0].from must be a fraction from 0 to 1"),
@@ -7248,6 +7248,62 @@ fn flange_segments_refuse_what_is_not_a_partition() {
         )
         .unwrap_err();
     assert_eq!(error.to_string(), "not supported yet: segments on a curved edge (pick a straight edge of the sheet)");
+}
+
+/// Every way a junction relief can be wrong is refused with a message naming the edge and segment,
+/// and the design stays as it was: a relief is a request for a manufacturable flat pattern, so one
+/// that cannot be cut refuses the feature rather than shipping an unrelieved part (FR-13).
+#[test]
+fn flange_segment_reliefs_refuse_what_cannot_be_cut() {
+    let mut s = Session::default();
+    al2_base(&mut s);
+    let before = s.doc.to_json();
+    // A right-angle edge of the 200 mm side: 90° bends both, so the same-bend merge is exercised by
+    // the plain pair, and the narrow stretch by the third case.
+    let edge = |segments: Value| json!({"type":"edge","edges":[{"point":[100,0,2],"segments":segments}],"height":"20 mm","angle":"90 deg"});
+    let pair = |relief: Value| {
+        json!([{"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","relief":relief},
+               {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm"}])
+    };
+    for (params, want) in [
+        (edge(pair(json!({"width":"2 mm"}))), "edges[0].segments[0].relief needs a shape (straight, rectangular, obround, tear or notch)"),
+        (edge(pair(json!({"shape":"square"}))), "edges[0].segments[0].relief.shape must be straight, rectangular, obround, tear or notch"),
+        (
+            edge(pair(json!({"shape":"round"}))),
+            "edges[0].segments[0].relief.shape: a round relief is a closed hole and does not part the junction; use obround with a depth of half its width",
+        ),
+        (edge(pair(json!({"shape":"straight","width":"0.005 mm"}))), "edges[0].segments[0].relief.width 0.005 mm is below 0.01 mm"),
+        (edge(pair(json!({"shape":"straight","depth":"-1 mm"}))), "edges[0].segments[0].relief.depth must be at least 0"),
+        (
+            edge(json!([{"from":0,"to":0.5,"angle":"90 deg","height":"20 mm"},
+                        {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm","relief":{"shape":"straight"}}])),
+            "edges[0].segments[1].relief: the last segment of an edge has no junction after it (put the relief on the segment that ends at the junction)",
+        ),
+        (
+            edge(json!([{"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","relief":{"shape":"straight"}},
+                        {"from":0.5,"to":1,"angle":"90 deg","height":"20 mm"}])),
+            "edges[0].segments[0].relief: segments 1 and 2 are one bend (same angle, height and side), so there is no junction after segment 1",
+        ),
+        (
+            edge(pair(json!({"shape":"straight","depth":"100 mm"}))),
+            "edges[0].segments[0].relief: a depth of 100.000 mm is deeper than the material inboard of the junction (97.000 mm)",
+        ),
+        (
+            edge(pair(json!({"shape":"obround","depth":"0.5 mm"}))),
+            "edges[0].segments[0].relief: an obround relief needs a depth of at least half its width (1.000 mm)",
+        ),
+        (
+            edge(json!([{"from":0,"to":0.9925,"angle":"90 deg","height":"20 mm","relief":{"shape":"straight","width":"4 mm"}},
+                        {"from":0.9925,"to":1,"angle":"90 deg","height":"15 mm"}])),
+            "edges[0].segments[0].relief is 4.000 mm wide, wider than segment 2 (1.500 mm); make the segment wider or the relief narrower",
+        ),
+    ] {
+        let error = s.execute("sheet.flange", &params).unwrap_err();
+        let text = error.to_string();
+        let msg = text.strip_prefix("invalid parameters for `sheet.flange`: ").unwrap_or(&text);
+        assert_eq!(msg, want, "{params}");
+        assert_eq!(s.doc.to_json(), before, "{params}: the design is unchanged");
+    }
 }
 
 /// The spec's example: three segments (90°/20 mm, 90°/15 mm, 45°/15 mm) on one edge. Three bends,
@@ -7803,7 +7859,7 @@ fn flange_segments_a_sliver_only_edge_builds_the_whole_edge() {
             let solidcraft_doc::FeatureKind::SheetFlange { edges, .. } = &mut f.kind else { continue };
             for e in edges.iter_mut() {
                 if !e.segments.is_empty() {
-                    let at = |from: f64, to: f64| solidcraft_doc::FlangeSegment { from, to, angle: None, height: None, flip: None };
+                    let at = |from: f64, to: f64| solidcraft_doc::FlangeSegment { from, to, angle: None, height: None, flip: None, relief: None };
                     e.segments = vec![at(0.0, 2.5e-10), at(2.5e-10, 5e-10), at(5e-10, 7.5e-10), at(7.5e-10, 1e-9)];
                 }
             }
@@ -7863,7 +7919,7 @@ fn flange_segments_stored_bounds_outside_the_partition_are_refused() {
                     if !e.segments.is_empty() {
                         e.segments = list
                             .iter()
-                            .map(|&(from, to)| solidcraft_doc::FlangeSegment { from, to, angle: None, height: None, flip: None })
+                            .map(|&(from, to)| solidcraft_doc::FlangeSegment { from, to, angle: None, height: None, flip: None, relief: None })
                             .collect();
                     }
                 }

@@ -55,6 +55,10 @@ const ANGLE_DISPLAY_LABELS: [&str; 2] = ["Bend", "Included"];
 /// Which way a further bend turns, against the bend before it.
 const BEND_WAY_LABELS: [&str; 2] = ["Same way", "Other way"];
 const FLANGE_RELIEF_LABELS: [&str; 5] = ["Rule", "Notch", "Round", "Rectangular", "Tear"];
+/// The junction reliefs a segment offers (`sheet.flange`'s `segments[].relief.shape`) and their
+/// labels. Index 0 is no relief, which the dialog writes as no `relief` key at all.
+const SEGMENT_RELIEFS: [&str; 6] = ["", "notch", "straight", "rectangular", "obround", "tear"];
+const SEGMENT_RELIEF_LABELS: [&str; 6] = ["None", "Notch", "Straight", "Rectangular", "Obround", "Tear"];
 
 /// One stretch of a picked edge in the Flange dialog: `from`…`to` as fractions of the stretch the
 /// sheet still has of the edge, and the stretch's own angle, height and side (text, as typed).
@@ -72,6 +76,10 @@ pub struct SegmentRow {
     /// Whether its `from` and `to` are the dialog's own equal stretches rather than the design's:
     /// adding another stretch redistributes these, and a restored list never does.
     pub equal: bool,
+    /// The relief this stretch asks for at the junction after it: the shape's index into
+    /// `SEGMENT_RELIEFS` (0: none, written as no `relief` at all), and its own width and depth (as
+    /// typed; empty follows the rule). Kept on the segment whose end is the junction.
+    pub relief: Option<(usize, String, String)>,
 }
 
 crate::dialog_descriptor::dialog_descriptors! {
@@ -345,15 +353,49 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                                 row.equal &= !changed;
                                 enter |= expr_row(ui, &format!("Segment {part} angle"), &mut row.angle);
                                 enter |= expr_row(ui, &format!("Segment {part} height"), &mut row.height);
-                                // The stretch's own side: the feature's, or the other one. A side the
-                                // design spelled out (even the feature's) stays as it was until this
-                                // choice is moved off the one it shows.
+                                // The stretch's own side and the relief at the junction after it, on one
+                                // row: a four-stretch edge still fits the dialog's page without
+                                // scrolling, and a scenario click lands on a field rather than on a
+                                // clipped one. A side the design spelled out (even the feature's)
+                                // stays as it was until this choice is moved off the one it shows.
                                 let mut way = usize::from(matches!(row.flip, Some(f) if f != *flip));
-                                choice_row(ui, &format!("Segment {part} turns"), &format!("sm_segment_way_{n}_{m}"), &mut way, &BEND_WAY_LABELS);
+                                let mut relief = row.relief.clone().unwrap_or((0, String::new(), String::new()));
+                                crate::ui_kit::row(ui, &format!("Segment {part} turns"), |ui| {
+                                    ui.columns(2, |cols| {
+                                        crate::ui_kit::dropdown(&mut cols[0], &format!("sm_segment_way_{n}_{m}"), &mut way, &BEND_WAY_LABELS);
+                                        crate::ui_kit::dropdown(
+                                            &mut cols[1],
+                                            &format!("sm_segment_relief_{n}_{m}"),
+                                            &mut relief.0,
+                                            &SEGMENT_RELIEF_LABELS,
+                                        );
+                                    });
+                                });
                                 if way == 1 {
                                     row.flip = Some(!*flip);
                                 } else if row.flip == Some(!*flip) {
                                     row.flip = None;
+                                }
+                                // A relief's own width and depth (empty follows the rule) appear
+                                // only once a shape is chosen, so the common case adds no rows.
+                                if SEGMENT_RELIEFS.get(relief.0).is_some_and(|s| s.is_empty()) {
+                                    row.relief = None;
+                                } else {
+                                    let (e, _) = crate::ui_kit::text_row(
+                                        ui,
+                                        &format!("Segment {part} relief width"),
+                                        &mut relief.1,
+                                        solidcraft_ui_text::tr_label("from the rule"),
+                                    );
+                                    enter |= e;
+                                    let (e, _) = crate::ui_kit::text_row(
+                                        ui,
+                                        &format!("Segment {part} relief depth"),
+                                        &mut relief.2,
+                                        solidcraft_ui_text::tr_label("from the rule"),
+                                    );
+                                    enter |= e;
+                                    row.relief = Some(relief);
                                 }
                             }
                             if let Some(m) = drop {
@@ -733,6 +775,19 @@ fn flange_edges_segmented(inputs: &[SelInput], own: &[(Vec3, String, String)], s
                 if let Some(f) = row.flip {
                     seg["flip"] = json!(f);
                 }
+                // A relief only where the shape is not None: no key, no relief.
+                if let Some((shape, width, depth)) = &row.relief
+                    && let Some(name) = SEGMENT_RELIEFS.get(*shape).filter(|s| !s.is_empty())
+                {
+                    let mut r = json!({"shape": name});
+                    if !width.trim().is_empty() {
+                        r["width"] = json!(width.trim());
+                    }
+                    if !depth.trim().is_empty() {
+                        r["depth"] = json!(depth.trim());
+                    }
+                    seg["relief"] = r;
+                }
                 segs.push(seg);
             }
             edge["segments"] = json!(segs);
@@ -772,6 +827,9 @@ fn add_segment(list: &mut Vec<SegmentRow>) {
     list[i].from = format!("{mid}");
     list[i].to = format!("{to}");
     list[i].equal = false;
+    // A relief the split stretch carried stays at its outer end: the new last part, past the
+    // junction the split made.
+    list[i].relief = list[i - 1].relief.take();
 }
 
 /// Take one stretch out of an edge's list and keep the list a partition of the edge: the gap the
@@ -791,6 +849,10 @@ fn remove_segment(list: &mut Vec<SegmentRow>, m: usize) {
         return;
     }
     let fraction = |text: &str| text.trim().parse::<f64>().ok().filter(|x| x.is_finite() && (0.0..=1.0).contains(x));
+    // The relief of the row removed describes the junction at its own end; the row before it takes
+    // that end, so it takes the relief too, as it is: `None` clears the stale one it carried.
+    // Removing the first stretch leaves no row that ends where it did, so its relief goes.
+    let kept_relief = if m > 0 { list.get(m).and_then(|row| row.relief.clone()) } else { None };
     list.remove(m);
     for row in list.iter_mut() {
         row.equal = false;
@@ -823,6 +885,18 @@ fn remove_segment(list: &mut Vec<SegmentRow>, m: usize) {
             row.from = format!("{}", i as f64 / n as f64);
             row.to = format!("{}", (i + 1) as f64 / n as f64);
         }
+    }
+    // The row that took the removed end takes the removed row's relief as it is: `None` included,
+    // so a row that asked for no relief no longer leaves the predecessor's stale one behind.
+    if m > 0
+        && let Some(took) = list.get_mut(m - 1)
+    {
+        took.relief = kept_relief;
+    }
+    // The last stretch ends at the edge's end, where there is no junction to relieve: a relief
+    // there would ask the command for a cut it refuses (R5), so it never stays.
+    if let Some(last) = list.last_mut() {
+        last.relief = None;
     }
     // The stretches cover the whole edge, ends included.
     if let Some(first) = list.first_mut() {
@@ -1053,6 +1127,14 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                             height: x.height.as_deref().map(str::to_string).unwrap_or_default(),
                             flip: x.flip,
                             equal: false,
+                            relief: x.relief.as_ref().map(|r| {
+                                let at = SEGMENT_RELIEFS.iter().position(|s| s.eq_ignore_ascii_case(r.shape.trim())).unwrap_or(0);
+                                (
+                                    at,
+                                    r.width.as_deref().map(str::to_string).unwrap_or_default(),
+                                    r.depth.as_deref().map(str::to_string).unwrap_or_default(),
+                                )
+                            }),
                         })
                         .collect();
                     segments.push((*point, rows));

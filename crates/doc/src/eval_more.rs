@@ -658,9 +658,12 @@ pub(super) fn sheet_eval(
                 };
                 own.push((height, angle));
             }
+            // The rule's values: the bend radius, and the relief width and depth a segment's
+            // relief takes where it names none of its own.
+            let rule_values = sheet_rule_values(doc, vals, st, i)?;
             let rr = match radius {
                 Some(e) => val(vals, e, Kind::Length)?,
-                None => sheet_rule_values(doc, vals, st, i)?.bend_radius,
+                None => rule_values.bend_radius,
             };
             // The corner relief these flanges ask for in place of the rule's.
             let relief = sheet::ReliefOverride {
@@ -688,10 +691,14 @@ pub(super) fn sheet_eval(
             let points: Vec<Vec3> = edges.iter().map(|e| e.point.0).collect();
             let picks = sheet_picks(sh, f, &points, warning);
             let mut each = Vec::with_capacity(edges.len());
+            // The junction relief of every stretch made, in the same order as `each`: an edge that
+            // is not split has no junction of its own.
+            let mut junctions: Vec<Option<sheet::JunctionRelief>> = Vec::with_capacity(edges.len());
             for (k, (e, pick)) in edges.iter().zip(picks).enumerate() {
                 let (height, angle) = own.get(k).copied().unwrap_or((h, a));
                 if e.segments.is_empty() {
                     each.push(sheet::EdgeFlange::at(pick, height, angle, from));
+                    junctions.push(None);
                     continue;
                 }
                 // A segmented edge makes one flange per run of segments that share an angle, a
@@ -701,7 +708,11 @@ pub(super) fn sheet_eval(
                 // ends at its end (1), and each starts where the run before it ends, so the runs
                 // are sorted, contiguous and non-overlapping and every accepted stretch is covered.
                 let (edge_height, edge_angle) = (height, angle);
-                let mut runs: Vec<(f64, f64, f64, f64, bool)> = Vec::new();
+                // (from, to, height, angle, side, the relief the run's last segment asks for)
+                let mut runs: Vec<(f64, f64, f64, f64, bool, Option<sheet::JunctionRelief>)> = Vec::new();
+                // The segment whose relief would relieve the junction at the run's far end, if
+                // any: a junction the next stretch merges across has none, and says so.
+                let mut pending: Option<usize> = None;
                 // The end of the edge the runs made so far cover. A run starts here, never before
                 // it, so the runs are sorted, contiguous and non-overlapping by construction, and
                 // every accepted stretch's coverage is preserved up to the junction tolerance.
@@ -745,6 +756,48 @@ pub(super) fn sheet_eval(
                             "edges[{k}].segments[{j}]: the flange height must be at least {least:.3} mm for this bend"
                         )));
                     }
+                    // The relief this segment asks for at the junction after it: read here, where
+                    // its index is known, so every refusal names the segment the caller wrote.
+                    let asked = match &seg.relief {
+                        None => None,
+                        Some(r) => {
+                            let shape = sheet::ReliefShape::parse(&r.shape).ok_or_else(|| {
+                                DocError::Invalid(format!(
+                                    "edges[{k}].segments[{j}].relief.shape must be straight, rectangular, obround, tear or notch"
+                                ))
+                            })?;
+                            if shape == sheet::ReliefShape::Round {
+                                // A round is a closed hole: on its own it leaves material joining the
+                                // two stretches out to the far edge, so the part still cannot fold.
+                                return Err(DocError::Invalid(format!(
+                                    "edges[{k}].segments[{j}].relief.shape: a round relief is a closed hole and does not part the junction; use obround with a depth of half its width"
+                                )));
+                            }
+                            let width = match &r.width {
+                                Some(x) => val(vals, x, Kind::Length)?,
+                                None => rule_values.relief_width,
+                            };
+                            let depth = match &r.depth {
+                                Some(x) => val(vals, x, Kind::Length)?,
+                                None => rule_values.relief_depth,
+                            };
+                            if !(width >= sheet::MIN_BEND_RELIEF) {
+                                return Err(DocError::Invalid(format!(
+                                    "edges[{k}].segments[{j}].relief.width {width:.3} mm is below {} mm",
+                                    sheet::MIN_BEND_RELIEF
+                                )));
+                            }
+                            if !(depth >= 0.0) {
+                                return Err(DocError::Invalid(format!("edges[{k}].segments[{j}].relief.depth must be at least 0")));
+                            }
+                            if j + 1 == e.segments.len() {
+                                return Err(DocError::Invalid(format!(
+                                    "edges[{k}].segments[{j}].relief: the last segment of an edge has no junction after it (put the relief on the segment that ends at the junction)"
+                                )));
+                            }
+                            Some(sheet::JunctionRelief { shape, width, depth, at: (k, j) })
+                        }
+                    };
                     let side = seg.flip.unwrap_or(*flip);
                     // A junction the command accepts is one the build snaps shut, whether the two
                     // stretches match or not: the next stretch starts where the edge is covered, so
@@ -765,6 +818,15 @@ pub(super) fn sheet_eval(
                         // run exists is covered by the run that follows it, which starts at the
                         // edge's start. Every span the build makes then runs forwards, so none
                         // reaches trimming or the flat pattern reversed.
+                        // A stretch absorbed into the run before it makes no junction of its own,
+                        // and the run it joins now ends past the one it relieved: either way a
+                        // relief there has nothing to cut.
+                        if let Some(p) = pending {
+                            return Err(junction_merged_error(k, p, j));
+                        }
+                        if asked.is_some() {
+                            return Err(junction_merged_error(k, j, j + 1));
+                        }
                         covered = covered.max(seg.to);
                         if let Some(last) = runs.last_mut() {
                             last.1 = covered;
@@ -775,7 +837,11 @@ pub(super) fn sheet_eval(
                         runs.last().is_some_and(|last| (last.2 - height).abs() < 1e-12 && (last.3 - angle).abs() < 1e-12 && last.4 == side);
                     if same_bend {
                         // The same bend carries on: the junction closes and the run takes the
-                        // stretch's end.
+                        // stretch's end. A relief written on the stretch that ends there has no
+                        // junction left to relieve.
+                        if let Some(p) = pending {
+                            return Err(junction_merged_error(k, p, j));
+                        }
                         if let Some(last) = runs.last_mut() {
                             last.1 = seg.to;
                         }
@@ -785,7 +851,16 @@ pub(super) fn sheet_eval(
                         // over stretches absorbed before it: those stretches cannot be bends of
                         // their own, so this run covers them and the edge is covered from 0.
                         let start = if runs.is_empty() { sheet::WHOLE_EDGE.0 } else { start };
-                        runs.push((start, seg.to, height, angle, side));
+                        runs.push((start, seg.to, height, angle, side, None));
+                    }
+                    // The run's far end is this segment's: its relief, if it has one, is the one
+                    // that reliefs the junction there.
+                    pending = asked.map(|_| j);
+                    if let Some(relief) = asked {
+                        let n = runs.len() - 1;
+                        if let Some(last) = runs.get_mut(n) {
+                            last.5 = Some(relief);
+                        }
                     }
                     covered = seg.to;
                 }
@@ -801,7 +876,7 @@ pub(super) fn sheet_eval(
                     // `sheet.flange` (its last `to` must reach the edge's end), but a stored design
                     // can hold one: the edge still builds whole, as the feature's own bend, rather
                     // than losing its flange.
-                    runs.push((sheet::WHOLE_EDGE.0, sheet::WHOLE_EDGE.1, edge_height, edge_angle, *flip));
+                    runs.push((sheet::WHOLE_EDGE.0, sheet::WHOLE_EDGE.1, edge_height, edge_angle, *flip, None));
                 }
                 // The command accepts a last `to` within the junction tolerance of the edge's end;
                 // the end itself is what builds, so snap it, as a merged run snaps the junctions it
@@ -811,12 +886,13 @@ pub(super) fn sheet_eval(
                 {
                     last.1 = sheet::WHOLE_EDGE.1;
                 }
-                for (span_from, span_to, height, angle, side) in runs {
+                for (span_from, span_to, height, angle, side, relief) in runs {
                     each.push(sheet::EdgeFlange { pick, height, angle, from, span: (span_from, span_to), flip: Some(side) });
+                    junctions.push(relief);
                 }
             }
             let n0 = sh.flanges.len();
-            let (_, notes) = sh.add_flanges_each(&each, rr, position, *flip, relief)?;
+            let (_, notes) = sh.add_flanges_relieved(&each, rr, position, *flip, relief, &junctions)?;
             if !notes.is_empty() {
                 let notes = notes.join("; ");
                 *warning = Some(match warning.take() {
@@ -1687,6 +1763,17 @@ impl PrimitivePrism {
             }
         }
     }
+}
+
+/// Why a relief has no junction after the segment that asks for one: the two stretches are one
+/// bend, so the build closes the junction and there is nothing to relieve.
+fn junction_merged_error(k: usize, p: usize, j: usize) -> DocError {
+    DocError::Invalid(format!(
+        "edges[{k}].segments[{p}].relief: segments {} and {} are one bend (same angle, height and side), so there is no junction after segment {}",
+        p + 1,
+        j + 1,
+        p + 1
+    ))
 }
 
 /// The most outline segments of a sketch's text a cut tells letters by, and the most text regions

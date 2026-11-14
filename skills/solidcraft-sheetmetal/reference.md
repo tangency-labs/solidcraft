@@ -86,7 +86,7 @@ An `edges` entry is `[x,y,z]` on a top or bottom edge, `{x,y,z}`, or
 ## The segment contract
 
 `segments` splits one picked edge's bend into stretches. Each is
-`{from, to, angle?, height?, flip?}`; no other key. `from` and `to` are unit-less fractions of the
+`{from, to, angle?, height?, flip?, relief?}`; no other key. `from` and `to` are unit-less fractions of the
 stretch the sheet still has there after cut-outs, `0` one end and `1` the other. A value left out
 falls back to the edge's own value, then the feature's.
 
@@ -114,11 +114,26 @@ falls back to the edge's own value, then the feature's.
   the outline's own direction (counter-clockwise in the flat pattern's coordinates). An
   asymmetric partition therefore depends on it: check `sheet.export_bend_table`'s flat centre
   lines, or keep the partition symmetric, and swap the fractions if the bends land mirrored.
-- **Junctions:** no bend relief is cut where two segments meet and no corner is closed there; the
-  two bends butt along the junction line. Only the outermost segments take part in corner closing
+- **Junctions:** no corner is closed where two segments meet, and by default no bend relief is cut
+  there: the two bends butt along the junction line. A segment may ask for one at the junction
+  after it with `relief`: `{"shape":"straight"|"rectangular"|"obround"|"tear"|"notch",
+  "width"?:length,"depth"?:length}` (rule's `relief_width`/`relief_depth` where left out; `round`
+  is refused as a closed hole that does not part the junction, use `obround` at depth = width/2).
+  Only the segment whose `to` is the junction takes one (never the last of an edge, never a
+  junction the merge closes). The notch is `width` across the junction, centred, from `depth`
+  before the deeper bend line out to the nearer far edge, cut from the parent panel (the base, or
+  the flange the stretches hang off) and both stretches, so the two are parted and joined only
+  through the parent panel `depth` back; `straight` and `rectangular` are the same rectangle,
+  `obround` ends its inner end in a half round, `tear` is the zero-width cut made `depth` deeper,
+  cut whatever the two stretches' sides are, `notch` is none. Half the width must fit the narrower stretch. It shows
+  on `OUTLINE`, never on `CUT`, and shortens both bends in the bend table by half the width. A
+  relief that cannot be cut refuses the feature naming `edges[i].segments[j].relief`; nothing is
+  clamped. Only the outermost segments take part in corner closing
   and end relief. Where the two stretches bend to opposite sides the blank is cut along their
   junction, from the inner bend line out to the nearer stretch's far edge, in the flat pattern and
-  the DXF: a blank joined there cannot fold, one stretch up and the next down. Stretches at
+  the DXF: a blank joined there cannot fold, one stretch up and the next down. Same-side stretches
+  stay joined unless the segment before the junction asks for a `tear`, which cuts the junction's
+  slit there too. Stretches at
   different angles can have different setbacks, depending on the rule's position (`inside` sets
   the bend line back, `outside` does not), so their bend lines can be offset; the cut starts at the
   inner of the two and so covers the strip between them, over which the folded part separates, and
@@ -156,9 +171,9 @@ The refusals are the contract; quote them when a call fails:
 |---|---|
 | `segments` on a base or contour flange | `segments is only for edge flanges (a base or contour flange has no edge to divide)` |
 | `segments` beside `edges` | `` `segments` belongs inside an `edges` item: edges [{point, segments}] `` |
-| not a list | `edges[i].segments must list segments {from, to, angle?, height?, flip?}` |
+| not a list | `edges[i].segments must list segments {from, to, angle?, height?, flip?, relief?}` |
 | count | `edges[i].segments must list 1…64 segments` |
-| unknown key | `edges[i].segments[j]: unknown key k (a segment takes from, to, angle, height and flip)` |
+| unknown key | `edges[i].segments[j]: unknown key k (a segment takes from, to, angle, height, flip and relief)` |
 | fraction missing or out of 0…1 | `edges[i].segments[j].from must be a fraction from 0 to 1` |
 | `to` not above `from` | `edges[i].segments[j].to must be more than its from` |
 | first `from` not 0 | `edges[i].segments[0].from must be 0: the segments cover the whole edge` |
@@ -170,6 +185,17 @@ The refusals are the contract; quote them when a call fails:
 | `then` with `segments` | `not supported yet: then on a segmented edge (bend each segment's far edge in its own feature)` |
 | the Flange dialog's `then` with a split edge | `edge N is split into segments: a split edge takes no `then`; bend each segment's far edge in its own feature` |
 | a split curved edge | `not supported yet: segments on a curved edge (pick a straight edge of the sheet)` |
+| `relief` without a shape | `edges[i].segments[j].relief needs a shape (straight, rectangular, obround, tear or notch)` |
+| unknown relief shape | `edges[i].segments[j].relief.shape must be straight, rectangular, obround, tear or notch` |
+| `round` relief | `edges[i].segments[j].relief.shape: a round relief is a closed hole and does not part the junction; use obround with a depth of half its width` |
+| relief width below 0.01 mm | `edges[i].segments[j].relief.width X mm is below 0.01 mm` |
+| relief on the last segment | `edges[i].segments[j].relief: the last segment of an edge has no junction after it (put the relief on the segment that ends at the junction)` |
+| relief at a junction the merge closes | `edges[i].segments[j].relief: segments a and b are one bend (same angle, height and side), so there is no junction after segment a` |
+| negative depth | `edges[i].segments[j].relief.depth must be at least 0` |
+| depth past the material inboard of the junction | `edges[i].segments[j].relief: a depth of D mm is deeper than the material inboard of the junction (R mm)` |
+| obround too shallow | `edges[i].segments[j].relief: an obround relief needs a depth of at least half its width (W mm)` |
+| width wider than the narrower stretch | `edges[i].segments[j].relief is W mm wide, wider than segment n (L mm); make the segment wider or the relief narrower` |
+| the notch splits the blank | `edges[i].segments[j].relief would cut the sheet apart; reduce its depth` |
 
 ## Bend arithmetic
 
@@ -222,7 +248,10 @@ Before handing a part to a shop, check:
 1. `sheet.flat_pattern`: the flat size fits the stock; the outline and cut-outs are what you
    planned; each bend's length, angle and direction match the plan.
 2. `sheet.export_bend_table {"format":"json"}`: one row per bend, with its flat centre line; the
-   allowances follow from the rule.
+   allowances follow from the rule. A junction relief that removes material (`straight`,
+   `rectangular`, `obround`) shortens both bends of that junction by half its width; `tear` cuts
+   nothing in the flat plane and `notch` is no relief, so neither shortens a bend, and angle,
+   radius and allowance do not change.
 3. `inspect.interference` and `inspect.clearance` against the mating bodies: zero overlap, the
    rule's gap or more.
 4. `sheet.export_dxf`: layers and bend notes; `bend_lines: false` when the cutter would cut them.
