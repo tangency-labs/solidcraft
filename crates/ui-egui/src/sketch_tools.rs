@@ -364,9 +364,12 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         return true;
     }
     if id == "canvas.edit" {
-        // The browser's canvas panel (one panel for canvases).
-        if let Some(first) = app.session.doc.canvases.first().map(|c| c.id) {
-            app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, first, false));
+        // The browser's canvas panel (one panel for canvases). A canvas picked in the Browser
+        // is the one to edit, not just the first one (#16518).
+        let picked = app.tree.picked_canvases.last().copied();
+        let target = picked.or_else(|| app.session.doc.canvases.first().map(|c| c.id));
+        if let Some(c) = target {
+            app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, c, false));
         }
         return false;
     }
