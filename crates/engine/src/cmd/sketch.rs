@@ -19,7 +19,7 @@ use crate::schema::sketch_dimensioned::{DrawDimensionedParams, DrawDimensionedRe
 use crate::schema::sketch_session::{
     Activated, Attachment, ChainParams, ChainResult, ConstructionParams, ConstructionResult, CreateParams, CreateResult, DeleteParams, DeleteResult,
     DimensionTextParams, DimensionTextResult, DragEndParams, DragEndResult, DragParams, DragResult, Frame, MovePointParams, MovePointResult,
-    OptionsParams, OptionsReply, OptionsResult, SketchOptions, SolveParams, SolveResult,
+    MovePointsParams, MovePointsResult, MovedPoint, OptionsParams, OptionsReply, OptionsResult, SketchOptions, SolveParams, SolveResult,
 };
 use crate::schema::sketch_shapes::{
     ArcCenterPointParams, ArcThreePointParams, CircleCenterParams, CircleThreePointParams, CircleTwoPointParams, Created, DrawResult, LineParams,
@@ -58,6 +58,7 @@ const CREATE_CONTRACT: TypedContract<CreateParams> = TypedContract::new();
 const CONSTRUCTION_CONTRACT: TypedContract<ConstructionParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<DeleteParams> = TypedContract::new();
 const MOVE_POINT_CONTRACT: TypedContract<MovePointParams> = TypedContract::new();
+const MOVE_POINTS_CONTRACT: TypedContract<MovePointsParams> = TypedContract::new();
 const DRAG_CONTRACT: TypedContract<DragParams> = TypedContract::new();
 const DRAG_END_CONTRACT: TypedContract<DragEndParams> = TypedContract::new();
 const DIMENSION_TEXT_CONTRACT: TypedContract<DimensionTextParams> = TypedContract::new();
@@ -335,7 +336,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&MOVE_POINT_CONTRACT)
         .output(output_schema_for::<MovePointResult>)
         .params("point: ref, to: [x,y]"),
-    CommandSpec::new("sketch.move_points", "Move Sketch Points", move_points).icon("sketch_move").enabled(in_sketch).params(
+    CommandSpec::new("sketch.move_points", "Move Sketch Points", crate::checked!("sketch.move_points", move_points))
+        .icon("sketch_move")
+        .enabled(in_sketch)
+        .contract(&MOVE_POINTS_CONTRACT)
+        .output(output_schema_for::<MovePointsResult>)
+        .params(
         "moves: [{point: ref | near: [x,y], to: [x,y]}] (each point to its own target; `near`: the sketch point closest to it, \
          refused when none lies within `tolerance` or two are as close), tolerance?: mm (default 0.1); sketch? → moved: \
          [{point, to, at, reached}] (`at`: where it ended up after the one solve; `reached`: whether that is `to`); a point placed by parameter expressions is refused, naming them (unfix it with sketch.constraint.fix first)",
@@ -4367,15 +4373,15 @@ fn move_points(s: &mut Session, p: &Value) -> Result<Value> {
         Ok((picked, left))
     })?;
     let solved = sketch_store::read(&s.doc, id).ok();
-    let moved: Vec<Value> = picked
+    let moved: Vec<MovedPoint> = picked
         .iter()
         .map(|(q, to)| {
             let point = solved.and_then(|sk| sk.points.get(*q)).map(|pt| pt.id.clone());
             let at = solved.and_then(|sk| sk.point(*q));
-            json!({"point": point, "to": [to.x, to.y], "at": at.map(|a| [a.x, a.y]), "reached": at.is_some_and(|a| a.dist(*to) <= 1e-6)})
+            MovedPoint { point, to: [to.x, to.y], at: at.map(|a| [a.x, a.y]), reached: at.is_some_and(|a| a.dist(*to) <= 1e-6) }
         })
         .collect();
-    Ok(json!({"moved": moved, "sketch": rep.as_ref().map(report_json)}))
+    reply(cmd, MovePointsResult { moved, sketch: rep.as_ref().map(solve_info), param_warnings: Vec::new() })
 }
 
 fn drag(s: &mut Session, p: &Value) -> Result<Value> {

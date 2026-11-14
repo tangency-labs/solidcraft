@@ -157,6 +157,44 @@ fn loop_edges(b: &Body, corners: [[f64; 2]; 4], z: f64) -> (Order, Vec<usize>) {
     (order, edges)
 }
 
+/// The plate of [`blends_turn_round_a_shallow_sharp_corner`]: 2 thick, its top outline 50
+/// along x and then 40 turning `kink` degrees (towards the plate for `convex`, away from it
+/// else), with the record indices of those two top edges.
+fn shallow_corner_plate(kink: f64, convex: bool) -> (Body, [usize; 2]) {
+    let t = if convex { -kink } else { kink }.to_radians();
+    let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+    let p = [
+        [0.0, 0.0],
+        [50.0, 0.0],
+        [50.0 + 40.0 * u[0], 40.0 * u[1]],
+        [50.0 + 40.0 * u[0] + 30.0 * n[0], 40.0 * u[1] + 30.0 * n[1]],
+        [0.0, -30.0],
+    ];
+    let profile: Vec<Curve> = (0..p.len())
+        .map(|i| {
+            let (a, b) = (p[i], p[(i + 1) % p.len()]);
+            Curve::Line {
+                start: [a[0], a[1], 0.0],
+                end: [b[0], b[1], 0.0],
+            }
+        })
+        .collect();
+    let b = extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        2.0,
+        0.0,
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap();
+    let edges = [
+        edge_at(&b, [25.0, 0.0, 2.0]),
+        edge_at(&b, [50.0 + 20.0 * u[0], 20.0 * u[1], 2.0]),
+    ];
+    (b, edges)
+}
+
 /// A plate 2 thick whose top outline runs 50 along x and then 40 at a shallow angle off it,
 /// turning `kink` degrees (towards the plate for `convex`, away from it else), its other sides
 /// square to those two: the two top edges rounded r 1 or chamfered 1 turn round the sharp
@@ -171,50 +209,112 @@ fn loop_edges(b: &Body, corners: [[f64; 2]; 4], z: f64) -> (Order, Vec<usize>) {
 #[test]
 fn blends_turn_round_a_shallow_sharp_corner() {
     all_fixes();
-    let plate = |kink: f64, convex: bool| {
-        let t = if convex { -kink } else { kink }.to_radians();
-        let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
-        let p = [
-            [0.0, 0.0],
-            [50.0, 0.0],
-            [50.0 + 40.0 * u[0], 40.0 * u[1]],
-            [50.0 + 40.0 * u[0] + 30.0 * n[0], 40.0 * u[1] + 30.0 * n[1]],
-            [0.0, -30.0],
-        ];
-        let profile: Vec<Curve> = (0..p.len())
-            .map(|i| {
-                let (a, b) = (p[i], p[(i + 1) % p.len()]);
-                Curve::Line {
-                    start: [a[0], a[1], 0.0],
-                    end: [b[0], b[1], 0.0],
-                }
-            })
-            .collect();
-        let b = extrude(
-            &profile,
-            [0.0, 0.0, 1.0],
-            2.0,
-            0.0,
-            DraftCorner::default(),
-            true,
-        )
-        .unwrap();
-        let edges = [
-            edge_at(&b, [25.0, 0.0, 2.0]),
-            edge_at(&b, [50.0 + 20.0 * u[0], 20.0 * u[1], 2.0]),
-        ];
-        (b, edges)
-    };
     let round = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
     let chamfer = (0.5, 1.0 / 6.0);
     for kink in [0.5, 1.5, 3.0, 6.0] {
         for convex in [true, false] {
             for (kind, (a, m)) in [(Blend::Round, round), (Blend::Chamfer, chamfer)] {
-                let (b, edges) = plate(kink, convex);
+                let (b, edges) = shallow_corner_plate(kink, convex);
                 let before = volume(&b);
                 blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap_or_else(|e| {
                     panic!("{kind:?} at a {kink} degree corner (convex {convex}): {e:?}")
                 });
+                let corner = 2.0 * m * (kink.to_radians() / 2.0).tan();
+                let want = 90.0 * a + if convex { -corner } else { corner };
+                let off = before - volume(&b);
+                assert!(
+                    rel(off, want) < 1e-6,
+                    "{kind:?} at a {kink} degree corner (convex {convex}): {off} off, want {want}"
+                );
+            }
+        }
+    }
+}
+
+/// Asserts that the faces of [`shallow_corner_plate`]`(kink, convex)` rounded r 1 that are not
+/// planes are two cylinders, one per round, read from their definitions: radius 1, semi-angle
+/// 0, the axis parallel to the round's edge and its origin on the line through the points 1 in
+/// from both of the edge's faces (the edge moved 1 into the plate and 1 down), each within
+/// 1e-12 (rounding of coordinates up to 90 and unit vectors). One round's surface extended over
+/// both, as the cleanup used to make it, stands 1.7e-7 rad off the other axis at 1e-5 degrees.
+fn rounds_on_their_cylinders(b: &Body, kink: f64, convex: bool) {
+    use solidcore::topology::face::p2 as face;
+    let t = if convex { -kink } else { kink }.to_radians();
+    let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+    // (a point, the direction) of each round's axis
+    let axes = [
+        (Vec3::new(0.0, -1.0, 1.0), Vec3::new(1.0, 0.0, 0.0)),
+        (
+            Vec3::new(50.0 + n[0], n[1], 1.0),
+            Vec3::new(u[0], u[1], 0.0),
+        ),
+    ];
+    let (_k, brep) = kernel_copy(b);
+    let mut on = Vec::new();
+    for &f in brep.face_list() {
+        let s = face::surface(&brep, f).unwrap().unwrap();
+        let cone = match s.kind() {
+            SurfaceKind::Plane(_) => continue,
+            SurfaceKind::Cone(c) => c.canonical(),
+            other => panic!("kink {kink} (convex {convex}): a round on {other:?}"),
+        };
+        assert!(
+            (cone.radius - 1.0).abs() <= 1e-12 && cone.semi_angle_deg == 0.0,
+            "kink {kink} (convex {convex}): radius {} semi-angle {}",
+            cone.radius,
+            cone.semi_angle_deg
+        );
+        let (origin, axis) = (cone.origin.origin(), cone.origin.z_axis());
+        let off: Vec<(f64, f64)> = axes
+            .iter()
+            .map(|(a, d)| (axis.cross(*d).length(), (origin - *a).cross(*d).length()))
+            .collect();
+        let which = (0..2)
+            .find(|&i| off[i].0 <= 1e-12 && off[i].1 <= 1e-12)
+            .unwrap_or_else(|| {
+                panic!("kink {kink} (convex {convex}): a round {off:?} off both axes")
+            });
+        on.push(which);
+    }
+    on.sort_unstable();
+    assert_eq!(
+        on,
+        [0, 1],
+        "kink {kink} (convex {convex}): rounds on cylinders {on:?}"
+    );
+}
+
+/// #15418: the plate of [`blends_turn_round_a_shallow_sharp_corner`] with corners a hundred
+/// thousandth to a few ten thousandths of a degree off straight. The two top edges rounded r 1
+/// or chamfered 1 build and pass every check. Each round stays its own face on its own
+/// closed-form cylinder: radius 1 about the line 1 in from the edge's two faces. The volume
+/// taken off is the mitred corner's closed form (the section's area A along the 90 of edge,
+/// the corner's first moment M times tan(kink / 2) twice, off at the convex corner and on at
+/// the concave one) within the 1e-6 of the sibling test: these corners join on one section,
+/// whose volume differs from the mitre's by a multiple of the kink. Rounds at a concave corner
+/// 3e-5 to 2e-4 degrees off straight used to come out as one cylinder face, the boolean's
+/// cleanup merging the second round into the first's extended surface: its far end stood the
+/// first edge's length times the kink off it and failed the check (`SmVertex`'s gap test).
+#[test]
+fn blends_turn_round_a_corner_a_ten_thousandth_of_a_degree_off_straight() {
+    all_fixes();
+    let round = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+    let chamfer = (0.5, 1.0 / 6.0);
+    for kink in [1e-5, 5e-5, 1e-4, 2e-4, 3e-4] {
+        for convex in [false, true] {
+            for (kind, (a, m)) in [(Blend::Round, round), (Blend::Chamfer, chamfer)] {
+                let (b, edges) = shallow_corner_plate(kink, convex);
+                let before = volume(&b);
+                blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap_or_else(|e| {
+                    panic!("{kind:?} at a {kink} degree corner (convex {convex}): {e:?}")
+                });
+                assert!(
+                    b.check(CheckLevel::All).unwrap().is_valid(),
+                    "{kind:?} at a {kink} degree corner (convex {convex})"
+                );
+                if kind == Blend::Round {
+                    rounds_on_their_cylinders(&b, kink, convex);
+                }
                 let corner = 2.0 * m * (kink.to_radians() / 2.0).tan();
                 let want = 90.0 * a + if convex { -corner } else { corner };
                 let off = before - volume(&b);

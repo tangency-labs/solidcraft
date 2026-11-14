@@ -101,8 +101,11 @@ closes the gaps (`fix_gaps`); it repeats at most ten times. The classify and sel
 
 After the cleanup of step 5, `place_vertices_on_face_corners` (`merge/p1.rs`) moves a vertex that lies
 more than the intersection tolerance off one of its faces to the corner its faces define, only within
-half its tolerance and only when the corner leaves every face gap under the intersection tolerance
-(measured at the corner before the move); otherwise the vertex stays. It runs after the cleanup because
+half its tolerance and only when the point leaves every face gap under the intersection tolerance and
+every gap to an edge end within half its tolerance (measured at the point before the move). The point is
+the corner when every face holds it, and otherwise the one that minimises the largest gap to the faces
+(the midpoint of the corner and the nearest point of a face it lies beside, such as a round's patch ending at
+its tangent line); otherwise the vertex stays. It runs after the cleanup because
 the faces and edges the vertex keeps are final there.
 
 Ops never computes a geometric quantity here: `boolean` takes the operands, calls
@@ -392,8 +395,10 @@ A reviewer can check each of these on a change to the boolean.
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
 - Opt-in fixes for the cases in §5, §6 and §8: `boolean_union_refuses_solid_leak`,
   `boolean_outer_shell_first`, `boolean_cleanup_removes_slits`, `keep_operand_uv_trims`,
-  `boolean_vertex_by_best_crossing`, `boolean_splits_definition_across_split`,
-  `boolean_skips_faces_apart` (`solidcore/src/kernel.rs`).
+  `boolean_vertex_by_best_crossing`, `boolean_splits_definition_across_split`
+  (`solidcore/src/kernel.rs`). Every boolean, 3D included, skips the face pairs whose boxes lie
+  apart, and a new planar face leaves in place the inner loops whose boxes lie outside its outer
+  loop's box (WR-527), always.
 
 **Open.**
 - Retiring those flags: each fix on by default with its old path deleted (AGENTS.md §4b).
