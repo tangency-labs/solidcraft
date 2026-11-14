@@ -59,6 +59,7 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
     ("crates/engine/src/view.rs", "the viewport's meshes, edges and highlights"),
     ("crates/kernel/src/mesh_convert.rs", "mesh bodies: turning a mesh body into a solid"),
     ("crates/kernel/src/mesh_recognize.rs", "mesh bodies: reading a mesh body as the analytic surfaces it stands for"),
+    ("crates/kernel/src/mesh_slabs.rs", "mesh bodies: reading a scanned mesh body as the stack of layers it was modelled from"),
     ("crates/kernel/src/meshbody.rs", "mesh bodies"),
     ("crates/kernel/src/native/preview.rs", "a feature's preview mesh"),
     ("crates/kernel/src/polybool.rs", "mesh bodies: booleans of a body with a closed triangle mesh"),

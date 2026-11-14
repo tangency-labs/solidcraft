@@ -134,8 +134,15 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "SURFACE", panel: "CREATE", promoted: 4, ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft"] },
     Section { tab: "SURFACE", panel: "EDIT", promoted: 4, ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch"] },
     // Reading a mesh as the surfaces it stands for, and rebuilding it as features, belong beside
-    // Convert Mesh: all three start from a mesh body and end in geometry the design can use.
-    Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert", "mesh.rebuild", "mesh.recognize"] },
+    // Convert Mesh: all of them start from a mesh body and end in geometry the design can use.
+    // Reconstruct sits next to Rebuild because the two answer the same question from opposite
+    // ends, exact surfaces or measurements, and which one a mesh wants is the first thing to try.
+    Section {
+        tab: "SURFACE",
+        panel: "CONVERT",
+        promoted: 2,
+        ids: &["surface.thicken", "mesh.convert", "mesh.rebuild", "mesh.reconstruct", "mesh.recognize"],
+    },
     Section {
         tab: "ASSEMBLE",
         panel: "COMPONENTS",

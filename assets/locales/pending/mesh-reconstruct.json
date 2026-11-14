@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "cmd.mesh.reconstruct": "إعادة بناء الشبكة الممسوحة",
+    "help.mesh.reconstruct": "يقرأ جسمًا شبكيًا ممسوحًا أو مشوشًا بوصفه كومة الطبقات التي بُني منها، ويطابق مخطط كل طبقة بخطوط وأقواس ودوائر، ثم يبنيه من جديد كرسم تخطيطي وبثق لكل مستوى. استخدمه مع مسح ثلاثي الأبعاد أو ملف STL خشن، حيث لا تجد إعادة بناء الشبكة كميزات سطحًا يمكن التحقق منه."
+  },
+  "de": {
+    "cmd.mesh.reconstruct": "Gescanntes Netz rekonstruieren",
+    "help.mesh.reconstruct": "Liest einen gescannten oder verrauschten Netzkörper als den Stapel von Ebenen, aus dem er modelliert wurde, nähert jeden Umriss mit Linien, Bögen und Kreisen an und baut ihn je Ebene als Skizze und Extrusion neu auf. Nehmen Sie ihn für einen 3D-Scan oder eine grobe STL, wo Netz als Features neu aufbauen keine Fläche findet, die es bestätigen kann."
+  },
+  "en": {
+    "cmd.mesh.reconstruct": "Reconstruct Scanned Mesh",
+    "help.mesh.reconstruct": "Reads a scanned or noisy mesh body as the stack of layers it was modelled from, fits each layer's outline with lines, arcs and circles, and builds it again as a sketch and an extrusion per level. Use it on a 3D scan or a rough STL, where Rebuild Mesh as Features finds no surface it can certify."
+  },
+  "he": {
+    "cmd.mesh.reconstruct": "שחזור רשת סרוקה",
+    "help.mesh.reconstruct": "קורא גוף רשת סרוק או רועש כערימת השכבות שממנה נבנה, מתאים לכל שכבה מתאר של קווים, קשתות ומעגלים, ובונה אותו מחדש כסקיצה ומשיכה לכל מפלס. מתאים לסריקת תלת ממד או לקובץ STL גס, שבהם בנייה מחדש של רשת כתכונות אינה מוצאת משטח שאפשר לאשר."
+  },
+  "ja": {
+    "cmd.mesh.reconstruct": "スキャンメッシュを再構成",
+    "help.mesh.reconstruct": "スキャンした、またはノイズのあるメッシュボディを、それが作られたときの層の積み重ねとして読み取り、各層の輪郭を直線と円弧と円で近似して、レベルごとのスケッチと押し出しとして作り直します。メッシュをフィーチャとして再構築が確証できる面を見つけられない、3Dスキャンや粗いSTLに使います。"
+  },
+  "ko": {
+    "cmd.mesh.reconstruct": "스캔 메시 재구성",
+    "help.mesh.reconstruct": "스캔했거나 잡음이 있는 메시 본체를 그것이 만들어진 층의 더미로 읽어, 각 층의 윤곽을 직선과 호와 원으로 맞추고, 층마다 스케치와 돌출로 다시 만듭니다. 메시를 피처로 다시 만들기가 확인할 수 있는 면을 찾지 못하는 3D 스캔이나 거친 STL에 사용합니다."
+  },
+  "vi": {
+    "cmd.mesh.reconstruct": "Dựng lại lưới quét",
+    "help.mesh.reconstruct": "Đọc một thân lưới quét hoặc nhiều nhiễu thành chồng lớp mà nó đã được dựng, khớp đường bao của từng lớp bằng đoạn thẳng, cung tròn và đường tròn, rồi dựng lại thành một phác thảo và một lần đùn cho mỗi mức. Dùng cho bản quét 3D hay tệp STL thô, nơi Dựng lại lưới thành đặc trưng không tìm được mặt nào để xác nhận."
+  },
+  "zh": {
+    "cmd.mesh.reconstruct": "重构扫描网格",
+    "help.mesh.reconstruct": "把扫描得到的或有噪声的网格实体读取为它建模时的层叠结构，用直线、圆弧和圆拟合每一层的轮廓，再按每个层级重新构建为草图和拉伸。用于三维扫描件或粗糙的 STL，这类情形下把网格重建为特征找不到可以确认的曲面。"
+  }
+}

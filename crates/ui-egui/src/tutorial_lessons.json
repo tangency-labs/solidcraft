@@ -7207,6 +7207,32 @@
    ]
   },
   {
+   "command": "mesh.reconstruct",
+   "setup": "mesh_plate",
+   "about": "Reads a scanned mesh as the stack of layers it was modelled from and builds it again as a sketch and an extrusion per level.",
+   "demo": [
+    [
+     "component.activate",
+     {
+      "component": "Scan"
+     }
+    ],
+    [
+     "mesh.reconstruct",
+     {
+      "body": "Scan",
+      "grid": "0.5 mm"
+     }
+    ],
+    [
+     "component.activate",
+     {
+      "component": "root"
+     }
+    ]
+   ]
+  },
+  {
    "command": "mesh.recognize",
    "setup": "mesh",
    "about": "Reads a mesh as the surfaces it stands for: planes, cylinders, cones, spheres and tori, each certified against the mesh itself. Nothing is changed.",

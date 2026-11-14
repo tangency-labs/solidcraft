@@ -88,6 +88,7 @@ mod measure;
 mod mesh_convert;
 mod mesh_rebuild;
 mod mesh_recognize;
+mod mesh_slabs;
 mod meshbody;
 #[cfg(test)]
 mod modify_history_tests;
@@ -203,6 +204,7 @@ pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
 pub use mesh_convert::convert_prismatic_mesh;
 pub use mesh_rebuild::{Bore, Boss, Corner, Outline, Prismatic, Unused, prismatic_plan};
 pub use mesh_recognize::{AxisCluster, Patch, Recognition, Surface, recognize_mesh};
+pub use mesh_slabs::{Deviation, Loop, Mirror, Part, Slab, SlabOptions, SlabStack, Symmetry, slab_plan};
 pub use meshbody::{MAX_TRIANGLES, mesh_body};
 pub use native::{body_from_smlib, smlib_body};
 pub use native::{brep_record, decode_native_body, encode_native_body, native_preview_mesh};

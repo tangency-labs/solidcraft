@@ -236,3 +236,132 @@ pub struct MeshStep {
 #[cfg(test)]
 #[path = "mesh_tests.rs"]
 mod tests;
+
+/// Rebuild a scanned mesh as the stack of extruded layers it was modelled from: a sketch per
+/// level, each outline fitted with lines, arcs and circles, squared up and rounded to a grid.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MeshReconstructParams {
+    /// The mesh body, by name. The selected mesh body when left out.
+    pub body: Option<String>,
+    /// The scan's own noise: how far a measured point may sit off the surface it belongs to, and
+    /// so how close a line or an arc has to come before it counts as fitting (0.25 mm by default,
+    /// between 0.001 and 10 mm). A clean export from another CAD program wants a small one; a
+    /// photogrammetry scan wants a large one.
+    pub tolerance: Option<LengthExpr>,
+    /// Round the finished dimensions to this step (0.1 mm by default, at most 10 mm). Zero leaves
+    /// them exactly as measured. This is what turns a 59.94 mm reading back into a 60 mm part.
+    pub grid: Option<LengthExpr>,
+    /// Which mirror planes to look for and average the part across: `auto` (both, the default),
+    /// `x`, `y`, or `off`.
+    pub symmetry: Option<String>,
+    /// Snap an edge's direction onto a multiple of this many degrees where it is already within
+    /// three degrees of one (15 by default; 0 leaves directions as measured).
+    pub snap_angle: Option<f64>,
+    /// The thinnest layer kept (0.6 mm by default). Two levels closer together than this are read
+    /// as one: a scan's face is not flat enough to tell a shallower step from its own noise.
+    pub min_thickness: Option<LengthExpr>,
+    /// The direction to build along, as `[x, y, z]`. Left out, the stack takes the direction the
+    /// most facet area lies square to, which on a plate is the one between its two faces.
+    pub axis: Option<[f64; 3]>,
+    /// Name each layer's thickness and each circle's diameter as a user parameter the features
+    /// follow (true by default). An outline's own corners stay as numbers: they came off the scan
+    /// and carry no dimension to hold them.
+    pub parameters: Option<bool>,
+    /// Those parameters' name before `_layer_1_thickness` and the rest. From the body name when
+    /// left out.
+    pub prefix: Option<String>,
+    /// Report the plan and the commands it would run, and change nothing (false by default).
+    pub plan_only: Option<bool>,
+    /// A name for the first extrusion.
+    pub name: Option<String>,
+}
+
+/// What `mesh.reconstruct` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MeshReconstructResult {
+    /// The mesh body that was read.
+    pub body: String,
+    /// Where the sketches sit: the part's lowest level, at the datum its outlines were measured
+    /// from.
+    pub origin: [f64; 3],
+    /// The direction the layers stack along, and the sketches' own axes.
+    pub axis: [f64; 3],
+    pub x_dir: [f64; 3],
+    pub y_dir: [f64; 3],
+    /// The heights the part steps between, from the sketch plane (mm).
+    pub levels: Vec<f64>,
+    /// The part's size along `x_dir`, `y_dir` and `axis` (mm).
+    pub size: [f64; 3],
+    pub slabs: Vec<MeshSlab>,
+    /// The mirror planes the part was found symmetric about, and made exactly symmetric across.
+    pub mirrors: Vec<MeshMirror>,
+    /// Triangles the scan was read from, after welding.
+    pub triangles: usize,
+    /// The scan's area (mm^2).
+    pub area: f64,
+    /// How far the finished plan sits from the scan it came from (mm). This is the number that
+    /// says whether the part really was a stack of layers: a plate comes back within its own
+    /// scanning noise, and a curved shell forced into slabs comes back millimetres out.
+    pub deviation: Option<MeshDeviation>,
+    /// How many outlines would not fit lines and arcs and were kept as traced polygons instead.
+    /// Nothing about those is a dimension to trust.
+    pub traced: usize,
+    pub parameters: Vec<MeshParameter>,
+    /// The commands the rebuild runs, in order.
+    pub steps: Vec<MeshStep>,
+    /// The features built, unless `plan_only`.
+    pub features: Vec<String>,
+}
+
+/// One extruded layer of a rebuilt part.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MeshSlab {
+    /// Where the layer starts and ends along the build axis, from the sketch plane (mm).
+    pub from: f64,
+    pub to: f64,
+    pub loops: Vec<MeshLoop>,
+}
+
+/// One closed outline of a layer.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MeshLoop {
+    /// How many lines the outline was fitted with, and how many arcs.
+    pub lines: usize,
+    pub arcs: usize,
+    /// The radius, where the whole outline is one circle (mm).
+    pub circle: Option<f64>,
+    /// The area the outline encloses (mm^2), signed: negative where it is a hole in the outline
+    /// around it.
+    pub area: f64,
+    /// How far the fitted outline sits from the points it was measured from (mm), at the 95th
+    /// percentile.
+    pub deviation: f64,
+    /// Whether lines and arcs fitted at all. False where the outline was kept as a traced
+    /// polygon because nothing else would close.
+    pub fitted: bool,
+}
+
+/// A mirror plane the part was found to be symmetric about.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MeshMirror {
+    /// Which sketch axis the plane is square to: `x` or `y`.
+    pub across: String,
+    /// Where the plane sits along that axis, in sketch coordinates (mm).
+    pub at: f64,
+    /// The median distance between the scan and its own reflection (mm): how true the symmetry
+    /// is.
+    pub mismatch: f64,
+    /// How many measured features were averaged with their partner across the plane.
+    pub paired: usize,
+}
+
+/// How far a rebuilt part sits from the scan it was read from (mm).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MeshDeviation {
+    pub mean: f64,
+    pub p95: f64,
+    pub max: f64,
+    /// How many scan points were measured.
+    pub probes: usize,
+}

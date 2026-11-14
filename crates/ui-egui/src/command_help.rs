@@ -105,6 +105,7 @@ pub const DOCUMENTED: &[&str] = &[
     "mesh.convert",
     "mesh.rebuild",
     "mesh.recognize",
+    "mesh.reconstruct",
     "motion.study",
     "motion.trace",
     "occurrence.ground",

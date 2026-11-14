@@ -5,15 +5,15 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::Kind;
-use solidcraft_kernel::{Outline, Prismatic, Surface, prismatic_plan, recognize_mesh};
+use solidcraft_kernel::{Outline, Part as SlabPart, Prismatic, SlabOptions, SlabStack, Surface, Symmetry, prismatic_plan, recognize_mesh, slab_plan};
 
 use super::{
     CommandSpec,
     features::{add_feature, check_expr},
 };
 use crate::schema::mesh::{
-    MeshAxis, MeshBore, MeshBoss, MeshCorner, MeshParameter, MeshPatch, MeshRebuildParams, MeshRebuildResult, MeshRecognizeParams,
-    MeshRecognizeResult, MeshStep, MeshUnused,
+    MeshAxis, MeshBore, MeshBoss, MeshCorner, MeshDeviation, MeshLoop, MeshMirror, MeshParameter, MeshPatch, MeshRebuildParams, MeshRebuildResult,
+    MeshRecognizeParams, MeshRecognizeResult, MeshReconstructParams, MeshReconstructResult, MeshSlab, MeshStep, MeshUnused,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{
@@ -23,6 +23,7 @@ use crate::{
 
 const RECOGNIZE_CONTRACT: TypedContract<MeshRecognizeParams> = TypedContract::new();
 const REBUILD_CONTRACT: TypedContract<MeshRebuildParams> = TypedContract::new();
+const RECONSTRUCT_CONTRACT: TypedContract<MeshReconstructParams> = TypedContract::new();
 
 /// How far a surface's axis may lean from the build axis, in degrees, when a call does not say.
 const DEFAULT_ALIGN: f64 = 2.;
@@ -49,6 +50,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&REBUILD_CONTRACT)
         .output(output_schema_for::<MeshRebuildResult>)
         .params("body?: mesh body name (default: the selected mesh body); tolerance?: length expression (default 0.05 mm), groups?: as mesh.recognize takes them; axis?: [x,y,z] (the direction to extrude along; default: the direction with the most recognized area square to it); align?: degrees (default 2, between 0.0573 and 17.19: how far a surface's own axis may lean from the build axis and still count as along it or square to it, which on a scan has to cover the part's own skew); parameters?: bool (default true: name each size as a user parameter the features follow); prefix?: those parameters' name before `_thickness` and the rest (default: from the body name); plan_only?: bool (default false: report the plan and the commands and change nothing); name?: a name for the extrusion: build a prismatic part again from what its mesh was recognized as -- a sketch on one end face, an extrusion to the other, the corner rounds, and the holes and bosses its cylinders stand for -- as ordinary parametric features, leaving the mesh body alone. An outline that turns back on itself, such as an L, is refused rather than rebuilt as something smaller; what the rebuild does not account for comes back in `unused` to model by hand → body, axis, origin, x_dir, y_dir, thickness, outline: circle|polygon, radius, corners: [{at, radius}], bores: [{centre, diameter, through, depth, from_top}], bosses: [{centre, diameter, height}], accounted (the share of the mesh's area the features cover), unused: [{surface, area, reason}], parameters: [{name, expression}], steps: [{command, params}], features"),
+    CommandSpec::new("mesh.reconstruct", "Reconstruct Scanned Mesh", crate::checked!("mesh.reconstruct", reconstruct))
+        .icon("mesh_body")
+        .contract(&RECONSTRUCT_CONTRACT)
+        .output(output_schema_for::<MeshReconstructResult>)
+        .params("body?: mesh body name (default: the selected mesh body); tolerance?: length expression (default 0.25 mm, between 0.001 and 10 mm: the scan's own noise, and so how close a line or arc must come to count as fitting); grid?: length expression (default 0.1 mm, at most 10: round finished dimensions to this step; 0 leaves them as measured); symmetry?: auto|x|y|off (default auto); snap_angle?: degrees (default 15: square up an edge already within three degrees of a multiple); min_thickness?: length expression (default 0.6 mm: the thinnest layer kept); axis?: [x,y,z] (the direction to stack along; default: the direction the most facet area lies square to); parameters?: bool (default true: name each layer thickness and circle diameter as a user parameter); prefix?: those parameters' name before `_layer_1_thickness` (default: from the body name); plan_only?: bool (default false); name?: a name for the first extrusion: read a scanned or noisy mesh as the stack of extruded layers it was modelled from and build it again as ordinary parametric features -- a sketch per level whose outline is fitted with lines, arcs and circles, squared up, with matching dimensions equalised, mirrored features averaged and sizes rounded to a grid. Unlike mesh.rebuild it never needs a surface to certify, so it reads scans; it always has an answer, and `deviation` is how far that answer sits from the scan -> body, origin, axis, x_dir, y_dir, levels, size, slabs: [{from, to, loops: [{lines, arcs, circle, area, deviation, fitted}]}], mirrors: [{across, at, mismatch, paired}], triangles, area, deviation: {mean, p95, max, probes}, traced (outlines kept as polygons because nothing fitted), parameters, steps, features"),
 ];
 
 /// The mesh body to convert: `body`, else the one selected body.
@@ -451,4 +457,226 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     s.active_component = active_component;
     s.active_occurrence_path = active_occurrence_path;
     result
+}
+
+/// How a scan is read when a call does not say: a quarter of a millimetre of noise, dimensions
+/// rounded to a tenth, edges squared to 15 degrees, and no layer thinner than six tenths.
+const DEFAULT_TOLERANCE: &str = "0.25 mm";
+const DEFAULT_GRID: &str = "0.1 mm";
+const DEFAULT_SNAP: f64 = 15.;
+const DEFAULT_MIN_THICKNESS: &str = "0.6 mm";
+
+/// How a scan should be read, from what the call asked for.
+fn reconstruct_options(s: &mut Session, p: &Value, cmd: &str) -> Result<SlabOptions> {
+    let length = |s: &mut Session, field: &str, default: &str| -> Result<f64> {
+        let text = expr(p, field).unwrap_or_else(|| default.into());
+        check_expr(s, &text, Kind::Length, cmd, field)?;
+        s.doc.eval(&text, Kind::Length).map_err(|err| bad(cmd, format!("{field}: {err}")))
+    };
+    let tolerance = length(s, "tolerance", DEFAULT_TOLERANCE)?;
+    let grid = length(s, "grid", DEFAULT_GRID)?;
+    let min_thickness = length(s, "min_thickness", DEFAULT_MIN_THICKNESS)?;
+    let symmetry = match str_(p, "symmetry").unwrap_or("auto") {
+        "auto" => Symmetry::Auto,
+        "x" => Symmetry::AcrossX,
+        "y" => Symmetry::AcrossY,
+        "off" => Symmetry::Off,
+        other => return Err(bad(cmd, format!("symmetry: auto, x, y or off, not `{other}`"))),
+    };
+    let axis = match p.get("axis").filter(|v| !v.is_null()) {
+        None => None,
+        Some(given) => Some(vec3(given).ok_or_else(|| bad(cmd, "axis: [x, y, z]"))?),
+    };
+    Ok(SlabOptions { tolerance, grid, symmetry, snap_angle: num(p, "snap_angle").unwrap_or(DEFAULT_SNAP), min_thickness, axis })
+}
+
+/// `mesh.reconstruct`: read a scan as the stack of layers it was modelled from, and build that
+/// stack again as ordinary features.
+///
+/// Where `mesh.rebuild` starts from certified surfaces and refuses a mesh whose faces will not
+/// certify, this starts from measurements and always has an answer, with a deviation attached
+/// saying how far to trust it. That is what a scan needs: its faces never certify, because every
+/// one of them is a few tenths of a millimetre off being a plane.
+fn reconstruct(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "mesh.reconstruct";
+    let options = reconstruct_options(s, p, cmd)?;
+    let body = target(s, p, cmd)?;
+    let plan = {
+        let state = s.model.state();
+        let source = state.body(&body).ok_or_else(|| bad(cmd, format!("no body `{body}`")))?;
+        if !source.body.is_mesh() {
+            return Err(bad(cmd, "select a mesh body"));
+        }
+        slab_plan(&source.body, &options)?
+    };
+    let mut names = Naming {
+        on: bool_(p, "parameters").unwrap_or(true),
+        prefix: identifier(str_(p, "prefix").unwrap_or(&body)),
+        body: body.clone(),
+        made: Vec::new(),
+    };
+    let steps = slab_steps(s, p, &plan, &mut names);
+    let features = if bool_(p, "plan_only").unwrap_or(false) { Vec::new() } else { run_steps(s, &steps, cmd)? };
+    let out = MeshReconstructResult {
+        body,
+        origin: at3(plan.origin),
+        axis: at3(plan.axis),
+        x_dir: at3(plan.x_dir),
+        y_dir: at3(plan.y_dir),
+        levels: plan.levels.iter().map(|z| round(*z)).collect(),
+        size: [round(plan.size[0]), round(plan.size[1]), round(plan.size[2])],
+        slabs: plan.slabs.iter().map(slab_reply).collect(),
+        mirrors: plan
+            .mirrors
+            .iter()
+            .map(|m| MeshMirror {
+                across: if m.across_x { "x".to_owned() } else { "y".to_owned() },
+                at: round(m.at),
+                mismatch: round(m.mismatch),
+                paired: m.paired,
+            })
+            .collect(),
+        triangles: plan.triangles,
+        area: round(plan.area),
+        deviation: plan.deviation.map(|d| MeshDeviation { mean: round(d.mean), p95: round(d.p95), max: round(d.max), probes: d.probes }),
+        traced: plan.slabs.iter().flat_map(|slab| slab.loops.iter()).filter(|outline| !outline.fitted).count(),
+        parameters: names.made,
+        steps,
+        features,
+    };
+    serde_json::to_value(out).map_err(|err| crate::EngineError::Other(err.to_string()))
+}
+
+fn slab_reply(slab: &solidcraft_kernel::Slab) -> MeshSlab {
+    MeshSlab {
+        from: round(slab.from),
+        to: round(slab.to),
+        loops: slab
+            .loops
+            .iter()
+            .map(|outline| MeshLoop {
+                lines: outline.parts.iter().filter(|part| matches!(part, SlabPart::Line { .. })).count(),
+                arcs: outline.parts.iter().filter(|part| matches!(part, SlabPart::Arc { .. })).count(),
+                circle: outline.parts.iter().find_map(|part| match part {
+                    SlabPart::Circle { radius, .. } => Some(round(*radius)),
+                    _ => None,
+                }),
+                area: round(outline.area),
+                deviation: round(outline.deviation),
+                fitted: outline.fitted,
+            })
+            .collect(),
+    }
+}
+
+/// Run a rebuild's steps as the one thing the user asked for.
+///
+/// Every step is a command of its own and records an undo step of its own, so those are folded
+/// back into the single step this command's own call records. A step that fails leaves the design
+/// as it was, as any failed command does.
+fn run_steps(s: &mut Session, steps: &[MeshStep], cmd: &str) -> Result<Vec<String>> {
+    let start = s.undo.len();
+    let mut features = Vec::new();
+    for (at, step) in steps.iter().enumerate() {
+        let out = s.execute(&step.command, &step.params).map_err(|err| bad(cmd, format!("step {at} of the rebuild, `{}`: {err}", step.command)))?;
+        if out.get("feature").is_some()
+            && let Some(name) = out.get("name").and_then(Value::as_str)
+        {
+            features.push(name.to_owned());
+        }
+    }
+    if s.undo.len() >= start {
+        s.undo.truncate(start);
+    }
+    Ok(features)
+}
+
+/// The commands that build the stack, in order: the parameters first, so everything after them
+/// can follow them, then a sketch and an extrusion for each layer.
+fn slab_steps(s: &Session, p: &Value, plan: &SlabStack, names: &mut Naming) -> Vec<MeshStep> {
+    let step = |command: &str, params: Value| MeshStep { command: command.to_owned(), params };
+    // The new body is named here because the mesh it was read from stands in the same space.
+    let solid = format!("{} rebuilt", names.body);
+    let mut build = Vec::new();
+    for (layer, slab) in plan.slabs.iter().enumerate() {
+        let origin = plan.origin + plan.axis * slab.from;
+        build.push(step("sketch.create", json!({"plane": {"origin": at3(origin), "x_dir": at3(plan.x_dir), "y_dir": at3(plan.y_dir)}})));
+        for (which, outline) in slab.loops.iter().enumerate() {
+            draw_loop(s, outline, layer, which, names, &mut build);
+        }
+        build.push(step("sketch.finish", json!({})));
+        let thickness = names.size(s, &format!("layer_{}_thickness", layer + 1), slab.to - slab.from);
+        // The first layer makes the body and the rest join onto it, so a stepped part comes out as
+        // one solid with a feature per level, which is how someone would have modelled it.
+        let mut extrude = match layer {
+            0 => json!({"distance": thickness, "operation": "new", "body_name": solid}),
+            _ => json!({"distance": thickness, "operation": "join", "targets": [&solid]}),
+        };
+        if layer == 0
+            && let (Some(name), Some(fields)) = (str_(p, "name"), extrude.as_object_mut())
+        {
+            fields.insert("name".into(), name.into());
+        }
+        build.push(step("solid.extrude", extrude));
+    }
+    let mut steps: Vec<MeshStep> =
+        names.made.iter().map(|made| step("parameters.add", json!({"name": made.name, "expression": made.expression}))).collect();
+    steps.extend(build);
+    steps
+}
+
+/// Draw one outline into the sketch being built.
+///
+/// A run of lines goes in as one call, the way someone drawing it would, and an arc interrupts the
+/// run and starts a new one. Only a circle's diameter becomes a parameter: a fitted outline's
+/// corners came off the scan and carry no dimension to hold them, so a parameter there would push
+/// walls about instead of resizing anything.
+fn draw_loop(s: &Session, outline: &solidcraft_kernel::Loop, layer: usize, which: usize, names: &mut Naming, build: &mut Vec<MeshStep>) {
+    let step = |command: &str, params: Value| MeshStep { command: command.to_owned(), params };
+    let at = |p: [f64; 2]| [fixed(p[0]), fixed(p[1])];
+    let circle = |centre: [f64; 2], radius: f64, names: &mut Naming, build: &mut Vec<MeshStep>| {
+        let diameter = names.size(s, &format!("layer_{}_circle_{}_dia", layer + 1, which + 1), radius * 2.);
+        build.push(step("sketch.circle.center", json!({"center": at(centre), "diameter": diameter})));
+    };
+    if let [SlabPart::Circle { centre, radius }] = outline.parts.as_slice() {
+        circle(*centre, *radius, names, build);
+        return;
+    }
+    // All lines: one closed run, which is both fewer commands and a sketch that reads as a shape.
+    if outline.parts.iter().all(|part| matches!(part, SlabPart::Line { .. })) {
+        let points: Vec<[String; 2]> = outline
+            .parts
+            .iter()
+            .filter_map(|part| match part {
+                SlabPart::Line { from, .. } => Some(at(*from)),
+                _ => None,
+            })
+            .collect();
+        if points.len() >= 3 {
+            build.push(step("sketch.line", json!({"points": points, "closed": true})));
+        }
+        return;
+    }
+    let mut run: Vec<[String; 2]> = Vec::new();
+    for part in &outline.parts {
+        match part {
+            SlabPart::Line { from, to } => {
+                if run.is_empty() {
+                    run.push(at(*from));
+                }
+                run.push(at(*to));
+            }
+            SlabPart::Arc { from, to, centre, ccw, .. } => {
+                if run.len() >= 2 {
+                    build.push(step("sketch.line", json!({"points": std::mem::take(&mut run)})));
+                }
+                run.clear();
+                build.push(step("sketch.arc.center_point", json!({"center": at(*centre), "start": at(*from), "end": at(*to), "clockwise": !ccw})));
+            }
+            SlabPart::Circle { centre, radius } => circle(*centre, *radius, names, build),
+        }
+    }
+    if run.len() >= 2 {
+        build.push(step("sketch.line", json!({"points": run})));
+    }
 }
