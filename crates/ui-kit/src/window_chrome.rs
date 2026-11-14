@@ -21,7 +21,7 @@
 //! A move or resize hands the press to the OS, which keeps the pointer until the button goes up.
 //! On X11 the window manager then receives that release, not the app, so egui would keep the
 //! button down and the next press would only end the old drag: the bar moved the window every
-//! other time (#13334). An app calls [`release_press_taken_by_os`] first in its raw-input hook.
+//! other time (#13334). An app calls [`release_press_taken_by_os`] first in its raw-input hook, then [`release_stale_input`].
 //!
 //! Adapted from VectorCraft's `crates/ui-egui/src/titlebar.rs` (MIT OR Apache-2.0).
 
@@ -213,6 +213,42 @@ pub fn release_press_taken_by_os(ctx: &egui::Context, raw: &mut egui::RawInput) 
         let release = egui::Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: ctx.input(|i| i.modifiers) };
         raw.events.insert(0, release);
     }
+}
+
+fn stale_input_id() -> Id {
+    Id::unique("window-chrome-stale-input")
+}
+
+/// Note that a native dialog (a file picker) just closed: the OS may have kept a button release
+/// or a modifier release for itself, so [`release_stale_input`] lets go of what is still held.
+pub fn mark_input_stale(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(stale_input_id(), true));
+}
+
+/// After the window lost focus (or a native dialog closed), on the next frame the window has
+/// focus: release each pointer button egui still holds down, at the last pointer position, before
+/// the frame's own events. On Wayland a file dialog takes the pointer and keyboard, so a release
+/// may never arrive, and egui would keep the button down and ignore canvas picks (#16460). A
+/// regained focus also clears the modifiers; the OS reports the real ones after.
+pub fn release_stale_input(ctx: &egui::Context, raw: &mut egui::RawInput) {
+    let lost = raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(false)));
+    let regained = raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(true)));
+    if lost {
+        mark_input_stale(ctx);
+    }
+    let mut first = Vec::new();
+    if raw.focused && !lost && ctx.data_mut(|d| d.remove_temp::<bool>(stale_input_id())).unwrap_or(false) {
+        let (pos, modifiers) = ctx.input(|i| (i.pointer.latest_pos().or(i.pointer.interact_pos()).unwrap_or(Pos2::ZERO), i.modifiers));
+        for button in [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle] {
+            if ctx.input(|i| i.pointer.button_down(button)) {
+                first.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers });
+            }
+        }
+    }
+    if regained {
+        first.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    }
+    raw.events.splice(0..0, first);
 }
 
 /// Minimize, Maximize/Restore and Close at the right end of `bar`, full bar height, flush with
@@ -532,5 +568,71 @@ mod tests {
         assert_eq!(dpi_scaled_size((1001, 777), 96, 96), Some((1001, 777)));
         assert_eq!(dpi_scaled_size((1001, 777), 0, 96), None);
         assert_eq!(dpi_scaled_size((0, 777), 96, 144), None);
+    }
+
+    #[test]
+    fn focus_lost_with_a_button_held_releases_it_on_regain_and_clears_modifiers() {
+        let ctx = crate::test_support::context();
+        let mut time = 0.0;
+        let mut frame = |events: Vec<Event>, focused: bool| {
+            time += 0.05;
+            let mut raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))),
+                time: Some(time),
+                events,
+                focused,
+                ..Default::default()
+            };
+            release_stale_input(&ctx, &mut raw);
+            let events = raw.events.clone();
+            ctx.run_ui(raw, |_| {}).textures_delta.clear();
+            events
+        };
+        let ctrl = egui::Modifiers { ctrl: true, ..Default::default() };
+        let at = pos2(50.0, 60.0);
+        frame(
+            vec![
+                Event::PointerMoved(at),
+                Event::ModifiersChanged(ctrl),
+                Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: ctrl },
+            ],
+            true,
+        );
+        assert!(ctx.input(|i| i.pointer.primary_down()));
+        frame(vec![Event::PointerGone, Event::WindowFocused(false)], false);
+        assert!(ctx.input(|i| i.pointer.primary_down()), "egui keeps the button down");
+        let events = frame(vec![Event::WindowFocused(true)], true);
+        assert!(matches!(events.first(), Some(Event::PointerButton { button: PointerButton::Primary, pressed: false, .. })));
+        assert!(events.iter().any(|e| matches!(e, Event::ModifiersChanged(m) if m.is_none())));
+        assert!(!ctx.input(|i| i.pointer.primary_down()));
+        assert!(ctx.input(|i| i.modifiers.is_none()));
+        // Nothing stale the second time.
+        let events = frame(vec![], true);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn a_closed_native_dialog_releases_a_held_button() {
+        let ctx = crate::test_support::context();
+        let run = |events: Vec<Event>| {
+            let mut raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))),
+                time: Some(1.0),
+                events,
+                focused: true,
+                ..Default::default()
+            };
+            release_stale_input(&ctx, &mut raw);
+            ctx.run_ui(raw, |_| {}).textures_delta.clear();
+        };
+        let at = pos2(10.0, 10.0);
+        run(vec![
+            Event::PointerMoved(at),
+            Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Default::default() },
+        ]);
+        assert!(ctx.input(|i| i.pointer.primary_down()));
+        mark_input_stale(&ctx);
+        run(vec![]);
+        assert!(!ctx.input(|i| i.pointer.primary_down()));
     }
 }
