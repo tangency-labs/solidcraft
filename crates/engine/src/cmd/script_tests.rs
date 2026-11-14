@@ -50,6 +50,11 @@ fn same(a: &mut Session, b: &mut Session) {
     assert_eq!(a.doc.user_materials, b.doc.user_materials, "user materials");
     assert_eq!(errors(a), errors(b), "feature results");
     assert_eq!(volume(a), volume(b), "volume");
+    assert_eq!(a.doc.components, b.doc.components, "components");
+    assert_eq!(a.doc.assembly.joints, b.doc.assembly.joints, "joints");
+    assert_eq!(a.doc.occurrences, b.doc.occurrences, "occurrences");
+    assert_eq!(a.doc.assembly.origins, b.doc.assembly.origins, "named joint origins");
+    assert_eq!(a.doc.assembly.links, b.doc.assembly.links, "motion links");
 }
 
 fn commands(script: &Value) -> Vec<&str> {
@@ -166,9 +171,24 @@ fn what_the_script_leaves_out_is_listed_and_components_are_refused() {
     run(&mut s, "appearance.assign", json!({"bodies": ["B"], "color": "#ff0000"}));
     let r = run(&mut s, "timeline.export_script", json!({}));
     assert!(r["omitted"].to_string().contains("appearances"), "{r}");
+    // A component is no longer refused: it exports and replays.
     run(&mut s, "component.create", json!({"name": "Sub"}));
+    let script = script(&mut s);
+    let steps = commands(&script);
+    assert!(steps.contains(&"component.create"), "{steps:?}");
+    assert!(steps.contains(&"occurrence.move"), "{steps:?}");
+    assert!(steps.contains(&"occurrence.ground"), "{steps:?}");
+    let mut t = replay(&script);
+    same(&mut s, &mut t);
+}
+
+#[test]
+fn nested_components_are_still_refused() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Outer", "activate": false}));
+    run(&mut s, "component.create", json!({"name": "Inner", "parent": "Outer"}));
     let e = s.execute("timeline.export_script", &json!({})).unwrap_err().to_string();
-    assert!(e.contains("not supported yet"), "{e}");
+    assert!(e.contains("nested components"), "{e}");
 }
 
 #[test]
@@ -373,4 +393,83 @@ fn add_resolves_legacy_seed_and_plane_names() {
     let kind = serde_json::to_value(&s.doc.find_feature("Lost").unwrap().kind).unwrap();
     assert_eq!(kind["features"], json!([0]), "{kind}");
     assert_eq!(kind["plane"], json!({"type": "construction", "feature": 0}), "{kind}");
+}
+
+/// Two components with placements, grounding, a revolute joint with values and
+/// limits, and a motion link: the script replays into the same design, ids
+/// included (both sessions allocate in the same order).
+#[test]
+fn an_assembly_with_a_joint_and_a_motion_link_replays() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base", "grounded": true, "activate": false}));
+    run(&mut s, "component.create", json!({"name": "Arm", "activate": false}));
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": "Arm:1", "space": "local",
+        "to_matrix": [1, 0, 0, 10, 0, 1, 0, 0, 0, 0, 1, 0]}),
+    );
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "name": "Pivot",
+        "a": {"occurrence": "Base:1", "frame": {"origin": [10, 0, 0], "z": [0, 0, 1], "x": [1, 0, 0]}},
+        "b": {"occurrence": "Arm:1", "frame": {"origin": [10, 0, 0], "z": [0, 0, 1], "x": [1, 0, 0]}},
+        "values": [30]}),
+    );
+    run(&mut s, "joint.limits", json!({"joint": "Pivot", "min": -10, "max": 45}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "slider", "name": "Slide",
+        "a": {"occurrence": "Base:1", "frame": {"origin": [0, 0, 0], "z": [1, 0, 0]}},
+        "b": {"occurrence": "Arm:1", "frame": {"origin": [0, 0, 0], "z": [1, 0, 0]}}}),
+    );
+    run(&mut s, "joint.motion_link", json!({"a": "Pivot", "b": "Slide", "ratio": 2.0}));
+
+    let script = script(&mut s);
+    let steps = commands(&script);
+    assert_eq!(steps.iter().filter(|c| **c == "component.create").count(), 2);
+    assert!(steps.contains(&"occurrence.move"));
+    assert!(steps.contains(&"occurrence.ground"));
+    assert!(steps.contains(&"joint.create"));
+    assert!(steps.contains(&"joint.motion_link"));
+    // Numeric values are recaptured by creating the joint where the parts
+    // are; limits travel as their own steps in degrees.
+    let pivot = script["commands"].as_array().unwrap().iter().find(|c| c["command"] == "joint.create" && c["params"]["name"] == "Pivot").unwrap();
+    assert!(pivot["params"].get("values").is_none(), "values must be recaptured, not re-applied");
+    let limits = script["commands"].as_array().unwrap().iter().find(|c| c["command"] == "joint.limits" && c["params"]["joint"] == "Pivot").unwrap();
+    assert!((limits["params"]["min"].as_f64().unwrap() + 10.0).abs() < 1e-9);
+    assert!((limits["params"]["max"].as_f64().unwrap() - 45.0).abs() < 1e-9);
+
+    let mut t = replay(&script);
+    same(&mut s, &mut t);
+}
+
+/// Feature ownership follows the replayed components even when creation
+/// interleaves and ids leave gaps.
+#[test]
+fn features_keep_their_component_through_the_replay_ids() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Chassis", "activate": true}));
+    plate(&mut s);
+    run(&mut s, "component.create", json!({"name": "Lid", "parent": "root", "activate": true}));
+    let script = script(&mut s);
+    let mut t = replay(&script);
+    same(&mut s, &mut t);
+    for (a, b) in s.doc.features.iter().zip(t.doc.features.iter()) {
+        assert_eq!(a.component, b.component, "ownership of {}", a.name);
+    }
+}
+
+/// Occurrence copies replay with their placements and names.
+#[test]
+fn occurrence_copies_replay() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Cap", "activate": false}));
+    run(&mut s, "occurrence.copy", json!({"occurrence": "Cap:1", "translate": [5, 0, 0]}));
+    let script = script(&mut s);
+    let mut t = replay(&script);
+    same(&mut s, &mut t);
+    assert_eq!(s.doc.occurrences.len(), 2);
 }
