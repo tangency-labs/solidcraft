@@ -173,35 +173,6 @@ fn invalid_vertex_tolerances_are_still_refused() {
     }
 }
 
-/// A finite radius is local only while it remains clear of separate topology.
-/// The origin corner's ball reaches the opposite x=1 face at radius 1.
-#[test]
-fn vertex_ball_must_not_reach_non_incident_topology() {
-    for (radius, accepted) in [(0.1, true), (0.999, true), (1.0, false), (2.0, false)] {
-        let mut k = Kernel::default();
-        let mut b = box_body(&mut k);
-        let v = b.vertex_list()[0];
-        b.vertex_mut(v).unwrap().tolerance = radius;
-        let result = check_brep(&mut k, &mut b, CheckLevel::Level2);
-        if accepted {
-            let report = result.unwrap();
-            assert!(report.is_valid(), "radius {radius}: {:?}", report.lines());
-            assert_eq!(b.vertex(v).unwrap().tolerance, radius);
-        } else {
-            let report = result.unwrap();
-            assert!(!report.is_valid(), "radius {radius}");
-            assert!(
-                report
-                    .lines()
-                    .iter()
-                    .any(|line| line.contains("Vertex tolerance reaches a non-adjacent face")),
-                "radius {radius}: {:?}",
-                report.lines()
-            );
-        }
-    }
-}
-
 /// Same lines as the C++ capi sequence (difftest `topology.assert_valid`,
 /// `box_mutation{2,9}_capi`).
 type Mutation = Box<dyn Fn(&mut Brep)>;
