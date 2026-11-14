@@ -144,6 +144,11 @@ pub enum DocError {
     /// empty until the evaluation of the feature fills it in ([`DocError::in_feature`]).
     #[error("{}", reselect_message(feature, reference))]
     Reselect { feature: String, reference: String },
+    /// An id or index read from a body's record or a sheet's own lists names no entry there:
+    /// `what` (say "face") number `index`, where the list holds `count`. The data naming it is
+    /// stale or corrupt; the operation fails instead of reading past the list.
+    #[error("{what} {index} doesn't exist (there are {count}): the data naming it is stale or corrupt")]
+    Missing { what: &'static str, index: usize, count: usize },
 }
 
 impl DocError {

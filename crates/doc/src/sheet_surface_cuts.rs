@@ -204,7 +204,7 @@ fn lying(
     }
     let size = now.size();
     let parallel = |u: Vec3, v: Vec3| u.cross(v).len() * size <= tol;
-    for group in components(q, here) {
+    for group in components(q, here).map_err(|e| e.to_string())? {
         let Some((o, a, r)) = group.iter().find_map(|f| match lean(now, *f, frame.z, tol) {
             Lean::Lying(o, a, r) => Some((o, a, r)),
             _ => None,
@@ -1301,8 +1301,8 @@ fn onto_panels(
             taken.claimed.extend(crossing.iter().copied());
         }
         let folded = Folded::new(carriers(sk, &dev, fold.as_ref(), &pieces)?, fold.as_ref(), t);
-        for group in components(&qb, walls).into_iter().filter(|_| flat.is_none()) {
-            let reach = reached(&qb, &folded, &group, sag);
+        for group in components(&qb, walls).map_err(|e| e.to_string())?.into_iter().filter(|_| flat.is_none()) {
+            let reach = reached(&qb, &folded, &group, sag).map_err(|e| e.to_string())?;
             touched.extend(reach.iter().copied());
             let mut panels = reach.iter().map(|k| match pieces.get(*k).map(|p| p.0) {
                 Some(Piece::Panel(i)) => Some(i),
@@ -1336,7 +1336,12 @@ fn onto_panels(
             continue;
         }
         let slab = Slab::new(&panel.surface, *frame, t);
-        let here = rest.as_deref().map(|w| within(&qb, &slab, &panel.region, w, tol * 100.0, sag)).unwrap_or_default();
+        let here = rest
+            .as_deref()
+            .map(|w| within(&qb, &slab, &panel.region, w, tol * 100.0, sag))
+            .transpose()
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
         taken.claimed.extend(here.iter().copied());
         if !plane {
             // A roll: what went through it is its walls' shadow.

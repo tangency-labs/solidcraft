@@ -15,6 +15,12 @@ use crate::sheet::FlatWork;
 use crate::sheet_surface_cuts::{holds, near_each_other, region_holds};
 use crate::{DocError, Result};
 
+/// Entry `index` of `list`, the `what` (say "face") an id read from a record or from a sheet's
+/// own lists names: [`DocError::Missing`] where the list has no such entry, never a panic.
+pub(crate) fn entry<'a, T>(list: &'a [T], index: usize, what: &'static str) -> Result<&'a T> {
+    list.get(index).ok_or(DocError::Missing { what, index, count: list.len() })
+}
+
 /// A piece of a development's flat: a panel's material less its trims, a bend's zone (by its
 /// place in the development's zones), or a tab: a piece of a zone that the cuts leave joined to
 /// one of its panels only, which rides with that panel, flat, where the rest of the zone bends.

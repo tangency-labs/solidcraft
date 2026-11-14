@@ -33,7 +33,15 @@ use solidcraft_develop::{Bent, Fold, Query, Rigid2, Rigid3, Surface, curve_throu
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_kernel::{Body, FaceSurface, face_surface};
 
+use crate::Result as DocResult;
+use crate::sheet_surface::entry;
 use crate::sheet_surface_cuts::{holds, region_holds};
+
+/// Entry `i` of `list`, the `what` an id or index names, as [`entry`] reads it, with its error
+/// ([`crate::DocError::Missing`]) as this module's text.
+fn nth<'a, T>(list: &'a [T], i: usize, what: &'static str) -> Result<&'a T, String> {
+    entry(list, i, what).map_err(|e| e.to_string())
+}
 
 /// A wall leaning less than this (the cosine of its normal's angle to the fibers) is edge-on to
 /// them: above the rounding of a wall square to them.
@@ -216,7 +224,8 @@ fn exact(curve: &CurveEval, a: f64, b: f64, frame: &Rigid3, place: &Rigid2) -> V
         })
         .collect();
     let Some(pts) = pts else { return Vec::new() };
-    let (s, e) = (pts[0], pts[N]);
+    // `pts` holds N + 1 points.
+    let (Some(&s), Some(&e), Some(&q), Some(&r)) = (pts.first(), pts.get(N), pts.get(N / 3), pts.get(2 * N / 3)) else { return Vec::new() };
     let on = ON_FORM + 1e-12 * s.dist(e);
     let off_line = |p: Vec2| {
         let d = e - s;
@@ -227,7 +236,7 @@ fn exact(curve: &CurveEval, a: f64, b: f64, frame: &Rigid3, place: &Rigid2) -> V
         return vec![Seg2::Line { a: s, b: e }];
     }
     // The circle through three points a third of the piece apart.
-    let (p, q, r) = (pts[0], pts[N / 3], pts[2 * N / 3]);
+    let p = s;
     let (u, v) = (q - p, r - p);
     let den = 2.0 * u.cross(v);
     if !(den.abs() > 1e-12) {
@@ -239,31 +248,41 @@ fn exact(curve: &CurveEval, a: f64, b: f64, frame: &Rigid3, place: &Rigid2) -> V
         return Vec::new();
     }
     let angle = |x: Vec2| (x - center).y.atan2((x - center).x);
-    let sweep: f64 = pts.windows(2).map(|w| (angle(w[1]) - angle(w[0]) + PI).rem_euclid(TAU) - PI).sum();
+    let sweep: f64 = pts.iter().zip(pts.iter().skip(1)).map(|(a, b)| (angle(*b) - angle(*a) + PI).rem_euclid(TAU) - PI).sum();
     // Past a half turn, in halves: an arc's ends stay well apart.
     let n = if sweep.abs() > PI { 2 } else { 1 };
     (0..n).map(|k| Seg2::Arc { center, radius, start: angle(s) + sweep * k as f64 / n as f64, sweep: sweep / n as f64 }).collect()
 }
 
 /// `walls` in groups that meet each other along edges: each the walls of one cut through the
-/// sheet.
-pub(crate) fn components(q: &Query, walls: &[usize]) -> Vec<Vec<usize>> {
+/// sheet. A wall that isn't a face of `q`'s record is [`crate::DocError::Missing`].
+pub(crate) fn components(q: &Query, walls: &[usize]) -> DocResult<Vec<Vec<usize>>> {
+    // `group` holds a place in `walls` for each wall, each naming a place in it.
     fn root(group: &mut [usize], mut i: usize) -> usize {
-        while group[i] != i {
-            group[i] = group[group[i]];
-            i = group[i];
+        while let Some(&up) = group.get(i)
+            && up != i
+        {
+            // In range: `i` was read from `group` just above, and every entry names a place in it.
+            let grand = group.get(up).copied().unwrap_or(up);
+            if let Some(g) = group.get_mut(i) {
+                *g = grand;
+            }
+            i = grand;
         }
         i
     }
     let mut group: Vec<usize> = (0..walls.len()).collect();
     for (i, &f) in walls.iter().enumerate() {
-        for l in &q.record().faces[f].loops {
+        for l in &entry(&q.record().faces, f, "face")?.loops {
             let Bounds::Edges { edges } = l else { continue };
             for oe in edges {
                 for g in q.edge_faces(oe.edge as usize) {
                     if let Some(j) = walls.iter().position(|w| *w == g && g != f) {
                         let (a, b) = (root(&mut group, i), root(&mut group, j));
-                        group[a] = b;
+                        // In range: `root` returns a place in `group`.
+                        if let Some(slot) = group.get_mut(a) {
+                            *slot = b;
+                        }
                     }
                 }
             }
@@ -277,14 +296,15 @@ pub(crate) fn components(q: &Query, walls: &[usize]) -> Vec<Vec<usize>> {
             None => out.push((r, vec![f])),
         }
     }
-    out.into_iter().map(|(_, list)| list).collect()
+    Ok(out.into_iter().map(|(_, list)| list).collect())
 }
 
-/// Which of `folded`'s pieces the edges of `walls` lie in, by their places in its list.
-pub(crate) fn reached(q: &Query, folded: &Folded, walls: &[usize], sag: f64) -> BTreeSet<usize> {
+/// Which of `folded`'s pieces the edges of `walls` lie in, by their places in its list. A wall
+/// that isn't a face of `q`'s record is [`crate::DocError::Missing`].
+pub(crate) fn reached(q: &Query, folded: &Folded, walls: &[usize], sag: f64) -> DocResult<BTreeSet<usize>> {
     let mut out = BTreeSet::new();
     for &f in walls {
-        for l in &q.record().faces[f].loops {
+        for l in &entry(&q.record().faces, f, "face")?.loops {
             let Bounds::Edges { edges } = l else { continue };
             for oe in edges {
                 for (_, p) in q.edge_points(oe.edge as usize, sag).unwrap_or_default() {
@@ -295,7 +315,7 @@ pub(crate) fn reached(q: &Query, folded: &Folded, walls: &[usize], sag: f64) -> 
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// Whether faces `a` and `b` lie on one surface within `tol`: a cut leaves the faces it didn't
@@ -346,16 +366,20 @@ pub(crate) fn walls(was: &Body, now: &Body, tol: f64) -> Vec<usize> {
             .map(|oe| oe.edge as usize)
             .collect()
     };
-    let old: Vec<(Option<FaceSurface>, &Record)> = (0..ra.faces.len()).map(|f| (face_surface(was, f), &ra.faces[f].surface)).collect();
-    (0..rb.faces.len())
-        .filter(|f| {
-            let here = (face_surface(now, *f), &rb.faces[*f].surface);
-            let under: Vec<usize> = (0..old.len()).filter(|o| same_surface(here, old[*o], tol)).collect();
+    let old: Vec<((Option<FaceSurface>, &Record), &[Bounds])> =
+        ra.faces.iter().enumerate().map(|(f, face)| ((face_surface(was, f), &face.surface), face.loops.as_slice())).collect();
+    rb.faces
+        .iter()
+        .enumerate()
+        .filter(|(f, face)| {
+            let here = (face_surface(now, *f), &face.surface);
+            let under: Vec<(usize, &[Bounds])> =
+                old.iter().enumerate().filter(|(_, (o, _))| same_surface(here, *o, tol)).map(|(o, (_, loops))| (o, *loops)).collect();
             if under.is_empty() {
                 return true;
             }
-            let outline: Vec<usize> = under.iter().flat_map(|o| edges_of(&ra.faces[*o].loops)).collect();
-            edges_of(&rb.faces[*f].loops).into_iter().any(|e| {
+            let outline: Vec<usize> = under.iter().flat_map(|(_, loops)| edges_of(loops)).collect();
+            edges_of(&face.loops).into_iter().any(|e| {
                 let Some([t0, t1]) = qb.edge_interval(e) else { return false };
                 let Some((middle, _)) = qb.edge_at(e, 0.5 * (t0 + t1)) else { return false };
                 if outline.iter().any(|o| qa.edge_distance(*o, middle, sag).is_some_and(|d| d <= sag)) {
@@ -366,9 +390,10 @@ pub(crate) fn walls(was: &Body, now: &Body, tol: f64) -> Vec<usize> {
                     Some(inner) if !inner.is_empty() => inner.iter().map(|(_, p)| *p).collect(),
                     _ => vec![middle],
                 };
-                !inner.iter().all(|p| under.iter().any(|o| qa.face_contains(*o, *p, accept)))
+                !inner.iter().all(|p| under.iter().any(|(o, _)| qa.face_contains(*o, *p, accept)))
             })
         })
+        .map(|(f, _)| f)
         .collect()
 }
 
@@ -506,11 +531,11 @@ impl Reader<'_> {
         for f in edge.kind.walls() {
             let wide: Vec<bool> = samples.iter().map(|(_, p)| self.widens(f, *p)).collect::<Result<_, _>>()?;
             let mut found: Vec<f64> = Vec::new();
-            for (k, pair) in wide.windows(2).enumerate() {
-                if let [a, b] = pair
+            for (pair, ts) in wide.windows(2).zip(samples.windows(2)) {
+                if let ([a, b], [(ta, _), (tb, _)]) = (pair, ts)
                     && a != b
                 {
-                    found.push(self.corner(&edge.curve, f, (samples[k].0, *a), samples[k + 1].0)?);
+                    found.push(self.corner(&edge.curve, f, (*ta, *a), *tb)?);
                 }
             }
             // Two corners nearer than the tolerance are a fold touching the edge there, not
@@ -615,9 +640,9 @@ impl Reader<'_> {
         while path.len() < MAX_FOLD_POINTS {
             // A corner it was looking for, close ahead (not the one it started at, at the start).
             let away = path.len() > 3;
-            let close = |i: &usize| ends[*i].dist(p) <= step * 1.5 && (ends[*i] - p).dot(dir) > 0.0 && (away || ends[*i].dist(from) > self.tol);
-            if let Some(i) = (0..ends.len()).filter(close).min_by(|a, b| ends[*a].dist(p).total_cmp(&ends[*b].dist(p))) {
-                path.push(ends[i]);
+            let close = |e: &Vec3| e.dist(p) <= step * 1.5 && (*e - p).dot(dir) > 0.0 && (away || e.dist(from) > self.tol);
+            if let Some((i, e)) = ends.iter().enumerate().filter(|(_, e)| close(e)).min_by(|a, b| a.1.dist(p).total_cmp(&b.1.dist(p))) {
+                path.push(*e);
                 return Ok((path, End::Known(i)));
             }
             let next = self.onto(f, p + dir * step, step * 4.0).and_then(|(g, _)| self.settle(f, g));
@@ -637,11 +662,11 @@ impl Reader<'_> {
                     .iter()
                     .enumerate()
                     .filter(|(_, e)| e.kind.walls().contains(&f))
-                    .filter_map(|(i, e)| self.q.edge_distance(e.e, x, self.sag).map(|d| (d, i)))
+                    .filter_map(|(i, e)| self.q.edge_distance(e.e, x, self.sag).map(|d| (d, i, e)))
                     .min_by(|a, b| a.0.total_cmp(&b.0));
-                let Some((_, i)) = near else { return Err(lost()) };
-                if let Some(t) = self.crossing(&edges[i], f, x)? {
-                    let at = edges[i].curve.point(t).ok_or_else(lost)?;
+                let Some((_, i, edge)) = near else { return Err(lost()) };
+                if let Some(t) = self.crossing(edge, f, x)? {
+                    let at = edge.curve.point(t).ok_or_else(lost)?;
                     path.push(at);
                     return Ok((path, End::Found(i, t)));
                 }
@@ -689,13 +714,19 @@ impl Reader<'_> {
     /// Where wall `f`'s leaning changes on `edge` near `x`: between the edge's points either side
     /// of its point nearest `x`; none where it leans one way all along there.
     fn crossing(&self, edge: &Edge, f: usize, x: Vec3) -> Result<Option<f64>, String> {
-        let samples = self.q.edge_points(edge.e, self.sag).ok_or_else(|| format!("an edge of the cut on {} can't be read", self.name))?;
-        let k = (0..samples.len()).min_by(|a, b| samples[*a].1.dist(x).total_cmp(&samples[*b].1.dist(x))).unwrap_or(0);
-        let (lo, hi) = (k.saturating_sub(3), (k + 3).min(samples.len() - 1));
-        let wide: Vec<bool> = (lo..=hi).map(|i| self.widens(f, samples[i].1)).collect::<Result<_, _>>()?;
-        let found = (0..wide.len().saturating_sub(1)).find(|i| wide[*i] != wide[i + 1]);
-        let Some(i) = found else { return Ok(None) };
-        self.corner(&edge.curve, f, (samples[lo + i].0, wide[i]), samples[lo + i + 1].0).map(Some)
+        let unread = || format!("an edge of the cut on {} can't be read", self.name);
+        let samples = self.q.edge_points(edge.e, self.sag).ok_or_else(unread)?;
+        // An edge read as no points has none nearest `x`.
+        let (k, _) = samples.iter().enumerate().min_by(|a, b| a.1.1.dist(x).total_cmp(&b.1.1.dist(x))).ok_or_else(unread)?;
+        let (lo, hi) = (k.saturating_sub(3), (k + 3).min(samples.len().saturating_sub(1)));
+        let near = samples.get(lo..=hi).ok_or_else(unread)?;
+        let wide: Vec<bool> = near.iter().map(|(_, p)| self.widens(f, *p)).collect::<Result<_, _>>()?;
+        let found = wide.windows(2).zip(near.windows(2)).find_map(|pair| match pair {
+            ([a, b], [(ta, _), (tb, _)]) if a != b => Some((*a, *ta, *tb)),
+            _ => None,
+        });
+        let Some((wa, ta, tb)) = found else { return Ok(None) };
+        self.corner(&edge.curve, f, (ta, wa), tb).map(Some)
     }
 }
 
@@ -719,10 +750,10 @@ pub(crate) fn shadow(
 ) -> Result<Vec<Region2>, String> {
     let rec = q.record();
     let mine: BTreeSet<usize> = walls.iter().copied().collect();
-    let wall = |f: usize| -> Option<Wall> {
-        let surface = SurfaceEval::new(&rec.faces[f].surface).ok()?;
+    let wall = |f: usize, face: &solidcore_record::brep::Face| -> Option<Wall> {
+        let surface = SurfaceEval::new(&face.surface).ok()?;
         // Its side from a point of its edges where the record's own normal is had.
-        let sign = rec.faces[f].loops.iter().find_map(|l| {
+        let sign = face.loops.iter().find_map(|l| {
             let Bounds::Edges { edges } = l else { return None };
             edges.iter().find_map(|oe| {
                 q.edge_points(oe.edge as usize, sag)?.into_iter().find_map(|(_, p)| {
@@ -736,7 +767,7 @@ pub(crate) fn shadow(
         })?;
         Some(Wall { surface, sign })
     };
-    let surfaces = (0..rec.faces.len()).map(|f| if mine.contains(&f) { wall(f) } else { None }).collect();
+    let surfaces = rec.faces.iter().enumerate().map(|(f, face)| if mine.contains(&f) { wall(f, face) } else { None }).collect();
     let r = Reader { q, slab, surfaces, tol, sag, step: (now.size() * 0.01).clamp(sag * 10.0, 1.0), name };
     let unread = || format!("a wall of the cut on {name} can't be read");
     // The walls' edges, each once, and what each is.
@@ -744,7 +775,7 @@ pub(crate) fn shadow(
     let mut seen = BTreeSet::new();
     for &f in walls {
         let (mut near, mut far, mut edge, mut depths) = (false, false, false, Vec::new());
-        for l in &rec.faces[f].loops {
+        for l in &nth(&rec.faces, f, "face")?.loops {
             let Bounds::Edges { edges: used } = l else { continue };
             for oe in used {
                 let e = oe.edge as usize;
@@ -765,14 +796,14 @@ pub(crate) fn shadow(
                     continue;
                 };
                 if seen.insert(e) {
-                    let edge = &rec.edges[e];
+                    let edge = nth(&rec.edges, e, "edge")?;
                     let curve = CurveEval::new(edge.parameters()).map_err(|_| unread())?;
                     edges.push(Edge { e, kind, curve, span: edge.interval, corners: Vec::new() });
                 }
             }
         }
         if !(near && far) {
-            let level = depths.iter().all(|w| (w - depths[0]).abs() <= tol * 10.0);
+            let level = depths.first().is_none_or(|d0| depths.iter().all(|w| (w - d0).abs() <= tol * 10.0));
             return Err(if level {
                 format!("leaves a recess in {name}: not supported yet at a slant, on a roll or in a bend")
             } else {
@@ -801,11 +832,14 @@ pub(crate) fn shadow(
             let (path, end) = r.fold(f, from, Some((i, t)), &ends, &edges)?;
             match end {
                 End::Known(i) => {
+                    nth(&open, i, "fold corner")?;
                     open.remove(i);
                 }
                 End::Found(i, t) => {
-                    edges[i].corners.push((t, f));
-                    edges[i].corners.sort_by(|x, y| x.0.total_cmp(&y.0));
+                    let count = edges.len();
+                    let edge = edges.get_mut(i).ok_or_else(|| crate::DocError::Missing { what: "wall edge", index: i, count }.to_string())?;
+                    edge.corners.push((t, f));
+                    edge.corners.sort_by(|x, y| x.0.total_cmp(&y.0));
                 }
             }
             folds.push(Piece(path, Vec::new()));
@@ -842,7 +876,7 @@ pub(crate) fn shadow(
         let mut cuts: Vec<f64> = std::iter::once(edge.span[0]).chain(edge.corners.iter().map(|c| c.0)).chain(std::iter::once(edge.span[1])).collect();
         cuts.dedup_by(|a, b| (*a - *b).abs() <= 1e-12 * (edge.span[1] - edge.span[0]).abs());
         for pair in cuts.windows(2) {
-            let [a, b] = [pair[0], pair[1]];
+            let &[a, b] = pair else { continue };
             let mid = edge.curve.point(0.5 * (a + b)).ok_or_else(unread)?;
             let wide: Vec<bool> = edge.kind.walls().iter().map(|f| r.widens(*f, mid)).collect::<Result<_, _>>()?;
             if !edge.kind.outline(&wide) {
@@ -863,7 +897,7 @@ pub(crate) fn shadow(
         }
     }
     let loops = assemble(&r, pieces, around)?;
-    let regions = nest(loops);
+    let regions = nest(loops)?;
     // The holes the walls leave in both faces lie within the shadow.
     for edge in &edges {
         if let Kind::Rim { .. } = edge.kind {
@@ -887,8 +921,9 @@ pub(crate) fn around(region: &Region2) -> f64 {
 }
 
 /// Those of `walls` that lie in the panel `region` of `slab`: every point of their edges within
-/// the thickness and on the region, or on its outline within `near`.
-pub(crate) fn within(q: &Query, slab: &Slab, region: &Region2, walls: &[usize], near: f64, sag: f64) -> Vec<usize> {
+/// the thickness and on the region, or on its outline within `near`. A wall that isn't a face of
+/// `q`'s record is [`crate::DocError::Missing`].
+pub(crate) fn within(q: &Query, slab: &Slab, region: &Region2, walls: &[usize], near: f64, sag: f64) -> DocResult<Vec<usize>> {
     let mid = around(region);
     let on = |p: Vec3| {
         slab.depth(p).is_some_and(|d| {
@@ -897,18 +932,17 @@ pub(crate) fn within(q: &Query, slab: &Slab, region: &Region2, walls: &[usize], 
         })
     };
     let rec = q.record();
-    walls
-        .iter()
-        .copied()
-        .filter(|f| {
-            rec.faces[*f].loops.iter().all(|l| match l {
-                Bounds::Edges { edges } => {
-                    edges.iter().all(|oe| q.edge_points(oe.edge as usize, sag).is_some_and(|pts| pts.iter().all(|(_, p)| on(*p))))
-                }
-                Bounds::Vertex { .. } => true,
-            })
-        })
-        .collect()
+    let mut out = Vec::new();
+    for &f in walls {
+        let inside = entry(&rec.faces, f, "face")?.loops.iter().all(|l| match l {
+            Bounds::Edges { edges } => edges.iter().all(|oe| q.edge_points(oe.edge as usize, sag).is_some_and(|pts| pts.iter().all(|(_, p)| on(*p)))),
+            Bounds::Vertex { .. } => true,
+        });
+        if inside {
+            out.push(f);
+        }
+    }
+    Ok(out)
 }
 
 fn outline_distance(g: &Region2, p: Vec2) -> f64 {
@@ -927,12 +961,13 @@ fn assemble(r: &Reader, pieces: Vec<Piece>, around: f64) -> Result<Vec<Loop2>, S
     // The pieces' ends, as points one within the edges' tolerance; a piece all within it is a
     // point (an edge's bit between a vertex and a touch beside it).
     let join = r.tol.max(r.q.record().tolerance) * 10.0;
-    let pieces: Vec<Piece> = pieces.into_iter().filter(|Piece(p, _)| p.iter().any(|x| x.dist(p[0]) > join)).collect();
+    let pieces: Vec<Piece> = pieces.into_iter().filter(|Piece(p, _)| p.first().is_some_and(|p0| p.iter().any(|x| x.dist(*p0) > join))).collect();
     let mut nodes: Vec<Vec3> = Vec::new();
     let mut ends: Vec<[usize; 2]> = Vec::new();
     for Piece(p, _) in &pieces {
         let mut end = [0; 2];
-        for (slot, x) in end.iter_mut().zip([p[0], p[p.len() - 1]]) {
+        let (Some(&first), Some(&last)) = (p.first(), p.last()) else { return Err(broken()) };
+        for (slot, x) in end.iter_mut().zip([first, last]) {
             *slot = match nodes.iter().position(|n| n.dist(x) <= join) {
                 Some(i) => i,
                 None => {
@@ -945,36 +980,44 @@ fn assemble(r: &Reader, pieces: Vec<Piece>, around: f64) -> Result<Vec<Loop2>, S
     }
     let mut degree = vec![0usize; nodes.len()];
     for [a, b] in &ends {
-        degree[*a] += 1;
-        degree[*b] += 1;
+        for node in [*a, *b] {
+            let count = degree.len();
+            *degree.get_mut(node).ok_or_else(|| crate::DocError::Missing { what: "outline node", index: node, count }.to_string())? += 1;
+        }
     }
     if degree.iter().any(|d| *d != 2) {
         return Err(broken());
     }
     let mut used = vec![false; pieces.len()];
     let (mut loops, mut junctions) = (Vec::new(), Vec::new());
+    // `ends` and `used` hold an entry for each piece.
     for start in 0..pieces.len() {
-        if used[start] {
+        if *nth(&used, start, "outline piece")? {
             continue;
         }
         // The cycle: each piece, and whether it runs from its last point to its first.
-        let (mut cycle, mut k, mut at) = (Vec::new(), start, ends[start][0]);
+        let [first, _] = *nth(&ends, start, "outline piece")?;
+        let (mut cycle, mut k, mut at) = (Vec::new(), start, first);
         loop {
-            used[k] = true;
-            let back = ends[k][0] != at;
+            let [a, b] = *nth(&ends, k, "outline piece")?;
+            // In range: `ends` (read at `k` just above) and `used` are the same length.
+            if let Some(u) = used.get_mut(k) {
+                *u = true;
+            }
+            let back = a != at;
             cycle.push((k, back));
-            at = if back { ends[k][0] } else { ends[k][1] };
-            if at == ends[start][0] {
+            at = if back { a } else { b };
+            if at == first {
                 break;
             }
-            k = (0..pieces.len()).find(|j| !used[*j] && ends[*j].contains(&at)).ok_or_else(broken)?;
+            k = (0..pieces.len()).find(|j| used.get(*j) == Some(&false) && ends.get(*j).is_some_and(|e| e.contains(&at))).ok_or_else(broken)?;
         }
         // Its points in the panel's parameters, a roll's angle unwrapped along it, or its exact
         // segments.
         let mut runs: Vec<Run> = Vec::new();
         let mut last: Option<Vec2> = None;
         for (k, back) in &cycle {
-            let Piece(points, exact) = &pieces[*k];
+            let Piece(points, exact) = nth(&pieces, *k, "outline piece")?;
             if !exact.is_empty() {
                 let segs: Vec<Seg2> = if *back { exact.iter().rev().map(Seg2::reversed).collect() } else { exact.clone() };
                 last = segs.last().map(Seg2::end);
@@ -1004,9 +1047,10 @@ fn assemble(r: &Reader, pieces: Vec<Piece>, around: f64) -> Result<Vec<Loop2>, S
         let scale = if r.slab.angular() { 1e-3 } else { 1.0 };
         runs.retain(|run| run.extent() > r.tol * 1e-3 * scale);
         for i in 1..runs.len() {
-            let (end, start) = (runs[i - 1].end(), runs[i].start());
             let (before, after) = runs.split_at_mut(i);
-            match (&mut before[i - 1], &mut after[0]) {
+            let (Some(prev_run), Some(next_run)) = (before.last_mut(), after.first_mut()) else { continue };
+            let (end, start) = (prev_run.end(), next_run.start());
+            match (prev_run, next_run) {
                 (Run::Points(prev), Run::Exact(_)) => {
                     if let (Some(p), Some(s)) = (prev.last_mut(), start) {
                         *p = s;
@@ -1058,10 +1102,10 @@ fn assemble(r: &Reader, pieces: Vec<Piece>, around: f64) -> Result<Vec<Loop2>, S
             .flat_map(|run| match run {
                 Run::Points(run) => {
                     let n = run.len();
-                    if n > 2 && run[0].dist(run[n - 1]) <= r.tol * 1e-3 {
-                        vec![Run::Points(run[..=n / 2].to_vec()), Run::Points(run[n / 2..].to_vec())]
-                    } else {
-                        vec![Run::Points(run)]
+                    let closed = n > 2 && run.first().zip(run.last()).is_some_and(|(a, b)| a.dist(*b) <= r.tol * 1e-3);
+                    match (closed, run.get(..=n / 2), run.get(n / 2..)) {
+                        (true, Some(head), Some(tail)) => vec![Run::Points(head.to_vec()), Run::Points(tail.to_vec())],
+                        _ => vec![Run::Points(run)],
                     }
                 }
                 exact => vec![exact],
@@ -1108,10 +1152,8 @@ impl Run {
     fn extent(&self) -> f64 {
         match self {
             Run::Points(v) => {
-                if v.len() < 2 {
-                    return 0.0;
-                }
-                v.iter().map(|p| p.dist(v[0])).fold(0.0, f64::max)
+                let Some(v0) = v.first().filter(|_| v.len() >= 2) else { return 0.0 };
+                v.iter().map(|p| p.dist(*v0)).fold(0.0, f64::max)
             }
             Run::Exact(segs) => segs.iter().map(Seg2::length).sum(),
         }
@@ -1123,16 +1165,17 @@ impl Run {
 fn crossed(loops: &[Loop2], joints: &[Vec2], tol: f64) -> Option<Vec2> {
     let lines: Vec<Vec<Vec2>> = loops.iter().map(|l| (&l.polyline(tol.max(1e-6) * 10.0)).into_iter().copied().collect()).collect();
     let near_joint = |p: Vec2, reach: f64| joints.iter().any(|j| j.dist(p) <= reach);
-    let seg = |l: &Vec<Vec2>, i: usize| (l[i], l[(i + 1) % l.len()]);
+    // Each segment of a closed polyline: each point and the next, round to the first.
+    fn segs(l: &[Vec2]) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
+        l.iter().copied().zip(l.iter().copied().cycle().skip(1))
+    }
     for (a, la) in lines.iter().enumerate() {
         for (b, lb) in lines.iter().enumerate().skip(a) {
-            for i in 0..la.len() {
-                let (p0, p1) = seg(la, i);
-                for j in 0..lb.len() {
-                    if a == b && (j <= i + 1 || (i == 0 && j == la.len() - 1)) {
+            for (i, (p0, p1)) in segs(la).enumerate() {
+                for (j, (q0, q1)) in segs(lb).enumerate() {
+                    if a == b && (j <= i + 1 || (i == 0 && j + 1 == la.len())) {
                         continue;
                     }
-                    let (q0, q1) = seg(lb, j);
                     let (d1, d2) = (p1 - p0, q1 - q0);
                     let den = d1.cross(d2);
                     if den.abs() <= 1e-15 * d1.len() * d2.len() {
@@ -1154,16 +1197,83 @@ fn crossed(loops: &[Loop2], joints: &[Vec2], tol: f64) -> Option<Vec2> {
 }
 
 /// Closed outlines as regions: each inside another is a hole of the smallest around it.
-fn nest(loops: Vec<Loop2>) -> Vec<Region2> {
+fn nest(loops: Vec<Loop2>) -> Result<Vec<Region2>, String> {
     let mut loops: Vec<Loop2> = loops.into_iter().map(|l| l.ccw()).collect();
     loops.sort_by(|a, b| b.signed_area().abs().total_cmp(&a.signed_area().abs()));
     let mut regions: Vec<Region2> = Vec::new();
     for l in loops {
-        let p = l.segs[0].mid();
+        let p = l.segs.first().ok_or("an outline of the cut has no segments")?.mid();
         match regions.iter_mut().rev().find(|g| holds(&g.outer, p)) {
             Some(g) if !g.holes.iter().any(|h| holds(h, p)) => g.holes.push(l.reversed()),
             _ => regions.push(Region2 { outer: l, holes: Vec::new() }),
         }
     }
-    regions
+    Ok(regions)
+}
+
+#[cfg(test)]
+mod tests {
+    use solidcore_record::{Loop2, Region2, Vec2, Vec3};
+    use solidcraft_develop::{Query, Rigid3, Surface};
+
+    use super::{Edge, Folded, Kind, Reader, Slab, components, reached, shadow, within};
+    use crate::DocError;
+
+    /// A plate 10 × 10 × 2 mm, its faces the record's only faces.
+    fn plate() -> solidcraft_kernel::Body {
+        solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 2.0)).expect("plate")
+    }
+
+    /// A wall id read from a stale record, past the body's faces, is a typed error naming the
+    /// face, never a panic: grouping walls, finding the pieces they reach, keeping those in a
+    /// panel, and reading their shadow.
+    #[test]
+    fn a_stale_wall_id_is_a_missing_face() {
+        let body = plate();
+        let q = Query::new(body.record());
+        let count = body.record().faces.len();
+        let stale = count + 3;
+        let missing = DocError::Missing { what: "face", index: stale, count };
+        assert_eq!(components(&q, &[0, stale]), Err(missing.clone()));
+        let folded = Folded::new(Vec::new(), None, 2.0);
+        assert_eq!(reached(&q, &folded, &[stale], 1e-3), Err(missing.clone()));
+        let surface = Surface::Plane;
+        let slab = Slab::new(&surface, Rigid3::IDENTITY, 2.0);
+        let region = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]),
+            holes: Vec::new(),
+        };
+        assert_eq!(within(&q, &slab, &region, &[stale], 1e-4, 1e-3), Err(missing.clone()));
+        let read = shadow(&body, &q, &slab, &[stale], "the panel", 0.0, 1e-6, 1e-3);
+        assert_eq!(read.err(), Some(missing.to_string()));
+    }
+
+    /// An edge the record can't read gives the edge's typed refusal from `crossing`, never a
+    /// panic. (`Query::edge_points` returns at least two points or none, so the old
+    /// `samples.len() - 1`, which underflowed on none, is now guarded on both paths.)
+    #[test]
+    fn crossing_an_unreadable_edge_is_refused() {
+        let body = plate();
+        let q = Query::new(body.record());
+        let surface = Surface::Plane;
+        let slab = Slab::new(&surface, Rigid3::IDENTITY, 2.0);
+        let rec = body.record();
+        let first = rec.edges.first().expect("a box has edges");
+        let curve = solidcraft_geom::brep::eval::CurveEval::new(first.parameters()).expect("a box's edge");
+        let r = Reader { q: &q, slab: &slab, surfaces: Vec::new(), tol: 1e-6, sag: 1e-3, step: 0.1, name: "the panel" };
+        let stale = Edge { e: rec.edges.len() + 3, kind: Kind::Rim { far: false, wall: 0 }, curve, span: first.interval, corners: Vec::new() };
+        assert_eq!(r.crossing(&stale, 0, Vec3::ZERO), Err("an edge of the cut on the panel can't be read".to_string()));
+    }
+
+    /// Walls that are faces of the record still group as before: the fix reads them, it doesn't
+    /// change what they are.
+    #[test]
+    fn walls_of_the_record_still_group() {
+        let body = plate();
+        let q = Query::new(body.record());
+        let all: Vec<usize> = (0..body.record().faces.len()).collect();
+        let groups = components(&q, &all).expect("faces of the record");
+        assert_eq!(groups.len(), 1, "a box's faces all meet: {groups:?}");
+        assert_eq!(groups.iter().map(Vec::len).sum::<usize>(), all.len());
+    }
 }

@@ -60,7 +60,7 @@ use solidcraft_kernel::{Body, FaceSurface, face_surface};
 use crate::sheet::FlatWork;
 
 use crate::sheet::ReliefShape;
-use crate::sheet_surface::Piece;
+use crate::sheet_surface::{Piece, entry};
 use crate::{DocError, ModelBody, Result};
 
 /// Normals closer than this (radians) meet smoothly: the sheet runs on across their edge.
@@ -534,16 +534,17 @@ fn to_sharp(r: &Region2, (a, z): (Vec2, Vec2), by: f64, tol: f64) -> std::result
         let u = (x - p).dot(d);
         ((x - p - d * u).len() <= near && u >= -near && u <= p.dist(q) + near).then_some(u)
     };
-    let k = (0..n)
-        .find(|k| along(&segs[*k], a).is_some() && along(&segs[*k], z).is_some())
+    let (k, line, ua, uz) = segs
+        .iter()
+        .enumerate()
+        .find_map(|(k, s)| Some((k, s, along(s, a)?, along(s, z)?)))
         .ok_or("meets a modelled bend along an edge that is not on a line of its outline")?;
-    let (ua, uz) = (along(&segs[k], a).unwrap_or(0.0), along(&segs[k], z).unwrap_or(0.0));
     let (p, q) = if ua <= uz { (a, z) } else { (z, a) };
     let d = (q - p).normalized().ok_or("meets a modelled bend along an edge with no length")?;
     let extent = crate::sheet_surface_cuts::loop_box(&r.outer).size().len().max(1e-9);
     let out = if crate::sheet_surface_cuts::region_holds(r, p.lerp(q, 0.5) + d.perp() * (extent * 1e-4)) { -d.perp() } else { d.perp() };
     // Where the edge ends at an end of the line, the line before or after it may carry on.
-    let (p_end, q_end) = (p.dist(segs[k].start()) <= near, q.dist(segs[k].end()) <= near);
+    let (p_end, q_end) = (p.dist(line.start()) <= near, q.dist(line.end()) <= near);
     // The line `s`, from `from` to the end `at`, carried on past `at` to the sharp, where it
     // heads out across the edge.
     let carried = |s: &Seg2, at: Vec2, from: Vec2| -> Option<Vec2> {
@@ -551,7 +552,9 @@ fn to_sharp(r: &Region2, (a, z): (Vec2, Vec2), by: f64, tol: f64) -> std::result
         let w = (at - from).normalized()?;
         (w.dot(out) > 1e-6 && w.cross(d).abs() > 1e-6).then(|| at + w * (by / w.dot(out)))
     };
-    let (before, after) = (&segs[(k + n - 1) % n], &segs[(k + 1) % n]);
+    // `segs` holds `line`, at `k`, so `n` > 0.
+    let neighbour = |i: usize| entry(segs, i, "segment of the outline").map_err(|e| e.to_string());
+    let (before, after) = (neighbour((k + n - 1) % n)?, neighbour((k + 1) % n)?);
     let p_out = carried(before, p, before.start()).filter(|_| p_end).unwrap_or(p + out * by);
     let q_out = carried(after, q, after.end()).filter(|_| q_end).unwrap_or(q + out * by);
     let band = Region2 { outer: Loop2::polygon(&[p, q, q_out, p_out]).ccw(), holes: Vec::new() };
@@ -1962,11 +1965,13 @@ fn read_surfaces(
         // Which way `a`'s material lies, looked for beside the edge's middle along its way there:
         // beside the line between its ends, a curved edge's panel can lie both ways.
         let left = {
+            // `pa` holds `n` ≥ 2 points.
+            let point = |i: usize| entry(&pa, i, "point along the edge").copied();
             let (q0, q1, at_k) = if n == 2 {
-                (pa[0], pa[1], pa[0].lerp(pa[1], 0.5))
+                (point(0)?, point(1)?, point(0)?.lerp(point(1)?, 0.5))
             } else {
                 let k = n / 2;
-                (pa[k - 1], pa[k + 1], pa[k])
+                (point(k - 1)?, point(k + 1)?, point(k)?)
             };
             let extent = crate::sheet_surface_cuts::loop_box(&ra.outer).size().len().max(1e-9);
             (q1 - q0).normalized().is_some_and(|d| crate::sheet_surface_cuts::region_holds(&ra, at_k + d.perp() * (extent * 1e-4)))
