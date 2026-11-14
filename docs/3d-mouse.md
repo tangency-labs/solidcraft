@@ -50,8 +50,10 @@ When [`smed`](https://github.com/thomschlie/smed), the SpaceMouse Enterprise dri
 within a second is left as one that refused, and asked again later. smed reports every
 key by 3Dconnexion's id, beyond the 32 a HID bitmask holds (the Enterprise's Tab and Space are 175
 and 176), and tells a short press from one held past the device's long-press threshold. The Buttons
-section then has a second row, **Button N, held**, for each key that was held or has a long job; a
-key without one does its short job when held. The SpaceMouse Enterprise starts with the jobs
+section then has a second row, **T, held**, for each key that was held or has a long job; a key
+without one does its short job when held. On the devices we have measured (SpaceMouse Pro and
+SpaceMouse Enterprise) each row is named by the key printed on it; others show **Button N** and
+**Button N, held**. The SpaceMouse Enterprise starts with the jobs
 printed on its keys, and T, R and F held give the bottom, left and back views; read without smed,
 its keys start with no job, as before. The first time a device is read through smed, it takes over
 the calibration and button jobs saved for it read directly (smed passes its axes on unchanged and

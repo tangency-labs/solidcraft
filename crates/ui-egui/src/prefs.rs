@@ -3452,7 +3452,7 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
         for number in numbers {
-            let mut name = solidcraft_ui_text::format("ui.3d_mouse_button", &[("number", &number.to_string())]);
+            let mut name = crate::space_mouse::button_name(&device, number, false);
             if app.space_mouse.buttons.contains(number) {
                 name.push_str("  ●");
             }
@@ -3465,7 +3465,7 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
                 };
             }
             if long_numbers.contains(&number) {
-                let mut name = solidcraft_ui_text::format("ui.3d_mouse_button_long", &[("number", &number.to_string())]);
+                let mut name = crate::space_mouse::button_name(&device, number, true);
                 if app.space_mouse.long_buttons.contains(number) {
                     name.push_str("  ●");
                 }
@@ -6067,11 +6067,12 @@ mod tests {
         let sections = ["space_mouse_device", "space_mouse_orbit", "space_mouse_axes", "space_mouse_buttons", "space_mouse_advanced"];
         let bodies = sections.map(|key| crate::scenario::rect_of(&format!("prefs:section:{key}:body")).unwrap());
         assert!(bodies.windows(2).all(|pair| pair[0].bottom() <= pair[1].top()));
-        assert!(crate::scenario::rect_of("dialog:row:Button 1").is_some());
+        // The Pro's button 1 is named as printed on it.
+        assert!(crate::scenario::rect_of("dialog:row:Menu").is_some());
         assert!(crate::scenario::rect_of("dialog:row:Driver").is_some());
         scroll_to_and_click(&mut h, "dialog:section:Advanced");
         assert!(crate::scenario::rect_of("dialog:row:Driver").is_none());
-        assert!(crate::scenario::rect_of("dialog:row:Button 1").is_some());
+        assert!(crate::scenario::rect_of("dialog:row:Menu").is_some());
         assert!(crate::scenario::rect_of("prefs:space_mouse_reset_axes").is_some());
     }
 
@@ -6345,15 +6346,16 @@ mod tests {
             h.call("ui.resize", json!({"width": 1600, "height": 4000}));
             crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
             h.frames(10);
-            for number in [3, 5, 6] {
-                let row = format!("Button {number}, held");
+            // Held rows are named by the key printed on the Enterprise: T, R and F.
+            for key in ["T", "R", "F"] {
+                let row = format!("{key}, held");
                 assert!(h.widget(&row).is_some(), "{row} is drawn");
             }
-            assert!(h.widget("Button 23, held").is_none(), "no held row for a button without a long job");
+            assert!(h.widget("Esc, held").is_none(), "no held row for a button without a long job");
             // Until it is held long once: then its row says what a long press does.
             h.app.space_mouse.seen_long.insert(23);
             h.frames(3);
-            assert!(h.widget("Button 23, held").is_some(), "a held row for a button held long");
+            assert!(h.widget("Esc, held").is_some(), "a held row for a button held long");
             if lock.is_none() {
                 assert!(h.widget("Rotation lock").is_none(), "no lock to show");
                 continue;
@@ -6380,6 +6382,28 @@ mod tests {
             assert!(!h.app.preferences.space_mouse_buttons.contains_key(device), "short jobs reset");
             assert!(h.widget("Bottom").is_some(), "button 3 held shows its measured job again");
         }
+    }
+
+    /// The keys that carry a symbol get their own row names, so the padlock key's row ("Lock key") is
+    /// not a second "Rotation lock" beside the checkbox it switches: a click on that name still hits
+    /// the checkbox.
+    #[test]
+    fn the_symbol_keys_rows_keep_clear_of_the_rotation_lock_checkbox() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language": "en"}));
+        h.app.space_mouse.device = Some("smed 256f:c633".into());
+        h.app.space_mouse.lock = Some(false);
+        h.app.space_mouse.seen.insert(9);
+        h.app.space_mouse.seen.insert(27);
+        h.call("ui.resize", json!({"width": 1600, "height": 4000}));
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
+        h.frames(10);
+        assert!(!h.widgets("Lock key").is_empty(), "the padlock key's row");
+        assert!(!h.widgets("Roll").is_empty(), "the roll key's row");
+        h.step(&json!({"widget": "Rotation lock"})).expect("the rotation lock checkbox");
+        h.frames(2);
+        assert_eq!(h.app.space_mouse.lock_request, Some(true), "the click switches the lock");
     }
 
     /// The driver choice under Advanced: smed is offered where it runs and picked like the others, is
