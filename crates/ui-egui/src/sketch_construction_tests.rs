@@ -93,23 +93,23 @@ fn construction_offset_box_follows_the_modes_that_have_a_distance() {
         h.step(&json!({"start": id})).unwrap();
         let mut tool = h.app.tool.take().unwrap();
         crate::sketch_dims::sync(&mut tool);
-        assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), vec!["Length", "Offset"], "{id}");
+        assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), vec!["Offset"], "{id}: no Length box before the first click");
     }
     let mut h = sketch();
     h.step(&json!({"start":"sketch.construction_line.parallel"})).unwrap();
     let mut tool = h.app.tool.take().unwrap();
     crate::sketch_dims::sync(&mut tool);
-    assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), vec!["Length"], "the offset waits until the reference line is picked");
+    assert!(tool.dims.is_empty(), "the offset waits until the reference line is picked");
     tool.picks.push("a".into());
     crate::sketch_dims::sync(&mut tool);
-    assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), vec!["Length", "Offset"]);
+    assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), vec!["Offset"]);
 
     let mut h = sketch();
     h.step(&json!({"start":"sketch.construction_line.perpendicular"})).unwrap();
     let mut tool = h.app.tool.take().unwrap();
     tool.picks.push("a".into());
     crate::sketch_dims::sync(&mut tool);
-    assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), vec!["Length"], "a perpendicular line has no offset");
+    assert!(tool.dims.is_empty(), "a perpendicular line has no offset, and no length before its first click");
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn typed_offset_places_the_line_and_its_dimension() {
     assert!(curve.infinite && curve.construction, "{curve:?}");
     let CurveKind::Line { a, .. } = curve.kind else { panic!("line") };
     let start = sk.point(a).unwrap();
-    assert!((start.y + 6.).abs() < 1e-6);
+    assert!((start.y - 6.).abs() < 1e-6, "the typed Y, not the cursor's side: {start:?}");
     assert!(start.dist(solidcore_record::Vec2::new(2., -4.)) > 1.0, "the click is not pinned as the line start: {start:?}");
     assert!(sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::DistanceY { .. })));
     assert!(!sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Length { .. })));
@@ -211,8 +211,9 @@ fn a_focused_offset_box_places_an_infinite_line() {
         let click = solidcore_record::Vec2::new(at[0], at[1]);
         assert!(pa.dist(click) > 1.0 && pb.dist(click) > 1.0, "{id}: the click is not a segment end {pa:?} {pb:?}");
         match *id {
-            "sketch.construction_line.horizontal" => assert!((pa.y + 8.0).abs() < 1e-6 && (pb.y + 8.0).abs() < 1e-6, "{pa:?} {pb:?}"),
-            "sketch.construction_line.vertical" => assert!((pa.x + 8.0).abs() < 1e-6 && (pb.x + 8.0).abs() < 1e-6, "{pa:?} {pb:?}"),
+            // A horizontal or vertical line's value is its coordinate: Y = 8, X = 8 (#15618).
+            "sketch.construction_line.horizontal" => assert!((pa.y - 8.0).abs() < 1e-6 && (pb.y - 8.0).abs() < 1e-6, "{pa:?} {pb:?}"),
+            "sketch.construction_line.vertical" => assert!((pa.x - 8.0).abs() < 1e-6 && (pb.x - 8.0).abs() < 1e-6, "{pa:?} {pb:?}"),
             _ => assert!((pa.y - 8.0).abs() < 1e-6 && (pb.y - 8.0).abs() < 1e-6, "{pa:?} {pb:?}"),
         }
         assert!(
@@ -261,7 +262,7 @@ fn a_typed_length_and_offset_shift_a_segment() {
     assert!(!curve.infinite && curve.construction, "{curve:?}");
     let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
     let (pa, pb) = (sk.point(a).unwrap(), sk.point(b).unwrap());
-    assert!((pa.y + 6.0).abs() < 1e-6 && (pb.y + 6.0).abs() < 1e-6, "{pa:?} {pb:?}");
+    assert!((pa.y - 6.0).abs() < 1e-6 && (pb.y - 6.0).abs() < 1e-6, "{pa:?} {pb:?}");
     assert!((pa.dist(pb) - 10.0).abs() < 1e-6, "{pa:?} {pb:?}");
     assert!(pa.dist(click) > 1.0, "the click is not the segment start: {pa:?}");
     assert!(sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::DistanceY { .. })));
@@ -307,24 +308,21 @@ fn focus_box(h: &mut Harness, label: &str) {
     h.frames(2);
 }
 
-/// The one-click tools show their Length box at once, but it takes the keyboard only for a digit:
-/// a letter still reaches the shortcuts (#10258).
+/// Before the first click the one-click tools show the pointer's coordinates in grey, as the Line
+/// tool does, and their Offset box, which takes the keyboard only for a digit: a letter still
+/// reaches the shortcuts (#10258, #15618). There is no Length box: the palette says whether the
+/// line is infinite, and a segment's length is typed after its first click.
 #[test]
-fn a_waiting_length_box_leaves_letters_to_the_shortcuts_and_takes_a_digit() {
-    for id in ["sketch.construction_line.horizontal", "sketch.construction_line.parallel"] {
+fn a_waiting_offset_box_leaves_letters_to_the_shortcuts_and_takes_a_digit() {
+    for id in ["sketch.construction_line.horizontal", "sketch.construction_line.vertical"] {
         let mut h = sketch();
         steps(&mut h, id, &[]);
         h.step(&json!({"move":{"sketch":[5,10]}})).unwrap();
         h.settle();
+        assert!(crate::scenario::rect_of("viewport:readout").is_some(), "{id}: the pointer's coordinates");
         let tool = h.app.tool.as_ref().unwrap();
-        let labels: Vec<_> = tool.dims.iter().map(|b| b.label).collect();
-        assert_eq!(labels[0], "Length", "{id}");
-        assert_eq!((tool.dims[0].value.as_str(), tool.dims[0].locked), ("\u{221e}", false), "{id}");
-        if id.ends_with("horizontal") {
-            assert_eq!(labels, vec!["Length", "Offset"], "{id}");
-        } else {
-            assert_eq!(labels, vec!["Length"], "{id}");
-        }
+        assert_eq!(tool.dims.iter().map(|b| b.label).collect::<Vec<_>>(), vec!["Offset"], "{id}");
+        assert!(!tool.dims[0].locked, "{id}");
         assert!(!length_box_focused(&h), "{id}: no keyboard before a digit");
         h.step(&json!({"key":"L"})).unwrap();
         h.settle();
@@ -337,15 +335,113 @@ fn a_waiting_length_box_leaves_letters_to_the_shortcuts_and_takes_a_digit() {
         digit(&mut h, '2');
         digit(&mut h, '5');
         h.frames(2);
-        assert!(length_box_focused(&h), "{id}: a digit gives the length box the keyboard");
+        assert!(length_box_focused(&h), "{id}: a digit gives the Offset box the keyboard");
         let b = &h.app.tool.as_ref().unwrap().dims[0];
-        assert_eq!((b.value.as_str(), b.locked), ("25", true), "{id}");
+        assert_eq!((b.label, b.value.as_str(), b.locked), ("Offset", "25", true), "{id}");
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(id), "{id}: digits are not shortcuts");
     }
 }
 
-/// With a length the tool takes two clicks: the start, then the side the segment runs to. The
-/// segment keeps its start's snap and gets the length as a dimension.
+/// A horizontal segment's start can be typed as coordinates before its first click, X then Y
+/// after Tab, where the grey coordinates are (#15618). An infinite line has no X box: along it, X
+/// places nothing.
+#[test]
+fn a_segment_start_takes_typed_coordinates() {
+    let mut h = sketch();
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.tool.as_ref().unwrap().dims.iter().map(|b| b.label).collect::<Vec<_>>(), vec!["Offset"], "infinite: Y only");
+    click_line_type(&mut h, "normal");
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.tool.as_ref().unwrap().dims.iter().map(|b| b.label).collect::<Vec<_>>(), vec!["Along", "Offset"], "a segment: X, Y");
+    digit(&mut h, '3');
+    // The boxes appear with the digit; the keyboard is back in the first one a frame later.
+    h.frames(2);
+    h.step(&json!({"key":"Tab"})).unwrap();
+    digit(&mut h, '7');
+    h.frames(2);
+    let dims = &h.app.tool.as_ref().unwrap().dims;
+    assert_eq!((dims[0].value.as_str(), dims[1].value.as_str()), ("3", "7"), "{dims:?}");
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    let start = h.app.tool.as_ref().unwrap().pts.first().map(|p| p.0).expect("the start");
+    assert!(start.dist(solidcore_record::Vec2::new(3., 7.)) < 1e-9, "{start:?}");
+    h.step(&json!({"move":{"sketch":[13,2]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"sketch":[13,2]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
+    let CurveKind::Line { a, b } = sk.curves.last().unwrap().kind else { panic!("a line") };
+    let (a, b) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+    assert!(a.dist(solidcore_record::Vec2::new(3., 7.)) < 1e-6 && (b.y - 7.).abs() < 1e-6 && (b.x - 13.).abs() < 1e-6, "{a:?} {b:?}");
+}
+
+/// A horizontal or vertical line's X and Y are coordinates, so zero and negative values place it;
+/// a parallel line's distance must still be positive (#15618).
+#[test]
+fn typed_coordinates_take_zero_and_negative_values() {
+    let mut h = sketch();
+    let sid = h.app.session.active_sketch.unwrap();
+    let pointer = (solidcore_record::Vec2::new(20., 3.), None);
+    let typed = |cmd: &str, line_type: u8, values: &[(&str, &str)]| {
+        let mut tool = crate::sketch_tools::tool_for(cmd).unwrap();
+        tool.line_type = line_type;
+        tool.dims = crate::sketch_dims::boxes_for(cmd, 0);
+        for (label, value) in values {
+            let b = tool.dims.iter_mut().find(|b| b.label == *label).unwrap();
+            b.locked = true;
+            b.value = (*value).into();
+        }
+        tool
+    };
+    // An infinite horizontal line below the axis, and one on it.
+    for (y, expected) in [("-5", -5.0), ("0", 0.0)] {
+        let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+        let mut tool = typed("sketch.construction_line.horizontal", 3, &[("Offset", y)]);
+        assert_eq!(crate::sketch_dims::validate(&h.app, &tool), Ok(()), "Y = {y}");
+        super::place_point(&mut h.app, &mut tool, pointer.clone());
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        assert_eq!(sk.curves.len(), before + 1, "Y = {y}: {:?}", h.app.status);
+        let CurveKind::Line { a, .. } = sk.curves.last().unwrap().kind else { panic!("a line") };
+        assert!((sk.point(a).unwrap().y - expected).abs() < 1e-6, "Y = {y}");
+    }
+    // A segment starting at X = 0, Y = -4.
+    let mut tool = typed("sketch.construction_line.horizontal", 0, &[("Along", "0"), ("Offset", "-4")]);
+    super::place_point(&mut h.app, &mut tool, pointer.clone());
+    let start = tool.pts.first().map(|p| p.0).expect("the start");
+    assert!(start.dist(solidcore_record::Vec2::new(0., -4.)) < 1e-9, "{start:?} {:?}", h.app.status);
+    // A vertical line left of the axis.
+    let tool = typed("sketch.construction_line.vertical", 3, &[("Offset", "-6")]);
+    assert_eq!(crate::sketch_dims::validate(&h.app, &tool), Ok(()));
+    // A parallel line's distance is no coordinate.
+    let tool = typed("sketch.construction_line.parallel", 3, &[("Offset", "-6")]);
+    assert!(crate::sketch_dims::validate(&h.app, &tool).is_err());
+}
+
+/// Switching between the construction line methods keeps the line type chosen in the palette
+/// (#15618).
+#[test]
+fn another_construction_method_keeps_the_chosen_line_type() {
+    let mut h = sketch();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    click_line_type(&mut h, "normal");
+    steps(&mut h, "sketch.construction_line.vertical", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.tool.as_ref().unwrap().cmd, "sketch.construction_line.vertical");
+    assert_eq!(shown_line_type(&h), 0, "Normal is kept");
+}
+
+/// A segment takes two clicks: the start, then the side it runs to. Its length is typed after the
+/// first click (#15618). It keeps its start's snap and gets the length as a dimension.
 #[test]
 fn a_typed_length_makes_two_clicks_draw_a_dimensioned_segment() {
     let cases: &[(&str, &[[f64; 2]], [f64; 2], [f64; 2])] = &[
@@ -359,16 +455,18 @@ fn a_typed_length_makes_two_clicks_draw_a_dimensioned_segment() {
         let sid = h.app.session.active_sketch.unwrap();
         let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
         steps(&mut h, id, picks);
+        h.app.tool.as_mut().unwrap().line_type = 1;
         h.step(&json!({"move":{"sketch":start}})).unwrap();
         h.settle();
-        digit(&mut h, '8');
         // Apart from the reference pick, so the two clicks are not one double click.
         h.frames(30);
         h.step(&json!({"click":{"sketch":start}})).unwrap();
         h.settle();
         assert_eq!(h.app.session.doc.sketch(sid).unwrap().curves.len(), before, "{id}: the first click only sets the start");
-        assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "8", "{id}: the length stays typed");
-        // A hand moves there first: the box steps out of the way, behind the start.
+        digit(&mut h, '8');
+        h.frames(2);
+        assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "8", "{id}: the length is typed after the start");
+        // A hand moves there first. The length box sits at the segment's middle, off the click.
         h.step(&json!({"move":{"sketch":side}})).unwrap();
         h.settle();
         h.step(&json!({"click":{"sketch":side}})).unwrap();
@@ -389,11 +487,14 @@ fn a_typed_length_makes_two_clicks_draw_a_dimensioned_segment() {
     }
 }
 
-/// The angle tool has a Length box beside Angle; Tab reaches it and Enter places the segment.
+/// For a segment the angle tool has a Length box beside Angle; Tab reaches it and Enter places
+/// the segment.
 #[test]
 fn the_angle_tool_takes_a_length_beside_its_angle() {
     let mut h = sketch();
-    steps(&mut h, "sketch.construction_line.angle", &[[5., 10.]]);
+    steps(&mut h, "sketch.construction_line.angle", &[]);
+    h.app.tool.as_mut().unwrap().line_type = 1;
+    h.step(&json!({"click":{"sketch":[5,10]}})).unwrap();
     h.step(&json!({"move":{"sketch":[15,20]}})).unwrap();
     h.settle();
     assert_eq!(h.app.tool.as_ref().unwrap().dims.iter().map(|b| b.label).collect::<Vec<_>>(), ["Angle", "Length"]);
@@ -412,16 +513,47 @@ fn the_angle_tool_takes_a_length_beside_its_angle() {
     assert!((d.len() - 12.0).abs() < 1e-6 && (d.angle().to_degrees() - 30.0).abs() < 1e-6, "{d:?}");
 }
 
-fn click_switch(h: &mut Harness, which: &str) {
-    let at = crate::scenario::handle_at(&format!("construction_switch:{which}")).expect("the Construction/Normal switch");
+/// Click one of the Sketch Palette's Line Type icons: normal, construction, centerline, infinite.
+fn click_line_type(h: &mut Harness, which: &str) {
+    let at = crate::scenario::handle_at(which).expect("the palette's Line Type icon");
     h.call("ui.click", json!({"x": at.x, "y": at.y}));
     h.settle();
 }
 
-/// The Construction/Normal switch is greyed out while the line is infinite; with a length, Normal
-/// makes the segment a normal sketch line. The Sketch Palette's line type is left alone (#10258).
+fn shown_line_type(h: &Harness) -> u8 {
+    crate::sketch_construction::shown_line_type(h.app.tool.as_ref().unwrap())
+}
+
+/// Start a horizontal segment with a click, as far as its first click.
+fn start_segment(h: &mut Harness) {
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+}
+
+/// Place a horizontal segment: the first click starts it, the digit typed then is its length,
+/// and the second click picks the side it runs to.
+fn place_with_length(h: &mut Harness, d: char) {
+    start_segment(h);
+    digit(h, d);
+    h.frames(2);
+    assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, d.to_string());
+    h.step(&json!({"move":{"sketch":[6,5]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"sketch":[6,5]}})).unwrap();
+    h.settle();
+}
+
+/// While a construction line tool runs, the Sketch Palette's Line Type icons are its line type
+/// (#15066): they sit in the palette, so they stay put while the pointer moves, which the
+/// Construction/Normal switch beside the Length box did not. Infinite is lit at the start. Normal
+/// and Centerline draw a segment of that type at the length typed after its first click. Infinite
+/// clears the length.
+/// The palette's drawing line type (X) is left alone (#10258).
 #[test]
-fn the_normal_switch_needs_a_length_and_draws_a_normal_line() {
+fn the_palette_line_type_icons_set_the_construction_line_type() {
     let mut h = sketch();
     crate::sketch_palette::set_mode(&mut h.app, 1);
     let sid = h.app.session.active_sketch.unwrap();
@@ -429,27 +561,189 @@ fn the_normal_switch_needs_a_length_and_draws_a_normal_line() {
     steps(&mut h, "sketch.construction_line.horizontal", &[]);
     h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
     h.settle();
-    click_switch(&mut h, "normal");
-    assert!(!h.app.tool.as_ref().unwrap().normal, "an infinite line stays construction");
+    assert_eq!(shown_line_type(&h), 3, "without a length the line is infinite");
+    let icon = || crate::scenario::handle_at("normal").expect("the Normal icon");
+    let palette =
+        crate::scenario::rect_of("sketch_palette:outer").or_else(|| crate::scenario::rect_of("sketch_palette:options")).expect("the Sketch Palette");
+    let at = icon();
+    assert!(palette.contains(at), "the icon is in the palette: {at:?} {palette:?}");
+    h.step(&json!({"move":{"sketch":[-30,25]}})).unwrap();
+    h.settle();
+    assert_eq!(icon(), at, "the icon stays put while the pointer moves");
 
+    click_line_type(&mut h, "normal");
+    assert_eq!(shown_line_type(&h), 0);
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty(), "a click on the icon places no point");
+    place_with_length(&mut h, '8');
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(!curve.construction && !curve.infinite && !curve.centerline, "{curve:?}");
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    assert!((sk.point(a).unwrap().dist(sk.point(b).unwrap()) - 8.0).abs() < 1e-6);
+    assert_eq!(crate::sketch_palette::mode(&h.app), 1, "the palette's line type is untouched");
+
+    // Centerline, the same way.
+    click_line_type(&mut h, "centerline");
+    place_with_length(&mut h, '5');
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 2, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(curve.centerline && !curve.construction && !curve.infinite, "{curve:?}");
+
+    // Infinite clears a typed length: the next click draws an infinite construction line.
+    start_segment(&mut h);
+    digit(&mut h, '7');
+    h.frames(2);
+    click_line_type(&mut h, "infinite");
+    assert!(crate::sketch_construction::typed_length(h.app.tool.as_ref().unwrap()).is_none(), "Infinite clears the length");
+    assert_eq!(shown_line_type(&h), 3);
+    h.step(&json!({"move":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 3, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(curve.construction && curve.infinite, "{curve:?}");
+}
+
+/// A line type other than Infinite always draws a segment, as the Line tool does: with no length
+/// typed, the first click starts it and the second ends it where the pointer is (#15066).
+#[test]
+fn a_chosen_line_type_without_a_length_draws_a_segment_to_the_pointer() {
+    let mut h = sketch();
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    click_line_type(&mut h, "normal");
+    h.step(&json!({"move":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.sketch(sid).unwrap().curves.len(), before, "the first click only starts the segment");
+    h.step(&json!({"move":{"sketch":[17,13]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"sketch":[17,13]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(!curve.construction && !curve.infinite && !curve.centerline, "{curve:?}");
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    let (a, b) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+    assert!((a.dist(b) - 12.0).abs() < 1e-6 && (a.y - b.y).abs() < 1e-9, "a horizontal segment to the pointer: {a:?} {b:?}");
+}
+
+/// Infinite chosen after a segment's first click drops that start: the next click places the
+/// infinite line, rather than one through the abandoned start.
+#[test]
+fn infinite_chosen_after_a_segment_start_places_the_line_at_the_next_click() {
+    let mut h = sketch();
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    click_line_type(&mut h, "normal");
+    h.step(&json!({"move":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 1, "the segment started");
+    click_line_type(&mut h, "infinite");
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty(), "Infinite drops the start");
+    h.step(&json!({"move":{"sketch":[17,13]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"sketch":[17,13]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(curve.infinite && curve.construction, "{curve:?}");
+    let CurveKind::Line { a, .. } = curve.kind else { panic!("a line") };
+    assert!((sk.point(a).unwrap().y - 13.0).abs() < 1e-6, "through the click, not the old start");
+}
+
+/// An angle segment with its Angle typed and no length: the Length box shows the length the click
+/// draws, and the click draws it. The click puts the end on the typed angle at the pointer's
+/// distance, so the box measures that end rather than the raw pointer.
+#[test]
+fn a_typed_angle_without_a_length_draws_the_segment_its_length_box_shows() {
+    let mut h = sketch();
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.angle", &[[5., 10.]]);
+    let mut tool = h.app.tool.take().unwrap();
+    tool.line_type = 0;
+    tool.dims = crate::sketch_dims::boxes_for(tool.cmd, 1);
+    let angle = tool.dims.iter_mut().find(|b| b.label == "Angle").unwrap();
+    angle.locked = true;
+    angle.value = "30 deg".into();
+    // 5 from the start, off the typed angle.
+    let pointer = (solidcore_record::Vec2::new(8., 14.), None);
+    let shown = super::pointer_segment_length(&h.app, &tool, &pointer).expect("a length to show");
+    assert!((shown - 5.0).abs() < 1e-6, "the Length box shows the length drawn: {shown}");
+    super::place_point(&mut h.app, &mut tool, pointer);
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "the click draws the segment: {:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(!curve.construction && !curve.infinite, "{curve:?}");
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    let d = sk.point(b).unwrap() - sk.point(a).unwrap();
+    assert!((d.len() - 5.0).abs() < 1e-6 && (d.angle().to_degrees() - 30.0).abs() < 1e-6, "{d:?}");
+}
+
+fn click_switch(h: &mut Harness, which: &str) {
+    let at = crate::scenario::handle_at(&format!("construction_switch:{which}")).expect("the Construction/Normal switch");
+    h.call("ui.click", json!({"x": at.x, "y": at.y}));
+    h.settle();
+}
+
+/// With the `construction_line_classic` preference the tools work as before #15066: the
+/// Construction/Normal switch under the Length box is greyed out while the line is infinite, and
+/// with a length Normal makes the segment a normal sketch line. The Sketch Palette's Line Type
+/// icons leave the tool alone and its line type is untouched (#10258).
+#[test]
+fn the_classic_preference_keeps_the_construction_normal_switch() {
+    let mut h = sketch();
+    h.app.preferences.construction_line_classic = true;
+    crate::sketch_palette::set_mode(&mut h.app, 1);
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    click_switch(&mut h, "normal");
+    assert_eq!(h.app.tool.as_ref().unwrap().line_type, 3, "an infinite line stays construction");
+
+    // The palette's icons pick the drawing line type, not the tool's.
+    click_line_type(&mut h, "centerline");
+    assert_eq!(h.app.tool.as_ref().unwrap().line_type, 3, "the palette leaves the tool alone");
+    assert_eq!(crate::sketch_palette::mode(&h.app), 2);
+    crate::sketch_palette::set_mode(&mut h.app, 1);
+
+    // Classic: the digit goes to the Length box before the first click.
     h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
     h.settle();
     digit(&mut h, '8');
     h.frames(2);
     click_switch(&mut h, "normal");
-    assert!(h.app.tool.as_ref().unwrap().normal, "with a length the switch works");
+    assert_eq!(h.app.tool.as_ref().unwrap().line_type, 0, "with a length the switch works");
     assert!(h.app.tool.as_ref().unwrap().pts.is_empty(), "a click on the switch places no point");
     assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "8");
 
-    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
-    h.settle();
-    h.frames(30);
-    h.step(&json!({"click":{"sketch":[20,0]}})).unwrap();
-    h.settle();
-    h.step(&json!({"move":{"sketch":[6,5]}})).unwrap();
-    h.settle();
-    h.step(&json!({"click":{"sketch":[6,5]}})).unwrap();
-    h.settle();
+    for at in [[20, 0], [6, 5]] {
+        h.step(&json!({"move":{"sketch":at}})).unwrap();
+        h.settle();
+        h.frames(30);
+        h.step(&json!({"click":{"sketch":at}})).unwrap();
+        h.settle();
+    }
     let sk = h.app.session.doc.sketch(sid).unwrap();
     assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
     let curve = sk.curves.last().unwrap();
@@ -465,6 +759,48 @@ fn the_normal_switch_needs_a_length_and_draws_a_normal_line() {
     let sk = h.app.session.doc.sketch(sid).unwrap();
     let curve = sk.curves.last().unwrap();
     assert!(curve.construction && curve.infinite, "{curve:?}");
+}
+
+/// With the `construction_line_classic` preference the boxes work as before #15618: a digit typed
+/// before the first click is the Length, two clicks then draw a dimensioned segment, and a horizontal
+/// line's typed Offset is a distance on the pointer's side, not a coordinate.
+#[test]
+fn the_classic_preference_keeps_the_length_box_before_the_first_click() {
+    let mut h = sketch();
+    h.app.preferences.construction_line_classic = true;
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    let labels: Vec<&str> = h.app.tool.as_ref().unwrap().dims.iter().map(|b| b.label).collect();
+    assert_eq!(labels, ["Length", "Offset"], "the Length box waits from the start, with no Along box");
+    digit(&mut h, '8');
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "8", "the digit went to the Length box");
+    h.step(&json!({"move":{"sketch":[6,5]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"sketch":[6,5]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    assert!(!curve.infinite && (sk.point(a).unwrap().dist(sk.point(b).unwrap()) - 8.0).abs() < 1e-6, "{curve:?}");
+
+    // A typed Offset of 6 with the pointer below the axis puts the line at Y = -6.
+    let tool = h.app.tool.as_mut().unwrap();
+    let dim = tool.dims.iter_mut().find(|d| d.label == "Offset").unwrap();
+    dim.locked = true;
+    dim.value = "6".into();
+    let mut tool = h.app.tool.take().unwrap();
+    super::place_point(&mut h.app, &mut tool, (solidcore_record::Vec2::new(5., -10.), None));
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    let curve = sk.curves.last().unwrap();
+    let CurveKind::Line { a, .. } = curve.kind else { panic!("a line") };
+    assert!(curve.infinite && (sk.point(a).unwrap().y + 6.0).abs() < 1e-6, "{curve:?}");
 }
 
 #[test]
