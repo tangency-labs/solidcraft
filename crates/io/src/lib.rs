@@ -56,7 +56,7 @@ pub use dxf_out::{
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
-pub use svg::{decode_svg, read_svg, svg_nothing_to_import, svg_sheet};
+pub use svg::{CurveWarning, SvgDrawing, decode_svg, read_svg, read_svg_drawing, svg_nothing_to_import, svg_sheet};
 mod gltf_in;
 pub use gltf_in::{GltfImport, Loader, MAX_GLTF_BYTES, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
 mod kicad_in;
@@ -121,17 +121,6 @@ pub enum IoError {
     Empty,
     #[error("{0}")]
     Invalid(String),
-    /// A curve of an imported drawing that SolidCraft's curve check refuses, so no sketch or body
-    /// could keep it (#16190): its number among the drawing's curves and lines (from 1) and its
-    /// ends, in millimetres.
-    #[error(
-        "curve {number} of the drawing, from ({:.4}, {:.4}) to ({:.4}, {:.4}) mm, bends too sharply or slows almost to a stop near an end, and SolidCraft's curve check refuses it. Move its handles away from its ends, or draw it as a line",
-        .from.x, .from.y, .to.x, .to.y
-    )]
-    CurveRefused { number: usize, from: solidcore_record::Vec2, to: solidcore_record::Vec2 },
-    /// The kernel could not check a curve of an imported drawing ([`IoError::CurveRefused`]).
-    #[error("curve {number} of the drawing could not be checked: {reason}")]
-    CurveUnchecked { number: usize, reason: String },
     #[error(transparent)]
     Kernel(#[from] solidcraft_kernel::KernelError),
     #[error(transparent)]

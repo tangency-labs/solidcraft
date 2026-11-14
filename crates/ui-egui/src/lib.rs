@@ -1551,6 +1551,13 @@ impl SolveApp {
                         tool.point_picks.clear();
                     }
                 }
+                // A drawing inserted with curves kept as drawn that the curve check refuses says so,
+                // as other imports' warnings do (#16190).
+                "sketch.insert_svg" | "sketch.insert_dxf" => {
+                    if let Some(w) = v.get("warnings").and_then(Value::as_array).filter(|w| !w.is_empty()) {
+                        self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
+                    }
+                }
                 "view.fit" | "view.home" => self.frame_view(id == "view.home"),
                 "view.tool" => {
                     self.viewport.nav = match v.get("tool").and_then(Value::as_str) {

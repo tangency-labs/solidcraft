@@ -170,6 +170,44 @@ fn length_mm(s: &str) -> Option<f64> {
 
 struct Out {
     g: Vec<Geom2>,
+    warnings: Vec<CurveWarning>,
+}
+
+/// A cubic of an imported drawing that is kept as drawn although SolidCraft's curve check
+/// refuses it (or could not check it), so a body made from it would fail: the reading warns
+/// about it by name rather than refusing the file (#16190).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CurveWarning {
+    /// Its number among the drawing's imported curves and lines, from 1.
+    pub number: usize,
+    /// Its start, in the drawing's millimetres.
+    pub from: Vec2,
+    /// Its end, in the drawing's millimetres.
+    pub to: Vec2,
+    /// `None`: the check refuses it. `Some(why)`: the kernel could not check it.
+    pub unchecked: Option<String>,
+}
+
+impl std::fmt::Display for CurveWarning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (n, a, b) = (self.number, self.from, self.to);
+        write!(f, "curve {n} of the drawing, from ({:.4}, {:.4}) to ({:.4}, {:.4}) mm, ", a.x, a.y, b.x, b.y)?;
+        match &self.unchecked {
+            None => f.write_str(
+                "bends too sharply or slows almost to a stop near an end: SolidCraft's curve check refuses it, so a body made from it will fail. Move its handles away from its ends, or draw it as a line",
+            ),
+            Some(why) => write!(f, "could not be checked: {why}"),
+        }
+    }
+}
+
+/// An SVG drawing's geometry and the warnings about curves kept as drawn ([`CurveWarning`]).
+#[derive(Clone, Debug, Default)]
+pub struct SvgDrawing {
+    /// The geometry, in millimetres, y up.
+    pub geometry: Vec<Geom2>,
+    /// One warning for each cubic the curve check refuses or could not check, in order.
+    pub warnings: Vec<CurveWarning>,
 }
 
 impl Out {
@@ -198,14 +236,17 @@ impl Out {
             return Err(IoError::Invalid(OUT_OF_RANGE.into()));
         }
         // The whole cubic lies within the model's zone tolerance of its chord (measured after the
-        // SVG transform): the model cannot tell it from that line. Otherwise it stays a curve,
-        // unless the kernel's curve check refuses it, which is an error that names it (#16190).
+        // SVG transform): the model cannot tell it from that line. Otherwise it stays as drawn,
+        // with a warning naming it when the kernel's curve check refuses it (#16190).
         let number = self.g.len() + 1;
-        match solidcore_ops::curve::classify_cubic(p.map(|q| [q.x, q.y, 0.0])) {
+        let unchecked = match solidcore_ops::curve::classify_cubic(p.map(|q| [q.x, q.y, 0.0])) {
             Ok(CubicStanding::Chord) => return self.line(Tf::ID, p[0], p[3]),
-            Ok(CubicStanding::Curve) => {}
-            Ok(CubicStanding::Refused) => return Err(IoError::CurveRefused { number, from: p[0], to: p[3] }),
-            Err(e) => return Err(IoError::CurveUnchecked { number, reason: e.to_string() }),
+            Ok(CubicStanding::Curve) => None,
+            Ok(CubicStanding::Refused) => Some(None),
+            Err(e) => Some(Some(e.to_string())),
+        };
+        if let Some(unchecked) = unchecked {
+            self.warnings.push(CurveWarning { number, from: p[0], to: p[3], unchecked });
         }
         self.push(Geom2::Spline { pts: p.to_vec(), control: true, degree: 3 })
     }
@@ -484,8 +525,15 @@ pub fn svg_sheet(text: &str) -> Option<(Vec2, Vec2)> {
     None
 }
 
-/// Read the geometry of an SVG document (millimetres, y up). `scale` multiplies the result.
+/// Read the geometry of an SVG document (millimetres, y up), without its warnings
+/// ([`read_svg_drawing`]).
 pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
+    read_svg_drawing(text).map(|d| d.geometry)
+}
+
+/// Read the geometry of an SVG document (millimetres, y up) and the warnings about curves kept as
+/// drawn that the curve check refuses.
+pub fn read_svg_drawing(text: &str) -> Result<SvgDrawing> {
     if text.len() > MAX_DRAWING_BYTES {
         return Err(IoError::Invalid("the SVG file is too large".into()));
     }
@@ -493,7 +541,7 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
     rd.config_mut().trim_text(true);
     let mut buf = Vec::new();
     let mut stack: Vec<Tf> = Vec::new();
-    let mut out = Out { g: Vec::new() };
+    let mut out = Out { g: Vec::new(), warnings: Vec::new() };
     let mut root: Option<Tf> = None;
     let mut pending_text: Option<(Tf, Vec2, f64)> = None;
     // The depth of the element whose contents are not drawn (#11039), while inside one.
@@ -606,7 +654,7 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
         }
         buf.clear();
     }
-    Ok(out.g)
+    Ok(SvgDrawing { geometry: out.g, warnings: out.warnings })
 }
 
 /// The text of an SVG file's bytes: a UTF-8 byte-order mark is dropped and UTF-16 files (with
@@ -781,17 +829,27 @@ mod tests {
         assert!(spline(&read("M0 0 C1 0.0005 2 0.0005 3 0", "").unwrap()));
         // Equal endpoints do not make a curve degenerate.
         assert!(spline(&read("M0 0 C10 10 -10 10 0 0", "").unwrap()));
-        // Collinear, overshooting both ends: it stops and turns back twice, which the curve
-        // check refuses, so the import names it.
-        assert!(matches!(read("M0 0 L0 5 M0 0 C-10 0 20 0 1 0", ""), Err(IoError::CurveRefused { number: 2, .. })));
+        // Collinear and overshooting its ends, each of these cubics stops and turns back, which
+        // the curve check refuses: both are imported as drawn, each with a warning naming it.
+        let d = read_svg_drawing(
+            r#"<svg width="10mm" height="10mm" viewBox="0 0 10 10"><path d="M0 0 L0 5 M0 0 C-10 0 20 0 1 0 M0 3 C-10 3 20 3 1 3"/></svg>"#,
+        )
+        .unwrap();
+        assert!(matches!(d.geometry.as_slice(), [Geom2::Line(..), Geom2::Spline { .. }, Geom2::Spline { .. }]), "{:?}", d.geometry);
+        assert_eq!(d.warnings.iter().map(|w| (w.number, w.unchecked.is_none())).collect::<Vec<_>>(), [(2, true), (3, true)]);
+        assert!(
+            d.warnings[1].to_string().starts_with("curve 3 of the drawing, from (0.0000, -3.0000) to (1.0000, -3.0000) mm, bends"),
+            "{}",
+            d.warnings[1]
+        );
     }
 
     /// Synthetic outlines. e and f each have a cubic whose inner control points almost meet its
     /// start (#16190): about 0.00053 mm off its chord, above the zone tolerance, so it stays a
-    /// curve, and the curve check refuses it, so the import names it instead of the extrusion
-    /// failing later. h's curves are regular and extrude.
+    /// curve as drawn, and the curve check refuses it, so the import warns about it by name. h's
+    /// curves are regular and extrude.
     #[test]
-    fn imported_cubic_outlines_extrude_or_are_refused_by_name() {
+    fn imported_cubic_outlines_extrude_or_are_named_in_warnings() {
         use solidcore_record::{Loop2, Plane, Region2, Seg2};
         let svg = |path: &str| format!(r#"<svg width="2480px" height="3508px" viewBox="0 0 2480 3508"><path d="{path}"/></svg>"#);
 
@@ -799,24 +857,24 @@ mod tests {
             "M200 200 L2000 200 L2000 1500 C 1990 1500.01, 1980 1500.02, 1900 1500.03 C 1899.99 1500.031, 1899.98 1500.032, 1800 1500 L200 1500 Z";
         let f = "M200 200 L2000 200 C 2100 200, 2200 300, 2200 400 C 2200.001 400.002, 2200.002 400.001, 2200 500 L2000 1500 L200 1500 Z";
         for (name, path, number) in [("e", e, 4), ("f", f, 3)] {
-            match read_svg(&svg(path)) {
-                Err(err @ IoError::CurveRefused { number: n, .. }) => {
-                    assert_eq!(n, number, "{name}");
-                    assert!(err.to_string().starts_with(&format!("curve {number} of the drawing, from (")), "{name}: {err}");
-                }
-                other => panic!("{name}: {other:?}"),
-            }
+            let d = read_svg_drawing(&svg(path)).unwrap();
+            assert_eq!(d.geometry.iter().filter(|g| matches!(g, Geom2::Spline { .. })).count(), 2, "{name}");
+            assert_eq!(d.warnings.iter().map(|w| (w.number, w.unchecked.is_none())).collect::<Vec<_>>(), [(number, true)], "{name}");
         }
 
         // g: a hook about 0.00007 mm across bends as far from its chord as half its size, above
         // the zone tolerance, and the check passes it: it stays a curve.
         let g = "M200 200 L2000 200 L2000 1500 L1000.0001 1500 C 1000.0002 1500.0001, 1000.0001 1500.0002, 1000 1500.0001 L200 1500 Z";
-        assert_eq!(read_svg(&svg(g)).unwrap().iter().filter(|g| matches!(g, Geom2::Spline { .. })).count(), 1);
+        let d = read_svg_drawing(&svg(g)).unwrap();
+        assert_eq!(d.geometry.iter().filter(|g| matches!(g, Geom2::Spline { .. })).count(), 1);
+        assert!(d.warnings.is_empty());
 
         // h: expected volume from integrating (x dy - y dx)/2 over the line and cubic
         // polynomials, times (25.4/96)^2 and the 2 mm depth.
         let h = "M200 200 L2000 200 L2000 1500 C 1500 1500, 1200 1600, 1000 1500 C 900 1450, 1100 1600, 1000 1499.99 L200 1500 Z";
-        let geometry = read_svg(&svg(h)).unwrap();
+        let d = read_svg_drawing(&svg(h)).unwrap();
+        assert!(d.warnings.is_empty());
+        let geometry = d.geometry;
         assert_eq!(geometry.iter().filter(|g| matches!(g, Geom2::Spline { .. })).count(), 2);
         let segs = geometry
             .iter()
