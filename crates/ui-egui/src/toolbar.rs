@@ -2613,6 +2613,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // A single Esc with nothing left to cancel keeps the sketch open (#1804); a quick
                 // second press finishes it (above).
             }
+            // The quick menu at the cursor (#5501), unless the person bound the key to a command.
+            Key::S if mods.shift && !mods.alt && crate::keymap::commands_for(app, crate::quick_menu::KEY).is_empty() => {
+                let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());
+                crate::quick_menu::open(app, at);
+            }
             Key::F2 => {
                 if !crate::context_menu::press_shortcut(app, "F2") {
                     let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());

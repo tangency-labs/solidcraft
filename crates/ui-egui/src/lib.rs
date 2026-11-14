@@ -245,6 +245,7 @@ mod print_face_ui;
 pub(crate) mod quick_measure;
 #[cfg(test)]
 mod quick_measure_tests;
+pub(crate) mod quick_menu;
 pub mod recovery_ui;
 pub mod ref_images;
 pub(crate) mod refused_part;
@@ -2418,9 +2419,8 @@ impl SolveApp {
             return;
         }
         if let Some(mut t) = tools::Tool::for_command(id) {
-            let state = crate::open_meshing::session_world(&self.session);
-            let sketch = self.session.active_sketch.and_then(|s| state.sketch(s)).map(|ss| &ss.sketch);
-            if let Some(params) = tools::constraint_preselection(id, &self.session.selection, sketch) {
+            // A selection the constraint takes whole runs it at once (`CommandSpec::for_selection`).
+            if let Some(params) = solidcraft_engine::find_command(id).and_then(|c| c.for_selection(&self.session)) {
                 if self.run(id, params).is_ok() {
                     let _ = self.session.execute("select.clear", &json!({}));
                     self.set_status("Constraint applied", false);
@@ -2436,28 +2436,20 @@ impl SolveApp {
                 }
                 return;
             }
-            // Curve-pair constraints can consume an exact preselection: two curves, or for
-            // Collinear and Tangent a curve and an origin axis (#15461). Leave ambiguous selections to
-            // the ordinary pick tool; never silently constrain a subset.
-            let operand = |sel: &solidcraft_engine::Sel| match sel {
-                solidcraft_engine::Sel::SketchCurve { id, .. } => Some(json!(id)),
-                solidcraft_engine::Sel::Axis { name } if tools::takes_axis_curve(id) => tools::axis_operand(self, name),
-                _ => None,
-            };
-            if matches!(
-                id,
-                "sketch.constraint.parallel"
-                    | "sketch.constraint.perpendicular"
-                    | "sketch.constraint.equal"
-                    | "sketch.constraint.tangent"
-                    | "sketch.constraint.concentric"
-                    | "sketch.constraint.collinear"
-            ) && let [first, second] = self.session.selection.as_slice()
-                && matches!((first, second), (solidcraft_engine::Sel::SketchCurve { .. }, _) | (_, solidcraft_engine::Sel::SketchCurve { .. }))
-                && let (Some(a), Some(b)) = (operand(first), operand(second))
-                && a != b
+            // Collinear and Tangent also take a curve and an origin axis from the selection
+            // (#15461): the axis as the sketch's own x / y, or its reference, which the command
+            // projects. Two curves are taken by the commands' own selection hooks above.
+            if tools::takes_axis_curve(id)
+                && let [first, second] = self.session.selection.as_slice()
+                && let Some((curve, axis, curve_first)) = match (first, second) {
+                    (solidcraft_engine::Sel::SketchCurve { id: c, .. }, solidcraft_engine::Sel::Axis { name }) => Some((c, name, true)),
+                    (solidcraft_engine::Sel::Axis { name }, solidcraft_engine::Sel::SketchCurve { id: c, .. }) => Some((c, name, false)),
+                    _ => None,
+                }
+                && let Some(axis) = tools::axis_operand(self, axis)
+                && axis != json!(curve)
             {
-                let params = json!({ "a": a, "b": b });
+                let params = if curve_first { json!({ "a": curve, "b": axis }) } else { json!({ "a": axis, "b": curve }) };
                 if self.run(id, params).is_ok() {
                     let _ = self.session.execute("select.clear", &json!({}));
                     self.set_status("Constraint applied", false);
