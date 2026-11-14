@@ -193,10 +193,12 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
     if marker >= bar.steps && marker_rect.is_none() {
         marker_rect = Some(marker_at(rect, end));
     }
-    // The history marker: drag it to roll the model back or forward.
-    if let Some(mr) = marker_rect {
+    // The history marker: drag it to roll the model back or forward, by its rect and a little
+    // either side of it.
+    let grab = marker_rect.map(|mr| mr.expand2(vec2(3.0, 0.0)));
+    if let (Some(mr), Some(grab)) = (marker_rect, grab) {
         solidcraft_ui_registry::publish_rect(bar.handles.marker, mr);
-        let resp = ui.interact(mr.expand2(vec2(3.0, 0.0)), ui.scope_id().with("tl_marker"), Sense::drag());
+        let resp = ui.interact(grab, ui.scope_id().with("tl_marker"), Sense::drag());
         if resp.drag_started() {
             drag = Some(Drag::Marker);
         }
@@ -207,6 +209,12 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
         resp.backing_on_hover_text(bar.marker_tip);
     }
     let content_end = contents.trailing(ui, &p, end, rect);
+    // The marker after the last step is part of the strip: the scroll range reaches past it, with
+    // the room it is grabbed by, so a strip scrolled to its end shows it whole.
+    let content_end = match grab {
+        Some(grab) if marker >= bar.steps => content_end.max(grab.right()),
+        _ => content_end,
+    };
     // The scroll range follows the drawn content (the chips don't take layout space themselves).
     ui.allocate_exact_size(vec2((content_end - origin).max(0.0), rect.height()), Sense::hover());
     // Drag feedback, and the drop.

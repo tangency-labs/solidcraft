@@ -1,6 +1,8 @@
 //! A surface's boundary matched to a boundary of another surface: the control rows next to the
 //! boundary moved so the two meet in position (G0), tangent plane (G1) or normal curvature
-//! across the seam (G2).
+//! across the seam (G2). Or matched to its own mirror image in a plane ([`match_plane`]): the
+//! boundary put on the plane and the next row square to it, so a half surface and its mirror
+//! meet as one smooth surface.
 //!
 //! Not upstream. The surface and the target are non-rational B-spline surfaces, clamped; the
 //! boundary is one side of the surface's parameter rectangle, the target one side of the
@@ -264,6 +266,166 @@ pub fn match_boundary(
     })
 }
 
+// ---- a boundary matched to its own mirror ----------------------------------------------------
+
+/// `srf` with the control rows next to its boundary `side` moved so it meets its own mirror
+/// image in the plane through `origin` with normal `normal` at `order`, at most `how.rows` rows
+/// moving, the change spread by `how.blend`. The module notes' turning and refinement across the
+/// boundary apply; the rows are set column by column, so the seam holds all along the boundary,
+/// not only at stations:
+/// - G0: the boundary row put on the plane (each control point moved along the normal);
+/// - G1: the next row put square to the plane behind it (each control point at its column's
+///   boundary point plus its old offset along the normal), so the derivative across the
+///   boundary is along the normal and the mirror's is its continuation;
+/// - G2: as G1. A surface whose derivative across the boundary is square to the mirror plane is
+///   curvature continuous with its mirror there: the mirror's second derivative across differs
+///   from the surface's only along the plane's normal, which lies in their shared tangent plane.
+///
+/// The seam with the mirror is measured at the stations (the boundary's Greville abscissae),
+/// before and after: the gap is the boundary's distance from the plane, the angle the one
+/// between the surface's normal and its mirror's, the curvature the jump of the normal
+/// curvature across.
+///
+/// # Errors
+/// `InvalidInput` for a normal of no length, a boundary that does not leave the plane to one
+/// side (a column whose next control point is on the plane, or columns leaving to both sides:
+/// such a surface folds onto its mirror or crosses it), rows outside 1..=3 or below the rows
+/// the order fixes (1 for G0, 2 otherwise), a blend outside 0..=1, a rational or unclamped
+/// surface; those of the refinement and the evaluations.
+pub fn match_plane(
+    srf: &Surface,
+    side: Boundary,
+    origin: Vec3,
+    normal: Vec3,
+    order: MatchOrder,
+    how: MatchRows,
+) -> Result<Matched> {
+    let k = order.order().min(1);
+    if !(1..=3).contains(&how.rows) || how.rows < k + 1 {
+        return Err(invalid(
+            "the rows that move are 1 to 3, and at least the rows the order fixes",
+        ));
+    }
+    if !(how.blend.is_finite() && (0.0..=1.0).contains(&how.blend)) {
+        return Err(invalid("a blend factor is between 0 and 1"));
+    }
+    if srf.is_rational() || !clamped(srf) {
+        return Err(invalid("a rational or unclamped surface"));
+    }
+    let n = normal
+        .unitize()
+        .map_err(|_| invalid("the plane's normal has no length"))?;
+    let turned = to_left(srf, side)?;
+    let mut s = halve_across(raise_across(turned, k)?, how.rows)?;
+    let plane = Mirror { origin, normal: n };
+    let before = plane.measure(&s)?;
+
+    let old: Vec<Vec<Vec3>> = (0..how.rows).map(|i| row(&s, i)).collect::<Result<_>>()?;
+    let mut new: Vec<Vec<Vec3>> = old.clone();
+    // G0: each boundary control point onto the plane, along the normal
+    let row0: Vec<Vec3> = row_of(&old, 0)?
+        .iter()
+        .map(|p| *p - n * n.dot(*p - origin))
+        .collect();
+    set_moved(&mut new, &old, 0, row0)?;
+    if k >= 1 {
+        // G1: each next control point square to the plane behind its boundary point, at its
+        // old offset along the normal; the offsets leave the plane to one side
+        let offsets = zip_with(row_of(&old, 1)?, row_of(&old, 0)?, |a, b| a - b)?;
+        let along: Vec<f64> = offsets.iter().map(|d| n.dot(*d)).collect();
+        let reach = offsets.iter().map(|d| d.length()).fold(0.0, f64::max);
+        let leaves = |d: f64| d.abs() > EFF_ZERO * (1.0 + reach);
+        let one_side = along.iter().all(|&d| leaves(d) && d > 0.0)
+            || along.iter().all(|&d| leaves(d) && d < 0.0);
+        if !one_side {
+            return Err(invalid(
+                "the boundary does not leave the mirror plane to one side",
+            ));
+        }
+        let row1: Vec<Vec3> = row_of(&new, 0)?
+            .iter()
+            .zip(&along)
+            .map(|(p, d)| *p + n * *d)
+            .collect();
+        set_moved(&mut new, &old, 1, row1)?;
+        spread(&mut new, &old, 2, how)?;
+    } else {
+        spread(&mut new, &old, 1, how)?;
+    }
+
+    s = with_rows(&s, &new)?;
+    let after = plane.measure(&s)?;
+    let mut moved = [0.0; 3];
+    for (i, m) in moved.iter_mut().enumerate() {
+        if let (Some(a), Some(b)) = (old.get(i), new.get(i)) {
+            *m = a
+                .iter()
+                .zip(b)
+                .map(|(x, y)| (*y - *x).length())
+                .fold(0.0, f64::max);
+        }
+    }
+    Ok(Matched {
+        surface: from_left(s, side)?,
+        before,
+        after,
+        moved,
+    })
+}
+
+/// A mirror plane: a point on it and its unit normal.
+struct Mirror {
+    origin: Vec3,
+    normal: Vec3,
+}
+
+impl Mirror {
+    /// `v` reflected in the plane (a direction: the plane's point does not enter).
+    fn reflect(&self, v: Vec3) -> Vec3 {
+        v - self.normal * (2.0 * self.normal.dot(v))
+    }
+
+    /// The seam between `s`'s boundary (turned) and its mirror image, at the boundary's
+    /// Greville abscissae.
+    fn measure(&self, s: &Surface) -> Result<SeamBounds> {
+        let (_, q) = s.degrees();
+        let r = s.parameter_bounds();
+        let v = s.v_knots();
+        let mut out = SeamBounds::default();
+        for j in 0..=s.m() {
+            let g = if q == 0 {
+                v.get(j).copied().unwrap_or(r.vb)
+            } else {
+                v.iter().skip(j + 1).take(q).sum::<f64>() / q as f64
+            };
+            let d = derivs(s, r.ul, g, v)?;
+            let (p, su, sv, suu) = (
+                at2(&d, 0, 0)?,
+                at2(&d, 1, 0)?,
+                at2(&d, 0, 1)?,
+                at2(&d, 2, 0)?,
+            );
+            out.gap = out.gap.max(self.normal.dot(p - self.origin).abs());
+            let Ok(n) = su.cross(sv).unitize() else {
+                return Err(invalid("the surface has no tangent plane at a station"));
+            };
+            // the mirror's normal there, turned to face as the surface's does (normals are lines)
+            let mut m = self.reflect(n);
+            if m.dot(n) < 0.0 {
+                m *= -1.0;
+            }
+            out.angle = out.angle.max(n.cross(m).length().atan2(n.dot(m)));
+            // across the seam the mirror's second derivative is the reflected one
+            let len2 = su.length_squared();
+            if len2 > EFF_ZERO {
+                let jump = (suu.dot(n) - self.reflect(suu).dot(m)) / len2;
+                out.curvature = out.curvature.max(jump.abs());
+            }
+        }
+        Ok(out)
+    }
+}
+
 // ---- the surface turned so its boundary is u = umin ----------------------------------------
 
 /// Whether both knot vectors are clamped: `p + 1` equal knots at each end.
@@ -498,17 +660,15 @@ fn derivs(s: &Surface, u0: f64, v: f64, vk: &[f64]) -> Result<Vec<Vec<Vec3>>> {
 
 /// `s` (turned) raised and refined so it can carry the target at order `k` with `rows` rows.
 fn refine(
-    mut s: Surface,
+    s: Surface,
     edge: &TargetEdge<'_>,
     reversed: bool,
     k: usize,
     rows: usize,
 ) -> Result<Surface> {
     // across: degree at least k + 1
-    let (p, q) = s.degrees();
-    if p < k + 1 {
-        s = elevate_degree(&s, k + 1 - p, Direction::U)?;
-    }
+    let mut s = raise_across(s, k)?;
+    let (_, q) = s.degrees();
     // along: the target's degree, and its inner knots where the surface has none
     let (tq, tk) = edge.along_knots();
     if tq > q && tq - q <= 3 {
@@ -535,7 +695,22 @@ fn refine(
         add.sort_by(f64::total_cmp);
         s = insert_knots(&s, &add, Direction::V)?;
     }
-    // across: the first span halved until the rows that move leave the far side's two
+    halve_across(s, rows)
+}
+
+/// `s` (turned) raised across its boundary to degree at least `k + 1`.
+fn raise_across(s: Surface, k: usize) -> Result<Surface> {
+    let (p, _) = s.degrees();
+    if p < k + 1 {
+        elevate_degree(&s, k + 1 - p, Direction::U)
+    } else {
+        Ok(s)
+    }
+}
+
+/// `s` (turned) with the first span across its boundary halved until the `rows` rows that move
+/// leave the far side's two where they were.
+fn halve_across(mut s: Surface, rows: usize) -> Result<Surface> {
     for _ in 0..MAX_HALVINGS {
         if s.n() > rows {
             break;

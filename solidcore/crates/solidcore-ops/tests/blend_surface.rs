@@ -57,7 +57,6 @@ fn tight() -> ContinuityTolerances {
 fn how() -> BlendEdges {
     BlendEdges {
         stations: 9,
-        min_in_plane: 0.2,
         crown: [0.0, 0.0],
         stitch_tolerance: 1e-6,
         seam: tight(),
@@ -229,10 +228,6 @@ fn malformed_blends_are_refused() {
             ..how()
         },
         BlendEdges {
-            min_in_plane: 1.5,
-            ..how()
-        },
-        BlendEdges {
             crown: [4.0, 0.0],
             ..how()
         },
@@ -255,6 +250,32 @@ fn malformed_blends_are_refused() {
         );
     }
     assert!(blend_edges(side(&a, Continuity::G1), side(&a, Continuity::G1), &how()).is_err());
+}
+
+/// Two edges that touch at an end leave no room for a blend there: the kernel refuses, and its
+/// words reach the caller.
+#[test]
+fn a_refused_blend_keeps_the_kernels_words() {
+    let (a, ao) = sheet(
+        line([0.0, 0.0, 0.0], [0.0, 10.0, 0.0]),
+        line([10.0, 0.0, 0.0], [10.0, 10.0, 0.0]),
+    );
+    let ea = edge_through(&a, &ao, [10.0, 5.0, 0.0]);
+    // the second sheet's edge runs from the first's corner (10, 0, 0) away from it
+    let (b, bo) = sheet(
+        line([10.0, 0.0, 0.0], [15.0, 10.0, 0.0]),
+        line([20.0, 0.0, 0.0], [25.0, 10.0, 0.0]),
+    );
+    let eb = edge_through(&b, &bo, [12.5, 5.0, 0.0]);
+    let (a, b) = ((a, ao, ea), (b, bo, eb));
+    match blend_edges(side(&a, Continuity::G1), side(&b, Continuity::G1), &how()) {
+        Err(e @ Error::Refused { operation, reason }) => {
+            assert!(operation.contains("section_blend"), "{operation}");
+            assert!(reason.contains("no room for a blend"), "{reason}");
+            assert_eq!(e.to_string(), format!("{operation}: {reason}"));
+        }
+        r => panic!("{:?}", r.map(|_| ())),
+    }
 }
 
 // ---- fillet between two sheets -------------------------------------------------------------
@@ -543,4 +564,56 @@ fn malformed_crossing_fillets_are_refused() {
         fillet_crossing(&boxed, &b, &how),
         Err(Error::Unsupported(_))
     ));
+}
+
+/// Two walls facing each other 10 apart across y, each 10 by 10 standing on z = 0: the blend
+/// from one's bottom edge to the other's leaves each wall downward, on past its edge, and turns
+/// under to the other: a U below the walls, tangent to both.
+#[test]
+fn a_g1_blend_between_facing_walls_is_a_u_below_them() {
+    let wall = |y: f64| {
+        let (b, o) = sheet(
+            line([0.0, y, 0.0], [10.0, y, 0.0]),
+            line([0.0, y, 10.0], [10.0, y, 10.0]),
+        );
+        let e = edge_through(&b, &o, [5.0, y, 0.0]);
+        (b, o, e)
+    };
+    let (a, b) = (wall(0.0), wall(10.0));
+    let (blend, [sa, sb]) =
+        blend_edges(side(&a, Continuity::G1), side(&b, Continuity::G1), &how()).unwrap();
+    holds(&sa, 1);
+    holds(&sb, 1);
+    let (lo, hi) = blend.bounds().unwrap();
+    // it dips below the walls' edges (about 0.83 deep for walls 10 apart, crown 0)
+    assert!(lo[2] < -0.5, "{lo:?}");
+    assert!(hi[2] <= 1e-6, "{hi:?}");
+}
+
+/// A plate standing in x = 0 (y and z in 0..10) and a deck in z = 0 from x = 5 to 15: the blend
+/// from the plate's top edge to the deck's near edge leaves the plate upward, on past its top,
+/// and comes down to meet the deck, tangent to both; it does not fold back down over the plate.
+#[test]
+fn a_g1_blend_from_a_plate_s_top_to_a_deck_below_leaves_it_upward() {
+    let (p, po) = sheet(
+        line([0.0, 0.0, 0.0], [0.0, 10.0, 0.0]),
+        line([0.0, 0.0, 10.0], [0.0, 10.0, 10.0]),
+    );
+    let ep = edge_through(&p, &po, [0.0, 5.0, 10.0]);
+    let (d, dd) = sheet(
+        line([5.0, 0.0, 0.0], [5.0, 10.0, 0.0]),
+        line([15.0, 0.0, 0.0], [15.0, 10.0, 0.0]),
+    );
+    let ed = edge_through(&d, &dd, [5.0, 5.0, 0.0]);
+    let (plate, deck) = ((p, po, ep), (d, dd, ed));
+    let (blend, [sp, sd]) = blend_edges(
+        side(&plate, Continuity::G1),
+        side(&deck, Continuity::G1),
+        &how(),
+    )
+    .unwrap();
+    holds(&sp, 1);
+    holds(&sd, 1);
+    let (_, hi) = blend.bounds().unwrap();
+    assert!(hi[2] > 10.0 + 1e-3, "{hi:?}");
 }

@@ -218,7 +218,9 @@ rules. Its compass is 110 pt; the 48 pt Shots strip clears the docks by 8 pt.
 - `expr_row`, `hint_row`, `text_row` and `choice_row` compose `row` with the existing
   expression, hinted expression, plain text and dropdown controls. They preserve row order,
   labels, focus IDs and completion; callers keep Enter/change ownership and explicit dropdown IDs.
-  `count_row` composes `row` with `count_field` for pattern quantities. `checked_row` is
+  `count_row` composes `row` with `count_field` for pattern quantities. `action_row` composes `row`
+  (empty label column) with `button_at` across the control column, for a one-shot action in a
+  card (its text from the catalog); it returns clicked and publishes `dialog:action:{key}`. `checked_row` is
   `hint_row` for a value the form checks before it runs: with a warning, the field is outlined in
   the warning colour and the message sits under it (`warning_caption`), so colour is never the
   only cue.

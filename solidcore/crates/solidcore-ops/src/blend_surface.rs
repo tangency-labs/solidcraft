@@ -8,13 +8,13 @@
 //!
 //! The recipe, every number the kernel's:
 //! - Each side is a cross-section read off its edge by the kernel's
-//!   [`solidcore::sweep::section_blend::section_frames`]: at `stations` stations of even arc
-//!   length, the edge's point and its sheet's shape read along the direction the blend leaves in
-//!   (the part of it in the sheet's tangent plane). The blend leaves each sheet towards the other
-//!   edge: along the chord from the middle of its own edge to the middle of the other's
-//!   ([`Body::edge_middle`]), which the kernel takes into the sheet's tangent plane at each
-//!   station; at the second side that is the direction back into the blend, as the kernel's
-//!   frames of a last section are.
+//!   [`solidcore::sweep::section_blend::section_frames_outward`]: at `stations` stations of even
+//!   arc length, the edge's point and its sheet's shape read along the sheet's own direction out
+//!   across the edge there, so the blend continues each sheet past its edge whichever side of
+//!   the sheet the other edge lies on; at the second side that is the direction back into the
+//!   blend, as the kernel's frames of a last section are. Where two faces bound an edge, the
+//!   kernel leaves the one whose outward direction runs most along the chord towards the other
+//!   edge (from the middle of its own edge to the middle of the other's, [`Body::edge_middle`]).
 //! - The second side's stations run the way that pairs each end of the first edge with the
 //!   nearer end of the second (the kernel's distances between the end stations), so the blend
 //!   does not cross over itself.
@@ -39,7 +39,7 @@ use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::query::api_queries::face_internal_point;
 use solidcore::query::continuity::{point_side, FaceSide};
 use solidcore::sweep::section_blend::{
-    section_blend_surface, section_frames as kernel_frames, EndOrder, FrameOptions, SectionFrame,
+    section_blend_surface, section_frames_outward as kernel_frames, EndOrder, SectionFrame,
 };
 use solidcore::topology::brep::p3::{
     brep_copy, merge_brep, new_brep, notify_serial, topology_ref, with_kernel_callbacks,
@@ -75,9 +75,6 @@ pub struct BlendEdges {
     /// The stations along each edge the blend is built through, and its seams measured at
     /// ([`MIN_STATIONS`]..=[`MAX_STATIONS`]).
     pub stations: usize,
-    /// The least share of the leave direction a sheet's tangent plane keeps for the blend to
-    /// leave through it (`0..=1`; the kernel's [`FrameOptions::min_in_plane`]).
-    pub min_in_plane: f64,
     /// How fast the blend leaves each side, first then second (`-0.9..=3`, 0 the plain blend).
     pub crown: [f64; 2],
     /// The tolerance the blend is sewn to the sheets at, to measure the seams (finite,
@@ -93,14 +90,14 @@ pub struct BlendEdges {
 /// body (two edges of one sheet). Neither sheet changes.
 ///
 /// # Errors
-/// - [`Error::Argument`]: a station count outside [`MIN_STATIONS`]..=[`MAX_STATIONS`], an
-///   in-plane share outside `0..=1`, a crown outside `-0.9..=3`, a stitch tolerance not finite
-///   and positive, a seam tolerance negative or not finite, or an edge past its record's list;
+/// - [`Error::Argument`]: a station count outside [`MIN_STATIONS`]..=[`MAX_STATIONS`], a crown
+///   outside `-0.9..=3`, a stitch tolerance not finite and positive, a seam tolerance negative
+///   or not finite, or an edge past its record's list;
 /// - [`Error::Unsupported`]: the blend does not sew onto an edge of a sheet within the stitch
 ///   tolerance, so that seam cannot be measured;
-/// - the kernel's refusals by their status: the two edges' middles at one point (no direction
-///   to leave in), a sheet whose tangent plane keeps less than `min_in_plane` of it, a station
-///   where the two edges meet (no room for a blend), a surface singular at a station;
+/// - [`Error::Refused`], the kernel's refusal in its words: the two edges' middles at one point
+///   (no chord to break a tie between two faces by), a station where the two edges meet (no room
+///   for a blend), a surface singular at a station;
 /// - [`Error::Empty`]; those of the stitch and the continuity report.
 pub fn blend_edges(
     from: BlendSide<'_>,
@@ -110,8 +107,6 @@ pub fn blend_edges(
     let ok_tolerance = |t: f64| t.is_finite() && t >= 0.0;
     let seam = how.seam;
     let valid = (MIN_STATIONS..=MAX_STATIONS).contains(&how.stations)
-        && how.min_in_plane.is_finite()
-        && (0.0..=1.0).contains(&how.min_in_plane)
         && how
             .crown
             .iter()
@@ -137,10 +132,7 @@ pub fn blend_edges(
     // the chord between the middles, the kernel's vector difference
     let point = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
     let towards = |a: [f64; 3], b: [f64; 3]| point(b) - point(a);
-    let opts = FrameOptions {
-        stations: how.stations,
-        min_in_plane: how.min_in_plane,
-    };
+    let stations = how.stations;
     let orders = [end_order(from.continuity), end_order(to.continuity)];
     let crown = how.crown;
     let blend = Body::new(run_on(
@@ -148,12 +140,24 @@ pub fn blend_edges(
         &[("from", from.body), ("to", to.body)],
         |k| {
             let first = {
-                let g = from.body.lock();
-                kernel_frames(k, &g, &[from_edge], towards(from_middle, to_middle), &opts)
+                let mut g = from.body.lock();
+                kernel_frames(
+                    k,
+                    &mut g,
+                    &[from_edge],
+                    towards(from_middle, to_middle),
+                    stations,
+                )
             };
             let second = {
-                let g = to.body.lock();
-                kernel_frames(k, &g, &[to_edge], towards(to_middle, from_middle), &opts)
+                let mut g = to.body.lock();
+                kernel_frames(
+                    k,
+                    &mut g,
+                    &[to_edge],
+                    towards(to_middle, from_middle),
+                    stations,
+                )
             };
             let (first, mut second) = match (first, second) {
                 (Ok(a), Ok(b)) => (a, b),
@@ -362,9 +366,10 @@ pub struct Fillet {
 /// The fillet between sheets `a` and `b` where they meet along an edge of each: the two sheets'
 /// copies sewn into one body at `how.tolerance`, the edges they then share rounded by the
 /// kernel's blend ([`crate::blend`]) with `how.section` (on the side the sheets' normals give,
-/// as the kernel's blend of a sheet's edge takes it). Each face of the rounded body is a sheet's
-/// when a point inside it (the kernel's) lies within `how.tolerance` of that sheet, and the
-/// fillet's otherwise (the blend makes the faces it trims anew, so their ids do not tell); the
+/// as the kernel's blend of a sheet's edge takes it). The faces of the rounded body the blend
+/// made ([`crate::Blended::made`]) are the fillet's; every other face is a sheet's, the first's
+/// when a point inside it (the kernel's) lies within `how.tolerance` of the first sheet, else
+/// the second's (the blend makes the faces it trims anew, so their ids do not tell); the
 /// fillet's faces are taken out as the fillet ([`crate::trim::remove_faces`]), and with
 /// `how.trim` each sheet's as that sheet, cut back along the contact curves. The
 /// seams between the fillet and the cut sheets are measured on the rounded body
@@ -426,11 +431,12 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
         ));
     }
     let sizes = vec![size; shared.len()];
-    crate::blend::blend(&sewn, kind, &shared, &sizes, &[], crate::Corners::Filled)?;
+    let blended = crate::blend::blend(&sewn, kind, &shared, &sizes, &[], crate::Corners::Filled)?;
     let rounded = native_order(&sewn);
-    // Each face of the rounded body is a sheet's (cut back) or the fillet's, by where a point
-    // inside it lies: the kernel's blend makes the faces it trims anew, so a face's id does not
-    // say which it is.
+    // The fillet's faces are the ones the kernel's blend made. Every other face is a sheet's,
+    // cut back: the first's where a point inside it lies on the first sheet, else the
+    // second's (the blend makes the faces it trims anew, so a face's id does not say which).
+    let made = blended.made;
     let inside = inside_points(&sewn)?;
     let on = |sheet: &Body, order: &Order, p: [f64; 3]| -> Result<bool> {
         Ok(sheet
@@ -439,14 +445,15 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
             .flatten()
             .any(|d| d.is_some_and(|d| d <= how.tolerance)))
     };
-    let (mut of_a, mut of_b, mut made) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut of_a, mut of_b) = (Vec::new(), Vec::new());
     for (i, p) in inside.iter().enumerate() {
+        if made.contains(&i) {
+            continue;
+        }
         if on(a, &a_order, *p)? {
             of_a.push(i);
-        } else if on(b, &b_order, *p)? {
-            of_b.push(i);
         } else {
-            made.push(i);
+            of_b.push(i);
         }
     }
     if made.is_empty() {

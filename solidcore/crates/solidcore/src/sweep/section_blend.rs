@@ -14,6 +14,7 @@
 //! | `third_derivative` (crate) | (none; SolidCraft's `bridge::third_derivative`) |
 //! | [`SectionBlendDefinition`], [`section_blend_surface`] | (none; the face's definition kept, #3140) |
 //! | [`section_frames`], [`FrameOptions`] | (none; SolidCraft's `section_frames`, `bridge::frames`) |
+//! | [`section_frames_outward`] | (none; the frames leaving each edge outward, for a blend between edges) |
 //!
 //! **The surface.** The sections run along u, each sampled at the same stations along v. Section
 //! `i` sits at `u = i / (n - 1)` and the surface passes through every station of it: each
@@ -776,7 +777,6 @@ pub fn section_frames(
     opts: &FrameOptions,
 ) -> Result<Vec<SectionFrame>> {
     use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
-    use crate::topology::{edge, edgeuse::p1 as eu};
     if !(MIN_STATIONS..=MAX_STATIONS).contains(&opts.stations) {
         return Err(frames_invalid("a section's frames take 2 to 257 stations"));
     }
@@ -791,68 +791,15 @@ pub fn section_frames(
     let leave = leave
         .unitize()
         .map_err(|_| frames_invalid("a leave direction of no length"))?;
-    if chain.is_empty() {
-        return Err(frames_invalid("an empty chain"));
-    }
-    // each edge's run: its curve, interval and whether it runs backwards in the chain
-    let ends = |e| -> Result<(
-        Option<crate::topology::VertexId>,
-        Option<crate::topology::VertexId>,
-    )> { Ok((edge::start_vertex(b, e)?, edge::end_vertex(b, e)?)) };
-    let mut runs = Vec::new();
-    let mut at: Option<crate::topology::VertexId> = None;
-    for (i, &e) in chain.iter().enumerate() {
-        let (s, t) = ends(e)?;
-        let backwards = match (i, at) {
-            // the first runs into the second
-            (0, _) => match chain.get(1) {
-                Some(&next) => {
-                    let (ns, nt) = ends(next)?;
-                    !(t.is_some() && (t == ns || t == nt))
-                }
-                None => false,
-            },
-            (_, Some(v)) if s == Some(v) => false,
-            (_, Some(v)) if t == Some(v) => true,
-            _ => {
-                return Err(frames_invalid(
-                    "a chain whose edges do not join end to start",
-                ))
-            }
-        };
-        at = if backwards { s } else { t };
-        let curve = edge::evaluation_curve(b, e)?
-            .ok_or_else(|| frames_invalid("a chain edge without a curve"))?;
-        let ivl = edge::interval(b, e)?;
-        runs.push((e, curve, ivl, backwards));
-    }
+    let walk = walk_chain(k, b, chain)?;
     // the support face: every chain edge bounds it, and its plane keeps most of `leave`
-    let faces_of = |e| -> Result<Vec<crate::topology::FaceId>> {
-        let mut out = Vec::new();
-        for u in edge::edgeuses(b, e, None, None)? {
-            if let Some(f) = eu::face(b, u)? {
-                if !out.contains(&f) {
-                    out.push(f);
-                }
-            }
-        }
-        Ok(out)
-    };
-    let (first_edge, first_curve, first_ivl, _) = runs
-        .first()
-        .ok_or_else(|| frames_invalid("an empty chain"))?;
-    let mid = first_curve.evaluate_point(k, first_ivl.evaluate(0.5))?;
-    let mut candidates = faces_of(*first_edge)?;
-    for &(e, _, _, _) in runs.iter().skip(1) {
-        let theirs = faces_of(e)?;
-        candidates.retain(|f| theirs.contains(f));
-    }
     let mut best: Option<(f64, crate::topology::FaceId)> = None;
-    for f in candidates {
+    for &f in &walk.faces {
         let Some(surf) = crate::topology::face::p2::surface(b, f)? else {
             continue;
         };
-        let Ok(foot) = crate::query::api_queries::surface_closest_point(k, surf, mid) else {
+        let Ok(foot) = crate::query::api_queries::surface_closest_point(k, surf, walk.middle)
+        else {
             continue;
         };
         let Some(&uv) = foot.uvs.first() else {
@@ -890,80 +837,295 @@ pub fn section_frames(
     }
     let surf = crate::topology::face::p2::surface(b, face)?
         .ok_or_else(|| frames_invalid("the support face has no surface"))?;
-    // the stations at even arc length
-    let mut lengths = Vec::new();
-    for (_, curve, ivl, _) in &runs {
-        let chord = curve
-            .evaluate_point(k, ivl.min())?
-            .distance(curve.evaluate_point(k, ivl.max())?);
-        let len = curve.length(k, ivl, 1e-9 * (1.0 + chord))?;
-        if !(len.is_finite() && len >= 0.0) {
-            return Err(frames_invalid("a chain edge whose length is not finite"));
-        }
-        lengths.push(len);
-    }
-    let total: f64 = lengths.iter().sum();
-    if !(total.is_finite() && total > 0.0) {
-        return Err(frames_invalid("a chain of no length"));
-    }
     let mut out = Vec::new();
-    #[allow(clippy::cast_precision_loss)] // at most MAX_STATIONS
-    let last = (opts.stations - 1) as f64;
-    for i in 0..opts.stations {
-        #[allow(clippy::cast_precision_loss)] // at most MAX_STATIONS
-        let s = total * (i as f64) / last;
-        // the run the station is on, and how far along it
-        let mut left = s;
-        let mut pick = 0;
-        for (j, &l) in lengths.iter().enumerate() {
-            pick = j;
-            if left <= l || j + 1 == lengths.len() {
-                break;
-            }
-            left -= l;
-        }
-        let ((_, curve, ivl, backwards), &len) = (
-            runs.get(pick)
-                .ok_or_else(|| frames_invalid("a chain's run"))?,
-            lengths
-                .get(pick)
-                .ok_or_else(|| frames_invalid("a chain's run"))?,
-        );
-        // `clamp(0.0, len)` without its panic
-        let left = if left < 0.0 {
-            0.0
-        } else if left > len {
-            len
-        } else {
-            left
-        };
-        let t = if *backwards {
-            if left >= len {
-                ivl.min()
-            } else {
-                curve
-                    .find_parameter_at_arc_length(k, ivl.max(), -left)?
-                    .end_param
-            }
-        } else if left >= len {
-            ivl.max()
-        } else {
-            curve
-                .find_parameter_at_arc_length(k, ivl.min(), left)?
-                .end_param
-        };
-        // `clamp(ivl.min(), ivl.max())` without its panic on a reversed or NaN interval
-        let t = if t < ivl.min() {
-            ivl.min()
-        } else if t > ivl.max() {
-            ivl.max()
-        } else {
-            t
-        };
-        let p = curve.evaluate_point(k, t)?;
-        out.push(frame_at(k, surf, p, leave)?);
+    for s in walk.stations(k, opts.stations)? {
+        out.push(frame_at(k, surf, s.p, leave)?);
     }
     Ok(out)
+}
+
+/// The frames of a cross-section that is an edge chain of a body, leaving it outward: at each
+/// station, the chain's point and the support face's shape read along the face's own direction
+/// out across the edge there, so that a blend through the frames continues the face past its
+/// edge, whichever side of the face the blend's other end lies on. The outward direction is the
+/// edge use's binormal reversed ([`crate::topology::edgeuse::evaluate_binormal`]: square to the
+/// edge in the face's tangent plane, into the face); with it as the leave direction, each frame
+/// is as [`section_frames`] reads it.
+///
+/// - The chain and its stations are [`section_frames`]'s.
+/// - The support face is the face bounding every chain edge. Where several do (an edge between
+///   two faces), it is the one whose outward direction at the first edge's middle runs furthest
+///   along `toward` (the direction the blend goes): `toward` only breaks that tie. A face using
+///   an edge twice (a seam) is left across its first use.
+///
+/// # Errors
+/// `InvalidInput` for stations out of range, a `toward` not finite or of no length, a chain that
+/// is empty or does not join end to start, an edge without a curve, no face bounding the whole
+/// chain, a chain edge its support face does not use, or a surface singular at a station; those
+/// of the lengths, binormals, projections and evaluations.
+pub fn section_frames_outward(
+    k: &crate::kernel::Kernel,
+    b: &mut crate::topology::Brep,
+    chain: &[crate::topology::EdgeId],
+    toward: Vec3,
+    stations: usize,
+) -> Result<Vec<SectionFrame>> {
+    if !(MIN_STATIONS..=MAX_STATIONS).contains(&stations) {
+        return Err(frames_invalid("a section's frames take 2 to 257 stations"));
+    }
+    if !finite(toward) {
+        return Err(frames_invalid(
+            "a direction towards the blend that is not finite",
+        ));
+    }
+    let toward = toward
+        .unitize()
+        .map_err(|_| frames_invalid("a direction towards the blend of no length"))?;
+    let walk = walk_chain(k, b, chain)?;
+    let at = walk.stations(k, stations)?;
+    let (first, middle) = walk.first_middle;
+    let faces = walk.faces;
+    // the support face: the one leaving furthest along `toward` where several bound the chain
+    let mut best: Option<(f64, crate::topology::FaceId)> = None;
+    for f in faces {
+        let along = outward(k, b, first, f, middle)?.dot(toward);
+        if best.is_none_or(|(s, _)| along > s) {
+            best = Some((along, f));
+        }
+    }
+    let (_, face) = best.ok_or_else(|| frames_invalid("no face bounds the whole chain"))?;
+    let leaves = at
+        .iter()
+        .map(|s| outward(k, b, s.edge, face, s.t))
+        .collect::<Result<Vec<_>>>()?;
+    let surf = crate::topology::face::p2::surface(b, face)?
+        .ok_or_else(|| frames_invalid("the support face has no surface"))?;
+    at.iter()
+        .zip(leaves)
+        .map(|(s, w)| frame_at(k, surf, s.p, w))
+        .collect()
+}
+
+/// Face `f`'s direction out across edge `e` at the edge's parameter `t`: the binormal of `f`'s
+/// first use of `e`, reversed.
+fn outward(
+    k: &crate::kernel::Kernel,
+    b: &mut crate::topology::Brep,
+    e: crate::topology::EdgeId,
+    f: crate::topology::FaceId,
+    t: f64,
+) -> Result<Vec3> {
+    use crate::topology::{edge, edgeuse};
+    let mut found = None;
+    for u in edge::edgeuses(b, e, None, None)? {
+        if edgeuse::p1::face(b, u)? == Some(f) {
+            found = Some(u);
+            break;
+        }
+    }
+    let u = found.ok_or_else(|| frames_invalid("a chain edge its support face does not use"))?;
+    let into = edgeuse::evaluate_binormal(k, b, u, t, true, &edgeuse::BinormalOptions::default())?;
+    Ok(-into.binormal)
+}
+
+/// A station of a chain ([`Walk::stations`]): the edge it is on, the edge's parameter there,
+/// and its point.
+struct Station {
+    edge: crate::topology::EdgeId,
+    t: f64,
+    p: Point3,
+}
+
+/// One edge of a walked chain: the edge, its curve and interval, and whether it runs backwards
+/// in the chain.
+struct Run {
+    edge: crate::topology::EdgeId,
+    curve: crate::curve::curve::Curve,
+    ivl: crate::geom::extent1d::Extent1d,
+    backwards: bool,
+}
+
+/// An edge chain walked for its frames ([`walk_chain`]).
+struct Walk {
+    runs: Vec<Run>,
+    /// The faces bounding every edge of the chain.
+    faces: Vec<crate::topology::FaceId>,
+    /// The first edge and the parameter of its middle.
+    first_middle: (crate::topology::EdgeId, f64),
+    /// The first edge's middle point.
+    middle: Point3,
+}
+
+/// The chain `chain` of `b`: each edge turned to run on from the one before (the first to run
+/// into the second), the faces bounding all of them, and the first edge's middle.
+///
+/// # Errors
+/// `InvalidInput` for a chain that is empty or does not join end to start, or an edge without
+/// a curve; those of the topology and the evaluation.
+fn walk_chain(
+    k: &crate::kernel::Kernel,
+    b: &crate::topology::Brep,
+    chain: &[crate::topology::EdgeId],
+) -> Result<Walk> {
+    use crate::topology::{edge, edgeuse::p1 as eu};
+    if chain.is_empty() {
+        return Err(frames_invalid("an empty chain"));
+    }
+    // each edge's run: its curve, interval and whether it runs backwards in the chain
+    let ends = |e| -> Result<(
+        Option<crate::topology::VertexId>,
+        Option<crate::topology::VertexId>,
+    )> { Ok((edge::start_vertex(b, e)?, edge::end_vertex(b, e)?)) };
+    let mut runs = Vec::new();
+    let mut at: Option<crate::topology::VertexId> = None;
+    for (i, &e) in chain.iter().enumerate() {
+        let (s, t) = ends(e)?;
+        let backwards = match (i, at) {
+            // the first runs into the second
+            (0, _) => match chain.get(1) {
+                Some(&next) => {
+                    let (ns, nt) = ends(next)?;
+                    !(t.is_some() && (t == ns || t == nt))
+                }
+                None => false,
+            },
+            (_, Some(v)) if s == Some(v) => false,
+            (_, Some(v)) if t == Some(v) => true,
+            _ => {
+                return Err(frames_invalid(
+                    "a chain whose edges do not join end to start",
+                ))
+            }
+        };
+        at = if backwards { s } else { t };
+        let curve = edge::evaluation_curve(b, e)?
+            .ok_or_else(|| frames_invalid("a chain edge without a curve"))?;
+        let ivl = edge::interval(b, e)?;
+        runs.push(Run {
+            edge: e,
+            curve,
+            ivl,
+            backwards,
+        });
+    }
+    // the faces every chain edge bounds
+    let faces_of = |e| -> Result<Vec<crate::topology::FaceId>> {
+        let mut out = Vec::new();
+        for u in edge::edgeuses(b, e, None, None)? {
+            if let Some(f) = eu::face(b, u)? {
+                if !out.contains(&f) {
+                    out.push(f);
+                }
+            }
+        }
+        Ok(out)
+    };
+    let first = runs
+        .first()
+        .ok_or_else(|| frames_invalid("an empty chain"))?;
+    let middle_t = first.ivl.evaluate(0.5);
+    let middle = first.curve.evaluate_point(k, middle_t)?;
+    let mut faces = faces_of(first.edge)?;
+    for run in runs.iter().skip(1) {
+        let theirs = faces_of(run.edge)?;
+        faces.retain(|f| theirs.contains(f));
+    }
+    let first_middle = (first.edge, middle_t);
+    Ok(Walk {
+        runs,
+        faces,
+        first_middle,
+        middle,
+    })
+}
+
+impl Walk {
+    /// `count` stations at even arc length along the chain, its ends included.
+    ///
+    /// # Errors
+    /// `InvalidInput` for an edge whose length is not finite or a chain of no length; those of
+    /// the lengths and evaluations.
+    fn stations(&self, k: &crate::kernel::Kernel, count: usize) -> Result<Vec<Station>> {
+        let mut lengths = Vec::new();
+        for run in &self.runs {
+            let chord = run
+                .curve
+                .evaluate_point(k, run.ivl.min())?
+                .distance(run.curve.evaluate_point(k, run.ivl.max())?);
+            let len = run.curve.length(k, &run.ivl, 1e-9 * (1.0 + chord))?;
+            if !(len.is_finite() && len >= 0.0) {
+                return Err(frames_invalid("a chain edge whose length is not finite"));
+            }
+            lengths.push(len);
+        }
+        let total: f64 = lengths.iter().sum();
+        if !(total.is_finite() && total > 0.0) {
+            return Err(frames_invalid("a chain of no length"));
+        }
+        let mut out = Vec::new();
+        #[allow(clippy::cast_precision_loss)] // at most MAX_STATIONS
+        let last = (count - 1) as f64;
+        for i in 0..count {
+            #[allow(clippy::cast_precision_loss)] // at most MAX_STATIONS
+            let s = total * (i as f64) / last;
+            // the run the station is on, and how far along it
+            let mut left = s;
+            let mut pick = 0;
+            for (j, &l) in lengths.iter().enumerate() {
+                pick = j;
+                if left <= l || j + 1 == lengths.len() {
+                    break;
+                }
+                left -= l;
+            }
+            let (run, &len) = (
+                self.runs
+                    .get(pick)
+                    .ok_or_else(|| frames_invalid("a chain's run"))?,
+                lengths
+                    .get(pick)
+                    .ok_or_else(|| frames_invalid("a chain's run"))?,
+            );
+            let (curve, ivl) = (&run.curve, &run.ivl);
+            // `clamp(0.0, len)` without its panic
+            let left = if left < 0.0 {
+                0.0
+            } else if left > len {
+                len
+            } else {
+                left
+            };
+            let t = if run.backwards {
+                if left >= len {
+                    ivl.min()
+                } else {
+                    curve
+                        .find_parameter_at_arc_length(k, ivl.max(), -left)?
+                        .end_param
+                }
+            } else if left >= len {
+                ivl.max()
+            } else {
+                curve
+                    .find_parameter_at_arc_length(k, ivl.min(), left)?
+                    .end_param
+            };
+            // `clamp(ivl.min(), ivl.max())` without its panic on a reversed or NaN interval
+            let t = if t < ivl.min() {
+                ivl.min()
+            } else if t > ivl.max() {
+                ivl.max()
+            } else {
+                t
+            };
+            out.push(Station {
+                edge: run.edge,
+                t,
+                p: curve.evaluate_point(k, t)?,
+            });
+        }
+        Ok(out)
+    }
 }
 
 /// The frame at `p` on `surf` leaving along `leave`'s part in the tangent plane

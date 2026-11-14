@@ -5844,6 +5844,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-display-units"
+version = "0.41.0"
+
+[[package]]
 name = "solidcraft-doc"
 version = "0.41.0"
 dependencies = [
@@ -5856,6 +5860,7 @@ dependencies = [
  "solidcore-tess",
  "solidcraft-color",
  "solidcraft-derive",
+ "solidcraft-display-units",
  "solidcraft-format",
  "solidcraft-geom",
  "solidcraft-kernel",

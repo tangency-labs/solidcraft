@@ -9,12 +9,13 @@
 use solidcore::curve::from_parameters::{from_parameters, record_of as kernel_record, EdgeCurve};
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::crv_deviation::{certified_distance, interpolation_bound};
+use solidcore::nurbs::crv_fit::end_directions::interp_end_directions;
 use solidcore::nurbs::crv_fit::p1::{approx_knots, param_values, ParamMethod};
 use solidcore::nurbs::crv_fit::p2::interp;
 use solidcore::nurbs::geom::Interval;
 use solidcore::nurbs::knots::{clamped_uniform, periodic_uniform, KnotVector, Side, MAX_DEGREE};
 use solidcore::topology::edge::create_trimmed_nurbs_curve;
-use solidcore::Vec3;
+use solidcore::{SolidError, Vec3};
 use solidcore_record::brep::{check_curve, Budget, Curve, Invalid, Natural, MAX_SPLINE_DEGREE};
 
 use crate::body::Body;
@@ -49,6 +50,55 @@ pub fn ep_curve(points: &[[f64; 3]], degree: usize) -> Result<(Curve, f64)> {
     run("curve_fit::ep_curve", |_| {
         let params = param_values(&data, ParamMethod::ChordLength)?;
         let fit = interp(&data, degree, ParamMethod::ChordLength)?;
+        let bound = interpolation_bound(&fit, &params, &data)?;
+        Ok(record_of(&fit).map(|c| (c, bound)))
+    })?
+}
+
+/// As [`ep_curve`], with the tangent at the start along `start` and at the end along `end`
+/// where they are given (the kernel's [`interp_end_directions`]: each direction taken as the end
+/// derivative, scaled to the points' polygon length): a half section whose end at a mirror
+/// plane runs square to it joins its mirror smoothly. With neither given it is [`ep_curve`].
+///
+/// # Errors
+/// As [`ep_curve`]; [`Error::Argument`] also for a direction with a coordinate that is not
+/// finite or of no length, or one given on a curve of degree below 2.
+pub fn ep_curve_with_ends(
+    points: &[[f64; 3]],
+    degree: usize,
+    start: Option<[f64; 3]>,
+    end: Option<[f64; 3]>,
+) -> Result<(Curve, f64)> {
+    if start.is_none() && end.is_none() {
+        return ep_curve(points, degree);
+    }
+    if points.len() < 2 || points.len() > CURVE_MAX_POINTS || !points.iter().all(|p| coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    if points.windows(2).any(|w| w.first() == w.get(1)) {
+        return Err(Error::Argument);
+    }
+    if !(2..=MAX_DEGREE).contains(&degree) {
+        return Err(Error::Argument);
+    }
+    let direction = |d: Option<[f64; 3]>| -> Result<Option<Vec3>> {
+        match d {
+            Some([x, y, z]) if [x, y, z].iter().all(|c| c.is_finite()) => {
+                Ok(Some(Vec3::new(x, y, z)))
+            }
+            Some(_) => Err(Error::Argument),
+            None => Ok(None),
+        }
+    };
+    let (start, end) = (direction(start)?, direction(end)?);
+    let data: Vec<Vec3> = points.iter().map(|&[x, y, z]| Vec3::new(x, y, z)).collect();
+    run("curve_fit::ep_curve_with_ends", |_| {
+        let params = param_values(&data, ParamMethod::ChordLength)?;
+        let fit = match interp_end_directions(&data, degree, start, end, ParamMethod::ChordLength) {
+            Ok(fit) => fit,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
         let bound = interpolation_bound(&fit, &params, &data)?;
         Ok(record_of(&fit).map(|c| (c, bound)))
     })?

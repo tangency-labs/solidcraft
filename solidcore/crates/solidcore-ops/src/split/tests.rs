@@ -204,14 +204,16 @@ fn bad_asks_are_refused() {
     );
     // a tool the kernel refuses: a box not increasing, axes not square
     let flat = plane([5.0, 0.0, 0.0], Y, Z, [1.0, 1.0], [0.0, 1.0]);
-    assert_eq!(
-        split_body(&b, &flat).err(),
-        Some(Error::Status(crate::error::INVALID_INPUT))
+    let refused = split_body(&b, &flat).err();
+    assert!(
+        matches!(refused, Some(Error::Refused { reason, .. }) if !reason.is_empty()),
+        "{refused:?}"
     );
     let skew = plane([5.0, 0.0, 0.0], Y, [0.0, 1.0, 1.0], [0.0, 1.0], [0.0, 1.0]);
-    assert_eq!(
-        split_faces(&b, &o, &[0], &[skew]).err(),
-        Some(Error::Status(crate::error::INVALID_INPUT))
+    let refused = split_faces(&b, &o, &[0], &[skew]).err();
+    assert!(
+        matches!(refused, Some(Error::Refused { reason, .. }) if !reason.is_empty()),
+        "{refused:?}"
     );
 }
 

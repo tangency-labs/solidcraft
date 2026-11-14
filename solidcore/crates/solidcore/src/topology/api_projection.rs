@@ -399,7 +399,7 @@ pub fn project_curve_onto_surface(
 /// makes with the curve's owner, on a copy when it has none yet), the `SmCrvOnSurf` override for a curve on a
 /// surface (and an `SmTangentField`, which inherits it); `SM_ERR` otherwise (the
 /// `SmCurve` base).
-fn plane_projection(
+pub(crate) fn plane_projection(
     k: &Kernel,
     curve: &Curve,
     plane_point: Point3,

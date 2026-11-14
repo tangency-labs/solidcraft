@@ -316,8 +316,8 @@ impl Body {
     /// **Estimated, not proved** ([`MassPropertiesEstimate`]).
     ///
     /// # Errors
-    /// [`Error::Status`] `SM_ERR_INVALID_INPUT` for an accuracy the kernel refuses, no mass or no
-    /// area, or a result that is not finite; [`Error::Status`] `SM_ERR_NOT_CONVERGING` when the
+    /// [`Error::Refused`], in the kernel's words, for an accuracy it refuses, no mass or no area,
+    /// or a result that is not finite; [`Error::Status`] `SM_ERR_NOT_CONVERGING` when the
     /// integration does not converge (the kernel's `NotConverged`); [`Error::Degenerate`] for
     /// an integrand that is not finite; [`Error::Unsupported`] for a span the integrator took
     /// no step over; [`Error::UnsureRegion`] for a region the kernel is unsure is material.
@@ -357,8 +357,8 @@ impl Body {
     /// ([`MassPropertiesEstimate`]).
     ///
     /// # Errors
-    /// [`Error::Status`] `SM_ERR_INVALID_INPUT` for an accuracy the kernel refuses or an area
-    /// that is not finite; the kernel's error.
+    /// [`Error::Refused`] for an accuracy the kernel refuses, in its words; [`Error::Status`]
+    /// `SM_ERR_INVALID_INPUT` for an area that is not finite; the kernel's error.
     pub fn area(&self, relative_accuracy: f64) -> Result<f64> {
         let a = with_body("area", self, |k, b| {
             Ok(
@@ -665,9 +665,9 @@ impl Body {
     /// ([`MassPropertiesEstimate`]).
     ///
     /// # Errors
-    /// [`Error::Argument`] for an index past the faces; [`Error::Status`]
-    /// `SM_ERR_INVALID_INPUT` for an accuracy the kernel refuses or an area that is not finite;
-    /// the kernel's error.
+    /// [`Error::Argument`] for an index past the faces; [`Error::Refused`] for an accuracy the
+    /// kernel refuses, in its words; [`Error::Status`] `SM_ERR_INVALID_INPUT` for an area that
+    /// is not finite; the kernel's error.
     pub fn face_area(&self, order: &Order, face: usize, relative_accuracy: f64) -> Result<f64> {
         let f = order::face(order, face)?;
         let a = with_body("face_area", self, |k, b| {
@@ -685,9 +685,9 @@ impl Body {
     /// **Estimated, not proved** ([`MassPropertiesEstimate`]).
     ///
     /// # Errors
-    /// [`Error::Argument`] for an index past the faces; [`Error::Status`]
-    /// `SM_ERR_INVALID_INPUT` for an accuracy the kernel refuses, a face of no area, or a result
-    /// that is not finite; the kernel's error.
+    /// [`Error::Argument`] for an index past the faces; [`Error::Refused`] for an accuracy the
+    /// kernel refuses or a face of no area, in its words; [`Error::Status`]
+    /// `SM_ERR_INVALID_INPUT` for a result that is not finite; the kernel's error.
     pub fn face_centroid(
         &self,
         order: &Order,

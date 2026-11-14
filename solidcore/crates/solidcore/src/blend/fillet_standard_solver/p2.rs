@@ -105,8 +105,6 @@
 //!   otherwise solves globally on the base, which finds a point on a closed surface's seam
 //!   once at each end of the period and refuses the two answers.
 
-use std::borrow::Cow;
-
 use crate::blend::fillet_custom_solver::{
     face_owner, offset_compute_inward_vector, offset_evaluate_1st, offset_evaluate_point,
     offset_local_point_solve, surface_global_point_solve, ConstantRadiusAssistedFs, InitialValues,
@@ -3061,37 +3059,6 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
 
 const OP_LAW: &str = "blend::fillet_standard_solver::p2::law_in_parameter";
 
-/// Not the fork's: the face a round's ball rolls on, for the round by its definition: the
-/// surface the trace rolled the ball on. Past its domain the offset of a B-spline, surface
-/// of revolution or surface of extrusion is evaluated on its extended base
-/// (`m_pExtendedSurface`: the base's tangent extension, or a surface of revolution of a
-/// circle's arc carried on as its circle), while the base itself continues otherwise (a
-/// B-spline's end spans carried on, a revolved generator's extrapolation). A round whose
-/// rails run on past the face (an edge's round run on past the edge's ends, or out to an
-/// End round a tube) had no foot on the plain base there: its first station missed the
-/// rails (by more than 1 on a twisted wall) and the round was built as the trace's skinned
-/// B-spline, which is the walls' round only at its sections. So where the offset holds an
-/// extension (the one it holds now, pending or stored, which contains every point the
-/// trace evaluated), the definition rolls on it. A plane, cylinder, cone, sphere or torus
-/// continues as itself and keeps its analytic kind in the definition, and a blend by its
-/// definition keeps its definition.
-fn rolled_on(offset: &crate::surface::offset_surface::OffsetSurface) -> Cow<'_, Surface> {
-    use crate::surface::surface::SurfaceKind;
-    let base = offset.base_surface();
-    let extends = matches!(
-        base.kind(),
-        SurfaceKind::BSpline(_)
-            | SurfaceKind::SurfOfRevolution(_)
-            | SurfaceKind::SurfOfExtrusion(_)
-    );
-    let extended = if extends {
-        offset.with_extended_base_surface(|e| e.map(Surface::clone_keeping_owner))
-    } else {
-        None
-    };
-    extended.map_or(Cow::Borrowed(base), Cow::Owned)
-}
-
 impl CircularCrossSectionFsg {
     /// The fork's `SmGnSectionFSG::CircleSurface` gate (cc08236, 308cc40, c596548; with
     /// `fixes.fillet_round_as_definition`, WR-698): a ball of one radius between faces that are NURBS surfaces is the round by
@@ -3133,7 +3100,9 @@ impl CircularCrossSectionFsg {
         use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
         use crate::blend::fillet_section::definition_box::definition_enclosable;
         use crate::blend::fillet_section::interval::Ivl;
-        use crate::blend::fillet_section::section::{ArcSection, GnLawRound, GnSectionFsg};
+        use crate::blend::fillet_section::section::{
+            rolled_on, ArcSection, GnLawRound, GnSectionFsg,
+        };
         use crate::blend::fillet_standard_solver::touch_circle::{
             corner_angle, fillet_curve_corners,
         };
@@ -3449,7 +3418,7 @@ impl super::p1::LinearCrossSectionFsg {
         uv: [&mut BSplineCurve; 2],
         ball: &CircleBall,
     ) -> Result<Option<Surface>> {
-        use crate::blend::fillet_section::section::GnSectionFsg;
+        use crate::blend::fillet_section::section::{rolled_on, GnSectionFsg};
         use crate::blend::fillet_standard_solver::touch_circle::{
             corner_angle, fillet_curve_corners,
         };
