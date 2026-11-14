@@ -4,7 +4,11 @@
 //! bar, and on macOS it runs under the traffic lights ([`SolveApp::integrated_titlebar`]).
 
 use crate::window_chrome::WindowAction;
-pub use crate::window_chrome::{Caption, dpi_scaled_size, resize_border_px, resize_hit, resize_zones, toggle_maximize};
+pub use crate::window_chrome::{
+    Caption, SystemCommand, caption_map, dpi_scaled_size, open_window_menu, publish_caption, resize_border_px, resize_hit, resize_zones,
+    set_native_maximize, set_system_commands, toggle_maximize, window_frame_pressed,
+};
+pub(crate) use crate::window_chrome::{begin_frame, frame_pressed};
 
 use crate::SolveApp;
 
@@ -43,6 +47,8 @@ mod tests {
         width: f32,
         time: f64,
         maximized: bool,
+        /// The window has the keyboard focus.
+        focused: bool,
         /// Lay out the whole window (`SolveApp::ui`) rather than only the bar and the zones.
         full: bool,
     }
@@ -52,7 +58,7 @@ mod tests {
             let ctx = crate::fonts::test_context();
             let mut app = SolveApp::new(Session::default(), Default::default());
             app.custom_titlebar = true;
-            Self { ctx, app, width, time: 0.0, maximized: false, full: false }
+            Self { ctx, app, width, time: 0.0, maximized: false, focused: true, full: false }
         }
 
         /// One frame with `events`, the input going through `release_press_taken_by_os` first
@@ -63,6 +69,7 @@ mod tests {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(self.width, 700.0))),
                 time: Some(self.time),
                 events,
+                focused: self.focused,
                 ..Default::default()
             };
             if let Some(v) = input.viewports.get_mut(&ViewportId::ROOT) {
@@ -76,6 +83,8 @@ mod tests {
                     app.ui(ui);
                     return;
                 }
+                // As `SolveApp::ui` does first.
+                begin_frame(ui.ctx());
                 crate::toolbar::app_bar(app, ui);
                 if app.custom_titlebar {
                     resize_zones(ui);
@@ -230,6 +239,110 @@ mod tests {
         assert!(w.app.quit_requested);
     }
 
+    /// Ask for the window menu at (400, 20) as the window procedure does, and draw it.
+    fn open_window_menu_at_400_20(w: &mut Win) {
+        crate::window_chrome::request_window_menu(&w.ctx, pos2(400.0, 20.0));
+        w.frame(vec![]);
+        w.frame(vec![]);
+        assert!(window_menu_open(w), "the window menu opens when asked");
+    }
+
+    /// The window menu is open (its popup hangs off the bar's drag area).
+    fn window_menu_open(w: &Win) -> bool {
+        w.ctx.read_response(egui::Id::unique("titlebar-drag")).is_some_and(|r| egui::Popup::is_id_open(&w.ctx, egui::Popup::default_response_id(&r)))
+    }
+
+    /// Where the window menu is drawn, its frame included.
+    fn window_menu_rect(w: &Win) -> Rect {
+        let anchor = w.ctx.read_response(egui::Id::unique("titlebar-drag")).expect("the bar's drag area");
+        w.ctx.memory(|m| m.area_rect(egui::Popup::default_response_id(&anchor))).unwrap_or(Rect::NOTHING)
+    }
+
+    fn file_menu_open(w: &Win) -> bool {
+        w.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false))
+    }
+
+    #[test]
+    fn a_right_click_on_the_title_bar_leaves_the_window_menu_the_only_menu_open() {
+        // Windows takes presses on the caption and the frame, and egui never sees them: the
+        // viewport's menu stayed open beside the window menu.
+        let mut w = Win::new(1200.0);
+        w.full = true;
+        w.app.home.open = false;
+        w.frame(vec![]);
+        w.frame(vec![]);
+        crate::context_menu::open_for(&mut w.app, pos2(600.0, 400.0), crate::context_menu::Target::Viewport);
+        w.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu"), true));
+        w.app.help.menu = true;
+        w.frame(vec![]);
+        assert!(w.app.viewport.context_menu.is_some() && file_menu_open(&w) && w.app.help.menu, "the menus are open");
+        // The right button goes down on the bare bar, then up: the window menu opens.
+        crate::window_chrome::report_frame_press(&w.ctx);
+        w.frame(vec![]);
+        crate::window_chrome::request_window_menu(&w.ctx, pos2(400.0, 20.0));
+        w.frame(vec![]);
+        w.frame(vec![]);
+        assert!(w.app.viewport.context_menu.is_none(), "the viewport's menu closed");
+        assert!(!file_menu_open(&w) && !w.app.help.menu, "the File and Help menus closed");
+        assert!(window_menu_open(&w), "the window menu is open");
+        // One frame, as the app's other menus have: the menu is as wide as theirs, no wider.
+        let width = window_menu_rect(&w).width();
+        assert!((width - crate::ui_kit::LIST_W).abs() < 1.0, "{width} wide, the context menu {}", crate::ui_kit::LIST_W);
+    }
+
+    fn window_menu_row(name: &str) -> Rect {
+        crate::scenario::rect_of(&format!("menu:window_{name}")).unwrap_or_else(|| panic!("no `{name}` row"))
+    }
+
+    #[test]
+    fn the_window_menu_opens_where_asked_and_runs_what_the_window_state_allows() {
+        let mut w = Win::new(1200.0);
+        w.frame(vec![]);
+        open_window_menu_at_400_20(&mut w);
+        let restore = window_menu_row("restore");
+        assert!(restore.left() >= 400.0 && restore.top() >= 20.0, "below and right of where it was asked for: {restore:?}");
+        // Restored: Restore does nothing, Minimize runs, and a choice closes the menu.
+        assert!(!w.click(restore.center()).iter().any(|c| matches!(c, ViewportCommand::Maximized(_))));
+        open_window_menu_at_400_20(&mut w);
+        assert!(w.click(window_menu_row("minimize").center()).contains(&ViewportCommand::Minimized(true)));
+        assert!(!window_menu_open(&w), "a choice closes the menu");
+        // The keys: Down picks the first row that can run (Minimize: Restore is off), Enter runs it.
+        open_window_menu_at_400_20(&mut w);
+        w.frame(crate::test_support::key(egui::Key::ArrowDown));
+        let out = w.frame(crate::test_support::key(egui::Key::Enter));
+        let cmds = out.viewport_output.get(&ViewportId::ROOT).map(|v| v.commands.clone()).unwrap_or_default();
+        assert!(cmds.contains(&ViewportCommand::Minimized(true)), "{cmds:?}");
+        // Maximized: Maximize does nothing, Restore runs.
+        w.maximized = true;
+        open_window_menu_at_400_20(&mut w);
+        assert!(!w.click(window_menu_row("maximize").center()).iter().any(|c| matches!(c, ViewportCommand::Maximized(_))));
+        open_window_menu_at_400_20(&mut w);
+        assert!(w.click(window_menu_row("restore").center()).contains(&ViewportCommand::Maximized(false)));
+        // Close asks about unsaved designs first, as the Close button does.
+        open_window_menu_at_400_20(&mut w);
+        assert!(w.click(window_menu_row("close").center()).contains(&ViewportCommand::Close));
+        assert!(w.app.quit_requested);
+    }
+
+    #[test]
+    fn the_window_menu_closes_on_escape_a_press_elsewhere_and_lost_focus() {
+        let mut w = Win::new(1200.0);
+        w.frame(vec![]);
+        open_window_menu_at_400_20(&mut w);
+        w.frame(crate::test_support::key(egui::Key::Escape));
+        w.frame(vec![]);
+        assert!(!window_menu_open(&w), "Escape");
+        // A press on the caption or the frame, which egui does not see: the window procedure tells.
+        open_window_menu_at_400_20(&mut w);
+        crate::window_chrome::report_frame_press(&w.ctx);
+        w.frame(vec![]);
+        assert!(!window_menu_open(&w), "a non-client press");
+        open_window_menu_at_400_20(&mut w);
+        w.focused = false;
+        w.frame(vec![]);
+        assert!(!window_menu_open(&w), "another app took the focus");
+    }
+
     #[test]
     fn empty_bar_space_drags_and_double_click_maximizes() {
         let mut w = Win::new(1600.0);
@@ -328,5 +441,56 @@ mod tests {
         let p = pos2(1199.0, 350.0);
         let cmds = w.gesture(&[p, p + vec2(6.0, 0.0)]);
         assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::BeginResize(_))), "{cmds:?}");
+    }
+
+    /// Windows with Preferences > Layout's `windows_native_frame` off, the default: the window
+    /// procedure answers the resize border, and the title bar is egui's. No
+    /// layout is published for Windows' hit test (so nothing is `HTCAPTION` or `HTMAXBUTTON`, and
+    /// the window procedure has no caption press to report), and a drag on the bare bar moves the
+    /// window through egui, once past its drag threshold. The same window with the native caption
+    /// is the control: there every frame publishes the bar, the bare bar as Windows' caption and
+    /// the maximize button as Windows' own.
+    ///
+    /// What a frame published is read from the app (`caption_published`), not from the caption
+    /// map: that is one per process, and under `cargo test` the frames of every other test clear it.
+    #[test]
+    fn with_the_default_frame_the_title_bar_stays_egui_s() {
+        let starts = |cmds: &[ViewportCommand]| cmds.iter().filter(|c| matches!(c, ViewportCommand::StartDrag)).count();
+        let window = |native_caption: bool| {
+            let mut w = Win::new(1600.0);
+            w.full = true;
+            w.app.home.open = false;
+            w.app.native_resize_border = true;
+            w.app.native_caption = native_caption;
+            w.frame(vec![]);
+            w
+        };
+        let bare = pos2(900.0, 17.0);
+        // The control: with the native caption every frame publishes the bar. The bare bar is a
+        // drag area (HTCAPTION) and the maximize button Windows' (HTMAXBUTTON, snap layouts);
+        // neither is one of the bar's own controls.
+        let mut native = window(true);
+        for _ in 0..3 {
+            native.frame(vec![]);
+            let ppp = native.ctx.pixels_per_point();
+            let px = |p: Pos2| ((p.x * ppp) as i32, (p.y * ppp) as i32);
+            let ((bx, by), (mx, my)) = (px(bare), px(native.caption(Caption::Maximize).center()));
+            let layout = native.app.caption_published.as_ref().expect("the native caption publishes the bar");
+            assert!(layout.drag.iter().any(|r| r.contains(bx, by)), "the bare bar is Windows' caption: {layout:?}");
+            assert!(layout.maximize.as_ref().is_some_and(|r| r.contains(mx, my)), "the maximize button is Windows': {layout:?}");
+            assert!(!layout.interactive.iter().any(|r| r.contains(bx, by) || r.contains(mx, my)), "{layout:?}");
+        }
+        // The default frame, frame after frame: nothing is published, so Windows' hit test finds
+        // no caption and no maximize button anywhere.
+        let mut w = window(false);
+        for _ in 0..3 {
+            w.frame(vec![]);
+            assert_eq!(w.app.caption_published, None, "no title bar for Windows' hit test");
+        }
+        // Within egui's drag threshold the window stays; past it, egui starts the move.
+        assert_eq!(starts(&w.gesture(&[bare, bare + vec2(2.0, 0.0)])), 0);
+        w.time += 1.0;
+        let cmds = w.gesture(&[bare, bare + vec2(12.0, 4.0), bare + vec2(30.0, 8.0)]);
+        assert_eq!(starts(&cmds), 1, "{cmds:?}");
     }
 }

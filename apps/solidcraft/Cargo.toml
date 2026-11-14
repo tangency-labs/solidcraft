@@ -45,6 +45,8 @@ solidcraft-space-mouse = { workspace = true }
 # "clipboard" is not a default here: eframe 0.37 builds egui-winit without it, and then every
 # Copy and Paste on the desktop silently does nothing (see src/clipboard_tests.rs).
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links", "clipboard"] }
+# The title bar's hit-test map (src/native_frame.rs).
+solidcraft-frame = { workspace = true }
 egui = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -90,6 +92,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 winreg = "0.56"
+# The vendored winit's choice of the undecorated window's non-client area, made before the window
+# opens (src/native_frame.rs, Preferences > Layout; already in the tree through eframe).
+winit = { version = "0.30", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.21.2", default-features = false }

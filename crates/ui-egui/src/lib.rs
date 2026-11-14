@@ -819,6 +819,15 @@ pub struct SolveApp {
     /// The OS hit test already offers the resize border ([`titlebar`]; the Windows desktop app),
     /// so no egui resize zones are laid out.
     pub native_resize_border: bool,
+    /// Windows owns the title bar's caption and maximize button, and the frame's presses are
+    /// reported ([`titlebar::publish_caption`]; the Windows desktop app with Preferences > Layout's
+    /// `windows_native_frame` on when it started). Off, the default, the bar is egui's.
+    pub native_caption: bool,
+    /// Tests: the title bar layout the latest frame published for Windows' hit test
+    /// ([`titlebar::publish_caption`]), `None` when it published none. The published map itself is
+    /// one per process, which the frames of every test running in it share.
+    #[cfg(test)]
+    pub(crate) caption_published: Option<window_chrome::CaptionLayout>,
     /// macOS: the traffic lights sit over the application bar's left end.
     pub integrated_titlebar: bool,
     /// The desktop host installed native menus alongside the application bar controls.
@@ -1050,6 +1059,9 @@ impl SolveApp {
             autosave_minutes: 5.0,
             custom_titlebar: false,
             native_resize_border: false,
+            native_caption: false,
+            #[cfg(test)]
+            caption_published: None,
             integrated_titlebar: false,
             native_file_menu: false,
             header: toolbar::HeaderLayout::DESKTOP,
@@ -3737,6 +3749,8 @@ impl SolveApp {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
+        // Before anything is drawn: a press the OS took on the window's frame closes open menus.
+        titlebar::begin_frame(ui.ctx());
         prefs::prepare_blur(self, ui.ctx());
         render_workspace::displayed::begin(self);
         let blur_source = !self.home.open && !render_workspace::result_active(self);
@@ -3772,6 +3786,14 @@ impl SolveApp {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         }
         control::publish_design(self, &control::DOCUMENT_WATCH);
+        // Last: everything that can lie over the title bar is laid out by now.
+        let published = titlebar::publish_caption(ui.ctx(), self.custom_titlebar && self.native_caption);
+        #[cfg(test)]
+        {
+            self.caption_published = published;
+        }
+        #[cfg(not(test))]
+        let _ = published;
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());

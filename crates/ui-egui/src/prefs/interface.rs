@@ -308,6 +308,9 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 },
                 |ui, state| ui_kit::layout_preview(ui, state, solidcraft_ui_text::tr("prefs.layout_note")),
             );
+            if windows_native_frame_row_shown(WINDOWS_NATIVE_FRAME_AVAILABLE, app.custom_titlebar) {
+                windows_native_frame_row(app, ui);
+            }
             layout_check(
                 ui,
                 app.tr("prefs.keep_work_on_tab_switch"),
@@ -586,6 +589,23 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         super::navbar::show(app, ui);
     });
+}
+
+/// Windows: the title bar and window edges are Windows' own (`windows_native_frame`). The window's
+/// frame is fixed when it opens, so a choice other than the one this window opened with is marked
+/// as waiting for a restart.
+fn windows_native_frame_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+    layout_check(
+        ui,
+        app.tr("prefs.windows_native_frame"),
+        app.tr("prefs.windows_native_frame_help"),
+        &mut app.preferences.windows_native_frame,
+        "windows_native_frame",
+    );
+    // `native_resize_border`: this window has the frame's procedure, so its frame is known.
+    if app.native_resize_border && app.preferences.windows_native_frame != app.native_caption {
+        ui_kit::settings_badge(ui, app.tr("prefs.graphics_page.restart"), true);
+    }
 }
 
 /// Keep native checkbox responses and one real search target; guidance stays on hover.

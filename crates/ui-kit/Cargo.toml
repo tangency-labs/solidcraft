@@ -23,6 +23,8 @@ solidcraft-color = { workspace = true }
 # The blurred backing behind translucent panels: drawn over the viewport's GPU picture.
 solidcraft-viewport-egui = { workspace = true }
 solidcraft-viewport-gpu = { workspace = true }
+# The title bar's layout for the native hit test.
+solidcraft-frame = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
 serde = { workspace = true }

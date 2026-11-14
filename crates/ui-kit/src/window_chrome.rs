@@ -12,8 +12,17 @@
 //! The resize zones are as wide as Windows' own resize border at the window's scale
 //! ([`resize_border_px`]), corners win where they overlap the edges ([`resize_hit`]). An app that
 //! answers the system's hit test itself (SolidCraft's `apps/solidcraft/src/native_frame.rs`) uses
-//! them there, so the OS shows its resize cursors and resizes from the first frame; elsewhere egui
-//! zones above everything else start an OS resize ([`resize_zones`]). The web build has neither.
+//! them there, so the OS shows its resize cursors and resizes from the first frame: for every edge,
+//! or, with the system's own frame kept on the left, right and bottom, for the top edge only.
+//! Elsewhere egui zones above everything else start an OS resize ([`resize_zones`]). The web build
+//! has neither.
+//!
+//! With the system's frame kept, such an app can also answer the hit test from the bar's layout,
+//! which the UI publishes every frame ([`publish_caption`]): the bare bar is the caption, so
+//! Windows drags the window from the first pixel, and the maximize button is the OS's, so hovering
+//! it shows Windows 11's snap layouts. A right-click on the bare bar asks for the window menu
+//! ([`open_window_menu`]), and a press the OS takes on the frame closes the UI's menus as a press
+//! outside them would ([`window_frame_pressed`]).
 //!
 //! Nothing here knows an app's state: closing is a [`WindowAction::Close`] the app answers (it may
 //! ask about unsaved work first).
@@ -159,23 +168,31 @@ impl TitleBar {
     }
 
     /// Lays out the bar in `bar`: the drag area first (so the contents' widgets, registered
-    /// later, take their clicks), `contents` in the rect left for them, then the caption buttons.
-    /// The caption button clicked, as the action for the app to run.
+    /// later, take their clicks), `contents` in the rect left for them, then the caption buttons
+    /// and, when asked for, the window menu. The caption button clicked or the window menu's
+    /// choice, as the action for the app to run.
     pub fn show(self, ui: &mut Ui, bar: Rect, contents: impl FnOnce(&mut Ui, Rect)) -> Option<WindowAction> {
         let layout = self.layout(bar);
-        if let Some(r) = layout.drag {
-            drag_area(ui, r);
-        }
+        let drag = layout.drag.map(|r| drag_area(ui, r));
         contents(ui, layout.content);
-        if self.caption_buttons { caption_buttons(ui, bar) } else { None }
+        if !self.caption_buttons {
+            return None;
+        }
+        let clicked = caption_buttons(ui, bar);
+        let chosen = drag.as_ref().and_then(|drag| window_menu(ui, drag));
+        clicked.or(chosen)
     }
 }
 
 /// The bar's background: a press-and-drag on empty space moves the window, a double-click
 /// toggles maximize. Call it before laying out the bar so its buttons, registered later, take
-/// their clicks.
-pub fn drag_area(ui: &Ui, rect: Rect) {
+/// their clicks. The response anchors the [`window_menu`].
+pub fn drag_area(ui: &Ui, rect: Rect) -> egui::Response {
     let ctx = ui.ctx();
+    // The bar this frame, for the native hit test ([`publish_caption`]). The pass number is read
+    // before taking the data lock: egui's context lock is not re-entrant.
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(bar_key(), (rect, pass)));
     let resp = ui.interact(rect, Id::unique("titlebar-drag"), Sense::click_and_drag());
     // egui hands a drag that starts on a click-only widget to the drag-sensing background below
     // it, so remember whether the press itself landed on bare background.
@@ -188,6 +205,7 @@ pub fn drag_area(ui: &Ui, rect: Rect) {
     } else if resp.drag_started_by(PointerButton::Primary) && ctx.data(|d| d.get_temp(resp.id).unwrap_or(false)) {
         hand_press_to_os(ctx, ViewportCommand::StartDrag);
     }
+    resp
 }
 
 /// Where the press handed to the OS by a window move or resize was, until the next frame.
@@ -225,7 +243,10 @@ pub fn caption_buttons(ui: &mut Ui, bar: Rect) -> Option<WindowAction> {
     for (i, c) in CAPTIONS.into_iter().enumerate() {
         let r = Rect::from_min_size(pos2(bar.right() - WIDTH + i as f32 * BUTTON_WIDTH, bar.top()), vec2(BUTTON_WIDTH, bar.height()));
         let resp = ui.interact(r, caption_id(c), Sense::click());
-        let fill = match (resp.is_pointer_button_down_on(), resp.hovered()) {
+        // Over a native caption the OS owns the maximize button's pointer (snap layouts): its
+        // hover and press come from the window procedure ([`set_native_maximize`]).
+        let (native_hover, native_pressed) = if c == Caption::Maximize { native_maximize() } else { (false, false) };
+        let fill = match (resp.is_pointer_button_down_on() || native_pressed, resp.hovered() || native_hover) {
             (true, _) => t.app_bar_hover_subtle,
             (_, true) => t.app_bar_hover_button,
             _ if resp.has_focus() => t.app_bar_hover_button,
@@ -321,12 +342,345 @@ pub fn resize_zones(ui: &mut Ui) {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Native caption hit testing
+//
+// On Windows the window procedure answers the system's hit test from the bar's layout: bare bar
+// is the caption (HTCAPTION: the OS drags the window, maximizes on double-click, shows the system
+// menu and snaps), the maximize button is HTMAXBUTTON (Windows 11 snap layouts), the bar's
+// controls stay the UI's. The UI publishes the layout at the end of each frame.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+pub use solidcraft_frame::caption::CaptionLayout;
+
+static CAPTION: std::sync::LazyLock<solidcraft_frame::CaptionMap> = std::sync::LazyLock::new(solidcraft_frame::CaptionMap::new);
+static CAPTION_CTX: std::sync::OnceLock<egui::Context> = std::sync::OnceLock::new();
+static MAX_HOVER: AtomicBool = AtomicBool::new(false);
+static MAX_PRESSED: AtomicBool = AtomicBool::new(false);
+
+fn bar_key() -> Id {
+    Id::unique("titlebar-bar-this-pass")
+}
+
+/// The title bar's published layout, for the window procedure's hit test.
+pub fn caption_map() -> &'static solidcraft_frame::CaptionMap {
+    &CAPTION
+}
+
+/// The window procedure reports the OS-owned maximize button's pointer state.
+pub fn set_native_maximize(hover: bool, pressed: bool) {
+    let hover_changed = MAX_HOVER.swap(hover, Ordering::Relaxed) != hover;
+    let pressed_changed = MAX_PRESSED.swap(pressed, Ordering::Relaxed) != pressed;
+    if (hover_changed || pressed_changed)
+        && let Some(ctx) = CAPTION_CTX.get()
+    {
+        ctx.request_repaint();
+    }
+}
+
+fn native_maximize() -> (bool, bool) {
+    (MAX_HOVER.load(Ordering::Relaxed), MAX_PRESSED.load(Ordering::Relaxed))
+}
+
+/// Most rectangles the map takes; more are merged (a merged area is the UI's, never a drag area).
+const MAX_RECTS: usize = solidcraft_frame::caption::MAX_INTERACTIVE;
+
+/// Publish this frame's title bar layout. Call at the end of the frame, after everything that can
+/// lie over the bar (menus, popups, windows) is laid out. `native` is false where the OS doesn't
+/// ask the map (no native frame): the map is then cleared. The layout it published, `None` when
+/// it published none.
+pub fn publish_caption(ctx: &egui::Context, native: bool) -> Option<CaptionLayout> {
+    let _ = CAPTION_CTX.set(ctx.clone());
+    let bar = ctx.data(|d| d.get_temp::<(Rect, u64)>(bar_key())).filter(|(_, pass)| *pass == ctx.cumulative_pass_nr()).map(|(r, _)| r);
+    let Some(bar) = bar.filter(|_| native) else {
+        if CAPTION.is_published() {
+            CAPTION.clear();
+        }
+        return None;
+    };
+    let drag_id = Id::unique("titlebar-drag");
+    let max_id = caption_id(Caption::Maximize);
+    let mut interactive = Vec::new();
+    let mut maximize = None;
+    ctx.viewport(|v| {
+        for (_, widgets) in v.this_pass.widgets.layers() {
+            for w in widgets {
+                if w.id == drag_id || !w.visible || !(w.sense.senses_click() || w.sense.senses_drag()) {
+                    continue;
+                }
+                let r = w.interact_rect.intersect(bar);
+                if !r.is_positive() {
+                    continue;
+                }
+                if w.id == max_id {
+                    maximize = Some(r);
+                } else {
+                    interactive.push(r);
+                }
+            }
+        }
+    });
+    let ppp = ctx.pixels_per_point();
+    let px = |r: Rect| {
+        solidcraft_frame::PxRect::new(
+            (r.min.x * ppp).floor() as i32,
+            (r.min.y * ppp).floor() as i32,
+            (r.max.x * ppp).ceil() as i32,
+            (r.max.y * ppp).ceil() as i32,
+        )
+    };
+    let interactive = merge_rects(interactive.into_iter().map(px).collect(), MAX_RECTS);
+    let layout = CaptionLayout { bar: px(bar), drag: vec![px(bar)], interactive, maximize: maximize.map(px) };
+    CAPTION.publish(&layout);
+    Some(layout)
+}
+
+/// Merge overlapping rectangles, then (while there are more than `max`) the two nearest along x,
+/// so the map never drops a control: a merged area only ever grows what is the UI's.
+fn merge_rects(mut rects: Vec<solidcraft_frame::PxRect>, max: usize) -> Vec<solidcraft_frame::PxRect> {
+    use solidcraft_frame::PxRect;
+    let union = |a: PxRect, b: PxRect| PxRect::new(a.min_x.min(b.min_x), a.min_y.min(b.min_y), a.max_x.max(b.max_x), a.max_y.max(b.max_y));
+    let touches = |a: &PxRect, b: &PxRect| a.min_x <= b.max_x && b.min_x <= a.max_x && a.min_y <= b.max_y && b.min_y <= a.max_y;
+    rects.sort_by_key(|r| (r.min_x, r.min_y));
+    let mut merged: Vec<PxRect> = Vec::with_capacity(rects.len());
+    for r in rects {
+        match merged.iter_mut().find(|m| touches(m, &r)) {
+            Some(m) => *m = union(*m, r),
+            None => merged.push(r),
+        }
+    }
+    while merged.len() > max.max(1) {
+        merged.sort_by_key(|r| r.min_x);
+        let Some(i) = merged.windows(2).enumerate().min_by_key(|(_, w)| w[1].min_x - w[0].max_x).map(|(i, _)| i) else { break };
+        let b = merged.remove(i + 1);
+        if let Some(a) = merged.get_mut(i) {
+            *a = union(*a, b);
+        }
+    }
+    merged
+}
+
+// ---------------------------------------------------------------------------------------------
+// Presses the OS takes
+//
+// On Windows the OS handles a press on the window's frame or title bar (move, size, the window
+// menu), so egui never sees it. Menus and popups close on a press outside them: the window
+// procedure reports these presses too ([`window_frame_pressed`]).
+
+fn frame_press_key() -> Id {
+    Id::unique("titlebar-frame-press")
+}
+
+/// The OS took a press on the window's frame or title bar (Windows' non-client area).
+pub fn window_frame_pressed() {
+    if let Some(ctx) = CAPTION_CTX.get() {
+        report_frame_press(ctx);
+    }
+}
+
+/// [`window_frame_pressed`] for the window of `ctx`.
+pub fn report_frame_press(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(frame_press_key().with("pending"), true));
+    ctx.request_repaint();
+}
+
+/// Start of a frame: a press the OS took since the last one closes egui's popups now, and the
+/// app's own menus see it through [`frame_pressed`].
+pub fn begin_frame(ctx: &egui::Context) {
+    if ctx.data_mut(|d| d.remove_temp::<bool>(frame_press_key().with("pending"))).unwrap_or(false) {
+        // Each window of the app counts its own frames: the press is this window's, this frame.
+        let frame = (ctx.viewport_id(), ctx.cumulative_frame_nr());
+        ctx.data_mut(|d| d.insert_temp(frame_press_key(), frame));
+        egui::Popup::close_all(ctx);
+    }
+}
+
+/// The OS took a press on this window's frame or title bar this frame: a menu or popup closes, as
+/// for a press outside it. Another window of the app, such as a shared panel in its own desktop
+/// window, sees no press.
+pub fn frame_pressed(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<(egui::ViewportId, u64)>(frame_press_key())) == Some((ctx.viewport_id(), ctx.cumulative_frame_nr()))
+}
+
+// ---------------------------------------------------------------------------------------------
+// The window menu
+//
+// Restore, Move, Size, Minimize, Maximize and Close in the app's own menu style. On Windows a
+// right-click on the bare bar opens it: the bar is the OS's caption there, so the window
+// procedure asks for it ([`open_window_menu`]). Alt+Space still opens the system's own menu.
+
+/// The window's keyboard move and size, which only the platform can start (Windows' `SC_MOVE`,
+/// `SC_SIZE`). Without them the window menu has no Move and Size.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SystemCommand {
+    Move,
+    Size,
+}
+
+static SYSTEM_COMMANDS: std::sync::OnceLock<fn(SystemCommand)> = std::sync::OnceLock::new();
+
+/// Let the window menu run Move and Size through `run` (the desktop app on Windows, once).
+pub fn set_system_commands(run: fn(SystemCommand)) {
+    let _ = SYSTEM_COMMANDS.set(run);
+}
+
+fn window_menu_key() -> Id {
+    Id::unique("titlebar-window-menu")
+}
+
+/// Open the window menu at client pixel (`x`, `y`) of the window whose bar is published.
+pub fn open_window_menu(x: i32, y: i32) {
+    if let Some(ctx) = CAPTION_CTX.get() {
+        request_window_menu(ctx, pos2(x as f32, y as f32));
+    }
+}
+
+/// Ask `ctx`'s next frame to open the window menu at client pixel `at`.
+pub fn request_window_menu(ctx: &egui::Context, at: Pos2) {
+    ctx.data_mut(|d| d.insert_temp(window_menu_key().with("request"), at));
+    ctx.request_repaint();
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum WindowItem {
+    Restore,
+    Move,
+    Size,
+    Minimize,
+    Maximize,
+    Close,
+}
+
+/// The window menu, when the window asked for it; `anchor` is the bar's [`drag_area`]. The row
+/// chosen, as the action for the app to run (as a caption button's); Move and Size run here.
+pub fn window_menu(ui: &Ui, anchor: &egui::Response) -> Option<WindowAction> {
+    let ctx = ui.ctx().clone();
+    let key = window_menu_key();
+    let popup_id = egui::Popup::default_response_id(anchor);
+    let request = ctx.data_mut(|d| d.remove_temp::<Pos2>(key.with("request")));
+    let ppp = ctx.pixels_per_point();
+    if let Some(px) = request {
+        ctx.data_mut(|d| {
+            d.insert_temp(key.with("at"), pos2(px.x / ppp, px.y / ppp));
+            d.insert_temp::<Option<usize>>(key.with("row"), None);
+        });
+    }
+    let opening = request.is_some();
+    let shown = egui::Popup::is_id_open(&ctx, popup_id);
+    // Another app taking the focus closes it, as it does a system menu.
+    if !opening && (!shown || !ctx.input(|i| i.focused)) {
+        if shown {
+            egui::Popup::close_id(&ctx, popup_id);
+        }
+        return None;
+    }
+    let max = maximized(&ctx);
+    let system = SYSTEM_COMMANDS.get().copied();
+    let mut rows = vec![(WindowItem::Restore, "window_restore", "ui.window_menu_restore", max)];
+    if system.is_some() {
+        rows.push((WindowItem::Move, "window_move", "ui.window_menu_move", !max));
+        rows.push((WindowItem::Size, "window_size", "ui.window_menu_size", !max));
+    }
+    rows.push((WindowItem::Minimize, "window_minimize", "ui.window_menu_minimize", true));
+    rows.push((WindowItem::Maximize, "window_maximize", "ui.window_menu_maximize", !max));
+    rows.push((WindowItem::Close, "window_close", "ui.window_menu_close", true));
+    let enabled: Vec<bool> = rows.iter().map(|r| r.3).collect();
+    let mut row = ctx.data(|d| d.get_temp::<Option<usize>>(key.with("row"))).flatten();
+    let mut chosen = crate::Menu::navigate(&ctx, &enabled, &mut row).then_some(row).flatten();
+    ctx.data_mut(|d| d.insert_temp(key.with("row"), row));
+    let at = ctx.data(|d| d.get_temp::<Pos2>(key.with("at"))).unwrap_or(anchor.rect.left_bottom());
+    // The popup draws the menu's frame; the rows go straight inside it, as in the app's other menus.
+    crate::Container::new(&ctx, crate::Surface::Popup)
+        .menu(anchor)
+        .anchor(at)
+        .align(egui::RectAlign::BOTTOM_START)
+        .frame(crate::Menu::frame())
+        .open_memory(opening.then_some(egui::SetOpenCommand::Bool(true)))
+        .show(|ui| {
+            crate::Menu::rows(ui, crate::LIST_W, |ui| {
+                for (k, (item, id, message, on)) in rows.iter().enumerate() {
+                    if *item == WindowItem::Close {
+                        crate::Menu::separator(ui);
+                    }
+                    let mut menu_item = crate::MenuItem::new(id, solidcraft_ui_text::tr(message), "");
+                    menu_item.enabled = *on;
+                    menu_item.highlighted = row == Some(k);
+                    if *item == WindowItem::Close {
+                        menu_item.shortcut = "Alt+F4";
+                    }
+                    if menu_item.show(ui).clicked() {
+                        chosen = Some(k);
+                    }
+                }
+            });
+            crate::Container::finish_content(ui, crate::Menu::frame());
+            if chosen.is_some() {
+                ui.close();
+            }
+        });
+    let item = chosen.and_then(|k| rows.get(k)).filter(|r| r.3).map(|r| r.0)?;
+    match item {
+        WindowItem::Restore => Some(WindowAction::Restore),
+        WindowItem::Minimize => Some(WindowAction::Minimize),
+        WindowItem::Maximize => Some(WindowAction::Maximize),
+        WindowItem::Close => Some(WindowAction::Close),
+        WindowItem::Move | WindowItem::Size => {
+            if let Some(run) = system {
+                run(if item == WindowItem::Move { SystemCommand::Move } else { SystemCommand::Size });
+            }
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod caption_tests {
+    use super::*;
+    use solidcraft_frame::PxRect;
+
+    #[test]
+    fn merging_keeps_every_control_covered_within_the_limit() {
+        let rects: Vec<PxRect> = (0..100).map(|i| PxRect::new(i * 20, 0, i * 20 + 10, 30)).collect();
+        let merged = merge_rects(rects.clone(), 32);
+        assert!(merged.len() <= 32);
+        for r in rects {
+            assert!(merged.iter().any(|m| m.min_x <= r.min_x && m.max_x >= r.max_x), "{r:?} lost");
+        }
+    }
+
+    #[test]
+    fn overlapping_controls_merge_into_one() {
+        let merged = merge_rects(vec![PxRect::new(0, 0, 10, 10), PxRect::new(5, 0, 20, 10), PxRect::new(100, 0, 110, 10)], 32);
+        assert_eq!(merged, vec![PxRect::new(0, 0, 20, 10), PxRect::new(100, 0, 110, 10)]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use egui::{Event, PointerButton, Pos2, RawInput, Rect, ViewportCommand, ViewportId, pos2, vec2};
 
     const BAR: f32 = 34.0;
+
+    #[test]
+    fn a_frame_press_is_seen_in_the_window_it_came_from_only() {
+        let ctx = crate::test_support::context();
+        report_frame_press(&ctx);
+        let mut seen = None;
+        let _ = ctx.run_ui(RawInput::default(), |ui| {
+            begin_frame(ui.ctx());
+            seen = Some(frame_pressed(ui.ctx()));
+        });
+        assert_eq!(seen, Some(true));
+        // A shared panel in its own desktop window counts its own frames; at the frame number of
+        // the press it has no press.
+        let id = ViewportId::from_hash_of("panel");
+        let mut panel = RawInput { viewport_id: id, ..Default::default() };
+        panel.viewports.insert(id, egui::ViewportInfo { parent: Some(ViewportId::ROOT), ..Default::default() });
+        let _ = ctx.run_ui(panel, |ui| seen = Some(frame_pressed(ui.ctx())));
+        assert_eq!(seen, Some(false));
+    }
 
     /// A headless window `width` pt wide that draws only a title bar, from plain inputs.
     struct Bar {
@@ -437,6 +791,40 @@ mod tests {
         // A drag from a caption button doesn't move the window.
         let (cmds, _) = w.gesture(&[min, min + vec2(-30.0, 8.0)]);
         assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::StartDrag)), "{cmds:?}");
+    }
+
+    /// The only test here that publishes: the caption map is one per process.
+    #[test]
+    fn publishing_the_caption_returns_the_layout_the_hit_test_then_reads() {
+        use solidcraft_frame::CaptionHit;
+        let ctx = crate::test_support::context();
+        let bar = Rect::from_min_size(Pos2::ZERO, vec2(1200.0, BAR));
+        let own = TitleBar { traffic_lights: false, caption_buttons: true };
+        let frame = |native: bool| {
+            let mut published = None;
+            let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 700.0))), ..Default::default() };
+            let _ = ctx.run_ui(input, |ui| {
+                let _ = own.show(ui, bar, |_, _| {});
+                published = publish_caption(ui.ctx(), native);
+            });
+            published
+        };
+        let ppp = ctx.pixels_per_point();
+        let hit = |p: Pos2| caption_map().hit((p.x * ppp) as i32, (p.y * ppp) as i32);
+        let at = |c: Caption| ctx.read_response(caption_id(c)).map(|r| r.rect.center()).unwrap_or(Pos2::ZERO);
+        // With the native caption the bar laid out this frame is published and returned.
+        let layout = frame(true).expect("the bar laid out this frame is published");
+        assert_eq!(caption_map().bar_and_maximize(), Some((layout.bar, layout.maximize)));
+        assert!(layout.maximize.is_some(), "{layout:?}");
+        assert_eq!(hit(pos2(600.0, BAR / 2.0)), CaptionHit::Drag, "the bare bar is the caption");
+        assert_eq!(hit(at(Caption::Maximize)), CaptionHit::MaximizeButton);
+        assert_eq!(hit(at(Caption::Minimize)), CaptionHit::Client);
+        assert_eq!(hit(at(Caption::Close)), CaptionHit::Client);
+        assert_eq!(hit(pos2(600.0, 300.0)), CaptionHit::Outside);
+        // Without it nothing is published, and the layout published before is forgotten.
+        assert_eq!(frame(false), None);
+        assert!(!caption_map().is_published());
+        assert_eq!(hit(pos2(600.0, BAR / 2.0)), CaptionHit::Outside);
     }
 
     #[test]

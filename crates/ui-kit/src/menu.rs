@@ -365,12 +365,15 @@ impl Menu {
     }
 
     pub fn show<R>(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
-        Self::show_frame(ui, Self::frame(), |ui| {
-            ui.set_width((width - Tokens::get().space_6 * 2.0 - 2.0).max(0.0));
-            ui.spacing_mut().item_spacing.y = 0.0;
-            ui.with_layout(egui::Layout::top_down(egui::Align::Min), add).inner
-        })
-        .inner
+        Self::show_frame(ui, Self::frame(), |ui| Self::rows(ui, width, add)).inner
+    }
+
+    /// The rows of a menu `width` wide, inside [`Self::frame`] drawn by their host: [`Self::show`],
+    /// or a popup given that frame.
+    pub fn rows<R>(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+        ui.set_width((width - Tokens::get().space_6 * 2.0 - 2.0).max(0.0));
+        ui.spacing_mut().item_spacing.y = 0.0;
+        ui.with_layout(egui::Layout::top_down(egui::Align::Min), add).inner
     }
 
     pub fn separator(ui: &mut Ui) {

@@ -867,7 +867,8 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
                         }
                     })
                 });
-            let pressed_outside = ui.ctx().input(|i| i.pointer.any_pressed()) && !resp.response.contains_pointer() && !mresp.contains_pointer();
+            let pressed_outside = ui.ctx().input(|i| i.pointer.any_pressed()) && !resp.response.contains_pointer() && !mresp.contains_pointer()
+                || crate::window_chrome::frame_pressed(ui.ctx());
             if listed.is_some() || pressed_outside {
                 ui.ctx().data_mut(|d| d.insert_temp(id, false));
             }
@@ -904,7 +905,8 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         if let Some(id) = resp.inner {
             actions.push(TabAction::Menu { tab: i, id: id.to_string() });
         }
-        let pressed_outside = ui.ctx().input(|x| x.pointer.any_pressed()) && !resp.response.contains_pointer();
+        let pressed_outside =
+            ui.ctx().input(|x| x.pointer.any_pressed()) && !resp.response.contains_pointer() || crate::window_chrome::frame_pressed(ui.ctx());
         menu = if resp.inner.is_some() || pressed_outside || ui.ctx().input(|x| x.key_pressed(egui::Key::Escape)) { None } else { Some((i, at)) };
     }
     ui.ctx().data_mut(|d| match menu {
@@ -1027,7 +1029,7 @@ pub fn file_menu(ctx: &egui::Context, rows: &[FileRow], at: Pos2, id: egui::Id, 
             });
         });
     });
-    let close = chosen.is_some() || (!just_opened && resp.response.clicked_elsewhere());
+    let close = chosen.is_some() || (!just_opened && resp.response.clicked_elsewhere()) || crate::window_chrome::frame_pressed(ctx);
     FileMenuOut { chosen, close }
 }
 

@@ -3068,6 +3068,11 @@ impl WorkspacePanelHost {
         allow_actions: bool,
         locale: solidcraft_ui_text::Locale,
     ) {
+        // A press on the window's frame closes it, as a press outside it does.
+        if crate::titlebar::frame_pressed(ui.ctx()) {
+            self.menu = None;
+            self.menu_anchor = None;
+        }
         let (Some(menu), Some(anchor)) = (self.menu.clone(), self.menu_anchor) else {
             return;
         };

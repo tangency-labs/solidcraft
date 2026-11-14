@@ -5774,6 +5774,7 @@ dependencies = [
  "solidcraft-3dx-client",
  "solidcraft-control",
  "solidcraft-engine",
+ "solidcraft-frame",
  "solidcraft-gpu",
  "solidcraft-look",
  "solidcraft-space-mouse",
@@ -5921,6 +5922,10 @@ dependencies = [
  "sha2 0.10.9",
  "zip",
 ]
+
+[[package]]
+name = "solidcraft-frame"
+version = "0.41.0"
 
 [[package]]
 name = "solidcraft-geom"
@@ -6187,6 +6192,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcraft-color",
+ "solidcraft-frame",
  "solidcraft-theme",
  "solidcraft-ui-registry",
  "solidcraft-ui-text",

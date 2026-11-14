@@ -1404,6 +1404,11 @@ preference_settings! {
     construct_menu_groups: bool = true, PAGE_LAYOUT => check_id_help("prefs.construct_menu_groups", "prefs.construct_menu_groups_help");
     /// After a ribbon panel menu is open, hover another panel to switch to its menu.
     ribbon_menus_follow_hover: bool = false, PAGE_LAYOUT;
+    /// Windows only: the title bar and window edges are Windows' own (a drag from the first pixel,
+    /// snap layouts on Maximize, resize borders just outside the window). Off, the default,
+    /// SolidCraft handles its title bar and resize edges itself. Kept in `graphics.json` and read
+    /// before the window opens, so it applies at the next start ([`WINDOWS_NATIVE_FRAME_AVAILABLE`]).
+    windows_native_frame: bool = false, PAGE_LAYOUT;
     /// Leave the commands the ribbon shows as buttons (pinned ones) out of its panel drop-downs,
     /// which then list only the rest (#4739).
     ribbon_menus_skip_pinned: bool = false, PAGE_LAYOUT;
@@ -2078,7 +2083,7 @@ impl Snapshot {
         if self.prefs.graphics_backend != app.preferences.graphics_backend && app.services.graphics_path.is_some() {
             save_graphics_backend(app, &self.prefs.graphics_backend)?;
         }
-        let graphics = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
+        let graphics = startup_settings(&app.preferences);
         let units_changed = app.preferences.default_units != self.prefs.default_units;
         // Update bookkeeping isn't a setting: a check that finished while the dialog was open stays.
         let update = std::mem::take(&mut app.preferences.update);
@@ -2111,7 +2116,7 @@ impl Snapshot {
         app.toolbar_custom.load(&self.toolbar);
         app.sbox.pinned = self.favourites;
         app.settings_profiles.active = self.profile.filter(|name| app.settings_profiles.names().contains(name));
-        if (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone()) != graphics {
+        if startup_settings(&app.preferences) != graphics {
             save_graphics(app);
         }
         Ok(())
@@ -2372,7 +2377,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
         app.set_status(error, true);
         return;
     }
-    let (msaa, window_system, adapter) = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
+    let startup = startup_settings(&app.preferences);
     let units = app.preferences.default_units.clone();
     reset_preferences(&mut app.preferences, page);
     if page == PAGE_PLUGINS {
@@ -2409,9 +2414,6 @@ fn defaults(app: &mut SolveApp, page: usize) {
             app.ui.show_grid = true;
             app.ui.ground_shadow = true;
             app.ui.perspective = false;
-            if app.preferences.msaa != msaa || app.preferences.window_system != window_system || app.preferences.graphics_adapter != adapter {
-                save_graphics(app);
-            }
         }
         PAGE_SKETCH => {
             app.session.auto_project = true;
@@ -2419,6 +2421,10 @@ fn defaults(app: &mut SolveApp, page: usize) {
             app.ui.pick_bodies = false;
         }
         _ => {}
+    }
+    // Graphics resets anti-aliasing, the window system and the card; Layout the window's frame.
+    if startup_settings(&app.preferences) != startup {
+        save_graphics(app);
     }
 }
 
@@ -2862,15 +2868,67 @@ pub fn request_graphics_restart(app: &mut SolveApp) -> Result<(), String> {
     Ok(())
 }
 
+/// Windows' own title bar and window edges (`windows_native_frame`) exist on Windows only: the row
+/// is drawn, `ui.prefs` lists and sets it, and `graphics.json` keeps it there and nowhere else.
+pub const WINDOWS_NATIVE_FRAME_AVAILABLE: bool = cfg!(target_os = "windows");
+
+const WINDOWS_NATIVE_FRAME_UNAVAILABLE: &str =
+    "`windows_native_frame` is available on Windows only: elsewhere the window's frame is the system's or SolidCraft's own";
+
+/// The settings kept in `graphics.json` for the next start, besides the graphics API: a change to
+/// any of them writes the file ([`save_graphics`]).
+fn startup_settings(p: &Prefs) -> (u32, String, String, bool) {
+    (p.msaa, p.window_system.clone(), p.graphics_adapter.clone(), p.windows_native_frame)
+}
+
+/// The row is drawn where the preference exists (`available`: [`WINDOWS_NATIVE_FRAME_AVAILABLE`])
+/// and SolidCraft's own title bar is in use (`custom_titlebar`): with the system's title bar
+/// (Windows with OpenGL alone) the window has no frame of SolidCraft's for it to choose.
+fn windows_native_frame_row_shown(available: bool, custom_titlebar: bool) -> bool {
+    available && custom_titlebar
+}
+
+/// `ui.prefs` refuses `windows_native_frame` where it doesn't exist (`available`:
+/// [`WINDOWS_NATIVE_FRAME_AVAILABLE`]).
+fn refuse_unavailable_preferences(p: &serde_json::Value, available: bool) -> Result<(), String> {
+    if !available && p.get("windows_native_frame").is_some() {
+        return Err(WINDOWS_NATIVE_FRAME_UNAVAILABLE.into());
+    }
+    Ok(())
+}
+
+/// A reply listing the preferences, without the ones this system doesn't have.
+fn preferences_reply(p: &Prefs) -> Result<serde_json::Value, String> {
+    preferences_reply_where(p, WINDOWS_NATIVE_FRAME_AVAILABLE)
+}
+
+/// [`preferences_reply`], with `windows_native_frame` listed only where it is `available`.
+fn preferences_reply_where(p: &Prefs, available: bool) -> Result<serde_json::Value, String> {
+    let mut out = serde_json::to_value(p).map_err(|e| e.to_string())?;
+    if !available && let Some(o) = out.as_object_mut() {
+        o.remove("windows_native_frame");
+    }
+    Ok(out)
+}
+
+/// The start-up settings `p` sets in `graphics.json`'s `graphics`, `windows_native_frame` only where
+/// it is `available` (elsewhere the file stays as it was).
+fn set_startup_settings(graphics: &mut serde_json::Value, p: &Prefs, available: bool) {
+    graphics["msaa"] = json!(p.msaa);
+    graphics["window_system"] = json!(p.window_system);
+    graphics["adapter"] = json!(p.graphics_adapter);
+    if available {
+        graphics["windows_native_frame"] = json!(p.windows_native_frame);
+    }
+}
+
 /// Write ordinary startup settings without changing a backend choice or its recovery record.
 fn save_graphics(app: &SolveApp) {
     if let Some(path) = &app.services.graphics_path {
         let path = std::path::Path::new(path);
         let result = (|| {
             let mut graphics = read_graphics_settings(path)?;
-            graphics["msaa"] = json!(app.preferences.msaa);
-            graphics["window_system"] = json!(app.preferences.window_system);
-            graphics["adapter"] = json!(app.preferences.graphics_adapter);
+            set_startup_settings(&mut graphics, &app.preferences, WINDOWS_NATIVE_FRAME_AVAILABLE);
             solidcraft_engine::io::safe_write::write_atomic(path, graphics.to_string().as_bytes(), false).map_err(|error| error.to_string())
         })();
         if let Err(error) = result {
@@ -3004,10 +3062,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         }
         crate::space_mouse_calibration::show(app, ctx);
-        if app.preferences.msaa != before.msaa
-            || app.preferences.window_system != before.window_system
-            || app.preferences.graphics_adapter != before.graphics_adapter
-        {
+        if startup_settings(&app.preferences) != startup_settings(&before) {
             save_graphics(app);
         }
         if app.preferences.up_axis != before.up_axis {
@@ -3532,7 +3587,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     if button.is_some() {
         // Cancel and Restore Defaults can change the angle too.
         follow_view_fov(app);
-        out = serde_json::to_value(&app.preferences).map_err(|e| e.to_string())?;
+        out = preferences_reply(&app.preferences)?;
     }
     if let Some(o) = out.as_object_mut() {
         if let serde_json::Value::Object(options) = serde_json::to_value(theme_options_reply(app)).map_err(|e| e.to_string())? {
@@ -4342,6 +4397,7 @@ fn prepare_preferences(
             return Err(format!("`{key}` must be 0.001…180 degrees"));
         }
     }
+    refuse_unavailable_preferences(p, WINDOWS_NATIVE_FRAME_AVAILABLE)?;
     let mut cur = serde_json::to_value(base).map_err(|e| e.to_string())?;
     if let (Some(o), Some(src)) = (cur.as_object_mut(), p.as_object()) {
         for (k, v) in src {
@@ -4544,9 +4600,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     }
     let units_changed = new.default_units != app.preferences.default_units;
     let up_changed = new.up_axis != app.preferences.up_axis;
-    let graphics_changed = new.msaa != app.preferences.msaa
-        || new.window_system != app.preferences.window_system
-        || new.graphics_adapter != app.preferences.graphics_adapter;
+    let graphics_changed = startup_settings(&new) != startup_settings(&app.preferences);
     if p.get("layout").is_some() {
         app.ui.layout = new.layout;
     }
@@ -4569,7 +4623,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
         up_axis_changed(app);
     }
     follow_view_fov(app);
-    serde_json::to_value(&app.preferences).map_err(|e| e.to_string())
+    preferences_reply(&app.preferences)
 }
 
 #[cfg(test)]
@@ -10941,6 +10995,115 @@ mod tests {
         assert!(h.app.preferences.construct_menu_groups);
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(!h.app.preferences.construct_menu_groups);
+    }
+
+    /// Windows' own title bar and window edges: off by default, kept in `graphics.json` for the
+    /// next start (the window's frame is fixed when it opens), set by `ui.prefs`, and put back by
+    /// Layout's reset. On other systems the preference doesn't exist for scripts or the file.
+    #[test]
+    fn windows_native_frame_is_saved_for_the_next_start_and_reset_with_layout_on_windows_only() {
+        assert!(!Prefs::default().windows_native_frame);
+        assert!(!lenient(&json!({"theme":"light"})).windows_native_frame);
+        let dir = std::env::temp_dir().join(format!("sc_windows_native_frame_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, json!({"backend": "vulkan", "msaa": 4}).to_string()).unwrap();
+        let saved = || -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default() };
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
+        let listed = h.call("ui.prefs", json!({}));
+        assert_eq!(listed["result"].get("windows_native_frame").is_some(), WINDOWS_NATIVE_FRAME_AVAILABLE, "{listed}");
+        let out = h.call("ui.prefs", json!({"windows_native_frame": true}));
+        if WINDOWS_NATIVE_FRAME_AVAILABLE {
+            assert_eq!(out["result"]["windows_native_frame"], true, "{out}");
+            assert!(h.app.preferences.windows_native_frame);
+            assert_eq!(saved()["windows_native_frame"], true, "kept for the next start");
+            assert_eq!((saved()["backend"].as_str(), saved()["msaa"].as_u64()), (Some("vulkan"), Some(4)), "the other settings stay");
+            let mut restored = SolveApp::new(Default::default(), Default::default());
+            restored.load_prefs(&h.app.prefs());
+            assert!(restored.preferences.windows_native_frame);
+            h.call("ui.prefs", json!({"open": "Layout", "button": "defaults"}));
+            assert!(!h.app.preferences.windows_native_frame, "Layout's reset turns it back off");
+            assert_eq!(saved()["windows_native_frame"], false, "and the file with it");
+            h.call("ui.prefs", json!({"button": "cancel"}));
+            assert!(h.app.preferences.windows_native_frame, "Cancel takes the reset back");
+            assert_eq!(saved()["windows_native_frame"], true, "and the file with it");
+            assert!(h.call("ui.prefs", json!({"windows_native_frame": "off"}))["error"].as_str().is_some(), "a refused value");
+            assert!(h.app.preferences.windows_native_frame, "changes nothing");
+        } else {
+            let error = out["error"].as_str().unwrap_or_default();
+            assert!(error.contains("windows_native_frame") && error.contains("Windows only"), "{out}");
+            assert!(!h.app.preferences.windows_native_frame, "a refused value changes nothing");
+            assert!(saved().get("windows_native_frame").is_none(), "the file has no such setting");
+            h.call("ui.prefs", json!({"open": "Layout", "button": "defaults"}));
+            assert!(saved().get("windows_native_frame").is_none());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Where `windows_native_frame` exists and where it doesn't, decided from an explicit input so
+    /// both sides run on every system: the refusal, the reply, the file, and the row.
+    #[test]
+    fn windows_native_frame_exists_where_available_for_scripts_the_file_and_the_row() {
+        let set = json!({"windows_native_frame": true});
+        // `ui.prefs` sets it where it exists and refuses it elsewhere, with a message that says so.
+        assert_eq!(refuse_unavailable_preferences(&set, true), Ok(()));
+        let refused = refuse_unavailable_preferences(&set, false).unwrap_err();
+        assert!(refused.contains("windows_native_frame") && refused.contains("Windows only"), "{refused}");
+        assert_eq!(refuse_unavailable_preferences(&json!({"msaa": 4}), false), Ok(()), "other keys are not refused");
+        // Replies list it where it exists only, and nothing else changes.
+        let p = Prefs { windows_native_frame: true, ..Prefs::default() };
+        let (listed, stripped) = (preferences_reply_where(&p, true).unwrap(), preferences_reply_where(&p, false).unwrap());
+        assert_eq!(listed["windows_native_frame"], true);
+        assert!(stripped.get("windows_native_frame").is_none(), "{stripped}");
+        let mut without = listed.clone();
+        if let Some(o) = without.as_object_mut() {
+            o.remove("windows_native_frame");
+        }
+        assert_eq!(stripped, without, "only that key goes");
+        // `graphics.json` gets it where it exists; elsewhere the file keeps what it had.
+        let base = json!({"backend": "vulkan", "msaa": 4});
+        let mut written = base.clone();
+        set_startup_settings(&mut written, &p, true);
+        assert_eq!(written["windows_native_frame"], true, "{written}");
+        assert_eq!((written["backend"].as_str(), written["msaa"].as_u64()), (Some("vulkan"), Some(u64::from(p.msaa))), "{written}");
+        let mut elsewhere = base.clone();
+        set_startup_settings(&mut elsewhere, &p, false);
+        assert!(elsewhere.get("windows_native_frame").is_none(), "{elsewhere}");
+        let mut kept = json!({"windows_native_frame": false});
+        set_startup_settings(&mut kept, &p, false);
+        assert_eq!(kept["windows_native_frame"], false, "a key it has is left alone");
+        // The row: only where the preference exists and SolidCraft's own title bar is in use.
+        assert!(windows_native_frame_row_shown(true, true));
+        assert!(!windows_native_frame_row_shown(true, false), "the system title bar: the choice changes nothing");
+        assert!(!windows_native_frame_row_shown(false, true));
+        assert!(!windows_native_frame_row_shown(false, false));
+    }
+
+    /// The row is on Layout on Windows with SolidCraft's own title bar only, and it changes the
+    /// preference.
+    #[test]
+    fn the_windows_native_frame_row_is_drawn_on_windows_only() {
+        let mut h = crate::scenario::Harness::new();
+        // With the system's title bar (Windows with OpenGL alone) there is no frame to choose.
+        h.app.custom_titlebar = false;
+        h.call("ui.prefs", json!({"open": "Layout"}));
+        h.frames(4);
+        assert!(crate::scenario::handle_at("prefs:windows_native_frame").is_none(), "not with the system title bar");
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        h.app.custom_titlebar = true;
+        h.call("ui.prefs", json!({"open": "Layout"}));
+        h.frames(4);
+        assert_eq!(crate::scenario::handle_at("prefs:windows_native_frame").is_some(), WINDOWS_NATIVE_FRAME_AVAILABLE, "the row is on Windows only");
+        if !WINDOWS_NATIVE_FRAME_AVAILABLE {
+            return;
+        }
+        super::reveal_preference(&mut h, "prefs:windows_native_frame");
+        let checkbox = crate::scenario::handle_at("prefs:windows_native_frame").unwrap();
+        h.call("ui.click", json!({"x": checkbox.x, "y": checkbox.y}));
+        assert!(h.app.preferences.windows_native_frame, "the row turns it on");
+        h.call("ui.click", json!({"x": checkbox.x, "y": checkbox.y}));
+        assert!(!h.app.preferences.windows_native_frame, "and off");
     }
 
     #[test]
