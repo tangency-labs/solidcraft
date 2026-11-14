@@ -253,9 +253,9 @@ impl BlendCorner {
 /// running on from the side edge.
 ///
 /// Not the fork's either: at the vertex the side edges' faces are tangent within
-/// `join_tol_deg`, the angle at which the two balls are still one within the corner's
-/// tolerance ([`join_tolerance_deg`]), not only within the solvers' tangency tolerance (10
-/// degrees by default) the fork reads. A sketch's
+/// `join_tol_deg`, the angle below which the two blends' sections at the joint vertex stand
+/// within the B-rep's intersection tolerance ([`join_within_xsect_tolerance_deg`]), not only
+/// within the solvers' tangency tolerance (10 degrees by default) the fork reads. A sketch's
 /// line running into an arc a degree off tangent leaves an upright edge whose faces meet at
 /// that degree: the two balls stand the radius times it apart, one section there leaves a gap
 /// the trim leaks through, and their mitre closes it.
@@ -311,6 +311,46 @@ pub fn classify(
         BlendCornerEvent::Turn
     };
     Ok(out)
+}
+
+/// The angle (degrees) below which two blends of sizes up to `size` may share one section (a
+/// Join) in a B-rep of intersection tolerance `xsect_tol` (#16627).
+///
+/// At the joint vertex the two blends' sections stand at most `size * a` apart, `a` the angle
+/// at which the side edge's faces meet at the vertex: each blend's section points lie at most
+/// `size` from the side edge (a round's centre `size` off the faces; a chamfer's points at its
+/// setbacks, `size` their largest offset), and turning by `a` about the side edge moves a
+/// point at distance `r` from it along an arc of length `r * a`, longer than the chord. The
+/// check holds every vertex strictly within the B-rep's intersection tolerance of each of its
+/// faces (`SmVertex::IsWithinXSectTol3dOfFaces`, `gap < XSectTol3d`, twice the B-rep's zone
+/// tolerance). So a Join needs `size * a < xsect_tol`.
+///
+/// The budget is shrunk for the rounding of the angle `check_tangential_edgeuse_at_vertex`
+/// compares: `8 eps` absolute plus `8 eps` relative in the angle between the two normals, and
+/// five more roundings in this budget, its quotient by `size` and the conversion to degrees and
+/// back (`16 eps` relative and `8 eps * size` absolute in all). That margin takes the normals as
+/// unit vectors correct to rounding; the error of a face normal evaluated on a curved surface
+/// is not bounded here.
+///
+/// Never above the solvers' tangency tolerance; that tolerance where `size` is not a positive
+/// length (no offset for the sections to stand apart by). 0 (no Join at any angle the strict
+/// test can pass) where the budget is not a positive length, and for a non-finite size or a
+/// tolerance that is not a positive finite length.
+#[must_use]
+pub fn join_within_xsect_tolerance_deg(size: f64, xsect_tol: f64, tangency_tol_deg: f64) -> f64 {
+    if !(size.is_finite() && xsect_tol.is_finite() && xsect_tol > 0.0) {
+        return 0.0;
+    }
+    if size <= EFF_ZERO {
+        return tangency_tol_deg;
+    }
+    let eps = f64::EPSILON;
+    let budget = xsect_tol * (1.0 - 16.0 * eps) - 8.0 * eps * size;
+    if budget > 0.0 {
+        join_tolerance_deg(size, budget, tangency_tol_deg)
+    } else {
+        0.0
+    }
 }
 
 /// The angle (degrees) at which two blends of sizes up to `size` meeting at a vertex are one
@@ -908,6 +948,30 @@ mod tests {
         assert_eq!(join_tolerance_deg(1e-9, 4e-5, 2.0), 2.0);
         assert_eq!(join_tolerance_deg(0.0, 4e-5, 10.0), 10.0);
         assert_eq!(join_tolerance_deg(2.0, 0.0, 10.0), 10.0);
+    }
+
+    /// #16627: in a B-rep of intersection tolerance 2e-5 blends of size 1 join only below 2e-5
+    /// rad, less the rounding margin (8 eps absolute in the angle, 1e-10 of it here), and never
+    /// at 2e-5 itself. No budget (a size so large that rounding eats it, a tolerance not a
+    /// positive finite length, or a non-finite size) admits no Join; no size keeps the tangency
+    /// tolerance.
+    #[test]
+    fn blends_join_only_below_the_intersection_tolerance() {
+        let deg = join_within_xsect_tolerance_deg(1.0, 2e-5, 10.0);
+        let bound = crate::math::rad_to_deg(2e-5);
+        assert!(deg < bound, "{deg} not below {bound}");
+        assert!(deg > bound * (1.0 - 1e-9), "{deg} far below {bound}");
+        assert_eq!(join_within_xsect_tolerance_deg(1e12, 1e-5, 10.0), 0.0);
+        assert_eq!(join_within_xsect_tolerance_deg(1.0, 0.0, 10.0), 0.0);
+        assert_eq!(join_within_xsect_tolerance_deg(1.0, f64::NAN, 10.0), 0.0);
+        assert_eq!(join_within_xsect_tolerance_deg(f64::NAN, 2e-5, 10.0), 0.0);
+        assert_eq!(
+            join_within_xsect_tolerance_deg(f64::INFINITY, 2e-5, 10.0),
+            0.0
+        );
+        assert_eq!(join_within_xsect_tolerance_deg(0.0, 2e-5, 10.0), 10.0);
+        // small blends: capped at the tangency tolerance
+        assert_eq!(join_within_xsect_tolerance_deg(1e-9, 2e-5, 2.0), 2.0);
     }
 
     #[test]
