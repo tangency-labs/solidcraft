@@ -1112,9 +1112,19 @@ struct Panel {
     more: Vec<PanelMoreRow>,
 }
 
+/// The ribbon's Plugins group (Model tab): one button per command of each plugin turned on.
+struct PluginGroup {
+    label: String,
+    tip: String,
+    buttons: Vec<crate::plugin_menu::RibbonButton>,
+    sizes: Vec<ButtonSize>,
+}
+
 /// The tab's panels for one pass of the ribbon, as the component's data.
 struct RibbonPanels {
     panels: Vec<Panel>,
+    /// The Plugins group after the panels, when the tab has one and a plugin is on.
+    plugins: Option<PluginGroup>,
     /// The last panel leaves the sketch or the edit.
     exit: bool,
     running: Option<String>,
@@ -1229,7 +1239,23 @@ impl RibbonPanels {
         // editing in place).
         let exit = (tab == "SKETCH" || (tab == "MODEL" && editing_in_place))
             && panels.last().is_some_and(|p| matches!(p.panel, "FINISH SKETCH" | "FINISH EDITING"));
-        RibbonPanels { panels, exit, running: if app.preferences.ribbon_reveal { running } else { None } }
+        let buttons = if tab == "MODEL" { crate::plugin_menu::ribbon_buttons(app) } else { Vec::new() };
+        let plugins = (!buttons.is_empty()).then(|| PluginGroup {
+            label: app.tr("ui.plugins").to_string(),
+            tip: format!("{} ({})", app.tr("ui.plugins"), buttons.len()),
+            sizes: buttons
+                .iter()
+                .map(|b| {
+                    if labels {
+                        ButtonSize { width: ribbon::button_width(painter, &b.label), min_width: BUTTON_MIN_WIDTH }
+                    } else {
+                        ButtonSize { width: 40.0, min_width: 40.0 }
+                    }
+                })
+                .collect(),
+            buttons,
+        });
+        RibbonPanels { panels, plugins, exit, running: if app.preferences.ribbon_reveal { running } else { None } }
     }
 
     fn row<'a>(
@@ -1269,6 +1295,50 @@ impl RibbonPanels {
                         })
                         .collect(),
                 })
+                .chain(self.plugins.iter().map(|g| {
+                    let button = |(b, size): (&'a crate::plugin_menu::RibbonButton, &ButtonSize)| ribbon::Button {
+                        id: &b.id,
+                        run: &b.id,
+                        label: &b.label,
+                        name: &b.name,
+                        icon: b.icon,
+                        size: *size,
+                        enabled: true,
+                        pressed: false,
+                        exit: false,
+                        split: None,
+                        app_paints: false,
+                        covers: &[],
+                    };
+                    ribbon::Group {
+                        key: "MODEL:PLUGINS",
+                        name: &g.label,
+                        label: &g.label,
+                        tip: &g.tip,
+                        buttons: g.buttons.iter().zip(&g.sizes).map(button).collect(),
+                        cells: Vec::new(),
+                        commands: g.buttons.iter().map(|b| b.id.as_str()).collect(),
+                        icon: Some("prefs_plugins"),
+                        // Its label (and its collapsed button) opens the Plugins menu below it,
+                        // which lists every command, the ones a narrow ribbon leaves out too.
+                        enabled: true,
+                        open: false,
+                        running: None,
+                        more: g
+                            .buttons
+                            .iter()
+                            .map(|b| ribbon::MoreRow {
+                                id: &b.id,
+                                label: &b.label,
+                                icon: b.icon,
+                                shortcut: "",
+                                enabled: true,
+                                checked: None,
+                                hint: Some(&b.name),
+                            })
+                            .collect(),
+                    }
+                }))
                 .collect(),
             labels,
             accent,
@@ -1282,6 +1352,14 @@ impl RibbonPanels {
     /// The id of panel `group`'s drop-down.
     fn popup_id(&self, group: usize) -> Option<egui::Id> {
         self.panels.get(group).map(|p| p.popup_id)
+    }
+
+    /// The plugin command button the component drew as `drawn`, when it is one.
+    fn plugin_button(&self, drawn: &ribbon::Drawn) -> Option<&crate::plugin_menu::RibbonButton> {
+        if drawn.group != self.panels.len() || drawn.cell {
+            return None;
+        }
+        self.plugins.as_ref()?.buttons.get(drawn.index)
     }
 
     /// The panel button the component drew as `drawn`.
@@ -1441,6 +1519,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             ribbon::text(ui, at, app.tr("ui.toolbar_tabs_hidden"), t.font_body, t.text_dim, false);
             crate::scenario::publish_handle("ribbon:tabs_hidden", at);
         }
+        if tab == "MODEL" {
+            crate::plugin_menu::ensure_listed(app);
+        }
         let panels = RibbonPanels::new(app, ui, &tab, &lists, &painter, running.clone());
         let more_tip = solidcraft_ui_text::tr_label("More toolbar panels");
         let accent = crate::workspace::tab_accent(&t, &tab);
@@ -1464,6 +1545,10 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         // persistent paint and a family's variants menu.
         for d in &mut out.buttons {
             let deferred = d.deferred.take();
+            if let Some(b) = panels.plugin_button(d) {
+                let _ = d.response.clone().backing_on_hover_text(&b.name);
+                continue;
+            }
             let Some(b) = panels.panel_button(d) else { continue };
             let resp = &d.response;
             if let Some(r) = reveal.as_ref().filter(|r| r.preview) {
@@ -1499,9 +1584,22 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         // What was chosen on the row, in order.
         let mut opened = Vec::new();
+        let plugin_group = panels.plugins.as_ref().map(|_| panels.panels.len());
         for action in std::mem::take(&mut out.actions) {
+            if let ribbon::Action::Section { group } | ribbon::Action::Open { group } = action
+                && Some(group) == plugin_group
+            {
+                if let Some(g) = out.groups.iter().find(|g| g.group == group) {
+                    crate::plugin_menu::toggle_below(app, ui.ctx(), g.label);
+                }
+                continue;
+            }
             match action {
                 ribbon::Action::Run { id, rect, place } => {
+                    // A plugin command's button opens that command's dialog, and nothing else.
+                    if crate::plugin_menu::choose_ribbon(app, &id) {
+                        continue;
+                    }
                     let Some(command) = solidcraft_engine::find_command(&id) else { continue };
                     match place {
                         ribbon::Place::Button => {
@@ -1540,6 +1638,10 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     });
                 }
                 ribbon::Action::Drop { id, group, before } => {
+                    // Plugin buttons stay in their own group; they are not pinned commands.
+                    if id.starts_with(crate::plugin_menu::RIBBON_PREFIX) {
+                        continue;
+                    }
                     if let Some((panel, _, _)) = lists.get(group) {
                         drop = Some((id, *panel, before));
                     }
