@@ -1958,7 +1958,8 @@ fn a_body_with_round_pieces_swept_under_a_degree_takes_a_later_round() {
     assert_eq!(counts(&s), (17, 39, 24));
     let before = volume(&s, "Body1");
     s.execute("solid.fillet", &json!({"body": "Body1", "edges": [[0.0, 22.5, 30.0]], "radius": 1})).unwrap();
-    let body = &s.model.state().body("Body1").unwrap().body;
+    let state = s.model.state();
+    let body = &state.body("Body1").unwrap().body;
     assert_eq!(body.shell_count(), 1);
     assert!(body.validity().is_empty(), "{:?}", body.validity());
     // The rim, one circle with one vertex, becomes a torus face with its seam between two circles:
