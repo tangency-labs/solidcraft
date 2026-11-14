@@ -38,7 +38,7 @@ pub struct Link {
     pub hide: fn(&mut Prefs),
 }
 
-pub const LINKS: [Link; 2] = [
+pub const LINKS: &[Link] = &[
     Link {
         id: "kofi",
         url: KOFI_URL,
@@ -120,7 +120,7 @@ mod tests {
         let ctx = egui::Context::default();
         let urls: Vec<_> = LINKS.iter().map(|l| l.url).collect();
         assert_eq!(urls, ["https://ko-fi.com/bherbruck", "https://discord.gg/FtU4NQNVDH"]);
-        for link in &LINKS {
+        for link in LINKS {
             ctx.begin_pass(egui::RawInput::default());
             assert!(run(&ctx, link.id), "{}", link.id);
             let mut out = ctx.end_pass();
@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn every_link_has_text_and_an_icon_in_the_catalog() {
         crate::i18n::install();
-        for link in &LINKS {
+        for link in LINKS {
             for id in [link.menu, link.button, link.label, link.tip, link.hide_tip, link.name, link.hide_name] {
                 assert_ne!(solidcraft_ui_text::tr(id), id, "{id} has no English text");
             }

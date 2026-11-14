@@ -170,7 +170,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                     }
                     // Support and community: always here, whether or not the status bar shows their buttons.
                     crate::ui_kit::Menu::separator(ui);
-                    for link in &crate::links::LINKS {
+                    for link in crate::links::LINKS {
                         let item = crate::ui_kit::Item::action(link.id, solidcraft_ui_text::tr(link.menu), link.icon);
                         if crate::ui_kit::menu::list_row(ui, &item).is_some() {
                             pick = Some(link.id);
@@ -213,7 +213,7 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::Text::Note("description"),
             );
             ui.horizontal(|ui| {
-                for link in &crate::links::LINKS {
+                for link in crate::links::LINKS {
                     let button = ui_kit::button(ui, solidcraft_ui_text::tr(link.label), ui_kit::Button::Normal).backing_on_hover_text(link.url);
                     crate::scenario::publish_target(&format!("about:{}", link.id), button.rect);
                     if button.clicked() {

@@ -846,7 +846,7 @@ fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
     }
     // Support and community links, always listed; the status bar's buttons are optional.
     rail.push(start_page::RailItem::Separator);
-    for link in &crate::links::LINKS {
+    for link in crate::links::LINKS {
         rail.push(start_page::RailItem::Entry(start_page::RailEntry {
             id: format!("home:{}", link.id).into(),
             label: solidcraft_ui_text::tr(link.label).into(),
