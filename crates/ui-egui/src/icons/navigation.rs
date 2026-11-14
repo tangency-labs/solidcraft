@@ -132,6 +132,30 @@ pub(crate) fn arrow(painter: &egui::Painter, at: Pos2, direction: egui::Vec2, ho
         Stroke::new(1.0, if hover { t.accent } else { t.cube_border }),
     ));
 }
+/// The cube's Turn Around button (#16080): a U-turn, a half circle that ends in an arrowhead
+/// pointing back the way it came, in the curved arrows' outlined style.
+pub(crate) fn u_turn_arrow(painter: &egui::Painter, at: Pos2, hover: bool, t: Tokens, scale: f32) {
+    let radius = 5.0 * scale;
+    let centre = at + vec2(0.0, -2.0 * scale);
+    // The left leg rises from below, the arc crosses the top, the right leg comes back down.
+    let mut points = vec![centre + vec2(-radius, 7.0 * scale)];
+    points.extend((0..=12).map(|i| {
+        let angle = std::f32::consts::PI * (1.0 + f32::from(i as u8) / 12.0);
+        centre + vec2(angle.cos(), angle.sin()) * radius
+    }));
+    points.push(centre + vec2(radius, 3.0 * scale));
+    painter.add(Shape::line(points.clone(), Stroke::new(4.0 * scale, if hover { t.accent } else { t.cube_border })));
+    painter.add(Shape::line(points.clone(), Stroke::new(2.0 * scale, if hover { t.accent_soft } else { t.cube_face })));
+    if let Some(tip) = points.last() {
+        let head = *tip + vec2(0.0, 2.0 * scale);
+        let (down, side) = (vec2(0.0, 4.0 * scale), vec2(4.0 * scale, 0.0));
+        painter.add(Shape::convex_polygon(
+            vec![head + down, head - side, head + side],
+            if hover { t.accent_soft } else { t.cube_face },
+            Stroke::new(1.0, if hover { t.accent } else { t.cube_border }),
+        ));
+    }
+}
 pub(crate) fn curved_arrow(painter: &egui::Painter, at: Pos2, clockwise: bool, hover: bool, t: Tokens, scale: f32) {
     let (start, end) =
         if clockwise { (-std::f32::consts::FRAC_PI_4 + 0.12, 0.0) } else { (-std::f32::consts::FRAC_PI_4 - 0.12, -std::f32::consts::FRAC_PI_2) };

@@ -1219,7 +1219,8 @@ animated view changes is enabled (the default), at the configured animation spee
 
 The cube runs `view.navigate` through the command engine. Programmatic callers pass `camera`
 and either `direction: [x,y,z]` in the camera's up-axis frame or `action` (`left`, `right`, `up`,
-`down`, `clockwise`, `counterclockwise`, `home`, `fit`). `fit: true` with a `direction` or a
+`down`, `clockwise`, `counterclockwise`, `turn_around`, `home`, `fit`). `turn_around` turns the view
+half a turn about the screen's vertical: the opposite side, with the same side up. `fit: true` with a `direction` or a
 turn asks for the whole model to be framed from the new direction as well, as `home` does. The
 result contains `camera` and `fit`; UI callers apply the camera with their animation
 preference, without editing the design. The Navigation preference `navigator_fit` (off by

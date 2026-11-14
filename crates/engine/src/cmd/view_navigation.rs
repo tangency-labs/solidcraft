@@ -163,7 +163,7 @@ CommandSpec::new("view.navigate", "Navigate View", crate::checked!("view.navigat
     .doc_only()
     .contract(&NAVIGATE_CONTRACT)
     .output(output_schema_for::<NavigateResult>)
-    .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90), fit?: bool (frame the whole model from the new direction as well, as home does; default false); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
+    .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|turn_around|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90), fit?: bool (frame the whole model from the new direction as well, as home does; default false); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
 CommandSpec::new("view.normal_to", "Normal to Selection", crate::checked!("view.normal_to", normal_to))
         .icon("camera")
         .noundo()
@@ -594,6 +594,10 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
             Some("down") => cam = turn(-u),
             Some("clockwise") => cam.roll = (cam.roll + FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
             Some("counterclockwise") => cam.roll = (cam.roll - FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
+            // Half a turn about the screen's vertical (#16080): the opposite side, with the same
+            // side up. A left turn of 180° keeps the heading at Top and Bottom, where it is not
+            // defined, so it would show the model upside down there.
+            Some("turn_around") => cam.rotate_in_view(solidcore_record::Vec3::new(0.0, std::f64::consts::PI, 0.0)),
             Some("home") => {
                 cam.set_view(StandardView::Iso);
                 fit = true;
@@ -1089,6 +1093,28 @@ mod tests {
         assert!((to.basis().0 - u).len() < 1e-9);
         for action in ["home", "fit"] {
             assert_eq!(navigate(&mut s, &json!({"camera":cam,"action":action})).unwrap()["fit"], true);
+        }
+        // #16080: turn_around shows the opposite side with the same side up, also from Top and
+        // Bottom, where a 180° left turn would show the model upside down; twice comes back.
+        for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
+            for view in [StandardView::Front, StandardView::Right, StandardView::Top, StandardView::Bottom, StandardView::Iso] {
+                for roll in [0.0, 0.7] {
+                    let mut from = Camera { up, ..Default::default() };
+                    from.set_view(view);
+                    from.roll = roll;
+                    let turn = |cam: Camera| -> Camera {
+                        let result = navigate(&mut Session::default(), &json!({"camera":cam,"action":"turn_around"})).unwrap();
+                        assert_eq!(result["fit"], false);
+                        serde_json::from_value(result["camera"].clone()).unwrap()
+                    };
+                    let to = turn(from);
+                    let ((_, u, b), (_, u2, b2)) = (from.basis(), to.basis());
+                    assert!(b2.dist(-b) < 1e-9, "{up:?} {view:?} {roll}: the opposite side");
+                    assert!(u2.dist(u) < 1e-9, "{up:?} {view:?} {roll}: the same side up");
+                    assert_eq!((to.target, to.distance), (from.target, from.distance));
+                    assert!(turn(to).back().dist(b) < 1e-9, "{up:?} {view:?} {roll}: twice comes back");
+                }
+            }
         }
         for params in [
             json!({}),

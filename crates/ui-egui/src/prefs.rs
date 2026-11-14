@@ -1590,6 +1590,9 @@ preference_settings! {
     /// counterclockwise and the counterclockwise arrow rolls clockwise (`invert_curved_roll_arrows`,
     /// #10483). Off by default: each arrow rolls the view the way it curls.
     invert_curved_roll_arrows: bool = false, PAGE_NAVIGATION;
+    /// The view cube's Turn Around button (#16080), beside Home: one click shows the model from
+    /// the opposite side. On by default; off gives the cube without it, as before.
+    cube_turn_around: bool = true, PAGE_NAVIGATION;
     /// How much of the view the model fills when Home, Fit, an opened design or a navigator
     /// view change frames it (0.1 to 1; #10091): 1, the default, fills the room between the
     /// panels, the compass and the navigation bar, as before.
@@ -4930,6 +4933,22 @@ mod tests {
         assert!(restored.preferences.invert_curved_roll_arrows);
         super::reset_preferences(&mut app.preferences, super::PAGE_NAVIGATION);
         assert!(!app.preferences.invert_curved_roll_arrows);
+    }
+
+    /// #16080: the cube's Turn Around button is on by default, its toggle persists, and the
+    /// Navigation page's Defaults turns it back on.
+    #[test]
+    fn cube_turn_around_defaults_on_persists_and_resets() {
+        assert!(Prefs::default().cube_turn_around);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(app.preferences.cube_turn_around);
+        app.preferences.cube_turn_around = false;
+        assert_eq!(serde_json::to_value(&app.preferences).unwrap()["cube_turn_around"], false);
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(!restored.preferences.cube_turn_around);
+        super::reset_preferences(&mut app.preferences, super::PAGE_NAVIGATION);
+        assert!(app.preferences.cube_turn_around);
     }
 
     /// #10220: off by default, offered on Preferences › General only where designs are kept in

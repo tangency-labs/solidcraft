@@ -272,6 +272,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let square_on = faces.iter().filter(|f| f.text_axes.is_some()).count() == 1;
     arrows(app, ui, &painter, c, scale, active, square_on, t);
     home(app, ui, &painter, c, scale, active, t);
+    if app.preferences.cube_turn_around {
+        // Top left, between Home and the up arrow, mirroring the curved roll arrow at the top right.
+        let at = c + vec2(-40.0, -72.0) * scale;
+        let tooltip = app.tr("ui.cube_turn_around_tip").to_owned();
+        let hovered = control(app, ui, Rect::from_center_size(at, vec2(20.0, 20.0) * scale), "turn_around", &tooltip);
+        if active {
+            crate::icons::navigation::u_turn_arrow(&painter, at, hovered, t, scale);
+        }
+    }
     let fit = Rect::from_center_size(c + vec2(67.0, 67.0) * scale, vec2(22.0, 22.0) * scale);
     let fit_hover = control(app, ui, fit, "fit", "Fit model in view");
     if active {
@@ -816,6 +825,50 @@ mod tests {
         assert!(is_a_quarter_turn(roll_at(&mut h, top), quarter), "on: the counterclockwise arrow rolls clockwise");
         // The handles name the roll actually performed, and trade places with it.
         assert_eq!(crate::scenario::handle_at("navigation_cube:control:clockwise").unwrap(), top);
+    }
+
+    /// #16080: the Turn Around button beside Home shows the model from the opposite side, keeps
+    /// the same side up and edits nothing; a second click comes back. Preferences › Navigation
+    /// "Show the Turn Around button on the cube" off gives the cube without it, as before.
+    #[test]
+    fn turn_around_shows_the_opposite_side_and_its_preference_hides_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "look_at_anim":false}));
+        assert!(h.app.preferences.cube_turn_around, "on by default");
+        let design = h.app.session.doc.to_json();
+        let click = |h: &mut crate::scenario::Harness| {
+            let p = crate::scenario::handle_at("navigation_cube:control:turn_around").expect("the cube shows Turn Around");
+            h.call("ui.click", json!({"x":p.x,"y":p.y}));
+            h.frames(2);
+        };
+        for up in ["z", "y"] {
+            h.call("ui.prefs", json!({"up_axis":up}));
+            for (view, opposite) in
+                [("front", Some(StandardView::Back)), ("right", Some(StandardView::Left)), ("top", Some(StandardView::Bottom)), ("iso", None)]
+            {
+                h.call("ui.view", json!({"view":view}));
+                h.frames(2);
+                let before = h.app.cam;
+                click(&mut h);
+                let (_, up_before, back_before) = before.basis();
+                let (_, up_after, back_after) = h.app.cam.basis();
+                assert!(back_after.dist(-back_before) < 1e-6, "{up} {view}: the opposite side");
+                assert!(up_after.dist(up_before) < 1e-6, "{up} {view}: the same side stays up");
+                if let Some(opposite) = opposite {
+                    assert_eq!(h.app.cam.aligned_standard_view(1e-5), Some(opposite), "{up} {view}");
+                }
+                assert_eq!(h.app.cam.target, before.target, "{up} {view}: the view turns in place");
+                assert_eq!(h.app.cam.distance, before.distance);
+                click(&mut h);
+                assert!(h.app.cam.back().dist(back_before) < 1e-6, "{up} {view}: a second click comes back");
+            }
+        }
+        assert_eq!(h.app.session.doc.to_json(), design);
+        assert!(h.app.session.undo.is_empty(), "a view change edits nothing");
+        h.call("ui.prefs", json!({"cube_turn_around":false}));
+        h.frames(2);
+        assert!(crate::scenario::handle_at("navigation_cube:control:turn_around").is_none(), "off: the cube has no Turn Around button");
+        assert!(crate::scenario::handle_at("navigation_cube:control:home").is_some(), "off: the other controls stay");
     }
 
     #[test]

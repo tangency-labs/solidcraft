@@ -1,0 +1,42 @@
+{
+  "en": {
+    "ui.cube_turn_around_tip": "Turn around: view the model from the opposite side",
+    "prefs.cube_turn_around": "Show the Turn Around button on the cube",
+    "prefs.cube_turn_around_note": "A U-turn button at the cube's top left, beside Home. One click shows the model from the opposite side, with the same side up. Off: the cube has no Turn Around button."
+  },
+  "ar": {
+    "ui.cube_turn_around_tip": "استدارة: عرض النموذج من الجهة المقابلة",
+    "prefs.cube_turn_around": "إظهار زر الاستدارة على المكعب",
+    "prefs.cube_turn_around_note": "زر على شكل حرف U أعلى يسار المكعب، بجانب زر الصفحة الرئيسية. نقرة واحدة تعرض النموذج من الجهة المقابلة مع بقاء الجهة نفسها إلى الأعلى. عند الإيقاف: لا يحتوي المكعب على زر الاستدارة."
+  },
+  "de": {
+    "ui.cube_turn_around_tip": "Umdrehen: Modell von der gegenüberliegenden Seite ansehen",
+    "prefs.cube_turn_around": "Schaltfläche „Umdrehen“ am Würfel anzeigen",
+    "prefs.cube_turn_around_note": "Eine Wende-Schaltfläche oben links am Würfel, neben Start. Ein Klick zeigt das Modell von der gegenüberliegenden Seite, dieselbe Seite bleibt oben. Aus: Der Würfel hat keine Schaltfläche „Umdrehen“."
+  },
+  "he": {
+    "ui.cube_turn_around_tip": "סיבוב לאחור: הצגת המודל מהצד הנגדי",
+    "prefs.cube_turn_around": "הצגת כפתור הסיבוב לאחור בקובייה",
+    "prefs.cube_turn_around_note": "כפתור פניית פרסה בפינה השמאלית העליונה של הקובייה, ליד כפתור הבית. לחיצה אחת מציגה את המודל מהצד הנגדי, כשאותו צד נשאר למעלה. כבוי: אין בקובייה כפתור סיבוב לאחור."
+  },
+  "ja": {
+    "ui.cube_turn_around_tip": "反転: モデルを反対側から表示",
+    "prefs.cube_turn_around": "キューブに反転ボタンを表示",
+    "prefs.cube_turn_around_note": "キューブの左上、ホームの横にあるUターンボタンです。1回のクリックで、上側を保ったままモデルを反対側から表示します。オフ: キューブに反転ボタンは表示されません。"
+  },
+  "ko": {
+    "ui.cube_turn_around_tip": "뒤집어 보기: 모델을 반대쪽에서 보기",
+    "prefs.cube_turn_around": "큐브에 뒤집어 보기 버튼 표시",
+    "prefs.cube_turn_around_note": "큐브 왼쪽 위, 홈 옆에 있는 U턴 버튼입니다. 한 번 클릭하면 위쪽 방향을 유지한 채 모델을 반대쪽에서 보여 줍니다. 끄기: 큐브에 뒤집어 보기 버튼이 없습니다."
+  },
+  "vi": {
+    "ui.cube_turn_around_tip": "Quay ngược: xem mô hình từ phía đối diện",
+    "prefs.cube_turn_around": "Hiển thị nút Quay ngược trên khối",
+    "prefs.cube_turn_around_note": "Một nút hình chữ U ở góc trên bên trái của khối, cạnh nút Trang chủ. Một lần nhấp sẽ hiển thị mô hình từ phía đối diện, giữ nguyên phía trên. Tắt: khối không có nút Quay ngược."
+  },
+  "zh": {
+    "ui.cube_turn_around_tip": "掉头：从相反一侧查看模型",
+    "prefs.cube_turn_around": "在立方体上显示掉头按钮",
+    "prefs.cube_turn_around_note": "立方体左上角、主页旁边的掉头按钮。单击一次即从相反一侧显示模型，上方保持不变。关闭：立方体上没有掉头按钮。"
+  }
+}

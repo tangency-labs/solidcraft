@@ -344,5 +344,8 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         let (label, note) = (app.tr("prefs.invert_curved_roll_arrows").to_owned(), app.tr("prefs.invert_curved_roll_arrows_note").to_owned());
         let response = ui_kit::checkbox(ui, &label, &mut app.preferences.invert_curved_roll_arrows).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:invert_curved_roll_arrows", response.rect);
+        let (label, note) = (app.tr("prefs.cube_turn_around").to_owned(), app.tr("prefs.cube_turn_around_note").to_owned());
+        let response = ui_kit::checkbox(ui, &label, &mut app.preferences.cube_turn_around).backing_on_hover_text(note);
+        crate::scenario::publish_target("prefs:cube_turn_around", response.rect);
     });
 }
