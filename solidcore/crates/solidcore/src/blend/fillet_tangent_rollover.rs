@@ -15,7 +15,9 @@
 //! ("Unimplemented Tangent Rollover Case", [`FilletSolver::process_full_roll_over`]). Here the
 //! full tangent rollover is decided before the trace, in the round's section, where it is exact
 //! ([`tangent_rollover_supports`]), and the solver rolls the ball on the face beyond from the
-//! start, as [`crate::blend::fillet_outline`] gives the solver its rim supports.
+//! start, as [`crate::blend::fillet_outline`] gives the solver its rim supports. A round that is
+//! not a lone one between planes along a straight edge (one of a chain, #15767) is decided from
+//! its ball's sections along its edge (the session's `roll_over_tangent_edges`).
 //!
 //! | Rust | Upstream |
 //! |------|----------|
