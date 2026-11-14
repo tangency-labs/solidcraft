@@ -880,15 +880,17 @@ pub fn fix_boundary_curves(
             let slope = |across: f64, along: f64| across.abs() <= RUNS_ALONG * along.abs();
             let along_u = slope(p.x - knot.x, p.y - knot.y) && slope(n.x - knot.x, n.y - knot.y);
             let along_v = slope(p.y - knot.y, p.x - knot.x) && slope(n.y - knot.y, n.x - knot.x);
-            if (knot.x == u0 || knot.x == u1)
-                || ((knot.x < u0 + uv_tol_x || knot.x > u1 - uv_tol_x) && along_u)
+            // Only a knot inside the tolerance band is considered, as upstream: with a
+            // zero or negative tolerance nothing is moved.
+            if (knot.x < u0 + uv_tol_x || knot.x > u1 - uv_tol_x)
+                && ((knot.x == u0 || knot.x == u1) || along_u)
             {
                 ctrl_poly.get_mut(prev).ok_or_else(bad)?.x = knot.x;
                 ctrl_poly.get_mut(next).ok_or_else(bad)?.x = knot.x;
                 changed = true;
             }
-            if (knot.y == v0 || knot.y == v1)
-                || ((knot.y < v0 + uv_tol_y || knot.y > v1 - uv_tol_y) && along_v)
+            if (knot.y < v0 + uv_tol_y || knot.y > v1 - uv_tol_y)
+                && ((knot.y == v0 || knot.y == v1) || along_v)
             {
                 ctrl_poly.get_mut(prev).ok_or_else(bad)?.y = knot.y;
                 ctrl_poly.get_mut(next).ok_or_else(bad)?.y = knot.y;
