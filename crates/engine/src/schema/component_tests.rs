@@ -1138,6 +1138,38 @@ fn replies_match_the_output_schemas_of_the_occurrence_commands() {
     assert!(conforms(schema.as_value(), schema.as_value(), &warned), "{warned}");
 }
 
+/// Ungrounding a part whose one joint lost its origin replies with that joint under `skipped` and a
+/// `warning`, which the output schema describes.
+#[test]
+fn an_ungrounding_with_a_skipped_joint_matches_the_output_schema() {
+    let mut s = Session::default();
+    let run = |s: &mut Session, id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    let mut placements = Vec::new();
+    for x in [0, 20] {
+        run(&mut s, "component.activate", json!({"component": 0}));
+        let o = run(&mut s, "component.create", json!({"name": format!("Part{x}"), "parent": 0, "grounded": true}))["occurrence"].clone();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+        placements.push(o);
+    }
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": placements[0], "face": [5, 5, 10]}, "b": {"occurrence": placements[1], "face": [25, 5, 0]}, "name": "Stack"}),
+    );
+    let mut doc = (*s.doc).clone();
+    if let Some(j) = doc.assembly.joints.first_mut()
+        && let solidcraft_doc::joints::Snap::FaceCenter { face, .. } = &mut j.b.snap
+    {
+        *face = Some("F999:nothing".into());
+    }
+    *s.doc_mut() = doc;
+    let r = run(&mut s, "occurrence.ground", json!({"occurrence": placements[1], "grounded": false}));
+    assert_eq!(r["skipped"].as_array().map(Vec::len), Some(1), "{r}");
+    assert!(r["warning"].as_str().is_some_and(|w| w.starts_with("Stack doesn't place")), "{r}");
+    matches(output_schema_for::<GroundResult>(), "occurrence.ground", &r);
+}
+
 /// A move that joints undo replies with `reverted` and a `warning`, which the output schema
 /// describes.
 #[test]

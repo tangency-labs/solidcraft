@@ -106,11 +106,12 @@ pub struct OccurrenceDof {
     pub dof: usize,
 }
 
-/// What `joint.edit` returns: the joints that disagree with the solved placement, and those the
-/// solve could not apply. Unless `quiet`, also each occurrence's degrees of freedom and the
-/// occurrences fixed in place.
+/// What `joint.edit` returns: the joint edited, the joints that disagree with the solved
+/// placement, and those the solve could not apply. Unless `quiet`, also each occurrence's degrees
+/// of freedom and the occurrences fixed in place.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct EditJointResult {
+    pub joint: u64,
     pub conflicts: Vec<JointProblem>,
     pub errors: Vec<JointProblem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -956,7 +957,8 @@ pub struct JointAddedResult {
     /// Its name.
     pub name: String,
     /// A value that starts inside its limits, not where it was given: the part moved there as it
-    /// was joined. Left out when there is none.
+    /// was joined. Also a joint between 2 grounded parts, which moves neither. Left out when
+    /// there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

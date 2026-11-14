@@ -274,6 +274,254 @@ fn rigid_cycles_solve_and_conflicts_report() {
     assert!(s.execute("joint.create", &json!({"type": "hinge"})).is_err());
 }
 
+fn both_grounded() -> Session {
+    let mut s = two_cubes();
+    let b = occ(&s, "B");
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    s
+}
+
+fn occurrence_name(s: &Session, component: &str) -> String {
+    let id = occ(s, component);
+    s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone()).unwrap_or_default()
+}
+
+/// A joint between two grounded parts moves neither: the conflict and a warning say that, not
+/// that other joints place them elsewhere.
+#[test]
+fn a_joint_between_two_grounded_parts_says_both_are_grounded() {
+    let mut s = both_grounded();
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 0]}, "name": "Stack"}),
+    );
+    let said = format!("both its parts are grounded ({}, {}), so it can move neither", occurrence_name(&s, "A"), occurrence_name(&s, "B"));
+    let c = r["conflicts"].as_array().cloned().unwrap_or_default();
+    assert_eq!(c.len(), 1, "{r}");
+    assert_eq!((c[0]["joint"].clone(), c[0]["why"].as_str()), (r["joint"].clone(), Some(said.as_str())), "{r}");
+    assert_eq!(r["warnings"], json!([format!("Stack: {said}")]), "{r}");
+    assert!(near(place(&s, "B", Vec3::new(20.0, 0.0, 0.0)), Vec3::new(20.0, 0.0, 0.0)), "B stays where it is grounded");
+}
+
+/// A Mate constraint is kept as a joint, so between two grounded parts it says the same, by
+/// its own name.
+#[test]
+fn a_constraint_between_two_grounded_parts_says_both_are_grounded() {
+    let mut s = both_grounded();
+    let r = run(
+        &mut s,
+        "assembly.constraint.create",
+        json!({"type": "mate", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 0]}}),
+    );
+    let said = format!("both its parts are grounded ({}, {}), so it can move neither", occurrence_name(&s, "A"), occurrence_name(&s, "B"));
+    assert_eq!(r["name"], json!("Mate1"), "{r}");
+    assert_eq!(r["warnings"], json!([format!("Mate1: {said}")]), "{r}");
+}
+
+/// The design's base never moves, so a joint from it to a grounded part moves neither. The why
+/// names the base, not occurrence 0.
+#[test]
+fn a_joint_from_the_base_to_a_grounded_part_says_the_base() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut s, "component.create", json!({"name": "B", "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": 0, "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 0]}, "name": "Stack"}),
+    );
+    let said = format!("it joins the design's base to {}, which is grounded, so it can move neither", occurrence_name(&s, "B"));
+    let c = r["conflicts"].as_array().cloned().unwrap_or_default();
+    assert_eq!(c.len(), 1, "{r}");
+    assert_eq!(c[0]["why"].as_str(), Some(said.as_str()), "{r}");
+    assert_eq!(r["warnings"], json!([format!("Stack: {said}")]), "{r}");
+}
+
+/// An as-built joint between two grounded parts holds them where they are: nothing to say.
+#[test]
+fn as_built_between_two_grounded_parts_warns_nothing() {
+    let mut s = both_grounded();
+    let r = run(&mut s, "joint.as_built", json!({"type": "rigid", "a": "A", "b": "B"}));
+    assert_eq!(r["conflicts"], json!([]), "{r}");
+    assert!(r.get("warnings").is_none(), "{r}");
+}
+
+fn stacked(s: &mut Session) -> Value {
+    run(
+        s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 0]}, "name": "Stack"}),
+    )
+}
+
+fn transform(s: &Session, id: u64) -> Option<solidcraft_doc::Mat> {
+    s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.transform)
+}
+
+/// Ungrounding one of two grounded parts lets the joint between them place it, and the reply
+/// says what moved; undo puts it back, grounded, with the conflict.
+#[test]
+fn ungrounding_one_of_two_grounded_parts_snaps_it_to_the_joint() {
+    let mut s = both_grounded();
+    stacked(&mut s);
+    let b = occ(&s, "B");
+    let r = run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert_eq!((&r["grounded"], &r["moved"], &r["conflicts"], &r["skipped"]), (&json!(false), &json!([b]), &json!([]), &json!([])), "{r}");
+    assert!(r.get("warning").is_none(), "{r}");
+    assert_eq!(serde_json::from_value::<solidcraft_doc::Mat>(r["transform"].clone()).ok(), transform(&s, b), "{r}");
+    assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 0.0)), Vec3::new(5.0, 5.0, 10.0)), "B's bottom sits on A's top");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 0.0)), Vec3::new(25.0, 5.0, 0.0)), "undo puts B back");
+    assert!(s.doc.occurrences.iter().any(|o| o.id == b && o.grounded));
+    let l = run(&mut s, "joint.list", json!({"quiet": true}));
+    assert_eq!(l["conflicts"].as_array().map(Vec::len), Some(1), "{l}");
+}
+
+/// Ungrounding solves the joints once: the refresh after the command finds the design and the
+/// model as the command's own solve left them.
+#[test]
+fn ungrounding_solves_the_joints_once() {
+    let mut s = both_grounded();
+    stacked(&mut s);
+    let b = occ(&s, "B");
+    super::solve_counts::take();
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert_eq!(super::solve_counts::take().0, 1);
+}
+
+/// A part whose joint origin no longer resolves stays where it is when ungrounded: the reply
+/// lists the joint the solve skips and warns, naming the joint, the part and why.
+#[test]
+fn ungrounding_a_part_whose_joint_origin_is_lost_says_which_joint_skips_it() {
+    let mut s = both_grounded();
+    stacked(&mut s);
+    let mut doc = (*s.doc).clone();
+    if let Some(j) = doc.assembly.joints.first_mut()
+        && let solidcraft_doc::joints::Snap::FaceCenter { face, .. } = &mut j.b.snap
+    {
+        *face = Some("F999:nothing".into());
+    }
+    *s.doc_mut() = doc;
+    let b = occ(&s, "B");
+    let r = run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert_eq!(r["moved"], json!([]), "{r}");
+    let skipped = r["skipped"].as_array().cloned().unwrap_or_default();
+    assert_eq!(skipped.len(), 1, "{r}");
+    let why = skipped[0]["why"].as_str().unwrap_or_default();
+    assert!(why.contains("no longer exists") && why.contains("edit the joint to pick again"), "{r}");
+    assert_eq!(skipped[0]["name"], json!("Stack"), "{r}");
+    assert_eq!(r["warning"], json!(format!("Stack doesn't place {}: {why}", occurrence_name(&s, "B"))), "{r}");
+    assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 0.0)), Vec3::new(25.0, 5.0, 0.0)), "B stays");
+}
+
+/// A part held through another part whose joint to the ground is skipped stays where it is when
+/// ungrounded: the reply names that joint too, not only the joints on the part itself.
+#[test]
+fn ungrounding_a_part_held_through_a_skipped_joint_says_which_joint_skips_it() {
+    let mut s = both_grounded();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "C", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": "B", "face": [25, 5, 10]}, "b": {"occurrence": "C", "face": [45, 5, 0]}, "name": "Top"}),
+    );
+    let c = occ(&s, "C");
+    let bottom = place(&s, "C", Vec3::new(45.0, 5.0, 0.0));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": c, "face": [bottom.x, bottom.y, bottom.z]}, "name": "Side"}),
+    );
+    let mut doc = (*s.doc).clone();
+    if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.name == "Side")
+        && let solidcraft_doc::joints::Snap::FaceCenter { face, .. } = &mut j.b.snap
+    {
+        *face = Some("F999:nothing".into());
+    }
+    *s.doc_mut() = doc;
+    let b = occ(&s, "B");
+    let r = run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert_eq!(r["moved"], json!([]), "{r}");
+    let skipped = r["skipped"].as_array().cloned().unwrap_or_default();
+    assert_eq!(skipped.iter().map(|k| k["name"].clone()).collect::<Vec<_>>(), vec![json!("Side")], "{r}");
+    let why = skipped[0]["why"].as_str().unwrap_or_default();
+    assert!(why.contains("no longer exists"), "{r}");
+    assert_eq!(r["warning"], json!(format!("Side doesn't place {}: {why}", occurrence_name(&s, "B"))), "{r}");
+}
+
+/// A part already sitting where a valid joint holds it stays put when ungrounded. A skipped joint
+/// on a free part hanging off it is listed, but the part gets no warning: a joint places it.
+#[test]
+fn ungrounding_a_part_a_joint_holds_where_it_sits_warns_nothing() {
+    let mut s = both_grounded();
+    stacked(&mut s);
+    let b = occ(&s, "B");
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    let seated = place(&s, "B", Vec3::new(25.0, 5.0, 0.0));
+    assert!(near(seated, Vec3::new(5.0, 5.0, 10.0)), "{seated:?}");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "C", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let top = place(&s, "B", Vec3::new(25.0, 5.0, 10.0));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": b, "face": [top.x, top.y, top.z]}, "b": {"occurrence": "C", "face": [45, 5, 0]}, "name": "Clip"}),
+    );
+    let mut doc = (*s.doc).clone();
+    if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.name == "Clip")
+        && let solidcraft_doc::joints::Snap::FaceCenter { face, .. } = &mut j.b.snap
+    {
+        *face = Some("F999:nothing".into());
+    }
+    *s.doc_mut() = doc;
+    let r = run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert!(!r["moved"].as_array().is_some_and(|m| m.contains(&json!(b))), "{r}");
+    assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 0.0)), seated), "B stays where Stack holds it");
+    let skipped = r["skipped"].as_array().cloned().unwrap_or_default();
+    assert_eq!(skipped.iter().map(|k| k["name"].clone()).collect::<Vec<_>>(), vec![json!("Clip")], "{r}");
+    assert!(r.get("warning").is_none(), "{r}");
+}
+
+/// Three parts in a loop of rigid joints, two of them grounded apart: ungrounding one lets the
+/// loop place it and close, with no conflict left.
+#[test]
+fn ungrounding_a_part_in_a_loop_of_three_closes_the_loop() {
+    let mut s = both_grounded();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "C", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    stacked(&mut s);
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": "B", "face": [25, 5, 10]}, "b": {"occurrence": "C", "face": [45, 5, 0]}, "name": "Top"}),
+    );
+    let c = occ(&s, "C");
+    let bottom = place(&s, "C", Vec3::new(45.0, 5.0, 0.0));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": c, "face": [bottom.x, bottom.y, bottom.z]}, "offset": 10, "name": "Close"}),
+    );
+    let l = run(&mut s, "joint.list", json!({"quiet": true}));
+    assert!(!l["conflicts"].as_array().is_none_or(Vec::is_empty), "{l}");
+    let b = occ(&s, "B");
+    let r = run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert_eq!((&r["conflicts"], &r["skipped"]), (&json!([]), &json!([])), "{r}");
+    assert!(r["moved"].as_array().is_some_and(|m| m.contains(&json!(b))), "{r}");
+    assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 0.0)), Vec3::new(5.0, 5.0, 10.0)), "{:?}", place(&s, "B", Vec3::new(25.0, 5.0, 0.0)));
+    assert!(near(place(&s, "C", Vec3::new(45.0, 5.0, 0.0)), Vec3::new(5.0, 5.0, 20.0)), "{:?}", place(&s, "C", Vec3::new(45.0, 5.0, 0.0)));
+}
+
 /// A 30 x 30 x 3 plate with a through slot whose x = 20 wall carries one rib (0.3 tall, 0.8
 /// wide), and a peg in the slot with 0.15 clearance all round.
 fn ribbed_slot_and_peg(s: &mut Session, peg_x1: f64) {

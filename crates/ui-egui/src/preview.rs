@@ -107,9 +107,9 @@ pub struct Built {
     pub applied: Option<(f64, f64)>,
     /// The radius spline of each edge a fillet tapered (`fit: taper`), with a point on the edge.
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
-    /// The reply of a previewed drive that stopped short of the asked values (the dialog says
-    /// where and why, in the UI's language).
-    pub stopped: Option<serde_json::Value>,
+    /// The reply of a previewed command the dialog speaks about, in the UI's language: a drive
+    /// that stopped short of the asked values (where and why), a joint that conflicts.
+    pub reply: Option<serde_json::Value>,
     /// For a Mirror of bodies: whether a copy meets the body it was made from, with the key of
     /// the bodies and plane it was worked out for ([`mirror_key`]).
     pub mirror_meets: Option<(u64, bool)>,
@@ -166,8 +166,8 @@ pub struct PreviewState {
     started: f64,
     /// The smallest and largest radius the previewed fillet used when it reduced the one asked for.
     pub applied: Option<(f64, f64)>,
-    /// The reply of a previewed drive that stopped short (see [`Built::stopped`]).
-    pub stopped: Option<serde_json::Value>,
+    /// The reply of a previewed command the dialog speaks about (see [`Built::reply`]).
+    pub reply: Option<serde_json::Value>,
     /// The reply of a previewed assembly constraint (see [`Built::placed`]).
     pub placed: Option<serde_json::Value>,
     /// The radius splines the previewed fillet tapered its edges with.
@@ -208,7 +208,7 @@ impl PreviewState {
         self.shown_key = None;
         self.error = None;
         self.applied = None;
-        self.stopped = None;
+        self.reply = None;
         self.placed = None;
         self.tapered.clear();
         self.mirror_meets = None;
@@ -247,7 +247,7 @@ impl PreviewState {
                 self.active = true;
                 self.error = b.error;
                 self.applied = b.applied;
-                self.stopped = b.stopped;
+                self.reply = b.reply;
                 self.placed = b.placed;
                 self.tapered = b.tapered;
                 self.mirror_meets = b.mirror_meets;
@@ -260,7 +260,7 @@ impl PreviewState {
                 self.sketches.clear();
                 self.error = Some(e);
                 self.applied = None;
-                self.stopped = None;
+                self.reply = None;
                 self.placed = None;
                 self.tapered.clear();
                 self.mirror_meets = None;
@@ -730,7 +730,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
-        stopped: None,
+        reply: None,
         mirror_meets: None,
         placed: None,
     }
@@ -779,7 +779,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
-        stopped: None,
+        reply: None,
         mirror_meets: None,
         placed: None,
     }
@@ -938,7 +938,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
-        stopped: None,
+        reply: None,
         mirror_meets: None,
         placed: None,
     }
@@ -1257,7 +1257,7 @@ mod tests {
             bounds: Aabb3::EMPTY,
             applied: None,
             tapered: Vec::new(),
-            stopped: None,
+            reply: None,
             mirror_meets: None,
             placed: None,
         }

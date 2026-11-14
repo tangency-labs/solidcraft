@@ -4,7 +4,7 @@
 //! share contents, "paste new" copies them) and can be grounded and moved.
 
 use solidcraft_geom::prelude::*;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
@@ -21,6 +21,7 @@ use crate::schema::component::{
     OccurrencePropertiesResult, PasteNewParams, PasteNewResult, PlacementEntry, PlacementInfo, PropertiesParams, PropertiesResult, RenameParams,
     RenameResult, ReparentItemsParams, ReparentItemsResult, RevertPositionParams, RevertPositionResult, UnlockParams, UnlockResult,
 };
+use crate::schema::joints::JointProblem;
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -1066,7 +1067,50 @@ fn ground(s: &mut Session, p: &Value) -> Result<Value> {
     let o = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id).ok_or_else(|| bad(cmd, "occurrence"))?;
     o.grounded = want.unwrap_or(!o.grounded);
     let g = o.grounded;
-    reply(GroundResult { occurrence: id, grounded: g, param_warnings: Vec::new() })
+    reply(after_grounding(s, id, g))
+}
+
+/// The reply to `occurrence.ground` once the joints are solved for the new flag: the occurrences
+/// the solve moved, where this one is now, the conflicts, and the joints the solve skips (an
+/// origin that no longer resolves) among those touching the free parts joined to this one.
+/// Ungrounding a part that no joint places also warns, naming each such skipped joint and why.
+fn after_grounding(s: &mut Session, id: u64, grounded: bool) -> GroundResult {
+    let before: BTreeMap<u64, Mat> = s.doc.occurrences.iter().map(|o| (o.id, o.transform)).collect();
+    let sol = if s.doc.assembly.joints.is_empty() { solidcraft_doc::joints::Solution::default() } else { s.place_joints() };
+    let moved: Vec<u64> = s.doc.occurrences.iter().filter(|o| before.get(&o.id).is_some_and(|m| *m != o.transform)).map(|o| o.id).collect();
+    let (name, transform) = s.doc.occurrences.iter().find(|o| o.id == id).map(|o| (o.name.clone(), o.transform)).unwrap_or_default();
+    let on = joints_of_group(s, id, &sol.fixed);
+    let problem = |(joint, name, why): (u64, String, String)| JointProblem { joint, name, why };
+    let skipped: Vec<JointProblem> = sol.errors.into_iter().filter(|(j, ..)| on.contains(j)).map(problem).collect();
+    let warning = (!grounded && !sol.world.contains_key(&id) && !skipped.is_empty())
+        .then(|| skipped.iter().map(|e| format!("{} doesn't place {name}: {}", e.name, e.why)).collect::<Vec<_>>().join("; "));
+    GroundResult {
+        occurrence: id,
+        grounded,
+        transform,
+        moved,
+        conflicts: sol.conflicts.into_iter().map(problem).collect(),
+        skipped,
+        warning,
+        param_warnings: Vec::new(),
+    }
+}
+
+/// The joints touching `id` and the free parts joined to it: a walk over the joints that stops
+/// at the fixed occurrences.
+fn joints_of_group(s: &Session, id: u64, fixed: &[u64]) -> BTreeSet<u64> {
+    let joints: Vec<_> = s.doc.assembly.joints.iter().filter(|j| !j.suppressed).take(solidcraft_doc::joints::MAX_JOINTS).collect();
+    let mut group = BTreeSet::from([id]);
+    let mut pending = vec![id];
+    while let Some(occ) = pending.pop() {
+        for j in joints.iter().filter(|j| j.a.occurrence == occ || j.b.occurrence == occ) {
+            let other = if j.a.occurrence == occ { j.b.occurrence } else { j.a.occurrence };
+            if !fixed.contains(&other) && group.insert(other) {
+                pending.push(other);
+            }
+        }
+    }
+    joints.iter().filter(|j| group.contains(&j.a.occurrence) || group.contains(&j.b.occurrence)).map(|j| j.id).collect()
 }
 
 fn capture(s: &mut Session, _p: &Value) -> Result<Value> {

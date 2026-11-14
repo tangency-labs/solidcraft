@@ -1546,13 +1546,26 @@ pub struct GroundParams {
     pub grounded: Option<bool>,
 }
 
-/// What `occurrence.ground` returns.
+/// What `occurrence.ground` returns, once the joints are solved for the new flag.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct GroundResult {
     /// The occurrence, by id.
     pub occurrence: u64,
     /// Whether it is grounded now.
     pub grounded: bool,
+    /// Its placement in its parent now, as a 4×4 matrix.
+    pub transform: [[f64; 4]; 4],
+    /// The occurrences the joint solve moved, by id.
+    pub moved: Vec<u64>,
+    /// The joints that disagree with the solved placement.
+    pub conflicts: Vec<crate::schema::joints::JointProblem>,
+    /// The joints the solve leaves out (an origin that no longer resolves) among those touching
+    /// this part and the free parts joined to it.
+    pub skipped: Vec<crate::schema::joints::JointProblem>,
+    /// Ungrounding left the part where no joint places it while joints are skipped: each skipped
+    /// joint and why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
