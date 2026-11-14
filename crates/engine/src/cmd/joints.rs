@@ -14,7 +14,7 @@ use solidcraft_doc::joints::{self, Coupling, Joint, JointExprs, JointKind, Joint
 use solidcraft_geom::Aabb3;
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, num, str_, vec3};
+use crate::params::{bad, bool_, num, str_, unique_reference, vec3};
 use crate::schema::joints::{
     AsBuiltJointParams, BudgetStop, CamLift, CamParams, CamResult, ContactStop, CouplingResult, CreateJointParams, DeleteJointParams,
     DeleteJointResult, DriveJointParams, DriveJointResult, EditJointResult, FloatingChain, GearParams, HeldValue, InspectJointParams,
@@ -1041,7 +1041,12 @@ pub(crate) fn joint_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64>
     let joint = if let Some(Value::Number(number)) = v {
         number.as_u64().and_then(|id| s.doc.assembly.joints.iter().find(|joint| joint.id == id))
     } else {
-        s.doc.assembly.joints.iter().find(|joint| joint.id.to_string() == key || joint.name == key)
+        unique_reference(
+            cmd,
+            "joint",
+            &key,
+            s.doc.assembly.joints.iter().filter(|joint| joint.id.to_string() == key || joint.name == key).map(|joint| (joint.id, joint)),
+        )?
     };
     joint.map(|joint| joint.id).ok_or_else(|| bad(cmd, format!("no joint `{key}`")))
 }

@@ -226,6 +226,18 @@ pub fn tr_engine_error(error: &str) -> String {
     {
         return format("component.error.ambiguous_name", &[("name", name), ("ids", ids)]);
     }
+    for (prefix, suffix, id) in [
+        ("ambiguous contact set `", "; use a numeric contact set ID", "contact.error.ambiguous_name"),
+        ("ambiguous exploded view `", "; use a numeric exploded view ID", "explode.error.ambiguous_name"),
+        ("ambiguous joint `", "; use a numeric joint ID", "joint.error.ambiguous_name"),
+        ("ambiguous motion study `", "; use a numeric motion study ID", "motion.error.ambiguous_name"),
+    ] {
+        if let Some((name, ids)) =
+            text.strip_prefix(prefix).and_then(|rest| rest.strip_suffix(suffix)).and_then(|rest| rest.rsplit_once("`; matching IDs: "))
+        {
+            return format(id, &[("name", name), ("ids", ids)]);
+        }
+    }
     if text == "joint limit minimum must not exceed maximum" {
         return tr("joint.error.limit_order").to_string();
     }
@@ -299,6 +311,26 @@ mod tests {
         assert_eq!(super::tr_engine_error(&message), expected);
         assert_eq!(super::tr_engine_error(&format!("invalid parameters for `component.delete`: {message}")), expected);
         assert_eq!(super::tr_engine_error("another error"), "another error");
+    }
+
+    #[test]
+    fn assembly_ambiguity_is_translated_without_truncating_names() {
+        install();
+        let _scope = scope("de");
+        let name = "A`; matching IDs: 99; use a numeric joint ID {ids}";
+        for (kind, command, plural, id_name) in [
+            ("contact set", "contact.edit", "Kontaktsätze", "Kontaktsatz-ID"),
+            ("exploded view", "explode.delete", "Explosionsdarstellungen", "ID der Explosionsdarstellung"),
+            ("joint", "joint.delete", "Gelenke", "Gelenk-ID"),
+            ("motion study", "motion.delete", "Bewegungsuntersuchungen", "ID der Bewegungsuntersuchung"),
+        ] {
+            let message = format!("ambiguous {kind} `{name}`; matching IDs: 1, 3; use a numeric {kind} ID");
+            let expected = format!("Mehrere {plural} heißen `{name}`. Verwende eine numerische {id_name}: 1, 3.");
+            assert_eq!(super::tr_engine_error(&message), expected, "{kind}");
+            assert_eq!(super::tr_engine_error(&format!("invalid parameters for `{command}`: {message}")), expected, "{kind}");
+            let unknown = format!("ambiguous {kind} `{name}`; matching IDs: 1, 3; another reason");
+            assert_eq!(super::tr_engine_error(&unknown), unknown);
+        }
     }
 
     /// #16164: the refusal to move a point the sketch holds fixed, or projects from a body, says
