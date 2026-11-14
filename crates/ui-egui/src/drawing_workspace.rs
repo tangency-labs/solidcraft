@@ -22,6 +22,8 @@ pub struct State {
     /// The sheet page's camera, zoom and drawn marks: screen only, never saved.
     pub(crate) page: crate::drawing_sheet_page::Page,
     status_revision: Option<u64>,
+    /// Last active drawing observed by the status card, including close/open transitions.
+    status_drawing_id: Option<String>,
     pub(crate) status_controller: crate::drawing_status_controller::DrawingStatusController,
     status_dirty: bool,
     status_error: Option<String>,
@@ -37,9 +39,16 @@ pub(crate) fn invalidate_status(app: &mut SolveApp) {
 
 fn refresh_status_if_needed(app: &mut SolveApp) {
     let revision = app.session.revision;
-    if !app.drawing_workspace.status_dirty && app.drawing_workspace.status_revision == Some(revision) {
+    // A drawing may be closed and reopened without changing the source model revision.
+    // Never keep the transient "no drawing open" status error for the reopened sheet.
+    let drawing_id = app.session.drawing("drawing.inspect").ok().map(|drawing| solidcraft_engine::doc::ids::encode(drawing.id));
+    if !app.drawing_workspace.status_dirty
+        && app.drawing_workspace.status_revision == Some(revision)
+        && app.drawing_workspace.status_drawing_id == drawing_id
+    {
         return;
     }
+    app.drawing_workspace.status_drawing_id = drawing_id;
     app.drawing_workspace.status_revision = Some(revision);
     app.drawing_workspace.status_dirty = false;
     app.drawing_workspace.status_error = crate::drawing_status_engine::refresh(&mut app.session, &mut app.drawing_workspace.status_controller).err();
@@ -722,6 +731,25 @@ fn panel_body(app: &mut SolveApp, ui: &mut egui::Ui) {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+
+    #[test]
+    fn status_refreshes_when_same_drawing_reopens_after_close() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        let id = solidcraft_engine::doc::ids::encode(h.app.session.drawing("drawing.inspect").unwrap().id);
+        h.frames(3);
+        assert!(h.app.drawing_workspace.status_error.is_none());
+        h.app.run("drawing.close", serde_json::json!({})).unwrap();
+        h.frames(3);
+        assert!(h.app.drawing_workspace.status_error.is_some(), "the closed drawing must not show a stale successful status");
+        h.app.run("drawing.open", serde_json::json!({"drawing": id})).unwrap();
+        h.frames(3);
+        assert!(h.app.drawing_workspace.status_error.is_none(), "the reopened drawing must clear the transient closed-state error");
+    }
 
     #[test]
     fn browser_lists_sheets_of_the_open_drawing() {
