@@ -8642,51 +8642,62 @@ fn feature_tools_with_constructor(
                     lo = hs.iter().cloned().fold(lo, f64::min) - margin;
                 }
             }
-            // From a slanted face: the prism runs over the face's whole rise across the profiles,
-            // then is cut at the face's plane moved to each end.
-            let (run_lo, run_hi) = match (&from_to, &from_slope) {
-                // From a slanted face To a flat one: over both planes' whole rise across the
-                // profiles, then cut at each.
-                (Some((fp, tp, _)), _) => {
-                    let (from_lo, from_hi) = slope_rise(fp, &ss.plane, &regions, off);
-                    let (to_lo, to_hi) = slope_rise(tp, &ss.plane, &regions, off);
-                    let (rise_lo, rise_hi) = (from_lo.min(to_lo), from_hi.max(to_hi));
-                    let margin = (rise_hi - rise_lo) * 0.05 + 1.0;
-                    (rise_lo - margin, rise_hi + margin)
-                }
-                (None, Some(fp)) => {
-                    // The rise is measured over sampled outlines, so the prism runs a margin
-                    // past it: its own caps must never reach the result.
-                    let (rise_lo, rise_hi) = slope_rise(fp, &ss.plane, &regions, from);
-                    let margin = (rise_hi - rise_lo) * 0.05 + 1.0;
-                    (lo + rise_lo - margin, hi + rise_hi + margin)
-                }
-                (None, None) => (lo, hi),
-            };
-            extrude_within_reach([run_lo + off, run_hi + off])?;
+            let is_symmetric_offset = extent.direction == crate::Direction::Symmetric && extent.symmetric_offset && off.abs() > 1e-9;
             // Through all, the tool is the same straight prism, run past the bodies: its interval is
             // where its caps are, so a cut through a sheet made from surfaces goes into the panel's
             // outline with the sketch's own curves (a text's letters as drawn), not read back from
             // the body's.
             let untrimmed = extent.to.is_none() && extent.from.is_none();
             let mut tools = Vec::new();
-            for r in &regions {
-                tools.extend(centered_extrude(
-                    &ss.plane,
-                    r,
-                    run_lo + off,
-                    run_hi + off,
-                    Some(&ss),
-                    thin_roles.as_ref(),
-                    extent.distance2.is_some(),
-                    extent.one_sided_direction.filter(|_| direction == crate::Direction::Symmetric && extent.distance2.is_none()),
-                )?);
-            }
-            if let Some((fp, tp, d)) = &from_to {
-                tools = trim_between_planes(tools, fp, tp, n, d.signum())?;
-            } else if let Some(fp) = &from_slope {
-                let shift = off - from;
-                tools = trim_between_slopes(tools, fp, n, lo + shift, hi + shift)?;
+            if is_symmetric_offset {
+                let gap = off.abs();
+                let half = hi;
+                extrude_within_reach([-gap - half, gap + half])?;
+                for r in &regions {
+                    tools.extend(centered_extrude(&ss.plane, r, gap, gap + half, Some(&ss), thin_roles.as_ref(), true, None)?);
+                    tools.extend(centered_extrude(&ss.plane, r, -gap - half, -gap, Some(&ss), thin_roles.as_ref(), true, None)?);
+                }
+            } else {
+                // From a slanted face: the prism runs over the face's whole rise across the profiles,
+                // then is cut at the face's plane moved to each end.
+                let (run_lo, run_hi) = match (&from_to, &from_slope) {
+                    // From a slanted face To a flat one: over both planes' whole rise across the
+                    // profiles, then cut at each.
+                    (Some((fp, tp, _)), _) => {
+                        let (from_lo, from_hi) = slope_rise(fp, &ss.plane, &regions, off);
+                        let (to_lo, to_hi) = slope_rise(tp, &ss.plane, &regions, off);
+                        let (rise_lo, rise_hi) = (from_lo.min(to_lo), from_hi.max(to_hi));
+                        let margin = (rise_hi - rise_lo) * 0.05 + 1.0;
+                        (rise_lo - margin, rise_hi + margin)
+                    }
+                    (None, Some(fp)) => {
+                        // The rise is measured over sampled outlines, so the prism runs a margin
+                        // past it: its own caps must never reach the result.
+                        let (rise_lo, rise_hi) = slope_rise(fp, &ss.plane, &regions, from);
+                        let margin = (rise_hi - rise_lo) * 0.05 + 1.0;
+                        (lo + rise_lo - margin, hi + rise_hi + margin)
+                    }
+                    (None, None) => (lo, hi),
+                };
+                extrude_within_reach([run_lo + off, run_hi + off])?;
+                for r in &regions {
+                    tools.extend(centered_extrude(
+                        &ss.plane,
+                        r,
+                        run_lo + off,
+                        run_hi + off,
+                        Some(&ss),
+                        thin_roles.as_ref(),
+                        extent.distance2.is_some(),
+                        extent.one_sided_direction.filter(|_| direction == crate::Direction::Symmetric && extent.distance2.is_none()),
+                    )?);
+                }
+                if let Some((fp, tp, d)) = &from_to {
+                    tools = trim_between_planes(tools, fp, tp, n, d.signum())?;
+                } else if let Some(fp) = &from_slope {
+                    let shift = off - from;
+                    tools = trim_between_slopes(tools, fp, n, lo + shift, hi + shift)?;
+                }
             }
             // A cut or a join by profiles apart in the sketch (the letters of a text): each tool
             // lies in the prism over its profile, so the tools are apart too. The body is then cut once by all of them, or joined to
@@ -8698,7 +8709,7 @@ fn feature_tools_with_constructor(
                 Operation::Join => one_target,
                 _ => false,
             };
-            if at_once && tools.len() > 1 && regions_apart(&regions, APART_GAP) {
+            if at_once && tools.len() > 1 && !is_symmetric_offset && regions_apart(&regions, APART_GAP) {
                 let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
                 if let Some(one) = kernel::join_apart(&bodies)? {
                     tools = vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())];
@@ -8715,7 +8726,7 @@ fn feature_tools_with_constructor(
             // A join's profile grows into the material it joins; its sketch plane and depth as drawn
             // still serve a join into sheet metal (`surface_sheet_join`), which takes the sketch's
             // regions.
-            if untrimmed || (*operation == Operation::Join && curved.is_none() && from_slope.is_none()) {
+            if (untrimmed || (*operation == Operation::Join && curved.is_none() && from_slope.is_none())) && !is_symmetric_offset {
                 *constructor = Some(ExtrudeConstructor { plane: ss.plane, interval: (lo + off, hi + off) });
             }
             // A Join tool's faces outlive the boolean where they stay on the result, so they are
@@ -8749,8 +8760,18 @@ fn feature_tools_with_constructor(
                         // curved To face) is not the feature's start or end face.
                         let nominal = |plane: &solidcore_record::Plane| {
                             let height = (plane.origin - ss.plane.origin).dot(n);
-                            let tolerance = 1e-9 * (1.0 + height.abs() + (lo + off).abs() + (hi + off).abs());
-                            (height - (lo + off)).abs() <= tolerance || (height - (hi + off)).abs() <= tolerance
+                            if is_symmetric_offset {
+                                let gap = off.abs();
+                                let half = hi;
+                                let tolerance = 1e-9 * (1.0 + height.abs() + (gap + half));
+                                (height - gap).abs() <= tolerance
+                                    || (height - (gap + half)).abs() <= tolerance
+                                    || (height - (-gap)).abs() <= tolerance
+                                    || (height - (-gap - half)).abs() <= tolerance
+                            } else {
+                                let tolerance = 1e-9 * (1.0 + height.abs() + (lo + off).abs() + (hi + off).abs());
+                                (height - (lo + off)).abs() <= tolerance || (height - (hi + off)).abs() <= tolerance
+                            }
                         };
                         for (cap, source) in caps.iter_mut().zip(body.face_sources().into_iter().flatten()) {
                             if matches!(source, Some(kernel::FaceSource::ExtrudeCap { plane, .. }) if !nominal(plane)) {
