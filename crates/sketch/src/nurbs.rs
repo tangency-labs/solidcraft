@@ -3,15 +3,11 @@
 //! control spline without them is the clamped uniform B-spline over its points.
 
 use serde::{Deserialize, Serialize};
-use solidcore_record::{Seg2, Vec2, Vec3};
+use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::bspline::{self, HPoint};
 
 use crate::model::{Result, SketchError};
 
-/// Most knots a spline may have (its points are capped at [`crate::MAX_SPLINE_POINTS`]).
-const MAX_KNOTS: usize = crate::curves::MAX_SPLINE_POINTS + solidcore_record::MAX_BEZIER_DEGREE + 1;
-/// Most a weight may exceed another by: past it the curve is all but its heaviest points.
-const MAX_WEIGHT_RATIO: f64 = 1e12;
 /// Polyline samples per knot span.
 const SPAN_SAMPLES: usize = 24;
 
@@ -30,50 +26,30 @@ fn bad<T>(why: &str) -> Result<T> {
 }
 
 impl Nurbs {
+    /// The existing fit curve as exact control splines. Chord knots compact its C2 spans;
+    /// very ill-conditioned joins retain their original Bezier controls instead.
+    pub fn from_fit_points(points: &[Vec2], periodic: bool) -> Result<Vec<(Vec<Vec2>, Nurbs)>> {
+        if !(2..=crate::MAX_SPLINE_POINTS).contains(&points.len()) || points.iter().any(|p| !p.is_finite()) {
+            return bad("fit points must be finite and within the spline point limit");
+        }
+        solidcore_ops::fit_projection::fit_splines(points, periodic, crate::MAX_SPLINE_POINTS)
+            .map(|curves| curves.into_iter().map(|s| (s.points, Nurbs { knots: s.knots, weights: s.weights })).collect())
+            .map_err(|e| SketchError::Invalid(e.to_string()))
+    }
+
     /// Whether these knots and weights fit a control spline of `degree` over `n` points.
     pub fn check(&self, n: usize, degree: u8) -> Result<()> {
-        let d = usize::from(degree);
-        if !(1..=solidcore_record::MAX_BEZIER_DEGREE).contains(&d) || n <= d || n > crate::curves::MAX_SPLINE_POINTS {
-            return bad("a knotted spline needs more points than its degree, 1 to 9");
-        }
-        let k = &self.knots;
-        if k.len() != n + d + 1 || k.len() > MAX_KNOTS {
-            return bad("a spline needs its point count plus its degree plus one knots");
-        }
-        if k.iter().any(|x| !x.is_finite()) || k.windows(2).any(|w| w[1] < w[0]) {
-            return bad("knots must be finite and never decrease");
-        }
-        let (lo, hi) = (k[d], k[n]);
-        let span = hi - lo;
-        if !(span > 0.0 && span.is_finite()) || k[..=d].iter().any(|x| *x != lo) || k[n..].iter().any(|x| *x != hi) {
-            return bad("the knots must be clamped at both ends");
-        }
-        let mut run = 0usize;
-        for (i, x) in k.iter().enumerate().take(n).skip(d + 1) {
-            run = if k.get(i - 1) == Some(x) { run + 1 } else { 1 };
-            if *x == lo || *x == hi || run > d {
-                return bad("no knot inside the spline may repeat more than its degree");
-            }
-        }
-        if !self.weights.is_empty() {
-            if self.weights.len() != n || self.weights.iter().any(|w| !(w.is_finite() && *w > 0.0)) {
-                return bad("a rational spline needs one positive weight per point");
-            }
-            let (min, max) = self.weights.iter().fold((f64::INFINITY, 0.0f64), |(a, b), w| (a.min(*w), b.max(*w)));
-            if max / min > MAX_WEIGHT_RATIO {
-                return bad("the weights differ too much");
-            }
-        }
-        Ok(())
+        solidcore_ops::fit_projection::check_control(n, usize::from(degree), &self.knots, &self.weights, crate::MAX_SPLINE_POINTS)
+            .map_err(|e| SketchError::Invalid(e.to_string()))
     }
 
-    fn weight(&self, i: usize) -> f64 {
-        self.weights.get(i).copied().unwrap_or(1.0)
-    }
-
-    /// The control points `p` with their weights, homogeneous.
+    /// The control points with a common homogeneous weight normalization.
     fn homogeneous(&self, p: &[Vec2]) -> Vec<HPoint> {
-        p.iter().enumerate().map(|(i, q)| HPoint::weighted(Vec3::new(q.x, q.y, 0.0), self.weight(i))).collect()
+        solidcore_ops::fit_projection::homogeneous_controls(p, &self.weights)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|[x, y, z, w]| HPoint { x, y, z, w })
+            .collect()
     }
 
     /// The knot domain `[lo, hi]` for `n` points of `degree`.
@@ -81,11 +57,12 @@ impl Nurbs {
         Some((*self.knots.get(degree)?, *self.knots.get(n)?))
     }
 
-    /// The same curve run the other way: the knots mirrored, the weights reversed (the points
-    /// reverse with them).
+    /// The same curve run the other way: negate and reverse the knots and reverse weights
+    /// (the points reverse with them). Reflection about zero preserves every knot exactly,
+    /// including intervals too narrow to survive subtraction from a large domain endpoint.
     pub fn reversed(&self) -> Nurbs {
-        let sum = self.knots.first().copied().unwrap_or(0.0) + self.knots.last().copied().unwrap_or(0.0);
-        Nurbs { knots: self.knots.iter().rev().map(|k| sum - k).collect(), weights: self.weights.iter().rev().copied().collect() }
+        let (knots, weights) = solidcore_ops::fit_projection::reversed_metadata(&self.knots, &self.weights);
+        Nurbs { knots, weights }
     }
 
     /// The point of the spline over `p` (of `degree`) at `t` in [0, 1] across its knot domain.
@@ -141,6 +118,14 @@ impl Nurbs {
             }
         }
         Some(spans)
+    }
+
+    /// A point or the complete line interval when every control lies on one line
+    /// within affine-map roundoff. `None` retains a genuinely two-dimensional curve.
+    pub fn linear_image(&self, p: &[Vec2], degree: u8, roundoff: f64) -> Result<Option<[Vec2; 2]>> {
+        self.check(p.len(), degree)?;
+        solidcore_ops::fit_projection::linear_image(p, usize::from(degree), &self.knots, &self.weights, roundoff)
+            .map_err(|e| SketchError::Invalid(e.to_string()))
     }
 
     /// The spline over `p` as its exact [`Seg2`] pieces, one a knot span: Béziers, or conics

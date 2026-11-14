@@ -5,17 +5,16 @@
 //! its link keeps, anything else (and a link saved without a name) from the reference point
 //! stored in the link. An edge of a solid lying in a plane parallel to the sketch's comes in as
 //! its exact curve (a line, an arc, the Bézier pieces of a free-form curve such as a letter
-//! cut from a font), so a profile drawn round it meets the solid's faces exactly. Anything
-//! else is fitted to its polyline from the tessellation, which lies exactly on the curve:
-//! lines and circular arcs are recovered exactly, the rest (an ellipse from a tilted circle,
-//! a spline edge running out of the plane) becomes a chain of lines.
+//! cut from a font), so a profile drawn round it meets the solid's faces exactly.
+//! Spline edges also project exactly between nonparallel planes, keeping their knots, weights
+//! and selected interval. Straight edges stay lines, and tilted circles become ellipses or
+//! conics. Unsupported native curves fail explicitly; mesh bodies retain polyline fitting.
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::Mesh;
-use solidcraft_sketch::linalg::{Mat, solve};
 use solidcraft_sketch::{CurveKind, LinkGeom, LinkKind, LinkSource, Sketch, WireCurve};
 
 use crate::eval::ModelState;
@@ -152,9 +151,12 @@ fn resolve_uncached(
             let name = st.bodies.get(bi).map(|b| b.name.clone()).unwrap_or_else(|| body.clone());
             source = LinkSource::Edge { body: name, at: q };
             edge_index = Some(e);
-            let planar = st.bodies.get(bi).and_then(|b| exact_edges(b, plane, &[e]).pop().flatten());
+            let planar = || match st.bodies.get(bi) {
+                Some(b) => Ok(exact_edges(b, plane, &[e])?.pop().flatten()),
+                None => Ok(None),
+            };
             let pts = mesh.edges.get(e).cloned().unwrap_or_default();
-            edge_geom(plane, kind, planar, (pts, || edge_curves(st.bodies.get(bi), e)), &mut wires, &mut exact)
+            edge_geom(plane, kind, planar, (pts, || edge_curves(st.bodies.get(bi), e)), &mut wires, &mut exact)?
         }
         LinkSource::Face { body, at } => {
             let (bi, mesh) = body_mesh(st, body, *at)?;
@@ -176,7 +178,7 @@ fn resolve_uncached(
                     if target.body.is_mesh() {
                         crate::project3d::flat_outline(&mesh, q).iter().flat_map(|outline| fit_mesh_outline(plane, outline)).collect()
                     } else {
-                        let g = projected_edges(target, &mesh, plane, &projection_face_edges(target, &mesh, f, plane)?);
+                        let g = projected_edges(target, &mesh, plane, &projection_face_edges(target, &mesh, f, plane)?)?;
                         if certified_planar_construction(target, f as usize) { merge_family_lines(g)? } else { g }
                     }
                 }
@@ -226,10 +228,10 @@ fn resolve_uncached(
                         exact.push(sketch_curves(ss, ci));
                         Vec::new()
                     } else {
-                        project_sketch_curve(&ss.sketch, &ss.plane, ci, plane)
+                        project_sketch_curve(&ss.sketch, &ss.plane, ci, plane)?
                     }
                 }
-                _ => project_sketch_curve(&ss.sketch, &ss.plane, ci, plane),
+                _ => project_sketch_curve(&ss.sketch, &ss.plane, ci, plane)?,
             }
         }
         LinkSource::OnSurface { sketch, curve, body, at } => {
@@ -385,20 +387,20 @@ fn off_plane(plane: &Plane, pts: &[Vec3]) -> bool {
 fn edge_geom(
     plane: &Plane,
     kind: LinkKind,
-    planar: Option<Vec<LinkGeom>>,
+    planar: impl FnOnce() -> Result<Option<Vec<LinkGeom>>>,
     (pts, curves): (Vec<Vec3>, impl FnOnce() -> Vec<WireCurve>),
     wires: &mut Vec<Vec<Vec3>>,
     exact: &mut Vec<Vec<WireCurve>>,
-) -> Vec<LinkGeom> {
-    match kind {
+) -> Result<Vec<LinkGeom>> {
+    Ok(match kind {
         LinkKind::Intersect => section_of_polyline(plane, &pts),
         LinkKind::Include if off_plane(plane, &pts) => {
             wires.push(pts);
             exact.push(curves());
             Vec::new()
         }
-        _ => planar.unwrap_or_else(|| fit_world(plane, &pts)),
-    }
+        _ => planar()?.unwrap_or_else(|| fit_world(plane, &pts)),
+    })
 }
 
 /// Edge `e` of `body` (its index in the body's edge order) as its exact curve from the body's
@@ -508,9 +510,8 @@ fn joined_wires(curves: Vec<(solidcore_record::brep::Curve, [f64; 2])>, tol: f64
     Ok((wires, exact))
 }
 
-/// `c` run the other way: the same points, its parameter `t` now `c0 + c1 - t` over the curve's
-/// own knots (a line's `1 - t`, a circle's or ellipse's angle negated with its y axis turned).
-/// Exact; `None` for a curve kind it doesn't turn.
+/// `c` run the other way: negate its spline/angle parameter (with reversed controls
+/// or a turned y axis), or use `1 - t` for a line. Knot negation preserves narrow spans.
 fn reversed(c: &WireCurve) -> Option<WireCurve> {
     use solidcore_record::brep::{Curve, Frame};
     let [t0, t1] = c.interval;
@@ -520,22 +521,12 @@ fn reversed(c: &WireCurve) -> Option<WireCurve> {
         Curve::Circle { frame, radius } => (Curve::Circle { frame: flip(frame), radius: *radius }, [-t1, -t0]),
         Curve::Ellipse { frame, radii } => (Curve::Ellipse { frame: flip(frame), radii: *radii }, [-t1, -t0]),
         Curve::Spline { knots, points } => {
-            let sum = knots.first()? + knots.last()?;
-            (
-                Curve::Spline { knots: knots.iter().rev().map(|k| sum - k).collect(), points: points.iter().rev().copied().collect() },
-                [sum - t1, sum - t0],
-            )
+            (Curve::Spline { knots: knots.iter().rev().map(|k| -k).collect(), points: points.iter().rev().copied().collect() }, [-t1, -t0])
         }
-        Curve::RationalSpline { knots, homogeneous } => {
-            let sum = knots.first()? + knots.last()?;
-            (
-                Curve::RationalSpline {
-                    knots: knots.iter().rev().map(|k| sum - k).collect(),
-                    homogeneous: homogeneous.iter().rev().copied().collect(),
-                },
-                [sum - t1, sum - t0],
-            )
-        }
+        Curve::RationalSpline { knots, homogeneous } => (
+            Curve::RationalSpline { knots: knots.iter().rev().map(|k| -k).collect(), homogeneous: homogeneous.iter().rev().copied().collect() },
+            [-t1, -t0],
+        ),
         _ => return None,
     };
     Some(WireCurve { curve, interval })
@@ -551,286 +542,64 @@ fn sketch_curves(ss: &crate::eval::SolvedSketch, ci: usize) -> Vec<WireCurve> {
         .unwrap_or_default()
 }
 
-/// Edges `edges` of `body` (indices into its mesh's `edges`) on `plane` as their exact curves:
-/// lines, circles and arcs, and a free-form curve as the one spline it is, its knots and weights
-/// its own. `None` for an edge that doesn't lie in a plane parallel to `plane`, isn't read
-/// exactly (a mesh body's) or is a spline no sketch holds (past degree 9 or 500 points): it is
-/// fitted to its polyline instead. An edge read as free-form pieces, or not read, that runs
-/// along a circle in a plane parallel to `plane` comes in as that circle ([`circular`]): a
-/// round's edge is a spline that only follows its circle.
-fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Vec<Option<Vec<LinkGeom>>> {
-    use crate::kernel::PlanarPiece;
-    let free_form = |p: &PlanarPiece| matches!(p, PlanarPiece::Spline(_) | PlanarPiece::Seg(Seg2::Cubic { .. } | Seg2::Bezier { .. }));
-    let link = |p: &PlanarPiece| match p {
-        PlanarPiece::Seg(s) => link_geom(s),
-        PlanarPiece::Spline(s) => link_spline(s),
-    };
-    let mut mesh = None;
-    body.body
-        .planar_edges(plane, edges)
-        .into_iter()
-        .zip(edges)
-        .map(|(pieces, e)| match pieces {
-            Some(pieces) if !pieces.iter().any(free_form) => pieces.iter().map(link).collect(),
-            Some(pieces) => {
-                let samples: Option<Vec<Vec2>> = pieces.iter().map(piece_samples).collect::<Option<Vec<_>>>().map(|s| s.concat());
-                match samples.as_deref().and_then(circular) {
-                    Some((g, _)) => Some(vec![g]),
-                    None => match samples.as_deref().and_then(elliptical) {
-                        Some(gs) => Some(gs),
-                        None => pieces.iter().map(link).collect(),
-                    },
-                }
-            }
-            None if body.body.is_mesh() => None,
-            None => {
-                // Not read: its polyline lies on the curve, but only many points of it show a circle.
-                let pts = mesh.get_or_insert_with(|| body.mesh()).edges.get(*e).filter(|pts| pts.len() > 8)?;
-                let level = plane.height(*pts.first()?);
-                let (g, radius) = circular(&pts.iter().map(|p| plane.to_local(*p)).collect::<Vec<_>>())?;
-                pts.iter().all(|p| (plane.height(*p) - level).abs() <= radius * CIRCLE_TOL).then(|| vec![g])
+/// Exact native edge projections. Only mesh bodies may use the polyline fallback;
+/// unsupported native curves report an error rather than silently changing shape.
+fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Result<Vec<Option<Vec<LinkGeom>>>> {
+    if body.body.is_mesh() {
+        return Ok(vec![None; edges.len()]);
+    }
+    edges
+        .iter()
+        .map(|e| {
+            let projected = solidcore_ops::spline_projection::projected_edge(
+                body.body.record(),
+                plane,
+                *e,
+                body.body.planar_edges_tolerance(),
+                solidcraft_sketch::MAX_SPLINE_POINTS,
+                solidcraft_sketch::MAX_COORD,
+            )
+            .map_err(|e| DocError::Invalid(e.to_string()))?;
+            match projected {
+                Some(geometry) => projection_links(geometry).map(Some),
+                None => Err(DocError::Invalid(format!("exact projection is not supported for native edge {e}"))),
             }
         })
         .collect()
 }
 
-/// A free-form edge's B-spline as the control spline that is the same curve, with its own knots
-/// and weights. `None` for one a sketch can't hold.
-fn link_spline(s: &crate::kernel::PlanarSpline) -> Option<LinkGeom> {
-    let degree = u8::try_from(s.degree).ok()?;
-    let nurbs = solidcraft_sketch::Nurbs { knots: s.knots.clone(), weights: s.weights.clone() };
-    nurbs.check(s.points.len(), degree).ok()?;
-    Some(LinkGeom::Spline { pts: s.points.clone(), control: true, degree, periodic: false, nurbs: Some(nurbs) })
-}
-
-/// Points sampled along each free-form piece of an edge to see whether it runs along a circle.
-const CIRCLE_SAMPLES: u16 = 16;
-/// How far round (radians) a curve turns at least to be taken for a circle: a letter's nearly
-/// straight stroke lies near a large circle too.
-const CIRCLE_MIN_TURN: f64 = 0.1;
-/// How far (a fraction of its radius) a curve may stray from a circle and still be that circle:
-/// a round's edge keeps to it within 3e-7, a curve that merely looks round (a letter's bowl of
-/// four cubic spans) only within 3e-4.
-const CIRCLE_TOL: f64 = 1e-5;
-/// How far (a fraction of its major semi-axis) a curve may stray from an ellipse and still be
-/// that ellipse. A drafted face's edge is a circle off-axis by the draft angle, so it keeps to
-/// the ellipse within 6e-7 of the major semi-axis, well inside this tolerance.
-const ELLIPSE_TOL: f64 = 1e-5;
-/// How far round (radians) an ellipse must turn before it is believable as one: a letter's
-/// nearly straight stroke lies near a large ellipse too.
-const ELLIPSE_MIN_TURN: f64 = 0.5;
-/// The widest an ellipse may be (its major over its minor axis).
-const ELLIPSE_MAX_RATIO: f64 = 1e3;
-
-/// The circle (closing points) or arc through `samples`, taken in order along a curve, with
-/// its radius: when they all lie on one within [`CIRCLE_TOL`]. The arc ends at the first and
-/// last sample, so it meets what the curve met.
-fn circular(samples: &[Vec2]) -> Option<(LinkGeom, f64)> {
-    let (first, last) = (*samples.first()?, *samples.last()?);
-    let (c, radius) = ls_circle(samples)?;
-    let tol = radius * CIRCLE_TOL;
-    if !(radius.is_finite() && tol > 0.0) || samples.iter().any(|p| (p.dist(c) - radius).abs() > tol) {
-        return None;
-    }
-    let mut sweep = 0.0;
-    for w in samples.windows(2) {
-        let (Some(a), Some(b)) = (w.first(), w.get(1)) else { continue };
-        let mut d = (*b - c).angle() - (*a - c).angle();
-        if d > std::f64::consts::PI {
-            d -= std::f64::consts::TAU;
-        } else if d < -std::f64::consts::PI {
-            d += std::f64::consts::TAU;
-        }
-        sweep += d;
-    }
-    let turn = sweep.abs();
-    // A NaN turn is not refused here, as before.
-    if !turn.is_nan() && !(CIRCLE_MIN_TURN..=std::f64::consts::TAU + 1e-6).contains(&turn) {
-        return None;
-    }
-    if first.dist(last) <= tol {
-        return (turn > std::f64::consts::TAU - 1e-6).then_some((LinkGeom::Circle(c, radius), radius));
-    }
-    // Counter-clockwise from `a` to `b`.
-    let (a, b) = if sweep > 0.0 { (first, last) } else { (last, first) };
-    Some((LinkGeom::Arc { c, a, b }, radius))
-}
-
-/// A least-squares ellipse through `samples`: its centre, its semi-major and semi-minor radii
-/// and the direction of its major axis. The samples are centred on their mean and scaled by
-/// their RMS radius, so the fit does not depend on the size of the model, and the conic is
-/// fitted with the trace normalised (`a + c = 1`), which leaves the ellipse's shape to the
-/// three remaining coefficients. `None` when the samples are not an ellipse: too few of them,
-/// a singular fit, a quadratic form that is not positive definite, a centre or axes that are
-/// not real, or an axis ratio no ellipse has.
-fn ls_ellipse(samples: &[Vec2]) -> Option<(Vec2, f64, f64, Vec2)> {
-    if samples.len() < 6 {
-        return None;
-    }
-    let n = samples.len() as f64;
-    let mean = samples.iter().fold(Vec2::ZERO, |a, p| a + *p) / n;
-    let rms = (samples.iter().map(|p| (*p - mean).len2()).sum::<f64>() / n).sqrt();
-    if !(rms > 0.0) || !rms.is_finite() {
-        return None;
-    }
-    // `a x^2 + b x y + c y^2 + d x + e y + f = 0`, with `a + c = 1` and the samples centred
-    // and scaled: `a (x^2 - y^2) + b x y + d x + e y + f = -y^2`.
-    let mut m = Mat::zeros(5, 5);
-    let mut rhs = [0.0f64; 5];
-    for p in samples {
-        let q = (*p - mean) / rms;
-        let row = [q.x * q.x - q.y * q.y, q.x * q.y, q.x, q.y, 1.0];
-        for i in 0..5 {
-            for j in 0..5 {
-                m.add(i, j, row[i] * row[j]);
-            }
-            rhs[i] += row[i] * -q.y * q.y;
-        }
-    }
-    let sol = solve(m, rhs.to_vec())?;
-    let (a, b, d, e, f) = (sol[0], sol[1], sol[2], sol[3], sol[4]);
-    let c = 1.0 - a;
-    let disc = a * c - (b / 2.0) * (b / 2.0);
-    if disc <= 0.0 {
-        return None;
-    }
-    let dm = 4.0 * disc;
-    if dm.abs() < 1e-300 {
-        return None;
-    }
-    let cx = (-d * 2.0 * c + b * e) / dm;
-    let cy = (b * d - 2.0 * a * e) / dm;
-    let fc = a * cx * cx + b * cx * cy + c * cy * cy + d * cx + e * cy + f;
-    if fc >= 0.0 {
-        return None;
-    }
-    let tr = a + c;
-    let disc2 = ((a - c) * (a - c) + b * b).max(0.0).sqrt();
-    let (l1, l2) = ((tr + disc2) / 2.0, (tr - disc2) / 2.0);
-    if l2 <= 0.0 {
-        return None;
-    }
-    let (vx, vy) = if b.abs() > 1e-18 {
-        (l1 - c, b / 2.0)
-    } else if a >= c {
-        (1.0, 0.0)
-    } else {
-        (0.0, 1.0)
-    };
-    let axis = Vec2::new(vx, vy).normalized()?;
-    let (mut r1, mut r2) = ((-fc / l1).sqrt(), (-fc / l2).sqrt());
-    let mut major = axis;
-    if r1 < r2 {
-        std::mem::swap(&mut r1, &mut r2);
-        major = axis.perp();
-    }
-    if !(r1.is_finite() && r2.is_finite() && r1 > 0.0 && r2 > 0.0) {
-        return None;
-    }
-    if r1 / r2 > ELLIPSE_MAX_RATIO {
-        return None;
-    }
-    Some((mean + Vec2::new(cx, cy) * rms, r1 * rms, r2 * rms, major))
-}
-
-/// How far `p` lies from the ellipse `(centre, a, b)` along its major axis `u`, in model units:
-/// the normalised algebraic distance `|F(p)| / |grad F(p)|`.
-fn ellipse_residual(p: Vec2, centre: Vec2, a: f64, b: f64, u: Vec2) -> f64 {
-    let w = u.perp();
-    let d = p - centre;
-    let up = d.dot(u);
-    let wp = d.dot(w);
-    let f = (up / a) * (up / a) + (wp / b) * (wp / b) - 1.0;
-    let gx = 2.0 * up * u.x / (a * a) + 2.0 * wp * w.x / (b * b);
-    let gy = 2.0 * up * u.y / (a * a) + 2.0 * wp * w.y / (b * b);
-    let g = (gx * gx + gy * gy).sqrt();
-    if g > 0.0 { f.abs() / g } else { f64::INFINITY }
-}
-
-/// The ellipse `(centre, a, b)` with its major axis `u`, the point at its parameter `t`.
-fn ellipse_point(centre: Vec2, a: f64, b: f64, u: Vec2, t: f64) -> Vec2 {
-    let w = u.perp();
-    centre + u * (a * t.cos()) + w * (b * t.sin())
-}
-
-/// The ellipse's own parameter of `p`: where it sits on the ellipse.
-fn ellipse_param(p: Vec2, centre: Vec2, a: f64, b: f64, u: Vec2) -> f64 {
-    let w = u.perp();
-    let d = p - centre;
-    ((d.dot(w)) / b).atan2((d.dot(u)) / a)
-}
-
-/// The ellipse through `samples` when they all lie on one: the whole of it when the samples
-/// close on themselves, or rational quadratic pieces of at most 90 degrees when they do not.
-/// A drafted face's edge is a circle seen at a slant, so it comes to the sketch as an ellipse
-/// and not as the point set a spline of its own would be; `None` leaves the caller with what it
-/// had.
-fn elliptical(samples: &[Vec2]) -> Option<Vec<LinkGeom>> {
-    let (centre, a, b, u) = ls_ellipse(samples)?;
-    let tol = a * ELLIPSE_TOL;
-    if samples.iter().any(|p| ellipse_residual(*p, centre, a, b, u) > tol) {
-        return None;
-    }
-    let mut ts: Vec<f64> = samples.iter().map(|p| ellipse_param(*p, centre, a, b, u)).collect();
-    for i in 1..ts.len() {
-        while ts[i] - ts[i - 1] > std::f64::consts::PI {
-            ts[i] -= std::f64::consts::TAU;
-        }
-        while ts[i] - ts[i - 1] < -std::f64::consts::PI {
-            ts[i] += std::f64::consts::TAU;
-        }
-    }
-    let sweep = ts[ts.len() - 1] - ts[0];
-    if sweep.abs() < ELLIPSE_MIN_TURN {
-        return None;
-    }
-    if samples[0].dist(samples[samples.len() - 1]) <= tol {
-        // The whole ellipse: its centre, the end of its major axis and its minor radius.
-        return Some(vec![LinkGeom::Ellipse { c: centre, major: centre + u * a, minor: b }]);
-    }
-    // An arc of it: rational quadratic pieces of at most 90 degrees, the weights the circle's
-    // own arcs use (`w = cos(sweep / 2)` of the half piece).
-    let k = ((sweep.abs() / (std::f64::consts::PI / 2.0)).ceil() as usize).clamp(1, 8);
-    let h = sweep / k as f64;
-    let mut out = Vec::new();
-    for i in 0..k {
-        let t0 = ts[0] + h * i as f64;
-        let t1 = ts[0] + h * (i + 1) as f64;
-        let mid = (t0 + t1) / 2.0;
-        let half = (t1 - t0) / 2.0;
-        let pa = ellipse_point(centre, a, b, u, t0);
-        let pb = ellipse_point(centre, a, b, u, t1);
-        let cd = half.cos();
-        if cd.abs() < 1e-12 {
-            return None;
-        }
-        let apex = ellipse_point(centre, a / cd, b / cd, u, mid);
-        let w = cd;
-        out.push(LinkGeom::Conic { a: pa, apex, b: pb, rho: w / (1.0 + w) });
-    }
-    Some(out)
-}
-
-/// [`CIRCLE_SAMPLES`] + 1 points along a piece of an edge, ends included; `None` for a spline
-/// whose knots don't fit its points.
-fn piece_samples(piece: &crate::kernel::PlanarPiece) -> Option<Vec<Vec2>> {
-    let at = |i: u16| f64::from(i) / f64::from(CIRCLE_SAMPLES);
-    match piece {
-        crate::kernel::PlanarPiece::Seg(s) => Some((0..=CIRCLE_SAMPLES).map(|i| s.point_at(at(i))).collect()),
-        crate::kernel::PlanarPiece::Spline(s) => {
-            let degree = u8::try_from(s.degree).ok()?;
-            let nurbs = solidcraft_sketch::Nurbs { knots: s.knots.clone(), weights: s.weights.clone() };
-            (0..=CIRCLE_SAMPLES).map(|i| nurbs.point(&s.points, degree, at(i))).collect()
-        }
-    }
+/// Store the modelling operation's geometric images as document link state.
+fn projection_links(geometry: Vec<solidcore_ops::conic_projection::Projection>) -> Result<Vec<LinkGeom>> {
+    use solidcore_ops::conic_projection::Projection;
+    geometry
+        .into_iter()
+        .map(|g| {
+            Ok(match g {
+                Projection::Segment(s) => link_geom(&s).ok_or_else(|| DocError::Invalid("exact edge degree is not supported by a sketch".into()))?,
+                Projection::Point(p) => LinkGeom::Point(p),
+                Projection::Line(a, b) => LinkGeom::Line(a, b),
+                Projection::Spline { spline, degree, implicit } => LinkGeom::Spline {
+                    pts: spline.points,
+                    control: true,
+                    degree: u8::try_from(degree).map_err(|_| DocError::Invalid("exact edge degree is not supported by a sketch".into()))?,
+                    periodic: false,
+                    nurbs: (!implicit).then_some(solidcraft_sketch::Nurbs { knots: spline.knots, weights: spline.weights }),
+                },
+                Projection::Conic { a, apex, b, rho } => LinkGeom::Conic { a, apex, b, rho },
+                Projection::Ellipse { center, major, minor } => LinkGeom::Ellipse { c: center, major, minor },
+            })
+        })
+        .collect()
 }
 
 /// `edges` of `body` projected on `plane`: each exactly ([`exact_edges`]) or fitted to its
 /// polyline in `mesh`.
-fn projected_edges(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Vec<LinkGeom> {
-    let mut out = projected_edges_apart(body, mesh, plane, edges);
-    meet_at_shared_ends(&mut out, order::join_tolerance(mesh));
-    out
+fn projected_edges(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Result<Vec<LinkGeom>> {
+    let mut out = projected_edges_apart(body, mesh, plane, edges)?;
+    if body.body.is_mesh() {
+        meet_at_shared_ends(&mut out, order::join_tolerance(mesh));
+    }
+    Ok(out)
 }
 
 /// Where curve ends lie within `gap` of each other, moves them onto the first of them. A fitted
@@ -862,12 +631,12 @@ fn meet_at_shared_ends(geom: &mut [LinkGeom], gap: f64) {
 }
 
 /// Each of `edges` projected on its own ([`projected_edges`] without the ends brought together).
-fn projected_edges_apart(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Vec<LinkGeom> {
+fn projected_edges_apart(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Result<Vec<LinkGeom>> {
     let mut out = Vec::new();
-    for (e, exact) in edges.iter().zip(exact_edges(body, plane, edges)) {
+    for (e, exact) in edges.iter().zip(exact_edges(body, plane, edges)?) {
         match exact {
             Some(mut g) => {
-                at_vertices(body, mesh, plane, *e, &mut g);
+                at_vertices(body, plane, *e, &mut g);
                 out.extend(g);
             }
             None => {
@@ -877,7 +646,7 @@ fn projected_edges_apart(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, ed
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// Edge `e`'s exact pieces `g` with their outer ends on the edge's vertices, where they lie
@@ -886,20 +655,30 @@ fn projected_edges_apart(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, ed
 /// tolerance: one SMLib made (a shell's offset corner) ended 2e-6 mm from the line it meets, and
 /// the two ends, not taken for one point, left the loop open, so an offset of one curve found
 /// no chain to follow. The vertex is the point both edges share.
-fn at_vertices(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, e: usize, g: &mut [LinkGeom]) {
+fn at_vertices(body: &crate::ModelBody, plane: &Plane, e: usize, g: &mut [LinkGeom]) {
     let record = body.body.record();
     let Some(edge) = record.edges.get(e) else { return };
-    let Some((first, last)) = mesh.edges.get(e).and_then(|pts| pts.first().zip(pts.last())) else { return };
+    let vertices: Option<Vec<_>> =
+        edge.vertices.iter().map(|v| record.vertices.get(*v as usize).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))).collect();
+    let Some(vertices) = vertices else { return };
     // The pieces are read within the planar-edge tolerance of the edge's curve, which passes
     // within its own tolerance of the vertices.
-    let tol = edge.vertices.iter().filter_map(|v| record.vertices.get(*v as usize)).map(|v| v.tolerance).fold(edge.tolerance, f64::max)
-        + body.body.planar_edges_tolerance();
+    let source_tolerance = edge.vertices.iter().filter_map(|v| record.vertices.get(*v as usize)).map(|v| v.tolerance).fold(edge.tolerance, f64::max);
+    let roundoff = vertices.iter().fold(plane.origin.len().max(1.), |s, v| s.max(v.len())) * f64::EPSILON * 256.;
     // Each vertex moves the piece end nearest it (the pieces' order and direction need not be
     // the edge's).
-    for v in [plane.to_local(*first), plane.to_local(*last)] {
+    for v in vertices.into_iter().map(|v| plane.to_local(v)) {
         let mut best: Option<(f64, &mut Vec2)> = None;
         for piece in g.iter_mut() {
+            let tol = source_tolerance + if matches!(piece, LinkGeom::Spline { .. }) { roundoff } else { body.body.planar_edges_tolerance() };
             let ends = match piece {
+                // A collapsed free-form curve may attain a bound in its interior. Moving
+                // it to a nearby source vertex could cut that extremum off again.
+                LinkGeom::Line(..)
+                    if !matches!(edge.parameters(), solidcore_record::brep::Curve::Line { .. } | solidcore_record::brep::Curve::Polyline { .. }) =>
+                {
+                    None
+                }
                 LinkGeom::Line(a, b) | LinkGeom::Arc { a, b, .. } | LinkGeom::Conic { a, b, .. } => Some((a, b)),
                 // A control spline's end points are its ends.
                 LinkGeom::Spline { pts, control: true, periodic: false, .. } => match pts.as_mut_slice() {
@@ -1024,8 +803,8 @@ fn resolve_named_edge(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
         .min_by(|a, b| a.dist(near).total_cmp(&b.dist(near)))
         .ok_or_else(|| lost("named projection edge"))?;
     let (mut wires, mut exact) = (Vec::new(), Vec::new());
-    let planar = exact_edges(target, plane, &[index]).pop().flatten();
-    let geom = edge_geom(plane, kind, planar, (pts, || edge_curves(Some(target), index)), &mut wires, &mut exact);
+    let planar = || Ok(exact_edges(target, plane, &[index])?.pop().flatten());
+    let geom = edge_geom(plane, kind, planar, (pts, || edge_curves(Some(target), index)), &mut wires, &mut exact)?;
     if geom.is_empty() && wires.is_empty() {
         return Err(DocError::Invalid("named edge projects to nothing on this sketch plane".into()));
     }
@@ -1070,7 +849,7 @@ fn resolve_named_face(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
     let geom = if kind == LinkKind::Intersect {
         section(plane, &mesh, Some(index))
     } else {
-        let geom = projected_edges(target, &mesh, plane, &projection_face_edges(target, &mesh, index, plane)?);
+        let geom = projected_edges(target, &mesh, plane, &projection_face_edges(target, &mesh, index, plane)?)?;
         let geom = merge_split_circles(geom);
         if certified_planar_construction(target, index as usize) { merge_family_lines(geom)? } else { geom }
     };
@@ -1150,7 +929,7 @@ pub fn resolve_face_indices(st: &ModelState, plane: &Plane, kind: LinkKind, body
         } else {
             order::family_edges(&mesh, &selected, plane)?
         };
-        geometry.extend(projected_edges(body, &mesh, plane, &edges));
+        geometry.extend(projected_edges(body, &mesh, plane, &edges)?);
     }
     if kind != LinkKind::Intersect && (indices.len() > 1 || indices.first().is_some_and(|index| certified_planar_construction(body, *index))) {
         geometry = merge_family_lines(geometry)?;
@@ -1583,15 +1362,21 @@ fn merge_split_circles(geom: Vec<LinkGeom>) -> Vec<LinkGeom> {
 // ---------------------------------------------------------------------------------------------
 // Projection
 
-fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Vec<LinkGeom> {
+fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Result<Vec<LinkGeom>> {
     let map = |p: Vec2| to.to_local(from.to_world(p));
-    let parallel = from.normal().cross(to.normal()).len() < 1e-9;
-    let flip = from.normal().dot(to.normal()) < 0.0;
-    match sk.curves.get(ci).map(|c| &c.kind) {
+    let sampled = || {
+        let pts: Vec<Vec3> = sk.polyline(ci).iter().map(|p| from.to_world(*p)).collect();
+        fit_world(to, &pts)
+    };
+    let relation = solidcore_ops::conic_projection::plane_relation(from, to);
+    let parallel = relation.parallel;
+    let edge_on = relation.edge_on;
+    let flip = relation.flip;
+    Ok(match sk.curves.get(ci).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => match (sk.point(*a), sk.point(*b)) {
             (Some(a), Some(b)) => {
                 let (a, b) = (map(a), map(b));
-                if a.dist(b) > 1e-9 { vec![LinkGeom::Line(a, b)] } else { vec![LinkGeom::Point(a)] }
+                if a.dist(b) > 1e-7 { vec![LinkGeom::Line(a, b)] } else { vec![LinkGeom::Point(a)] }
             }
             _ => Vec::new(),
         },
@@ -1608,30 +1393,66 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Vec
             (Some(c), Some(m)) => vec![LinkGeom::Ellipse { c: map(c), major: map(m), minor: *r }],
             _ => Vec::new(),
         },
-        Some(CurveKind::Spline { pts, control: false, periodic, nurbs: None, handles, .. }) if parallel && !handles.is_empty() => {
-            let p: Option<Vec<Vec2>> = pts.iter().map(|q| sk.point(*q).map(map)).collect();
-            let tangent_handles: Option<Vec<Vec2>> = handles.iter().map(|q| sk.point(*q).map(map)).collect();
-            let Some((p, tangent_handles)) = p.zip(tangent_handles) else { return Vec::new() };
-            // One curve per span whether or not a handle has been moved, so turning a handle keeps
-            // the projected layout and what is constrained to it (#6502).
-            let Ok(pieces) = solidcraft_sketch::fit_beziers_with_handles(&p, &tangent_handles, *periodic) else { return Vec::new() };
-            pieces.into_iter().map(|piece| LinkGeom::Spline { pts: piece.to_vec(), control: true, degree: 3, periodic: false, nurbs: None }).collect()
+        Some(CurveKind::Spline { pts, control: false, periodic, nurbs: None, handles, .. }) if !handles.is_empty() => {
+            let source: Vec<Vec2> =
+                pts.iter().map(|p| sk.point(*p).ok_or_else(|| DocError::Invalid("missing source spline point".into()))).collect::<Result<_>>()?;
+            let tangents: Vec<Vec2> = handles
+                .iter()
+                .map(|p| sk.point(*p).ok_or_else(|| DocError::Invalid("missing source spline handle".into())))
+                .collect::<Result<_>>()?;
+            let pieces = solidcraft_sketch::fit_beziers_with_handles(&source, &tangents, *periodic).map_err(|e| DocError::Invalid(e.to_string()))?;
+            projection_links(
+                solidcore_ops::conic_projection::project_beziers(from, to, &pieces, edge_on, solidcraft_sketch::MAX_COORD)
+                    .map_err(|e| DocError::Invalid(e.to_string()))?,
+            )?
         }
-        Some(CurveKind::Spline { pts, control, degree, periodic, nurbs, handles, .. }) if parallel && handles.is_empty() => {
-            let p: Option<Vec<Vec2>> = pts.iter().map(|q| sk.point(*q).map(map)).collect();
-            p.map(|pts| vec![LinkGeom::Spline { pts, control: *control, degree: *degree, periodic: *periodic, nurbs: nurbs.clone() }])
-                .unwrap_or_default()
+        Some(CurveKind::Spline { pts, control, degree, periodic, nurbs, .. }) => {
+            let source: Vec<Vec2> =
+                pts.iter().map(|p| sk.point(*p).ok_or_else(|| DocError::Invalid("missing source spline point".into()))).collect::<Result<_>>()?;
+            if *control {
+                let metadata = nurbs.as_ref().map(|n| (n.knots.as_slice(), n.weights.as_slice()));
+                projection_links(
+                    solidcore_ops::conic_projection::project_control(
+                        from,
+                        to,
+                        &source,
+                        usize::from(*degree),
+                        metadata,
+                        edge_on,
+                        solidcraft_sketch::MAX_COORD,
+                    )
+                    .map_err(|e| DocError::Invalid(e.to_string()))?,
+                )?
+            } else if parallel {
+                vec![LinkGeom::Spline {
+                    pts: solidcore_ops::conic_projection::project_points(from, to, &source),
+                    control: false,
+                    degree: *degree,
+                    periodic: *periodic,
+                    nurbs: None,
+                }]
+            } else {
+                projection_links(
+                    solidcore_ops::conic_projection::project_fit(
+                        from,
+                        to,
+                        &source,
+                        *periodic,
+                        solidcraft_sketch::MAX_SPLINE_POINTS,
+                        edge_on,
+                        solidcraft_sketch::MAX_COORD,
+                    )
+                    .map_err(|e| DocError::Invalid(e.to_string()))?,
+                )?
+            }
         }
         Some(CurveKind::Conic { a, b, apex, rho }) if parallel => match (sk.point(*a), sk.point(*apex), sk.point(*b)) {
             (Some(a), Some(x), Some(b)) => vec![LinkGeom::Conic { a: map(a), apex: map(x), b: map(b), rho: *rho }],
             _ => Vec::new(),
         },
-        Some(_) => {
-            let pts: Vec<Vec3> = sk.polyline(ci).iter().map(|p| from.to_world(*p)).collect();
-            fit_world(to, &pts)
-        }
+        Some(_) => sampled(),
         None => Vec::new(),
-    }
+    })
 }
 
 /// A circle in space (centre, unit normal, radius) through the polyline's points, and whether

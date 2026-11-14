@@ -1916,6 +1916,172 @@ fn bounds_reach_the_extremes_of_circles_and_arcs() {
     assert!(lo.dist(v(0.0, 0.0)) < 1e-9 && hi.dist(v(10.0, 10.0)) < 1e-9, "{lo:?} {hi:?}");
 }
 
+#[test]
+fn spline_link_refresh_updates_degree_together_with_knots() {
+    let mut sk = Sketch::default();
+    let pts = vec![v(0., 0.), v(5., 10.), v(10., -5.), v(15., 0.)];
+    let geometry = |degree, knots| LinkGeom::Spline {
+        pts: pts.clone(),
+        control: true,
+        degree,
+        periodic: false,
+        nurbs: Some(Nurbs { knots, weights: Vec::new() }),
+    };
+    let id = sk
+        .add_link(LinkKind::Project, LinkSource::SketchCurve { sketch: 1, curve: "s1".into() }, &[geometry(3, vec![0., 0., 0., 0., 1., 1., 1., 1.])])
+        .unwrap();
+    sk.update_link(&id, &[geometry(2, vec![0., 0., 0., 0.5, 1., 1., 1.])]).unwrap();
+    let ci = sk.link_curves(&id)[0];
+    let CurveKind::Spline { degree, nurbs: Some(nurbs), .. } = &sk.curves[ci].kind else { panic!("not an exact spline") };
+    assert_eq!(*degree, 2);
+    nurbs.check(4, *degree).unwrap();
+}
+
+#[test]
+fn spline_link_refresh_keeps_small_control_and_knot_edits_at_large_coordinates() {
+    let mut sk = Sketch::default();
+    let mut controls = vec![v(100000., 0.), v(100005., 10.), v(100010., -5.), v(100015., 3.), v(100020., 0.)];
+    let mut nurbs = Nurbs { knots: vec![0., 0., 0., 0., 0.3, 1., 1., 1., 1.], weights: vec![1e-20; 5] };
+    let geometry = |controls: &Vec<Vec2>, nurbs: &Nurbs| LinkGeom::Spline {
+        pts: controls.clone(),
+        control: true,
+        degree: 3,
+        periodic: false,
+        nurbs: Some(nurbs.clone()),
+    };
+    let id = sk.add_link(LinkKind::Project, LinkSource::SketchCurve { sketch: 1, curve: "s1".into() }, &[geometry(&controls, &nurbs)]).unwrap();
+    let ci = sk.link_curves(&id)[0];
+    let curve_id = sk.curves[ci].id.clone();
+    for edit in 0..3 {
+        match edit {
+            0 => controls[1].y += 0.05,
+            1 => nurbs.knots[4] += 5e-8,
+            _ => nurbs.weights[1] *= 2.,
+        }
+        assert!(!sk.update_link(&id, &[geometry(&controls, &nurbs)]).unwrap());
+        assert_eq!(sk.curves[ci].id, curve_id);
+        let CurveKind::Spline { pts, nurbs: Some(actual), .. } = &sk.curves[ci].kind else { panic!("not a knotted spline") };
+        let points: Vec<_> = pts.iter().map(|p| sk.point(*p).unwrap()).collect();
+        assert_eq!(*actual, nurbs);
+        assert_eq!(points, controls);
+        for i in 0..=32 {
+            let t = i as f64 / 32.;
+            assert!(actual.point(&points, 3, t).unwrap().dist(nurbs.point(&controls, 3, t).unwrap()) < 1e-12);
+        }
+    }
+}
+
+#[test]
+fn reversing_a_spline_preserves_a_narrow_end_knot() {
+    let mut sk = Sketch::default();
+    let controls = [v(0., 0.), v(1., 2.), v(2., -1.), v(3., 0.)];
+    let nurbs = Nurbs { knots: vec![0., 0., 0., 1e-18, 1., 1., 1.], weights: vec![1., 2., 3., 1.] };
+    nurbs.check(4, 2).unwrap();
+    let pts = controls.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
+    let ci = sk
+        .add_curve(CurveKind::Spline { pts, control: true, degree: 2, periodic: false, nurbs: Some(nurbs.clone()), handles: Vec::new() }, None)
+        .unwrap();
+    sk.reverse_spline(ci).unwrap();
+    let CurveKind::Spline { pts, nurbs: Some(back), .. } = &sk.curves[ci].kind else { panic!("not an exact spline") };
+    back.check(4, 2).unwrap();
+    let reversed: Vec<_> = pts.iter().map(|p| sk.point(*p).unwrap()).collect();
+    for t in [0., 0.1, 0.5, 0.9, 1.] {
+        assert!(nurbs.point(&controls, 2, t).unwrap().dist(back.point(&reversed, 2, 1. - t).unwrap()) < 1e-12);
+    }
+    let source_spans = nurbs.segs(&controls, 2).unwrap();
+    let back_spans = back.segs(&reversed, 2).unwrap();
+    assert_eq!(source_spans.len(), 2);
+    for (a, b) in source_spans.iter().zip(back_spans.iter().rev()) {
+        for t in [0., 0.1, 0.5, 0.9, 1.] {
+            assert!(a.point_at(t).dist(b.point_at(1. - t)) < 1e-12);
+        }
+    }
+    sk.reverse_spline(ci).unwrap();
+    let CurveKind::Spline { nurbs: Some(twice), .. } = &sk.curves[ci].kind else { panic!("not an exact spline") };
+    assert_eq!(*twice, nurbs);
+}
+
+#[test]
+fn reversing_a_spline_with_large_finite_knots_keeps_valid_geometry() {
+    let nurbs = Nurbs { knots: vec![8e307, 8e307, 9e307, 1e308, 1e308], weights: vec![1., 2., 1.] };
+    let points = [v(0., 0.), v(1., 1.), v(2., 0.)];
+    nurbs.check(3, 1).unwrap();
+    let back = nurbs.reversed();
+    back.check(3, 1).unwrap();
+    let reversed: Vec<_> = points.into_iter().rev().collect();
+    let twice = back.reversed();
+    assert_eq!(twice.knots.first(), nurbs.knots.first());
+    assert_eq!(twice.knots.last(), nurbs.knots.last());
+    for i in 0..=20 {
+        let t = i as f64 / 20.;
+        let source = nurbs.point(&points, 1, t).unwrap();
+        assert!(source.dist(back.point(&reversed, 1, 1. - t).unwrap()) < 1e-12);
+        assert!(source.dist(twice.point(&points, 1, t).unwrap()) < 1e-12);
+    }
+}
+
+#[test]
+fn collinear_nurbs_ranges_ignore_uniform_weight_scale() {
+    let controls = [v(0., 0.), v(90., 0.), v(17., 0.), v(0., 0.)];
+    let t = (978.0 - f64::sqrt(978.0 * 978.0 - 4.0 * 657.0 * 270.0)) / (2.0 * 657.0);
+    let maximum = 270.0 * t - 489.0 * t * t + 219.0 * t * t * t;
+    for scale in [1e-320, 1., 1e300] {
+        let nurbs = Nurbs { knots: vec![0., 0., 0., 0., 1., 1., 1., 1.], weights: vec![scale; 4] };
+        let [a, b] = nurbs.linear_image(&controls, 3, 1e-12).unwrap().unwrap();
+        assert!(a.x <= 0. && a.x > -1e-8, "{a:?}");
+        assert!(b.x >= maximum && b.x - maximum < 1e-8, "{b:?}");
+        assert!((nurbs.point(&controls, 3, t).unwrap().x - maximum).abs() < 1e-12);
+    }
+    let tiny = [v(0., 0.), v(1e-4, 0.)];
+    let nurbs = Nurbs { knots: vec![0., 0., 1., 1.], weights: vec![1e-320; 2] };
+    let [a, b] = nurbs.linear_image(&tiny, 1, 1e-14).unwrap().unwrap();
+    assert!(a.x <= 0. && b.x >= 1e-4 && b.x - a.x < 1.00001e-4);
+}
+
+#[test]
+fn fit_splines_keep_their_spans_in_compact_control_form() {
+    for periodic in [false, true] {
+        for count in [4usize, 8, 168, 498, 500] {
+            let mut points: Vec<Vec2> = (0..count)
+                .map(|i| {
+                    if periodic {
+                        let a = std::f64::consts::TAU * i as f64 / (count - 1) as f64;
+                        Vec2::new(10.0 * a.cos(), 7.0 * a.sin())
+                    } else {
+                        Vec2::new(0.01 * (i * i) as f64 + i as f64 * 0.1, (i as f64 * 0.37).sin() * 3.0)
+                    }
+                })
+                .collect();
+            if periodic {
+                points[count - 1] = points[0];
+            }
+            let expected = crate::fit_beziers_mode(&points, periodic).unwrap();
+            let curves = crate::Nurbs::from_fit_points(&points, periodic).unwrap();
+            if count == 168 {
+                assert_eq!(curves.len(), 1);
+                assert_eq!(curves[0].0.len(), count + 2);
+            }
+            let mut actual = Vec::new();
+            for (controls, nurbs) in curves {
+                assert!(controls.len() <= crate::MAX_SPLINE_POINTS);
+                actual.extend(nurbs.segs(&controls, 3).unwrap());
+            }
+            assert_eq!(actual.len(), expected.len(), "count={count}, periodic={periodic}");
+            for (actual, [p0, p1, p2, p3]) in actual.into_iter().zip(expected) {
+                let source = Seg2::Cubic { p0, p1, p2, p3 };
+                for i in 0..=16 {
+                    let t = f64::from(i) / 16.0;
+                    assert!(
+                        actual.derivative(t).dist(source.derivative(t)) < 1e-8,
+                        "source tangent changed: count={count}, periodic={periodic}, t={t}"
+                    );
+                    assert!(actual.point_at(t).dist(source.point_at(t)) < 1e-8, "count={count}, periodic={periodic}, t={t}");
+                }
+            }
+        }
+    }
+}
+
 /// A control spline with its own knots and weights (a projected free-form edge): its exact pieces
 /// are its knot spans, a rational quadratic's are conics, its points follow its knots, it reads
 /// back from a saved design the same, and knots that don't fit it are refused.

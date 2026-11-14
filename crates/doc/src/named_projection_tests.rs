@@ -5,6 +5,167 @@ use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource, Sketch};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+#[test]
+fn tilted_spline_projection_keeps_one_exact_curve() {
+    use solidcore_record::{Seg2, Vec2};
+    use solidcraft_sketch::{CurveKind, LinkGeom, Nurbs};
+
+    let from = Plane::XY.offset(9.);
+    let to = Plane::new(Vec3::new(-2., 3., 1.), Vec3::new(0.8, 0., 0.6), Vec3::Y).unwrap();
+    for (control, periodic, rational) in [(false, false, false), (false, true, false), (true, false, false), (true, false, true)] {
+        let mut sketch = Sketch::default();
+        let mut points: Vec<Vec2> = [[0., 0.], [5., 18.], [25., -5.], [40., 9.], [50., 1.]].into_iter().map(|[x, y]| Vec2::new(x, y)).collect();
+        if periodic {
+            points.push(points[0]);
+        }
+        let pts = points.iter().map(|p| sketch.add_point(*p, None).unwrap()).collect();
+        let nurbs = rational.then(|| Nurbs { knots: vec![0., 0., 0., 0., 0.3, 1., 1., 1., 1.], weights: vec![1., 0.8, 1.4, 0.9, 1.] });
+        let fit_spans = (!control).then(|| solidcraft_sketch::fit_beziers_mode(&points, periodic).unwrap());
+        let chords: Vec<_> = points.windows(2).map(|p| p[0].dist(p[1]).max(1e-9)).collect();
+        let total: f64 = chords.iter().sum();
+        let expected: Vec<Vec2> = (0..=128)
+            .map(|i| {
+                let t = f64::from(i) / 128.;
+                if let Some(spans) = &fit_spans {
+                    // Compact knots follow source chord parameter, while the open sketch's
+                    // public t advances uniformly per span. Compare the same geometric point.
+                    let mut u = t * total;
+                    let mut span = 0;
+                    while span + 1 < spans.len() && u > chords[span] {
+                        u -= chords[span];
+                        span += 1;
+                    }
+                    let [p0, p1, p2, p3] = spans[span];
+                    Seg2::Cubic { p0, p1, p2, p3 }.point_at((u / chords[span]).clamp(0., 1.))
+                } else {
+                    solidcraft_sketch::spline_point_mode(&points, control, 3, false, nurbs.as_ref(), t)
+                }
+            })
+            .map(|p| to.to_local(from.to_world(p)))
+            .collect();
+        sketch.add_curve(CurveKind::Spline { pts, control, degree: 3, periodic, nurbs, handles: Vec::new() }, Some("source")).unwrap();
+        let report = solidcraft_sketch::solve(&mut sketch);
+        let mut state = ModelState::default();
+        state.sketches.push(Arc::new(crate::eval::SolvedSketch {
+            feature: 1,
+            name: "Source".into(),
+            plane: from,
+            sketch,
+            report,
+            profiles: Vec::new(),
+            profiles_3d: Vec::new(),
+            ends: Default::default(),
+        }));
+        let resolved = crate::project::resolve(
+            &Document::default(),
+            &BTreeMap::new(),
+            &state,
+            &to,
+            LinkKind::Project,
+            &LinkSource::SketchCurve { sketch: 1, curve: "source".into() },
+        )
+        .unwrap();
+        assert!(matches!(resolved.geom.as_slice(), [LinkGeom::Spline { .. }]), "projected spline must stay one spline: {:?}", resolved.geom);
+        let mut projected = Sketch::default();
+        let link = projected.add_link(LinkKind::Project, resolved.source, &resolved.geom).unwrap();
+        let ci = projected.link_curves(&link)[0];
+        assert!(projected.reverse_spline(ci).is_err(), "linked curves follow their source");
+        projected.break_link(&link).unwrap();
+        for reversed in [false, true, false] {
+            if reversed {
+                projected.reverse_spline(ci).unwrap();
+            }
+            let CurveKind::Spline { pts, control: projected_control, degree, periodic, nurbs, .. } = &projected.curves[ci].kind else {
+                panic!("projection is not a spline")
+            };
+            let points: Vec<Vec2> = pts.iter().map(|p| projected.point(*p).unwrap()).collect();
+            for (i, expected) in expected.iter().enumerate() {
+                let t = i as f64 / 128.;
+                let actual = solidcraft_sketch::spline_point_mode(
+                    &points,
+                    *projected_control,
+                    *degree,
+                    *periodic,
+                    nurbs.as_ref(),
+                    if reversed { 1. - t } else { t },
+                );
+                assert!(
+                    actual.dist(*expected) < 1e-8,
+                    "control={control}, periodic={periodic}, rational={rational}, reversed={reversed}, t={t}, actual={actual:?}, expected={expected:?}"
+                );
+            }
+            if reversed {
+                projected.reverse_spline(ci).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn projecting_a_fit_spline_keeps_edited_tangent_handles_on_parallel_and_tilted_planes() {
+    use solidcraft_sketch::{CurveKind, LinkGeom};
+
+    let from = Plane::XY.offset(9.);
+    let tilted = Plane::new(Vec3::new(-2., 3., 1.), Vec3::new(0.8, 0., 0.6), Vec3::Y).unwrap();
+    for periodic in [false, true] {
+        let mut sketch = Sketch::default();
+        let mut points = vec![Vec2::new(0., 0.), Vec2::new(8., 13.), Vec2::new(20., -2.)];
+        if periodic {
+            points.push(points[0]);
+        }
+        let pts = points.iter().map(|p| sketch.add_point(*p, None).unwrap()).collect();
+        let curve = sketch
+            .add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic, nurbs: None, handles: Vec::new() }, Some("source"))
+            .unwrap();
+        sketch.add_spline_handles(curve).unwrap();
+        let CurveKind::Spline { handles, .. } = &sketch.curves[curve].kind else { panic!("not a spline") };
+        let handle = handles[1];
+        sketch.points[handle].pos += Vec2::new(3., -2.);
+        for reversed in [false, true] {
+            let mut source = sketch.clone();
+            if reversed {
+                source.reverse_spline(curve).unwrap();
+            }
+            let report = solidcraft_sketch::solve(&mut source);
+            let CurveKind::Spline { pts, handles, .. } = &source.curves[curve].kind else { panic!("not a spline") };
+            let points: Vec<_> = pts.iter().map(|p| source.point(*p).unwrap()).collect();
+            let handles: Vec<_> = handles.iter().map(|p| source.point(*p).unwrap()).collect();
+            let expected = solidcraft_sketch::fit_beziers_with_handles(&points, &handles, periodic).unwrap();
+            let mut state = ModelState::default();
+            state.sketches.push(Arc::new(crate::eval::SolvedSketch {
+                feature: 1,
+                name: "Source".into(),
+                plane: from,
+                sketch: source,
+                report,
+                profiles: Vec::new(),
+                profiles_3d: Vec::new(),
+                ends: Default::default(),
+            }));
+            for to in [Plane::XY, tilted] {
+                let resolved = crate::project::resolve(
+                    &Document::default(),
+                    &BTreeMap::new(),
+                    &state,
+                    &to,
+                    LinkKind::Project,
+                    &LinkSource::SketchCurve { sketch: 1, curve: "source".into() },
+                )
+                .unwrap();
+                assert_eq!(resolved.geom.len(), expected.len(), "one exact curve per handled span");
+                for (actual, span) in resolved.geom.iter().zip(&expected) {
+                    let LinkGeom::Spline { pts, control: true, degree: 3, .. } = actual else { panic!("not an exact cubic: {actual:?}") };
+                    assert_eq!(pts.len(), 4);
+                    for (actual, point) in pts.iter().zip(span) {
+                        let expected = to.to_local(from.to_world(*point));
+                        assert!(actual.dist(expected) < 1e-10, "periodic={periodic}, reversed={reversed}: {actual:?} != {expected:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn named_box(name: &str, width: f64, height: f64) -> ModelBody {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(width, width, height)).unwrap();
     let mut names = vec!["unrelated".to_string(); body.faces(0.01).unwrap().len()];
@@ -484,6 +645,10 @@ fn a_drafted_face_projects_its_edge_as_one_ellipse() {
     let source = LinkSource::Face { body: "Drafted".into(), at: Vec3::new(0.0, 0.0, 30.0) };
     let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
     // The edge comes to the sketch as one ellipse, not as the point set of a spline.
+    let [LinkGeom::Ellipse { c, major, minor }] = resolved.geom.as_slice() else { panic!("{:?}", resolved.geom) };
+    assert!(c.len() < 1e-10);
+    assert!((major.dist(*c) - 20.0 / angle.cos()).abs() < 1e-10);
+    assert!((minor - 20.0).abs() < 1e-10);
     assert!(
         resolved.geom.iter().any(|g| matches!(g, LinkGeom::Ellipse { .. })),
         "a drafted face's edge is an ellipse, not a point set: {:?}",

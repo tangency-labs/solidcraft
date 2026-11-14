@@ -1321,21 +1321,14 @@ impl Body {
 
     /// Edges `indices` (record edge indices) in `plane`'s coordinates, exactly: lines, circular
     /// arcs, single free-form segments, and a free-form curve of several spans as the one
-    /// B-spline it is, for a sketch to project them. `None` for an edge that doesn't lie in a
-    /// plane parallel to `plane`, isn't read exactly or isn't there, and for every edge of a mesh
-    /// body.
+    /// B-spline it is, for a sketch to project them. Splines and ellipses also project exactly
+    /// between nonparallel planes. `None` for other edges outside a parallel plane, edges that
+    /// aren't read exactly or aren't there, and every edge of a mesh body.
     pub fn planar_edges(&self, plane: &solidcore_record::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
             return vec![None; indices.len()];
         }
-        let tol = self.planar_edges_tolerance();
-        indices
-            .iter()
-            .map(|i| {
-                let mut work = 262_144usize;
-                crate::prism_curve::Run::of(&self.record, *i, true).and_then(|run| crate::prism_curve::projected_curves(&run, plane, tol, &mut work))
-            })
-            .collect()
+        solidcore_ops::spline_projection::project_edges(&self.record, plane, indices, self.planar_edges_tolerance())
     }
 
     /// Faces with area and centroid.

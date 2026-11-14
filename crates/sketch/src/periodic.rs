@@ -1,7 +1,7 @@
 //! Explicit cyclic C2 fit splines. Missing periodic markers retain natural interpolation.
-use crate::model::in_range;
 use crate::{MAX_SPLINE_POINTS, Sketch, SketchError};
 use solidcore_record::Vec2;
+#[cfg(test)]
 use solidcraft_geom::prelude::*;
 
 type Result<T> = std::result::Result<T, SketchError>;
@@ -10,93 +10,15 @@ fn bad() -> SketchError {
 }
 
 pub(crate) fn validate_periodic_points(points: &[Vec2]) -> Result<()> {
-    if points.len() < 4
-        || points.len() > MAX_SPLINE_POINTS
-        || points.first() != points.last()
-        || points.iter().any(|p| !in_range(*p))
-        || points.windows(2).any(|p| {
-            let h = p[0].dist(p[1]);
-            !h.is_finite() || h <= 1e-9
-        })
-    {
+    if points.len() > MAX_SPLINE_POINTS {
         return Err(bad());
     }
-    let mut distinct = Vec::new();
-    for p in points {
-        if !distinct.contains(p) {
-            distinct.push(*p);
-        }
-        if distinct.len() == 3 {
-            return Ok(());
-        }
-    }
-    Err(bad())
+    solidcore_ops::fit_projection::check_periodic(points).map_err(|_| bad())
 }
+
 pub fn periodic_beziers(points: &[Vec2]) -> Result<Vec<[Vec2; 4]>> {
     validate_periodic_points(points)?;
-    let n = points.len() - 1;
-    let h: Vec<f64> = points.windows(2).map(|p| p[0].dist(p[1])).collect();
-    let mut diagonal = Vec::with_capacity(n);
-    let mut rhs = Vec::with_capacity(n);
-    for i in 0..n {
-        let previous = (i + n - 1) % n;
-        diagonal.push(2.0 * (h[previous] + h[i]));
-        rhs.push(((points[i + 1] - points[i]) / h[i] - (points[i] - points[previous]) / h[previous]) * 6.0);
-    }
-    // Remove the two corner entries with a rank-one correction. The underlying
-    // cyclic matrix is strictly diagonally dominant; all pivots are still checked.
-    let corner = h[n - 1];
-    let gamma = -diagonal[0];
-    diagonal[0] -= gamma;
-    diagonal[n - 1] -= corner * corner / gamma;
-    let solve = |mut rhs: Vec<Vec2>| -> Result<Vec<Vec2>> {
-        let mut diagonal = diagonal.clone();
-        for i in 1..n {
-            if !diagonal[i - 1].is_finite() || diagonal[i - 1].abs() < 1e-12 * (h[i - 1] + h[(i + n - 2) % n]) {
-                return Err(bad());
-            }
-            let factor = h[i - 1] / diagonal[i - 1];
-            diagonal[i] -= factor * h[i - 1];
-            rhs[i] = rhs[i] - rhs[i - 1] * factor;
-        }
-        for i in (0..n).rev() {
-            if !diagonal[i].is_finite() || diagonal[i].abs() < 1e-12 * (h[i] + h[(i + n - 1) % n]) {
-                return Err(bad());
-            }
-            let next = rhs.get(i + 1).copied().unwrap_or_default() * h[i];
-            rhs[i] = (rhs[i] - next) / diagonal[i];
-            if !rhs[i].is_finite() {
-                return Err(bad());
-            }
-        }
-        Ok(rhs)
-    };
-    let mut second = solve(rhs)?;
-    let mut correction_rhs = vec![Vec2::ZERO; n];
-    correction_rhs[0].x = gamma;
-    correction_rhs[n - 1].x = corner;
-    let correction = solve(correction_rhs)?;
-    let denominator = 1.0 + correction[0].x + corner * correction[n - 1].x / gamma;
-    if !denominator.is_finite() || denominator.abs() <= 1e-12 {
-        return Err(bad());
-    }
-    let factor = (second[0] + second[n - 1] * (corner / gamma)) / denominator;
-    for (value, correction) in second.iter_mut().zip(&correction) {
-        *value -= factor * correction.x;
-    }
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let next = (i + 1) % n;
-        let chord = points[i + 1] - points[i];
-        let t0 = chord - (second[i] * 2.0 + second[next]) * (h[i] * h[i] / 6.0);
-        let t1 = chord + (second[i] + second[next] * 2.0) * (h[i] * h[i] / 6.0);
-        let cubic = [points[i], points[i] + t0 / 3.0, points[i + 1] - t1 / 3.0, points[i + 1]];
-        if cubic.iter().any(|p| !in_range(*p)) {
-            return Err(bad());
-        }
-        out.push(cubic);
-    }
-    Ok(out)
+    solidcore_ops::fit_projection::fit_beziers(points, true).map_err(|e| SketchError::Invalid(e.to_string()))
 }
 
 impl Sketch {
