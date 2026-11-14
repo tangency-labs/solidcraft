@@ -723,62 +723,66 @@ impl<O: ClassObject> CurveClassification<O> {
         let near_miss_dist_3d = EFF_ZERO * 1000.0;
         // Only a potentially missed vertex needs the whole-span evidence for
         // its own-edge tolerance; ordinary endpoints require no extra drops.
-        let vertex_misses = |pc: &PointClassification<O>, t: f64, end: bool| -> Result<bool> {
-            if pc.point_class() != PointClassType::Vertex
-                || pc.gap_3d(k, geometry, surface)? < near_miss_dist_3d
-            {
-                return Ok(false);
-            }
-            let across = match self.surface1().and_then(|s| geometry.surface(s)) {
-                Some(s) => self.gap_across_curve(k, geometry, pc, t, end, s)?,
-                None => None,
-            };
-            if across.is_some_and(|gap| gap < near_miss_dist_3d) {
-                return Ok(false);
-            }
-            // A shared classification boundary is the same vertex from
-            // either neighboring interval. Its coincident edge may be on
-            // the other side of the interval being visited.
-            let mut on_curve = false;
-            if pc.object().is_some() {
-                for adjacent in self.intervals() {
-                    let shared_start =
-                        adjacent.interval.min() == t && adjacent.start.object() == pc.object();
-                    let shared_end =
-                        adjacent.interval.max() == t && adjacent.end.object() == pc.object();
-                    if (shared_start || shared_end)
-                        && adjacent.mid.point_class() == PointClassType::Edge
-                        && adjacent.mid.gap_3d(k, geometry, surface)? < near_miss_dist_3d
-                        && self.coincident_span_lies_on_curve(
-                            k,
-                            geometry,
-                            adjacent,
-                            near_miss_dist_3d,
-                        )?
-                    {
-                        on_curve = true;
-                        break;
+        let vertex_misses =
+            |pc: &PointClassification<O>, t: f64, end: bool, own_edge: bool| -> Result<bool> {
+                if pc.point_class() != PointClassType::Vertex
+                    || pc.gap_3d(k, geometry, surface)? < near_miss_dist_3d
+                {
+                    return Ok(false);
+                }
+                let across = match self.surface1().and_then(|s| geometry.surface(s)) {
+                    Some(s) => self.gap_across_curve(k, geometry, pc, t, end, s)?,
+                    None => None,
+                };
+                if across.is_some_and(|gap| gap < near_miss_dist_3d) {
+                    return Ok(false);
+                }
+                // A shared classification boundary is the same vertex from
+                // either neighboring interval. Its coincident edge may be on
+                // the other side of the interval being visited.
+                // The interval's own coincident edge keeps the relief it had; a shared
+                // boundary's other side is relieved only by the whole-definition proof.
+                let mut on_curve = own_edge;
+                if !on_curve && pc.object().is_some() {
+                    for adjacent in self.intervals() {
+                        let shared_start =
+                            adjacent.interval.min() == t && adjacent.start.object() == pc.object();
+                        let shared_end =
+                            adjacent.interval.max() == t && adjacent.end.object() == pc.object();
+                        if (shared_start || shared_end)
+                            && adjacent.mid.point_class() == PointClassType::Edge
+                            && adjacent.mid.gap_3d(k, geometry, surface)? < near_miss_dist_3d
+                            && self.coincident_span_lies_on_curve(
+                                k,
+                                geometry,
+                                adjacent,
+                                near_miss_dist_3d,
+                            )?
+                        {
+                            on_curve = true;
+                            break;
+                        }
                     }
                 }
-            }
-            let threshold = if on_curve && !self.edge_runs_beside(k, geometry, pc)? {
-                max2(
-                    near_miss_dist_3d,
-                    object_zone_tol_3d(k, geometry, pc.object())?,
-                )
-            } else {
-                near_miss_dist_3d
+                let threshold = if on_curve && !self.edge_runs_beside(k, geometry, pc)? {
+                    max2(
+                        near_miss_dist_3d,
+                        object_zone_tol_3d(k, geometry, pc.object())?,
+                    )
+                } else {
+                    near_miss_dist_3d
+                };
+                Ok(across.is_none_or(|gap| gap >= threshold))
             };
-            Ok(across.is_none_or(|gap| gap >= threshold))
-        };
 
         for ivl in self.intervals() {
             let mid = &ivl.mid;
             let coincident = mid.point_class() == PointClassType::Edge;
             let beside = coincident && mid.gap_3d(k, geometry, surface)? >= near_miss_dist_3d;
-            if vertex_misses(&ivl.start, ivl.interval.min(), false)?
+            let own_edge = coincident && !beside;
+            if vertex_misses(&ivl.start, ivl.interval.min(), false, own_edge)?
                 || beside
-                || vertex_misses(&ivl.end, ivl.interval.max(), true)?
+                || vertex_misses(&ivl.end, ivl.interval.max(), true, own_edge)?
             {
                 return Ok(true);
             }
