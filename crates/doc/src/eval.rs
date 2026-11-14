@@ -5738,6 +5738,24 @@ fn blend_body(
     r: f64,
     warning: &mut Option<String>,
 ) -> Result<(Traced, Option<Vec<f64>>, Tapered)> {
+    let (nb, from, used, tapered) = blend_raw(vals, f, mb, edges, r, warning)?;
+    // Keeping the input's planar certificates may join faces; their history stays over the same
+    // operand.
+    Ok((Traced::step(nb.with_preserved_planar_sources(&mb.body)?, &[&from]), used, tapered))
+}
+
+/// The blended body of [`blend_body`], with the stage its last blend started from (the input,
+/// or the body after the edges before the last for a blend made one edge at a time), the radii a
+/// fitted fillet used and the edges it tapered. Every type, fit, corner and setback of `f` is
+/// built here, so a pattern's or a mirror's copy of a blend is the same blend (#16912).
+fn blend_raw(
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    mb: &ModelBody,
+    edges: &[Vec3],
+    r: f64,
+    warning: &mut Option<String>,
+) -> Result<(kernel::Body, Traced, Option<Vec<f64>>, Tapered)> {
     let input = mb.traced();
     let (mut used, mut tapered) = (None, Vec::new());
     if let FeatureKind::Fillet { turn: crate::FilletTurn::Swept, style, fit, corner, setbacks, .. } = &f.kind
@@ -5806,9 +5824,7 @@ fn blend_body(
         FeatureKind::Chamfer { distance2, angle, flip, .. } => (chamfer_with(vals, &mb.body, edges, r, distance2, angle, *flip)?, input),
         _ => return Err(DocError::Invalid("blend".into())),
     };
-    // Keeping the input's planar certificates may join faces; their history stays over the same
-    // operand.
-    Ok((Traced::step(nb.with_preserved_planar_sources(&mb.body)?, &[&from]), used, tapered))
+    Ok((nb, from, used, tapered))
 }
 
 /// `f` as the naming of its faces reads it: a revolve's explicit axis origin written as the values
@@ -8792,6 +8808,21 @@ fn copy_instances(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelStat
     Ok(all)
 }
 
+/// Blend `src` (a fillet or chamfer) as its copy placed by `m` reads it: the points its radius
+/// law starts from and its corner setbacks' vertices moved with its edges.
+fn moved_blend(src: &Feature, m: &Mat) -> Feature {
+    let mut copy = src.clone();
+    if let FeatureKind::Fillet { style, setbacks, .. } = &mut copy.kind {
+        if let crate::FilletStyle::Variable { start, .. } | crate::FilletStyle::Spline { start, .. } = style {
+            start.0 = crate::apply_point(m, start.0);
+        }
+        for c in setbacks {
+            c.vertex.0 = crate::apply_point(m, c.vertex.0);
+        }
+    }
+    copy
+}
+
 /// Apply transformed copies of the tools of `features` (patterns, mirrors).
 fn replay(
     doc: &Document,
@@ -8853,20 +8884,22 @@ fn replay(
                 for (ti, idx) in groups {
                     let moved: Vec<Vec3> = idx.iter().filter_map(|i| moved_all.get(*i).copied()).collect();
                     let Some(mb) = st.bodies.get(ti).cloned() else { continue };
-                    let nb = match &src.kind {
-                        FeatureKind::Chamfer { distance2, angle, flip, .. } => chamfer_with(vals, &mb.body, &moved, r, distance2, angle, *flip)?,
+                    let nb = match (&src.kind, st.fitted.get(&src.id)) {
                         // A copy is congruent to the original: the radius it was reduced to first.
-                        FeatureKind::Fillet { fit, turn, .. } => match st.fitted.get(&src.id) {
-                            Some(used) => {
-                                let used: Vec<f64> = idx.iter().map(|i| used.get(*i).copied().unwrap_or(r)).collect();
-                                kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?
-                            }
-                            None => fillet_fitted(&mb.body, &moved, r, *fit, turn.kernel())?.0,
-                        },
-                        _ => kernel::fillet(&mb.body, &moved, r)?,
+                        (FeatureKind::Fillet { turn, .. }, Some(used)) => {
+                            let used: Vec<f64> = idx.iter().map(|i| used.get(*i).copied().unwrap_or(r)).collect();
+                            mb.traced().then(kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?)
+                        }
+                        // Otherwise the copy is the same blend, with its type, fit, corners and
+                        // setbacks, at the copied edges (#16912): a curvature or spline fillet's
+                        // copy was a constant-radius round. Its notes are the original's.
+                        _ => {
+                            let (nb, from, _, _) = blend_raw(vals, &moved_blend(src, m), &mb, &moved, r, &mut None)?;
+                            // A copy blends edges the pattern's own copies made: named after the
+                            // body so far.
+                            from.then(nb)
+                        }
                     };
-                    // A copy blends edges the pattern's own copies made: named after the body so far.
-                    let nb = mb.traced().then(nb);
                     if let Some(slot) = st.bodies.get_mut(ti) {
                         *slot = mb.remade(nb);
                     }
