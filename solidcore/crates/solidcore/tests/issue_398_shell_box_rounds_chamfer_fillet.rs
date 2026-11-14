@@ -256,12 +256,15 @@ fn issue_398_open_top_shell_with_edges_on_analytics_exact() {
     assert_eq!(got.face_list().len(), 51);
     let want = closed_form(Some(30.0));
     assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
-    // 1.9e-10 above the closed form since #2890 (precise properties integrate from the
+    // It was 1.9e-10 above the closed form from #2890 (precise properties integrate from the
     // trims' base; 13701.73421803366, 2.4e-9 above, before): the offset's face extensions
     // are exact (the source bit for bit, no least squares fit or knot removal moving a
     // face's own part); it was 13701.73449509504 (2.3e-8 above) on the fitted extensions,
-    // 13701.735330849975 (8.4e-8 above) with the flag off
-    let pinned = 13701.734187900483;
+    // 13701.735330849975 (8.4e-8 above) with the flag off. With the rims' chamfer stored as
+    // its cone (WR-572, unconditional since its flag was retired) it is 13701.734697389531,
+    // 3.7e-8 above, where the revolution gave 13701.734182305687 (2.2e-10 below): the
+    // offset corner cones meet the cavity floor 1.2e-6 below it (tangency-labs/solidcraft#16587)
+    let pinned = 13701.734697389531;
     assert!((v - pinned).abs() <= 1e-9 * pinned, "{v} vs {pinned}");
 }
 
