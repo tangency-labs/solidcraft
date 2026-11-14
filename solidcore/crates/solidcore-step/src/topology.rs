@@ -1650,7 +1650,14 @@ impl<'b, 'a> Builder<'b, 'a> {
                     None => self.face_extent(fi)?,
                 };
                 let extent = extent.ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
-                let (f, d) = crate::kernel::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?;
+                let (f, d) = crate::kernel::form::surface_within(&label, extent, tol).ok_or_else(|| {
+                    let turns = (extent[0][1] - extent[0][0]) / TAU;
+                    if turns > 1.0 {
+                        unsupported(format!("a face that winds {turns:.1} turns about its axis (a thread's flank): a round face covers at most one"))
+                    } else {
+                        unsupported("a face of more than one turn")
+                    }
+                })?;
                 Some((f, d, extent))
             }
             None => None,

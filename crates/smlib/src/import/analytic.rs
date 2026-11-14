@@ -70,7 +70,11 @@ pub(super) fn analytic(brep: &b::Brep) -> R<Cow<'_, b::Brep>> {
         let flip = agree((&f.surface, f.domain), (&surface, range), tol)?;
         let face = out.get_or_insert_with(|| brep.clone()).faces.get_mut(i).ok_or(Unsupported::Invalid("face"))?;
         face.surface = surface;
-        face.domain = range;
+        // A face with a NURBS form keeps its domain: it is the form's (its trims are on the form),
+        // not the analytic surface's range.
+        if f.nurbs.is_none() {
+            face.domain = range;
+        }
         if flip {
             turned.push(i);
         }
