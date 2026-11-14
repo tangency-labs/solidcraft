@@ -1774,8 +1774,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "fillet_mitre_gap_patch" => &mut k.fixes.fillet_mitre_gap_patch,
         "fillet_corner_per_vertex_fan" => &mut k.fixes.fillet_corner_per_vertex_fan,
         "fillet_trace_reaches_rails" => &mut k.fixes.fillet_trace_reaches_rails,
-        "fillet_rail_end_on_continued_surface" => &mut k.fixes.fillet_rail_end_on_continued_surface,
-        "fillet_cliff_overflow" => &mut k.fixes.fillet_cliff_overflow,
         "offset_extension_as_itself" => &mut k.fixes.offset_extension_as_itself,
         "fillet_run_on_past_far_end_only" => &mut k.fixes.fillet_run_on_past_far_end_only,
         _ => k
@@ -2521,13 +2519,25 @@ mod tests {
         }
     }
 
+    /// The corpus has no known refusal left (`324-*/round_4_over_hole`, the last, builds
+    /// since the cliff overflow is the only path, tangency-labs/solidcraft#13841): a case
+    /// whose last step fails with a fixed error stands in for one.
     #[test]
     fn a_refusal_defers_only_its_own_step_and_error() {
-        let refused = all()
-            .into_iter()
-            .find(|l| l.id.ends_with("/round_4_over_hole"))
-            .expect("the #422 case")
-            .case;
+        let refused: Case = serde_json::from_value(json!({
+            "name": "a_step_that_fails",
+            "refused_by": {
+                "issue": "tangency-labs/solidcraft#13841",
+                "step": "result",
+                "error": "no body `missing`"
+            },
+            "steps": [
+                {"op": "box", "id": "block", "origin": [0, 0, 0], "size": [40, 20, 10]},
+                {"op": "fillet", "id": "result", "body": "missing", "edges": [[10, 20, 10]], "radius": 4}
+            ],
+            "expect": {"lumps": 1}
+        }))
+        .unwrap();
         assert!(matches!(run_rust(&refused), Run::Deferred(_)));
         let mut no_refusal = refused.clone();
         no_refusal.refused_by = None;
@@ -2545,7 +2555,7 @@ mod tests {
         assert!(matches!(run_rust(&other_step), Run::Error(_)));
         let mut other_error = refused;
         if let Some(r) = other_error.refused_by.as_mut() {
-            r.error = "upstream status 1002".into();
+            r.error = "no body `other`".into();
         }
         assert!(matches!(run_rust(&other_error), Run::Error(_)));
     }

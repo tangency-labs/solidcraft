@@ -336,8 +336,7 @@ nice -n 10 cargo run -p goldens -- --solidcraft-cases '3526-*'        # ids (<fi
 * **Known refusal** (`refused_by`, optional): for a case the kernel refuses on purpose,
   the `issue` that tracks it, the `step` id that fails and text its `error` contains. Only
   that step failing with that error defers the case on the issue; any other error stays
-  an `ERROR`, and the deferral keeps the full error text (for example
-  `324-*/round_4_over_hole`, tangency-labs/solidcore#422).
+  an `ERROR`, and the deferral keeps the full error text.
   An empty or whitespace-only `error` never matches: the step failure stays an `ERROR`.
 * **Expectations** (`expect`): `lumps` (bounded regions; `0` = nothing left; a sealed
   void is a region of its own), `volume` (`value`, absolute `tol`, the `formula` it came

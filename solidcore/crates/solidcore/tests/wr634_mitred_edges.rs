@@ -58,10 +58,7 @@ const RIM: [(f64, f64); 4] = [(15.0, 10.0), (45.0, 10.0), (45.0, 30.0), (15.0, 3
 /// mitred edges, and the rim's edges in `RIM` order.
 fn classify(mitre: bool) -> (i32, Vec<EdgeId>, Vec<EdgeId>, Vec<EdgeId>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_mitre_concave_face_corners = mitre;
     let mut b = pocketed_plate(&mut k);
     let rim: Vec<EdgeId> = (0..4)

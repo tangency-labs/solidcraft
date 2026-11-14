@@ -1,4 +1,4 @@
-//! The SolidCraft fork's tangency-labs/smlib@db4a655 (`fillet_cliff_overflow`, WR-631 /
+//! The SolidCraft fork's tangency-labs/smlib@db4a655 (the cliff overflow, WR-631 /
 //! WR-635 / WR-636): a closed rim blended past the far end of its wall is built as if the
 //! wall went on, then cut by the face beyond. The disc R13 x 2 with its top rim rounded
 //! R2.5 (solidcraft#190): the round's rail on the wall lies 0.5 below the disc's bottom,
@@ -9,8 +9,7 @@
 //! Expected (the fork's capi test `closed_rims_blended_past_their_walls`, the rig's
 //! analytic answer): the disc pi 338 less the round's spandrel of revolution,
 //! 957.692238945; the fork builds 957.692238947 (this port 957.6922564 at the volume
-//! integrator's 1e-6 accuracy). Without the flag the round is refused; with it but without
-//! db4a655 it was refused as "lies on no face's exact continuation" (`NotExact`).
+//! integrator's 1e-6 accuracy). Without db4a655 it was refused as "lies on no face's exact continuation" (`NotExact`).
 
 #![allow(
     clippy::unwrap_used,
@@ -28,15 +27,12 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-fn kernel(cliff: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.fillet_run_on_bspline_trims = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.offset_extension_as_itself = true;
-    k.fixes.fillet_cliff_overflow = cliff;
     k
 }
 
@@ -68,8 +64,8 @@ fn rim_at(k: &Kernel, b: &Brep, z: f64) -> EdgeId {
 
 /// Rounds the top rim of the disc R13 x 2 by `r`: the volume of the result, or the error
 /// code and comment.
-fn round_disc_rim(cliff: bool, r: f64) -> Result<f64, (i32, String)> {
-    let mut k = kernel(cliff);
+fn round_disc_rim(r: f64) -> Result<f64, (i32, String)> {
+    let mut k = kernel();
     let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 13.0, 2.0).unwrap();
     let rim = rim_at(&k, &b, 2.0);
     let mut session = FilletSession::new(&mut k, &mut b).unwrap();
@@ -90,7 +86,7 @@ fn round_disc_rim(cliff: bool, r: f64) -> Result<f64, (i32, String)> {
 
 #[test]
 fn db4a655_disc_rim_rounded_past_its_wall_closes_on_the_wall_continued() {
-    let built = round_disc_rim(true, 2.5);
+    let built = round_disc_rim(2.5);
     let expected = 957.692_238_945;
     match built {
         Ok(v) => assert!(
@@ -99,9 +95,4 @@ fn db4a655_disc_rim_rounded_past_its_wall_closes_on_the_wall_continued() {
         ),
         Err(e) => panic!("refused: {e:?}"),
     }
-}
-
-#[test]
-fn db4a655_without_the_flag_the_round_is_refused() {
-    assert!(round_disc_rim(false, 2.5).is_err());
 }

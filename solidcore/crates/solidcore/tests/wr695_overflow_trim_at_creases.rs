@@ -33,10 +33,7 @@ use solidcore::{Brep, Kernel};
 /// creases on (`trim`) or off (the subtraction).
 fn kernel(trim: bool) -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_overflow_trim_at_creases = trim;
     k
 }

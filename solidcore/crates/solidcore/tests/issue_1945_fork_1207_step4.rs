@@ -35,7 +35,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.temporary_radius_setup_errors = true;
     k.fixes.fillet_trim_status = true;
     k.fixes.curve_loop_normal_from_area = true;
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_vertex_error_diagnostics = true;
@@ -128,7 +127,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.shell_empty_cavity_fails = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.ssi_singular_start_inside_direction = true;

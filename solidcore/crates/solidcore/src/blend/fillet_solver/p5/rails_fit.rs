@@ -3,8 +3,7 @@
 //!
 //! Not upstream (SMLib 1.0.1 has neither): the fork's check, tangency-labs/smlib
 //! `fc43974` (refusal), `967f7ab` (`LeavesPastAnEnd`) and `518566f` (a run of off-face
-//! intervals is judged once, WR-302, tangency-labs/solidcore#841 and #1024). Used only
-//! with the opt-in `Kernel::fixes.fillet_refuse_rails_leaving_faces`.
+//! intervals is judged once, WR-302, tangency-labs/solidcore#841 and #1024).
 //!
 //! Deviations: a run of off-face intervals between two stretches on the face is skipped
 //! when it both leaves and returns on or beyond the cross section at the same end of the
@@ -14,14 +13,12 @@
 //! end where the filleted edge is closed and the run lies beyond the plane on which the
 //! corner at its vertex cuts the rail ([`past_closed_corner`], #2498): the fork takes the
 //! top rail of a teardrop's rim, which crosses the rim itself just past the tip, for a
-//! cliff overflow. The fork's later cliff-overflow construction (`SmFilletCliffOverflow.cpp`,
-//! which builds a convex blend over a cliff and subtracts what it removes) is not
-//! ported, so every blend that leaves its face between its ends is refused, as in
-//! `fc43974`. With the opt-in `Kernel::fixes.fillet_cliff_overflow` (WR-631, the fork's
-//! `8ba4667` at rev `68fb9162`) the check also tells whether a rail rolls over a tangent
-//! edge and whether a rail that leaves its face runs on into the body's material
-//! ([`RailsFit`], `IsConcaveEdge`, `sm_InsideMaterial`), for the executive's choice
-//! between a refusal and a cliff overflow; those judgements run only with that flag. The
+//! cliff overflow. As the fork's `8ba4667` at rev `68fb9162` (WR-631), the check also
+//! tells whether a rail rolls over a tangent edge and whether a rail that leaves its
+//! face runs on into the body's material ([`RailsFit`], `IsConcaveEdge`,
+//! `sm_InsideMaterial`), for the executive's choice between a refusal and a cliff
+//! overflow (a convex blend built over a cliff, the material it removes taken from the
+//! body: `crate::blend::fillet_cliff_overflow`). The
 //! fork's `IsKnifeEdge` ([`is_knife_edge`], `e418750`, WR-665) is here too, used by
 //! `SmFilletCorner::Create` with `fixes.fillet_corner_per_vertex_fan`. The
 //! nearest-edge search of `sm_InsideMaterial` keeps the first of equally near edges, in
@@ -49,6 +46,7 @@ use crate::topology::{edge, edgeuse::p1 as eu, Brep, EdgeId, FaceId};
 /// What [`FilletSolver::rails_fit_their_faces_judged_with_ops`] finds of a solver's rails
 /// (the fork's `RailsFitTheirFaces(rbFit, rbRollsOver, rbIntoMaterial)`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)] // the fork's three out-flags and one judgement of the same run
 pub struct RailsFit {
     /// `rbFit`: every rail stays on its face (`false` = a rail leaves its face between
     /// the filleted edge's ends, or is nowhere on it).
@@ -58,6 +56,11 @@ pub struct RailsFit {
     /// `rbIntoMaterial`: a rail that leaves its face runs on inside the body (judged only
     /// when asked; `false` otherwise).
     pub into_material: bool,
+    /// Not the fork's (tangency-labs/solidcore#2175): a closed rail leaves its face past
+    /// one end of the filleted edge and comes back onto it past the other, round the far
+    /// side of the rail. The face is smaller than the blend beyond both ends, not cut off
+    /// by a cliff between them.
+    pub wraps_past_both_ends: bool,
 }
 
 /// `SmFilletSolver::IsKnifeEdge` (the fork's, tangency-labs/smlib `e418750`, WR-665):
@@ -407,6 +410,25 @@ impl FilletSolver {
         let mut fit = true;
         let mut rolls_over = false;
         let mut into_material = false;
+        let mut wraps_past_both_ends = false;
+        // the filleted edge (a rail that leaves its face across it is not leaving past a cliff)
+        let filleted = match solver.solver().edgeuse(0)? {
+            Some(u) => eu::edge(target, u)?,
+            None => None,
+        };
+        // A sheet's edge bounds no material: a rail that runs off a sheet's face is cut by the
+        // corners and the face's boundary as upstream cuts it, with no cliff to overflow and
+        // no body to subtract from (not the fork's, whose `IsConcaveEdge` fails there).
+        if let Some(e) = filleted {
+            if !edge_bounds_material(target, e)? {
+                return Ok(RailsFit {
+                    fit: true,
+                    rolls_over: false,
+                    into_material: false,
+                    wraps_past_both_ends: false,
+                });
+            }
+        }
         for id in solver.solver().fillet_geoms() {
             if fillets.geom(id)?.fillet_geom_type() != FilletGeomType::Default {
                 continue;
@@ -485,6 +507,8 @@ impl FilletSolver {
                     } else {
                         (&ivl.start, ivl.interval.min())
                     };
+                    // this run leaves past one end and comes back past the other
+                    let mut wraps = false;
                     let past_end = |point: &PointClassification<FilletClassObject>, d: f64| {
                         leaves_past_an_end(solver.solver(), k, target, face, &curve, d, point)
                     };
@@ -522,6 +546,7 @@ impl FilletSolver {
                         if back == Some(end) {
                             continue;
                         }
+                        wraps = back.is_some();
                     }
                     let side = match (leave.point_class(), leave.object()) {
                         (PointClassType::Edge, Some(o)) => match o.target_entity()? {
@@ -530,6 +555,13 @@ impl FilletSolver {
                         },
                         _ => None,
                     };
+                    // A rail that leaves its face across the filleted edge itself crosses
+                    // where the two faces meet, not a cliff: the faces turn tangent there
+                    // (the blend's section closes up at an end), and the corner at that end
+                    // trims the fillet as upstream does. No overflow construction applies.
+                    if side.is_some() && side == filleted {
+                        continue;
+                    }
                     if let Some(side) = side {
                         let tolerance = solver.solver().tangency_tolerance;
                         if test_manifold_tangent_rollover(k, target, side, tolerance)?.0 {
@@ -538,6 +570,11 @@ impl FilletSolver {
                         }
                     }
                     fit = false;
+                    // only a run that is itself judged off its face (not one passed over
+                    // above as trimmed, tangent at the filleted edge or rolled over)
+                    if wraps {
+                        wraps_past_both_ends = true;
+                    }
                     if judge_material {
                         // the edge it leaves across (or the face's edge nearest where it leaves)
                         let inside = if let Some(side) = side {
@@ -593,6 +630,7 @@ impl FilletSolver {
             fit,
             rolls_over,
             into_material,
+            wraps_past_both_ends,
         })
     }
 }

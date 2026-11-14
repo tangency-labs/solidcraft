@@ -19,9 +19,15 @@
 //! widened interval, and the put-back was refused as the fork's since 779cb9b. -9 now
 //! builds the fork's 2fc375f body (6 faces), with the closed form's volume to 8e-12: the
 //! shrink keeps the rounds' exact trims (WR-700), where the fork's 1006.320632128887
-//! through SolidCraft's capi is 4.8e-9 over it. With the flags off, the put-back fails at -7.5 (a corner edge) and at -9
-//! (a rollover). Each such failure is now a typed refusal,
-//! `OffsetFacesRefusal::NotPutBack`, where it had none.
+//! through SolidCraft's capi is 4.8e-9 over it.
+//!
+//! On the default kernel the depths below the floor build too (#13841): the rounds' rails
+//! on the walls lie below the floor there, so each round leaves its wall across the floor's
+//! edge (a cliff) and is built as a cliff overflow, which was a flag
+//! (`fillet_cliff_overflow`, with the refusal of rails leaving their faces and the rail end
+//! on the continued surface) and is now the only path. Before, the put-back failed at
+//! -7.5 and -8 (two fillet surfaces that do not meet) and at -9 and -9.5 (a rollover),
+//! refused as `OffsetFacesRefusal::NotPutBack`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -37,6 +43,7 @@ use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::surface::plane::Plane;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::face::p2 as face2;
 use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId};
 use solidcore::Kernel;
@@ -208,6 +215,33 @@ fn flags_off_build_the_depths_above_the_floor() {
     }
 }
 
+/// #13841: the default kernel builds every depth below the floor as the preset does, one
+/// manifold solid of 6 faces with the closed form's volume.
+#[test]
+fn default_kernel_builds_the_depths_below_the_floor() {
+    for d in [-7.5, -8.0, -9.0, -9.5] {
+        let k = &mut Kernel::default();
+        let (mut b, ex, r) = moved(k, d);
+        assert!(
+            r.is_ok(),
+            "d {d}: {r:?}: {:?} {}",
+            ex.refusal(),
+            ex.reason()
+        );
+        assert_eq!(ex.refusal(), OffsetFacesRefusal::None, "d {d}");
+        assert!(brep_is_manifold_solid(&b).unwrap(), "d {d}");
+        assert_eq!(b.face_list().len(), 6, "d {d}");
+        let lines = check_brep(k, &mut b, CheckLevel::Level2).unwrap().lines();
+        assert!(lines.is_empty(), "d {d}: {lines:?}");
+        let v = volume(k, &mut b);
+        let want = analytic(d);
+        assert!(
+            (v - want).abs() <= 1e-6 * want,
+            "d {d}: V {v} vs analytic {want}"
+        );
+    }
+}
+
 /// SolidCraft's `UpstreamFixes` preset (183 flags).
 fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.analytic_copy_keeps_parameterization = true;
@@ -239,7 +273,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_chamfer_cone_stored_as_cone = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
-    k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_corner_ball_center_from_axes = true;
     k.fixes.fillet_corner_ball_patch = true;
     k.fixes.fillet_half_degree_crease = true;
@@ -252,11 +285,9 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_nx1_tangent_side_edge = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_point_step_per_point = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.fillet_rails_meet_at_one_end_point = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;
     k.fixes.fillet_run_on_past_far_end_only = true;
     k.fixes.fillet_split_edge_keeps_near_half = true;

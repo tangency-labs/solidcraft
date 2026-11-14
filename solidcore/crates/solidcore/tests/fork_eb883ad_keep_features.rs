@@ -175,8 +175,6 @@ fn a_band_short_of_the_feature_leaves_it() {
 fn fork_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut fixes = UpstreamFixes::default();
-    fixes.fillet_refuse_rails_leaving_faces = true;
-    fixes.fillet_cliff_overflow = true;
     fixes.fillet_overflow_trim_at_creases = true;
     fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes = fixes;
