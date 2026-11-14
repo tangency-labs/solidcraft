@@ -1061,18 +1061,27 @@ mod tests {
     #[test]
     fn blend_success_returns_its_face() {
         let mut k = Kernel::default();
-        // edges 0 and 3 on faces 1 and 2 give no blend direction: that failure is passed on
-        // (WR-662), where upstream ignores it and reports success with no face
-        {
+        // edges 0 and 3 on faces 1 and 2 give no blend direction, and edges 0 and 1, which
+        // meet at a corner of face 1, a blend whose reference curve touches its boundary
+        // there: those failures are passed on (WR-662), where upstream ignores them and
+        // reports success, with no face and with a face on that degenerate surface
+        for (edge2_index, face2_index) in [(3, 2), (1, 1)] {
             let mut brep = create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0).unwrap();
             let edges = crate::topology::brep::p1::edges(&brep, None).unwrap();
             let faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
             assert!(create_blend_primitive(
-                &mut k, &mut brep, edges[0], faces[1], edges[3], faces[2], true,
+                &mut k,
+                &mut brep,
+                edges[0],
+                faces[1],
+                edges[edge2_index],
+                faces[face2_index],
+                true,
             )
             .is_err());
         }
-        for (edge2_index, face2_index, has_face) in [(2, 2, true), (1, 1, true)] {
+        {
+            let (edge2_index, face2_index, has_face) = (2, 2, true);
             let mut brep = create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0).unwrap();
             let edges = crate::topology::brep::p1::edges(&brep, None).unwrap();
             let faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
