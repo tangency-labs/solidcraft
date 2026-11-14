@@ -1936,6 +1936,151 @@ mod path_export_regressions {
         );
     }
 
+    fn scalar_encoding(round_trip: fn(f64) -> Option<f64>) -> ScalarEncoding {
+        ScalarEncoding {
+            round_trip,
+            min_ellipse_ratio: 1e-12,
+            turn_snap_radians: 1e-12,
+        }
+    }
+
+    #[test]
+    fn refused_line_endpoint_never_certifies_a_path_or_a_degenerate_line() {
+        let encoding = scalar_encoding(|v| (v <= 10.0).then_some(v));
+        for (a, b) in [
+            (Vec2::ZERO, Vec2::new(11.0, 0.0)),
+            (Vec2::new(11.0, 0.0), Vec2::ZERO),
+            (Vec2::new(11.0, 0.0), Vec2::new(11.0, 0.0)),
+        ] {
+            let segs = [
+                Seg2::Line {
+                    a: Vec2::ZERO,
+                    b: Vec2::new(1.0, 0.0),
+                },
+                Seg2::Line { a, b },
+            ];
+            let error =
+                path_shapes(DxfPath::Open(&segs), DxfPathStyle::Exact, encoding).unwrap_err();
+            assert_eq!(error.piece, Some((1, 2)));
+            assert_eq!(error.reason, "line endpoint cannot be encoded");
+        }
+    }
+
+    #[test]
+    fn refused_arc_angle_never_certifies_a_one_sided_encoding() {
+        let arc = Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: 2.0,
+            start: 0.0,
+            sweep: std::f64::consts::FRAC_PI_2,
+        };
+        for encoding in [
+            scalar_encoding(|v| (v != 90.0).then_some(v)),
+            scalar_encoding(|v| (v != 0.0).then_some(v)),
+        ] {
+            let error = exact_piece(&arc, 2, 4, encoding).unwrap_err();
+            assert_eq!(error.piece, Some((2, 4)));
+            assert_eq!(error.reason, "arc angle cannot be encoded");
+        }
+    }
+
+    #[test]
+    fn refused_ellipse_parameters_keep_the_exact_rational_controls() {
+        let a = Vec2::new(2.0, 0.0);
+        let apex = Vec2::new(2.0, 1.0);
+        let b = Vec2::new(0.0, 1.0);
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let conic = Seg2::Conic { a, apex, b, w };
+        assert!(matches!(
+            exact_piece(&conic, 0, 1, scalar_encoding(Some)).unwrap(),
+            PathShape::Ellipse { .. }
+        ));
+        // The quarter ellipse's pi/2 parameter is refused; all its rational
+        // controls, weights and knots are representable in this same encoding.
+        let encoding = scalar_encoding(|v| (!(1.0..2.0).contains(&v) || v == 1.0).then_some(v));
+        let PathShape::Spline {
+            degree,
+            knots,
+            ctrl,
+            weights,
+        } = exact_piece(&conic, 0, 1, encoding).unwrap()
+        else {
+            panic!("unencodable ellipse parameter must keep the rational source");
+        };
+        assert_eq!(degree, 2);
+        assert_eq!(knots, [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+        assert_eq!(ctrl, [a, apex, b]);
+        assert_eq!(weights, Some(vec![1.0, w, 1.0]));
+        let error = exact_piece(
+            &conic,
+            0,
+            1,
+            scalar_encoding(|v| (!(1.9..2.1).contains(&v.abs())).then_some(v)),
+        )
+        .unwrap_err();
+        assert_eq!(error.reason, "spline control cannot be encoded");
+    }
+
+    #[test]
+    fn refused_spline_control_never_passes_a_partial_collapse_check() {
+        let cubic = Seg2::Cubic {
+            p0: Vec2::ZERO,
+            p1: Vec2::new(1.0, 1.0),
+            p2: Vec2::new(11.0, 1.0),
+            p3: Vec2::new(2.0, 0.0),
+        };
+        let error =
+            exact_piece(&cubic, 1, 3, scalar_encoding(|v| (v <= 10.0).then_some(v))).unwrap_err();
+        assert_eq!(error.piece, Some((1, 3)));
+        assert_eq!(error.reason, "spline control cannot be encoded");
+    }
+
+    #[test]
+    fn nonfinite_decoded_scalars_never_certify_points_angles_or_positive_values() {
+        for decoded in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let round_trip: fn(f64) -> Option<f64> = if decoded.is_nan() {
+                |v| Some(if v == 2.0 { f64::NAN } else { v })
+            } else if decoded.is_sign_positive() {
+                |v| Some(if v == 2.0 { f64::INFINITY } else { v })
+            } else {
+                |v| Some(if v == 2.0 { f64::NEG_INFINITY } else { v })
+            };
+            let encoding = scalar_encoding(round_trip);
+            let line = Seg2::Line {
+                a: Vec2::ZERO,
+                b: Vec2::new(2.0, 0.0),
+            };
+            assert_eq!(
+                exact_piece(&line, 0, 1, encoding).unwrap_err().reason,
+                "line endpoint cannot be encoded"
+            );
+            let circle = Seg2::Arc {
+                center: Vec2::ZERO,
+                radius: 2.0,
+                start: 0.0,
+                sweep: std::f64::consts::TAU,
+            };
+            assert_eq!(
+                exact_piece(&circle, 0, 1, encoding).unwrap_err().reason,
+                "arc radius is not positive at writer precision"
+            );
+        }
+        let arc = Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: 2.0,
+            start: 0.0,
+            sweep: std::f64::consts::FRAC_PI_2,
+        };
+        let error = exact_piece(
+            &arc,
+            0,
+            1,
+            scalar_encoding(|v| Some(if v == 90.0 { f64::INFINITY } else { v })),
+        )
+        .unwrap_err();
+        assert_eq!(error.reason, "arc angle cannot be encoded");
+    }
+
     #[test]
     fn bulge_bounds_include_the_directed_cardinal_extremum() {
         let pts = bulged_edge_points(

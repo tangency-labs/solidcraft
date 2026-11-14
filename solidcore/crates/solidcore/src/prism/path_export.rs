@@ -401,10 +401,14 @@ fn ellipse_representable(
     {
         return false;
     }
-    if major == Vec2::ZERO
-        || encoded_point(major, encoding) == Some(Vec2::ZERO)
-        || (encoding.round_trip)(t0) == (encoding.round_trip)(t1)
-    {
+    let (Some(encoded_major), Some(encoded_t0), Some(encoded_t1)) = (
+        encoded_point(major, encoding),
+        encoded_scalar(t0, encoding),
+        encoded_scalar(t1, encoding),
+    ) else {
+        return false;
+    };
+    if major == Vec2::ZERO || encoded_major == Vec2::ZERO || encoded_t0 == encoded_t1 {
         return false;
     }
     let minor = major.perp() * ratio;
@@ -417,7 +421,11 @@ fn ellipse_representable(
 fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape> {
     let shape = match *seg {
         Seg2::Line { a, b } => {
-            if a != b && encoded_point(a, encoding) == encoded_point(b, encoding) {
+            let encoded_a = encoded_point(a, encoding)
+                .ok_or_else(|| piece.invalid("line endpoint cannot be encoded"))?;
+            let encoded_b = encoded_point(b, encoding)
+                .ok_or_else(|| piece.invalid("line endpoint cannot be encoded"))?;
+            if a != b && encoded_a == encoded_b {
                 return Err(piece.invalid("line endpoints collapse at writer precision"));
             }
             DxfShape::Line(a, b)
@@ -445,9 +453,11 @@ fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape>
                 a0.to_degrees().rem_euclid(360.0),
                 a1.to_degrees().rem_euclid(360.0),
             );
-            if (encoding.round_trip)(a0).map(|a| a.rem_euclid(360.0))
-                == (encoding.round_trip)(a1).map(|a| a.rem_euclid(360.0))
-            {
+            let encoded_a0 = encoded_scalar(a0, encoding)
+                .ok_or_else(|| piece.invalid("arc angle cannot be encoded"))?;
+            let encoded_a1 = encoded_scalar(a1, encoding)
+                .ok_or_else(|| piece.invalid("arc angle cannot be encoded"))?;
+            if encoded_a0.rem_euclid(360.0) == encoded_a1.rem_euclid(360.0) {
                 return Err(piece.invalid("arc endpoints collapse in the angular representation"));
             }
             DxfShape::Arc {
@@ -495,11 +505,15 @@ fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape>
     };
     if let DxfShape::Spline { ctrl, .. } = &shape {
         if let Some(first) = ctrl.first() {
-            if ctrl.iter().any(|p| p != first)
-                && ctrl
-                    .iter()
-                    .all(|p| encoded_point(*p, encoding) == encoded_point(*first, encoding))
-            {
+            let encoded_first = encoded_point(*first, encoding)
+                .ok_or_else(|| piece.invalid("spline control cannot be encoded"))?;
+            let mut all_equal = true;
+            for point in ctrl {
+                let encoded = encoded_point(*point, encoding)
+                    .ok_or_else(|| piece.invalid("spline control cannot be encoded"))?;
+                all_equal &= encoded == encoded_first;
+            }
+            if ctrl.iter().any(|p| p != first) && all_equal {
                 return Err(piece.invalid("spline controls collapse at writer precision"));
             }
         }
@@ -507,15 +521,19 @@ fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape>
     Ok(shape)
 }
 
+fn encoded_scalar(value: f64, encoding: ScalarEncoding) -> Option<f64> {
+    (encoding.round_trip)(value).filter(|decoded| decoded.is_finite())
+}
+
 fn encoded_point(point: Vec2, encoding: ScalarEncoding) -> Option<Vec2> {
     Some(Vec2::new(
-        (encoding.round_trip)(point.x)?,
-        (encoding.round_trip)(point.y)?,
+        encoded_scalar(point.x, encoding)?,
+        encoded_scalar(point.y, encoding)?,
     ))
 }
 
 fn encoded_positive(value: f64, piece: Piece, name: &str, encoding: ScalarEncoding) -> Result<()> {
-    if !(encoding.round_trip)(value).is_some_and(|v| v > 0.0) {
+    if !encoded_scalar(value, encoding).is_some_and(|v| v > 0.0) {
         return Err(piece.invalid(format_args!("{name} is not positive at writer precision")));
     }
     Ok(())
