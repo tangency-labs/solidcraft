@@ -35,6 +35,7 @@ pub mod crash_ui;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
+pub mod design_tab_prefs;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;

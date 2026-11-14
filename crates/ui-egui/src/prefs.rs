@@ -1383,6 +1383,19 @@ preference_settings! {
     /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
     /// as the rest of the title bar does, as before.
     tab_double_click_renames: bool = true, PAGE_LAYOUT;
+    /// A design's views (Model, Sketch, Sheet, Render, Animation) are tabs inside its tab; off, the
+    /// design keeps one tab and a view switcher lists them.
+    design_views_as_tabs: bool = true, PAGE_LAYOUT;
+    /// A drawing sheet opens as a view (a sub-tab) of its design.
+    design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
+    /// Editing a sketch opens it as a view of its design; Finish Sketch returns to the previous view.
+    design_sub_tab_sketches: bool = true, PAGE_LAYOUT;
+    /// Render and Animate open as views of their design.
+    design_sub_tab_render: bool = true, PAGE_LAYOUT;
+    /// Opening a sheet, sketch or workspace that a view already shows activates that view.
+    design_reuse_views: bool = true, PAGE_LAYOUT;
+    /// A design opens with the views it had when it was last closed.
+    design_reopen_views: bool = false, PAGE_LAYOUT;
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
     dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_LAYOUT;
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
@@ -6796,6 +6809,12 @@ mod tests {
             ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
             ("ribbon_reveal", json!(true), PAGE_LAYOUT),
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
+            ("design_views_as_tabs", json!(false), PAGE_LAYOUT),
+            ("design_sub_tab_sheets", json!(false), PAGE_LAYOUT),
+            ("design_sub_tab_sketches", json!(false), PAGE_LAYOUT),
+            ("design_sub_tab_render", json!(false), PAGE_LAYOUT),
+            ("design_reuse_views", json!(false), PAGE_LAYOUT),
+            ("design_reopen_views", json!(true), PAGE_LAYOUT),
             ("dialog_buttons", json!("top"), PAGE_LAYOUT),
             ("toast_place", json!("centre"), PAGE_LAYOUT),
             ("operations_panel", json!(false), PAGE_LAYOUT),
@@ -7273,6 +7292,58 @@ mod tests {
         assert_eq!(h.app.preferences.browser_bodies_folders, BodiesFolders::Never, "Cancel puts it back");
         defaults(&mut h.app, PAGE_LAYOUT);
         assert_eq!(h.app.preferences.browser_bodies_folders, BodiesFolders::Several, "Interface's Restore Defaults");
+    }
+
+    /// Design tabs: views shown as tabs, sub-tabs for sheets, sketches and Render, and reusing a
+    /// view are on by default and reopening a design's views is off, also in preferences saved
+    /// before them. Each is saved and read back, `ui.prefs` refuses a value that is not a boolean,
+    /// the Layout page's Restore Defaults resets them, and one struct hands them to the tab strip.
+    #[test]
+    fn design_tab_preferences_default_roundtrip_reset_and_read_through_one_struct() {
+        use super::*;
+        use crate::design_tab_prefs::DesignTabPrefs;
+        let keys = [
+            "design_views_as_tabs",
+            "design_sub_tab_sheets",
+            "design_sub_tab_sketches",
+            "design_sub_tab_render",
+            "design_reuse_views",
+            "design_reopen_views",
+        ];
+        let mut h = crate::scenario::Harness::new();
+        let on = DesignTabPrefs::from(&h.app.preferences);
+        assert_eq!(
+            [on.views_as_tabs, on.sub_tab_sheets, on.sub_tab_sketches, on.sub_tab_render, on.reuse_views, on.reopen_views],
+            [true, true, true, true, true, false]
+        );
+        let old = lenient(&json!({"theme": "light"}));
+        assert_eq!(DesignTabPrefs::from(&old), on, "saved before they existed");
+        for key in keys {
+            let value = !serde_json::to_value(&h.app.preferences).unwrap()[key].as_bool().unwrap();
+            assert_eq!(control(&mut h.app, &json!({ key: value })).unwrap()[key], value, "{key}");
+            let mut restored = SolveApp::new(Default::default(), Default::default());
+            restored.load_prefs(&h.app.prefs());
+            assert_eq!(serde_json::to_value(&restored.preferences).unwrap()[key], json!(value), "{key} is saved");
+            for bad in [json!("yes"), json!(1), json!([true])] {
+                let before = h.app.preferences.clone();
+                assert!(set(&mut h.app, &json!({ key: bad })).is_err(), "{key}: {bad}");
+                assert_eq!(h.app.preferences, before, "{key}: a refused value changes nothing");
+            }
+        }
+        let flipped = DesignTabPrefs::from(&h.app.preferences);
+        assert_eq!(
+            [
+                flipped.views_as_tabs,
+                flipped.sub_tab_sheets,
+                flipped.sub_tab_sketches,
+                flipped.sub_tab_render,
+                flipped.reuse_views,
+                flipped.reopen_views
+            ],
+            [false, false, false, false, false, true]
+        );
+        defaults(&mut h.app, PAGE_LAYOUT);
+        assert_eq!(DesignTabPrefs::from(&h.app.preferences), on, "Layout's Restore Defaults");
     }
 
     /// Theme: System on a Linux desktop (#7944): the freedesktop preference wins, GNOME's
