@@ -2784,6 +2784,39 @@ fn patch_dialog_fills_a_loop_of_edges_that_is_not_planar() {
 }
 
 #[test]
+fn the_patch_tool_takes_a_3d_spline() {
+    // #16186: the Patch tool took no 3D spline. Its Boundary row wanted profiles or edges, so a
+    // click on a spline of a 3D sketch found nothing to select. A tilted square of 3D splines is
+    // a planar loop of its own: picking one of them fills the Patch with that loop.
+    let mut app = app_with(json!([
+        {"command": "sketch.create", "params": {"plane": "XY"}},
+        {"command": "sketch.options", "params": {"sketch_3d": true}},
+        {"command": "sketch.line3d", "params": {"points": [[0, 0, 0], [10, 0, 10]]}},
+        {"command": "sketch.line3d", "params": {"points": [[10, 0, 10], [10, 10, 10]]}},
+        {"command": "sketch.line3d", "params": {"points": [[10, 10, 10], [0, 10, 0]]}},
+        {"command": "sketch.line3d", "params": {"points": [[0, 10, 0], [0, 0, 0]]}},
+        {"command": "sketch.finish", "params": {}}
+    ]));
+    let sk = app.session.doc.features.last().unwrap().id;
+    let st = app.session.model.state();
+    let ss = st.sketch(sk).unwrap();
+    assert_eq!(ss.profiles_3d.len(), 1, "the tilted square is one planar 3D loop");
+    let spline = ss.sketch.wires[0].id.clone();
+    let mut d = start(&mut app, vec![], "surface.patch");
+    assert!(d.inputs[0].accept & crate::selection::CURVES != 0, "the Boundary row takes a spline");
+    d.inputs[0].items = vec![Sel::SketchCurve { id: spline, sketch: Some(sk) }];
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].0, "surface.patch");
+    assert_eq!(cmds[0].1, json!({"sketch": sk, "profiles_3d": [0]}), "the loop the spline bounds");
+    // The patch builds the face of the tilted square.
+    app.session.execute(&cmds[0].0, &cmds[0].1).unwrap();
+    let st = app.session.model.state();
+    assert_eq!(st.bodies.len(), 1, "the patch is a body of its own");
+    assert!(st.bodies[0].body.is_surface() && st.bodies[0].body.face_count() == 1);
+}
+
+#[test]
 fn split_body_by_a_curved_face_sends_it_as_a_tool() {
     let mut app = app_with(json!([
         {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}},
