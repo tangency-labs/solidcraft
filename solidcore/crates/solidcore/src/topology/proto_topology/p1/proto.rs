@@ -1097,6 +1097,30 @@ impl<O: ClassObject> VertexDefinition<O> {
         Ok(true)
     }
 
+    /// Not upstream (#16637): a certified bound on how far this definition's position may
+    /// lie from the point it stands for, where one is known: its gap when either source
+    /// object is a vertex (the definition stands for that vertex, and its position is the
+    /// vertex's point or a point within the gap of it); the misplacement bound of the
+    /// crossing that placed it (`crossing_error`: the gap over the crossing's sine) when a
+    /// crossing at a known angle did; `None` otherwise, and for a gap that is not finite.
+    #[must_use]
+    pub fn placement_error(&self) -> Option<f64> {
+        if !self.gap.is_finite() {
+            return None;
+        }
+        if self.pc1.point_class() == PointClassType::Vertex
+            || self.pc2.point_class() == PointClassType::Vertex
+        {
+            return Some(max2(self.gap, 0.0));
+        }
+        if self.crossing_sine < 0.0 {
+            return None;
+        }
+        let error = crossing_error(self.gap, self.crossing_sine);
+        // (written to accept: an unknown angle's BIG_DOUBLE, or a NaN, gives no bound)
+        (error < BIG_DOUBLE).then_some(error)
+    }
+
     /// The tolerance (`GetTolerance`, as an `SmZoneTol3d`).
     #[must_use]
     pub fn tolerance(&self, k: &Kernel) -> f64 {
