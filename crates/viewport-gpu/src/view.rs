@@ -2556,6 +2556,8 @@ pub struct Renderer {
     /// asked for; `timer_tried` once that was tried (the device may have no timestamp queries).
     timer: Option<pass_times::PassTimer>,
     timer_tried: bool,
+    /// The last frame asked for the passes' times ([`DrawStats::time_passes`]).
+    timing: bool,
     ss_bgl: wgpu::BindGroupLayout,
     /// The supersampled frame's textures, kept while its size stays.
     ss: Option<Supersampled>,
@@ -3529,6 +3531,7 @@ impl Renderer {
                 oit_targets: None,
                 timer: None,
                 timer_tried: false,
+                timing: false,
                 ss_bgl,
                 ss: None,
                 ss_ready: false,
@@ -3961,10 +3964,21 @@ impl Renderer {
             self.timer = pass_times::PassTimer::new(device, queue);
             self.timer_tried = true;
         }
+        // Timing just asked for over a still view: draw this frame instead of showing the cached
+        // picture, which records no passes, so the times come without waiting for the view to
+        // change. Later still frames reuse the picture as before.
+        if time && !self.timing && self.timer.is_some() {
+            self.ss_key = None;
+        }
+        self.timing = time;
         if let Some(timer) = &mut self.timer {
             timer.begin(device, time);
         }
         self.prepare_frame(device, queue, encoder, frame);
+        // The times cover the passes recorded here, in `prepare`. A frame drawn straight into the
+        // window's pass (`paint`, where it needs no offscreen picture) is not timed: that pass is
+        // the window's, which takes no timestamp writes from here. The app's window pass has one
+        // sample and no depth, so its view is always drawn offscreen, in passes timed here.
         if let Some(timer) = &mut self.timer {
             timer.finish(encoder);
         }
@@ -6510,6 +6524,18 @@ mod glass_tests {
             s.time_passes = false;
         }
         assert_eq!(frames(&mut timed), None, "the times go once the readout stops asking");
+        // A still view: the same frame again shows the picture already drawn, which records no
+        // passes. Timing asked for over it draws a frame once, so its times come all the same.
+        let mut still = Renderer::new(&device, target, None);
+        let frame = test_frame(two_layers([220, 40, 40, 128], [40, 40, 220, 128], true), 1.0);
+        render_frame(&mut still, &device, &queue, &frame, true);
+        if let Ok(mut s) = still.stats().lock() {
+            s.time_passes = true;
+        }
+        for _ in 0..6 {
+            render_frame(&mut still, &device, &queue, &frame, true);
+        }
+        assert!(still.stats().lock().ok().and_then(|s| s.gpu).is_some(), "a still view's passes are timed once timing is asked for");
     }
 
     /// The Render workspace's preview once painted the modelling viewport's last frame instead of
