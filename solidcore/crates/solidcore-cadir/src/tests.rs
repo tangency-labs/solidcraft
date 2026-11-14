@@ -234,3 +234,31 @@ fn a_placement_scaling_unevenly_is_refused() {
     let turned = [[c, -s, 0.0, 3.0], [s, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
     assert!(geometry::Similarity::of(turned).is_ok());
 }
+
+/// A shell's wire edges and free vertices, which a record of faces cannot hold yet, are noted on
+/// the region, and its faces still come in: the cube's six faces, and one free vertex noted.
+#[test]
+fn a_shells_free_vertex_is_noted_and_its_faces_kept() {
+    let mut ir = cube();
+    let shell = ir.model.shells.first().unwrap().clone();
+    let vertex = ir.model.vertices.first().unwrap().id.clone();
+    let with_vertex = cadmpeg_ir::topology::Shell::new(
+        shell.id.clone(),
+        shell.region.clone(),
+        shell.faces().to_vec(),
+        Vec::new(),
+        vec![vertex],
+    )
+    .unwrap();
+    *ir.model.shells.first_mut().unwrap() = with_vertex;
+    let s = one(&ir);
+    assert_eq!(s.brep.faces.len(), 6);
+    assert!((volume(&s) - 1000.0).abs() < 1e-6);
+    assert!(
+        s.notes
+            .iter()
+            .any(|n| n == "1 wire edges and free vertices of its shells left out"),
+        "{:?}",
+        s.notes
+    );
+}
