@@ -1,5 +1,6 @@
 //! New-design defaults, with inline precision specimens.
 use super::*;
+use solidcraft_engine::doc::expr;
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
@@ -7,6 +8,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         "ui.units_of_new_designs",
         "ui.length_decimals",
         "ui.angle_decimals",
+        "ui.mass_unit",
+        "ui.mass_decimals",
         "prefs.parameter_list_rows",
         "prefs.origin_plane_names",
         "prefs.stand_up_unknown",
@@ -68,6 +71,27 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     });
                     ui.add_space(t.space_6);
                     ui_kit::settings_precision_sample(ui, &format!("{:.*}°", usize::from(app.preferences.angle_decimals.min(6)), 45.0));
+                });
+                ui_kit::row(ui, app.tr("ui.mass_unit"), |ui| {
+                    let units: Vec<&str> = expr::UNITS.iter().filter(|(_, kind, _)| *kind == expr::Kind::Mass).map(|(name, ..)| *name).collect();
+                    // Another saved unit shows as kilograms, as `show_mass` reads it.
+                    let default = units.iter().position(|u| *u == expr::Kind::Mass.default_unit()).unwrap_or(0);
+                    let mut selected = units.iter().position(|u| *u == app.preferences.mass_unit).unwrap_or(default);
+                    ui_kit::segmented(ui, &mut selected, &units, ui_kit::Segments { intrinsic: true, ..Default::default() });
+                    if let Some(unit) = units.get(selected)
+                        && app.preferences.mass_unit != *unit
+                    {
+                        app.preferences.mass_unit = (*unit).into();
+                    }
+                });
+                ui_kit::row(ui, app.tr("ui.mass_decimals"), |ui| {
+                    ui.scope(|ui| {
+                        ui.spacing_mut().interact_size.x = t.space_24 * 2.0 + t.space_8;
+                        let response = ui_kit::whole_number_field(ui, &mut app.preferences.mass_decimals, 0..=6, "");
+                        crate::scenario::publish_target("prefs:mass_decimals", response.rect);
+                    });
+                    ui.add_space(t.space_6);
+                    ui_kit::settings_precision_sample(ui, &show_mass(app, 9420.0));
                 });
                 ui_kit::settings_row_help(ui, app.tr("prefs.parameter_list_rows"), app.tr("prefs.parameter_list_rows_tip"), |ui| {
                     let response = ui_kit::named_control(ui, app.tr("prefs.design_tools.rows"), |ui| {
