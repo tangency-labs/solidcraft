@@ -1250,6 +1250,9 @@ impl Stitch<'_> {
                             }
                             set_none(&mut v_edges, kk)?;
                             done_with_vertex = false;
+                            // (not upstream) the sewn edge now serves both faces: its
+                            // tolerance covers the gap to each, within the stitch bound
+                            cover_edge_face_gaps(k, b, e, this_tol)?;
                             if let Some((pre, bound)) = edge_report {
                                 let after = edge::tolerance(b, e)?;
                                 self.record_gap(
@@ -1648,6 +1651,31 @@ impl Stitch<'_> {
         }
         Ok(out)
     }
+}
+
+/// (Not upstream.) Raises the tolerance of edge `e`, just sewn to the edge it was glued to, and of
+/// its vertices to cover the largest gap between its curve and the surface of each face that now
+/// uses it, as sewing does: the tolerance grows to the gap actually closed, never past `limit`
+/// (the tolerance the pair was glued at). A gap beyond `limit` leaves the tolerance as it is, so
+/// the validity check still refuses it. A gap that cannot be measured is left alone: the check
+/// reports it.
+fn cover_edge_face_gaps(k: &mut Kernel, b: &mut Brep, e: EdgeId, limit: f64) -> Result<()> {
+    let mut widest = 0.0_f64;
+    for eu in edge::edgeuses(b, e, None, None)? {
+        let Some(gap) = ignored(crate::topology::edgeuse::p1::max_edge_face_gap(
+            k, b, eu, true,
+        ))?
+        .flatten() else {
+            continue;
+        };
+        if gap.gap_3d.is_finite() {
+            widest = widest.max(gap.gap_3d);
+        }
+    }
+    if widest > edge::tolerance(b, e)? && widest <= limit {
+        update_object_tolerance(k, b, Some(TopologyToUpdate::Edge(e)), widest, 0.0, false)?;
+    }
+    Ok(())
 }
 
 /// The squeeze/glue decision of `DoStitching` and `StitchVertexPairs` for two
