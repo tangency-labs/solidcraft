@@ -52,6 +52,7 @@ pub mod face_surface;
 pub mod file;
 pub mod label;
 pub mod measure;
+pub mod mesh;
 pub mod network;
 pub mod offset;
 pub mod order;

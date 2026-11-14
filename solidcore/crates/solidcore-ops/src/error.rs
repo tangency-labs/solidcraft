@@ -16,6 +16,8 @@ pub enum Error {
     /// An argument refused before the kernel saw it: not finite, out of range, or an index
     /// past its list.
     Argument,
+    /// A mesh reconstruction refused this input or could not certify the fitted solid.
+    Mesh(&'static str),
     /// The kernel reported success but the result has no faces (for a boolean: it is empty).
     Empty,
     /// The kernel reported success, but a solid input gave a result that is not a closed solid.
@@ -689,6 +691,7 @@ impl std::fmt::Display for Error {
                 f,
                 "solidcore-ops was called from inside a call or the failure callback"
             ),
+            Error::Mesh(why) => write!(f, "mesh conversion: {why}"),
             Error::Record(w) => write!(f, "record: {w}"),
             Error::Internal(e) => write!(f, "solidcore failed internally in {e}"),
             Error::Unsupported(what) | Error::Unported(what) => {
@@ -721,7 +724,10 @@ impl std::fmt::Display for Error {
                 ..
             } => write!(f, "the setback at a corner is shorter than {least}"),
             Error::SetbackTooLong { vertex, largest } => {
-                write!(f, "the setback at vertex {vertex} does not fit: below {largest} fits")
+                write!(
+                    f,
+                    "the setback at vertex {vertex} does not fit: below {largest} fits"
+                )
             }
             Error::ChamferAngleTooLarge {
                 edge,

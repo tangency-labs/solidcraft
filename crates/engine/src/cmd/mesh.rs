@@ -1,8 +1,8 @@
 //! Parametric reconstruction of imported mechanical mesh bodies.
 
 use serde_json::Value;
-use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::Kind;
+use solidcraft_doc::{FeatureKind, MeshReconstruction};
 
 use super::{
     CommandSpec,
@@ -23,7 +23,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("import")
         .contract(&MESH_CONVERT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("body?: mesh body name (default: the selected mesh body); tolerance?: length expression (default 0.05 mm): rebuild a closed mesh as an editable solid — a constant-section part as planar and cylindrical faces, any other closed mesh as the faceted solid its triangles describe — with a parametric timeline feature in the mesh body's owning component (the active component must be that component or an ancestor; otherwise activate the named component first); the active component is unchanged; name?"),
+        .params("body?: mesh body name (default: the selected mesh body); tolerance?: length expression (default 0.05 mm): rebuild a closed mesh as an editable solid — supported straight-extrusion parts and planar shoulders as planar and cylindrical faces, other closed meshes as the faceted solids their triangles describe — with a parametric timeline feature in the mesh body's owning component (the active component must be that component or an ancestor; otherwise activate the named component first); the active component is unchanged; name?"),
 ];
 
 /// The mesh body to convert: `body`, else the one selected body.
@@ -39,6 +39,7 @@ fn target(s: &Session, p: &Value, cmd: &str) -> Result<String> {
     }
 }
 
+/// Create the conversion feature in its owning component and restore the original authoring context.
 fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "mesh.convert";
     let state = s.model.state();
@@ -61,7 +62,7 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     // Conversion edits the component definition, independent of its occurrence placement.
     let active_component = std::mem::replace(&mut s.active_component, owner);
     let active_occurrence_path = s.active_occurrence_path.take();
-    let result = add_feature(s, p, FeatureKind::MeshConvert { body: body.into(), tolerance });
+    let result = add_feature(s, p, FeatureKind::MeshConvert { body: body.into(), tolerance, reconstruction: MeshReconstruction::AnalyticV1 });
     s.active_component = active_component;
     s.active_occurrence_path = active_occurrence_path;
     result
