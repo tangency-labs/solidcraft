@@ -248,6 +248,11 @@ crate::dialog_descriptor::dialog_descriptors! {
             Loft {
                 operation: usize,
                 rail_fit: usize,
+                /// How far the first and last sections reach out along their normals before the
+                /// loft bends (square ends only, such as body faces): a factor, 1 by default.
+                weights: [String; 2],
+                /// The first and last square ends leave the other way, into their faces.
+                flips: [bool; 2],
             },
             /// Sweep a profile along a path of sketch curves.
             Sweep {
@@ -1082,10 +1087,13 @@ impl Dialog {
                 Kind::PatternCirc { count: "6".into(), angle: "360 deg".into() },
                 vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXIS_PICKS, false)],
             ),
-            "solid.loft" => Dialog::new(Kind::Loft { operation: usize::from(has_bodies), rail_fit: 0 }, {
-                let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
-                vec![SelInput::new("Profiles", PROFILES | selection::POINTS, true), rail, rail2]
-            }),
+            "solid.loft" => {
+                Dialog::new(Kind::Loft { operation: usize::from(has_bodies), rail_fit: 0, weights: ["1".into(), "1".into()], flips: [false; 2] }, {
+                    let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
+                    // A body face, flat or curved, is a section as it stands, with no sketch drawn on it first.
+                    vec![SelInput::new("Profiles", PROFILES | FACES | selection::POINTS, true), rail, rail2]
+                })
+            }
             "solid.sweep" => Dialog::new(Kind::Sweep { operation: usize::from(has_bodies), opts: crate::dialogs_sweep::SweepOpts::default() }, {
                 let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
                 vec![
@@ -1910,7 +1918,10 @@ impl Dialog {
         let measure = matches!(self.kind, Kind::Measure { .. });
         // The chat's picks stay what was clicked: a rim is one edge there, not its pieces. So do
         // print faces: a click on one takes it out, not the other pieces of its surface in.
-        let one = measure || matches!(self.kind, Kind::ChatContext | Kind::SaveMesh(_));
+        // A Loft section is the face clicked: the other pieces of its surface would each become
+        // a section of their own.
+        let loft_face = self.active == 0 && matches!(self.kind, Kind::Loft { .. }) && matches!(sel, Sel::Face { .. });
+        let one = measure || loft_face || matches!(self.kind, Kind::ChatContext | Kind::SaveMesh(_));
         let sel = if measure { crate::viewport::measurement_selection(s, &sel) } else { sel };
         let chain = matches!(self.kind, Kind::Fillet { chain: true, .. });
         let single =
@@ -5536,6 +5547,21 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
             {
                 let world = crate::open_meshing::session_world(&app.session);
                 for (sec, out) in sections.iter().zip(edited.iter_mut()) {
+                    // A curved face section on the same body keeps its sketch, so editing does
+                    // not start a new one. The sketch is only a stand-in (the loft reads the face
+                    // itself), so it stays right even when the face is picked again elsewhere,
+                    // or the body is placed and the dialog hands back a world point.
+                    if let Some(body) = &sec.body
+                        && out.get("face").is_some()
+                        && out.get("body").and_then(Value::as_str) == Some(body.0.as_str())
+                    {
+                        out["sketch"] = json!(sec.sketch.0);
+                        continue;
+                    }
+                    // A flat face's section keeps leaving square.
+                    if sec.square && out.get("sketch").and_then(Value::as_u64) == Some(sec.sketch.0) {
+                        out["square"] = json!(true);
+                    }
                     let Some(ss) = world.sketch(sec.sketch.0).filter(|_| sec.profiles == ProfileSel::All && sec.point.is_none()) else { continue };
                     let all: Vec<Value> = (0..ss.profiles.len()).map(|i| json!(i)).collect();
                     if out.get("sketch").and_then(Value::as_u64) == Some(sec.sketch.0) && out.get("profiles").and_then(Value::as_array) == Some(&all)
@@ -5918,14 +5944,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             pattern_objects(s, sels(d, 0), &mut p);
             ("solid.pattern.circular", p)
         }
-        Kind::Loft { operation, rail_fit } => {
-            need(0, "profiles of two or more sketches")?;
+        Kind::Loft { operation, rail_fit, weights, flips } => {
+            need(0, "two or more sections")?;
             // Sections follow the picks. Profiles picked one after another in one sketch are one
             // section, such as both halves of a split outline (#11720); a later return to that
             // sketch is a section of its own, so a loft can go there and back (#8221). A sketch
             // point is a section of its own, an apex the loft closes to (#4830).
             let mut sections: Vec<Value> = Vec::new();
-            let (mut profile_sketches, mut apexes) = (Vec::new(), 0);
+            let (mut profile_sketches, mut apexes, mut faces) = (Vec::new(), 0, 0);
             for x in sels(d, 0) {
                 match x {
                     Sel::Profile { sketch, index } => {
@@ -5942,13 +5968,40 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                             apexes += 1;
                         }
                     }
+                    Sel::Face { body, point, .. } => {
+                        sections.push(json!({"face": pt(*point), "body": body}));
+                        faces += 1;
+                    }
                     _ => {}
                 }
             }
             profile_sketches.sort_unstable();
             profile_sketches.dedup();
-            if profile_sketches.len() + apexes < 2 {
-                return Err("pick profiles in two or more sketches, or a profile and a sketch point".into());
+            if profile_sketches.len() + apexes + faces < 2 {
+                return Err("pick two or more sections: profiles of different sketches, planar body faces or a sketch point".into());
+            }
+            // The end weights ride on the first and last sections; 1 is the default and stays unsaid.
+            for (i, w) in weights.iter().enumerate() {
+                let w: f64 = w.trim().parse().map_err(|_| "a weight must be a number from 0 to 100".to_string())?;
+                if !(0.0..=100.0).contains(&w) {
+                    return Err("a weight must be a number from 0 to 100".into());
+                }
+                let n = sections.len();
+                let sec = if i == 0 { sections.first_mut() } else { sections.get_mut(n.saturating_sub(1)) };
+                if (w - 1.0).abs() > 1e-12
+                    && let Some(obj) = sec.and_then(Value::as_object_mut)
+                {
+                    obj.insert("weight".into(), json!(w));
+                }
+            }
+            // A flipped end leaves into its face; unflipped stays unsaid.
+            let n = sections.len();
+            for (i, at) in [0, n.saturating_sub(1)].into_iter().enumerate() {
+                if flips[i]
+                    && let Some(obj) = sections.get_mut(at).and_then(Value::as_object_mut)
+                {
+                    obj.insert("flip".into(), json!(true));
+                }
             }
             let mut p = json!({"sections": sections, "operation": OPS.get(*operation).copied().unwrap_or("new")});
             crate::dialogs_sweep::rail_params(app, *rail_fit, [sels(d, 1), sels(d, 2)], &mut p)?;
@@ -8010,7 +8063,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         }
         FeatureKind::Loft { sections, operation, targets, rails, rail_fit } => {
             let mut d = start("solid.loft")?;
-            d.kind = Kind::Loft { operation: op_index(operation), rail_fit: crate::dialogs_sweep::rail_fit_index(*rail_fit) };
+            let weight = |s: Option<&solidcraft_engine::doc::LoftSection>| s.and_then(|s| s.weight).unwrap_or(1.0).to_string();
+            d.kind = Kind::Loft {
+                operation: op_index(operation),
+                rail_fit: crate::dialogs_sweep::rail_fit_index(*rail_fit),
+                weights: [weight(sections.first()), weight(sections.last())],
+                flips: [sections.first().is_some_and(|s| s.flip), sections.last().is_some_and(|s| s.flip)],
+            };
             for (inp, items) in d.inputs.iter_mut().skip(1).zip(crate::dialogs_sweep::rail_sels(rails, s.active_sketch)) {
                 inp.items = items;
             }
@@ -8018,8 +8077,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 inp.items = sections
                     .iter()
                     .flat_map(|sec| {
+                        // A face section (a curved face's) shows the face itself again.
+                        if let (Some(body), Some(at)) = (&sec.body, &sec.face) {
+                            return face_sel_on(s, Some(&body.0), **at).into_iter().collect::<Vec<_>>();
+                        }
                         let idx = st.sketch(sec.sketch.0).map(|ss| profile_indices(ss, &sec.profiles)).unwrap_or_default();
-                        idx.into_iter().map(move |index| Sel::Profile { sketch: sec.sketch.0, index })
+                        idx.into_iter().map(|index| Sel::Profile { sketch: sec.sketch.0, index }).collect()
                     })
                     .collect();
             }

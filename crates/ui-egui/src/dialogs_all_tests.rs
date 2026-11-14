@@ -411,6 +411,7 @@ fn check_form(command: &str, labels: &[&str]) {
         "solid.shell" => &["Tangent Chain"],
         "solid.rib" | "solid.web" | "solid.align" | "sheet.flange" | "sheet.hem" | "sheet.fold" | "joint.create" => &["Flip"],
         "inspect.section" => &["Flip", "Hatch"],
+        "solid.loft" => &["Flip Start", "Flip End"],
         "solid.move" => &["Create Copy"],
         "solid.combine" => &["Keep Tools", "New Component"],
         "solid.thread" => &["Modeled", "Automatic size"],

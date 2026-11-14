@@ -1094,9 +1094,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
             crate::dialogs_thread::sync_inputs(&mut d.inputs, &mut d.active, options);
         }
-        Kind::Loft { operation, rail_fit } => {
+        Kind::Loft { operation, rail_fit, weights, flips } => {
             crate::op_auto::op_row(ui, "lf_op", operation);
             crate::dialogs_sweep::rail_fit_row(ui, "lf", rail_fit);
+            // How far the loft runs straight out of each end face before it bends.
+            let [w0, w1] = weights;
+            enter |= expr_row(ui, "Start Weight", w0);
+            enter |= expr_row(ui, "End Weight", w1);
+            // Which way each end leaves its face: out (default) or into it.
+            let [f0, f1] = flips;
+            ui_kit::options(ui, "lf_flip", &mut [("Flip Start", f0), ("Flip End", f1)]);
         }
         Kind::Sweep { operation, opts } => {
             enter |= crate::dialogs_sweep::rows_with(ui, opts, "sw", |ui| {

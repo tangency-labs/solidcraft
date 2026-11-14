@@ -1115,6 +1115,104 @@ fn coil_and_loft_to_a_point() {
     assert!(s.execute("solid.loft", &json!({"sections": [{"sketch": "Base"}, {"sketch": "Top", "point": "nope"}]})).is_err());
 }
 
+/// Two 10 mm cubes 20 mm apart, for lofting between their facing faces.
+fn two_cubes() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"corner": [30, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "B"}));
+    s
+}
+
+/// Loft sections can be planar body faces, picked like an extrude's `face`: no sketch to draw.
+/// The facing faces of two cubes bridge into a 10 x 10 x 20 block; a Join that names no targets
+/// joins both cubes, so the three end up one body of 4000 mm³.
+#[test]
+fn a_loft_between_body_faces_bridges_them_and_a_join_takes_both_bodies() {
+    let mut s = two_cubes();
+    run(&mut s, "solid.loft", json!({"sections": [{"face": [10, 5, 5]}, {"face": [30, 5, 5]}]}));
+    assert_eq!(s.model.state().bodies.len(), 3);
+    assert!(s.active_sketch.is_none(), "the face sketches are closed again");
+    let made = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
+    assert!((body_volume(&s, &made) - 2000.0).abs() < 1e-6, "{}", body_volume(&s, &made));
+
+    let mut s = two_cubes();
+    run(&mut s, "solid.loft", json!({"sections": [{"face": [10, 5, 5], "body": "A"}, {"face": [30, 5, 5]}], "operation": "join"}));
+    let st = s.model.state();
+    assert_eq!(st.bodies.len(), 1, "{:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let name = st.bodies.first().map(|b| b.name.clone()).unwrap();
+    assert_eq!(st.body(&name).map(|b| b.body.shell_count()), Some(1));
+    assert!((body_volume(&s, &name) - 4000.0).abs() < 1e-6, "{}", body_volume(&s, &name));
+}
+
+/// Faces at a right angle bridge in a smooth bend: the loft leaves each face square to it. A
+/// straight skin between them twists and the kernel refuses it.
+#[test]
+fn a_loft_between_faces_at_a_right_angle_bends() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"corner": [30, 30, 0], "length": 10, "width": 10, "height": 10, "body_name": "B"}));
+    run(&mut s, "solid.loft", json!({"sections": [{"face": [10, 5, 5]}, {"face": [35, 30, 5]}]}));
+    assert_eq!(s.model.state().bodies.len(), 3);
+}
+
+/// Faces that point away from each other along one line loft round like a horseshoe, up and
+/// over, instead of straight through both bodies.
+#[test]
+fn a_loft_between_faces_back_to_back_swings_round() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"corner": [30, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "B"}));
+    run(&mut s, "solid.loft", json!({"sections": [{"face": [0, 5, 5]}, {"face": [40, 5, 5]}], "operation": "new"}));
+    let st = s.model.state();
+    let loft = st.bodies.iter().find(|b| b.name != "A" && b.name != "B").expect("a loft body");
+    let b = loft.body.exact_bounds().expect("bounds");
+    let (lo, hi) = (b.min, b.max);
+    // It leaves each face outward, past both bodies' outer sides, and arches over them.
+    assert!(lo.x < -2.0 && hi.x > 42.0, "{lo:?} {hi:?}");
+    assert!(hi.z > 20.0, "{hi:?}");
+}
+
+/// Flipping both ends of a loft between faces back to back sends it straight through, from one
+/// face into the other, instead of round.
+#[test]
+fn a_flipped_loft_between_faces_back_to_back_runs_straight() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"corner": [30, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "B"}));
+    let sections = json!([{"face": [0, 5, 5], "flip": true}, {"face": [40, 5, 5], "flip": true}]);
+    run(&mut s, "solid.loft", json!({"sections": sections, "operation": "new"}));
+    let st = s.model.state();
+    let loft = st.bodies.iter().find(|b| b.name != "A" && b.name != "B").expect("a loft body");
+    let b = loft.body.exact_bounds().expect("bounds");
+    assert!(b.min.x > -1e-6 && b.max.x < 40.0 + 1e-6 && b.max.z < 10.0 + 1e-6, "{b:?}");
+    assert!(s.doc.features.iter().any(|f| matches!(&f.kind, solidcraft_doc::FeatureKind::Loft { sections, .. } if sections.iter().all(|s| s.flip))));
+}
+
+/// A face section mixes with a sketch section, and bad face sections are refused, leaving the
+/// design as it was.
+#[test]
+fn a_loft_mixes_a_face_with_a_sketch_and_refuses_bad_face_sections() {
+    let mut s = two_cubes();
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [20, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Mid"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [5, 5], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.loft", json!({"sections": [{"face": [10, 5, 5]}, {"sketch": "Mid"}]}));
+    assert_eq!(s.model.state().bodies.len(), 3);
+
+    let mut s = two_cubes();
+    let before = s.doc.features.len();
+    for bad in [
+        json!({"sections": [{"face": [10, 5, 5], "sketch": "Mid"}, {"face": [30, 5, 5]}]}),
+        json!({"sections": [{"face": [10, 5, 5], "weight": 500}, {"face": [30, 5, 5]}]}),
+        json!({"sections": [{"face": "here"}, {"face": [30, 5, 5]}]}),
+        json!({"sections": [{"face": [20, 5, 5]}, {"face": [30, 5, 5]}]}),
+        json!({"sections": [{"face": [10, 5, 5]}, {"face": [30, 5, 5], "body": "A"}]}),
+    ] {
+        assert!(s.execute("solid.loft", &bad).is_err(), "{bad}");
+        assert_eq!(s.doc.features.len(), before, "{bad}");
+    }
+}
+
 /// A 3 mm shelled basin (100 x 60 x 30, open top) with a fall lofted from its whole outline
 /// 10 up down to a drain pad (`pad`: corners, 1 up), in either section order. The loft's top
 /// edges lie on the outer walls; the cut used to fail for one order of the sections (an

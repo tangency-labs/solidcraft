@@ -7408,6 +7408,14 @@ fn feature_tools_with_constructor(
             Ok(vec![coil.with_recipe(tool_recipe(doc, f, vals))])
         }
         FeatureKind::Loft { sections, rails, rail_fit, .. } => {
+            // Curved body faces loft by their rims, capped with copies of the faces.
+            if sections.iter().any(|s| s.body.is_some()) {
+                if !rails.is_empty() {
+                    return Err(DocError::Invalid("not supported yet: guide rails on a loft between curved faces".into()));
+                }
+                let w = |s: Option<&crate::LoftSection>| s.and_then(|s| s.weight).unwrap_or(1.0);
+                return Ok(unnamed(vec![face_rim_loft(st, sections, [w(sections.first()), w(sections.last())])?]));
+            }
             let mut secs = Vec::new();
             let mut sketches = Vec::new();
             for sec in sections {
@@ -7422,7 +7430,17 @@ fn feature_tools_with_constructor(
             // Its caps are the first and last sections, its sides named by the curves they run
             // between.
             let body = if rails.is_empty() {
-                kernel::loft_regions(&secs)?
+                {
+                    // A square end's reach: its weight (default 1), 0 for an end that is not square.
+                    let reach = |s: Option<&crate::LoftSection>| s.filter(|s| s.square).map_or(0.0, |s| s.weight.unwrap_or(1.0).clamp(0.0, 100.0));
+                    let flip = |s: Option<&crate::LoftSection>| s.is_some_and(|s| s.flip);
+                    kernel::loft_regions(&squared_ends(
+                        &secs,
+                        reach(sections.first()),
+                        reach(sections.last()),
+                        [flip(sections.first()), flip(sections.last())],
+                    ))?
+                }
             } else {
                 // Rails shape the sections' outlines; sections with holes wait for rails that
                 // carry the holes too.
@@ -11592,6 +11610,495 @@ mod chain_tests {
         assert_eq!(off, None);
         assert_eq!(faces, Some(8));
     }
+}
+
+/// Loft sections bent to leave their square ends square. A square end is left along its plane's
+/// normal (a body face's sketch faces out of the body), or against it when the next section lies
+/// clearly behind. Two sections at an angle, side by side (a U-turn) or offset follow a smooth
+/// cubic spine between them, with in-between copies of each end's profile turned to follow the
+/// spine, so the bend keeps its full section instead of pinching (a straight skin between faces
+/// at an angle twists, and the kernel refuses it). More sections get a copy of each square end a
+/// quarter of the way to its neighbour. Ends already facing each other on one line stay as given.
+fn squared_ends(secs: &[(Plane, Region2)], first: f64, last: f64, flips: [bool; 2]) -> Vec<(Plane, Region2)> {
+    let centre = |(p, r): &(Plane, Region2)| p.to_world(r.centroid());
+    let unit = |v: Vec3| v.normalized().unwrap_or(v);
+    // Which way a square end leaves, towards `other`; None when it needs no bending.
+    let leave = |end: &(Plane, Region2), other: Vec3, flip: bool| -> Option<Vec3> {
+        let n = if flip { end.0.normal() * -1.0 } else { end.0.normal() };
+        let d = other - centre(end);
+        let len = d.len();
+        if !(len > 1e-9) {
+            return None;
+        }
+        let along = d.dot(n);
+        if (d - n * along).len() <= 1e-6 * len && along > 0.0 {
+            return None;
+        }
+        // Always out of the face (into it when flipped), even when the other end lies behind
+        // it: the loft turns back.
+        Some(n)
+    };
+    let mut out = secs.to_vec();
+    let (Some(s0), Some(s1)) = (secs.first(), secs.last()) else { return out };
+    if secs.len() < 2 {
+        return out;
+    }
+    if secs.len() > 2 {
+        let helper = |end: &(Plane, Region2), next: &(Plane, Region2), w: f64, flip: bool| {
+            let len = (centre(next) - centre(end)).len();
+            leave(end, centre(next), flip).map(|dir| (Plane { origin: end.0.origin + dir * (0.25 * len * w), ..end.0 }, end.1.clone()))
+        };
+        if last > 0.0
+            && let Some(prev) = secs.get(secs.len() - 2)
+            && let Some(h) = helper(s1, prev, last, flips[1])
+        {
+            out.insert(out.len() - 1, h);
+        }
+        if first > 0.0
+            && let Some(next) = secs.get(1)
+            && let Some(h) = helper(s0, next, first, flips[0])
+        {
+            out.insert(1, h);
+        }
+        return out;
+    }
+    let (c0, c1) = (centre(s0), centre(s1));
+    let chord = c1 - c0;
+    let len = chord.len();
+    let straight = unit(chord);
+    let d0 = if first > 0.0 { leave(s0, c1, flips[0]) } else { None };
+    let d1 = if last > 0.0 { leave(s1, c0, flips[1]) } else { None };
+    if d0.is_none() && d1.is_none() {
+        return out;
+    }
+    // The spine: a cubic Bezier leaving c0 along `dir0` and arriving at c1 along `dir1`.
+    let dir0 = d0.unwrap_or(straight);
+    let dir1 = d1.map_or(straight, |d| d * -1.0);
+    // Each end's handle: half the gap times its weight; an end that is not square aims straight.
+    let k0 = 0.5 * len * if d0.is_some() { first } else { 2.0 / 3.0 };
+    let k1 = 0.5 * len * if d1.is_some() { last } else { 2.0 / 3.0 };
+    let (p1, p2) = (c0 + dir0 * k0, c1 - dir1 * k1);
+    let mut ctrl = vec![c0, p1, p2, c1];
+    // A Bezier point and unit tangent, by de Casteljau over the control points.
+    let casteljau = |pts: &[Vec3], t: f64| -> Vec3 {
+        let mut q = pts.to_vec();
+        while q.len() > 1 {
+            q = q.windows(2).map(|w| w[0] * (1.0 - t) + w[1] * t).collect();
+        }
+        q.first().copied().unwrap_or(c0)
+    };
+    // Ends that leave away from each other along one line (faces back to back) give a spine
+    // that folds back on itself: lift its middle to one side, up where that is square to the
+    // chord, so the loft swings round like a horseshoe. The end directions stay as they are,
+    // and the arch grows until its tightest bend clears the profile, so the skin never folds
+    // through itself.
+    let off = |q: Vec3| (q - c0 - straight * (q - c0).dot(straight)).len();
+    if (dir0.dot(straight) < 0.0 || dir1.dot(straight) < 0.0) && off(p1).max(off(p2)) < 0.25 * len {
+        let up = Vec3::new(0.0, 0.0, 1.0);
+        let side = (up - straight * up.dot(straight))
+            .normalized()
+            .filter(|v| v.len() > 0.5 && up.dot(straight).abs() < 0.9)
+            .or_else(|| (Vec3::new(0.0, 1.0, 0.0) - straight * straight.y).normalized())
+            .unwrap_or(up);
+        let reach = |(p, r): &(Plane, Region2)| {
+            let m = r.centroid();
+            r.outer.segs.iter().map(|seg| p.to_world(seg.start()) - p.to_world(m)).map(|v| v.len()).fold(0.0, f64::max)
+        };
+        let profile = reach(s0).max(reach(s1));
+        // The tightest bend radius of a Bezier, sampled.
+        let tightest = |pts: &[Vec3]| -> f64 {
+            let d1: Vec<Vec3> = pts.windows(2).map(|w| w[1] - w[0]).collect();
+            let d2: Vec<Vec3> = d1.windows(2).map(|w| w[1] - w[0]).collect();
+            (0..=200)
+                .map(|i| {
+                    let t = i as f64 / 200.0;
+                    let (a, b) = (casteljau(&d1, t), casteljau(&d2, t));
+                    let n = (pts.len() - 1) as f64;
+                    let (a, b) = (a * n, b * (n * (n - 1.0)));
+                    let bend = a.cross(b).len();
+                    if bend > 1e-12 { a.len().powi(3) / bend } else { f64::INFINITY }
+                })
+                .fold(f64::INFINITY, f64::min)
+        };
+        let base = 0.5 * len * first.max(last).max(0.5);
+        let mut grow = 1.0;
+        for _ in 0..12 {
+            let (q1, q2) = (c0 + dir0 * (k0 * grow), c1 - dir1 * (k1 * grow));
+            let lift = side * (base * grow);
+            ctrl = vec![c0, q1, q1 + lift, q2 + lift, q2, c1];
+            if tightest(&ctrl) >= 1.5 * profile {
+                break;
+            }
+            grow *= 1.3;
+        }
+    }
+    let at = |t: f64| casteljau(&ctrl, t);
+    let diffs: Vec<Vec3> = ctrl.windows(2).map(|w| w[1] - w[0]).collect();
+    let tangent = |t: f64| unit(casteljau(&diffs, t));
+    // The least rotation taking unit `a` to unit `b`, applied to `v`.
+    let turn = |v: Vec3, a: Vec3, b: Vec3| {
+        let axis = a.cross(b);
+        let s = axis.len();
+        let c = a.dot(b);
+        if s <= 1e-12 {
+            if c > 0.0 {
+                return v;
+            }
+            // Half a turn about any axis square to `a`.
+            let any = if a.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+            let k = unit(a.cross(any));
+            return k * (2.0 * k.dot(v)) - v;
+        }
+        let k = axis * (1.0 / s);
+        v * c + k.cross(v) * s + k * (k.dot(v) * (1.0 - c))
+    };
+    // The start profile carried the whole way along the spine, its frame turned with the tangent
+    // (least rotation), then rolled about the tangent a little more at every step so it lands
+    // on the end profile: one shape all along, so the skin never twists between two.
+    const STEPS: usize = 24;
+    let ts: Vec<f64> = (1..STEPS).map(|i| i as f64 / STEPS as f64).collect();
+    let c = s0.1.centroid();
+    let outline: Vec<Vec2> = s0.1.outer.segs.iter().map(|seg| seg.start() - c).collect();
+    let mut frames = Vec::with_capacity(STEPS);
+    let (mut x, mut y, mut prev) = (s0.0.x, s0.0.y, dir0);
+    for &t in ts.iter().chain(std::iter::once(&1.0)) {
+        let tan = if t >= 1.0 { dir1 } else { tangent(t) };
+        x = turn(x, prev, tan);
+        y = turn(y, prev, tan);
+        prev = tan;
+        frames.push((t, x, y, tan));
+    }
+    // The roll at the end that best lays the carried outline on the end section's outline.
+    let ends: Vec<Vec3> = s1.1.outer.segs.iter().map(|seg| s1.0.to_world(seg.start())).collect();
+    let roll = frames.last().map_or(0.0, |&(_, x, y, tan)| {
+        let miss = |a: f64| -> f64 {
+            let (xr, yr) = (turn_about(x, tan, a), turn_about(y, tan, a));
+            outline
+                .iter()
+                .map(|q| {
+                    let w = c1 + xr * q.x + yr * q.y;
+                    ends.iter().map(|e| (*e - w).len2()).fold(f64::INFINITY, f64::min)
+                })
+                .sum()
+        };
+        (0..360)
+            .map(|d| (d as f64).to_radians())
+            .map(|a| (a, miss(a)))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map_or(0.0, |(a, _)| if a > std::f64::consts::PI { a - std::f64::consts::TAU } else { a })
+    });
+    out = vec![s0.clone()];
+    for &(t, x, y, tan) in frames.iter().take(ts.len()) {
+        let (x, y) = (turn_about(x, tan, roll * t), turn_about(y, tan, roll * t));
+        out.push((Plane { origin: at(t) - x * c.x - y * c.y, x, y }, s0.1.clone()));
+    }
+    out.push(s1.clone());
+    out
+}
+
+/// A solid loft between two body faces, curved or flat, by their rims: the wall leaves each face
+/// along its overall outward normal (G1, reaching out by the section's weight) and copies of the
+/// two faces cap the ends (or patches on the wall's own rims where those do not sew). Where both
+/// rims have the same number of sharp corners, the wall is one piece per stretch between corners,
+/// sampled on the faces' exact edges, so its rims are the faces' own; smooth rims (or rims that
+/// do not pair up) take one wall all round.
+fn face_rim_loft(st: &ModelState, sections: &[crate::LoftSection], weights: [f64; 2]) -> Result<Body> {
+    const STATIONS: usize = 81;
+    const PIECE_STATIONS: usize = 33;
+    let [a, b] = sections else {
+        return Err(DocError::Invalid("a curved face lofts to one other face, for now".into()));
+    };
+    /// One B-rep edge of a rim: its polyline in rim order and a point on it.
+    type Piece = (Vec<Vec3>, Vec3);
+    struct Rim {
+        source: Body,
+        at: Vec3,
+        pieces: Vec<Piece>,
+        centre: Vec3,
+        normal: Vec3,
+    }
+    let unit = |v: Vec3| v.normalized().unwrap_or(v);
+    let length = |l: &[Vec3]| l.windows(2).map(|w| (w[1] - w[0]).len()).sum::<f64>();
+    // `n` points by arclength along an open polyline, both ends included.
+    let resample = |poly: &[Vec3], n: usize| -> Vec<Vec3> {
+        let total = length(poly);
+        let step = total / (n.max(2) - 1) as f64;
+        let (mut k, mut walked) = (0usize, 0.0);
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            let want = (step * i as f64).min(total);
+            while let (Some(p), Some(q)) = (poly.get(k), poly.get(k + 1)) {
+                if walked + (*q - *p).len() >= want || k + 2 >= poly.len() {
+                    break;
+                }
+                walked += (*q - *p).len();
+                k += 1;
+            }
+            match (poly.get(k).copied(), poly.get(k + 1).copied()) {
+                (Some(p), Some(q)) => {
+                    let span = (q - p).len();
+                    let t = if span > 1e-15 { ((want - walked) / span).clamp(0.0, 1.0) } else { 0.0 };
+                    out.push(p * (1.0 - t) + q * t);
+                }
+                (Some(p), None) => out.push(p),
+                _ => {}
+            }
+        }
+        out
+    };
+    let flat = |pieces: &[Piece]| -> Vec<Vec3> {
+        let mut out: Vec<Vec3> = Vec::new();
+        for (poly, _) in pieces {
+            for p in poly {
+                if out.last().is_none_or(|l| (*l - *p).len() > 1e-12) {
+                    out.push(*p);
+                }
+            }
+        }
+        out
+    };
+    let rim = |sec: &crate::LoftSection| -> Result<Rim> {
+        let (Some(name), Some(at)) = (sec.body.as_ref(), sec.face.as_ref().map(|p| **p)) else {
+            return Err(DocError::Invalid("a loft face section needs a body and a point on its face".into()));
+        };
+        let mb = st.body(&name.0).ok_or_else(|| DocError::Unknown(format!("body `{}`", name.0)))?;
+        let f = crate::appearance::face_index_at(mb, at).ok_or_else(|| DocError::Invalid(format!("Loft: no face of {} there", name.0)))? as u32;
+        let mut polys: Vec<Piece> = kernel::loft_blend::face_rim_pieces(&mb.body, f as usize, 33)?;
+        let size = polys.iter().flat_map(|(p, _)| p).map(|p| (*p - at).len()).fold(0.0, f64::max).max(1e-9);
+        let near = size * 1e-5 + 1e-9;
+        // Chain the edges into loops; the longest is the face's outer rim.
+        let mut loops: Vec<Vec<Piece>> = Vec::new();
+        while let Some(first) = polys.pop() {
+            let mut lp = vec![first];
+            while let (Some(head), Some(end)) = (lp.first().and_then(|p| p.0.first().copied()), lp.last().and_then(|p| p.0.last().copied())) {
+                if (end - head).len() <= near && lp.iter().map(|p| p.0.len()).sum::<usize>() > 2 {
+                    break;
+                }
+                let touches = |q: Option<&Vec3>| q.is_some_and(|q| (*q - end).len() <= near);
+                let Some(i) = polys.iter().position(|(p, _)| touches(p.first()) || touches(p.last())) else { break };
+                let (mut p, mid) = polys.swap_remove(i);
+                if !touches(p.first()) {
+                    p.reverse();
+                }
+                lp.push((p, mid));
+            }
+            loops.push(lp);
+        }
+        // One rim only: the wall would skip a hole's rim and the loft would fill the hole.
+        if loops.len() > 1 {
+            return Err(DocError::Invalid("not supported yet: a loft from a curved face with a hole or more than one rim".into()));
+        }
+        let pieces = loops.into_iter().next().ok_or_else(|| DocError::Invalid("Loft: the face has no rim".into()))?;
+        let all = flat(&pieces);
+        if all.len() < 3 || all.first().zip(all.last()).is_none_or(|(h, e)| (*h - *e).len() > size * 1e-3) {
+            return Err(DocError::Invalid("Loft: the face's rim does not close".into()));
+        }
+        // Outward normals of the face, read on its exact surface, averaged round the rim.
+        let normal_at = |p: Vec3| kernel::loft_blend::face_normal_at(&mb.body, f as usize, p).unwrap_or(Vec3::ZERO);
+        let ring = resample(&all, STATIONS);
+        let n = ring.len().max(1) as f64;
+        let centre = ring.iter().fold(Vec3::ZERO, |s, p| s + *p) * (1.0 / n);
+        let normal = unit(ring.iter().fold(Vec3::ZERO, |s, p| s + normal_at(*p)));
+        // A flipped end leaves into its face.
+        let normal = if sec.flip { normal * -1.0 } else { normal };
+        Ok(Rim { source: mb.body.clone(), at, pieces, centre, normal })
+    };
+    let ra = rim(a)?;
+    let mut rb = rim(b)?;
+    // Line the second rim up with the first: turn the first so it arrives facing the second,
+    // then take the direction round the second rim (and the start) that sits closest.
+    // The turn is carried along the loft's own path (a curve leaving the first face and
+    // arriving at the second), so faces that point the same way pair up as a U-turn, not
+    // crossed over.
+    let gap = (rb.centre - ra.centre).len();
+    let spine = [ra.centre, ra.centre + ra.normal * (0.5 * gap), rb.centre + rb.normal * (0.5 * gap), rb.centre];
+    let tangents: Vec<Vec3> = (0..=64)
+        .filter_map(|i| {
+            let t = i as f64 / 64.0;
+            let u = 1.0 - t;
+            let d = (spine[1] - spine[0]) * (u * u) + (spine[2] - spine[1]) * (2.0 * u * t) + (spine[3] - spine[2]) * (t * t);
+            d.normalized()
+        })
+        .collect();
+    let carry = |v: Vec3| tangents.windows(2).fold(v, |v, w| turn_between(v, w[0], w[1]));
+    let ring_a = resample(&flat(&ra.pieces), STATIONS);
+    let ring_b = resample(&flat(&rb.pieces), STATIONS);
+    let ua: Vec<Vec3> = ring_a.iter().take(STATIONS - 1).map(|p| carry(*p - ra.centre)).collect();
+    let nb = STATIONS - 1;
+    let mut best = (f64::INFINITY, 0usize, false);
+    for rev in [false, true] {
+        for shift in 0..nb {
+            let cost: f64 = ua
+                .iter()
+                .enumerate()
+                .map(|(i, u)| {
+                    let j = if rev { (shift + nb - i % nb) % nb } else { (shift + i) % nb };
+                    ring_b.get(j).map_or(f64::INFINITY, |q| (*u - (*q - rb.centre)).len2())
+                })
+                .sum();
+            if cost < best.0 {
+                best = (cost, shift, rev);
+            }
+        }
+    }
+    let (_, shift, rev) = best;
+    if rev {
+        rb.pieces.reverse();
+        for (p, _) in &mut rb.pieces {
+            p.reverse();
+        }
+    }
+    let size = ring_a.iter().chain(&ring_b).map(|p| (*p - ra.centre).len()).fold(0.0, f64::max).max(1e-6);
+    // The blend's crown runs from -0.9 (flat) to 3 (full); every weight gets its own: 0 to 1
+    // flattens towards -0.9, and above 1 it fills towards 3 without reaching it (2 gives 1.5,
+    // 10 gives 2.7).
+    let crown = weights.map(|w| if w <= 1.0 { 0.9 * (w.max(0.0) - 1.0) } else { 3.0 * (1.0 - 1.0 / w) });
+    let frames = |pts: &[Vec3], leave: Vec3| -> Vec<kernel::Frame> {
+        pts.iter().map(|p| kernel::Frame { p: *p, leave, bend: Vec3::ZERO, bend_change: Vec3::ZERO }).collect()
+    };
+    // Where a rim turns sharply from one edge to the next: the pieces that start a stretch.
+    let corners = |pieces: &[Piece]| -> Vec<usize> {
+        let n = pieces.len();
+        (0..n)
+            .filter(|&i| {
+                let prev = pieces.get((i + n - 1) % n).map(|p| &p.0);
+                let cur = pieces.get(i).map(|p| &p.0);
+                match (prev, cur) {
+                    (Some(pp), Some(cp)) if pp.len() >= 2 && cp.len() >= 2 => {
+                        let out = unit(pp[pp.len() - 1] - pp[pp.len() - 2]);
+                        let into = unit(cp[1] - cp[0]);
+                        out.dot(into) < 0.9
+                    }
+                    _ => false,
+                }
+            })
+            .collect()
+    };
+    let (ka, kb) = (corners(&ra.pieces), corners(&rb.pieces));
+    let mut walls: Vec<Body> = Vec::new();
+    if !ka.is_empty() && ka.len() == kb.len() {
+        // Pair the corners: the second rim's corner that the first's first corner arrives at.
+        let start_of = |r: &Rim, i: usize| r.pieces.get(i).and_then(|p| p.0.first().copied()).unwrap_or(r.centre);
+        let a0 = carry(start_of(&ra, ka[0]) - ra.centre);
+        let j0 = (0..kb.len())
+            .min_by(|&x, &y| (a0 - (start_of(&rb, kb[x]) - rb.centre)).len2().total_cmp(&(a0 - (start_of(&rb, kb[y]) - rb.centre)).len2()))
+            .unwrap_or(0);
+        // One stretch of a rim: its pieces from corner `i` up to the next corner.
+        let stretch = |r: &Rim, ks: &[usize], i: usize| -> Vec<Piece> {
+            let n = r.pieces.len();
+            let (from, to) = (ks[i % ks.len()], ks[(i + 1) % ks.len()]);
+            let count = if to > from { to - from } else { to + n - from };
+            (0..count).filter_map(|k| r.pieces.get((from + k) % n).cloned()).collect()
+        };
+        // Stations on the exact edges where the kernel can read them, else on the polyline.
+        let exact = |r: &Rim, part: &[Piece]| -> Vec<Vec3> {
+            let poly = flat(part);
+            let rough = resample(&poly, PIECE_STATIONS);
+            let mids: Vec<Vec3> = part.iter().map(|p| p.1).collect();
+            let Ok(fr) = kernel::loft_blend::section_frames(&r.source, &mids, r.normal, PIECE_STATIONS) else { return rough };
+            let mut pts: Vec<Vec3> = fr.iter().map(|f| f.p).collect();
+            let (Some(s), Some(e)) = (poly.first().copied(), poly.last().copied()) else { return rough };
+            if pts.first().zip(pts.last()).is_some_and(|(p, q)| (*p - e).len() + (*q - s).len() < (*p - s).len() + (*q - e).len()) {
+                pts.reverse();
+            }
+            let fits = pts.len() == PIECE_STATIONS
+                && pts.first().is_some_and(|p| (*p - s).len() <= size * 1e-3)
+                && pts.last().is_some_and(|p| (*p - e).len() <= size * 1e-3);
+            if fits { pts } else { rough }
+        };
+        for i in 0..ka.len() {
+            let pa = exact(&ra, &stretch(&ra, &ka, i));
+            let pb = exact(&rb, &stretch(&rb, &kb, i + j0));
+            walls.push(kernel::loft_blend(
+                &[frames(&pa, ra.normal), frames(&pb, rb.normal)],
+                [kernel::Continuity::G1, kernel::Continuity::G1],
+                crown,
+                PIECE_STATIONS,
+            )?);
+        }
+    } else {
+        // One wall all round, the second rim's stations started where they line up.
+        let mut pa: Vec<Vec3> = ring_a.iter().take(STATIONS - 1).copied().collect();
+        let ring_b_oriented = resample(&flat(&rb.pieces), STATIONS);
+        // The pieces were already turned when `rev`; only the start moves now.
+        let nb2 = ring_b_oriented.len().saturating_sub(1).max(1);
+        let start = if rev { (nb2 - (shift % nb2)) % nb2 } else { shift % nb2 };
+        let mut pb: Vec<Vec3> = (0..nb2).filter_map(|i| ring_b_oriented.get((start + i) % nb2).copied()).collect();
+        if let (Some(fa), Some(fb)) = (pa.first().copied(), pb.first().copied()) {
+            pa.push(fa);
+            pb.push(fb);
+        }
+        walls.push(kernel::loft_blend(
+            &[frames(&pa, ra.normal), frames(&pb, rb.normal)],
+            [kernel::Continuity::G1, kernel::Continuity::G1],
+            crown,
+            STATIONS,
+        )?);
+    }
+    // Sew the wall pieces (or the one wall's seam) into a tube, so each rim is one closed loop.
+    let refs: Vec<&Body> = walls.iter().collect();
+    let tube = match kernel::stitch(&refs, size * 1e-6) {
+        Ok(t) => t,
+        Err(e) if walls.len() > 1 => return Err(e.into()),
+        Err(_) => walls.pop().ok_or_else(|| DocError::Invalid("Loft: no wall".into()))?,
+    };
+    let mut last: Option<DocError> = None;
+    let mut close = |caps: Result<[Body; 2]>| -> Option<Body> {
+        let [ca, cb] = match caps {
+            Ok(c) => c,
+            Err(e) => {
+                last = Some(e);
+                return None;
+            }
+        };
+        for t in [1e-5, 1e-4] {
+            match kernel::stitch(&[&tube, &ca, &cb], size * t) {
+                Ok(b) if !b.is_surface() => return Some(b),
+                Ok(_) => last = Some(DocError::Invalid("Loft: the wall and its ends did not close into a solid".into())),
+                Err(e) => last = Some(e.into()),
+            }
+        }
+        None
+    };
+    // Capped with copies of the faces themselves where they sew to the wall; else with patches
+    // on the wall's own rims, which always match it (a Join takes the faces in either way).
+    if let Some(body) = close((|| Ok([kernel::copy_faces(&ra.source, &[ra.at])?, kernel::copy_faces(&rb.source, &[rb.at])?]))()) {
+        return Ok(body);
+    }
+    let patch = |r: &Rim| -> Result<Body> {
+        let ring = resample(&flat(&r.pieces), 9);
+        let one = ring.get(2).copied().unwrap_or(r.centre);
+        match kernel::patch_edges(&tube, &[one]) {
+            Ok(b) => Ok(b),
+            Err(_) => Ok(kernel::patch_edges(&tube, &[1, 3, 5, 7].iter().filter_map(|k| ring.get(*k).copied()).collect::<Vec<_>>())?),
+        }
+    };
+    if let Some(body) = close((|| Ok([patch(&ra)?, patch(&rb)?]))()) {
+        return Ok(body);
+    }
+    Err(last.unwrap_or_else(|| DocError::Invalid("Loft: could not close the loft".into())))
+}
+
+/// `v` turned by the least rotation that takes unit `a` to unit `b`.
+fn turn_between(v: Vec3, a: Vec3, b: Vec3) -> Vec3 {
+    let axis = a.cross(b);
+    let s = axis.len();
+    let c = a.dot(b);
+    if s <= 1e-12 {
+        if c > 0.0 {
+            return v;
+        }
+        let any = if a.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+        let k = a.cross(any).normalized().unwrap_or(any);
+        return k * (2.0 * k.dot(v)) - v;
+    }
+    turn_about(v, axis * (1.0 / s), s.atan2(c))
+}
+
+/// `v` turned by `a` radians about the unit axis `k`.
+fn turn_about(v: Vec3, k: Vec3, a: f64) -> Vec3 {
+    let (s, c) = a.sin_cos();
+    v * c + k.cross(v) * s + k * (k.dot(v) * (1.0 - c))
 }
 
 #[cfg(test)]

@@ -2615,6 +2615,23 @@ pub struct LoftSection {
     /// A sketch point instead of a profile (the loft closes to it, as a pyramid's apex).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub point: Option<String>,
+    /// An end section the loft leaves square to its plane, as it leaves a body face it starts
+    /// on: faces at an angle bridge in a smooth bend instead of a straight, twisted skin.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub square: bool,
+    /// How far a square end reaches out along its normal before bending, as a factor of the
+    /// default (1): 0 bends at once, 2 runs out twice as far. None is the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<f64>,
+    /// A square end that leaves the other way: into its face instead of out of it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip: bool,
+    /// A section picked as a curved body face: the face of `body` at `face` lofts by its rim and
+    /// caps that end with a copy of itself. Its `sketch` is an empty placeholder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<BodyName>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub face: Option<Position>,
 }
 
 /// A section of a surface loft: one chain from a sketch (one profile's boundary, or curves

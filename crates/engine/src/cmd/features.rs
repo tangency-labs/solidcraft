@@ -66,7 +66,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SWEEP_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
-    CommandSpec::new("solid.loft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2…50, in order; matching hole counts, no holes at an apex); rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them), name?, body_name?"),
+    CommandSpec::new("solid.loft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex) | {face: [x,y,z], body?, square?: bool (default true: the loft leaves the face square, so faces at an angle bridge in a smooth bend), weight?: 0..100 (how far a square end reaches out along its normal before bending; default 1), flip?: bool (a square end leaves into its face instead of out of it, which picks the way the loft swings round)} (a body face as the profile: a flat face's boundary is projected into a sketch on it and followed as the model changes; a curved face lofts from its rim, to one other face; body names whose face, where faces of several bodies meet)] (2…50, in order; matching hole counts, no holes at an apex); rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them; a Join from face sections defaults to every body whose face is a section), name?, body_name?"),
     CommandSpec::new("solid.box", "Box", crate::checked!("solid.box", prim_box))
         .at("SOLID", "CREATE")
         .icon("box")
@@ -3984,14 +3984,125 @@ pub(crate) fn rail_fit_form(v: &Value) -> std::result::Result<RailFit, &'static 
     }
 }
 
+/// Is face `f` of `body` flat (its exact surface a plane)?
+fn planar_face(st: &solidcraft_doc::ModelState, body: &str, f: u32) -> bool {
+    st.body(body).is_none_or(|b| b.body.is_mesh() || b.body.planar_face(f as usize).is_some())
+}
+
+/// The outward unit normal of face `f` of `body` at `p`, on its exact surface.
+fn face_normal_near(st: &solidcraft_doc::ModelState, body: &str, f: u32, p: Vec3) -> Option<Vec3> {
+    st.body(body).and_then(|b| solidcraft_doc::kernel::loft_blend::face_normal_at(&b.body, f as usize, p))
+}
+
 fn loft(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.loft";
     let list = p.get("sections").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`sections` must be a list"))?;
     if list.len() < 2 || list.len() > 50 {
         return Err(bad(cmd, "a loft needs 2…50 sections"));
     }
+    // A square end's reach along its normal, a factor of the default: 0…100.
+    let weight = |sec: &Value, cmd: &str| -> Result<Option<f64>> {
+        match sec.get("weight") {
+            None | Some(Value::Null) => Ok(None),
+            Some(w) => match w.as_f64() {
+                Some(w) if (0.0..=100.0).contains(&w) => Ok(Some(w)),
+                _ => Err(bad(cmd, "`sections[].weight` must be a number from 0 to 100")),
+            },
+        }
+    };
     let mut sections = Vec::new();
-    for sec in list {
+    // Bodies whose planar faces were picked as sections: a Join that names no targets joins
+    // them all, so a loft bridging two bodies ends up one body with both.
+    let mut face_bodies: Vec<String> = Vec::new();
+    // A curved face lofts by its rim, so a loft with one lofts every face section that way: two
+    // faces, flat or curved, and nothing else (for now).
+    let curved = list.iter().any(|sec| {
+        sec.get("face").and_then(vec3).is_some_and(
+            |fp| matches!(super::face::face_at_in(s, fp, str_(sec, "body")), Ok(Some((_, f, _, body))) if !planar_face(&s.model.state(), &body, f)),
+        )
+    });
+    if curved {
+        if list.len() != 2 || list.iter().any(|sec| sec.get("face").is_none()) {
+            return Err(bad(cmd, "a curved face lofts to one other face, for now: give two face sections"));
+        }
+        for sec in list {
+            let fp = sec.get("face").and_then(vec3).ok_or_else(|| bad(cmd, "`sections[].face` must be a point [x, y, z] on a face"))?;
+            let (m, f, d, body) = super::face::face_at_in(s, fp, str_(sec, "body"))
+                .map_err(|names| bad(cmd, format!("faces of several bodies meet at `face` ({}): name one with `body`", names.join(", "))))?
+                .ok_or_else(|| bad(cmd, "no body face at `face`"))?;
+            if d > (m.bounds().diagonal() * 1e-2).max(1e-2) {
+                return Err(bad(cmd, "no body face at `face`"));
+            }
+            // An empty sketch on the face's tangent plane stands in for the section's sketch;
+            // an edited loft hands back the one it made.
+            let kept = match sec.get("sketch") {
+                Some(v) => Some(sketch_id(s, Some(v), cmd, "sections[].sketch")?),
+                None => None,
+            };
+            let id = match kept {
+                Some(id) => id,
+                None => {
+                    let n = face_normal_near(&s.model.state(), &body, f, fp).unwrap_or(Vec3::new(0.0, 0.0, 1.0));
+                    let any = if n.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+                    let x = n.cross(any).normalized().unwrap_or(any);
+                    let y = n.cross(x);
+                    let run = |s: &mut Session, id: &str, p: Value| -> Result<Value> {
+                        let spec = crate::find_command(id).ok_or_else(|| bad(cmd, id))?;
+                        (spec.run)(s, &p)
+                    };
+                    let r = run(
+                        s,
+                        "sketch.create",
+                        json!({"plane": {"origin": [fp.x, fp.y, fp.z], "x_dir": [x.x, x.y, x.z], "y_dir": [y.x, y.y, y.z]}}),
+                    )?;
+                    let id = r.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "could not start the face section's sketch"))?;
+                    run(s, "sketch.finish", json!({}))?;
+                    s.active_sketch = None;
+                    id
+                }
+            };
+            if !face_bodies.contains(&body) {
+                face_bodies.push(body.clone());
+            }
+            sections.push(solidcraft_doc::LoftSection {
+                sketch: SketchId(id),
+                profiles: ProfileSel::All,
+                point: None,
+                square: true,
+                weight: weight(sec, cmd)?,
+                flip: sec.get("flip").and_then(Value::as_bool).unwrap_or(false),
+                body: Some(BodyName(body)),
+                face: Some(Position(fp)),
+            });
+        }
+    }
+    for sec in list.iter().filter(|_| !curved) {
+        // A planar body face lofts like a profile: its boundary is projected into a sketch on
+        // it, as an extrude or revolve from a face does, so the section follows the face.
+        if let Some(face) = sec.get("face") {
+            if sec.get("sketch").is_some() || sec.get("profiles").is_some() || sec.get("point").is_some() {
+                return Err(bad(cmd, "a face section takes no `sketch`, `profiles` or `point`"));
+            }
+            let fp = vec3(face).ok_or_else(|| bad(cmd, "`sections[].face` must be a point [x, y, z] on a planar face"))?;
+            let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(sec, "body"), false)?;
+            s.active_sketch = None;
+            if !face_bodies.contains(&body) {
+                face_bodies.push(body);
+            }
+            // A face leaves square unless `square: false`: two faces at an angle bend smoothly.
+            let square = sec.get("square").and_then(Value::as_bool).unwrap_or(true);
+            sections.push(solidcraft_doc::LoftSection {
+                sketch: SketchId(id),
+                profiles: ProfileSel::Points { points: vec![inside] },
+                point: None,
+                square,
+                weight: weight(sec, cmd)?,
+                flip: sec.get("flip").and_then(Value::as_bool).unwrap_or(false),
+                body: None,
+                face: None,
+            });
+            continue;
+        }
         let sketch = sketch_id(s, sec.get("sketch"), cmd, "sections[].sketch")?;
         // A sketch point closes the loft to an apex.
         if let Some(pt) = str_(sec, "point") {
@@ -4003,16 +4114,40 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
                 sketch: SketchId(sketch),
                 profiles: solidcraft_doc::ProfileSel::All,
                 point: Some(pt.to_string()),
+                square: false,
+                weight: None,
+                flip: false,
+                body: None,
+                face: None,
             });
             continue;
         }
-        sections.push(solidcraft_doc::LoftSection { sketch: SketchId(sketch), profiles: profiles_or_default(s, sec, sketch, cmd)?, point: None });
+        let square = sec.get("square").and_then(Value::as_bool).unwrap_or(false);
+        sections.push(solidcraft_doc::LoftSection {
+            sketch: SketchId(sketch),
+            profiles: profiles_or_default(s, sec, sketch, cmd)?,
+            point: None,
+            square,
+            weight: weight(sec, cmd)?,
+            flip: sec.get("flip").and_then(Value::as_bool).unwrap_or(false),
+            body: None,
+            face: None,
+        });
     }
     let (rails, rail_fit) = guide_rails(s, p, cmd, "loft", None)?;
+    // Guide rails shape the whole loft, so an end's weight or flip would have no effect.
+    if !rails.is_empty() && sections.iter().any(|sec| sec.weight.is_some() || sec.flip) {
+        return Err(bad(cmd, "a loft with guide rails takes no section `weight` or `flip`"));
+    }
     let operation = operation(p, cmd)?;
     let sketches: Vec<u64> = sections.iter().map(|sec| sec.sketch.0).collect();
     let mut targets = face_join_targets(s, p, operation, &sketches, cmd)?;
     if operation == Operation::Join && string_list(cmd, p, "targets")?.is_empty() && string_list(cmd, p, "participants")?.is_empty() {
+        for body in &face_bodies {
+            if !targets.iter().any(|t| &t.0 == body) {
+                targets.push(BodyName(body.clone()));
+            }
+        }
         let st = s.model.state();
         let candidates: Vec<_> = st
             .bodies
