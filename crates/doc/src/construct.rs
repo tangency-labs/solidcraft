@@ -615,6 +615,29 @@ pub fn sketch_point_position(st: &ModelState, sketch: u64, point: &str) -> Optio
     ss.sketch.wires.get(ss.sketch.wire_index(wire)?)?.fit.get(index).copied()
 }
 
+/// The point a Scale grows its bodies about, from its pick as the model is now: a flat face's
+/// middle, a hole's or shaft's round end nearest the pick (a round edge's centre), else the point
+/// [`point`] finds. A named face or edge that is gone fails, asking for it to be picked again.
+pub(crate) fn scale_point(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
+    match g {
+        GeoRef::Face { at, name } => {
+            let (b, fi, p) = face_of(ctx.st, *at, name)?;
+            if let Some(c) = kernel::cylinder_face_at(&b.body, p) {
+                let s = (p - c.axis_point).dot(c.axis);
+                let end = if (s - c.start).abs() <= (c.end - s).abs() { c.start } else { c.end };
+                return Ok(c.axis_point + c.axis * end);
+            }
+            let tol = (b.body.size() * 2e-3).max(1e-3);
+            let f = b.body.faces(tol).ok().and_then(|fs| fs.into_iter().find(|f| f.index == fi));
+            match f {
+                Some(f) if f.plane_normal.is_some() && f.centroid.is_finite() => Ok(f.centroid),
+                _ => Err(bad("this face has no centre to scale about: pick a flat or round face, a vertex or a point")),
+            }
+        }
+        _ => point(ctx, g),
+    }
+}
+
 /// An edge or face of the model as a line: along a straight edge, through the centre of a
 /// circular edge along its normal, or the axis of a cylinder, cone or torus face.
 fn model_line(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {

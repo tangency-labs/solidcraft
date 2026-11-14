@@ -22,7 +22,7 @@ use solidcraft_sketch::{CurveKind, Profile, SolveReport, find_profiles};
 
 use crate::expr::{self, Kind, Value};
 use crate::lineage::Traced;
-use crate::{AxisRef, DocError, Document, Feature, FeatureId, FeatureKind, HoleKind, Operation, PlaneRef, ProfileSel, Result};
+use crate::{AxisRef, DocError, Document, Feature, FeatureId, FeatureKind, HoleKind, Operation, PlaneRef, ProfileSel, Result, ScaleAbout};
 
 type JointFaces = (Body, kernel::Result<Arc<[kernel::FaceInfo]>>);
 
@@ -9340,6 +9340,21 @@ fn chamfer_with(
     })
 }
 
+/// The centre of the exact bounding box of a Scale's bodies, as the features before it leave
+/// them.
+fn bodies_centre(st: &ModelState, bodies: &[crate::BodyName]) -> Result<Vec3> {
+    let mut bb: Option<(Vec3, Vec3)> = None;
+    for n in bodies {
+        let b = st.bodies.iter().find(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
+        let x = b.body.exact_bounds()?;
+        bb = Some(match bb {
+            None => (x.min, x.max),
+            Some((lo, hi)) => (lo.min(x.min), hi.max(x.max)),
+        });
+    }
+    bb.map(|(lo, hi)| (lo + hi) * 0.5).filter(|c| c.is_finite()).ok_or_else(|| DocError::Invalid("the bodies have no centre to scale about".into()))
+}
+
 fn eval_feature(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -10148,7 +10163,7 @@ fn eval_feature(
             }
             Ok(())
         }
-        FeatureKind::Scale { bodies, origin, factor, factors } => {
+        FeatureKind::Scale { bodies, origin, about, factor, factors } => {
             let k = match factors {
                 Some(fs) => [val(vals, &fs[0], Kind::Unitless)?, val(vals, &fs[1], Kind::Unitless)?, val(vals, &fs[2], Kind::Unitless)?],
                 None => {
@@ -10159,7 +10174,16 @@ fn eval_feature(
             if k.iter().any(|x| !(x.is_finite() && *x > 1e-9 && *x < 1e6)) {
                 return Err(DocError::Invalid("scale factors must be positive".into()));
             }
-            let o = *origin;
+            let o = match about {
+                None => origin.0,
+                Some(ScaleAbout::Centre) => bodies_centre(st, bodies)?,
+                Some(ScaleAbout::Pick { at }) => {
+                    crate::construct::scale_point(&crate::construct::Ctx { doc, vals, st, depth: 0, component: f.component }, at)?
+                }
+            };
+            if !o.is_finite() {
+                return Err(DocError::Invalid("the point to scale about is not finite".into()));
+            }
             // Column-major: scale about the origin.
             let m = [
                 [k[0], 0.0, 0.0, 0.0],

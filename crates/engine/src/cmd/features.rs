@@ -4222,7 +4222,16 @@ fn scale(s: &mut Session, p: &Value) -> Result<Value> {
     };
     check_expr(s, &factor, Kind::Unitless, cmd, "factor")?;
     let origin = p.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
-    add_feature(s, p, FeatureKind::Scale { bodies: bodies.into_iter().map(BodyName).collect(), origin: Position(origin), factor, factors })
+    // What it scales about, found again each time the design updates: `"centre"` (the bodies'
+    // centre) or a reference (a vertex, face, edge or sketch point), which follows the model. A
+    // fixed `origin` stays where it is.
+    let about = match p.get("about") {
+        None | Some(Value::Null) => None,
+        Some(_) if p.get("origin").is_some_and(|o| !o.is_null()) => return Err(bad(cmd, "give `origin` or `about`, not both")),
+        Some(Value::String(c)) if c == "centre" || c == "center" => Some(solidcraft_doc::ScaleAbout::Centre),
+        Some(v) => Some(solidcraft_doc::ScaleAbout::Pick { at: super::construct::geo(s, Some(v), cmd, "about")? }),
+    };
+    add_feature(s, p, FeatureKind::Scale { bodies: bodies.into_iter().map(BodyName).collect(), origin: Position(origin), about, factor, factors })
 }
 
 fn delete_face(s: &mut Session, p: &Value) -> Result<Value> {
