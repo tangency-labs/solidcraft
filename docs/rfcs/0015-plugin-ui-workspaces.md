@@ -93,6 +93,12 @@ world workbench-plugin {
 
 A panel is a static layout the plugin returns from `ui-provider.describe` at install time, plus data it sets at run time. Widgets bind to slash paths in that data. Forms reuse the #15100 design-forms field types, so plugin forms, design forms and feature dialogs all look the same.
 
+The companion [command-plugin selection proposal](../plugin-selection.md)
+([#16274](https://github.com/tangency-labs/solidcraft/issues/16274)) describes
+native viewport picking for entry input schemas. Its selection controller and
+field model should be shared with these forms. The annotation and policy bindings
+remain under review; the proposal does not implement `ui@0.1`.
+
 ```wit
 /// Panels and workspaces. Host-drawn; a plugin ships no UI code.
 interface ui {

@@ -25,6 +25,12 @@ are lists. Entries may declare named menu or ribbon slots; each app decides
 which slots exist and draws forms from the input schemas. Plugins ship no UI
 code. SolidCraft retains approval, cancellation and plugin preferences.
 
+Interactive geometry fields are proposed in
+[Native selection fields for command plugins](plugin-selection.md), tracked by
+[#16274](https://github.com/tangency-labs/solidcraft/issues/16274).
+That design shares native picking with Extrude and Chamfer; it is not implemented.
+The current Plugins-menu form does not render selection arrays.
+
 ## Versions
 
 The WIT package is `craft:plugin@0.1.0`. Today's surface is one capability, `commands@0.1`:
