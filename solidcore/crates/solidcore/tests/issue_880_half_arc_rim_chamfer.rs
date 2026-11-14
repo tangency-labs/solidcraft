@@ -30,16 +30,25 @@ use solidcore::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::axis2_placement::Axis2Placement;
-use solidcore::math::{Point3, Vec3, PI};
+use solidcore::intersect::point_class::{PointClassType, PointClassification};
+use solidcore::mass::integrator::properties::face_area;
+use solidcore::math::{Point2, Point3, Vec3, PI};
+use solidcore::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use solidcore::primitive::api_curves::create_arc;
 use solidcore::primitive::api_primitives::create_box;
+use solidcore::query::face::p2::{point_classify, PointClassifyOptions};
+use solidcore::surface::procedural_blend::ProceduralBlend;
 use solidcore::surface::surface::p2::SurfaceKind;
+use solidcore::surface::surface::p4::NoObject;
+use solidcore::surface::surface::p5::DropPointOptions;
+use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, transform, StitchAndOrientOptions};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-use solidcore::topology::{edge, EdgeId, EdgeuseId};
+use solidcore::topology::face::p1::calculate_uv_domain_from_uv_trim_curves;
+use solidcore::topology::{edge, EdgeId, EdgeuseId, FaceId};
 use solidcore::{Brep, Kernel};
 
 /// SolidCraft's `SEAM_ANGLE`, in radians.
@@ -265,7 +274,7 @@ fn issue_880_one_half_chamfers_at_equal_setbacks() {
     let mut rails = Vec::new();
     for edge_id in p1::edges(&b, None).unwrap() {
         let faces = edge::faces(&b, edge_id, None).unwrap();
-        let chamfer_face = |f: &solidcore::topology::FaceId| {
+        let chamfer_face = |f: &FaceId| {
             !matches!(
                 kind(*f),
                 SurfaceKind::Plane(_) | SurfaceKind::SurfOfExtrusion(_)
@@ -332,4 +341,337 @@ fn issue_880_one_half_chamfers_at_equal_setbacks() {
         removed > 11.609_075 && removed < 19.620_616,
         "removed {removed}"
     );
+}
+
+/// The largest sine of the angle between the u tangents on the two sides of an interior
+/// knot of `net`, over every such knot and all of v, bounded from the control net (not
+/// sampled), for a polynomial net of degree 1 in v whose interior u knots have full
+/// multiplicity (the Hermite nets a chamfer is built as). At the knot's row `i` the u
+/// tangents are `S-(v) = (1 - v) a0 + v a1` and `S+(v) = (1 - v) b0 + v b1` up to positive
+/// factors, `aj = P[i][j] - P[i-1][j]` and `bj = P[i+1][j] - P[i][j]`. Their cross product
+/// is quadratic in v, bounded by its Bernstein coefficients; their dot product's
+/// Bernstein coefficients are all positive (the tangents never turn back); and each side's
+/// length is at least the distance from the origin to its segment. So
+/// `sin <= max |c_k| / (|S-|min |S+|min)`.
+fn u_knot_g1_sine(net: &BSplineSurface) -> f64 {
+    assert!(!net.is_rational());
+    assert_eq!(net.degree(SurfParamType::V), 1);
+    let p = net.degree(SurfParamType::U);
+    let (knots, mults) = net.knots(SurfParamType::U, None).unwrap();
+    let cpn = net.control_point_net().unwrap();
+    assert_eq!(cpn.v_count, 2);
+    let at = |i: usize, j: usize| cpn.points[i * cpn.v_count + j];
+    let dist0 = |a: Vec3, b: Vec3| {
+        // the distance from the origin to the segment a b
+        let d = b - a;
+        if d.dot(d) == 0.0 {
+            return a.length();
+        }
+        let t = (-(a.dot(d)) / d.dot(d)).clamp(0.0, 1.0);
+        (a + d * t).length()
+    };
+    let (vd, _) = net.knots(SurfParamType::V, None).unwrap();
+    let mut worst = 0.0_f64;
+    let mut first = mults[0];
+    for (kk, (&u, &m)) in knots.iter().zip(&mults).enumerate().skip(1) {
+        if kk + 1 == knots.len() {
+            break;
+        }
+        assert_eq!(m, p, "an interior knot below full multiplicity");
+        // (the knot's first place in the full knot vector, less one)
+        let i = first - 1;
+        first += m;
+        // the row interpolates the knot's iso-curve: the indexing is the net's
+        let on = net
+            .evaluate_point(Point2::new(u, vd[0]))
+            .unwrap()
+            .distance(at(i, 0));
+        assert!(on <= 1e-9, "row {i} is not the knot's: {on:e}");
+        let a = [at(i, 0) - at(i - 1, 0), at(i, 1) - at(i - 1, 1)];
+        let b = [at(i + 1, 0) - at(i, 0), at(i + 1, 1) - at(i, 1)];
+        let dots = [
+            a[0].dot(b[0]),
+            0.5 * (a[0].dot(b[1]) + a[1].dot(b[0])),
+            a[1].dot(b[1]),
+        ];
+        assert!(
+            dots.iter().all(|&d| d > 0.0),
+            "knot {u}: the tangents turn back"
+        );
+        let c = [
+            a[0].cross(b[0]).length(),
+            (a[0].cross(b[1]) + a[1].cross(b[0])).length() * 0.5,
+            a[1].cross(b[1]).length(),
+        ];
+        let (la, lb) = (dist0(a[0], a[1]), dist0(b[0], b[1]));
+        assert!(la > 0.0 && lb > 0.0, "knot {u}: a tangent vanishes");
+        worst = worst.max(c.iter().fold(0.0_f64, |x, &y| x.max(y)) / (la * lb));
+    }
+    worst
+}
+
+/// The points of a 41 x 41 grid over face `f`'s trims' uv box that the face classifies
+/// inside.
+fn face_points(k: &Kernel, b: &mut Brep, f: FaceId) -> Vec<Point3> {
+    let bx = calculate_uv_domain_from_uv_trim_curves(k, b, f, true, false, false)
+        .unwrap()
+        .domain;
+    let s = b.face(f).unwrap().surface.clone().unwrap();
+    let mut out = Vec::new();
+    for i in 0..=40 {
+        for j in 0..=40 {
+            let uv = bx.evaluate(f64::from(i) / 40.0, f64::from(j) / 40.0);
+            let mut pc = PointClassification::new(1e-6);
+            point_classify(k, b, f, uv, &mut pc, PointClassifyOptions::default()).unwrap();
+            if pc.point_class() == PointClassType::Face {
+                out.push(s.evaluate_point(k, uv).unwrap());
+            }
+        }
+    }
+    out
+}
+
+/// The sum over `b`'s edges of (1/3) tol L max |x|: each edge's tolerance, length and
+/// largest distance from the origin, the length and distance measured on a 200-segment
+/// polyline of its curve.
+fn gap_strips(k: &Kernel, b: &Brep) -> f64 {
+    let mut sum = 0.0;
+    for e in p1::edges(b, None).unwrap() {
+        let Some(curve) = edge::curve(b, e).unwrap() else {
+            continue;
+        };
+        let ivl = edge::interval(b, e).unwrap();
+        let pts: Vec<Point3> = (0..=200)
+            .map(|i| {
+                curve
+                    .evaluate_point(k, ivl.evaluate(f64::from(i) / 200.0))
+                    .unwrap()
+            })
+            .collect();
+        let length: f64 = pts.windows(2).map(|w| w[0].distance(w[1])).sum();
+        let far = pts.iter().map(|p| p.length()).fold(0.0_f64, f64::max);
+        sum += edge::tolerance(b, e).unwrap() * length * far / 3.0;
+    }
+    sum
+}
+
+/// The distance from `x` to the segment from `p` to `q`.
+fn segment_distance(x: Point3, p: Point3, q: Point3) -> f64 {
+    let e = q - p;
+    let t = ((x - p).dot(e) / e.dot(e)).clamp(0.0, 1.0);
+    (p + e * t).distance(x)
+}
+
+/// The angle in degrees between the normals of two chamfers by their definitions where
+/// `before` ends and `after` starts (at u = `knot` of both), at `t` across: each the
+/// cross product of the definition's s and t partials on its own side of the station
+/// (`EvaluateDefinition`'s `bBefore`), the dihedral of the edge between them.
+fn crease_degrees(
+    k: &Kernel,
+    before: &ProceduralBlend,
+    after: &ProceduralBlend,
+    knot: f64,
+    t: f64,
+) -> f64 {
+    let normal = |pb: &ProceduralBlend, side_before: bool| {
+        let st = pb.definition_parameters(Point2::new(knot, t));
+        let d = pb
+            .evaluate_definition_sided(k, st.x, st.y, 1, 1, side_before)
+            .unwrap();
+        d[1][0].cross(d[0][1])
+    };
+    let (a, b) = (normal(before, true), normal(after, false));
+    (a.dot(b) / (a.length() * b.length()))
+        .clamp(-1.0, 1.0)
+        .acos()
+        .to_degrees()
+}
+
+/// #16651: the half rim's chamfer with the rounds as their definitions. Where the chamfer
+/// runs on past the seam, its wall's foot crosses u = 1 of the wall's extension, its old
+/// boundary, where the extension is only G1: the foot's s-derivative solves
+/// `(I + r W) F' = c'` and the shape operator W jumps there, so F' does (by 8.46 degrees
+/// at the setbacks 1 and 2), and the chord's normal `C x ((1 - w) F1' + w F2')` turns with
+/// it. The chamfer by its definition creases there (its one net held a C0 knot,
+/// `check_brep`'s Test #4). It is now split there into two chamfers by the definition, one
+/// each side, joined by an edge along the chord: closed, clean, every knot inside each face
+/// G1 by the control net's bound, one face more than without the flag per crease, and the
+/// edge's dihedral, from the definitions' own sided partials, more than the G1 angle at
+/// the wall's end (7.78 and 4.78 degrees) and none at the cut face's, whose foot does not
+/// jump; the edge on the definition's ruling; and the volume within d A of the build
+/// without the flag (d the measured largest distance from its chamfer to the definitions,
+/// A the chamfer's area) plus the strips its tolerant edges leave out of either surface
+/// integral.
+#[test]
+fn issue_880_one_half_chamfer_splits_at_its_crease_as_a_definition() {
+    let sin_g1 = (0.5_f64).to_radians().sin(); // SM_CONTINUITY_ANGLE
+    for offsets in [
+        (1.0, 2.0),
+        (1.443_730_684_954_035_7, 1.443_730_684_954_035_7),
+    ] {
+        let built = |definition: bool| {
+            let mut k = Kernel::default();
+            k.fixes.fillet_round_as_definition = definition;
+            let mut b = cut_cylinder(&mut k);
+            let originals = p1::faces(&b, None).unwrap();
+            let e = rims(&k, &b)[0];
+            let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
+            chamfer(&mut k, &mut b, &[(e, u)], offsets).unwrap();
+            let outcome = finish(&mut k, &mut b, originals.len());
+            (k, b, originals, outcome)
+        };
+        let (mut k, mut b, originals, outcome) = built(true);
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "{offsets:?}: {lines:?}");
+        assert!(outcome.2, "{offsets:?}: {outcome:?}");
+        // the chamfer's faces, each a chamfer by its definition, G1 inside
+        let mut chamfers = Vec::new();
+        for f in p1::faces(&b, None).unwrap() {
+            if originals.contains(&f) {
+                continue;
+            }
+            let s = b.face(f).unwrap().surface.clone().unwrap();
+            if let SurfaceKind::ProceduralBlend(pb) = s.kind() {
+                assert!(
+                    pb.chamfer().is_some(),
+                    "{offsets:?}: {f:?} is not a chamfer"
+                );
+                let sine = u_knot_g1_sine(pb.net());
+                assert!(sine <= sin_g1, "{offsets:?}: {f:?} turns by sin {sine:e}");
+                let d = pb.net().natural_uv_domain();
+                chamfers.push((f, (**pb).clone(), d));
+            }
+        }
+        // where one ends the next starts: the crease, an edge of both
+        let mut creases = 0;
+        for (fa, a, da) in &chamfers {
+            for (fb, b2, db) in &chamfers {
+                if da.max().x != db.min().x {
+                    continue;
+                }
+                let shared: Vec<EdgeId> = p1::edges(&b, None)
+                    .unwrap()
+                    .into_iter()
+                    .filter(|&e| {
+                        let faces = edge::faces(&b, e, None).unwrap();
+                        faces.contains(fa) && faces.contains(fb)
+                    })
+                    .collect();
+                assert_eq!(
+                    shared.len(),
+                    1,
+                    "{offsets:?}: {fa:?} and {fb:?} share {shared:?}"
+                );
+                let knot = da.max().x;
+                // the edge is the chord there: its middle on the definition's ruling, the
+                // segment between its ends (t = 0 and 1) at the knot
+                let e = shared[0];
+                let curve = edge::curve(&b, e).unwrap().unwrap();
+                let mid = curve
+                    .evaluate_point(&k, edge::interval(&b, e).unwrap().evaluate(0.5))
+                    .unwrap();
+                let end = |t: f64| {
+                    let st = a.definition_parameters(Point2::new(knot, t));
+                    a.evaluate_definition_sided(&k, st.x, st.y, 0, 0, true)
+                        .unwrap()[0][0]
+                };
+                let (p0, p1) = (end(da.min().y), end(da.max().y));
+                let off = segment_distance(mid, p0, p1);
+                let tolerance = edge::tolerance(&b, e).unwrap();
+                assert!(
+                    off <= tolerance,
+                    "{offsets:?}: the edge is {off:e} off the ruling (tolerance {tolerance:e})"
+                );
+                // (the foot on the cut face, a plane, does not jump: no crease at its end)
+                let mut angles = Vec::new();
+                for i in 0..=4 {
+                    let t = da.min().y + (da.max().y - da.min().y) * f64::from(i) / 4.0;
+                    let angle = crease_degrees(&k, a, b2, knot, t);
+                    eprintln!("{offsets:?}: crease at u {knot} t {t}: {angle} degrees");
+                    angles.push(angle);
+                }
+                let widest = angles.iter().fold(0.0_f64, |x, &y| x.max(y));
+                assert!(
+                    widest > 0.5,
+                    "{offsets:?}: the crease is G1 ({widest} degrees)"
+                );
+                assert!(
+                    angles[0].min(angles[4]) < 1e-6,
+                    "{offsets:?}: both feet jump ({angles:?})"
+                );
+                creases += 1;
+            }
+        }
+        assert!(
+            creases >= 1,
+            "{offsets:?}: no crease among {} faces",
+            chamfers.len()
+        );
+        // one face more than without the flag (one chamfer face, smoothed across it) for
+        // each crease
+        let (k0, mut b0, originals0, off) = built(false);
+        assert_eq!(
+            outcome.1,
+            off.1 + creases,
+            "{offsets:?}: {outcome:?} against {off:?}"
+        );
+        // the volume (MEASURED bound): the two builds differ only by their chamfers, which
+        // share their boundary curves to within the edges' tolerances, so the volumes
+        // differ by at most the chamfer's area times the largest distance d between the
+        // chamfer without the flag (a G1 fit across the crease) and the definitions (each
+        // within its certified bound of its net). d is measured: the largest gap from the
+        // points of a 41 x 41 grid inside each face without the flag to the nearer net,
+        // plus the larger certified bound.
+        let mut area = 0.0;
+        let mut bound = 0.0_f64;
+        for (f, pb, _) in &chamfers {
+            area += face_area(&k, &mut b, *f, 1e-9).unwrap();
+            bound = bound.max(pb.bound());
+        }
+        let nets: Vec<Surface> = chamfers
+            .iter()
+            .map(|(_, pb, _)| Surface::from(pb.net().copy()))
+            .collect();
+        let mut d = 0.0_f64;
+        let mut judged = 0;
+        for f in p1::faces(&b0, None).unwrap() {
+            if originals0.contains(&f) {
+                continue;
+            }
+            let s = b0.face(f).unwrap().surface.clone().unwrap();
+            if !matches!(s.kind(), SurfaceKind::BSpline(_)) {
+                continue;
+            }
+            for x in face_points(&k0, &mut b0, f) {
+                let gap = nets
+                    .iter()
+                    .map(|n| {
+                        let nd = n.natural_uv_domain_with_nurb(&k).unwrap();
+                        n.drop_point::<NoObject>(&k, x, &nd, &DropPointOptions::default())
+                            .unwrap()
+                            .gap
+                    })
+                    .fold(f64::INFINITY, f64::min);
+                d = d.max(gap);
+                judged += 1;
+            }
+        }
+        assert!(judged > 100, "{offsets:?}: judged {judged}");
+        d += bound;
+        let (v, v0) = (volume(&k, &mut b), volume(&k0, &mut b0));
+        // and the volumes are surface integrals (1/3) x . n dA over faces whose edges are
+        // tolerant: along each edge the faces may leave a strip as wide as its tolerance
+        // unmeasured, at most (1/3) tol L max |x| of it, in each build
+        let strips = gap_strips(&k, &b) + gap_strips(&k0, &b0);
+        let allowed = d * area + strips;
+        eprintln!(
+            "{offsets:?}: volume {v} against {v0} without the flag: {:e} of d A + strips = \
+             {:e} + {strips:e} (d {d:e} over {judged} points, area {area})",
+            (v - v0).abs(),
+            d * area
+        );
+        assert!((v - v0).abs() <= allowed, "{offsets:?}: {v} against {v0}");
+    }
 }
