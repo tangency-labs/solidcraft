@@ -348,7 +348,7 @@ fn a_round_on_a_ring_segments_torus_edge_keeps_the_bodys_box() {
 
 /// #16394, the arc wall rows: a 22 × 6 section whose outer wall is an arc of radius 10 about
 /// (32, 0), from (42, 0) to (40, 6). A radius 1 round on the wall's edge at the end face keeps
-/// the box (it grew to z 6.0013); one on the wall's bottom edge keeps x within ±10 (it grew to
+/// the box (it grew to z 6.0013, so its top is checked to 0.001 mm); one on the wall's bottom edge keeps x within ±10 (it grew to
 /// ±10.25) and brings the outer radius in to 32 + √(9² − 1²) + 1, the ball's centre 1 above the
 /// floor and 9 from the arc's centre.
 #[test]
@@ -360,6 +360,8 @@ fn a_round_on_an_arc_walls_edges_keeps_the_bodys_box() {
         ring_segment(&mut s, json!([[40, 6], [20, 6], [20, 0], [42, 0]]), [32.0, 0.0]);
         assert_box(&mut s, "before the round", [-10.0, inner, 0.0], [10.0, 42.0, 6.0]);
         run(&mut s, "solid.fillet", json!({"edges": [pick], "radius": "1", "body": "Part", "tangent_chain": false, "name": "Round"}));
-        assert_box(&mut s, &format!("round on the edge at {pick:?}"), [-10.0, inner, 0.0], [10.0, max_y, 6.0]);
+        let after = assert_box(&mut s, &format!("round on the edge at {pick:?}"), [-10.0, inner, 0.0], [10.0, max_y, 6.0]);
+        // the flat top at z = 6 is the body's highest, to well within the 0.0013 it grew by
+        assert!(close(&after["bbox"]["max"][2], 6.0, 0.001), "round on the edge at {pick:?}: max z: {after}");
     }
 }
