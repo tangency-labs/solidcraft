@@ -2378,6 +2378,10 @@ fn files_line<'a>(ui: &mut egui::Ui, names: impl Iterator<Item = &'a str>) {
 
 /// The widest a file chip gets; a narrower chat makes them narrower.
 const CHIP_W: f32 = 170.0;
+/// The tallest the file chips get, about three and a half rows: more scroll, and the half row shows
+/// that there are more. A message holds up to 200 files, which would otherwise push the
+/// conversation out of the panel.
+pub(super) const CHIPS_MAX_HEIGHT: f32 = 112.0;
 
 /// The items of a message that are not pills in its text (those of Attach selection, or all of them
 /// when the message has no pills), with their "gone" flags and each one's place among all of the
@@ -2545,6 +2549,7 @@ fn pill_input(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, focused
 /// The files for the next message, as chips in rows that fit the chat: a picture's thumbnail (or
 /// a file mark), the name cut to fit, and a × that takes the file off. Laid out by hand: egui
 /// wraps plain widgets, not framed groups, and one row wider than the chat widens all below it.
+/// Past [`CHIPS_MAX_HEIGHT`] the rows scroll.
 #[cfg(not(target_arch = "wasm32"))]
 fn attachment_chips(chat: &mut AgentChat, ui: &mut egui::Ui) {
     // Thumbnails of files no longer on the message are let go.
@@ -2553,29 +2558,31 @@ fn attachment_chips(chat: &mut AgentChat, ui: &mut egui::Ui) {
     if chat.files() == 0 {
         return;
     }
-    let gap = ui.spacing().item_spacing.x;
-    let avail = ui.available_width().max(1.0);
-    let w = CHIP_W.min(avail);
-    let per_row = (((avail + gap) / (w + gap)).floor() as usize).max(1);
     let (mut remove, mut stop) = (None, None);
     // The files read, then those still being read (each takes its place once it is done).
     let read = chat.attachments.len();
     let indices: Vec<usize> = (0..chat.files()).collect();
-    for row in indices.chunks(per_row) {
-        ui.horizontal(|ui| {
-            for &i in row {
-                if let Some(f) = chat.attachments.get(i) {
-                    if chip(ui, &mut chat.thumbs, f, i, w) {
-                        remove = Some(i);
+    egui::ScrollArea::vertical().id_salt("sc_agent_chat_chips").max_height(CHIPS_MAX_HEIGHT).auto_shrink([false, true]).show(ui, |ui| {
+        let gap = ui.spacing().item_spacing.x;
+        let avail = ui.available_width().max(1.0);
+        let w = CHIP_W.min(avail);
+        let per_row = (((avail + gap) / (w + gap)).floor() as usize).max(1);
+        for row in indices.chunks(per_row) {
+            ui.horizontal(|ui| {
+                for &i in row {
+                    if let Some(f) = chat.attachments.get(i) {
+                        if chip(ui, &mut chat.thumbs, f, i, w) {
+                            remove = Some(i);
+                        }
+                    } else if let Some(l) = chat.loading.get(i - read)
+                        && loading_chip(ui, &l.name, l.importing(), i - read, w)
+                    {
+                        stop = Some(i - read);
                     }
-                } else if let Some(l) = chat.loading.get(i - read)
-                    && loading_chip(ui, &l.name, l.importing(), i - read, w)
-                {
-                    stop = Some(i - read);
                 }
-            }
-        });
-    }
+            });
+        }
+    });
     if let Some(i) = remove
         && i < chat.attachments.len()
     {

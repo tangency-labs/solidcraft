@@ -3521,6 +3521,25 @@ fn assert_inside_the_panel(chips: usize) {
     }
 }
 
+/// Many files on a message scroll in a strip of chips about three rows high, so the text box stays
+/// in the panel; a message holds up to 200 files.
+#[test]
+fn many_files_scroll_in_a_strip_of_chips() {
+    use solidcraft_ui_registry::rect_of;
+    let d = attachable("many-chips");
+    let mut h = narrow_chat();
+    for _ in 0..40 {
+        attach_path(&mut h.app, &at(&d, "brief.md")).unwrap();
+    }
+    h.frames(3);
+    let first = rect_of("agent_chat:file:0").expect("the first chip");
+    let input = rect_of("agent_chat:input").expect("the text box");
+    let panel = rect_of("agent_chat:panel").expect("the panel");
+    assert!(input.top() - first.top() <= panel::CHIPS_MAX_HEIGHT + 24.0, "the chips stay in their strip: {first:?}, text box {input:?}");
+    assert!(panel.contains_rect(input), "the text box stays in the panel: {input:?} in {panel:?}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// Files for the next message show as chips above the text box (a picture's thumbnail, the name,
 /// a × that takes it off), inside the chat, and Send sends files with no text.
 #[test]

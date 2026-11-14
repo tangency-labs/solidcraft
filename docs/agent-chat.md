@@ -138,6 +138,7 @@ disk (below), up to 200 on one message.
 - The files show as chips above the text box: a picture's thumbnail, the name, and × to take the
   file off. A picture is read off the window thread, so a large one never stops the window: its
   chip shows a spinner meanwhile, and **Send** waits for it. **Send** sends files with no text.
+  Past about three rows, the chips scroll, so the text box and the conversation stay in view.
 - **Pictures** (PNG, JPEG, GIF, WebP) go to the agent as they are when they are at most 2048 px
   on the long side and 3.75 MB (a picture's base64 then stays under 5 MB, so eight still fit in a
   prompt). Otherwise they are scaled down to 2048 px and re-encoded: as PNG when that fits, as
