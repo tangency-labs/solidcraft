@@ -17,6 +17,10 @@
 //! fork's numbers and the port's). With the flag off (upstream) the port also pairs every
 //! face, 2080 = 64 x 65 / 2 and 32896 = 256 x 257 / 2 pairs, so the test fails. The plate
 //! keeps its exact area either way.
+//!
+//! Not the fork's: the same plate as a solid, 12 thick, with its holes cut in 3D by one
+//! `boolean_lists` call (`plate_cut_marks_one_face_for_each_face_it_deletes`,
+//! `plate_cut_solves_no_proto_vertex_that_has_proto_edges`).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -27,14 +31,17 @@
 use std::f64::consts::PI;
 use std::time::Instant;
 
-use solidcore::boolean::api_brep::{boolean_2d, Boolean2d, Boolean2dOutcome};
+use solidcore::boolean::api_brep::{boolean_2d, boolean_lists, Boolean2d, Boolean2dOutcome};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::geom::axis2_placement::Axis2Placement;
-use solidcore::mass::integrator::properties::brep_area;
+use solidcore::kernel::UpstreamFixes;
+use solidcore::mass::integrator::properties::{brep_area, brep_volume_default};
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::create_line_segment;
+use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::primitive::api_trim_ops::create_planar_faces;
+use solidcore::topology::brep::p1;
 use solidcore::{Brep, Kernel};
 
 const RADIUS: f64 = 2.0;
@@ -365,4 +372,73 @@ fn plate_extruded_walks(n: u32) -> u64 {
 fn an_extruded_plate_walks_each_hole_a_fixed_number_of_times() {
     assert_eq!(plate_extruded_walks(8), 2 * 3 * 64 + 4);
     assert_eq!(plate_extruded_walks(16), 2 * 3 * 256 + 4);
+}
+
+/// The solid plate, 12 thick, minus `n` x `n` cylinders r 4 through it on the 20 mm
+/// pitch, in one `boolean_lists` call with SolidCraft's fixes: checks the cut (a wall
+/// for each hole, three edges for each hole, the exact volume) and returns the faces its
+/// shell traversals marked and the point solves it ran of a proto vertex against a proto
+/// edge.
+fn plate_cut_counts(n: u32) -> (u64, u64) {
+    let mut fixes = UpstreamFixes::all();
+    fixes.fillet_refuse_rounds_breaking_through = false;
+    fixes.fillet_round_ends_on_outline = false;
+    let mut k = Kernel {
+        fixes,
+        ..Kernel::default()
+    };
+    let (w, thick, radius) = (PITCH * f64::from(n), 12.0, 4.0);
+    let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), w, w, thick).unwrap();
+    let mut tools = Vec::new();
+    for i in 0..n {
+        for j in 0..n {
+            let (x, y) = (PITCH * (f64::from(i) + 0.5), PITCH * (f64::from(j) + 0.5));
+            let base = Point3::new(x, y, -1.0);
+            tools.push(create_cylinder(&mut k, base, radius, thick + 2.0).unwrap());
+        }
+    }
+    let holes = (n * n) as usize;
+    k.work_counters.reset();
+    let mut cut = boolean_lists(&mut k, &[plate], &[], &tools, &[], 3)
+        .unwrap()
+        .breps;
+    let marked = k.work_counters.shell_traversal_faces();
+    let solves = k.work_counters.proto_vertex_point_solves();
+    assert_eq!(cut.len(), 1);
+    let cut = &mut cut[0];
+    assert_eq!(p1::faces(cut, None).unwrap().len(), holes + 6);
+    assert_eq!(p1::edges(cut, None).unwrap().len(), 3 * holes + 12);
+    let volume = brep_volume_default(&k, cut, 1e-6).unwrap();
+    let exact = w * w * thick - holes as f64 * PI * radius * radius * thick;
+    println!("plate minus {holes} cylinders: volume {volume:.6}, exact {exact:.6}");
+    println!("  {marked} faces marked by shell traversals");
+    println!("  {solves} point solves of a proto vertex against a proto edge");
+    assert!(
+        (volume - exact).abs() <= 1e-6 * exact,
+        "volume {volume}, exact {exact}"
+    );
+    (marked, solves)
+}
+
+/// The cut deletes the two discs each cylinder cuts out of the plate's top and bottom,
+/// and each deletion asks whether the disc's one vertex is still joined to the shell.
+/// It is, through the first face at that vertex: one face marked for each face deleted,
+/// 2 N for N holes. Walking on over the rest of the shell marked
+/// (7/2) N^2 + (23/2) N faces: 2475 for 25 holes and 36150 for 100.
+#[test]
+fn plate_cut_marks_one_face_for_each_face_it_deletes() {
+    let marked = (plate_cut_counts(5).0, plate_cut_counts(10).0);
+    assert_eq!(marked, (2 * 25, 2 * 100));
+}
+
+/// Each cylinder meets the plate's top and bottom in a circle: a closed proto edge that
+/// starts and ends at its one proto vertex, 2 N of each for N holes. The boolean removes
+/// a proto vertex lying on a proto edge only when it has no proto edges of its own, and
+/// here every proto vertex has one, so nothing can be removed and no point solve is
+/// needed: 0 and 0. Solving each proto vertex against every other proto edge ran
+/// 4 N^2 - 2 N solves: 2450 for 25 holes and 39800 for 100.
+#[test]
+fn plate_cut_solves_no_proto_vertex_that_has_proto_edges() {
+    let solves = (plate_cut_counts(5).1, plate_cut_counts(10).1);
+    assert_eq!(solves, (0, 0));
 }

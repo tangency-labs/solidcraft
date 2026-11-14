@@ -878,6 +878,84 @@ mod tests {
             .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, v3)
             .unwrap());
         assert_eq!(m.proto_vertices(), &[v3]);
+        // each of the two ran its point solve
+        assert_eq!(k.work_counters.proto_vertex_point_solves(), 2);
+    }
+
+    /// With `proto_vertex_miss_is_false`, a proto vertex that has proto edges is never
+    /// removed and a miss is `false` too, so its point solve is not run: on the curve or off
+    /// it, the answer is `false` and no solve is counted. An edge-less proto vertex is solved
+    /// as before, and so is every proto vertex under a fired cancel token, where the solve is
+    /// what may report the cancel.
+    #[test]
+    fn a_proto_vertex_with_proto_edges_is_not_solved() {
+        let mut k = Kernel::default();
+        k.fixes.proto_vertex_miss_is_false = true;
+        let geo = Geo(vec![line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0])]);
+        let mut m = manager();
+        let ivl = geo.0[0].natural_interval();
+        let v0 = m
+            .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let v1 = m
+            .new_proto_vertex(Point3::new(2.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let pe = m.new_proto_edge(&k, Some(v0), Some(v1), ivl).unwrap();
+        let ed = m
+            .insert_edge_definition(EdgeDefinition::new(
+                Some(C0),
+                ivl,
+                R0,
+                L0,
+                1e-5,
+                None,
+                None,
+                Some(pe),
+            ))
+            .unwrap();
+        m.proto_edge_mut(pe)
+            .unwrap()
+            .edge_definitions_mut()
+            .push(ed);
+        // two proto vertices that each end a proto edge of their own, one on `pe`'s curve
+        // and one off it
+        let other = m.new_proto_edge(&k, None, None, ivl).unwrap();
+        let mut edged = Vec::new();
+        for y in [0.0, 5.0] {
+            let v = m.new_proto_vertex(Point3::new(1.0, y, 0.0), 1e-5).unwrap();
+            m.add_proto_vertex(v);
+            m.proto_vertex_mut(v).unwrap().add_proto_edge(other);
+            edged.push(v);
+        }
+        k.work_counters.reset();
+        for &v in &edged {
+            assert!(!m
+                .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, v)
+                .unwrap());
+        }
+        assert_eq!(m.proto_vertices(), &edged[..]);
+        assert_eq!(k.work_counters.proto_vertex_point_solves(), 0);
+        // an edge-less one on the curve is solved and removed
+        let free = m
+            .new_proto_vertex(Point3::new(0.5, 0.0, 0.0), 1e-5)
+            .unwrap();
+        m.add_proto_vertex(free);
+        assert!(m
+            .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, free)
+            .unwrap());
+        assert_eq!(k.work_counters.proto_vertex_point_solves(), 1);
+        // under a fired token the solve runs as it did before (a line's solve does not ask
+        // the token, so the answer is still `false`; a curve whose solve builds its cache
+        // reports the cancel from there)
+        let token = crate::kernel::CancelToken::new();
+        token.cancel();
+        k.set_cancel_token(token);
+        for &v in &edged {
+            assert!(!m
+                .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, v)
+                .unwrap());
+        }
+        assert_eq!(k.work_counters.proto_vertex_point_solves(), 3);
     }
 
     /// tangency-labs/solidcore#848 (WR-73): with the opt-in, a proto vertex the proto

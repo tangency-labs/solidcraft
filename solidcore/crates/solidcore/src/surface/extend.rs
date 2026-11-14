@@ -2156,6 +2156,7 @@ mod blend;
 mod local_iso;
 mod measure;
 mod sides;
+pub(crate) use sides::round_the_axis;
 pub use sides::{ExtendedSides, SideExtension};
 
 #[cfg(test)]

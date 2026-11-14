@@ -1,4 +1,4 @@
-//! `AnalyticSupport::derive` reads a cylinder's and a cone's numbers off their NURBS form's
+//! `AnalyticSupport::derive` reads a cylinder's, cone's and torus's numbers off their NURBS form's
 //! control structure (#15010), so a support derived from its form builds on that form however
 //! far from the world origin and however tilted it lies: the form, then derive, then build.
 //! The forms are quarter cylinders and cones made of rational quadratic quarter circles (the
@@ -16,7 +16,7 @@ use solidcore::kernel::Kernel;
 use solidcore::math::Point2;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::CPoint;
-use solidcore::surface::implicit::{AnalyticSupport, SupportKind};
+use solidcore::surface::implicit::{lies_on, AnalyticSupport, Implicit, SupportKind};
 
 /// A frame tilted off every world axis: its axis along (1, 2, 3), its x square to it.
 fn tilted() -> (Vec3, Vec3, Vec3) {
@@ -72,8 +72,9 @@ fn round_trips(k: &Kernel, kind: SupportKind, form: &BSplineSurface, size: f64) 
         )
     };
     for uv in [at(0.1, 0.2), at(0.5, 0.5), at(0.9, 0.8)] {
-        let off =
-            (built.evaluate_point(k, uv).unwrap() - form.evaluate_point(uv).unwrap()).length();
+        let step = built.convert_uv_from_nurbs_to_step(k, uv).unwrap();
+        let off = (built.evaluate_step_point(k, step).unwrap() - form.evaluate_point(uv).unwrap())
+            .length();
         assert!(
             off <= 64.0 * f64::EPSILON * size,
             "{kind:?} at {size:e}: {off:e} off at {uv:?}"
@@ -191,5 +192,175 @@ fn the_pleated_cases_cylinder_supports_round_trip() {
     for form in &forms {
         assert_eq!(form.kind, "Cylinder");
         round_trips(&k, SupportKind::Cylinder, &form.surface(), 300.0);
+    }
+}
+
+/// A shallow circular strip amplifies rounding when its centre is recovered from the
+/// sagitta. Recovering the radius independently then leaves its endpoints on opposite
+/// sides of the reconstructed cylinder (#16172).
+#[test]
+fn a_shallow_cylinders_endpoints_stay_on_the_derived_support() {
+    let sweep = 0.02_f64;
+    let k = Kernel::default();
+    let (x, y, z) = tilted();
+    let radius = 1000.0;
+    let start = 2.0;
+    let weight = (sweep * 0.5).cos();
+    let rows = [0.0, 12.0]
+        .into_iter()
+        .map(|height| {
+            [
+                (start, 1.0),
+                (start + sweep * 0.5, weight),
+                (start + sweep, 1.0),
+            ]
+            .into_iter()
+            .map(|(angle, w)| {
+                let p = (x * angle.cos() + y * angle.sin()) * (radius / w) + z * height;
+                CPoint::new(p.x * w, p.y * w, p.z * w, w)
+            })
+            .collect()
+        })
+        .collect();
+    let nurb = solidcore::nurbs::srf_basic::Surface::new(
+        rows,
+        1,
+        2,
+        vec![0.0, 0.0, 1.0, 1.0],
+        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    )
+    .unwrap();
+    let form = BSplineSurface::from_nurb(nurb, true);
+    // Certify the constructed form against its intended cylinder before recognition:
+    // the shallow sweep must not hide malformed weights or control points.
+    assert!(lies_on(
+        &form,
+        &Implicit::Cone {
+            origin: Vec3::ZERO,
+            axis: z,
+            radius,
+            tan_angle: 0.0,
+        },
+    )
+    .unwrap());
+    let support = AnalyticSupport::derive(&k, SupportKind::Cylinder, &form).unwrap();
+    assert_eq!(support.kind(), SupportKind::Cylinder);
+    if let AnalyticSupport::Cylinder { placement, radius } = support {
+        let implicit = Implicit::Cone {
+            origin: placement.origin(),
+            axis: placement.x_axis().cross(placement.y_axis()),
+            radius,
+            tan_angle: 0.0,
+        };
+        assert!(lies_on(&form, &implicit).unwrap());
+    }
+}
+
+/// Tensor-product rational arcs: a 120-degree sweep and a partial r8 tube about
+/// the circle R33. The middle controls are tangent intersections, not samples.
+#[test]
+fn partial_tori_round_trip_on_their_control_circles() {
+    let k = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let (x, y, z) = tilted();
+    for origin in [Vec3::ZERO, Vec3::new(600.0, -480.0, 640.0)] {
+        for alpha in [0.6_f64.asin(), -0.6_f64.asin()] {
+            for swap in [false, true] {
+                let rows: Vec<Vec<CPoint>> = (0..5)
+                    .map(|i| {
+                        let u = f64::from(i) * std::f64::consts::PI / 6.0;
+                        let wu = if i % 2 == 0 {
+                            1.0
+                        } else {
+                            (std::f64::consts::PI / 6.0).cos()
+                        };
+                        let radial = (x * u.cos() + y * u.sin()) * (1.0 / wu);
+                        (0..3)
+                            .map(|j| {
+                                let v = f64::from(j) * alpha / 2.0;
+                                let wv = if j == 1 { (alpha / 2.0).cos() } else { 1.0 };
+                                let p = origin
+                                    + radial * (33.0 + 8.0 * v.cos() / wv)
+                                    + z * (8.0 * v.sin() / wv);
+                                let w = wu * wv;
+                                CPoint::new(p.x * w, p.y * w, p.z * w, w)
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let (net, uk, vk) = if swap {
+                    (
+                        (0..3)
+                            .map(|j| (0..5).map(|i| rows[i][j]).collect())
+                            .collect(),
+                        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                        vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
+                    )
+                } else {
+                    (
+                        rows,
+                        vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
+                        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                    )
+                };
+                let nurb = solidcore::nurbs::srf_basic::Surface::new(net, 2, 2, uk, vk).unwrap();
+                round_trips(
+                    &k,
+                    SupportKind::Torus,
+                    &BSplineSurface::from_nurb(nurb, true),
+                    origin.length() + 41.0,
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn horn_tori_round_trip_from_a_collapsed_boundary_sweep() {
+    let k = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let (x, y, z) = tilted();
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    for origin in [Vec3::ZERO, Vec3::new(600.0, -480.0, 640.0)] {
+        for sign in [-1.0, 1.0] {
+            for swap in [false, true] {
+                // The tube has centre radius 8 and radius 8. Its first point is
+                // on the axis, so the entire first sweep boundary is one point.
+                let rows: Vec<Vec<CPoint>> = [(1.0, 0.0, 1.0), (1.0, 1.0, w), (0.0, 1.0, 1.0)]
+                    .into_iter()
+                    .map(|(a, b, wu)| {
+                        [(0.0, 0.0, 1.0), (0.0, 8.0, w), (8.0, 8.0, 1.0)]
+                            .into_iter()
+                            .map(|(radius, height, wv)| {
+                                let p = origin + (x * a + y * b) * radius + z * (sign * height);
+                                let weight = wu * wv;
+                                CPoint::new(p.x * weight, p.y * weight, p.z * weight, weight)
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let net = if swap {
+                    (0..3)
+                        .map(|j| (0..3).map(|i| rows[i][j]).collect())
+                        .collect()
+                } else {
+                    rows
+                };
+                let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+                let nurb =
+                    solidcore::nurbs::srf_basic::Surface::new(net, 2, 2, knots.clone(), knots)
+                        .unwrap();
+                round_trips(
+                    &k,
+                    SupportKind::Torus,
+                    &BSplineSurface::from_nurb(nurb, true),
+                    origin.length() + 16.0,
+                );
+            }
+        }
     }
 }

@@ -293,6 +293,67 @@ fn a_to_offset_back_across_the_start_from_a_curved_face_ends_at_its_level() {
     assert!((added - expected).abs() / expected < 1e-3, "added {added}, expected {expected}");
 }
 
+/// #16713: a Cut To Object from a face of the body (the profile starts inside its material) up to
+/// a curved face the body also has, a bore here, was refused with "nothing lies between the
+/// profile and the To object": the tool less the body kept only the air beyond. It takes the
+/// material between the profile and the bore's surface, as the preview shows.
+#[test]
+fn cut_to_a_curved_face_from_inside_the_material_takes_the_material_between() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    // A bore along y, radius 2, its axis at z 6: its underside is 4 mm above the bottom.
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -10, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Bore"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 6], "radius": 2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Bore", "distance": -20, "operation": "cut"}));
+    let before = body(&mut s, "Block")["volume_mm3"].as_f64().unwrap_or(0.0);
+    // A slot on the bottom face, 2 wide and 10 long, up to the bore's underside.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Slot"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-1, -5], "p1": [1, 5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Slot", "to": [0, 0, 4], "operation": "cut"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let removed = before - body(&mut s, "Block")["volume_mm3"].as_f64().unwrap_or(0.0);
+    // The slot's material under the bore: over x in [-1, 1] the area between z = 0 and the
+    // bore's underside z = 6 - sqrt(4 - x^2) is 12 - (sqrt(3) + 2 pi / 3) = 8.173554, times
+    // the slot's 10 mm length.
+    let want = 81.73554;
+    assert!((removed - want).abs() < want * 1e-2, "removed {removed}, want {want}");
+}
+
+/// #16713: a Join To Object from the air up to a curved face, the underside of a bar, adds the
+/// post between the profile and that surface: the bar and the post make one body.
+#[test]
+fn join_up_to_a_curved_face_adds_the_material_between() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [-20, 0, 30], "axis": [1, 0, 0], "radius": 10, "height": 40, "body_name": "Bar"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "P"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-4, -5], "p1": [4, 5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [0, 0, 20], "operation": "join"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let joined = body(&mut s, "Bar")["volume_mm3"].as_f64().unwrap_or(0.0);
+    // The bar is 100 pi * 40 = 4000 pi. The post over x in [-4, 4], y in [-5, 5] runs from z = 0 up
+    // to the bar's underside z = 30 - sqrt(100 - y^2): its section is
+    // 300 - (25 sqrt(3) + 50 pi / 3) over y, so 8 * that = 2400 - 200 sqrt(3) - 400 pi / 3 =
+    // 1634.7108 in volume. It lies wholly outside the bar, so the volumes add.
+    let want = 4000.0 * PI + 1634.7108;
+    assert!((joined - want).abs() < want * 1e-3, "joined {joined}, want {want}");
+}
+
+/// #16713: a profile that only partly lies over the To face is refused, not run on past it.
+#[test]
+fn cut_to_a_curved_face_the_profile_partly_misses_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [-20, 0, 30], "axis": [1, 0, 0], "radius": 10, "height": 40, "body_name": "Bar"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "P"}));
+    // 24 across the bar's 20: the profile reaches past its side.
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-4, -12], "p1": [4, 12]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let err = s.execute("solid.extrude", &json!({"sketch": "P", "to": [0, 0, 20], "body_name": "Post"})).expect_err("refused");
+    assert!(err.to_string().contains("reaches past the To face"), "{err}");
+}
+
 /// #13188: a stored taper of 0 is a straight extrusion, also for a profile with a hole.
 #[test]
 fn extrude_with_a_taper_of_zero_on_a_profile_with_a_hole_is_straight() {
@@ -315,4 +376,38 @@ fn extrude_with_a_taper_of_zero_on_a_profile_with_a_hole_is_straight() {
     assert!((plain - expected).abs() / expected < 1e-3, "{plain} vs {expected}");
     let zero = volume(Some("0 deg"));
     assert!((zero - plain).abs() < 1e-6 * plain, "taper 0 gives {zero}, none gives {plain}");
+}
+
+fn through_all_block() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-20, -20, -30], "length": 60, "width": 60, "height": 60, "body_name": "Blk"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+/// Through All is measured from where the extrude starts, so a start offset leaves no slab
+/// uncut on either side (#16556).
+#[test]
+fn through_all_cut_with_a_start_offset_goes_all_the_way() {
+    for direction in ["symmetric", "positive", "negative"] {
+        for offset in [5, -5, 0, 40, -40] {
+            let mut s = through_all_block();
+            run(
+                &mut s,
+                "solid.extrude",
+                json!({"sketch": "Sketch1", "through_all": true, "direction": direction, "start_offset": offset, "operation": "cut", "targets": ["Blk"]}),
+            );
+            let volume = body(&mut s, "Blk")["volume_mm3"].as_f64().unwrap();
+            // A one-sided cut only removes what lies on its side of the start.
+            let removed = 216000.0 - volume;
+            let expected = match direction {
+                "symmetric" => 24000.0,
+                "positive" => 400.0 * (30.0 - f64::from(offset)).clamp(0.0, 60.0),
+                _ => 400.0 * (f64::from(offset) + 30.0).clamp(0.0, 60.0),
+            };
+            assert!((removed - expected).abs() < 1e-3, "{direction} offset {offset}: removed {removed}, expected {expected}");
+        }
+    }
 }

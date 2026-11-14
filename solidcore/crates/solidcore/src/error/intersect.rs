@@ -13,13 +13,19 @@
 //! | [`IntersectFailure::Missing`]       | `SM_ERR_NULL_POINTER`      |
 //! | [`IntersectFailure::OutsideDomain`] | `SM_ERR_OUTSIDE_OF_DOMAIN` |
 //! | [`IntersectFailure::Inconsistent`]  | `SM_ERR_ASSERT_FAILURE`    |
+//! | [`IntersectFailure::StepTangentTooShort`] | `SM_ERR`             |
+//! | [`IntersectFailure::StageFailed`]   | the site's (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`) |
 //!
-//! Deviations: not upstream. A failure says in a phrase what went wrong; the failure's
-//! `operation` path says which routine. The handles these routines work on are the
+//! **The record** (#15034). A check that refuses builds a typed cause; a stage that fails
+//! with no reason the kernel names is an [`IntersectFailure::StageFailed`], a defect
+//! ([`ErrorKind::StageFailed`]), keeping the error of the call it made as its cause where it
+//! has one. The phrase causes ([`IntersectFailure::Failed`] to
+//! [`IntersectFailure::Inconsistent`]) are sites not yet converted.
+//!
+//! Deviations: not upstream. The failure's `operation` path says which routine. The handles these routines work on are the
 //! classification's or intersector's own, not ids of the caller's B-rep, so no failure
 //! names an entity. The failures that are checks of a caller's handles stay
-//! [`crate::SolidError::InvalidInput`]. `surface_intersector/p1` and `p5`, which have
-//! open work elsewhere, do not use these yet.
+//! [`crate::SolidError::InvalidInput`].
 
 use super::{
     ErrorKind, Failure, Reason, SM_ERR, SM_ERR_ASSERT_FAILURE, SM_ERR_NULL_POINTER,
@@ -41,25 +47,38 @@ pub enum IntersectFailure {
     OutsideDomain(&'static str),
     /// A consistency check of the routine's own data did not hold, as the phrase says.
     Inconsistent(&'static str),
+    /// The traced intersection curve's tangent at the next point is shorter than the
+    /// stepping's parallel tolerance: the surfaces are (nearly) tangent there, so the step
+    /// has no direction.
+    StepTangentTooShort,
+    /// A stage of an intersection routine failed with no reason the kernel names: a defect
+    /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
+    /// reports (for the goldens only), where it was built, and the error of the call it made
+    /// where it has one.
+    StageFailed,
 }
 
 impl IntersectFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) => SM_ERR,
+            Self::Failed(_) | Self::StepTangentTooShort | Self::StageFailed => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
         }
     }
 
-    /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
+    /// The failure's stable [`ErrorKind`]: [`ErrorKind::StageFailed`] for
+    /// [`IntersectFailure::StageFailed`], a defect; [`ErrorKind::Missing`] for
     /// [`IntersectFailure::Missing`], [`ErrorKind::OutsideDomain`] for
     /// [`IntersectFailure::OutsideDomain`], [`ErrorKind::Failed`] otherwise.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
-        ErrorKind::of_status(self.comparison_status())
+        match self {
+            Self::StageFailed => ErrorKind::StageFailed,
+            _ => ErrorKind::of_status(self.comparison_status()),
+        }
     }
 }
 
@@ -69,6 +88,10 @@ impl core::fmt::Display for IntersectFailure {
             Self::Failed(what) | Self::OutsideDomain(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
+            Self::StepTangentTooShort => f.write_str(
+                "the intersection curve's tangent at the next point is shorter than the parallel tolerance",
+            ),
+            Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
         }
     }
 }
@@ -77,6 +100,7 @@ impl crate::SolidError {
     /// [`crate::SolidError::Failed`] for an intersection or classification routine that
     /// fails with `failure`.
     #[must_use]
+    #[track_caller]
     pub(crate) fn intersect(operation: &'static str, failure: IntersectFailure) -> Self {
         Failure::new(operation, failure).into_error()
     }
@@ -95,6 +119,17 @@ impl crate::SolidError {
     #[must_use]
     pub(crate) fn intersect_missing(operation: &'static str, what: &'static str) -> Self {
         Self::intersect(operation, IntersectFailure::Missing(what))
+    }
+
+    /// [`crate::SolidError::Failed`] for a stage of an intersection routine that failed with
+    /// no reason the kernel names ([`IntersectFailure::StageFailed`], a defect), with
+    /// `status`, the one the C++ reports (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`).
+    #[must_use]
+    #[track_caller]
+    pub(crate) fn intersect_stage_failed(operation: &'static str, status: i32) -> Self {
+        Failure::new(operation, IntersectFailure::StageFailed)
+            .with_status(status)
+            .into_error()
     }
 
     /// The intersection failure behind this error, for a [`crate::SolidError::Failed`]
@@ -207,18 +242,25 @@ pub(super) mod tests {
         }
     }
 
+    #[test]
+    fn a_stage_failure_is_a_defect_and_a_typed_cause_keeps_its_status() {
+        for status in [SM_ERR, SM_ERR_NULL_POINTER] {
+            super::super::tests::assert_stage_failure(
+                &SolidError::intersect_stage_failed("intersect::op", status),
+                "intersect::op",
+                status,
+            );
+        }
+        let e = SolidError::intersect("intersect::op", IntersectFailure::StepTangentTooShort);
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.kind(), ErrorKind::Failed);
+        assert!(!e.is_defect() && e.is_status_answer());
+    }
+
     /// The intersection routines describe their failures: their library code builds no
-    /// bare `Upstream` status, except the files listed (with the bare sites each may still
-    /// hold) whose conversion waits on other open work.
+    /// bare `Upstream` status.
     #[test]
     fn the_intersect_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting(
-            "intersect",
-            40,
-            &[
-                ("intersect/surface_intersector/p1.rs", 6),
-                ("intersect/surface_intersector/p5.rs", 6),
-            ],
-        );
+        super::super::bare_scan::assert_waiting("intersect", 40, &[]);
     }
 }

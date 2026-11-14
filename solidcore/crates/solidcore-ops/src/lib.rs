@@ -38,6 +38,7 @@ pub mod blend_surface;
 pub mod body;
 pub mod boolean;
 pub mod cancel;
+pub mod cap;
 pub mod cell_grid;
 pub mod check;
 pub mod contact;
@@ -46,6 +47,7 @@ pub mod curve;
 pub mod curve_fit;
 pub mod curve_knots;
 pub mod curve_plane;
+pub mod cylinder_wall;
 pub mod error;
 pub mod extend;
 pub mod face_surface;
@@ -80,7 +82,10 @@ pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body
 pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
 pub use contact::Gap;
-pub use error::{Error, FitKind, OffsetRefusal, Result, RoomReason, SolidTest, Unblendable};
+pub use error::{
+    Error, FitKind, OffsetRefusal, RecordEntity, Result, RoomReason, SolidTest, Unblendable,
+    Unsoundness,
+};
 pub use measure::{
     point_distance, Distance, EdgePoint, EdgeRayPoint, FaceCentroid, GapSample,
     MassPropertiesEstimate, Normal, PointClass,
