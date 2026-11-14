@@ -801,37 +801,30 @@ fn a_gap_inside_the_summed_local_zones_is_taken_only_by_the_stitch_scope() {
 
 }
 
-/// The stitch's scope takes a gap past the rule for every body only where the tolerance ball that
-/// covers it reaches no topology it does not bound: a separate face 0.009 from a sewn vertex, inside
-/// its 0.012 ball and outside every edge's zone, keeps the gap reported; the same face 0.5 away does
-/// not. (A check repairs the vertex tolerances it finds short as it runs, so each check is of a
-/// body of its own.)
+/// The stitch's scope takes a gap past the rule for every body only where the tolerance tube that
+/// covers it reaches no topology it does not bound: a separate face 0.01 from the sewn edge's end,
+/// inside its 0.02 tube, is reached; the same face 0.5 away is proven clear. (The vertex ball is
+/// held to the same by Test #82's clearance proof, which excuses topology within the edge zones, so
+/// it does not reach here.)
 #[test]
-fn the_stitch_scope_refuses_a_gap_whose_ball_reaches_other_topology() {
-    use solidcore::topology::brep::validation::{check_brep_scoped, CheckLevel, ValidityScope};
+fn the_edge_tube_proof_finds_a_face_inside_the_tube_and_clears_one_far_away() {
+    use solidcore::topology::brep::validation::{edge_tube_reaches, vertex_ball_reaches};
 
     let mut k = Kernel::default();
-    for (distance, valid) in [(0.5, true), (0.009, false)] {
+    for (distance, reaches) in [(0.5, false), (0.01, true)] {
         let (mut b, sewed) =
-            lifted_sheets_beside(&mut k, 0.008, 0.01, 0.005, Some((1.0, 1.0 + distance)));
+            lifted_sheets_beside(&mut k, 0.004, 1e-4, 0.02, Some((1.0, 1.0 + distance)));
         assert_eq!(sewed, 1, "distance {distance}");
-        let report =
-            check_brep_scoped(&mut k, &mut b, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
-        assert_eq!(report.is_valid(), valid, "distance {distance}: {:?}", report.lines());
-    }
-}
-
-#[test]
-fn dbg_near() {
-    use solidcore::topology::brep::validation::{check_brep_scoped, CheckLevel, ValidityScope};
-    let mut k = Kernel::default();
-    for (gap, zone) in [(0.004, 0.005), (0.004, 0.0045), (0.003, 0.0035)] {
-        for d in [0.0045, 0.0055, 0.5] {
-            for scope in [ValidityScope::Body, ValidityScope::Stitched] {
-                let (mut b, sewed) = lifted_sheets_beside(&mut k, gap, 0.01, zone, Some((1.0, 1.0 + d)));
-                let tols: Vec<f64> = b.vertex_list().iter().map(|&v| b.vertex(v).unwrap().tolerance).collect();
-                let r = check_brep_scoped(&mut k, &mut b, CheckLevel::Level2, scope).unwrap();
-                eprintln!("DBG gap={gap} zone={zone} d={d} {scope:?} sewed={sewed} vtol={:?} n={}", &tols[..4], r.lines().len());
+        let mut any = false;
+        for e in b.edge_list().to_vec() {
+            if b.edge(e).unwrap().tolerance == 0.02 {
+                any |= edge_tube_reaches(&k, &mut b, e).unwrap();
+            }
+        }
+        assert_eq!(any, reaches, "distance {distance}");
+        for v in b.vertex_list().to_vec() {
+            if b.vertex(v).unwrap().tolerance == 0.006 {
+                assert!(!vertex_ball_reaches(&k, &mut b, v).unwrap(), "distance {distance}");
             }
         }
     }

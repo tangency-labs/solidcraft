@@ -1314,7 +1314,11 @@ fn curve_clears(
 /// bound: the clearance half of Test #82 ([`check_vertex_clearance`]) run for this one vertex,
 /// whatever its tolerance. A proof by boxes decides it; a query that cannot be proven counts as
 /// reaching. Used by the stitch scope of the tolerance pass (`assert_valid::brep`).
-pub(super) fn vertex_ball_reaches(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
+///
+/// # Errors
+///
+/// Those of the geometric queries that are not findings (cancelled, unported) and a missing entity.
+pub fn vertex_ball_reaches(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
     let mut r = Reports {
         array: None,
         level: 0,
@@ -1463,7 +1467,11 @@ fn tube_clears(
 /// and edge that is not `e`, a face of `e`, or incident to an end vertex of `e` (which meet its
 /// ends legitimately) must be proven at least the tube's radius away, by boxes. A curve with no
 /// certified box, a missing surface or a proof that runs out of boxes counts as reaching.
-pub(super) fn edge_tube_reaches(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<bool> {
+///
+/// # Errors
+///
+/// As [`vertex_ball_reaches`].
+pub fn edge_tube_reaches(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<bool> {
     let data = b.edge(e)?;
     let (radius, interval) = (data.tolerance, data.interval);
     let Some(curve) = data.curve.clone() else {
