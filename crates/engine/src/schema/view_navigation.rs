@@ -846,6 +846,102 @@ pub struct NavigateResult {
     pub param_warnings: Vec<String>,
 }
 
+/// The camera tool the viewport latches: `view.tool`'s `tool`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum NavigationTool {
+    Orbit,
+    Pan,
+    Zoom,
+    /// No tool: releases the one that was latched.
+    None,
+}
+
+reads!(navigation_tool -> NavigationTool, "tool must be orbit, pan, zoom or none");
+
+/// `view.tool`: latch one of the viewport's camera tools, or `none` to release the one that is
+/// latched. A display setting the window applies; the design and the camera are not changed, and
+/// it never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = tool_required)]
+pub struct ToolParams {
+    // Optional in the type and required in the schema (`tool_required`): left out, the handler
+    // refuses it with its own message.
+    /// `orbit`, `pan`, `zoom` or `none`.
+    #[serde(default, deserialize_with = "navigation_tool", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "NavigationTool")]
+    pub tool: Option<NavigationTool>,
+}
+
+/// What `view.tool` returns: the tool the window latches.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ToolResult {
+    pub tool: NavigationTool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// How the model is drawn in the viewport: `view.visual_style`'s `style`. The order of the
+/// variants is the index the window uses for the style.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VisualStyle {
+    ShadedWithEdges,
+    Shaded,
+    Wireframe,
+    ShadedWithHiddenEdges,
+}
+
+impl VisualStyle {
+    /// The index the window keeps the style under, in the order the names are listed.
+    pub fn index(self) -> u8 {
+        match self {
+            VisualStyle::ShadedWithEdges => 0,
+            VisualStyle::Shaded => 1,
+            VisualStyle::Wireframe => 2,
+            VisualStyle::ShadedWithHiddenEdges => 3,
+        }
+    }
+}
+
+reads!(
+    visual_style_value -> VisualStyle,
+    "style must be shaded_with_edges, shaded, wireframe or shaded_with_hidden_edges"
+);
+
+/// `view.visual_style`: how the model is drawn in the viewport. A display setting the window
+/// applies; the design and the camera are not changed, and it never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = style_required)]
+pub struct VisualStyleParams {
+    // Optional in the type and required in the schema (`style_required`): left out, the handler
+    // refuses it with its own message.
+    /// `shaded_with_edges`, `shaded`, `wireframe` or `shaded_with_hidden_edges`.
+    #[serde(default, deserialize_with = "visual_style_value", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "VisualStyle")]
+    pub style: Option<VisualStyle>,
+}
+
+/// What `view.visual_style` returns: the style asked for and the index the window uses for it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct VisualStyleResult {
+    pub style: VisualStyle,
+    /// 0 for `shaded_with_edges`, 1 for `shaded`, 2 for `wireframe`, 3 for `shaded_with_hidden_edges`.
+    pub index: u8,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+fn tool_required(schema: &mut Schema) {
+    require(schema, "tool");
+}
+
+fn style_required(schema: &mut Schema) {
+    require(schema, "style");
+}
+
 #[cfg(test)]
 #[path = "view_navigation_tests.rs"]
 mod tests;

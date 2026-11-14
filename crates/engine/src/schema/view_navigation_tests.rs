@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use super::{
     AmbientOcclusionParams, AmbientOcclusionResult, AngleReadoutParams, CameraReply, DisplayToggleParams, GraphicsPresetParams, GraphicsPresetResult,
     HistoryLayoutParams, HistoryLayoutResult, LayoutParams, LayoutResult, NavigateParams, NavigateResult, NavigationBarParams, NormalToParams,
-    StandardViewParams, TabStep, TabStepParams,
+    StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult, VisualStyleParams, VisualStyleResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -721,4 +721,78 @@ fn the_display_toggles_answer_with_their_own_schemas() {
         let e = strict.err().unwrap_or_else(|| panic!("{id} {hostile} runs in strict"));
         assert!(e.to_string().contains("unknown key `off`"), "{id}: {e}");
     }
+}
+
+/// The two latched display settings: each publishes a contract and an output schema, its only key
+/// is required, and the schema names are exactly the names the handler takes.
+#[test]
+fn the_mode_commands_publish_contracts_and_schemas() {
+    assert_keys(input_schema_for::<ToolParams>(), &["tool"]);
+    assert_keys(input_schema_for::<VisualStyleParams>(), &["style"]);
+    let mut s = Session::default();
+    let mut described = |id: &str| s.execute("engine.describe", &json!({"command": id})).unwrap();
+    for id in ["view.tool", "view.visual_style"] {
+        let spec = crate::find_command(id).unwrap();
+        assert!(spec.contract.is_some() && spec.output.is_some() && !spec.undoable, "{id}");
+        let d = described(id);
+        assert_eq!(d["input"]["additionalProperties"], false, "{id}");
+        assert_eq!(d["output"]["type"], "object", "{id}");
+    }
+    assert_eq!(described("view.tool")["input"]["required"], json!(["tool"]));
+    assert_eq!(described("view.visual_style")["input"]["required"], json!(["style"]));
+    // The window's names are the published names, so a caller reads them off the description.
+    let tools = serde_json::to_string(&described("view.tool")["input"]).unwrap();
+    for name in ["orbit", "pan", "zoom", "none"] {
+        assert!(tools.contains(&format!("\"{name}\"")), "tool {name}: {tools}");
+    }
+    let styles = serde_json::to_string(&described("view.visual_style")["input"]).unwrap();
+    for name in ["shaded_with_edges", "shaded", "wireframe", "shaded_with_hidden_edges"] {
+        assert!(styles.contains(&format!("\"{name}\"")), "style {name}: {styles}");
+    }
+}
+
+/// The replies are the JSON the handlers returned before the types, and in the warn mode they
+/// match the published output schemas.
+#[test]
+fn mode_replies_are_todays_json() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let tool_schema = output_schema_for::<ToolResult>();
+    let style_schema = output_schema_for::<VisualStyleResult>();
+    let (tool, style) = (tool_schema.as_value(), style_schema.as_value());
+    for name in ["orbit", "pan", "zoom", "none"] {
+        let p = json!({"tool": name});
+        let reply = s.execute("view.tool", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert_eq!(reply, json!({"tool": name}), "{p}");
+        assert!(conforms(tool, tool, &reply), "{reply} doesn't match {tool}");
+        assert!(reply.get("param_warnings").is_none(), "{p}: {reply}");
+    }
+    for (name, index) in [("shaded_with_edges", 0), ("shaded", 1), ("wireframe", 2), ("shaded_with_hidden_edges", 3)] {
+        let p = json!({"style": name});
+        let reply = s.execute("view.visual_style", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert_eq!(reply, json!({"style": name, "index": index}), "{p}");
+        assert!(conforms(style, style, &reply), "{reply} doesn't match {style}");
+        assert!(reply.get("param_warnings").is_none(), "{p}: {reply}");
+    }
+    // Both commands check their own keys first, so a key they don't know stays today's refusal.
+    for (id, key) in [("view.tool", "tools"), ("view.visual_style", "styles")] {
+        let e = s.execute(id, &json!({key: "orbit"})).err().unwrap_or_else(|| panic!("{id} {key} runs"));
+        assert_eq!(e.to_string(), format!("invalid parameters for `{id}`: unknown parameter: {key}"), "{id} {key}");
+    }
+}
+
+/// Strict refuses with the handler's own message whatever the handler refuses today.
+#[test]
+fn mode_commands_keep_todays_errors() {
+    assert_strict_keeps_todays_errors(&[
+        ("view.tool", json!({})),
+        ("view.tool", json!({"tool": "spin"})),
+        ("view.tool", json!({"tool": 1})),
+        ("view.tool", json!({"tool": true})),
+        ("view.tool", json!({"tool": null})),
+        ("view.visual_style", json!({})),
+        ("view.visual_style", json!({"style": "hidden"})),
+        ("view.visual_style", json!({"style": "Shaded"})),
+        ("view.visual_style", json!({"style": 1})),
+        ("view.visual_style", json!({"style": null})),
+    ]);
 }

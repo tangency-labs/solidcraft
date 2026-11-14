@@ -8,8 +8,9 @@ use crate::params::{bad, num, req_vec2, req_vec3, vec3};
 use crate::schema::view_navigation::{
     AmbientOcclusionParams, AmbientOcclusionResult, CameraReply, DisplayToggleParams, DisplayToggleResult, GraphicsPreset, GraphicsPresetParams,
     GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult, LayoutMode, LayoutParams, LayoutResult, NavigateParams,
-    NavigateResult, NavigationBarParams, NavigationBarResult, NavigatorParams, NormalToParams, PresetQuality, RenderBrowser, RenderFocus, RenderLive,
-    RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams, TabStep, TabStepParams, ZoomTool,
+    NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool, NavigatorParams, NormalToParams, PresetQuality, RenderBrowser,
+    RenderFocus, RenderLive, RenderSelect, RibbonTabsOnly, RibbonTabsOnlyParams, StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult,
+    VisualStyle, VisualStyleParams, VisualStyleResult, ZoomTool,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
@@ -30,6 +31,8 @@ const HISTORY_LAYOUT_CONTRACT: TypedContract<HistoryLayoutParams> = TypedContrac
 const GRAPHICS_PRESET_CONTRACT: TypedContract<GraphicsPresetParams> = TypedContract::new();
 const AMBIENT_OCCLUSION_CONTRACT: TypedContract<AmbientOcclusionParams> = TypedContract::new();
 const NAVIGATE_CONTRACT: TypedContract<NavigateParams> = TypedContract::new();
+const TOOL_CONTRACT: TypedContract<ToolParams> = TypedContract::new();
+const VISUAL_STYLE_CONTRACT: TypedContract<VisualStyleParams> = TypedContract::new();
 const ORIGIN_AXES_ACROSS_VIEW_CONTRACT: TypedContract<crate::schema::view_navigation::OriginAxesAcrossViewParams> = TypedContract::new();
 
 // Both existing request forms share the Browser command and its published schema.
@@ -67,8 +70,10 @@ CommandSpec::new("view.fit", "Fit", fit)
     .icon("fit").key("F6").noundo().doc_only().params("no parameters → frame the active canvas or selection; display only"),
 CommandSpec::new("view.home", "Home View", home)
     .icon("home").noundo().doc_only().params("no parameters → home orientation framing the active canvas; display only"),
-CommandSpec::new("view.tool", "Navigation Tool", tool)
-    .icon("orbit").noundo().doc_only().params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it"),
+CommandSpec::new("view.tool", "Navigation Tool", crate::checked!("view.tool", tool))
+    .icon("orbit").noundo().doc_only()
+    .contract(&TOOL_CONTRACT).output(output_schema_for::<ToolResult>)
+    .params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it"),
 CommandSpec::new("view.tool.zoom", "Drag to Zoom", crate::checked!("view.tool.zoom", zoom_tool))
     .icon("zoom").noundo().doc_only()
     .contract(&ZOOM_TOOL_CONTRACT).output(output_schema_for::<ZoomTool>)
@@ -77,8 +82,10 @@ CommandSpec::new("view.spin", "Continuous Orbit", crate::checked!("view.spin", s
     .icon("spin").noundo().doc_only()
     .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
     .params("on?: bool (omitted: toggle) → on?; continuous orbit until the next click or key"),
-CommandSpec::new("view.visual_style", "Visual Style", visual_style)
-    .icon("style").noundo().doc_only().params("style: shaded_with_edges|shaded|wireframe|shaded_with_hidden_edges → style, index (0..3 in that order)"),
+CommandSpec::new("view.visual_style", "Visual Style", crate::checked!("view.visual_style", visual_style))
+    .icon("style").noundo().doc_only()
+    .contract(&VISUAL_STYLE_CONTRACT).output(output_schema_for::<VisualStyleResult>)
+    .params("style: shaded_with_edges|shaded|wireframe|shaded_with_hidden_edges → style, index (0..3 in that order)"),
 CommandSpec::new("view.grid", "Grid", crate::checked!("view.grid", grid))
     .icon("style").noundo().doc_only()
     .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
@@ -326,26 +333,27 @@ fn home(_s: &mut Session, p: &Value) -> Result<Value> {
 fn tool(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.tool";
     view_params(p, cmd, &["tool"])?;
-    let tool = p
-        .get("tool")
-        .and_then(Value::as_str)
-        .filter(|v| matches!(*v, "orbit" | "pan" | "zoom" | "none"))
-        .ok_or_else(|| bad(cmd, "tool must be orbit, pan, zoom or none"))?;
-    Ok(json!({"tool": tool}))
+    let tool = match p.get("tool").and_then(Value::as_str) {
+        Some("orbit") => NavigationTool::Orbit,
+        Some("pan") => NavigationTool::Pan,
+        Some("zoom") => NavigationTool::Zoom,
+        Some("none") => NavigationTool::None,
+        _ => return Err(bad(cmd, "tool must be orbit, pan, zoom or none")),
+    };
+    typed_reply(cmd, ToolResult { tool, param_warnings: Vec::new() })
 }
 
 fn visual_style(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.visual_style";
     view_params(p, cmd, &["style"])?;
-    let style = p.get("style").and_then(Value::as_str);
-    let index = match style {
-        Some("shaded_with_edges") => 0,
-        Some("shaded") => 1,
-        Some("wireframe") => 2,
-        Some("shaded_with_hidden_edges") => 3,
+    let style = match p.get("style").and_then(Value::as_str) {
+        Some("shaded_with_edges") => VisualStyle::ShadedWithEdges,
+        Some("shaded") => VisualStyle::Shaded,
+        Some("wireframe") => VisualStyle::Wireframe,
+        Some("shaded_with_hidden_edges") => VisualStyle::ShadedWithHiddenEdges,
         _ => return Err(bad(cmd, "style must be shaded_with_edges, shaded, wireframe or shaded_with_hidden_edges")),
     };
-    Ok(json!({"style": style, "index": index}))
+    typed_reply(cmd, VisualStyleResult { style, index: style.index(), param_warnings: Vec::new() })
 }
 
 fn view_toggle(p: &Value, cmd: &str, key: &str) -> Result<Value> {
