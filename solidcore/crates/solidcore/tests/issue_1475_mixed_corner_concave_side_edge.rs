@@ -190,3 +190,133 @@ fn corner_builds_with_the_fix() {
         }
     }
 }
+
+/// A box `[origin, origin + size]`.
+type BoxSpec = ([f64; 3], [f64; 3]);
+
+/// The lower box of every two-box case: x 0..20, y 0..10, z 0..10.
+const LOWER: BoxSpec = ([0.0, 0.0, 0.0], [20.0, 10.0, 10.0]);
+/// A box standing on the lower one's top and overhanging its front face by 2.
+const OVERHANG: BoxSpec = ([5.0, -2.0, 10.0], [10.0, 6.0, 10.0]);
+/// A box sunk 5 into the lower one's top and standing out of its back face by 2.
+const INSET: BoxSpec = ([5.0, 2.0, 5.0], [10.0, 10.0, 10.0]);
+
+/// The `blend.fillet_executive_p3` goldens cases whose two rounded edges meet at a 3x2
+/// mixed-convexity corner with the unfilleted edge taking the swapped roles (WR-524): the
+/// upper box and the two edges, by index into `GetEdges` of the union, as the goldens
+/// runner picks them.
+const SWAPPED_ROLE_CASES: [(BoxSpec, [usize; 2]); 12] = [
+    (OVERHANG, [15, 22]),
+    (OVERHANG, [15, 24]),
+    (INSET, [1, 14]),
+    (INSET, [1, 18]),
+    (INSET, [12, 13]),
+    (INSET, [12, 17]),
+    (INSET, [13, 19]),
+    (INSET, [14, 27]),
+    (INSET, [15, 19]),
+    (INSET, [15, 27]),
+    (INSET, [16, 22]),
+    (INSET, [17, 22]),
+];
+
+fn inside_box(p: [f64; 3], (o, s): BoxSpec) -> bool {
+    (0..3).all(|i| p[i] > o[i] && p[i] < o[i] + s[i])
+}
+
+/// The volume of the two boxes' union.
+fn union_volume((ao, as_): BoxSpec, (bo, bs): BoxSpec) -> f64 {
+    let overlap: f64 = (0..3)
+        .map(|i| ((ao[i] + as_[i]).min(bo[i] + bs[i]) - ao[i].max(bo[i])).max(0.0))
+        .product();
+    as_.iter().product::<f64>() + bs.iter().product::<f64>() - overlap
+}
+
+/// Whether the straight, axis-parallel edge from `a` to `b` of the union is concave: of
+/// the four points just off its midpoint in the quadrants round it, three lie in the
+/// union (one for a convex edge). Decided from the boxes alone, not from the kernel.
+fn concave(a: Vec3, b: Vec3, upper: BoxSpec) -> bool {
+    let m = (a + b) * 0.5;
+    let m = [m.x, m.y, m.z];
+    let d = b - a;
+    let d = [d.x, d.y, d.z];
+    let along = (0..3)
+        .max_by(|&i, &j| d[i].abs().total_cmp(&d[j].abs()))
+        .unwrap();
+    let (u, w) = ((along + 1) % 3, (along + 2) % 3);
+    let mut inside = 0;
+    for su in [-1e-3, 1e-3] {
+        for sw in [-1e-3, 1e-3] {
+            let mut p = m;
+            p[u] += su;
+            p[w] += sw;
+            if inside_box(p, LOWER) || inside_box(p, upper) {
+                inside += 1;
+            }
+        }
+    }
+    assert!(inside == 1 || inside == 3, "{a:?} {b:?}: {inside} quadrants");
+    inside == 3
+}
+
+#[test]
+fn box_union_corners_with_swapped_roles_build() {
+    use solidcore::blend::fillet_executive::api::fillet_edges;
+    use solidcore::boolean::api_brep::boolean_union;
+    use solidcore::primitive::api_primitives::create_box;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::topology::edge;
+
+    let r = 1.0_f64;
+    let section = (1.0 - core::f64::consts::PI / 4.0) * r * r;
+    for (upper, picks) in SWAPPED_ROLE_CASES {
+        let mut k = Kernel::default();
+        let boxed = |k: &mut Kernel, (o, s): BoxSpec| {
+            create_box(k, Vec3::from(o), s[0], s[1], s[2]).unwrap()
+        };
+        let lower = boxed(&mut k, LOWER);
+        let top = boxed(&mut k, upper);
+        let mut b = boolean_union(&mut k, lower, top).unwrap();
+        let v0 = union_volume(LOWER, upper);
+        let before = volume(&k, &mut b);
+        assert!((before - v0).abs() <= 1e-9 * v0, "{before} vs {v0}");
+        let edges = bp1::edges(&b, None).unwrap();
+        let mut selected = Vec::new();
+        // the straight rounds' volume: + (1 - pi/4) r^2 L for a concave edge (material
+        // added), - for a convex one
+        let mut prisms = 0.0;
+        let mut ends = Vec::new();
+        for i in picks {
+            let e = edges[i];
+            selected.push(e);
+            let (s, t) = edge::start_end_vertices(&b, e).unwrap();
+            let (a, c) = (
+                b.vertex(s.unwrap()).unwrap().point,
+                b.vertex(t.unwrap()).unwrap().point,
+            );
+            let sign = if concave(a, c, upper) { 1.0 } else { -1.0 };
+            prisms += sign * section * a.distance(c);
+            ends.extend([a, c]);
+        }
+        // the two edges share the corner vertex
+        let shared: Vec<Vec3> = ends
+            .iter()
+            .copied()
+            .filter(|p| ends.iter().filter(|q| q.distance(*p) < 1e-9).count() == 2)
+            .collect();
+        assert_eq!(shared.len(), 2, "{ends:?}");
+        fillet_edges(&mut k, &mut b, &selected, r, 1, 1, 1.0).unwrap();
+        assert!(is_manifold_solid(&b).unwrap());
+        let report = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(report.is_valid(), "{upper:?} {picks:?}: {report:?}");
+        let v = volume(&k, &mut b);
+        // The straight rounds end on faces square to them; only the corner patch, inside
+        // the (2r)^3 cube about the shared vertex, departs from them (it does by -0.0017
+        // in every case: the same corner each time).
+        assert!(
+            (v - v0 - prisms).abs() < (2.0 * r).powi(3),
+            "{upper:?} {picks:?}: {v} vs {}",
+            v0 + prisms
+        );
+    }
+}
