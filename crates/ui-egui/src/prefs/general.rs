@@ -162,6 +162,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let first_letter = setting::dialog_first_letter_buttons(app, ui).backing_on_hover_text(app.tr("prefs.dialog_first_letter_buttons_help"));
             crate::scenario::publish_target("prefs:dialog_first_letter_buttons", first_letter.rect);
         });
+        ui_kit::settings_section(ui, "community", app.tr("prefs.community"), |ui| {
+            let donate = setting::show_donate_button(app, ui).backing_on_hover_text(app.tr("prefs.show_donate_button_help"));
+            crate::scenario::publish_target("prefs:show_donate_button", donate.rect);
+            let discord = setting::show_discord_button(app, ui).backing_on_hover_text(app.tr("prefs.show_discord_button_help"));
+            crate::scenario::publish_target("prefs:show_discord_button", discord.rect);
+        });
         ui_kit::settings_section(ui, "updates", app.tr("prefs.updates"), |ui| {
             crate::update::prefs_rows(app, ui);
         });

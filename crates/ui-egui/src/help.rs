@@ -5,6 +5,7 @@
 
 use crate::SolveApp;
 use crate::ui_kit;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -74,6 +75,9 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, item: &str) {
             app.set_status(msg, error);
         }
         "messages" => app.messages.open = true,
+        id if crate::links::by_id(id).is_some() => {
+            crate::links::run(ctx, id);
+        }
         "report" => {
             let dialog = app.dialog.clone();
             let error = dialog.as_ref().and_then(|d| d.error.clone()).or_else(|| app.preview.error.clone());
@@ -164,6 +168,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                             }
                         }
                     }
+                    // Support and community: always here, whether or not the status bar shows their buttons.
+                    crate::ui_kit::Menu::separator(ui);
+                    for link in crate::links::LINKS {
+                        let item = crate::ui_kit::Item::action(link.id, solidcraft_ui_text::tr(link.menu), link.icon);
+                        if crate::ui_kit::menu::list_row(ui, &item).is_some() {
+                            pick = Some(link.id);
+                        }
+                    }
                 })
             });
         if let Some(p) = pick {
@@ -200,6 +212,15 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
                 solidcraft_ui_text::tr_label("Open-source parametric 3D CAD in Rust. Licensed MIT OR Apache-2.0."),
                 ui_kit::Text::Note("description"),
             );
+            ui.horizontal(|ui| {
+                for link in crate::links::LINKS {
+                    let button = ui_kit::button(ui, solidcraft_ui_text::tr(link.label), ui_kit::Button::Normal).backing_on_hover_text(link.url);
+                    crate::scenario::publish_target(&format!("about:{}", link.id), button.rect);
+                    if button.clicked() {
+                        crate::links::run(ui.ctx(), link.id);
+                    }
+                }
+            });
             let copy = ui_kit::button(ui, solidcraft_ui_text::tr_label("Copy diagnostic information"), ui_kit::Button::Normal);
             crate::scenario::publish_target("about:copy_diagnostics", copy.rect);
             if copy.clicked() {

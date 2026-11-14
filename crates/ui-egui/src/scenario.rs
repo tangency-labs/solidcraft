@@ -116,6 +116,8 @@ pub struct Harness {
     /// The last frame's platform output (with its accessibility tree: dialog widgets are found
     /// by their text there).
     pub output: egui::PlatformOutput,
+    /// Every URL a frame asked the platform to open, until [`Harness::take_opened`].
+    pub opened: Vec<String>,
     /// The last frame's painted shapes.
     pub shapes: Vec<egui::epaint::ClippedShape>,
     /// Files the scenario saves and opens live here; file pickers answer from it.
@@ -158,6 +160,7 @@ impl Harness {
                 ctx
             },
             output: Default::default(),
+            opened: Vec::new(),
             shapes: Vec::new(),
             dir: scratch_dir(),
             next_file: Rc::new(RefCell::new(None)),
@@ -218,8 +221,17 @@ impl Harness {
         });
         // Nothing is painted: drop the frame's texture changes.
         out.textures_delta.clear();
+        self.opened.extend(out.platform_output.commands.iter().filter_map(|c| match c {
+            egui::OutputCommand::OpenUrl(u) => Some(u.url.clone()),
+            _ => None,
+        }));
         self.output = out.platform_output;
         self.shapes = out.shapes;
+    }
+
+    /// The URLs opened since the last call.
+    pub fn take_opened(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.opened)
     }
 
     pub fn frames(&mut self, n: usize) {

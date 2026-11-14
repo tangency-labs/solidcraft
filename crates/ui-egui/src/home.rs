@@ -686,6 +686,8 @@ enum FileAction {
     Shortcuts,
     Crashes,
     About,
+    /// Open this link of [`crate::links::LINKS`] in the browser.
+    Link(&'static str),
     /// Recover (true) or discard the recoverable design at this index.
     Recovery(usize, bool),
     /// The recent design at this index in `HomeState::recent`.
@@ -827,7 +829,7 @@ fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
         ("home:crashes", app.tr("home.crashes").into(), String::new(), None, true, FileAction::Crashes),
         ("home:about", app.tr_label("About SolidCraft").into(), String::new(), None, true, FileAction::About),
     ];
-    let mut rail = Vec::with_capacity(nav.len() + 2);
+    let mut rail = Vec::with_capacity(nav.len() + 2 + crate::links::LINKS.len() + 1);
     for (index, (id, label, shortcut, section, enabled, chosen)) in nav.into_iter().enumerate() {
         if index == 4 || index == 8 {
             rail.push(start_page::RailItem::Separator);
@@ -839,6 +841,18 @@ fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
             selected: section == Some(app.home.section),
             enabled: enabled && !busy,
             chosen,
+        }));
+    }
+    // Support and community links, always listed; the status bar's buttons are optional.
+    rail.push(start_page::RailItem::Separator);
+    for link in crate::links::LINKS {
+        rail.push(start_page::RailItem::Entry(start_page::RailEntry {
+            id: format!("home:{}", link.id).into(),
+            label: solidcraft_ui_text::tr(link.label).into(),
+            shortcut: String::new().into(),
+            selected: false,
+            enabled: true,
+            chosen: FileAction::Link(link.id),
         }));
     }
     rail
@@ -1142,6 +1156,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
         }
         FileAction::Crashes => crate::help::run(app, ctx, "crashes"),
         FileAction::About => crate::help::run(app, ctx, "about"),
+        FileAction::Link(id) => crate::help::run(app, ctx, id),
         FileAction::Recovery(index, recover) => {
             if let Some(entry) = app.recoverable.get(index).cloned() {
                 crate::recovery_ui::apply(app, entry, recover);
