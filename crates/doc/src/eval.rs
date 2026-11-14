@@ -7133,7 +7133,10 @@ fn feature_tools_with_constructor(
             // lies before its surface (the tool less the body, the piece at the start). An end
             // the offset carries back across the start, away from that face, never meets it: it
             // ends at its level, as for a plane, instead of running out through the whole body.
-            let curved = curved_face(&tst, to_face, Some(n)).filter(|_| toward_to);
+            // A wall that runs along the extrusion (a cylinder's side, when extruding along its
+            // axis) is never reached: the point picked on it stands for the plane through it, as a
+            // point in space does (#11923).
+            let curved = curved_face(&tst, to_face, Some(n)).filter(|_| toward_to).filter(|_| !to_face.is_some_and(|face| runs_along(&tst, face, n)));
             // The tool is cut back to that surface below, which removes the part a To offset adds
             // past it: the offset would change nothing, so say so instead of cutting nothing (#12617).
             if curved.is_some()
@@ -9218,6 +9221,27 @@ fn curved_face(st: &ModelState, face: Option<(usize, usize)>, n: Option<Vec3>) -
         None => normal.is_some_and(|fnrm| fnrm.is_some()),
     };
     (!planar).then_some(bi)
+}
+
+/// Whether a face runs along `n` everywhere: its surface normal is square to `n` over the whole
+/// face (the side of a cylinder or prism parallel to `n`), so a sweep along `n` never meets it.
+fn runs_along(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> bool {
+    let Some(b) = st.bodies.get(bi) else { return false };
+    let m = b.mesh();
+    let mut seen = false;
+    for (tri, f) in m.triangles.iter().zip(&m.tri_face) {
+        if *f as usize != fi {
+            continue;
+        }
+        for v in tri {
+            let Some(normal) = m.normals.get(*v as usize).and_then(|x| x.normalized()) else { return false };
+            if normal.dot(n).abs() > 1e-4 {
+                return false;
+            }
+            seen = true;
+        }
+    }
+    seen
 }
 
 /// The body at `p` when the face there is not planar.
