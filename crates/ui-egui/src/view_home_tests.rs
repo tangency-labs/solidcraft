@@ -415,6 +415,39 @@ fn navigation_bar_display_menu_runs_grid_and_shadow_commands() {
     }
 }
 
+/// The Browser tree panel closes from its own host menu, which left no way back; the View menu
+/// and the Layout setting bring it back (#16058).
+#[test]
+fn the_view_menu_brings_the_browser_tree_back() {
+    let mut h = Harness::new();
+    moved_block(&mut h);
+    // The tree is closed, as its own host menu closes it.
+    h.app.ui.show_browser = false;
+    h.settle();
+    assert!(!crate::browser::panel_open(&h.app), "the tree starts closed");
+    let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
+    let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label("view.browser")))]);
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    assert!(crate::scenario::rect_of("view:browser_tree").is_some(), "the View menu has the Browser tree row");
+    for open in [true, false] {
+        let log = h.app.session.log.len();
+        h.step(&json!({"click":{"handle":"view:browser_tree"}})).unwrap();
+        h.settle();
+        assert_eq!(crate::browser::panel_open(&h.app), open, "the row turns the tree {open}");
+        assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "the row runs the command: {echo}");
+    }
+    // The Layout setting brings the tree back as well.
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    h.call("ui.prefs", json!({"open":"Layout"}));
+    h.frames(4);
+    crate::prefs::reveal_preference(&mut h, "prefs:browser_tree");
+    let log = h.app.session.log.len();
+    h.step(&json!({"click":{"handle":"prefs:browser_tree"}})).unwrap();
+    h.settle();
+    assert!(crate::browser::panel_open(&h.app), "the Layout setting brings the tree back");
+    assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "the setting runs the command: {echo}");
+}
+
 #[test]
 fn origin_axes_display_menu_and_preferences_share_an_opt_in_setting() {
     let mut h = Harness::new();
