@@ -21,6 +21,20 @@ pub const CLUSTER_BUTTONS: f32 = 108.0;
 const TABS_KEPT: f32 = 124.0;
 /// Where the Report a bug text starts, from the button's left edge.
 pub const REPORT_TEXT_X: f32 = 29.0;
+/// The fills of the bar's pills. They are the services' own colours (Ko-fi coral, Discord
+/// blurple), the same in every theme; both take white ink.
+pub mod brand {
+    use egui::Color32;
+    pub const KOFI: Color32 = Color32::from_rgb(0xFF, 0x5E, 0x5B);
+    pub const DISCORD: Color32 = Color32::from_rgb(0x58, 0x65, 0xF2);
+}
+/// The pills' height, and the least width at which the bar gives the first pill its label.
+pub const PILL_HEIGHT: f32 = 24.0;
+pub const PILL_LABEL_MIN: f32 = 1100.0;
+/// The gap before and between pills, and the × inside one.
+const PILL_GAP: f32 = 6.0;
+const PILL_X: f32 = 16.0;
+
 /// Space between the search field and Settings.
 pub const SEARCH_GAP: f32 = 4.0;
 /// Home's least place from the bar's left edge, and the least gap between the app's name and
@@ -54,6 +68,8 @@ pub struct Handles<'a> {
     pub separator: &'a str,
     pub search: &'a str,
     pub report: &'a str,
+    /// A pill's rect under this prefix followed by its id, and its × under that followed by `:hide`.
+    pub pill: &'a str,
     /// Settings' rect and centre.
     pub settings: &'a str,
     pub version: &'a str,
@@ -80,6 +96,25 @@ pub struct Report<'a> {
     pub label: &'a str,
     pub tip: &'a str,
     pub icon_only: bool,
+}
+
+/// A link pill before Report a bug: a flat coloured capsule with a mark, a label while the bar is
+/// wide and a small × on its right that asks to hide it.
+#[derive(Clone, Copy, Debug)]
+pub struct Pill<'a> {
+    /// Its name in handles and in the actions it returns.
+    pub id: &'a str,
+    pub icon: &'a str,
+    /// Shown beside the mark on a wide bar (`labelled`); empty for an icon-only pill.
+    pub label: &'a str,
+    pub labelled: bool,
+    pub tip: &'a str,
+    pub hide_tip: &'a str,
+    /// The accessible names of the pill and of its ×.
+    pub name: &'a str,
+    pub hide_name: &'a str,
+    pub fill: egui::Color32,
+    pub ink: egui::Color32,
 }
 
 /// The version at the bar's right end, linking to `url`.
@@ -109,6 +144,8 @@ pub struct AppBar<'a> {
     pub help: BarButton<'a>,
     pub settings: BarButton<'a>,
     pub report: Report<'a>,
+    /// The link pills, left to right, just before Report a bug.
+    pub pills: Vec<Pill<'a>>,
     /// The bar holds the command search field, just before Settings.
     pub search: bool,
     /// The shortcut the closed search field shows, as the keymap displays it; it sets the field's
@@ -158,6 +195,13 @@ pub enum BarAction {
         x: f32,
     },
     Report,
+    /// A pill was clicked / its × was.
+    Pill {
+        id: String,
+    },
+    HidePill {
+        id: String,
+    },
     /// The version's link.
     Version,
 }
@@ -232,6 +276,79 @@ pub fn search_rect(ctx: &egui::Context, shortcut: Option<&str>, bar: Rect, right
     let whole = bar.width() >= COMPACT && tabs_room - full - SEARCH_GAP >= 216.0;
     let width = if whole { full } else { crate::CommandSearch::compact_width(height) };
     Rect::from_min_size(pos2(right - width, bar.center().y - height / 2.0), vec2(width, height))
+}
+
+/// A pill's width: pad, mark, label, ×.
+fn pill_width(ui: &egui::Ui, p: &Pill) -> f32 {
+    let label = if p.labelled && !p.label.is_empty() {
+        5.0 + ui.painter().layout_no_wrap(p.label.to_string(), crate::type_face::semibold(12.0), p.ink).size().x
+    } else {
+        0.0
+    };
+    8.0 + 14.0 + label + 4.0 + PILL_X + 3.0
+}
+
+/// The room the pills take left of Report a bug: each with the gap before it.
+fn pills_width(ui: &egui::Ui, pills: &[Pill]) -> f32 {
+    pills.iter().map(|p| pill_width(ui, p) + PILL_GAP).sum()
+}
+
+/// A flat capsule `PILL_HEIGHT` tall in `fill`, a touch lighter while `hot`.
+fn capsule(ui: &egui::Ui, rect: Rect, fill: egui::Color32, hot: bool) {
+    let fill = if hot { fill.lerp_to_gamma(egui::Color32::WHITE, 0.12) } else { fill };
+    ui.painter().rect_filled(rect, egui::CornerRadius::same((rect.height() / 2.0) as u8), fill);
+}
+
+/// One pill, its right edge at `right`: returns its left edge. A flat capsule with full-height
+/// corners; hovering lightens its fill by about 8 % over 0.1 s. The × is a plain glyph, with a
+/// round translucent dark background (black at 38 %) that fades in while it is hovered. Edges are
+/// snapped to whole pixels so they stay crisp at any scale.
+fn pill(ui: &mut egui::Ui, bar: Rect, right: f32, p: &Pill, h: &Handles, actions: &mut Vec<BarAction>) -> f32 {
+    let t = Tokens::get();
+    let ppp = ui.ctx().pixels_per_point();
+    let snap = |v: f32| (v * ppp).round() / ppp;
+    let width = snap(pill_width(ui, p));
+    let rect = Rect::from_min_size(pos2(snap(right - width), snap(bar.center().y - PILL_HEIGHT / 2.0)), vec2(width, PILL_HEIGHT));
+    let x_rect = Rect::from_center_size(pos2(snap(rect.right() - 4.0 - PILL_X / 2.0), rect.center().y), vec2(PILL_X, PILL_X));
+    let main = Rect::from_min_max(rect.min, pos2(x_rect.left(), rect.bottom()));
+    let main_resp = ui.interact(main, ui.scope_id().with(("sc_pill", p.id)), Sense::click());
+    let x_resp = ui.interact(x_rect, ui.scope_id().with(("sc_pill_hide", p.id)), Sense::click());
+    main_resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, p.name));
+    x_resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, p.hide_name));
+    let (hot, hot_x) = (main_resp.hovered() || main_resp.has_focus() || x_resp.hovered(), x_resp.hovered() || x_resp.has_focus());
+    let lift = ui.ctx().animate_bool_with_time(ui.scope_id().with(("sc_pill_lift", p.id)), hot, 0.1);
+    let veil = ui.ctx().animate_bool_with_time(ui.scope_id().with(("sc_pill_veil", p.id)), hot_x, 0.1);
+    let fill = p.fill.lerp_to_gamma(egui::Color32::WHITE, 0.08 * lift);
+    ui.painter().rect_filled(rect, egui::CornerRadius::same((PILL_HEIGHT / 2.0) as u8), fill);
+    if main_resp.has_focus() || x_resp.has_focus() {
+        ui.painter().rect_stroke(
+            rect.expand(1.5),
+            egui::CornerRadius::same((PILL_HEIGHT / 2.0 + 1.5) as u8),
+            Stroke::new(1.5, t.app_bar_text),
+            egui::StrokeKind::Outside,
+        );
+    }
+    let icon = Rect::from_center_size(pos2(rect.left() + 8.0 + 7.0, rect.center().y), vec2(14.0, 14.0));
+    crate::icons::paint_ink(ui.painter(), icon, p.icon, p.ink);
+    if p.labelled && !p.label.is_empty() {
+        // Centred on the capitals' height, not the line box, so the name sits level with the mark.
+        let galley = ui.painter().layout_no_wrap(p.label.to_string(), crate::type_face::semibold(12.0), p.ink);
+        let top = rect.center().y - galley.size().y / 2.0 + 0.5;
+        ui.painter().galley(pos2(snap(icon.right() + 5.0), snap(top)), galley, p.ink);
+    }
+    if veil > 0.0 {
+        ui.painter().circle_filled(x_rect.center(), PILL_X / 2.0, egui::Color32::from_black_alpha((97.0 * veil) as u8));
+    }
+    crate::icons::paint_ink(ui.painter(), Rect::from_center_size(x_rect.center(), vec2(8.0, 8.0)), "close", p.ink);
+    solidcraft_ui_registry::publish_target(&handle(h.pill, p.id), main);
+    solidcraft_ui_registry::publish_target(&format!("{}{}:hide", h.pill, p.id), x_rect);
+    if main_resp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(p.tip).clicked() {
+        actions.push(BarAction::Pill { id: p.id.to_string() });
+    }
+    if x_resp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(p.hide_tip).clicked() {
+        actions.push(BarAction::HidePill { id: p.id.to_string() });
+    }
+    rect.left() - PILL_GAP
 }
 
 /// A short divider between the bar's groups.
@@ -368,27 +485,30 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     let separator_x = x - step + if compact { 19.0 } else { 24.0 };
     separator(ui, r, separator_x, "documents", h);
     let tabs_start = separator_x + 10.0;
-    let report_font = FontId::proportional(t.font_button);
+    let report_font = crate::type_face::semibold(12.0);
     let label_width = ui.painter().layout_no_wrap(data.report.label.to_string(), report_font.clone(), t.app_bar_text).size().x;
     // The version links to its release notes; measured here so Report a bug leaves it room.
     let version = data.version.map(|v| (v, ui.painter().layout_no_wrap(v.text.to_string(), FontId::proportional(t.font_small), t.app_bar_text)));
     let version_width = version.as_ref().map(|(_, galley)| galley.size().x);
-    let (report, report_label) = report_rect(r, captions, tabs_start, label_width, version_width, data.report.icon_only);
+    let pills_w = pills_width(ui, &data.pills);
+    let (report, report_label) = report_rect(r, captions, tabs_start + pills_w, label_width, version_width, data.report.icon_only);
+    // The pills sit before Report a bug; Settings, Help, the search field and the assistant keep
+    // their places relative to `anchor`, the pills' left edge.
+    let anchor = report.left() - pills_w;
     // Settings' left edge; the search field, when the bar holds it, sits just before it and moves
     // the assistant and the end of the document tabs left by its width.
-    let gear_left = report.left() - 68.0;
-    let search =
-        data.search.then(|| search_rect(ui.ctx(), data.search_shortcut, r, gear_left - SEARCH_GAP, report.left() - CLUSTER_BUTTONS - tabs_start));
+    let gear_left = anchor - 68.0;
+    let search = data.search.then(|| search_rect(ui.ctx(), data.search_shortcut, r, gear_left - SEARCH_GAP, anchor - CLUSTER_BUTTONS - tabs_start));
     let search_shift = search.map_or(0.0, |s| s.width() + SEARCH_GAP);
     if let Some(search) = search {
         solidcraft_ui_registry::publish_target(h.search, search);
     }
-    if icon_button(ui, r, help_x(report), &data.help, compact, h) {
-        actions.push(BarAction::Help { x: help_x(report) });
+    if icon_button(ui, r, anchor - 18.0, &data.help, compact, h) {
+        actions.push(BarAction::Help { x: anchor - 18.0 });
     }
     // An offer (a newer release) sits before the right cluster, in the space up to the file
     // actions; labelled where Report a bug is (an icon-only one leaves it to fit by room).
-    let controls_left = report.left() - CLUSTER_BUTTONS - search_shift;
+    let controls_left = anchor - CLUSTER_BUTTONS - search_shift;
     let offer = Rect::from_min_max(pos2(x, report.top()), pos2(controls_left - 2.0, report.bottom()));
     let offer_labeled = report_label || (data.report.icon_only && r.width() >= COMPACT);
     // Report a bug.
@@ -396,41 +516,43 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), data.report.label));
     solidcraft_ui_registry::publish_target(h.report, report);
     let hot = response.hovered() || response.has_focus();
-    let tip = if data.report.icon_only {
-        // Drawn like Settings and Help beside it.
-        if hot {
-            ui.painter().rect_filled(report.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-        }
-        crate::icons::paint_app_bar(ui.painter(), report.shrink(7.0), "bug_report", 1.0);
-        data.report.label
-    } else {
-        ui.painter().rect_filled(report, t.radius_sm, if hot { t.app_bar_hover_button } else { t.app_bar });
-        ui.painter().rect_stroke(report, t.radius_sm, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
-        let icon = Rect::from_center_size(pos2(report.left() + 14.0, report.center().y), vec2(18.0, 18.0));
-        crate::icons::paint_app_bar(ui.painter(), icon, "bug_report", 1.0);
-        if report_label {
-            ui.painter().text(
-                pos2(report.left() + REPORT_TEXT_X, report.center().y),
-                Align2::LEFT_CENTER,
-                data.report.label,
-                report_font,
-                t.app_bar_text,
-            );
-        }
+    // A neutral pill shaped like the link pills: the bug mark, and the label where there is room.
+    let capsule_rect = Rect::from_center_size(report.center(), vec2(report.width().min(if report_label { f32::MAX } else { 28.0 }), PILL_HEIGHT));
+    // Neutral: a raised control in the theme's own colours, the same shape as the link pills.
+    let (neutral, ink) = (t.app_bar.lerp_to_gamma(t.app_bar_text, 0.12), t.app_bar_text);
+    capsule(ui, capsule_rect, neutral, hot);
+    let tip = if report_label {
+        let icon = Rect::from_center_size(pos2(capsule_rect.left() + 14.0, capsule_rect.center().y), vec2(16.0, 16.0));
+        crate::icons::paint_ink(ui.painter(), icon, "bug_report", ink);
+        ui.painter().text(
+            pos2(capsule_rect.left() + REPORT_TEXT_X, capsule_rect.center().y),
+            Align2::LEFT_CENTER,
+            data.report.label,
+            crate::type_face::semibold(12.0),
+            ink,
+        );
         data.report.tip
+    } else {
+        crate::icons::paint_ink(ui.painter(), Rect::from_center_size(capsule_rect.center(), vec2(16.0, 16.0)), "bug_report", ink);
+        if data.report.icon_only { data.report.label } else { data.report.tip }
     };
     if response.backing_on_hover_text(tip).clicked() {
         actions.push(BarAction::Report);
     }
+    // The link pills, ending 4 before Report a bug.
+    let mut right = report.left() - PILL_GAP;
+    for p in data.pills.iter().rev() {
+        right = pill(ui, r, right, p, h, &mut actions);
+    }
     // Settings sits immediately left of Help.
-    let gear = Rect::from_center_size(pos2(report.left() - 52.0, r.center().y), vec2(32.0, 32.0));
+    let gear = Rect::from_center_size(pos2(anchor - 52.0, r.center().y), vec2(32.0, 32.0));
     let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click());
     if gresp.hovered() || gresp.has_focus() {
         ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
     }
     crate::icons::paint_app_bar(ui.painter(), gear.shrink(7.0), data.settings.icon, 1.0);
     solidcraft_ui_registry::publish_rect(h.settings, gear);
-    let assistant = data.assistant.then(|| Rect::from_center_size(pos2(report.left() - 86.0 - search_shift, r.center().y), vec2(32.0, 32.0)));
+    let assistant = data.assistant.then(|| Rect::from_center_size(pos2(anchor - 86.0 - search_shift, r.center().y), vec2(32.0, 32.0)));
     solidcraft_ui_registry::publish_handle(h.settings, gear.center());
     if gresp.backing_on_hover_text(data.settings.tip).clicked() {
         actions.push(BarAction::Button { id: data.settings.id.to_string() });

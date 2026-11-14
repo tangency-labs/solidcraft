@@ -116,6 +116,7 @@ mod kit_gallery_tests;
 mod kit_host_tests;
 mod length_input;
 mod linked_source;
+pub mod links;
 #[cfg(test)]
 mod loft_rails_dialog_tests;
 #[cfg(test)]

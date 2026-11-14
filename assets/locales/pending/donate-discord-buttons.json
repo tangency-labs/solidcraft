@@ -1,0 +1,67 @@
+{
+  "en": {
+    "links.kofi_menu": "Support SolidCraft on Ko-fi…",
+    "links.discord_menu": "Join the Discord…",
+    "links.kofi_button": "Donate",
+    "links.discord_button": "Discord",
+    "links.kofi_label": "Support on Ko-fi",
+    "links.discord_label": "Join the Discord",
+    "links.kofi_tip": "Support SolidCraft on Ko-fi (opens ko-fi.com in your browser)",
+    "links.discord_tip": "Join the SolidCraft Discord (opens in your browser)",
+    "links.kofi_hide": "Hide the Donate button (turn it back on in Preferences, General)",
+    "links.discord_hide": "Hide the Discord button (turn it back on in Preferences, General)",
+    "prefs.community": "Community",
+    "prefs.show_donate_button": "Show Donate button",
+    "prefs.show_donate_button_help": "A Donate pill in the title bar, before Report a bug. The × on it turns it off; the Help menu, About and Home keep the Ko-fi link either way.",
+    "prefs.show_discord_button": "Show Discord button",
+    "prefs.show_discord_button_help": "A Discord pill in the title bar, before Report a bug. The × on it turns it off; the Help menu, About and Home keep the Discord link either way.",
+    "links.kofi_name": "Donate on Ko-fi",
+    "links.discord_name": "Join the Discord",
+    "links.kofi_hide_name": "Hide Donate button",
+    "links.discord_hide_name": "Hide Discord button"
+  },
+  "de": {
+    "links.kofi_menu": "SolidCraft auf Ko-fi unterstützen…",
+    "links.discord_menu": "Dem Discord beitreten…",
+    "links.kofi_button": "Spenden",
+    "links.discord_button": "Discord",
+    "links.kofi_label": "Auf Ko-fi unterstützen",
+    "links.discord_label": "Dem Discord beitreten",
+    "prefs.community": "Community",
+    "prefs.show_donate_button": "Spenden-Schaltfläche anzeigen",
+    "prefs.show_discord_button": "Discord-Schaltfläche anzeigen"
+  },
+  "es": {
+    "links.kofi_menu": "Apoyar a SolidCraft en Ko-fi…",
+    "links.discord_menu": "Unirse al Discord…",
+    "links.kofi_button": "Donar",
+    "links.discord_button": "Discord",
+    "links.kofi_label": "Apoyar en Ko-fi",
+    "links.discord_label": "Unirse al Discord",
+    "prefs.community": "Comunidad",
+    "prefs.show_donate_button": "Mostrar el botón Donar",
+    "prefs.show_discord_button": "Mostrar el botón Discord"
+  },
+  "fr": {
+    "links.kofi_menu": "Soutenir SolidCraft sur Ko-fi…",
+    "links.discord_menu": "Rejoindre le Discord…",
+    "links.kofi_button": "Faire un don",
+    "links.discord_button": "Discord",
+    "links.kofi_label": "Soutenir sur Ko-fi",
+    "links.discord_label": "Rejoindre le Discord",
+    "prefs.community": "Communauté",
+    "prefs.show_donate_button": "Afficher le bouton Faire un don",
+    "prefs.show_discord_button": "Afficher le bouton Discord"
+  },
+  "ja": {
+    "links.kofi_menu": "Ko-fi で SolidCraft を支援…",
+    "links.discord_menu": "Discord に参加…",
+    "links.kofi_button": "寄付",
+    "links.discord_button": "Discord",
+    "links.kofi_label": "Ko-fi で支援",
+    "links.discord_label": "Discord に参加",
+    "prefs.community": "コミュニティ",
+    "prefs.show_donate_button": "寄付ボタンを表示",
+    "prefs.show_discord_button": "Discord ボタンを表示"
+  }
+}

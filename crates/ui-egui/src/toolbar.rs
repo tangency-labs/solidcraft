@@ -194,6 +194,7 @@ const APP_BAR_HANDLES: app_bar::Handles<'static> = app_bar::Handles {
     separator: "titlebar:separator:",
     search: "titlebar:search",
     report: "titlebar:report",
+    pill: "titlebar:",
     settings: "titlebar:preferences",
     version: "titlebar:version",
 };
@@ -251,6 +252,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     tip: solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft"),
                     icon_only: app.header.report == ReportButton::Icon,
                 },
+                pills: crate::links::pills(app, r.width() >= app_bar::PILL_LABEL_MIN),
                 search: search_in_header(app) && design_shown(app),
                 search_shortcut: palette_shortcut.as_deref(),
                 assistant: crate::agent_chat::app_bar_button_shown(app),
@@ -298,6 +300,14 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         });
                     }
                     app_bar::BarAction::Report => crate::help::run(app, &ui.ctx().clone(), "report"),
+                    app_bar::BarAction::Pill { id } => {
+                        crate::links::run(ui.ctx(), id);
+                    }
+                    app_bar::BarAction::HidePill { id } => {
+                        if let Some(link) = crate::links::by_id(id) {
+                            (link.hide)(&mut app.preferences);
+                        }
+                    }
                     app_bar::BarAction::Version => ui.ctx().open_url(egui::OpenUrl::new_tab(&url)),
                 }
             }
