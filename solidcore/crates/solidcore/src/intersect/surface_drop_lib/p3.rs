@@ -68,11 +68,14 @@
 //! - **Curve on surface.** The final distance check builds an `SmCrvOnSurf` of each UV
 //!   curve on an evaluation copy of the surface (`clone_for_evaluation`, which keeps
 //!   the owner and so the face tolerance).
-//! - **Subdivision endpoint state.** Pending endpoints retain their complete drop
-//!   point, including 3D derivatives and boundary classification. Once a split
-//!   point changes the start, the pending endpoint is dropped again from that start
-//!   before testing its span. A failed restored drop abandons this trace, as a
-//!   failed initial endpoint does; it is not an accuracy subdivision request.
+//! - **Subdivision endpoint state.** A pending endpoint keeps its complete drop
+//!   point, but, as upstream, only its parameter and UV point and tangent are taken
+//!   back when it becomes the span end. Once a split point changes the start and the
+//!   new span jumps more than half a closed parameter domain, the endpoint is dropped
+//!   again from that start, so its seam branch is resolved from the actual start,
+//!   under the initial endpoint's pole, exit and approximation checks. A failed
+//!   redrop falls back, once, to the saved endpoint and does not end the trace: a
+//!   rejected point is never retried, so subdivision cannot loop on it.
 //!   An unresolved closed-direction seam jump cannot use
 //!   the inaccurate-short-span escape: subdivision must resolve its branch.
 //! - **Bounded subdivision.** The span stack of the subdivision loop is at most
@@ -182,6 +185,29 @@ fn checked_endpoint_status(status: i32, end: &DropPt, interval: &Extent1d) -> i3
         && !interval.is_value_on_boundary(end.t, EFF_ZERO).0
     {
         SM_ERR_OUTSIDE_OF_DOMAIN
+    } else {
+        status
+    }
+}
+
+/// Apply the same geometric rejection and approximation recovery to both an
+/// initial endpoint and one restored after subdivision. A numerical normal-line
+/// solve failure may be kept only under the caller's existing approximation
+/// policy; an interior pole or domain exit is never recovered this way.
+fn accepted_endpoint_status(
+    status: i32,
+    end: &mut DropPt,
+    interval: &Extent1d,
+    keep_all_drop_curves: bool,
+    approx_tol_3d: f64,
+) -> i32 {
+    let status = checked_endpoint_status(status, end, interval);
+    if (status == SM_ERR_NOT_CONVERGING || status == SM_ERR_NOT_WITHIN_TOLERANCE)
+        && keep_all_drop_curves
+        && end.approx_dev < approx_tol_3d
+    {
+        end.good_drop = Some(true);
+        SM_SUCCESS
     } else {
         status
     }
@@ -1267,7 +1293,13 @@ impl Surface {
                 }
 
                 // leaving the domain or hitting a pole in the middle of the curve
-                ret_status = checked_endpoint_status(ret_status, &end, interval);
+                ret_status = accepted_endpoint_status(
+                    ret_status,
+                    &mut end,
+                    interval,
+                    keep_all_drop_curves,
+                    approx_tol_3d,
+                );
 
                 if ret_status != SM_SUCCESS {
                     // walked off the edge of the surface close to the curve end
@@ -1294,26 +1326,21 @@ impl Surface {
                     if ret_status == SM_ERR_NOT_CONVERGING
                         || ret_status == SM_ERR_NOT_WITHIN_TOLERANCE
                     {
-                        if keep_all_drop_curves && end.approx_dev < approx_tol_3d {
-                            ret_status = SM_SUCCESS;
-                            end.good_drop = Some(true);
-                        } else {
-                            fs.set(
-                                &mut record,
-                                3,
-                                SM_ERR_NOT_WITHIN_TOLERANCE,
-                                CreateUvTrimCurvePathType::KeptBeyondTolDrop,
-                                &FailOut {
-                                    rd_max_drop: out.max_drop_to_surf,
-                                    rd_max_dev: out.max_approx_dev,
-                                    max_drop: max_drop_to_surf,
-                                    solutions: Some(&solutions),
-                                    ctrl_poly: Some(&ctrl_poly),
-                                    knots: Some(&knots),
-                                    uv_curves: Some(&out.uv_curves),
-                                },
-                            );
-                        }
+                        fs.set(
+                            &mut record,
+                            3,
+                            SM_ERR_NOT_WITHIN_TOLERANCE,
+                            CreateUvTrimCurvePathType::KeptBeyondTolDrop,
+                            &FailOut {
+                                rd_max_drop: out.max_drop_to_surf,
+                                rd_max_dev: out.max_approx_dev,
+                                max_drop: max_drop_to_surf,
+                                solutions: Some(&solutions),
+                                ctrl_poly: Some(&ctrl_poly),
+                                knots: Some(&knots),
+                                uv_curves: Some(&out.uv_curves),
+                            },
+                        );
                     }
 
                     // still failing: give up on this start point
@@ -1348,20 +1375,28 @@ impl Surface {
                 let mut stop_spans = false;
                 let mut span_failure_path = CreateUvTrimCurvePathType::DropStartPointFail;
                 while !stack.is_empty() {
-                    // A pending endpoint was dropped relative to an earlier start.
-                    // After accepting a split point, restore its complete state and
-                    // drop it again from the actual start. In particular, seam-side
-                    // choices and entering/leaving flags cannot be inherited from
-                    // the last midpoint evaluated during subdivision.
+                    // A pending endpoint was dropped relative to an earlier start. Its
+                    // parameter and UV point and tangent are taken from the stack, as
+                    // upstream. Only when the new span makes a closed-surface seam
+                    // branch ambiguous is the endpoint dropped again from the actual
+                    // start; a failed redrop falls back, once, to the saved point
+                    // (the path of the initial endpoint), and never ends the trace.
                     let (queued_start_t, saved_end) = *stack.last().ok_or_else(|| {
                         SolidError::intersect_missing(OP, "the pending span endpoint")
                     })?;
-                    end = saved_end;
-                    let endpoint_t = end.t;
-                    ret_status = if queued_start_t == start.t {
-                        SM_SUCCESS
-                    } else {
-                        match start.get_next_point(
+                    end.t = saved_end.t;
+                    end.uv_pd = saved_end.uv_pd;
+                    let ambiguous_seam = ((srf_closure == SurfParamType::U
+                        || srf_closure == SurfParamType::Both)
+                        && (end.uv_pd[0].x - start.uv_pd[0].x).abs()
+                            > srf_nat_domain.u_interval().length() / 2.0)
+                        || ((srf_closure == SurfParamType::V
+                            || srf_closure == SurfParamType::Both)
+                            && (end.uv_pd[0].y - start.uv_pd[0].y).abs()
+                                > srf_nat_domain.v_interval().length() / 2.0);
+                    if queued_start_t != start.t && ambiguous_seam {
+                        let mut redrop = saved_end;
+                        let status = match start.get_next_point(
                             k,
                             this,
                             &mut offset,
@@ -1371,20 +1406,23 @@ impl Surface {
                             srf_closure,
                             curve,
                             approx_tol_3d,
-                            endpoint_t,
-                            &mut end,
+                            saved_end.t,
+                            &mut redrop,
                         ) {
-                            Ok(code) => checked_endpoint_status(code, &end, interval),
+                            Ok(code) => code,
                             Err(e) if e.is_unported_or_cancelled() => return Err(e),
                             Err(e) => status_of(&e),
+                        };
+                        let status = accepted_endpoint_status(
+                            status,
+                            &mut redrop,
+                            interval,
+                            keep_all_drop_curves,
+                            approx_tol_3d,
+                        );
+                        if status == SM_SUCCESS {
+                            end = redrop;
                         }
-                    };
-                    if ret_status != SM_SUCCESS {
-                        // A failed projection cannot be repaired by accepting
-                        // successively closer midpoints. End this trace so other
-                        // starts and the caller's projection fallback can run.
-                        stop_spans = true;
-                        break;
                     }
                     ignore_status(ivl.set_min_max(start.t, end.t))?;
 
@@ -1739,6 +1777,43 @@ mod tests {
             run(crate::geom::tol::USE_DEFAULT),
             run(k.tolerances.zone_tol_3d / 2.0)
         );
+    }
+
+    #[test]
+    fn restored_endpoints_keep_the_initial_approximation_recovery_policy() {
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        for code in [SM_ERR_NOT_CONVERGING, SM_ERR_NOT_WITHIN_TOLERANCE] {
+            for keep_all in [false, true] {
+                let mut endpoint = DropPt::new(0.5, Some(false));
+                endpoint.on_pole = Some(false);
+                endpoint.leaving_domain = Some(false);
+                endpoint.approx_dev = 0.5e-4;
+                assert_eq!(
+                    accepted_endpoint_status(code, &mut endpoint, &interval, keep_all, 1e-4,),
+                    if keep_all { SM_SUCCESS } else { code }
+                );
+                assert_eq!(endpoint.good_drop == Some(true), keep_all);
+                endpoint.good_drop = Some(false);
+                endpoint.approx_dev = 1e-4;
+                assert_eq!(
+                    accepted_endpoint_status(code, &mut endpoint, &interval, keep_all, 1e-4,),
+                    code,
+                    "the existing strict approximation bound is retained"
+                );
+            }
+            for (pole, leaving) in [(true, false), (false, true)] {
+                let mut endpoint = DropPt::new(0.5, Some(false));
+                endpoint.on_pole = Some(pole);
+                endpoint.leaving_domain = Some(leaving);
+                endpoint.approx_dev = 0.0;
+                assert_eq!(
+                    accepted_endpoint_status(code, &mut endpoint, &interval, true, 1e-4,),
+                    SM_ERR_OUTSIDE_OF_DOMAIN,
+                    "approximation recovery cannot accept an interior pole or exit"
+                );
+                assert_ne!(endpoint.good_drop, Some(true));
+            }
+        }
     }
 
     #[test]
