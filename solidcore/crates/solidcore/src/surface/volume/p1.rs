@@ -141,6 +141,10 @@ const OP_CONCAT: &str = "surface::volume::p1::concat_evals";
 const OP_WITH_MAPS: &str = "surface::volume::p1::Volume::with_maps";
 const OP_ADD_NEXT_MAP: &str = "surface::volume::p1::Volume::add_next_map";
 const OP_PV: &str = "surface::volume::p1::FindPvIntersect::evaluate";
+const OP_POINT_IN_PARAM_DOMAIN_SIMPLE: &str =
+    "surface::volume::p1::Volume::is_point_in_param_domain_simple";
+const OP_LINE_IN_PARAM_DOMAIN_SIMPLE: &str =
+    "surface::volume::p1::Volume::is_line_in_param_domain_simple";
 
 pub use crate::geom::assert_array::labels::{
     BEND_VOLUME_TYPE, B_SPLINE_VOLUME_TYPE, TRANSFORM_TYPE, TWIST_VOLUME_TYPE, UNBEND_VOLUME_TYPE,
@@ -168,6 +172,16 @@ fn at(a: &[Vec3], i: usize, operation: &'static str) -> Result<Vec3> {
     a.get(i)
         .copied()
         .ok_or_else(|| SolidError::invalid_input(operation, "evaluation array too short"))
+}
+
+/// Refuse a point that is not defined (§7.7: "NaN refuses"). A comparison
+/// with NaN fails, so an undefined point would otherwise test as inside
+/// every box.
+fn check_defined_point(point: Point3, operation: &'static str) -> Result<()> {
+    if point.is_undef() {
+        return Err(SolidError::invalid_input(operation, "undefined point"));
+    }
+    Ok(())
 }
 
 /// The position of a simple map's evaluation (`EvaluatePointSimple` of a
@@ -1371,7 +1385,9 @@ impl Volume {
     /// # Errors
     ///
     /// [`SolidError::Unported`] for the unported kinds.
+    /// [`SolidError::InvalidInput`] for an undefined parameter point.
     pub fn is_point_in_param_domain_simple(&self, param_point: Point3) -> Result<bool> {
+        check_defined_point(param_point, OP_POINT_IN_PARAM_DOMAIN_SIMPLE)?;
         match &self.kind {
             VolumeKind::Twist(t) => Ok(t.is_point_in_param_domain_simple()),
             VolumeKind::Unbend(u) => Ok(u.is_point_in_param_domain_simple()),
@@ -1395,12 +1411,15 @@ impl Volume {
     /// # Errors
     ///
     /// [`SolidError::Unported`] for the unported kinds.
+    /// [`SolidError::InvalidInput`] for an undefined line endpoint.
     pub fn is_line_in_param_domain_simple(
         &self,
         k: &Kernel,
         start: Point3,
         end: Point3,
     ) -> Result<bool> {
+        check_defined_point(start, OP_LINE_IN_PARAM_DOMAIN_SIMPLE)?;
+        check_defined_point(end, OP_LINE_IN_PARAM_DOMAIN_SIMPLE)?;
         match &self.kind {
             VolumeKind::Twist(t) => Ok(t.is_line_in_param_domain_simple()),
             VolumeKind::Unbend(u) => Ok(u.is_line_in_param_domain_simple(start, end)),

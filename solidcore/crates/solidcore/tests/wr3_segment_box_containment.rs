@@ -8,25 +8,25 @@ use solidcore::{
         b_spline_volume::BSplineVolume,
         volume::p1::{Volume, VolumeKind},
     },
-    Kernel, SolidError,
+    Kernel, Result, SolidError,
 };
 
 /// The issue's unit B-spline volume: degree 1 in each direction, knots
 /// `[0, 0, 1, 1]`, natural domain the unit box.
-fn unit_volume() -> Volume {
-    let mut nurb = allocate_nurb_volume([1; 3], [1; 3], [3; 3]).unwrap();
+fn unit_volume() -> Result<Volume> {
+    let mut nurb = allocate_nurb_volume([1; 3], [1; 3], [3; 3])?;
     for d in 0..3 {
         nurb.knots_mut(d).copy_from_slice(&[0.0, 0.0, 1.0, 1.0]);
     }
     for (i, point) in nurb.cpts_mut().iter_mut().enumerate() {
         *point = CPoint::new((i / 4) as f64, ((i / 2) % 2) as f64, (i % 2) as f64, 1.0);
     }
-    Volume::new(VolumeKind::BSpline(BSplineVolume::new(nurb)))
+    Ok(Volume::new(VolumeKind::BSpline(BSplineVolume::new(nurb))))
 }
 
 #[test]
 fn one_endpoint_inside_is_contained_only_in_legacy_mode() {
-    let volume = unit_volume();
+    let volume = unit_volume().unwrap();
     let inside = Vec3::new(0.5, 0.5, 0.5);
     let outside = Vec3::new(2.0, 0.5, 0.5);
     let mut kernel = Kernel::default();
@@ -74,7 +74,7 @@ fn one_endpoint_inside_is_contained_only_in_legacy_mode() {
 /// Before the fix the point and line calls below return `Ok(true)`.
 #[test]
 fn non_finite_inputs_are_refused() {
-    let volume = unit_volume();
+    let volume = unit_volume().unwrap();
     let mut kernel = Kernel::default();
     let nan = Vec3::new(f64::NAN, f64::NAN, f64::NAN);
     let inside = Vec3::new(0.5, 0.5, 0.5);
