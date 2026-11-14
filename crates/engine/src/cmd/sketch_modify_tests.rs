@@ -4364,27 +4364,27 @@ fn trim_extend_and_break_refuse_an_offsets_ends_until_its_association_is_broken(
     );
 }
 
-/// #2874: an offset's corners follow its source curves, so filleting them is refused before
-/// anything changes (the whole batch), instead of leaving full circles and an unsolved sketch.
-/// Once the offset association is broken the same corners round normally.
+/// #2874, #8903: an offset's corners follow its source curves, so a fillet there first releases
+/// the offset into ordinary lines, each held parallel to its source at the offset's distance
+/// (still driven by the offset's parameter), and then rounds the corners. Before #8903 the fillet
+/// was refused; before #2874 it left full circles and an unsolved sketch.
 #[test]
-fn fillet_refuses_an_offsets_corners_until_its_association_is_broken() {
+fn fillet_releases_an_offsets_corners_keeping_its_distance() {
     let mut s = new_sketch();
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
-    let out = ids(&run(&mut s, "sketch.offset", json!({"curves": ["l1", "l2", "l3", "l4"], "distance": "2 mm", "side": [-5, -5]}))["curves"]);
+    // Fully dimensioned (its first corner is on the origin), so each released line has a known place.
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "type": "length", "value": "40 mm"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "type": "length", "value": "30 mm"}));
+    let offset = run(&mut s, "sketch.offset", json!({"curves": ["l1", "l2", "l3", "l4"], "distance": "2 mm", "side": [-5, -5]}));
+    let out = ids(&offset["curves"]);
     assert_eq!(out, ["l5", "l6", "l7", "l8"]);
-    let before = serde_json::to_value(sketch(&s)).unwrap();
+    let distance = offset["param"].as_str().unwrap().to_string();
     let corners = json!({"points": ["l5.start", "l5.end", "l6.end", "l7.end"], "radius": "2 mm"});
-    let e = s.execute("sketch.fillet", &corners).unwrap_err().to_string();
-    assert!(e.contains("offset") && e.contains("break the offset association"), "{e}");
-    assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "a refused fillet changes nothing");
-    let e = s.execute("sketch.chamfer.equal_distance", &json!({"point": "l6.end", "distance": 1})).unwrap_err().to_string();
-    assert!(e.contains("offset"), "{e}");
-
-    run(&mut s, "sketch.offset.break", json!({"curve": "l5"}));
     let f = run(&mut s, "sketch.fillet", corners);
     assert_eq!(f["sketch"]["solved"], json!(true), "{f}");
+    assert_eq!(ids(&f["offset_released"]), out, "{f}");
     let sk = sketch(&s);
+    assert!(sk.offsets.is_empty(), "the offset association is released");
     let arcs = ids(&f["curves"]);
     assert_eq!(arcs.len(), 4);
     for arc in &arcs {
@@ -4392,6 +4392,82 @@ fn fillet_refuses_an_offsets_corners_until_its_association_is_broken() {
         assert!(matches!(sk.curves[ai].kind, CurveKind::Arc { .. }), "{arc} is a trimmed arc");
         assert!((sk.radius(ai).unwrap() - 2.0).abs() < 1e-7);
     }
+    // The released lines still stand the offset's distance outside the 40 × 30 mm rectangle, and
+    // the distance parameter moves them: the bottom line (l5) below it, the right one (l6) right
+    // of it, the top one (l7) above it, the left one (l8) left of it. A line that flipped inside
+    // would sit at the mirrored coordinate.
+    let at = |s: &Session, output: &str| {
+        let sk = sketch(s);
+        match sk.shape(sk.curve_index(output).unwrap()).unwrap() {
+            solidcraft_sketch::Shape::Line { a, .. } => a,
+            other => panic!("{other:?}"),
+        }
+    };
+    for (d, when) in [(2.0, "after the fillet"), (3.0, "after the distance changed")] {
+        if d == 3.0 {
+            run(&mut s, "parameters.change", json!({"name": distance, "expression": "3 mm"}));
+        }
+        let expected: [(fn(Vec2) -> f64, f64); 4] = [(|p| p.y, -d), (|p| p.x, 40.0 + d), (|p| p.y, 30.0 + d), (|p| p.x, -d)];
+        for ((coordinate, value), output) in expected.iter().zip(&out) {
+            let p = at(&s, output);
+            assert!((coordinate(p) - value).abs() < 1e-7, "{output} {when}: at {p:?}, expected {value}");
+        }
+    }
+
+    // A chamfer releases an offset the same way.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    run(&mut s, "sketch.offset", json!({"curves": ["l1", "l2", "l3", "l4"], "distance": "2 mm", "side": [-5, -5]}));
+    let c = run(&mut s, "sketch.chamfer.equal_distance", json!({"point": "l6.end", "distance": 1}));
+    assert_eq!(c["sketch"]["solved"], json!(true), "{c}");
+    assert_eq!(ids(&c["offset_released"]).len(), 4, "{c}");
+    assert!(sketch(&s).offsets.is_empty());
+}
+
+/// #2874, #8903: an offset this PR does not release keeps its association, so Fillet and
+/// Chamfer still refuse a corner on its output, before anything changes. A circle's offset is
+/// one: a fillet between it and a line ending on it is refused, and the sketch stays as it was.
+#[test]
+fn fillet_still_refuses_a_corner_on_a_circle_offset() {
+    let mut s = new_sketch();
+    let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}))["curves"])[0].clone();
+    let output = ids(&run(&mut s, "sketch.offset", json!({"curves": [circle], "distance": "2 mm", "side": [20, 0]}))["curves"])[0].clone();
+    let line = ids(&run(&mut s, "sketch.line", json!({"points": [[12, 0], [30, 0]]}))["curves"])[0].clone();
+    let before = serde_json::to_value(sketch(&s)).unwrap();
+    let e = s.execute("sketch.fillet", &json!({"a": line, "b": output, "radius": "2 mm"})).unwrap_err().to_string();
+    assert!(e.contains("is an offset") && e.contains("break the offset association"), "{e}");
+    assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "a refused fillet changes nothing");
+    assert_eq!(sketch(&s).offsets.len(), 1, "the circle's offset keeps its association");
+}
+
+/// #8903: an offset of an outline with a rounded corner has an arc among its curves. Filleting
+/// one of the offset's sharp corners releases the arc too: it keeps its source's centre and
+/// stays the offset's distance from the source arc.
+#[test]
+fn fillet_releases_an_offset_with_an_arc() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    let rounded = run(&mut s, "sketch.fillet", json!({"point": "l2.end", "radius": "5 mm"}));
+    let source_arc = ids(&rounded["curves"])[0].clone();
+    let sk = sketch(&s);
+    let chain: Vec<String> = sk.curves.iter().map(|c| c.id.clone()).collect();
+    let offset = run(&mut s, "sketch.offset", json!({"curves": chain, "distance": "2 mm", "side": [-5, -5]}));
+    let out = ids(&offset["curves"]);
+    let sk = sketch(&s);
+    let output_arc = out.iter().find(|id| matches!(sk.curves[sk.curve_index(id).unwrap()].kind, CurveKind::Arc { .. })).unwrap().clone();
+    let corner = out.iter().find(|id| matches!(sk.curves[sk.curve_index(id).unwrap()].kind, CurveKind::Line { .. })).unwrap().clone();
+    let f = run(&mut s, "sketch.fillet", json!({"point": format!("{corner}.start"), "radius": "1 mm"}));
+    assert_eq!(f["sketch"]["solved"], json!(true), "{f}");
+    assert!(ids(&f["offset_released"]).contains(&output_arc), "{f}");
+    let radii = |s: &Session| {
+        let sk = sketch(s);
+        (sk.radius(sk.curve_index(&source_arc).unwrap()).unwrap(), sk.radius(sk.curve_index(&output_arc).unwrap()).unwrap())
+    };
+    let (source, output) = radii(&s);
+    assert!((source - output).abs() > 1.0 && ((source - output).abs() - 2.0).abs() < 1e-7, "{source} {output}");
+    run(&mut s, "parameters.change", json!({"name": rounded["param"], "expression": "8 mm"}));
+    let (source, output) = radii(&s);
+    assert!((source - 8.0).abs() < 1e-7 && ((source - output).abs() - 2.0).abs() < 1e-7, "{source} {output}");
 }
 
 /// #4681: a fillet radius typed as `=name` (a leading equals sign, as in a spreadsheet) is the
@@ -6027,6 +6103,45 @@ fn a_rectangle_turned_off_the_axes_stays_a_rectangle() {
         assert!(dot(d[i], d[(i + 1) % 4]).abs() < 1e-6, "{d:?}");
     }
     assert!(d[0].len() > 1e-6 && d[1].len() > 1e-6);
+}
+
+/// #16642: relations to a stationary line that the turn releases must not stand in for the
+/// rectangle's own relations. Its opposite sides stay parallel through a later corner drag.
+#[test]
+fn a_turned_rectangle_keeps_its_shape_after_releasing_external_parallels() {
+    let (mut s, sides) = rect_with_sides();
+    let fixed = ids(&run(&mut s, "sketch.line", json!({"points": [[0, -5], [30, -5]], "connect": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": fixed}));
+    let holds: Vec<Value> = [0, 2]
+        .into_iter()
+        .map(|i| {
+            let r = run(&mut s, "sketch.constraint.parallel", json!({"a": sides[i], "b": fixed}));
+            assert_eq!(r["redundant"], true, "{r}");
+            json!({"id": r["constraint"], "kind": "Parallel"})
+        })
+        .collect();
+    let r = run(&mut s, "sketch.move", json!({"entities": sides, "angle": 30, "center": [1, 1]}));
+    assert_eq!(r["released"], json!(holds), "{r}");
+    assert_eq!(r["sketch"]["dof"], 5, "the rectangle keeps only x, y, width, height and angle free: {r}");
+    assert_eq!(r["sketch"]["solved"], true, "{r}");
+    let kinds: Vec<_> = r["added"].as_array().unwrap().iter().map(|a| a["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds.iter().filter(|&&k| k == "Parallel").count(), 2, "{r}");
+    assert_eq!(kinds.iter().filter(|&&k| k == "Perpendicular").count(), 1, "{r}");
+
+    run(&mut s, "sketch.drag", json!({"entity": format!("{}.start", sides[0]), "from": [1, 1], "to": [-2, 3]}));
+    run(&mut s, "sketch.drag_end", json!({}));
+    let d = side_directions(&s, &sides);
+    assert!(d[0].cross(d[2]).abs() < 1e-6 && d[1].cross(d[3]).abs() < 1e-6, "opposite sides stay parallel: {d:?}");
+    for i in 0..4 {
+        assert!(d[i].dot(d[(i + 1) % 4]).abs() < 1e-6, "adjacent sides stay perpendicular: {d:?}");
+    }
+    assert!(d[0].len() > 1e-6 && d[1].len() > 1e-6);
+    let sk = sketch(&s);
+    let at = sk.point(sk.resolve_point(&format!("{}.start", sides[0])).unwrap()).unwrap();
+    assert!(at.dist(Vec2::new(-2.0, 3.0)) < 1e-6, "the dragged corner reaches its target: {at:?}");
+    for (end, expected) in [("start", Vec2::new(0.0, -5.0)), ("end", Vec2::new(30.0, -5.0))] {
+        assert_eq!(sk.point(sk.resolve_point(&format!("{fixed}.{end}")).unwrap()).unwrap(), expected);
+    }
 }
 
 fn sides_of(r: &Value) -> Vec<String> {

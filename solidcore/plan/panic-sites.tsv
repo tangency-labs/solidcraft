@@ -67,6 +67,8 @@ crates/solidcore-step/src/topology/swept.rs	hyperbola_spline	Ord::clamp	1	proven
 crates/solidcore-step/src/topology/swept.rs	revolution	int-div	1	proven	ts.len() / 2	constant non-zero divisor
 crates/solidcore-step/src/topology/swept.rs	whole	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore-step/src/topology/swept.rs	widest_gap	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore-step/src/topology/wound.rs	along	f64::clamp	1	proven	clamp(0.0, FRAC_PI_2)	constant bounds 0 <= FRAC_PI_2
+crates/solidcore-step/src/topology/wound.rs	pcurve	Ord::clamp	1	proven	clamp(16, MAX_PIECES / 4)	constant bounds 16 <= MAX_PIECES / 4 (1000)
 crates/solidcore-step/src/write/topology.rs	BrepWriter::edge_geometry	with_capacity	1	proven	Vec::with_capacity(edge.uses.len())	the length of a collection already in memory
 crates/solidcore-step/src/write/topology.rs	BrepWriter::face	with_capacity	1	proven	Vec::with_capacity(face.loops.len())	the length of a collection already in memory
 crates/solidcore-step/src/write/topology.rs	BrepWriter::face	with_capacity	2	proven	Vec::with_capacity(edges.len())	the length of a collection already in memory

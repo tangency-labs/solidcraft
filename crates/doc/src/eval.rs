@@ -962,6 +962,7 @@ struct CachedEval<S> {
     warning: Option<String>,
     import_report: Option<Arc<kernel::ImportReport>>,
     repair: Option<Arc<kernel::RepairReport>>,
+    lost_projections: Option<Arc<Vec<crate::LostProjection>>>,
     ms: f64,
     state: S,
 }
@@ -1127,6 +1128,7 @@ impl<S> CachedEval<S> {
             warning: self.warning.clone(),
             import_report: self.import_report.clone(),
             repair: self.repair.clone(),
+            lost_projections: self.lost_projections.clone(),
             ms: self.ms,
             state,
         }
@@ -1313,6 +1315,10 @@ pub struct FeatureResult {
     /// What a Repair Part feature changed, face by face (the command's reply says it).
     #[serde(skip)]
     pub repair: Option<Arc<kernel::RepairReport>>,
+    /// A sketch that failed for projections kept by names that find nothing: which
+    /// ([`crate::DocError::LostProjections`]; `error` is their message).
+    #[serde(skip)]
+    pub lost_projections: Option<Arc<Vec<crate::LostProjection>>>,
     pub ms: f64,
     pub skipped: bool,
     /// Not evaluated on the document's current inputs: a feature at or after a sketch shown live
@@ -2925,13 +2931,10 @@ impl Model {
         self.results.iter().rev().find(|r| !r.skipped).map(|r| r.state.clone()).unwrap_or_else(|| self.empty.clone())
     }
 
-    /// Show the sketch `feature` while it is edited although it failed (#12085): a link whose
-    /// named face or edge is gone fails the sketch, so the evaluation keeps no sketch for it, and
-    /// its editor had nothing to show or repair. Here the sketch is built as it is evaluated, but
-    /// with such a link marked lost and kept where it was (no other face or edge is taken for
-    /// it), and added to the final state only: the sketch's result keeps its error and the
-    /// features after it still fail. `None`, a sketch that did not fail, or one that fails for
-    /// another reason too, shows nothing more. Returns whether a held sketch is shown.
+    /// Show the sketch `feature` while it is edited although it failed (#12085), as
+    /// [`Model::failed_sketch_shown`] builds it, in the final state only: the sketch's result
+    /// keeps its error and the features after it still fail. `None`, or a sketch that shows
+    /// nothing, shows nothing more. Returns whether a held sketch is shown.
     pub fn hold_failed_sketch(&mut self, doc: &Document, feature: Option<u64>) -> bool {
         let Some(id) = feature else {
             self.held = None;
@@ -2942,11 +2945,29 @@ impl Model {
             return true;
         }
         self.held = None;
-        if base.sketch(id).is_some() || !self.result(id).is_some_and(|r| r.error.is_some() && !r.skipped && !r.stale) {
+        if base.sketch(id).is_some() {
             return false;
         }
-        let Some(f) = doc.feature(id) else { return false };
-        let FeatureKind::Sketch { plane, sketch } = &f.kind else { return false };
+        let Some(solved) = self.failed_sketch_shown(doc, id) else { return false };
+        let mut shown = (*base).clone();
+        shown.sketches.retain(|s| s.feature != id);
+        shown.sketches.push(solved);
+        self.held = Some(HeldSketch { feature: id, base, shown: Arc::new(shown) });
+        true
+    }
+
+    /// The sketch `id` that failed because links lost their named face or edge (#12085): the
+    /// evaluation keeps no sketch for it, so it would show nothing to repair. Built here as it is
+    /// evaluated, on the model before it, but with each such link marked lost and kept where it
+    /// was (no other face or edge is taken for it). `None` for a sketch that did not fail that
+    /// way, or that fails for another reason too. For showing the sketch and telling that lost
+    /// projections are its only failure (Redefine Sketch Plane); no feature builds from it.
+    pub fn failed_sketch_shown(&self, doc: &Document, id: u64) -> Option<Arc<SolvedSketch>> {
+        if !self.result(id).is_some_and(|r| r.lost_projections.is_some() && !r.skipped && !r.stale) {
+            return None;
+        }
+        let f = doc.feature(id)?;
+        let FeatureKind::Sketch { plane, sketch } = &f.kind else { return None };
         let mut next = (*self.state_before(id)).clone();
         let vals = evaluation_values(doc).0;
         let mut warning = None;
@@ -2955,12 +2976,7 @@ impl Model {
             eval_sketch(doc, &vals, f, plane, sketch, &mut next, &mut warning, crate::project::LostNames::Mark)
                 .map_err(|e| kernel::KernelError::Failed(e.to_string()))
         });
-        let Some(solved) = built.ok().and_then(|()| next.sketches.iter().find(|s| s.feature == id).cloned()) else { return false };
-        let mut shown = (*base).clone();
-        shown.sketches.retain(|s| s.feature != id);
-        shown.sketches.push(solved);
-        self.held = Some(HeldSketch { feature: id, base, shown: Arc::new(shown) });
-        true
+        built.ok().and_then(|()| next.sketches.iter().find(|s| s.feature == id).cloned())
     }
 
     /// State just before the feature with this id (for editing a sketch in context).
@@ -3272,6 +3288,7 @@ impl Model {
                         warning: None,
                         import_report: None,
                         repair: None,
+                        lost_projections: None,
                         ms: 0.0,
                         skipped: true,
                         stale: false,
@@ -3306,6 +3323,7 @@ impl Model {
                         warning: None,
                         import_report: None,
                         repair: None,
+                        lost_projections: None,
                         ms: 0.0,
                         skipped: false,
                         stale: false,
@@ -3352,6 +3370,7 @@ impl Model {
                         warning: c.warning,
                         import_report: c.import_report,
                         repair: c.repair,
+                        lost_projections: c.lost_projections,
                         ms: c.ms,
                         skipped: false,
                         stale: false,
@@ -3410,6 +3429,7 @@ impl Model {
                 let mut warning = cached.as_ref().and_then(|c| c.warning.clone());
                 let mut import_report = cached.as_ref().and_then(|c| c.import_report.clone());
                 let mut repair = cached.as_ref().and_then(|c| c.repair.clone());
+                let mut lost_projections = cached.as_ref().and_then(|c| c.lost_projections.clone());
                 // Face references by name: move each face point onto its named face (on the body the
                 // feature names, when it names one and the face is there).
                 let renamed;
@@ -3453,7 +3473,12 @@ impl Model {
                         r.map_err(|e| match e {
                             // A panic the kernel caught stays one.
                             crate::DocError::Kernel(kernel::KernelError::Internal(m)) => kernel::KernelError::Internal(m),
-                            e => kernel::KernelError::Failed(e.in_feature(&f.name).to_string()),
+                            e => {
+                                if let crate::DocError::LostProjections { links, .. } = &e {
+                                    lost_projections = Some(Arc::new(links.clone()));
+                                }
+                                kernel::KernelError::Failed(e.in_feature(&f.name).to_string())
+                            }
                         })?;
                         // The checks the feature's steps left to its end: the bodies it keeps.
                         if !deferred {
@@ -3571,6 +3596,7 @@ impl Model {
                     }
                     Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
                 };
+                let lost_projections = lost_projections.filter(|_| error.is_some());
                 // A panic is no result to reuse: the kernel was replaced after it. Work its watcher
                 // stopped may have been cut short (a boolean that gave up): it is not kept either.
                 if !self.no_cache && !watched.cancelled() && !internal {
@@ -3579,6 +3605,7 @@ impl Model {
                         warning: warning.clone(),
                         import_report: import_report.clone(),
                         repair: repair.clone(),
+                        lost_projections: lost_projections.clone(),
                         ms,
                         state: state.clone(),
                     };
@@ -3604,6 +3631,7 @@ impl Model {
                     warning,
                     import_report,
                     repair,
+                    lost_projections,
                     ms,
                     skipped: false,
                     stale: false,
@@ -4836,7 +4864,13 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
         // pieces as they stand (#3455: joining 64 separate pegs took the kernel's union 4.5 s).
         let acc = match union_all_apart(&operands) {
             Some(acc) => acc,
-            None => union_all(&operands)?,
+            // The kernel's union pairs the tools with each other before the target. Fins whose
+            // ends meet only inside a hub then meet in slivers it cannot resolve (#15913); into
+            // the target one at a time, each tool's overlap with the others already lies inside.
+            None => match union_all(&operands) {
+                Ok(acc) => acc,
+                Err(e) => tools.iter().try_fold(base.clone(), |acc, tool| union(&acc, tool)).map_err(|_| e)?,
+            },
         };
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
             *mb = mb.remade(acc);
@@ -5071,8 +5105,9 @@ fn named_pieces_of(
     out
 }
 
-/// Distance that reaches through every target body from the sketch plane (either side).
-pub fn through_all_distance(st: &ModelState, plane: &Plane, targets: &[String]) -> Result<f64> {
+/// Distance that reaches through every target body from the plane `start` along the normal from
+/// the sketch plane (the From Object level plus any start offset), on either side.
+pub fn through_all_distance(st: &ModelState, plane: &Plane, start: f64, targets: &[String]) -> Result<f64> {
     let mut far: f64 = 0.0;
     let mut any = false;
     for b in st.bodies.iter().filter(|b| targets.is_empty() || targets.contains(&b.name)) {
@@ -5087,7 +5122,7 @@ pub fn through_all_distance(st: &ModelState, plane: &Plane, targets: &[String]) 
                 if i & 2 == 0 { bb.min.y } else { bb.max.y },
                 if i & 4 == 0 { bb.min.z } else { bb.max.z },
             );
-            far = far.max(plane.height(p).abs());
+            far = far.max((plane.height(p) - start).abs());
         }
     }
     if !any {
@@ -5527,7 +5562,7 @@ fn named_body(st: &ModelState, name: &str, p: Vec3) -> Option<usize> {
         if b.body.is_mesh() || token.is_some_and(|t| !crate::naming::face_names(b).iter().any(|n| n.contains(t))) {
             continue;
         }
-        let Ok(hit) = crate::naming::locate_edge(b, name, p) else { continue };
+        let Ok(hit) = crate::name_lookup::locate_projected_edge(b, name, p) else { continue };
         let score = (hit.on_point, -hit.point.dist(p));
         if best.as_ref().is_none_or(|(_, s)| score.partial_cmp(s).is_some_and(|o| o.is_gt())) {
             best = Some((i, score));
@@ -5629,8 +5664,9 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
             }
             continue;
         };
-        let hit =
-            trusted_edge_name(f, i, p).and_then(|n| crate::naming::locate_edge(mb, n, p).ok()).ok_or_else(|| DocError::reselect(stored.as_str()))?;
+        let hit = trusted_edge_name(f, i, p)
+            .and_then(|n| crate::name_lookup::locate_projected_edge(mb, n, p).ok())
+            .ok_or_else(|| DocError::reselect(stored.as_str()))?;
         if let Some(note) = hit.note(stored) {
             notes.push(note);
         }
@@ -6966,8 +7002,11 @@ fn feature_tools_with_constructor(
             // middle of the profiles. The points are in this feature's component frame, so the
             // model is seen from there: a target in another, moved component where it is shown.
             let n = ss.plane.normal();
-            let tst =
-                if extent.to.is_some() || extent.from.is_some() { state_in_frame(doc, st, f.component)? } else { std::borrow::Cow::Borrowed(st) };
+            let tst = if extent.to.is_some() || extent.from.is_some() {
+                state_in_frame_pinned_to(doc, st, f.component, &extent.picked_placements)?
+            } else {
+                std::borrow::Cow::Borrowed(st)
+            };
             // Through all, and where the tool meets its targets, is measured where they are shown.
             let shown = targets_as_shown(st, f, &crate::plain(targets))?;
             let st: &ModelState = &shown;
@@ -7008,7 +7047,9 @@ fn feature_tools_with_constructor(
                 }
                 None if extent.through_all => {
                     // The reach is a length; a negative saved distance keeps its side (#10415).
-                    let reach = through_all_distance(st, &ss.plane, &crate::plain(targets))?;
+                    // Measured from where the extrude starts, so an offset leaves no side short (#16556).
+                    let start = from + extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
+                    let reach = through_all_distance(st, &ss.plane, start, &crate::plain(targets))?;
                     if val(vals, &extent.distance, Kind::Length).is_ok_and(|saved| saved < 0.0) { -reach } else { reach }
                 }
                 None => val(vals, &extent.distance, Kind::Length)?,
@@ -7141,9 +7182,12 @@ fn feature_tools_with_constructor(
                     tools = vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())];
                 }
             }
-            if let Some(tb) = curved.and_then(|bi| tst.bodies.get(bi)) {
+            if let Some(tb) = curved.and_then(|bi| tst.bodies.get(bi))
+                && let Some((_, fi)) = to_face
+            {
                 let start = if hi > 0.0 { lo + off } else { hi + off };
-                tools = trim_to_body(tools, tb, |q: Vec3| ((q - ss.plane.origin).dot(n) - start).abs())?;
+                let far = if hi > 0.0 { hi + off } else { lo + off };
+                tools = trim_to_face(tools, tb, fi, &ss.plane, start, far)?;
             }
             // A join's profile grows into the material it joins; its sketch plane and depth as drawn
             // still serve a join into sheet metal (`sheet_join`), which takes the sketch's regions.
@@ -8651,7 +8695,13 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
             continue;
         }
         let from = if k == 0 { placed.unwrap_or(*p) } else { *p };
-        match crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, from) {
+        // Only a thread may find a numbered piece of a round side again as its whole face (#16602).
+        let hit = if matches!(f.kind, FeatureKind::Thread { .. }) {
+            crate::name_lookup::locate_thread_face_on_body(&fst, f.kind.face_body(), n, from)
+        } else {
+            crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, from)
+        };
+        match hit {
             Some(hit) => {
                 if let Some(note) = hit.note(n) {
                     notes.push(note);
@@ -8776,7 +8826,9 @@ fn replay(
     // A source's named faces are looked up in the model as it was before any copy was made: the
     // copy of an earlier source (a boss joined to the body) changes the faces a later source (a cut
     // starting on the boss) names, though the later source means the original's (#11792).
-    let named_from = plan.iter().any(|(src, _, _)| src.face_names.iter().any(|n| !n.is_empty())).then(|| st.clone());
+    // A hole placed from edges names those edges too (#16799): the second hole's edge names
+    // mean the original's edges, which the first hole's copy has already cut into.
+    let named_from = plan.iter().any(|(src, _, _)| src.face_names.iter().chain(&src.edge_names).any(|n| !n.is_empty())).then(|| st.clone());
     for (src, mats, first) in &plan {
         // A fillet or chamfer repeats at the copied edges.
         if let FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } = &src.kind {
@@ -8899,7 +8951,7 @@ fn replay(
             // A hole is drilled again at each copy of its spot (found on the surface there), so
             // a blind hole's depth counts from the face at the copy, not from the bottom of the
             // original hole under the original spot.
-            let (spots, dir) = hole_spots_raw(vals, st, src)?;
+            let (spots, dir) = hole_spots_raw(vals, named_from.as_ref().unwrap_or(st), src)?;
             // Copies start where the original does (#11538).
             let from_inside = hole_from_inside(doc, src);
             // A hole at sketch points drills into the material, judged at each copy's spots as
@@ -9173,6 +9225,37 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
                 out.push(Traced { body: lump, lineage, recipe: None });
             }
         }
+    }
+    if out.is_empty() {
+        return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
+    }
+    Ok(out)
+}
+
+/// Tools run to a curved To face, one construction chosen by the exact on-face test, not by a
+/// failed attempt: the kernel's [`kernel::face_split_if_on_face`] splits each tool's prism at the
+/// face's extended surface and says whether its section lies wholly on the face. When every
+/// tool's does, those pieces (the one that starts at `start`, whether that lies in air or inside
+/// the target's material) are the result; otherwise the tool is trimmed to the target body
+/// ([`trim_to_body`], as a profile only partly over the face always was), refused when a piece
+/// still has its end cap at `far`.
+fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Vec<Traced>> {
+    let mut out = Vec::new();
+    let mut on_face = true;
+    for t in &tools {
+        let Some(parts) = kernel::face_split_if_on_face(&t.body, &target.body, face, plane, start, far)? else {
+            on_face = false;
+            break;
+        };
+        out.extend(parts.into_iter().map(|part| Traced::step(part, &[t])));
+    }
+    if !on_face {
+        let n = plane.normal();
+        let trimmed = trim_to_body(tools, target, |q: Vec3| ((q - plane.origin).dot(n) - start).abs())?;
+        if trimmed.iter().any(|t| kernel::has_cap_at(&t.body, plane, far, far - start)) {
+            return Err(DocError::Invalid("the profile reaches past the To face".into()));
+        }
+        return Ok(trimmed);
     }
     if out.is_empty() {
         return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
@@ -10727,7 +10810,8 @@ pub fn state_in_frame<'a>(doc: &Document, st: &'a ModelState, comp: u64) -> Resu
 /// model itself.
 pub fn face_point_state<'a>(doc: &Document, st: &'a ModelState, kind: &FeatureKind, comp: u64) -> Result<std::borrow::Cow<'a, ModelState>> {
     match kind {
-        FeatureKind::Extrude { .. } | FeatureKind::Revolve { .. } => state_in_frame(doc, st, comp),
+        FeatureKind::Extrude { extent, .. } => state_in_frame_pinned_to(doc, st, comp, &extent.picked_placements),
+        FeatureKind::Revolve { .. } => state_in_frame(doc, st, comp),
         _ => Ok(std::borrow::Cow::Borrowed(st)),
     }
 }
@@ -10775,6 +10859,29 @@ pub fn face_point_names(doc: &Document, st: &ModelState, kind: &FeatureKind, com
 
 /// As `state_in_frame`, using the exact active placement for its shared source geometry.
 pub fn state_in_frame_at<'a>(doc: &Document, st: &'a ModelState, comp: u64, frame: Mat) -> Result<std::borrow::Cow<'a, ModelState>> {
+    state_in_frame_pinned(doc, st, comp, frame, &[])
+}
+
+/// As [`state_in_frame`], with each component `pins` names held at the placement relative to
+/// `comp` it had when the feature's To / From Object was picked (#16732): a joint that slides
+/// another component does not stretch what the pick measures to. Components without a pin are
+/// where they are shown.
+pub fn state_in_frame_pinned_to<'a>(
+    doc: &Document,
+    st: &'a ModelState,
+    comp: u64,
+    pins: &[crate::PickedPlacement],
+) -> Result<std::borrow::Cow<'a, ModelState>> {
+    state_in_frame_pinned(doc, st, comp, doc.component_transform(comp), pins)
+}
+
+fn state_in_frame_pinned<'a>(
+    doc: &Document,
+    st: &'a ModelState,
+    comp: u64,
+    frame: Mat,
+    pins: &[crate::PickedPlacement],
+) -> Result<std::borrow::Cow<'a, ModelState>> {
     use std::borrow::Cow;
     if doc.occurrences.is_empty() && doc.body_offsets.is_empty() {
         return Ok(Cow::Borrowed(st));
@@ -10782,7 +10889,11 @@ pub fn state_in_frame_at<'a>(doc: &Document, st: &'a ModelState, comp: u64, fram
     let inv = crate::mat_inverse(&frame).ok_or_else(|| DocError::Invalid(format!("component {comp}'s frame cannot be inverted")))?;
     let comp_of_feature = |id: u64| doc.feature(id).map(|f| f.component).unwrap_or(0);
     let rel = |c: u64, body: Option<&str>| {
-        let m = crate::mat_mul(&inv, &if c == comp { frame } else { doc.component_transform(c) });
+        let pinned = if c == comp { None } else { pins.iter().find(|p| p.component == c) };
+        let m = match pinned {
+            Some(p) => p.placement,
+            None => crate::mat_mul(&inv, &if c == comp { frame } else { doc.component_transform(c) }),
+        };
         match body.and_then(|b| doc.body_offsets.get(b)) {
             Some(o) => crate::mat_mul(&m, o),
             None => m,

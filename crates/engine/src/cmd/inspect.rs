@@ -13,21 +13,24 @@ use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
 use crate::schema::inspect::{BodiesDetail, DocumentBodies, TimelineDetail, TimelineRow};
 use crate::schema::inspect::{
-    BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox, CommandEntry,
-    CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail, DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentSketch,
-    FaceCylinder, KernelCounts, ListedMaterial, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams,
-    MeasureResult, MeasureTotal, Measured, MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces,
-    ModelThread, ModelThreads, ModelThreadsParams, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile,
-    SketchWire, SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
+    BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox,
+    ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail,
+    DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentRevisionParams, DocumentSketch, FaceCylinder, KernelCounts, ListedMaterial,
+    MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams, MeasureResult, MeasureTotal, Measured,
+    MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces, ModelThread, ModelThreads, ModelThreadsParams,
+    PointFixedBy, RevisionResult, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile, SketchWire,
+    SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const COLORED_COMPONENTS_CONTRACT: TypedContract<ColoredComponentsParams> = TypedContract::new();
 const BODY_LIST_CONTRACT: TypedContract<BodyListParams> = TypedContract::new();
 const THREADS_CONTRACT: TypedContract<ModelThreadsParams> = TypedContract::new();
 const BODY_FEATURES_CONTRACT: TypedContract<BodyFeaturesParams> = TypedContract::new();
 const MEASURE_CONTRACT: TypedContract<MeasureParams> = TypedContract::new();
 const DOCUMENT_INSPECT_CONTRACT: TypedContract<DocumentInspectParams> = TypedContract::new();
+const DOCUMENT_REVISION_CONTRACT: TypedContract<DocumentRevisionParams> = TypedContract::new();
 const SKETCH_INSPECT_CONTRACT: TypedContract<SketchInspectParams> = TypedContract::new();
 const MATERIAL_ASSIGN_CONTRACT: TypedContract<MaterialAssignParams> = TypedContract::new();
 const MATERIAL_LIST_CONTRACT: TypedContract<MaterialListParams> = TypedContract::new();
@@ -43,8 +46,12 @@ pub(super) mod appearance_gestures;
 mod body_features;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("inspect.colored_components", "Component Colors", colored_components)
-        .at("SOLID", "INSPECT").icon("colored_components").noundo()
+    CommandSpec::new("inspect.colored_components", "Component Colors", crate::checked!("inspect.colored_components", colored_components))
+        .at("SOLID", "INSPECT")
+        .icon("colored_components")
+        .noundo()
+        .contract(&COLORED_COMPONENTS_CONTRACT)
+        .output(output_schema_for::<ColoredComponentsResult>)
         .params("enabled?: bool (omitted: toggle); temporary component colours, without changing appearances"),
     CommandSpec::new("inspect.measure", "Measure", crate::checked!("inspect.measure", measure))
         .at("SOLID", "INSPECT")
@@ -64,7 +71,12 @@ pub static COMMANDS: &[CommandSpec] = &[
              timeline?: true (default) | \"summary\" (each feature as id, name, type, with error, warning, suppressed and rolled_back only when set) | false (left out); \
              bodies?: true (default) | \"names\" (only the body names, nothing measured) | false (left out)",
         ),
-    CommandSpec::new("document.revision", "Design Revision", revision).icon("inspect").noundo().params(
+    CommandSpec::new("document.revision", "Design Revision", crate::checked!("document.revision", revision))
+        .icon("inspect")
+        .noundo()
+        .contract(&DOCUMENT_REVISION_CONTRACT)
+        .output(output_schema_for::<RevisionResult>)
+        .params(
         "→ document_id (this open design's id: kept while it stays open, another for each design started or opened), \
          revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
          never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
@@ -410,6 +422,7 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
             world: plane.to_world(p.pos).into(),
             fixed: locked.get(i).copied().unwrap_or(false),
             link: p.link.clone(),
+            fixed_by: p.exprs.as_deref().map(|e| PointFixedBy { x: e.x.clone(), y: e.y.clone() }),
             fully_constrained: ss.report.point_determined.get(i).copied().unwrap_or(false),
         })
         .collect();
@@ -560,7 +573,7 @@ impl Session {
 /// `document.revision`: the design's id and [`Session::design_revision`].
 fn revision(s: &mut Session, _p: &Value) -> Result<Value> {
     let revision = s.design_revision();
-    Ok(json!({"document_id": s.document_id, "revision": revision}))
+    reply("document.revision", RevisionResult { document_id: s.document_id.clone(), revision, param_warnings: Vec::new() })
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1196,5 +1209,5 @@ fn colored_components(s: &mut Session, p: &Value) -> Result<Value> {
     } else if !enabled {
         s.colored_components = None;
     }
-    Ok(json!({"enabled": enabled}))
+    typed_reply("inspect.colored_components", ColoredComponentsResult { enabled, param_warnings: Vec::new() })
 }

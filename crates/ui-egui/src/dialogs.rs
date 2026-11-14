@@ -1737,6 +1737,15 @@ impl Dialog {
         if let Some(sel) = self.circle_centre_pick(s, inp, h, snap) {
             return Some(sel);
         }
+        // A mesh body has no vertices or edges to pick, and its own surface is its triangles: a
+        // point input of a construction takes the exact point the pointer's ray meets on one (#16400).
+        if matches!(self.kind, Kind::Construct { .. })
+            && inp.accept & selection::VERTICES != 0
+            && let Hit::Face { body, point, .. } = h
+            && is_mesh_body(s, body)
+        {
+            return Some(Sel::Vertex { body: body.clone(), point: *point });
+        }
         // The snap looked the face under the cursor up already, planar or not.
         let sel = inp.accepts(h, s.active_sketch, |body, face| {
             snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some())
@@ -3679,13 +3688,18 @@ pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<
         return Some(FilletRefusal::Plain(solidcraft_ui_text::format("ui.fillet_error_setback_short", &[("least", &format!("{least} mm"))])));
     }
     let too_large = error.contains("larger than the faces beside its edges allow");
+    // The kernel tried smaller radii down to its least and none built: no radius is the cause, so
+    // a smaller one, or Largest radius, is no advice (the full refusal stays under Copy details).
+    let none_fits = too_large && error.contains("no smaller radius builds either");
     let corner = error.contains("setback") || error.contains("G2 corner") || error.contains("corner patch");
     let kernel = error.contains("SMLib")
         || error.contains("the operation failed")
         || error.contains("not supported yet")
         || error.contains("kernel internal error")
         || error.contains("the rounds would leave openings");
-    if too_large {
+    if none_fits {
+        Some(FilletRefusal::Plain(tr("ui.fillet_error_no_radius").to_string()))
+    } else if too_large {
         Some(FilletRefusal::Plain(tr("ui.fillet_error_too_large").to_string()))
     } else if corner && kernel {
         Some(FilletRefusal::Plain(tr("ui.fillet_error_corner").to_string()))
@@ -7121,12 +7135,18 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
     })
 }
 
+/// Is `body` an imported mesh body (no B-rep, so no vertices of its own)?
+fn is_mesh_body(s: &Session, body: &str) -> bool {
+    crate::open_meshing::session_world(s).body(body).is_some_and(|b| b.body.is_mesh())
+}
+
 /// A dialog pick as a construction reference (`construct.*`'s `{face|edge|vertex: [x,y,z]}`,
 /// `{plane}`, `{axis}` or `{sketch, point|curve}`).
 fn construct_ref(app: &SolveApp, sel: &Sel) -> Result<Value, String> {
     Ok(match sel {
         Sel::Face { point, .. } => json!({"face": pt(*point)}),
         Sel::Edge { point, .. } => json!({"edge": pt(*point)}),
+        Sel::Vertex { body, point } if is_mesh_body(&app.session, body) => json!({"point": pt(*point)}),
         Sel::Vertex { point, .. } => match crate::snap_wake::snapped(app, *point) {
             Some((item, snap)) => snap_ref(app, item, snap)?,
             None => json!({"vertex": pt(*point)}),
