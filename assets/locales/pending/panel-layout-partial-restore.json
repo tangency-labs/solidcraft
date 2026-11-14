@@ -1,0 +1,5 @@
+{
+  "en": {
+    "prefs.panel_layout.reset": "{count} saved panel layouts could not be restored and were reset: {names}. The rest of your layouts are kept."
+  }
+}

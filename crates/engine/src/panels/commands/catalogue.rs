@@ -58,6 +58,20 @@ impl CatalogueState {
     /// names/IDs, envelope node/depth/byte bounds, rejected recovery and total
     /// budgets are checked before the result can be published by any catalogue.
     pub fn hydrate(bytes: &[u8], registry: &PanelRegistry) -> PanelResult<Self> {
+        Ok(Self::hydrate_inner(bytes, registry, None)?.0)
+    }
+
+    /// Like `hydrate`, but one stored layout that cannot be read is dropped on its
+    /// own instead of rejecting the whole snapshot. A dropped built-in or
+    /// remembered layout is replaced by the same entry of `defaults` when it has
+    /// one; a dropped user preset is gone. Framing, counts, duplicate identities
+    /// and aggregate budgets remain hard errors. The bytes on disk are not touched.
+    pub fn hydrate_lenient(bytes: &[u8], registry: &PanelRegistry, defaults: &Self) -> PanelResult<(Self, Vec<SkippedEntry>)> {
+        Self::hydrate_inner(bytes, registry, Some(defaults))
+    }
+
+    fn hydrate_inner(bytes: &[u8], registry: &PanelRegistry, lenient: Option<&Self>) -> PanelResult<(Self, Vec<SkippedEntry>)> {
+        let mut skipped = Vec::new();
         if bytes.len() > MAX_CATALOGUE_SNAPSHOT_BYTES {
             return Err(error(Rule::CollectionLimit, "catalogue snapshot byte cap"));
         }
@@ -76,7 +90,15 @@ impl CatalogueState {
                 if next.find_preset_name(&name).is_some() {
                     return Err(error(Rule::DuplicateId, "duplicate stored preset identity"));
                 }
-                let record = reader.record(registry)?;
+                let raw = reader.raw_record()?;
+                let record = match StoredEnvelope::from_record(raw.0, raw.1, registry) {
+                    Ok(record) => record,
+                    Err(_) if lenient.is_some() => {
+                        skipped.push(if builtin { SkippedEntry::Builtin(name) } else { SkippedEntry::User(name) });
+                        continue;
+                    }
+                    Err(reason) => return Err(reason),
+                };
                 if builtin {
                     next.builtins.insert(name, record);
                 } else {
@@ -99,16 +121,40 @@ impl CatalogueState {
             if next.remembered.contains_key(&workspace) {
                 return Err(error(Rule::DuplicateId, "duplicate remembered workspace identity"));
             }
-            let record = reader.record(registry)?;
+            let raw = reader.raw_record()?;
             // A remembered record belongs to its key, unlike a reusable preset.
-            record.envelope(registry, &workspace)?;
-            next.remembered.insert(workspace, record);
+            let checked =
+                StoredEnvelope::from_record(raw.0, raw.1, registry).and_then(|record| record.envelope(registry, &workspace).map(|_| record));
+            match checked {
+                Ok(record) => {
+                    next.remembered.insert(workspace, record);
+                }
+                Err(_) if lenient.is_some() => skipped.push(SkippedEntry::Remembered(workspace)),
+                Err(reason) => return Err(reason),
+            }
         }
         if reader.at != bytes.len() {
             return Err(error(Rule::Schema, "trailing catalogue snapshot data"));
         }
+        if let Some(defaults) = lenient {
+            for entry in &skipped {
+                match entry {
+                    SkippedEntry::Builtin(name) => {
+                        if let Some(record) = defaults.builtins.get(name) {
+                            next.builtins.insert(name.clone(), record.clone());
+                        }
+                    }
+                    SkippedEntry::Remembered(workspace) => {
+                        if let Some(record) = defaults.remembered.get(workspace) {
+                            next.remembered.insert(workspace.clone(), record.clone());
+                        }
+                    }
+                    SkippedEntry::User(_) => {}
+                }
+            }
+        }
         next.validate()?;
-        Ok(next)
+        Ok((next, skipped))
     }
 }
 
@@ -167,13 +213,14 @@ impl<'a> Reader<'a> {
     fn text(&mut self, max: usize) -> PanelResult<String> {
         std::str::from_utf8(self.bytes(max)?).map(str::to_owned).map_err(|_| error(Rule::Schema, "invalid catalogue UTF-8"))
     }
-    fn record(&mut self, registry: &PanelRegistry) -> PanelResult<StoredEnvelope> {
+    /// Framing only: the record's bytes and recovery bytes, undecoded.
+    fn raw_record(&mut self) -> PanelResult<(&'a [u8], Option<&'a [u8]>)> {
         let bytes = self.bytes(MAX_ENVELOPE_BYTES)?;
         let rejected = match self.take(1)? {
             [0] => None,
             [1] => Some(self.bytes(MAX_ENVELOPE_BYTES)?),
             _ => return Err(error(Rule::Schema, "invalid catalogue recovery tag")),
         };
-        StoredEnvelope::from_record(bytes, rejected, registry)
+        Ok((bytes, rejected))
     }
 }

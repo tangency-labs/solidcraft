@@ -123,6 +123,7 @@ impl AppPanelRuntime {
             catalogue: self.catalogue.state().export()?,
             rejected: state.rejected.clone(),
             legacy: state.legacy.clone(),
+            reported: state.reported.clone(),
         })
     }
     pub(super) fn preference_preset_names(&self) -> Vec<String> {
@@ -137,6 +138,60 @@ impl AppPanelRuntime {
     pub(super) fn preference_user_preset_names(&self) -> Vec<String> {
         self.catalogue.state().user_presets().map(|(name, _)| name.to_string()).collect()
     }
+    /// First paint restore that keeps what it can. Without native windows, Window
+    /// placements fall back to their portable ones; if the selected layout still
+    /// cannot be placed it is reset to its default. Other saved layouts are kept.
+    fn restore_preference_record_resilient(&mut self, session: &Session, record: super::preferences::PreferenceRecord) -> PanelResult<()> {
+        let first = match self.restore_preference_record(session, record.clone()) {
+            Ok(()) => return Ok(()),
+            Err(reason) => reason,
+        };
+        let mut reset = self.preferences.as_ref().map(|state| state.reset.clone()).unwrap_or_default();
+        let original = record.value();
+        let mut current = record;
+        let mut changed = Vec::new();
+        if !self.native.capabilities().native_windows
+            && let Ok((redocked, names)) = super::preferences::redock_native_record(&current, self.runtime.layout().registry())
+            && !names.is_empty()
+        {
+            let (rejected, reported) = (current.rejected.clone(), current.reported.clone());
+            current = redocked;
+            current.rejected = rejected;
+            current.reported = reported;
+            changed = names;
+        }
+        // Keep the saved record verbatim as the recovery copy, and remember what
+        // was reported so later starts stay quiet.
+        let remember = |record: &mut super::preferences::PreferenceRecord, names: &[String]| {
+            if record.rejected.is_none() {
+                record.rejected = Some(original.clone());
+            }
+            record.reported.extend(names.iter().filter(|name| !record.reported.contains(name)).cloned());
+        };
+        if !changed.is_empty() {
+            let mut attempt = current.clone();
+            remember(&mut attempt, &changed);
+            if self.restore_preference_record(session, attempt).is_ok() {
+                reset.extend(changed);
+                if let Some(state) = &mut self.preferences {
+                    state.reset = reset;
+                }
+                return Ok(());
+            }
+            reset.extend(changed.iter().cloned());
+        }
+        let mut names = changed;
+        names.push(current.selected.0.clone());
+        reset.push(current.selected.0.clone());
+        remember(&mut current, &names);
+        if self.reset_pending_preferences(session, current).is_err() {
+            return Err(first);
+        }
+        if let Some(state) = &mut self.preferences {
+            state.reset = reset;
+        }
+        Ok(())
+    }
     pub(super) fn restore_preference_record(&mut self, session: &Session, record: super::preferences::PreferenceRecord) -> PanelResult<()> {
         let next = record.catalogue(self.runtime.layout().registry())?;
         let stored = next.remembered(&record.selected).ok_or_else(|| error(Rule::MissingTarget, "saved selected workspace has no layout"))?;
@@ -149,6 +204,7 @@ impl AppPanelRuntime {
             state.failed_environment = None;
             state.rejected = record.rejected;
             state.legacy = record.legacy;
+            state.reported = record.reported;
         }
         Ok(())
     }
@@ -216,6 +272,7 @@ impl AppPanelRuntime {
             let original = record.value();
             state.rejected = record.rejected.or(Some(original));
             state.legacy = record.legacy;
+            state.reported = record.reported;
             state.pending = None;
             state.failed = false;
             state.failed_environment = None;
@@ -676,7 +733,7 @@ impl AppPanelRuntime {
         if result.is_ok()
             && let Some(record) = self.preferences.as_ref().filter(|state| !state.failed).and_then(|state| state.pending.clone())
         {
-            match self.restore_preference_record(session, record) {
+            match self.restore_preference_record_resilient(session, record) {
                 Ok(()) => {
                     self.refresh_metrics()?;
                     self.refresh_reservations()?;
@@ -1173,7 +1230,7 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
         .panel_runtime
         .as_ref()
         .and_then(|integration| integration.preferences.as_ref())
-        .is_some_and(|state| state.failed || state.rejected.is_some())
+        .is_some_and(|state| state.failed || (state.rejected.is_some() && state.reported.is_empty()) || !state.reset.is_empty())
     {
         super::preferences::report_notice(app);
     }

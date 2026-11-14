@@ -376,6 +376,103 @@ fn future_application_panel_record_is_retained_without_legacy_reimport() {
 }
 
 #[test]
+fn unreadable_saved_layout_is_reset_on_its_own_and_the_rest_is_kept() {
+    use solidcraft_engine::doc::canvas::{base64_decode, base64_encode};
+    let mut app = remembered_preference_fixture();
+    app.run_panel_command("layout.save", &serde_json::json!({"name":"Break me"})).unwrap();
+    app.run_panel_command("layout.save", &serde_json::json!({"name":"Keep me"})).unwrap();
+    let layout = app.panel_runtime().unwrap().layout().layout().clone();
+    let mut value = preferences_value(&app).unwrap();
+    let mut bytes = base64_decode(value["catalogue"].as_str().unwrap()).unwrap();
+    let name = bytes.windows(8).position(|window| window == b"Break me").unwrap();
+    let format = b"solidcraft.panel-layout";
+    let at = name + bytes[name..].windows(format.len()).position(|window| window == format).unwrap();
+    bytes[at] = b'x';
+    value["catalogue"] = base64_encode(&bytes).into();
+    let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    restored.load_prefs(&serde_json::json!({"panel_layout":value}).to_string());
+    super::specimen::control_specimen(&mut restored, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    prepare_preference_fixture(&mut restored);
+    assert_eq!(user_preset_names(&restored), ["Keep me"], "the unreadable preset is dropped alone");
+    assert_eq!(restored.panel_runtime().unwrap().layout().layout(), &layout, "the saved arrangement is kept");
+    let notice = restored.status.as_ref().map(|status| status.0.clone()).unwrap();
+    assert!(notice.contains("Break me"), "the notice names what was reset: {notice}");
+}
+
+#[test]
+fn unreadable_saved_layout_survives_a_save_and_is_reported_only_once() {
+    use solidcraft_engine::doc::canvas::{base64_decode, base64_encode};
+    let mut app = remembered_preference_fixture();
+    app.run_panel_command("layout.save", &serde_json::json!({"name":"Break me"})).unwrap();
+    let mut original = preferences_value(&app).unwrap();
+    let mut bytes = base64_decode(original["catalogue"].as_str().unwrap()).unwrap();
+    let name = bytes.windows(8).position(|window| window == b"Break me").unwrap();
+    let format = b"solidcraft.panel-layout";
+    let at = name + bytes[name..].windows(format.len()).position(|window| window == format).unwrap();
+    bytes[at] = b'x';
+    original["catalogue"] = base64_encode(&bytes).into();
+    let start = |value: &serde_json::Value| {
+        let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&serde_json::json!({"panel_layout":value}).to_string());
+        super::specimen::control_specimen(&mut restored, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+        prepare_preference_fixture(&mut restored);
+        restored
+    };
+    let first = start(&original);
+    assert!(first.status.is_some(), "the first start reports the reset");
+    let saved = preferences_value(&first).unwrap();
+    assert_eq!(saved["rejected"], original, "the unreadable entry is kept verbatim across a save");
+    let second = start(&saved);
+    assert!(second.status.is_none(), "the same entry is not reported again");
+    assert_eq!(preferences_value(&second).unwrap()["rejected"], original, "and a later save still keeps it");
+}
+
+#[test]
+fn fully_valid_saved_record_restores_without_a_notice() {
+    let app = remembered_preference_fixture();
+    let layout = app.panel_runtime().unwrap().layout().layout().clone();
+    let saved = app.prefs();
+    let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    restored.load_prefs(&saved);
+    super::specimen::control_specimen(&mut restored, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
+    prepare_preference_fixture(&mut restored);
+    assert_eq!(restored.panel_runtime().unwrap().layout().layout(), &layout);
+    assert!(restored.status.is_none(), "nothing was reset, so nothing is reported");
+}
+
+#[test]
+fn native_window_placement_falls_back_to_a_portable_one_without_native_windows() {
+    use commands::LayoutCatalogue as _;
+    let mut service = fixture_service(true).unwrap();
+    apply_fixture(&mut service, vec![fixture_open("fixture.editor", "editor", "editor-section", Zone::Left, 0).unwrap()]);
+    apply_fixture(
+        &mut service,
+        vec![Mutation::Move {
+            instance: InstanceId::new("editor").unwrap(),
+            destination: serde_json::from_value(panel_command_native_move()["destination"].clone()).unwrap(),
+        }],
+    );
+    assert!(service.layout().sections.iter().any(|section| section.location.zone() == Zone::Window));
+    let registry = service.registry().clone();
+    let mut catalogue = fixture_command_catalogue(&registry).unwrap();
+    catalogue.remember(&LayoutEnvelope::new(service.layout().clone()), None, &registry).unwrap();
+    let record = super::preferences::PreferenceRecord {
+        version: 1,
+        selected: service.layout().workspace.clone(),
+        catalogue: catalogue.state().export().unwrap(),
+        rejected: None,
+        legacy: None,
+        reported: Vec::new(),
+    };
+    let (portable, names) = super::preferences::redock_native_record(&record, &registry).unwrap();
+    assert_eq!(names, ["editor (Window)"]);
+    let state = portable.catalogue(&registry).unwrap();
+    let envelope = state.remembered(&record.selected).unwrap().envelope(&registry, &record.selected).unwrap();
+    assert!(envelope.layout.sections.iter().all(|section| section.location.zone() != Zone::Window));
+    assert!(envelope.layout.instances.iter().any(|instance| instance.id.0 == "editor"), "the panel itself is kept");
+}
+
+#[test]
 fn invalid_packed_catalogue_and_unknown_legacy_fields_remain_recoverable() {
     let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     app.load_prefs("{\"preferences\":{\"browser_width\":333}}");
@@ -529,6 +626,7 @@ fn panel_preference_disk_projection_removes_native_geometry_without_changing_the
         catalogue: fixture.catalogue.state().export().unwrap(),
         rejected: Some(rejected.clone()),
         legacy: None,
+        reported: Vec::new(),
     }
     .value();
     let mut observer = crate::SolveApp::new(Default::default(), Default::default());
@@ -583,6 +681,7 @@ fn panel_preference_disk_projection_removes_native_geometry_without_changing_the
         catalogue: fixture.catalogue.state().export().unwrap(),
         rejected: None,
         legacy: None,
+        reported: Vec::new(),
     }
     .value();
     let fallback = portable_preferences_value(&observer, Some(blocked_record)).unwrap().unwrap();

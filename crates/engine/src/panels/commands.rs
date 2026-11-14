@@ -68,6 +68,14 @@ pub struct WorkspaceDescriptor {
     pub default_preset: String,
 }
 
+/// A stored layout that `CatalogueState::hydrate_lenient` could not read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SkippedEntry {
+    Builtin(String),
+    User(String),
+    Remembered(WorkspaceId),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PresetKind {
     BuiltIn,

@@ -33,6 +33,9 @@ pub(super) struct PreferenceRecord {
     pub rejected: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub legacy: Option<LegacyPanelPlacements>,
+    /// Entries already reported as reset. Their original bytes stay in `rejected`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reported: Vec<String>,
 }
 
 mod catalogue_bytes {
@@ -65,6 +68,9 @@ pub(super) struct PreferenceSession {
     pub failed: bool,
     pub legacy: Option<LegacyPanelPlacements>,
     pub failed_environment: Option<PreferenceEnvironment>,
+    /// Entries reset at startup or first paint, for the precise notice.
+    pub reset: Vec<String>,
+    pub reported: Vec<String>,
 }
 
 pub(super) type PreferenceEnvironment = (LogicalRect, AllocationEnvironment, u64, RuntimeEnvironment, Vec<LogicalRect>, HostCapabilities);
@@ -243,6 +249,16 @@ fn bounded_record(value: &Value) -> PanelResult<()> {
 }
 impl PreferenceRecord {
     pub(super) fn read(value: &Value, registry: &PanelRegistry) -> PanelResult<Self> {
+        Ok(Self::read_with(value, registry, None)?.0)
+    }
+    /// Per-entry restore: a stored layout that cannot be read is reset to the
+    /// matching entry of `defaults` (or dropped, for a user preset) and named in
+    /// the returned list; the rest is kept. Nothing is written until the next
+    /// save. A record that is unreadable as a whole still fails.
+    pub(super) fn read_repairing(value: &Value, registry: &PanelRegistry, defaults: &commands::CatalogueState) -> PanelResult<(Self, Vec<String>)> {
+        Self::read_with(value, registry, Some(defaults))
+    }
+    fn read_with(value: &Value, registry: &PanelRegistry, defaults: Option<&commands::CatalogueState>) -> PanelResult<(Self, Vec<String>)> {
         bounded_record(value)?;
         if value.get("version").and_then(Value::as_u64) != Some(u64::from(RECORD_VERSION)) {
             return Err(error(Rule::Version, "unsupported application panel preferences"));
@@ -264,11 +280,37 @@ impl PreferenceRecord {
                 return Err(error(Rule::CollectionLimit, "rejected panel preference byte cap"));
             }
         }
-        let state = commands::CatalogueState::hydrate(&record.catalogue, registry)?;
+        let mut reset = Vec::new();
+        let state = match defaults {
+            Some(defaults) => {
+                let (state, skipped) = commands::CatalogueState::hydrate_lenient(&record.catalogue, registry, defaults)?;
+                reset = skipped
+                    .into_iter()
+                    .map(|entry| match entry {
+                        commands::SkippedEntry::Builtin(name) | commands::SkippedEntry::User(name) => name,
+                        commands::SkippedEntry::Remembered(workspace) => workspace.0,
+                    })
+                    .collect();
+                state
+            }
+            None => commands::CatalogueState::hydrate(&record.catalogue, registry)?,
+        };
         if !state.summaries().iter().any(|item| item.id == record.selected) || state.remembered(&record.selected).is_none() {
             return Err(error(Rule::MissingTarget, "saved selected workspace has no remembered layout"));
         }
-        Ok(record)
+        if !reset.is_empty() {
+            record.catalogue = state.export()?;
+            // The original record stays verbatim as the recovery copy, so a save
+            // never deletes what could not be read; later starts do not repeat the notice.
+            if record.rejected.is_none() {
+                let mut counter = CountBytes(0);
+                let fits = serde_json::to_writer(&mut counter, value).is_ok() && counter.0 <= MAX_REJECTED_RECORD_BYTES;
+                record.rejected = Some(if fits { value.clone() } else { Value::Null });
+            }
+            reset.retain(|name| !record.reported.contains(name));
+            record.reported.extend(reset.iter().cloned());
+        }
+        Ok((record, reset))
     }
     pub(super) fn catalogue(&self, registry: &PanelRegistry) -> PanelResult<commands::CatalogueState> {
         commands::CatalogueState::hydrate(&self.catalogue, registry)
@@ -276,6 +318,11 @@ impl PreferenceRecord {
     pub(super) fn value(&self) -> Value {
         let packed = solidcraft_engine::doc::canvas::base64_encode(&self.catalogue);
         let mut value = serde_json::json!({"version":self.version,"selected":self.selected,"catalogue":packed,"legacy":self.legacy});
+        if !self.reported.is_empty()
+            && let Some(object) = value.as_object_mut()
+        {
+            object.insert("reported".into(), serde_json::json!(self.reported));
+        }
         if let Some(rejected) = &self.rejected
             && let Some(object) = value.as_object_mut()
         {
@@ -308,22 +355,39 @@ pub fn portable_preferences_value(app: &crate::SolveApp, value: Option<Value>) -
     let empty = PanelRegistry::default();
     let registry = app.panel_runtime.as_ref().map_or(&empty, |runtime| runtime.runtime().layout().registry());
     let Ok(mut record) = PreferenceRecord::read(&value, registry) else { return Ok(Some(value)) };
-    record.catalogue = record
+    record.catalogue =
+        record.catalogue(registry)?.map_envelopes(registry, |bytes, envelope| portable_envelope(bytes, envelope, registry))?.export()?;
+    Ok(Some(record.value()))
+}
+
+fn portable_envelope(bytes: &[u8], envelope: LayoutEnvelope, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
+    let native = envelope.layout.sections.iter().any(|section| section.location.zone() == Zone::Window)
+        || envelope.layout.instances.iter().any(|instance| instance.memory.location.zone() == Zone::Window);
+    if !native {
+        return Ok(envelope);
+    }
+    // Current registered placements are portable. Opaque extension/recovery
+    // data keeps its existing lossless representation until its owner returns.
+    let projected = project_retained_record(bytes, registry, &envelope.layout.workspace)?;
+    let layout = portable_profile_layout(&projected.layout, registry)?;
+    with_live_layout(&projected, layout, registry)
+}
+
+/// A saved record for a host without native windows: every Window placement
+/// falls back to its portable one, and each moved panel is named.
+pub(super) fn redock_native_record(record: &PreferenceRecord, registry: &PanelRegistry) -> PanelResult<(PreferenceRecord, Vec<String>)> {
+    let mut names = Vec::new();
+    let mut next = record.clone();
+    next.catalogue = record
         .catalogue(registry)?
         .map_envelopes(registry, |bytes, envelope| {
-            let native = envelope.layout.sections.iter().any(|section| section.location.zone() == Zone::Window)
-                || envelope.layout.instances.iter().any(|instance| instance.memory.location.zone() == Zone::Window);
-            if !native {
-                return Ok(envelope);
+            for section in envelope.layout.sections.iter().filter(|section| section.location.zone() == Zone::Window) {
+                names.extend(section.tabs.iter().map(|tab| format!("{} (Window)", tab.0)));
             }
-            // Current registered placements are portable. Opaque extension/recovery
-            // data keeps its existing lossless representation until its owner returns.
-            let projected = project_retained_record(bytes, registry, &envelope.layout.workspace)?;
-            let layout = portable_profile_layout(&projected.layout, registry)?;
-            with_live_layout(&projected, layout, registry)
+            portable_envelope(bytes, envelope, registry)
         })?
         .export()?;
-    Ok(Some(record.value()))
+    Ok((next, names))
 }
 
 /// Capture before the generic preferences reader can discard an unreadable value.
@@ -355,8 +419,25 @@ pub fn load_preferences(app: &mut crate::SolveApp, saved: &Value) {
 pub(super) fn report_notice(app: &mut crate::SolveApp) {
     if !app.panel_layout_preferences.notice_reported {
         app.panel_layout_preferences.notice_reported = true;
-        app.set_status(app.tr("prefs.panel_layout.recovery").to_string(), true);
+        let reset = app.panel_runtime.as_ref().and_then(|runtime| runtime.preferences.as_ref()).map(|state| state.reset.clone()).unwrap_or_default();
+        let text =
+            if reset.is_empty() || app.panel_runtime.as_ref().and_then(|runtime| runtime.preferences.as_ref()).is_some_and(|state| state.failed) {
+                app.tr("prefs.panel_layout.recovery").to_string()
+            } else {
+                reset_notice(&reset)
+            };
+        app.set_status(text, true);
     }
+}
+
+/// Names what was reset, at most five, then a count of the rest.
+fn reset_notice(reset: &[String]) -> String {
+    const SHOWN: usize = 5;
+    let mut names = reset.iter().take(SHOWN).cloned().collect::<Vec<_>>().join(", ");
+    if reset.len() > SHOWN {
+        names.push_str(&format!(", +{}", reset.len() - SHOWN));
+    }
+    solidcraft_ui_text::format("prefs.panel_layout.reset", &[("count", &reset.len().to_string()), ("names", &names)])
 }
 
 /// Opt in an already registered runtime. Production registrations supply their
@@ -410,12 +491,19 @@ pub(super) fn configure_preferences(
         catalogue: defaults.state().export()?,
         rejected: None,
         legacy: legacy.clone(),
+        reported: Vec::new(),
     };
     let mut pending = None;
     let mut rejected = None;
+    let mut reset = Vec::new();
+    let mut reported = Vec::new();
     if let Some(raw) = &preferences.record {
-        match PreferenceRecord::read(raw, registry) {
-            Ok(record) => pending = Some(record),
+        match PreferenceRecord::read_repairing(raw, registry, defaults.state()) {
+            Ok((record, names)) => {
+                reset = names;
+                reported = record.reported.clone();
+                pending = Some(record);
+            }
             Err(_) => {
                 let mut counter = CountBytes(0);
                 if serde_json::to_writer(&mut counter, raw).is_ok() && counter.0 <= MAX_REJECTED_RECORD_BYTES {
@@ -428,9 +516,9 @@ pub(super) fn configure_preferences(
     }
     integration.install_preference_catalogue(
         PreferenceCatalogue(defaults.state().clone()),
-        PreferenceSession { pending, initial, rejected, failed: false, legacy, failed_environment: None },
+        PreferenceSession { pending, initial, rejected, failed: false, legacy, failed_environment: None, reset, reported },
     )?;
-    Ok(integration.preferences.as_ref().is_some_and(|state| state.rejected.is_some()))
+    Ok(integration.preferences.as_ref().is_some_and(|state| (state.rejected.is_some() && state.reported.is_empty()) || !state.reset.is_empty()))
 }
 
 /// Preferences Cancel uses the same admitted retained-controller transaction as
@@ -446,7 +534,14 @@ pub fn restore_preferences(app: &mut crate::SolveApp, value: Option<Value>) -> P
     }
     if let Some(integration) = app.panel_runtime.as_mut().filter(|runtime| runtime.preferences.is_some()) {
         let record = match &value {
-            Some(raw) => PreferenceRecord::read(raw, integration.runtime().layout().registry())?,
+            Some(raw) => {
+                let (record, reset) =
+                    PreferenceRecord::read_repairing(raw, integration.runtime().layout().registry(), integration.preference_catalogue_state())?;
+                if let Some(state) = &mut integration.preferences {
+                    state.reset = reset;
+                }
+                record
+            }
             None => integration.preferences.as_ref().ok_or_else(|| error(Rule::Lifecycle, "panel preferences disappeared"))?.initial.clone(),
         };
         integration.restore_preference_record(&app.session, record)?;
