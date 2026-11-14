@@ -63,7 +63,6 @@ pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
 pub use parts::part_length_label;
 pub use sketch::dimension_roles;
-pub use sketch::face::attachment_refused as sketch_face_attachment_refused;
 pub(crate) use sketch::face::face_pick_form;
 pub use sketch_construction::{
     ConstructionLine, construction_line_choice, construction_line_mode, construction_line_solutions, construction_line_takes_length,

@@ -5060,23 +5060,7 @@ pub fn start_sketch(app: &mut SolveApp, sel: &Sel) -> Result<(), String> {
         params["flip"] = json!(flip);
     }
     let before = app.settled_cam();
-    let mut fixed_face = false;
-    if let Err(error) = app.run("sketch.create", params.clone()) {
-        // A face whose history can't keep an attachment still gets its sketch, on the face's
-        // current plane and unattached, as `fixed: true` makes it: the sketch isn't refused and the
-        // status line says it won't follow later edits of the face (#16523). The command keeps
-        // refusing it for scripts, which never get a dialog or a silent fallback.
-        let refused = matches!(sel, Sel::Face { .. }) && solidcraft_engine::sketch_face_attachment_refused(&error);
-        if !refused {
-            return Err(crate::friendly_error("sketch.create", &error));
-        }
-        params["plane"]["fixed"] = json!(true);
-        app.run("sketch.create", params).map_err(|_| crate::friendly_error("sketch.create", &error))?;
-        fixed_face = true;
-    }
-    if fixed_face {
-        app.set_status(solidcraft_ui_text::tr("ui.sketch_unattached_face"), false);
-    }
+    app.run("sketch.create", params).map_err(|error| crate::friendly_error("sketch.create", &error))?;
     let turned = app.look_at_opened_sketch(before);
     // On a face: look at the picked point, not the plane's origin (a corner of the face),
     // which left the face filling the view off-centre like a big square.
@@ -8677,11 +8661,10 @@ mod refused_ok_tests {
         assert_eq!(super::shown_error("hole depth must be positive"), "hole depth must be positive");
     }
 
-    /// Create Sketch on a face whose history can't keep an attachment still makes the sketch, on
-    /// the face's current plane and unattached, and says so on the status line (#16523); the
-    /// command itself keeps refusing it without `fixed`.
+    /// Create Sketch on a face that can't keep an attachment is refused and makes no sketch: the
+    /// dialog then offers Use fixed plane, and only that click makes an unattached one (#16523).
     #[test]
-    fn create_sketch_on_a_face_that_cannot_keep_an_attachment_makes_it_unattached_and_says_so() {
+    fn create_sketch_on_a_face_that_cannot_keep_an_attachment_waits_for_use_fixed_plane() {
         let mut h = Harness::new();
         let run = |h: &mut Harness, command: &str, params: Value| h.app.run(command, params).unwrap();
         run(&mut h, "solid.box", json!({"length":40,"width":20,"height":5,"corner":[0,0,0],"body_name":"L"}));
@@ -8703,20 +8686,11 @@ mod refused_ok_tests {
                 .unwrap();
             (face.index, face.centroid)
         };
+        let before = h.app.session.doc.to_json();
         let sel = Sel::Face { body: "L".into(), index, point };
-        let plane = crate::sketch_attachment_ui::face_plane(&h.app, &sel).unwrap();
-        let error = h.app.run("sketch.create", json!({"plane": plane})).unwrap_err();
-        assert!(solidcraft_engine::sketch_face_attachment_refused(&error), "{error}");
-        start_sketch(&mut h.app, &sel).unwrap();
-        let sketch = h.app.session.active_sketch.expect("the sketch is open");
-        let fixed = matches!(
-            h.app.session.doc.feature(sketch).map(|f| &f.kind),
-            Some(solidcraft_engine::doc::FeatureKind::Sketch { plane: solidcraft_engine::doc::PlaneRef::Custom { .. }, .. })
-        );
-        assert!(fixed, "an unattached sketch");
-        let (status, _, is_error) = h.app.status.clone().expect("a status line");
-        assert!(status.contains("won't follow"), "{status}");
-        assert!(!is_error);
+        let error = start_sketch(&mut h.app, &sel).unwrap_err();
+        assert!(error.contains("fixed"), "{error}");
+        assert_eq!(h.app.session.doc.to_json(), before, "no sketch is made until the user chooses a fixed plane");
     }
 
     #[test]
