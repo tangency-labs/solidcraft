@@ -124,20 +124,34 @@ fn a_picked_section_and_the_placement() {
     assert!(m.all && m.mirror && m.name == "Rail" && m.angle == "15 deg" && ANCHORS[m.anchor].0 == "bottom", "{m:?}");
 }
 
-/// A member of a part drawn with Y up keeps its up axis through Edit Feature, which has no
-/// control for it: the edit would otherwise stand it on Z.
+/// The Up Axis row: a part drawn with Y up picks Y, the command gets `up: "Y"`, and Edit Feature
+/// shows the member's own axis and keeps it; Z, the default, is left out of the command.
 #[test]
-fn an_edit_keeps_the_members_up_axis() {
+fn the_up_axis_row_sets_and_keeps_the_members_up_axis() {
     let mut app = frame_app();
-    app.run("frame.member", json!({"sketch": "Frame", "profile": {"kind": "angle", "width": 60, "height": 40, "thickness": 5}, "up": "Y"})).unwrap();
+    let lines = frame_lines(&app);
+    let mut d = dialog_on(&mut app, &lines);
+    assert_eq!(UP_AXES[member(&mut d).up].0, "Z");
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("up").is_none(), "{}", c[0].1);
+    member(&mut d).up = UP_AXES.iter().position(|a| a.0 == "Y").unwrap();
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["up"], json!("Y"), "{}", c[0].1);
+    run_all(&mut app, c);
     let f = app.session.doc.features.last().unwrap().id;
     let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(UP_AXES[member(&mut e).up].0, "Y");
     member(&mut e).angle = "90 deg".into();
     let c = apply_commands(&app, &e).unwrap();
     assert_eq!(c[0].1["params"]["up"], json!("Y"), "{}", c[0].1);
     run_all(&mut app, c);
     let FeatureKind::FrameMember { up, angle, .. } = &app.session.doc.feature(f).unwrap().kind else { panic!() };
     assert_eq!((up, angle.as_deref()), (&frame::UpAxis::Y, Some("90 deg")));
+    // Back to Z: the axis is dropped, not kept from the feature.
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    member(&mut e).up = 0;
+    let c = apply_commands(&app, &e).unwrap();
+    assert!(c[0].1["params"].get("up").is_none(), "{}", c[0].1);
 }
 
 /// A member whose section is a whole profile sketch keeps it when edited: the dialog shows the
