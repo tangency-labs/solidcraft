@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.orbit_free_view_middle": "Orbit about where Home puts the model",
+    "prefs.orbit_free_view_middle_note": "Off: the view turns about its target, the point Pan moves, which stays the same from one orbit to the next. On: the view turns about the point Home puts the model on, in the middle of the part of the view the panels leave free. Applies when Orbit around is View center."
+  },
+  "de": {
+    "prefs.orbit_free_view_middle": "Um den Punkt drehen, auf den Home das Modell setzt",
+    "prefs.orbit_free_view_middle_note": "Aus: Die Ansicht dreht sich um ihr Ziel, den Punkt, den Verschieben bewegt; er bleibt von einer Drehung zur nächsten gleich. Ein: Die Ansicht dreht sich um den Punkt, auf den Home das Modell setzt, in der Mitte des Ansichtsbereichs, den die Leisten freilassen. Gilt, wenn Drehen um auf Ansichtsmitte steht."
+  },
+  "ar": {
+    "prefs.orbit_free_view_middle": "الدوران حول الموضع الذي يضع فيه Home النموذج",
+    "prefs.orbit_free_view_middle_note": "متوقف: يدور العرض حول هدفه، النقطة التي يحركها التحريك، وتبقى ثابتة من دوران إلى آخر. قيد التشغيل: يدور العرض حول النقطة التي يضع Home النموذج عليها، في منتصف الجزء الذي تتركه اللوحات حرًا من العرض. ينطبق عندما يكون الدوران حول مركز العرض."
+  },
+  "he": {
+    "prefs.orbit_free_view_middle": "סיבוב סביב המקום שבו Home מציב את המודל",
+    "prefs.orbit_free_view_middle_note": "כבוי: התצוגה מסתובבת סביב היעד שלה, הנקודה ש-Pan מזיז, והיא נשארת אותה נקודה מסיבוב לסיבוב. פעיל: התצוגה מסתובבת סביב הנקודה שבה Home מציב את המודל, באמצע החלק שהחלוניות משאירות פנוי. חל כשסיבוב סביב מוגדר למרכז התצוגה."
+  },
+  "ja": {
+    "prefs.orbit_free_view_middle": "Home がモデルを置く位置を中心に回転する",
+    "prefs.orbit_free_view_middle_note": "オフ: 表示は、パンで動くターゲットを中心に回転し、回転のたびに同じ点のままです。オン: パネルが空けた表示領域の中央にある、Home がモデルを置く点を中心に回転します。「回転の中心」が表示の中心のときに働きます。"
+  },
+  "ko": {
+    "prefs.orbit_free_view_middle": "Home이 모델을 놓는 위치를 중심으로 회전",
+    "prefs.orbit_free_view_middle_note": "끔: 보기는 이동이 움직이는 점인 대상을 중심으로 회전하며, 회전마다 같은 점으로 유지됩니다. 켬: 패널이 비워 둔 보기 영역의 가운데, Home이 모델을 놓는 점을 중심으로 회전합니다. 회전 중심이 보기 중심일 때 적용됩니다."
+  },
+  "vi": {
+    "prefs.orbit_free_view_middle": "Xoay quanh vị trí Home đặt mô hình",
+    "prefs.orbit_free_view_middle_note": "Tắt: khung nhìn xoay quanh mục tiêu của nó, điểm mà Di chuyển dịch chuyển, giữ nguyên từ lần xoay này sang lần khác. Bật: khung nhìn xoay quanh điểm Home đặt mô hình, ở giữa phần khung nhìn mà các bảng để trống. Áp dụng khi Xoay quanh là Tâm khung nhìn."
+  },
+  "zh": {
+    "prefs.orbit_free_view_middle": "绕 Home 放置模型的位置旋转",
+    "prefs.orbit_free_view_middle_note": "关闭：视图绕其目标（平移所移动的点）旋转，每次旋转都保持同一点。开启：视图绕 Home 放置模型的点旋转，该点位于面板留出的视图区域中央。在“旋转中心”为视图中心时生效。"
+  }
+}

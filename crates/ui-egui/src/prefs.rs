@@ -1592,6 +1592,11 @@ preference_settings! {
     /// whole model, as Home does (#10091). Off by default: the view turns in place, keeping its
     /// target and zoom.
     navigator_fit: bool = false, PAGE_NAVIGATION;
+    /// With Orbit around set to the view's centre, turn about the point Home puts the model on, in
+    /// the middle of the part of the view the panels leave free (#14651), instead of the camera's
+    /// target (#16641). Off by default: the view turns about its target, what Pan moves, as it did
+    /// before; that point is steady while the orbit is, wherever the panels and the model lie.
+    orbit_free_view_middle: bool = false, PAGE_NAVIGATION;
     /// The navigator's directional arrows orbit the camera the way the arrow points, as in
     /// Fusion and Inventor (`invert_navigator_arrows`, #10254). Off by default: an arrow rotates
     /// the view toward the side it sits on, so the arrow on the left swings the camera left.

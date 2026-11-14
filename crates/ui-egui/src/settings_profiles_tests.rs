@@ -37,7 +37,7 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 103, "include the live panel drag preference among the current portable settings");
+    assert_eq!(keys.len(), 104, "include the live panel drag preference among the current portable settings");
     for key in [
         "nav",
         "maya_horizontal_zoom",
@@ -844,6 +844,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "navigator_fit",
         "navigator_style",
         "orbit_around",
+        "orbit_free_view_middle",
         "orbit_reverse",
         "origin_plane_names",
         "pan_reverse_x",
@@ -907,7 +908,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 103);
+    assert_eq!(expected.len(), 104);
     assert_eq!(actual, expected);
 }
 

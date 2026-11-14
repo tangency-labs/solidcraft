@@ -176,6 +176,11 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             }
         }
     });
+    if app.preferences.orbit_around == OrbitAround::ViewCentre {
+        let (label, note) = (app.tr("prefs.orbit_free_view_middle").to_owned(), app.tr("prefs.orbit_free_view_middle_note").to_owned());
+        let response = ui_kit::checkbox(ui, &label, &mut app.preferences.orbit_free_view_middle).backing_on_hover_text(note);
+        crate::scenario::publish_target("prefs:orbit_free_view_middle", response.rect);
+    }
     ui_kit::settings_section(ui, "orbit_style", app.tr("prefs.navigation.orbit_style"), |ui| {
         let label = app.tr("ui.orbit");
         let help = app.tr("nav.free_orbit.snap_help");

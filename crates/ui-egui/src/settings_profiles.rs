@@ -87,6 +87,7 @@ const PROFILE_KEYS: &[&str] = &[
     "navigator_fit",
     "navigator_style",
     "orbit_around",
+    "orbit_free_view_middle",
     "orbit_reverse",
     "origin_plane_names",
     "pan_reverse_x",

@@ -1594,11 +1594,11 @@ fn screen_middle(app: &SolveApp, mut cam: Camera, bounds: &solidcraft_engine::ge
 /// navigators' Fit on, Home puts it where [`navigator_home_centre`] says, see [`home_centre`]). With
 /// the Browser open the middle lies beside the window's centre, and turning about the window's
 /// centre swung the model off to one side (#14651). `None`, so that the camera turns about its
-/// target, when the middle is within half a point of the window's centre, before the view is
+/// target, when the preference `orbit_free_view_middle` is off (the default, #16641), when the middle is within half a point of the window's centre, before the view is
 /// first laid out, in the Render workspace (which frames its own picture), and when the camera
 /// gives no finite point.
 pub(crate) fn view_middle(app: &SolveApp, rect: Rect) -> Option<Vec3> {
-    if crate::render_workspace::active(app) {
+    if crate::render_workspace::active(app) || !app.preferences.orbit_free_view_middle {
         return None;
     }
     let middle = home_centre(app)?;

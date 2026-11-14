@@ -550,7 +550,7 @@ fn navigation_bar_look_at_keeps_the_active_sketch_fallback() {
     assert_eq!(h.app.session.undo.len(), undo);
 }
 
-/// In the default orbit mode, orbit turns about the middle of the part of the view the panels
+/// With `orbit_free_view_middle` on, orbit turns about the middle of the part of the view the panels
 /// leave free, the middle Home moves the model to (#14651): straight after Home, an orbit keeps
 /// that point still and turns the model about it, with the Browser shown and with it hidden.
 /// Turning about the window's centre instead swung the model off to the side.
@@ -559,6 +559,7 @@ fn orbit_after_home_turns_the_model_in_place_beside_the_browser() {
     for browser in [true, false] {
         let mut h = Harness::new();
         h.app.home.open = false;
+        h.app.preferences.orbit_free_view_middle = true;
         moved_block(&mut h);
         h.app.ui.show_browser = browser;
         h.settle();
@@ -605,6 +606,7 @@ fn the_orbit_pivot_is_the_point_home_centres_on() {
     for browser in [true, false] {
         let mut h = Harness::new();
         h.app.home.open = false;
+        h.app.preferences.orbit_free_view_middle = true;
         moved_block(&mut h);
         h.app.ui.show_browser = browser;
         h.settle();
@@ -631,6 +633,7 @@ fn orbit_after_the_navigators_home_turns_the_model_in_place() {
         let case = format!("browser {browser}, perspective {perspective}");
         let mut h = Harness::new();
         h.app.home.open = false;
+        h.app.preferences.orbit_free_view_middle = true;
         moved_block(&mut h);
         h.app.ui.show_browser = browser;
         h.app.ui.perspective = perspective;
@@ -676,6 +679,7 @@ fn spin_after_a_pan_holds_the_drag_orbit_pivot_still() {
         let case = format!("browser {browser}, perspective {perspective}");
         let mut h = Harness::new();
         h.app.home.open = false;
+        h.app.preferences.orbit_free_view_middle = true;
         moved_block(&mut h);
         h.app.ui.show_browser = browser;
         h.app.ui.perspective = perspective;
@@ -710,6 +714,7 @@ fn orbit_up_to_the_top_view_and_around_keeps_one_pivot() {
         let case = format!("browser {browser}, zoom {zoom}");
         let mut h = Harness::new();
         h.app.home.open = false;
+        h.app.preferences.orbit_free_view_middle = true;
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.app.run("sketch.rectangle.two_point", json!({"p0": [-60, -20], "p1": [60, 20]})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
@@ -736,5 +741,32 @@ fn orbit_up_to_the_top_view_and_around_keeps_one_pivot() {
             assert!(at.distance(held) < 0.5, "{case}, step {i}: the pivot moved from {held:?} to {at:?}");
         }
         assert!(std::f64::consts::FRAC_PI_2 - h.app.cam.pitch < 1e-3, "{case}: the drag reached the top view");
+    }
+}
+
+/// By default the view turns about its target, what Pan moves, wherever the Browser and the model
+/// lie, and the target is the same for every drag (#16641): the point is steady, not one that moves
+/// with the view's angle.
+#[test]
+fn the_default_orbit_turns_about_the_camera_target() {
+    for browser in [true, false] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        moved_block(&mut h);
+        h.app.ui.show_browser = browser;
+        h.settle();
+        assert!(!h.app.preferences.orbit_free_view_middle, "off by default");
+        assert_eq!(h.app.preferences.orbit_around, crate::prefs::OrbitAround::ViewCentre);
+        h.app.animate_view("home");
+        h.settle();
+        let rect = h.app.viewport.rect.unwrap();
+        assert!(crate::navigation::view_middle(&h.app, rect).is_none(), "browser {browser}: no pivot but the target");
+        let target = h.app.cam.target;
+        let p = spot(&h);
+        for _ in 0..3 {
+            h.call("ui.drag", json!({"x0": p.x, "y0": p.y, "x1": p.x + 60.0, "y1": p.y + 30.0, "button": "middle", "shift": true, "steps": 6}));
+            h.settle();
+            assert!(h.app.cam.target.dist(target) < 1e-9, "browser {browser}: the target moved from {target:?} to {:?}", h.app.cam.target);
+        }
     }
 }
