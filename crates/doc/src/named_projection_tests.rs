@@ -645,6 +645,10 @@ fn a_drafted_face_projects_its_edge_as_one_ellipse() {
     let source = LinkSource::Face { body: "Drafted".into(), at: Vec3::new(0.0, 0.0, 30.0) };
     let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
     // The edge comes to the sketch as one ellipse, not as the point set of a spline.
+    let [LinkGeom::Ellipse { c, major, minor }] = resolved.geom.as_slice() else { panic!("{:?}", resolved.geom) };
+    assert!(c.len() < 1e-10);
+    assert!((major.dist(*c) - 20.0 / angle.cos()).abs() < 1e-10);
+    assert!((minor - 20.0).abs() < 1e-10);
     assert!(
         resolved.geom.iter().any(|g| matches!(g, LinkGeom::Ellipse { .. })),
         "a drafted face's edge is an ellipse, not a point set: {:?}",

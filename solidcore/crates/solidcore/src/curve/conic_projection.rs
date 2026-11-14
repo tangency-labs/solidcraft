@@ -109,6 +109,61 @@ pub fn project_points(source: &Frame, target: &Frame, points: &[Vec2]) -> Vec<Ve
         .collect()
 }
 
+/// The full image of an analytic ellipse. A rank-deficient image is left to the
+/// exact control-curve classifier, which also keeps its complete linear extent.
+pub(crate) fn project_ellipse(
+    source: &Frame,
+    radii: [f64; 2],
+    target: &Frame,
+    max_coord: f64,
+) -> Result<Option<Vec<Projection>>> {
+    let x = vec3(source.x_axis) * radii[0];
+    let y = vec3(source.y_axis) * radii[1];
+    let tx = vec3(target.x_axis);
+    let ty = vec3(target.y_axis);
+    let u = Vec2::new(x.dot(tx), x.dot(ty));
+    let v = Vec2::new(y.dot(tx), y.dot(ty));
+    let scale = length2(u).max(length2(v));
+    if !(scale > 0.0 && scale.is_finite()) {
+        return Ok(None);
+    }
+    let (u, v) = (u / scale, v / scale);
+    let xx = u.x * u.x + v.x * v.x;
+    let yy = u.y * u.y + v.y * v.y;
+    let xy = u.x * u.y + v.x * v.y;
+    let large = ((xx + yy + (xx - yy).hypot(2.0 * xy)) * 0.5).sqrt();
+    let small = (u.x * v.y - u.y * v.x).abs() / large;
+    let major_radius = scale * large;
+    let minor = scale * small;
+    if !(minor > major_radius * f64::EPSILON * 128.0 && minor > 1e-7) {
+        return Ok(None);
+    }
+    let angle = (2.0 * xy).atan2(xx - yy) * 0.5;
+    let center = to_local(target, vec3(source.origin));
+    let coordinate_roundoff =
+        (vec3(source.origin).length() + vec3(target.origin).length() + major_radius)
+            * f64::EPSILON
+            * 128.0;
+    if minor <= coordinate_roundoff {
+        return Ok(None);
+    }
+    let major = center + Vec2::new(angle.cos(), angle.sin()) * major_radius;
+    if !(max_coord.is_finite()
+        && max_coord > 0.0
+        && center.x.abs() + scale * u.x.hypot(v.x) < max_coord
+        && center.y.abs() + scale * u.y.hypot(v.y) < max_coord
+        && major.x.is_finite()
+        && major.y.is_finite())
+    {
+        return Err(invalid("projected ellipse exceeds sketch limits"));
+    }
+    Ok(Some(vec![Projection::Ellipse {
+        center,
+        major,
+        minor,
+    }]))
+}
+
 /// Coordinate arithmetic scale for a projection, taken before source spline conversion.
 pub fn projection_scale(source: &Frame, target: &Frame, points: &[Vec2]) -> f64 {
     points.iter().fold(
