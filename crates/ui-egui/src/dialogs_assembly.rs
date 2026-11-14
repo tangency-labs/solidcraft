@@ -919,14 +919,27 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
             }
         }
         Sel::Vertex { body, point } => {
+            // A woken centre (a flat face's, a round edge's) is kept by that face or edge, so it
+            // follows the part as a pick of the face or edge does (#11231).
+            if let Some(source) = centre_source(&st, body, *point) {
+                return snap_of(s, &source);
+            }
             // The corner of the edges meeting there, kept by their names, z along the part's +Z
             // as a point's is.
             let z = occurrence_of_body(s, body)
                 .map_or(Vec3::Z, |o| solidcraft_engine::doc::apply_vector(&solidcraft_engine::doc::joints::occurrence_world(&s.doc, o), Vec3::Z));
-            (
-                body.as_str(),
-                SnapPt { at: *point, z: Vec3::Z, kind: SnapKind::Vertex, param: json!({"edge": pt(*point), "corner": pt(*point), "z": pt(z)}) },
-            )
+            let mut param = json!({"edge": pt(*point), "corner": pt(*point), "z": pt(z)});
+            // A woken point on a part that is no corner (an edge's middle, #11231) is kept by the
+            // edge it lies on, so it follows that edge as a pick of the edge does.
+            let tol = 1e-6 * (1.0 + point.len());
+            if st
+                .body(body)
+                .is_some_and(|b| !b.mesh().edges.iter().any(|e| [e.first(), e.last()].into_iter().flatten().any(|q| q.dist(*point) <= tol)))
+                && let Value::Object(m) = &mut param
+            {
+                m.remove("corner");
+            }
+            (body.as_str(), SnapPt { at: *point, z: Vec3::Z, kind: SnapKind::Vertex, param })
         }
         Sel::SketchPoint { id } => {
             // A sketch point's world position, its plane's normal as the joint's z, kept by its
@@ -998,6 +1011,19 @@ pub(crate) fn woken_pick(app: &SolveApp, snaps: bool, sel: Sel) -> Sel {
 /// Whether a dialog's active input takes joint snaps (a joint's origin, a trace's point).
 pub(crate) fn takes_snaps(d: &Dialog) -> bool {
     d.active_input().is_some_and(|i| i.accept == SNAPS)
+}
+
+/// The flat face or round edge of `body` whose centre is at `at`, if one is.
+fn centre_source(st: &solidcraft_engine::doc::ModelState, body: &str, at: Vec3) -> Option<Sel> {
+    let b = st.body(body)?;
+    let near = |p: Vec3| p.dist(at) <= 1e-6 * (1.0 + at.len());
+    let m = b.mesh();
+    if let Some((i, e)) = m.edges.iter().enumerate().find(|(_, e)| circle_of(e).is_some_and(|(c, _)| near(c))) {
+        return Some(Sel::Edge { body: body.into(), index: i, point: *e.first()? });
+    }
+    let tol = (b.body.size() * 2e-3).max(1e-3);
+    let f = b.body.faces(tol).ok()?.into_iter().find(|f| f.plane_normal.is_some() && near(f.centroid))?;
+    Some(Sel::Face { body: body.into(), index: f.index, point: f.centroid })
 }
 
 /// Each pick's snap, measured once for the world state, design and open sketch it was measured in.
