@@ -200,7 +200,9 @@ pub enum OffsetFailure {
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The check that fails names the entity where the reason is about one
+/// ([`Unsoundness::entity`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum Unsoundness {
     /// The check at `SM_LEVEL_2` reports `failures` failure lines more than the input's
@@ -224,6 +226,43 @@ pub enum Unsoundness {
     /// The body is a manifold solid whose volume's enclosure still holds 0 after its
     /// budget: its sign is not proved.
     VolumeUndecided,
+    /// A loop of the body has a certified area that leaves its orientation undecided. No
+    /// check returns it yet (as [`crate::topology::brep::SolidTest::LoopOrientationUndecided`]);
+    /// it is named so a caller's match covers it when one does.
+    LoopOrientationUndecided,
+    /// A gap in a loop of the body cannot be closed within the tolerances its certificates
+    /// allow. No check returns it yet; it is named so a caller's match covers it when one
+    /// does.
+    LoopGapNotClosable,
+    /// The tolerance of `entity`, an edge or vertex of the body, grew to `tolerance`, past the
+    /// `bound` its certificate allows (`docs/validity-and-tolerances.md` §8: a constructed
+    /// result's tolerances come from its certificates). No check returns it yet; it is named
+    /// so a caller's match covers it when one does.
+    ToleranceBeyondBound {
+        /// The edge or vertex, of the body built.
+        entity: EntityRef,
+        /// Its tolerance.
+        tolerance: f64,
+        /// The largest tolerance its certificate allows.
+        bound: f64,
+    },
+}
+
+impl Unsoundness {
+    /// The entity the reason names: the edge or vertex whose tolerance grew past its bound.
+    #[must_use]
+    pub const fn entity(&self) -> Option<EntityRef> {
+        match *self {
+            Self::ToleranceBeyondBound { entity, .. } => Some(entity),
+            Self::Check { .. }
+            | Self::GeometryUnchecked
+            | Self::NotManifoldSolid
+            | Self::VolumeNotPositive
+            | Self::VolumeUndecided
+            | Self::LoopOrientationUndecided
+            | Self::LoopGapNotClosable => None,
+        }
+    }
 }
 
 /// How loops of an offset face touch without crossing ([`OffsetFailure::WallsTouch`]).
@@ -282,10 +321,10 @@ impl OffsetFailure {
                 .map(EntityRef::Edge)
                 .or_else(|| face.map(EntityRef::Face)),
             Self::LoopGapUncertified { face } => face.map(EntityRef::Face),
+            Self::Unsound { what } => what.entity(),
             Self::ExactCurveUncut
             | Self::TangentEndOffCurve
             | Self::TangentBranchUncertified
-            | Self::Unsound { .. }
             | Self::DistanceUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
             | Self::Failed(_)
@@ -508,6 +547,23 @@ impl core::fmt::Display for Unsoundness {
             Unsoundness::VolumeUndecided => f.write_str(
                 "the local operation's body is a manifold solid whose volume's sign could \
                  not be proved",
+            ),
+            Unsoundness::LoopOrientationUndecided => f.write_str(
+                "a loop of the body built has a certified area that leaves its orientation \
+                 undecided",
+            ),
+            Unsoundness::LoopGapNotClosable => f.write_str(
+                "a gap in a loop of the body built cannot be closed within the tolerances its \
+                 certificates allow",
+            ),
+            Unsoundness::ToleranceBeyondBound {
+                entity,
+                tolerance,
+                bound,
+            } => write!(
+                f,
+                "the tolerance of {entity} grew to {tolerance}, past the {bound} its \
+                 certificate allows"
             ),
         }
     }
@@ -944,7 +1000,10 @@ mod tests {
             let o = OffsetFailure::Unsound { what };
             assert_eq!(what.entity(), None);
             assert_eq!(o.entity(), None);
-            assert_eq!(o.to_string(), format!("{says}: refused, the input unchanged"));
+            assert_eq!(
+                o.to_string(),
+                format!("{says}: refused, the input unchanged")
+            );
         }
     }
 

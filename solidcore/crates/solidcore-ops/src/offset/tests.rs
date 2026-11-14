@@ -324,7 +324,7 @@ fn the_offset_refusals_are_typed() {
     use solidcore::error::Failure;
     use solidcore::error::{SM_ERR_OFFSET_EDGE_VANISHES, SM_ERR_OFFSET_WALLS_TOUCH};
     use solidcore::{FaceId, SolidError};
-    let none = |_: FaceId| -> Option<usize> { None };
+    let none = |_: solidcore::EntityRef| -> Option<crate::RecordEntity> { None };
     let up = |code| SolidError::Upstream {
         operation: "test",
         code,
@@ -398,15 +398,17 @@ fn the_offset_refusals_are_typed() {
 /// in place of a reason (#15035): a routine's own failure keeps its kind and the kernel's phrase.
 #[test]
 fn every_other_offset_refusal_says_why_and_where() {
-    use crate::OffsetRefusal as R;
-    use solidcore::error::offset::{LoopCrossing, OffsetFailure as O, Unsoundness};
+    use crate::{OffsetRefusal as R, RecordEntity, Unsoundness};
+    use solidcore::error::offset::{LoopCrossing, OffsetFailure as O, Unsoundness as K};
     use solidcore::error::ErrorKind;
     use solidcore::error::Failure;
     use solidcore::FaceId;
     let named = FaceId::from_index(3);
     let other = FaceId::from_index(4);
     // the call's lookup: face 3 is record face 7, face 4 is not the body's
-    let index = |f: FaceId| -> Option<usize> { (f == named).then_some(7) };
+    let index = |e: solidcore::EntityRef| {
+        (e == solidcore::EntityRef::Face(named)).then_some(RecordEntity::Face(7))
+    };
     let refused = |o: O| super::status(Failure::new("test", o).into_error(), &index);
     let cases = [
         // (the kernel's fold kind, but no fold: its own reason, not `WallFolds`)
@@ -481,7 +483,7 @@ fn every_other_offset_refusal_says_why_and_where() {
         ),
         (
             O::Unsound {
-                what: Unsoundness::Check {
+                what: K::Check {
                     failures: 2,
                     first: Some((1, 4)),
                 },
@@ -496,7 +498,7 @@ fn every_other_offset_refusal_says_why_and_where() {
         ),
         (
             O::Unsound {
-                what: Unsoundness::VolumeUndecided,
+                what: K::VolumeUndecided,
             },
             None,
             R::Unsound {
@@ -790,10 +792,13 @@ fn an_unsound_body_names_its_entity_by_record_index() {
     ];
     for (kernel, ops) in cases {
         let e = in_order(kernel);
-        assert_eq!(e, Error::OffsetRefused {
-            face: None,
-            why: R::Unsound { what: ops },
-        });
+        assert_eq!(
+            e,
+            Error::OffsetRefused {
+                face: None,
+                why: R::Unsound { what: ops },
+            }
+        );
         assert_eq!(e.to_string(), format!("the offset is refused: {kernel}"));
     }
 }
