@@ -3131,3 +3131,23 @@ fn a_slot_arc_split_by_a_balls_seam_selects_and_rounds_like_its_mirror() {
     assert!((plus - 89.8218).abs() < 1e-2, "rounding the split arc removes {plus}");
     assert!((plus - minus).abs() < 1e-3, "the split arc's round removes {plus}, its mirror's {minus}");
 }
+
+/// A cut To a point on the curved wall of the body it cuts (#11923): the wall runs along the
+/// extrusion, so the cut can never reach it, and the point stands for the plane through it, as a
+/// point in space does. A 12 mm square on the top of a cylinder (r 20, 25 tall) cut To a point on
+/// the wall half way down takes a 12 x 12 x 12.5 slot.
+#[test]
+fn a_cut_to_a_point_on_a_wall_along_the_cut_stops_at_that_height() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[0.0,0.0],"radius":20.0}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":25.0}));
+    let before = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane":"XY","offset":25.0}));
+    run(&mut s, "sketch.rectangle.center", json!({"center":[0.0,0.0],"corner":[6.0,6.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"direction":"negative","distance":"12.5 mm","operation":"cut","profiles":[0],"to":[14.14,14.14,12.5]}));
+    let removed = before - volume(&mut s);
+    assert!((removed - 12.0 * 12.0 * 12.5).abs() < 1e-3 * 1800.0, "removed {removed} vs 1800");
+}
