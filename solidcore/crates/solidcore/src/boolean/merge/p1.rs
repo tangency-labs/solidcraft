@@ -49,6 +49,10 @@
 //! all the same, and the kept-faces test needs two faces. Not the fork's (#15768): a face a
 //! merge makes of a kept face is kept, whichever of the two ids it keeps, and the fillet
 //! passes as kept edges only the input edges it left whole (`kept_edges`).
+//! Not upstream: `boolean_post_process` merges two faces on different surfaces only where
+//! one surface covers the other face within a tenth of the smaller face tolerance
+//! (`IsTopological`'s gain 0.2, upstream 10), so no tolerance is raised; upstream raises only
+//! the kept face's, leaving the other face's vertices off the merged face.
 //! Opt-in `Kernel::fixes.cover_wraps_across_closed_seam` (WR-599, the fork's
 //! tangency-labs/smlib@16bf1cb): after each face merge `boolean_post_process` runs
 //! `HasSeamProblem` on the merged face and `SplitAtSeam` when a seam is crossed or missing.
@@ -553,12 +557,6 @@ fn brep_shells(k: &mut Kernel, brep: &Brep) -> Result<Vec<ShellId>> {
     crate::topology::brep::p1::shells(k, brep, None)
 }
 
-/// `pFace->SetTolerance(tol)` with the upstream defaults (update only if larger, cascade
-/// to the boundaries).
-fn set_face_tolerance(brep: &mut Brep, face: FaceId, tolerance: f64) -> Result<()> {
-    crate::topology::face::p3::set_tolerance(brep, face, tolerance, true, true)
-}
-
 /// WR-599 (`Kernel::fixes.cover_wraps_across_closed_seam`): `pMerged->HasSeamProblem(..)`
 /// (its classification status propagated, as the fork's `SER`), then, when a seam is
 /// crossed or missing (the fork's static `SmFace::HasSeamProblem(eCrossed, eMissing)`),
@@ -597,6 +595,15 @@ fn split_merged_face_at_seam(
     )?;
     Ok(())
 }
+
+/// `IsTopological`'s gain in [`boolean_post_process`]: faces on different surfaces merge only
+/// where one covers the other within a tenth of the smaller face tolerance (upstream: 10).
+/// `IsTopological` covers within the gain times half the smaller face tolerance, so 0.2 is
+/// upstream's own threshold for raising no tolerance (a distance up to a tenth of the kept
+/// face's), up to the one rounding in which `0.2 * (0.5 * t)` and `t / 10` can differ. The
+/// gain also scales `IsTopological`'s planarity test of non-analytic faces and its plane cover
+/// tolerance (`/ 10000`).
+const MERGE_COVER_GAIN: f64 = 0.2;
 
 /// Remove topological intersection edges and redundant vertices. `check_all_edges`
 /// defaults to true upstream; false checks only the intersection lists with live
@@ -669,7 +676,15 @@ pub(crate) fn boolean_post_process_with_notifications(
                 continue;
             }
         }
-        let topological = edge::is_topological(k, brep, e, 10.0)?;
+        // Not upstream (#15418): faces on different surfaces merge only where one surface
+        // carries the other face within a tenth of the faces' tolerances, where no tolerance
+        // has to grow (`IsTopological` covers within the gain times half the smaller face
+        // tolerance: 0.2 gives a tenth). Upstream's gain of 10 merges up to five times that
+        // tolerance and raises only the kept face's: the vertices and edges brought over from
+        // the other face keep theirs and lie that far off the merged face (a vertex-face gap
+        // the check refuses), and the shape moves by as much (two rounds a ten-thousandth of
+        // a degree apart became one cylinder, its far end 50 times the angle off).
+        let topological = edge::is_topological(k, brep, e, MERGE_COVER_GAIN)?;
         if !topological.is_topological {
             continue;
         }
@@ -691,6 +706,8 @@ pub(crate) fn boolean_post_process_with_notifications(
             .ok_or_else(|| SolidError::entity_missing(OP, "the edge use has no face"))?;
         // Surface identity is represented by its owning face in this arena model.
         if f0 != f1 {
+            // (upstream raises the kept face's tolerance by the distance past a tenth of it:
+            // the cover's gain keeps the distance within that, so nothing is raised)
             let domain = brep
                 .face(keep)?
                 .surface
@@ -698,10 +715,6 @@ pub(crate) fn boolean_post_process_with_notifications(
                 .ok_or_else(|| SolidError::entity_missing(OP, "the face to keep has no surface"))?
                 .natural_uv_domain_with_nurb(k)?;
             crate::topology::face::p2::set_uv_domain(brep, keep, &domain)?;
-            let tolerance = crate::topology::face::p2::tolerance(brep, keep)?;
-            if topological.dist_between > tolerance / 10.0 {
-                set_face_tolerance(brep, keep, tolerance + topological.dist_between)?;
-            }
         }
         let a = edge::vertex(brep, e)?;
         let b = edge::other_vertex(brep, e, a)?;
