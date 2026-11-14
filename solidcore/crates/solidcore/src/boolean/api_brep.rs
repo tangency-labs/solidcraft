@@ -205,31 +205,99 @@ enum MergeMethod {
 }
 
 /// One edge of a boolean operand, as [`glue_self_touching_edges`] compares them: its
-/// vertices (the lower index first), its shell, its faces and its curve's kind (the shell,
-/// faces and kind only for an edge that shares its vertices with another).
+/// vertices (the lower index first), its shell, its faces, whether a face lies on both sides
+/// of it, and its curve's kind (the shell, faces, crack flag and kind only for an edge that
+/// shares its vertices with another).
 struct TouchingEdge {
     edge: EdgeId,
     start: crate::topology::VertexId,
     ends: (u32, u32),
     shell: Option<crate::topology::ShellId>,
     faces: Vec<crate::topology::FaceId>,
+    /// A face on both sides of the edge (more than two of its edge uses on one face: the
+    /// kernel's crack edge, which its check refuses glued to another edge).
+    crack: bool,
     kind: Option<core::mem::Discriminant<crate::curve::curve::p2::CurveKind>>,
 }
 
 impl TouchingEdge {
     /// Whether `other` may be a second copy of this edge, before its geometry is compared:
-    /// the same vertices and curve kind, both on faces (not wires), and no face in common
-    /// (two faces meeting across the line, the kernel's crack edges, are not copies). The
-    /// shells may differ: the record round trip leaves a solid touching itself in two shells
-    /// joined along the line, and the kernel shares one edge between shells that touch.
+    /// the same vertices and curve kind, both on faces (not wires), and neither a crack edge
+    /// (a face on both sides of it). The faces against those already glued are checked by
+    /// [`copy_pairs`]. The shells may differ: the record round trip leaves a solid touching
+    /// itself in two shells joined along the line, and the kernel shares one edge between
+    /// shells that touch.
     fn may_copy(&self, other: &Self) -> bool {
         self.shell.is_some()
             && other.shell.is_some()
+            && !self.crack
+            && !other.crack
             && self.ends == other.ends
             && self.kind.is_some()
             && self.kind == other.kind
-            && !self.faces.iter().any(|f| other.faces.contains(f))
     }
+}
+
+/// The edges to glue, `(surviving, to_delete, orientation)`: in each bucket of edges that
+/// share their vertices (indices into `touches`), each edge not yet glued away keeps every
+/// later edge that [`TouchingEdge::may_copy`] it, shares no face with it **or with any copy
+/// already glued into it**, and whose curve `coincide` proves within the tolerance. So no
+/// face ever ends up on both sides of the glued edge (the crack-glued form the kernel's check
+/// refuses), however many copies a bucket holds.
+///
+/// # Errors
+///
+/// Those of `coincide`.
+fn copy_pairs(
+    touches: &[TouchingEdge],
+    crowded: &[Vec<usize>],
+    mut coincide: impl FnMut(EdgeId, EdgeId) -> Result<bool>,
+) -> Result<
+    Vec<(
+        EdgeId,
+        EdgeId,
+        crate::nurbs::b_spline_surface_n_lib::p2::OrientType,
+    )>,
+> {
+    use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use std::collections::BTreeSet;
+
+    let mut pairs = Vec::new();
+    let mut taken: BTreeSet<EdgeId> = BTreeSet::new();
+    for bucket in crowded {
+        for (n, &i) in bucket.iter().enumerate() {
+            let Some(first) = touches.get(i) else {
+                continue;
+            };
+            if taken.contains(&first.edge) {
+                continue;
+            }
+            // the faces of the glued edge so far: this edge's and every accepted copy's
+            let mut faces: BTreeSet<crate::topology::FaceId> =
+                first.faces.iter().copied().collect();
+            for &j in bucket.iter().skip(n + 1) {
+                let Some(other) = touches.get(j) else {
+                    continue;
+                };
+                if taken.contains(&other.edge)
+                    || !first.may_copy(other)
+                    || other.faces.iter().any(|f| faces.contains(f))
+                    || !coincide(first.edge, other.edge)?
+                {
+                    continue;
+                }
+                let orientation = if first.start == other.start {
+                    OrientType::Same
+                } else {
+                    OrientType::Opposite
+                };
+                pairs.push((first.edge, other.edge, orientation));
+                taken.insert(other.edge);
+                faces.extend(other.faces.iter().copied());
+            }
+        }
+    }
+    Ok(pairs)
 }
 
 /// Not upstream: a bound `d` such that every point of curve `a` over `ia` is within `d` of a
@@ -307,18 +375,22 @@ fn coincidence_bound(
 /// region nesting), whether the copies lie in one shell or in two shells that touch along the
 /// line (the round trip leaves a self-touching solid in two). Edges whose faces repeat (a
 /// face on both sides of the line: the kernel's crack edges, which its check refuses glued)
-/// are left alone. Returns the number of edges glued away.
+/// are left alone, and a copy sharing a face with the edge or with a copy already glued into
+/// it is not glued ([`copy_pairs`]). Returns the number of edges glued away.
 ///
 /// The edges are bucketed by their vertex pair; only a bucket of two or more edges has its
 /// pairs compared, so a body without self-touch costs one pass over its edges.
 ///
 /// # Errors
 ///
-/// Those of the topology walk and of `GlueEdgesGeneral`.
+/// Those of the topology walk and of `GlueEdgesGeneral`. They fail the boolean: the pairs
+/// passed meet `GlueEdgesGeneral`'s precondition (both vertices shared, both on faces), so
+/// its remaining errors are broken links in the operand's topology (an edge use without
+/// mate, radial, shell or vertex use) or its notifications' failures, and an operand left
+/// half glued could not be merged "as given" anyway.
 fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeMap;
 
-    use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use crate::topology::brep::p2::ArenaNotifyState;
     use crate::topology::brep::p7::glue_edges_general;
     use crate::topology::edge;
@@ -351,6 +423,7 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
             ends,
             shell: None,
             faces: Vec::new(),
+            crack: false,
             kind: None,
         });
     }
@@ -376,8 +449,11 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
                 touch.shell = eu1::faceuse_shell(b, fu)?;
             }
         }
+        // each face of a manifold edge holds two of its uses (an edge use and its mate)
+        let uses = touch.faces.len();
         touch.faces.sort_unstable();
         touch.faces.dedup();
+        touch.crack = uses > 2 * touch.faces.len();
     }
     // Whether the two edges' curves are proved within `tol` of each other.
     let coincide = |b: &Brep, x: EdgeId, y: EdgeId| -> Result<bool> {
@@ -388,36 +464,7 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
         // written so that a NaN bound or tolerance refuses
         Ok(coincidence_bound(cx, &dx.interval, cy, &dy.interval).is_some_and(|d| d <= tol))
     };
-    let mut pairs: Vec<(EdgeId, EdgeId, OrientType)> = Vec::new();
-    let mut taken: BTreeSet<EdgeId> = BTreeSet::new();
-    for bucket in &crowded {
-        for (n, &i) in bucket.iter().enumerate() {
-            let Some(first) = touches.get(i) else {
-                continue;
-            };
-            if taken.contains(&first.edge) {
-                continue;
-            }
-            for &j in bucket.iter().skip(n + 1) {
-                let Some(other) = touches.get(j) else {
-                    continue;
-                };
-                if taken.contains(&other.edge)
-                    || !first.may_copy(other)
-                    || !coincide(b, first.edge, other.edge)?
-                {
-                    continue;
-                }
-                let orientation = if first.start == other.start {
-                    OrientType::Same
-                } else {
-                    OrientType::Opposite
-                };
-                pairs.push((first.edge, other.edge, orientation));
-                taken.insert(other.edge);
-            }
-        }
-    }
+    let pairs = copy_pairs(&touches, &crowded, |x, y| coincide(b, x, y))?;
     if pairs.is_empty() {
         return Ok(0);
     }
@@ -885,6 +932,63 @@ mod tests {
             p(z),
             3,
         )))
+    }
+
+    /// A [`TouchingEdge`] for [`copy_pairs`]: edge `e` between vertices 1 and 2 on `faces`
+    /// in shell 0, a line.
+    fn touching(e: u32, faces: &[u32], crack: bool) -> TouchingEdge {
+        use crate::topology::{FaceId, ShellId, VertexId};
+        let line = segment([0.0; 3], [1.0, 0.0, 0.0]);
+        TouchingEdge {
+            edge: EdgeId::from_index(e),
+            start: VertexId::from_index(1),
+            ends: (1, 2),
+            shell: Some(ShellId::from_index(0)),
+            faces: faces.iter().map(|&f| FaceId::from_index(f)).collect(),
+            crack,
+            kind: Some(core::mem::discriminant(line.kind())),
+        }
+    }
+
+    fn glued(touches: &[TouchingEdge], coincide: bool) -> Vec<(u32, u32)> {
+        let bucket: Vec<usize> = (0..touches.len()).collect();
+        copy_pairs(touches, &[bucket], |_, _| Ok(coincide))
+            .unwrap()
+            .into_iter()
+            .map(|(a, b, _)| (a.index(), b.index()))
+            .collect()
+    }
+
+    /// Three coincident edges in one bucket: the copies are checked against every face
+    /// already glued, not only the first edge's, so no face ends up on both sides of the
+    /// glued edge. Crack edges (a face on both sides) are never glued; true copies on distinct
+    /// faces all glue into the first; unproved geometry glues nothing.
+    #[test]
+    fn copies_are_checked_against_every_face_already_glued() {
+        // two copies on face 5 and a first edge on faces 1, 2: only one copy on face 5 joins
+        let t = [
+            touching(0, &[1, 2], false),
+            touching(1, &[5, 6], false),
+            touching(2, &[5, 7], false),
+        ];
+        assert_eq!(glued(&t, true), vec![(0, 1)]);
+        // three copies on distinct faces all glue into the first
+        let t = [
+            touching(0, &[1, 2], false),
+            touching(1, &[3, 4], false),
+            touching(2, &[5, 6], false),
+        ];
+        assert_eq!(glued(&t, true), vec![(0, 1), (0, 2)]);
+        // a crack edge (face 5 on both sides) is not glued, as first or as copy
+        let t = [touching(0, &[5], true), touching(1, &[3, 4], false)];
+        assert_eq!(glued(&t, true), Vec::<(u32, u32)>::new());
+        let t = [touching(0, &[3, 4], false), touching(1, &[5], true)];
+        assert_eq!(glued(&t, true), Vec::<(u32, u32)>::new());
+        // a shared face with the first edge, or no coincidence proof: nothing
+        let t = [touching(0, &[1, 2], false), touching(1, &[2, 3], false)];
+        assert_eq!(glued(&t, true), Vec::<(u32, u32)>::new());
+        let t = [touching(0, &[1, 2], false), touching(1, &[3, 4], false)];
+        assert_eq!(glued(&t, false), Vec::<(u32, u32)>::new());
     }
 
     /// Two lines between the same ends, either way round, are within rounding of each other;

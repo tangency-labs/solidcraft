@@ -1282,3 +1282,53 @@ mod pocket_with_hole_at_its_corner {
         join_fills(round_tripped(&pocketed), "the pocketed block");
     }
 }
+
+/// Two unit boxes touching along the edge x = y = 1 in one body (two solids), after a record
+/// round trip (`split_shared` writes the edge once per solid, so the operand carries it as two
+/// coincident edges, which the boolean glues back into the one edge the kernel's union shares).
+/// Booleans on it give the exact volumes, whether the tool reaches the shared edge or not,
+/// with no fixes and with every fix: subtract `[0.5, 1.5]^2 x [0, 0.5]` (an eighth of a unit
+/// from each box, across the edge) leaves 1.75; intersect `[0.5, 1.5]^2 x [0, 1]` keeps 0.5;
+/// union with a far unit box gives 3.
+#[test]
+fn two_solids_touching_along_an_edge_survive_a_round_trip_and_booleans() {
+    for all in [false, true] {
+        with_fixes(all);
+        let touching = || {
+            let a = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+            let b = make_box([1.0, 1.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+            round_tripped(&boolean(a, b, BooleanOp::Union).unwrap().unwrap())
+        };
+        let cases = [
+            (
+                BooleanOp::Subtract,
+                make_box([0.5, 0.5, 0.0], [1.0, 1.0, 0.5]).unwrap(),
+                1.75,
+            ),
+            (
+                BooleanOp::Intersect,
+                make_box([0.5, 0.5, 0.0], [1.0, 1.0, 1.0]).unwrap(),
+                0.5,
+            ),
+            (
+                BooleanOp::Union,
+                make_box([5.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap(),
+                3.0,
+            ),
+        ];
+        for (op, tool, want) in cases {
+            let r = boolean(touching(), tool, op).unwrap().unwrap();
+            let report = r.check(CheckLevel::All).unwrap();
+            assert!(
+                report.is_valid(),
+                "all fixes {all}, {op:?}:\n{}",
+                report.text
+            );
+            assert!(
+                near(volume(&r), want),
+                "all fixes {all}, {op:?}: {} vs {want}",
+                volume(&r)
+            );
+        }
+    }
+}
