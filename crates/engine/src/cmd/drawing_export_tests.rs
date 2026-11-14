@@ -446,6 +446,19 @@ fn view_sizes(s: &mut Session, views: [u64; 3]) -> [[f64; 2]; 3] {
     views.map(|view| box_size(&objects.iter().find(|o| o["object"] == json!(ids::encode(view))).unwrap()["bounds_mm"]))
 }
 
+/// What each of `views` draws on Sheet 1 as the window's page shows it once settled: the provider's
+/// lines ([`crate::drawing_scene::extract`]), which it keeps between reads and across a close and
+/// draws again only for a view out of date. For a drawing that updates at once, `drawing.scene` and
+/// the export draw anew instead, so only this reads what the page keeps.
+fn page_sizes(s: &mut Session, views: [u64; 3]) -> [[f64; 2]; 3] {
+    let d = s.drawing("test").unwrap().clone();
+    crate::drawing_scene::extract(s, d.sheets[0].id).unwrap();
+    crate::drawing_scene::settle(s, &d);
+    let page = crate::drawing_scene::extract(s, d.sheets[0].id).unwrap();
+    let size = |view: u64| page.objects.iter().find(|o| o.object == view).unwrap().bounds_mm.size();
+    views.map(|view| [size(view).x, size(view).y])
+}
+
 /// Whether three views' sizes are the ones `expected` gives.
 fn sized_as(sizes: [[f64; 2]; 3], expected: [[f64; 2]; 3]) -> bool {
     sizes.into_iter().zip(expected).all(|(size, expected)| same_size(size, expected))
@@ -460,10 +473,10 @@ fn on_the_model(s: &mut Session, drawing: &str, id: &str, p: Value) {
 }
 
 /// The plate's model edited with its drawing closed (acceptance cases 85 to 87, #4894): each view's
-/// lines follow with the hand sizes, and each edit saved and opened again exports the same SVG. Undo
-/// brings back the sheet before it byte for byte, and redo the one after it. The edited model's own
-/// geometry is oracle cases 85 to 87's (tests/oracle), and what the dimensions read across these
-/// edits is in drawing_dimension_tests.rs (#8288).
+/// lines follow with the hand sizes, in the export and on the window's page, and each edit saved and
+/// opened again exports the same SVG. Undo brings back the sheet before it byte for byte, and redo
+/// the one after it. The edited model's own geometry is oracle cases 85 to 87's (tests/oracle), and
+/// what the dimensions read across these edits is in drawing_dimension_tests.rs (#8288).
 #[test]
 fn the_milestone_plate_follows_its_model_and_undo_brings_its_sheet_back() {
     let (mut s, views, _) = milestone_plate();
@@ -472,6 +485,8 @@ fn the_milestone_plate_follows_its_model_and_undo_brings_its_sheet_back() {
     let folder = Folder::new("drawing-m2-edits");
     let before = sheet(&mut s);
     let (wide, plate) = (WIDE_VIEWS, PLATE_VIEWS);
+    // The page drawn first, so each close keeps its lines to come back, as in the window.
+    assert!(sized_as(page_sizes(&mut s, views), plate));
     for (case, id, edit, sizes) in [
         (85, "parameters.change", json!({"name": "width", "expression": "100 mm"}), wide),
         (86, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}), plate),
@@ -480,6 +495,8 @@ fn the_milestone_plate_follows_its_model_and_undo_brings_its_sheet_back() {
         on_the_model(&mut s, &drawing, id, edit);
         let drawn = view_sizes(&mut s, views);
         assert!(sized_as(drawn, sizes), "case {case}: {drawn:?}");
+        let paged = page_sizes(&mut s, views);
+        assert!(sized_as(paged, sizes), "case {case}: the page shows {paged:?}");
         // The sheet the edit gives, and the same from the file.
         let after = sheet(&mut s);
         assert_ne!(after, before, "case {case}");
