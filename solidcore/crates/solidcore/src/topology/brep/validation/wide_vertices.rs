@@ -548,33 +548,48 @@ mod tests {
         .unwrap();
     }
 
-    /// `Test #82` refuses a vertex tolerance equal to its limit, not only one over it: just under
-    /// the limit the check reports nothing, at it test 82 fails for that vertex.
-    #[test]
-    fn the_check_refuses_a_vertex_tolerance_at_the_limit() {
+    /// Failed test numbers of the level-2 check of `b`.
+    fn failed_tests(k: &mut Kernel, b: &mut Brep) -> Vec<u32> {
         use crate::topology::brep::validation::{check_brep, CheckLevel};
+        let c = check_brep(k, b, CheckLevel::Level2).unwrap();
+        c.pointer_reports
+            .reports()
+            .iter()
+            .chain(c.reports.reports())
+            .filter(|r| !r.ok)
+            .map(|r| r.test_index as u32)
+            .collect()
+    }
 
-        for (factor, refused) in [(0.999_999, false), (1.0, true)] {
+    /// `Test #82` holds under `LARGE_SMALL_SIZE_RATIO` times the body's tolerance as before. At or
+    /// past that limit the ratio no longer decides: the vertex is accepted when its ball reaches
+    /// no face or edge it does not bound, refused (test 82) when it does. In the 10 x 10 x 10 box
+    /// the nearest non-incident face is 10 away, so 1 x and 2 x the limit (0.01 and 0.02) clear.
+    /// In the 1 x 2 x 3 box the nearest is the face x = 1: a corner tolerance of 0.999 clears it,
+    /// 1.0 touches it and 2.0 passes through it.
+    #[test]
+    fn a_vertex_past_the_ratio_limit_is_accepted_only_where_its_ball_clears_other_topology() {
+        for factor in [0.999_999, 1.0, 2.0, 50.0] {
             with_box(|k, b| {
                 let (v, _, limit) = corner_and_limit(b);
                 b.vertex_mut(v)?.tolerance = factor * limit;
-                let c = check_brep(k, b, CheckLevel::Level2)?;
-                let failed: Vec<u32> = c
-                    .pointer_reports
-                    .reports()
-                    .iter()
-                    .chain(c.reports.reports())
-                    .filter(|r| !r.ok)
-                    .map(|r| r.test_index as u32)
-                    .collect();
-                assert_eq!(
-                    failed,
-                    if refused { vec![82] } else { vec![] },
-                    "at {factor} of the limit"
-                );
+                assert_eq!(failed_tests(k, b), Vec::<u32>::new(), "at {factor} x limit");
                 Ok(())
             })
             .unwrap();
+        }
+        for (radius, refused) in [(0.999, false), (1.0, true), (2.0, true)] {
+            let mut k = Kernel::default();
+            let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 2.0, 3.0).unwrap();
+            let limit = crate::geom::tol::LARGE_SMALL_SIZE_RATIO * b.tolerance();
+            assert!(radius > limit);
+            let v = b.vertex_list()[0];
+            b.vertex_mut(v).unwrap().tolerance = radius;
+            assert_eq!(
+                failed_tests(&mut k, &mut b).contains(&82),
+                refused,
+                "1 x 2 x 3 box, corner tolerance {radius}"
+            );
         }
     }
 

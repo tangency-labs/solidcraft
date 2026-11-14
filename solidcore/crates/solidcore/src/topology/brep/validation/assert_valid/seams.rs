@@ -162,14 +162,83 @@ pub(super) fn assert_test_edge13(k: &mut Kernel, b: &mut Brep, e: EdgeId) -> Res
 }
 
 /// `sm_AssertTestVertex1(this, &dMaxGap3d, &pMaxGapFace)`: `(passed, max_gap_3d)`, the
-/// vertex within the cross-section tolerance of its faces and on their corner
-/// (`IsWithinXSectTol3dOfFaces`, `IsOnFaceCorner`). Called at every level; its report
-/// (Vertex test 1) is level 2.
+/// vertex within its local tolerance of its faces. The
+/// body's intersection tolerance remains the floor. Strict corner queries keep
+/// their own semantics; this is the tolerant body's validity check. Called at
+/// every level; its report (Vertex test 1) is level 2.
 pub(super) fn assert_test_vertex1(
     k: &mut Kernel,
     b: &mut Brep,
     v: VertexId,
 ) -> Result<(bool, f64)> {
-    let (passed, max_gap_3d, _) = crate::topology::vertex::corner::assert_test_vertex1(k, b, v)?;
-    Ok((passed, max_gap_3d))
+    use crate::topology::vertex::corner;
+
+    let (_, face_gap, _) = corner::is_within_xsect_tol_3d_of_faces(k, b, v, false)?;
+    let tolerance = corner::xsect_tol_3d_of_brep(k, b).max(b.vertex(v)?.tolerance);
+    // CalcCornerFromFaces is a placement query, not a distance to the tolerant
+    // boundary. Its approximate intersection can slide along a shared curve;
+    // even an exact ideal corner ignores the incident faces' tolerance bands.
+    // As on main, Test 1 reports the measured vertex/face gap. Strict corner
+    // queries used by placement and repair keep their independent semantics.
+    let passed = face_gap <= tolerance;
+    if passed {
+        // A tolerance absorbs a gap, not a misplaced vertex: the faces' corner is never
+        // farther from the vertex than a tolerance may grow to (`GROWTH_PAST_RATIO`), whatever
+        // the measured gaps say (a gap that could not be measured reads as none).
+        let (on_corner, corner) = corner::is_on_face_corner(k, b, v)?;
+        if !on_corner && corner.found_point {
+            let limit = super::brep::GROWTH_PAST_RATIO
+                * crate::geom::tol::LARGE_SMALL_SIZE_RATIO
+                * b.tolerance();
+            let off = corner.best_point.distance(b.vertex(v)?.point);
+            if off > limit.max(tolerance) {
+                // reported as the vertex's gap: its distance from the corner
+                return Ok((false, off));
+            }
+        }
+    }
+    Ok((passed, face_gap))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::Vec3;
+    use crate::primitive::api_primitives::create_box;
+    use crate::topology::{vertex, vertexuse};
+
+    #[test]
+    fn vertex_face_gap_is_not_the_ideal_corner_displacement() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Vec3::ZERO, 1.0, 2.0, 3.0).unwrap();
+        let v = b
+            .vertex_list()
+            .iter()
+            .copied()
+            .find(|&v| b.vertex(v).unwrap().point == Vec3::ZERO)
+            .unwrap();
+        // Prepare trim caches before changing the recorded vertex point.
+        vertex::corner::is_on_face_corner(&k, &mut b, v).unwrap();
+        let offset = 1.3e-5;
+        let radius = 2.1e-5;
+        b.vertex_mut(v).unwrap().point = Vec3::new(offset, offset, offset);
+        b.vertex_mut(v).unwrap().tolerance = radius;
+        for vu in vertex::vertexuses(&b, v).unwrap() {
+            vertexuse::init_vertex_face_gap(&mut b, vu).unwrap();
+        }
+        let (_, corner) = vertex::corner::is_on_face_corner(&k, &mut b, v).unwrap();
+        assert!(corner.found_point);
+        assert!(corner.best_point.distance(b.vertex(v).unwrap().point) > radius);
+        // The ideal intersection is outside the ball, but (1e-5, 1e-5, 1e-5)
+        // is inside it and inside all three face bands. Report actual face gaps;
+        // the independent whole-body tolerance checks retain their own bounds.
+        let band = b.tolerance();
+        let witness = Vec3::new(band, band, band);
+        assert!(witness.distance(b.vertex(v).unwrap().point) < radius);
+        assert!(corner.best_point.distance(Vec3::ZERO) < 1e-12);
+        let (passed, gap) = assert_test_vertex1(&mut k, &mut b, v).unwrap();
+        assert!(passed, "face gap {gap}");
+        assert!((gap - offset).abs() < 1e-12, "face gap {gap}");
+        assert_eq!(b.vertex(v).unwrap().tolerance, radius);
+    }
 }

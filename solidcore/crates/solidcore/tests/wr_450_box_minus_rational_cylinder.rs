@@ -142,16 +142,7 @@ fn wr_450_box_minus_rational_cylinder_is_valid_only_with_the_fix() {
             assert!(worst_edge > 0.5, "{worst_edge}");
             assert!(!check.is_valid());
             assert_eq!(check.assert_valid, None, "ValidatePointers fails");
-            assert_eq!(
-                failures,
-                [
-                    (labels::BREP_TYPE, 59),
-                    (labels::BREP_TYPE, 82),
-                    (labels::BREP_TYPE, 82)
-                ],
-                "{:?}",
-                check.lines()
-            );
+            assert_eq!(failures, [(labels::BREP_TYPE, 59)], "{:?}", check.lines());
         }
     }
 }

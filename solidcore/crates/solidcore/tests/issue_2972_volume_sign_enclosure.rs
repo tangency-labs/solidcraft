@@ -366,7 +366,7 @@ fn a_face_without_a_nurbs_form_is_an_error_not_a_sign() {
 
 /// The solid test names the test a body fails (#15035), the first in the order the tests run:
 /// a sheet is not manifold (and not closed solids, for the touching test); a box with a vertex
-/// tolerance 1000 times the body's, and a box with every face flipped, fail the pointer check;
+/// tolerance below the body's, and a box with every face flipped, fail the pointer check;
 /// the quarter horn torus of #1954, its internal pole read as upstream reads it, fails
 /// `AssertValid`; the box with its material outside is proved inside out; the quarter
 /// shell R 10, t 1e-6 leaves its sign undecided. A box passes every test.
@@ -400,7 +400,7 @@ fn the_solid_test_names_the_test_a_body_fails() {
 
     let mut loose = boxed(&mut k);
     let v = loose.vertex_list()[0];
-    let tolerance = loose.tolerance() * 1000.0;
+    let tolerance = loose.tolerance() * 0.5;
     loose.vertex_mut(v).unwrap().tolerance = tolerance;
     assert!(is_manifold_solid(&loose).unwrap());
     assert_eq!(

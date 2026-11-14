@@ -127,11 +127,11 @@ The tests that decide each property, by the test numbers the check reports:
 | use orientation | edge uses alternate Same, Opposite round the edge (Edge 14); a radial pair and a mate pair have different orientations (Edgeuse 23, 24); a radial pair's normals point into their sector (Edgeuse 10) | `assert_valid/edge.rs` | 0 |
 | uses belong together | a radial pair is in one shell, a mate pair on one face (Edgeuse 8, 22) | `assert_valid/edge.rs` | 0 |
 | pcurves | a trim's interval is the edge's (Edgeuse 25, 26), it does not jump across a periodic boundary (Edgeuse 7), has length (11), does not dog-leg at a pole (20); a radial pair's trims give one binormal point (27) | `assert_valid/edge.rs` | 0 |
-| loops | the edge uses of a loop use close in 3D within the intersection tolerance (Loopuse 5); inner loops nest in the outer one, loops are disjoint in UV and share no vertex (Face 37, 38, 39) | `assert_valid/loops.rs`, `face.rs` | 0 |
+| loops | edge ends close within the edge zones or meet one shared vertex within their local zones (Loopuse 5); inner loops nest in the outer one, loops are disjoint in UV and share no vertex (Face 37, 38, 39) | `assert_valid/loops.rs`, `face.rs` | 0 |
 | an edge is not smaller than its tube | curve length ≥ τ_e (Edge 7) | `assert_valid/edge.rs` | 0 |
 | edge ends at its vertices | \|C(t_end) − P_v\| ≤ τ_e + τ_v (Edge 16, 17) | `assert_valid/edge.rs` | 0 |
 | edge on its faces | the largest edge/face gap ≤ τ_e + τ_f (Edge 13) | `topology/edge/edge_form.rs` | 2 |
-| vertex on its faces | the vertex within the intersection tolerance of its faces' corner (Vertex 1) | `assert_valid/vertex.rs` | 2 (report) |
+| vertex on its faces | face gaps within the vertex's local tolerance, floored at the body's intersection tolerance (Vertex 1) | `assert_valid/vertex.rs` | 2 (report) |
 | the tolerance pass | vertex/edge and vertex/face gaps ≤ τ_v / 2, edge/face gap ≤ τ_e (`SmBrep` list 2, tests 0 to 4) | `assert_valid/brep.rs`, `validate_and_update` | 0 |
 | seams and poles | §6 | `assert_valid/face.rs`, `vertex.rs` | 0 and 2 |
 | closed shells | a region's outer shell is a closed face-use shell (Brep 10, 11), its inner shells lie inside it (Brep 12), every region is reached across face uses (Brep 18, 19) | `assert_valid/brep.rs` | 0 |
@@ -165,9 +165,13 @@ Three scales live in the body (`topology.rs`):
 
 The default zone tolerance follows the model's size class (`size_estimate_to_zone_tol_3d`): 1e-5 for
 a size between 0.5 and 500, 1e-4 up to 5e4, 1e-6 down to 0.005, and so on by factors of 100 in
-size. The check holds no upper bound on a local tolerance: upstream marks its "edge tolerance over
-1000 times the body's" tests obsolete (Edge 5, 6), and the face tests 25, 26 and 30 are not run
-(`assert_valid/face.rs`).
+size. Vertex tolerances must be finite and at least the body's (allowing the check's 1% rounding
+margin). A vertex tolerance under 1000 times the body's passes Test 82 as ever. One at or past that
+limit, an imported corner whose gap is local, is accepted only if its ball reaches no face or edge
+it does not bound or neighbour (rule 7); a ball that does, or whose clearance cannot be established,
+is refused with Test 82. Geometric gap checks still apply. The pointer check keeps its ratio of 1000
+for faces and edges (`validation/pointers.rs`); the separate Edge tests 5, 6 are obsolete, and Face
+tests 25, 26 and 30 are not run (`assert_valid/face.rs`).
 
 ### 5.2 What an edge's tolerance must cover
 
@@ -363,8 +367,9 @@ tolerance.
    a seam crossed by a face is an edge of it.
 5. τ_v ≥ τ_e at both ends of an edge; every local tolerance is at least the body's (not checked
    today, §10).
-6. Every gap is within its tolerances: edge/face ≤ τ_e + τ_f, an edge's ends ≤ τ_e + τ_v, a loop's
-   edge uses close within the intersection tolerance.
+6. Every gap is within its tolerances: edge/face ≤ τ_e + τ_f, an edge's ends ≤ τ_e + τ_v. At a
+   shared vertex, a loop's endpoint gap is bounded by τ_e1 + τ_e2 + 2τ_v, provided both endpoints
+   meet that same vertex within their own edge and vertex zones.
 7. No tube or ball reaches an entity it does not bound: an edge is longer than its tolerance, and no
    two entities coincide.
 8. A solid result is one closed manifold, valid at level 0, facing out (positive volume); a
@@ -393,7 +398,9 @@ and the tolerance pass.
   bands) is not checked.
 - No step closes a gap by recomputing geometry: `fix_bad_gaps` is empty, the coincident-edge and
   missed-intersection steps are not implemented upstream.
-- No upper bound on a local tolerance is checked (Edge 5, 6 obsolete; Face 25, 26, 30 not run).
+- A vertex tolerance past 1000 times the body's is decided by clearance from non-incident topology,
+  not by the ratio; faces and edges retain the pointer check's ratio of 1000. The separate Edge
+  tests 5, 6 are obsolete; Face 25, 26, 30 are not run.
 
 ## 11. If you're stuck
 
