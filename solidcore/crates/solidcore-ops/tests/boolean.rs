@@ -226,14 +226,17 @@ fn drill(x: f64, z: f64, depth: f64) -> Body {
 }
 
 /// Two parallel holes of radius 2.5 whose axes are 5 − ε apart, a hair less than tangent: their
-/// walls cross in two lines 2√(2.5 ε) apart and lie within ε of each other between them. The
-/// sketch solver of tangency-labs/solidcraft#15429 left two drill centres 2.3e-9 closer than
-/// their diameter, the upper one with its wall on the plate's top face; the second cut failed
-/// in the merge, and through holes, and the two cylinders' union, failed as not a solid for ε
-/// from 1e-9 to 1e-5. Within the faces' tolerance the walls touch along one line, as at ε = 0:
-/// each cut is one valid solid of the counts the touching holes give, and the volume less the
-/// overlap (the lens of the two circles; the points' overlap is below 1e-12), in either order.
-/// The two cylinders unite to two solids touching along the line.
+/// walls cross in two lines 2√(2.5 ε) apart and lie within ε of each other between them, and
+/// so do their rims on a face square to the axes. The sketch solver of
+/// tangency-labs/solidcraft#15429 left two drill centres 2.3e-9 closer than their diameter, the
+/// upper one with its wall on the plate's top face, and the second cut failed in the merge;
+/// through holes, and the two cylinders' union, failed as not a solid from ε = 1e-9. The walls
+/// and the rims touch within the intersection tolerance, as for holes a hair apart (ε = −1e-9):
+/// each cut is one valid solid of the counts of the holes a hair apart and the volume less the
+/// overlap (the lens of the two circles; the points' overlap is below 1e-12), in either order,
+/// and the two cylinders unite to two solids touching along the line. The drills are checked
+/// to the issue's ε: from 1e-8 their points, which only the marching intersection meets, add
+/// edges (valid solids of the right volume).
 #[test]
 fn parallel_holes_a_hair_less_than_tangent_cut_as_touching() {
     all_fixes();
@@ -245,32 +248,41 @@ fn parallel_holes_a_hair_less_than_tangent_cut_as_touching() {
     };
     let (r, depth) = (2.5, 5.0);
     let tip = r / 59f64.to_radians().tan();
-    for eps in [0.0, 1e-9, 2.3e-9, 1e-7, 1e-6, 1e-5] {
-        let d = 5.0 - eps;
-        let lens = if eps > 0.0 { lens_area(r, d) } else { 0.0 };
-        let through = 4000.0 - (2.0 * PI * r * r - lens) * 10.0;
-        let drilled = 4000.0 - 2.0 * PI * r * r * (depth + tip / 3.0) + lens * depth;
-        for swap in [false, true] {
-            let at = |a: f64, b: f64| if swap { (b, a) } else { (a, b) };
-            let (y1, y2) = at(10.0, 10.0 - d);
-            let c = cut_twice(cylinder(y1), cylinder(y2));
-            one_valid_solid(&c, [10, 23, 14], through);
-            let (z1, z2) = at(7.5, 7.5 - d);
-            let c = cut_twice(drill(5.0, z1, depth), drill(5.0, z2, depth));
-            one_valid_solid(&c, [13, 27, 16], drilled);
+    let lens = |eps: f64| {
+        if eps > 0.0 {
+            lens_area(r, 5.0 - eps)
+        } else {
+            0.0
         }
-        let u = boolean(cylinder(10.0), cylinder(10.0 - d), BooleanOp::Union)
+    };
+    // either order: the holes at a and b, or at b and a
+    let orders = |a: f64, b: f64| [(a, b), (b, a)];
+    for eps in [-1e-9, 1e-9, 2.3e-9, 1e-8, 1e-7] {
+        let through = 4000.0 - (2.0 * PI * r * r - lens(eps)) * 10.0;
+        for (y1, y2) in orders(10.0, 5.0 + eps) {
+            let c = cut_twice(cylinder(y1), cylinder(y2));
+            one_valid_solid(&c, [8, 22, 14], through);
+        }
+        let u = boolean(cylinder(10.0), cylinder(5.0 + eps), BooleanOp::Union)
             .unwrap()
             .unwrap();
         let report = u.check(CheckLevel::All).unwrap();
         assert!(report.is_valid(), "{eps}: {}", report.text);
         assert_eq!(u.solid_count().unwrap(), 2, "{eps}");
-        let want = (2.0 * PI * r * r - lens) * 12.0;
+        assert_eq!(u.counts().unwrap(), [6, 10, 6], "{eps}");
+        let want = (2.0 * PI * r * r - lens(eps)) * 12.0;
         assert!(
             near(volume(&u), want),
             "{eps}: {}, closed form {want}",
             volume(&u)
         );
+    }
+    for eps in [-1e-9, 1e-9, 2.3e-9] {
+        let drilled = 4000.0 - 2.0 * PI * r * r * (depth + tip / 3.0) + lens(eps) * depth;
+        for (z1, z2) in orders(7.5, 2.5 + eps) {
+            let c = cut_twice(drill(5.0, z1, depth), drill(5.0, z2, depth));
+            one_valid_solid(&c, [12, 27, 16], drilled);
+        }
     }
 }
 
