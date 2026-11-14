@@ -1,5 +1,6 @@
 //! Contracts and result types for the commands in `cmd/frame.rs`: `frame.member`,
-//! `frame.profile.list`, `frame.profile.properties` and `frame.profile.insert` (#12500).
+//! `frame.profile.list`, `frame.profile.properties` and `frame.profile.insert` (#12500); and
+//! `frame.trim` and `frame.corner` (#4003).
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether a sketch exists, a dimension evaluates
@@ -29,7 +30,9 @@ use solidcraft_doc::frame::{self, Anchor, MAX_MEMBERS, Profile, ProfileSpec};
 use super::check::{keyed, located, whole};
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::types::{AngleExpr, Point2, ProfilesParam, SketchRef, StringList, not_blank_pattern, present};
+use super::types::{
+    AngleExpr, FeatureCommon, IdOrName, LengthExpr, Point2, ProfilesParam, SketchRef, StringList, feature_common, not_blank_pattern, present,
+};
 use crate::params;
 
 /// The words `Anchor` is spelled with, as the handlers' message lists them.
@@ -726,6 +729,105 @@ impl JsonSchema for FrameMemberParams {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         FrameMemberKeys::json_schema(generator)
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Trim/Extend (`frame.trim`)
+
+/// A frame member body name, or its creating feature and sketch line.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Member {
+    Body(String),
+    Line { feature: IdOrName, line: String },
+}
+
+/// One member or a list of members.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Members {
+    Body(String),
+    List(Vec<Member>),
+}
+
+/// A profile side of a target member.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Side {
+    Right,
+    Left,
+    Top,
+    Bottom,
+}
+
+/// A member, its profile side, or a plane/planar face.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Target {
+    Side { member: Member, side: Option<Side> },
+    Plane { plane: Value },
+    SavedPlane { plane_ref: Value },
+    Member(Member),
+}
+
+/// One target or a list of targets.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Targets {
+    List(Vec<Target>),
+    One(Target),
+}
+
+/// The end to move.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum End {
+    Auto,
+    Start,
+    End,
+}
+
+/// Trim or extend frame members to member sides, planes or planar faces.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TrimParams {
+    /// Members to rebuild, by body name or {feature, line}. Between 1 and 1000 members.
+    pub members: Members,
+    /// One or more member sides, {plane} picks or persisted {plane_ref} attachments.
+    pub to: Targets,
+    /// Which end moves. Default: auto, the end nearer each target.
+    #[serde(default)]
+    pub end: Option<End>,
+    /// Weld gap in design length units or a length expression. Default: 0; at most 1 m.
+    #[serde(default)]
+    pub gap: Option<LengthExpr>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// How the two members of a corner meet.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CornerKind {
+    Mitre,
+}
+
+/// Join two frame members that meet at their ends in a corner.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CornerParams {
+    /// The two members that meet, by body name or {feature, line}.
+    #[schemars(length(min = 2, max = 2))]
+    pub members: Vec<Member>,
+    /// How they meet. Default: mitre, both cut on the plane halfway between them.
+    #[serde(default)]
+    pub kind: Option<CornerKind>,
+    /// Weld gap between the two cut faces, in design length units or a length expression.
+    /// Default: 0; at most 1 m.
+    #[serde(default)]
+    pub gap: Option<LengthExpr>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
 }
 
 #[cfg(test)]

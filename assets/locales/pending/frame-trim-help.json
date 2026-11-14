@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "help.frame.trim": "قصّ عناصر الإطار أو مدّدها إلى عناصر أخرى أو أوجه مستوية أو مستويات، مع فجوة لحام اختيارية. استخدمه لإنشاء وصلات تناكبية في الإطار."
+  },
+  "de": {
+    "help.frame.trim": "Kürzt oder verlängert Stäbe bis zu anderen Stäben, ebenen Flächen oder Ebenen, mit optionalem Schweißspalt. Verwenden Sie dies für stumpfe Verbindungen im Rahmen."
+  },
+  "en": {
+    "help.frame.trim": "Trim or extend frame members to other members, planar faces or planes, with an optional weld gap. Use it to make butt joints in a frame."
+  },
+  "he": {
+    "help.frame.trim": "קיטום או הארכה של איברי מסגרת עד לאיברים אחרים, פאות מישוריות או מישורים, עם מרווח ריתוך לפי הצורך. משמש ליצירת חיבורי השקה במסגרת."
+  },
+  "ja": {
+    "help.frame.trim": "部材を他の部材、平面の面、または平面までトリムまたは延長し、必要に応じて溶接ギャップを設けます。フレームに突き合わせ継手を作るときに使います。"
+  },
+  "ko": {
+    "help.frame.trim": "프레임 부재를 다른 부재, 평평한 면 또는 평면까지 자르거나 연장하고 필요하면 용접 간격을 둡니다. 프레임의 맞대기 이음을 만들 때 사용합니다."
+  },
+  "vi": {
+    "help.frame.trim": "Cắt hoặc kéo dài thanh khung đến thanh khác, mặt phẳng của vật thể hoặc mặt phẳng, với khe hở hàn tùy chọn. Dùng để tạo mối nối giáp mép trong khung."
+  },
+  "zh": {
+    "help.frame.trim": "将框架构件修剪或延伸至其他构件、平面面或平面，并可设置焊接间隙。用于在框架中创建对接接头。"
+  }
+}
