@@ -81,6 +81,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::boolean::merge::p4::KernelManifoldIntersector;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::geom::attribute::{ids, Attribute, Behavior};
 use crate::geom::context::{Context, MarkType};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -1852,6 +1853,57 @@ impl OffsetExecutive {
 }
 
 impl OffsetExecutive {
+    /// Not upstream (tangency-labs/solidcore#3138): marks every face of the offset with how
+    /// it was made ([`ids::OFFSET_ROLE`]), from the executive's relations as they stand
+    /// before the merge, once every face that replaced another (the crossing loops' rebuilt
+    /// faces) has taken its place in them: a face use's offset copy, a face along an edge,
+    /// a face at a vertex; a closing face (a sheet's side wall, made along a lamina edge) is
+    /// a face along an edge too. Every face of `original` and of the offset first loses the
+    /// role an earlier offset left on it. A related face no longer in the offset is passed
+    /// over; a face related twice keeps its first role (copies, then edges, then vertices,
+    /// then closing faces).
+    ///
+    /// # Errors
+    ///
+    /// A null-pointer error without an offset B-rep; those of the attribute store.
+    fn mark_offset_roles(&mut self, original: &mut Brep) -> Result<()> {
+        let mut roles: Vec<(FaceId, i64)> = Vec::new();
+        for fu in self.faceuse_to_faces.all_firsts() {
+            for f in self.faceuse_to_faces.seconds(fu) {
+                roles.push((f, ids::OFFSET_ROLE_COPY));
+            }
+        }
+        for e in self.edge_to_faces.all_firsts() {
+            for f in self.edge_to_faces.seconds(e) {
+                roles.push((f, ids::OFFSET_ROLE_EDGE));
+            }
+        }
+        for v in self.vertex_to_faces.all_firsts() {
+            for f in self.vertex_to_faces.seconds(v) {
+                roles.push((f, ids::OFFSET_ROLE_VERTEX));
+            }
+        }
+        // a sheet's side walls are not related to their edges (`build_side_wall_of_edgeuse`
+        // records them as closing faces only): each stands on one lamina edge
+        for &f in &self.closing_faces {
+            roles.push((f, ids::OFFSET_ROLE_EDGE));
+        }
+        clear_offset_roles(original)?;
+        let offset = required(self.offset_brep.as_mut())?;
+        clear_offset_roles(offset)?;
+        let mut marked: BTreeSet<FaceId> = BTreeSet::new();
+        let faces: BTreeSet<FaceId> = offset.face_list().iter().copied().collect();
+        for (f, role) in roles {
+            if faces.contains(&f) && marked.insert(f) {
+                offset.add_attribute(
+                    EntityRef::Face(f),
+                    Attribute::long(ids::OFFSET_ROLE, role, Behavior::Copy),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     /// Stitches or merges the assembled offset (`PiecewiseMerge`).
     ///
     /// On the non-merge path the B-rep is taken and relations are cleared *before*
@@ -1870,6 +1922,7 @@ impl OffsetExecutive {
         original: &mut Brep,
         notifications: Option<&mut OffsetNotifications<'_>>,
     ) -> Result<Brep> {
+        self.mark_offset_roles(original)?;
         if !self.merge_results {
             self.clear_relations();
             let mut result = required(self.offset_brep.take())?;
@@ -3401,6 +3454,27 @@ fn removed_faces_edgeuses(result: &Brep, faces: &[FaceId]) -> Result<BTreeSet<Ed
         }
     }
     Ok(gone)
+}
+
+/// Every [`ids::OFFSET_ROLE`] on the faces of `b` removed.
+///
+/// # Errors
+///
+/// Those of the attribute store.
+fn clear_offset_roles(b: &mut Brep) -> Result<()> {
+    for f in b.face_list().to_vec() {
+        let e = EntityRef::Face(f);
+        let marks: Vec<_> = b
+            .entity_attributes(e)
+            .into_iter()
+            .filter(|(_, a)| a.attribute_id() == ids::OFFSET_ROLE)
+            .map(|(h, _)| h)
+            .collect();
+        for h in marks {
+            b.remove_attribute(e, h)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

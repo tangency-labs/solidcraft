@@ -50,6 +50,7 @@ pub mod error;
 pub mod extend;
 pub mod face_surface;
 pub mod file;
+pub mod history;
 pub mod label;
 pub mod measure;
 pub mod network;
