@@ -423,14 +423,26 @@ fn join_point(a: Seg2, b: Seg2, tol: f64) -> Option<Vec2> {
             let near = (a.end() + b.start()) * 0.5;
             Some(center + Vec2::from_angle((near - center).angle()) * radius)
         }
-        (Seg2::Arc { center, radius, .. }, Seg2::Arc { center: c2, radius: r2, .. }) => intersections_within(
-            &Shape::Round { c: center, r: radius, start: 0.0, sweep: TAU },
-            &Shape::Round { c: c2, r: r2, start: 0.0, sweep: TAU },
-            tol,
-        )
-        .into_iter()
-        .filter(|p| p.dist((a.end() + b.start()) * 0.5) <= tol * 2.0)
-        .min_by(|p, q| p.dist((a.end() + b.start()) * 0.5).total_cmp(&q.dist((a.end() + b.start()) * 0.5))),
+        (Seg2::Arc { center, radius, .. }, Seg2::Arc { center: c2, radius: r2, .. }) => {
+            let mid = (a.end() + b.start()) * 0.5;
+            // Two arcs whose ends both lie on both circles meet there: keep that point. Where the
+            // circles touch tangentially (an arc leaving another's end along its tangent, as two
+            // corner arcs of one outline do) their intersection moves along the tangent by about
+            // sqrt(2 * radius * gap) for a gap between them, 3e-5 mm for a 1e-9 mm round-off, and
+            // trimming both arcs there moved the outline's corner off the sketch's point.
+            let on_a = center + Vec2::from_angle((mid - center).angle()) * radius;
+            if (on_a.dist(c2) - r2).abs() <= ON_CARRIER_TOL && on_a.dist(mid) <= ON_CARRIER_TOL {
+                return Some(on_a);
+            }
+            intersections_within(
+                &Shape::Round { c: center, r: radius, start: 0.0, sweep: TAU },
+                &Shape::Round { c: c2, r: r2, start: 0.0, sweep: TAU },
+                tol,
+            )
+            .into_iter()
+            .filter(|p| p.dist(mid) <= tol * 2.0)
+            .min_by(|p, q| p.dist(mid).total_cmp(&q.dist(mid)))
+        }
         _ => None,
     }
 }
