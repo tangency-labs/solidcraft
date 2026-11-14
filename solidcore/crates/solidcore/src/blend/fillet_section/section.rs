@@ -225,6 +225,28 @@ fn solve_top(
 }
 
 /// `GetNaturalInterval` as `(min, max)`.
+/// The most halvings a span over the target is cut by at once.
+const MOST_CUTS: u32 = 4;
+
+/// How many halvings a span whose certified bound is `bound` takes to reach `target` (not
+/// upstream: the fork halves once and certifies again). The section's spans are cubic
+/// Hermite, whose bound falls as `h^4`: `2^cuts` pieces bring it to `bound / 16^cuts`, so the
+/// fewest cuts with that at most the target, at least one (a bound not finite: one, a plain
+/// halving) and at most [`MOST_CUTS`]. Each piece is still certified on its own.
+fn cuts_to_target(bound: f64, target: f64) -> u32 {
+    let ratio = bound / target;
+    if !(ratio.is_finite() && target > 0.0) {
+        return 1;
+    }
+    let mut cuts = 1;
+    let mut reach = 16.0;
+    while cuts < MOST_CUTS && ratio > reach {
+        cuts += 1;
+        reach *= 16.0;
+    }
+    cuts
+}
+
 fn interval(c: &BSplineCurve) -> (f64, f64) {
     let i = c.natural_interval();
     (i.min(), i.max())
@@ -1988,12 +2010,19 @@ impl GnSectionFsg {
         // a span's finest proved level, kept while it is over the target: its halves start
         // from its pieces (not the fork's, which certifies each half afresh)
         let mut levels: Vec<Option<Arc<CertifiedLevel>>> = vec![None; bounds.len()];
+        // how many halvings each span is of the span its level came from
+        let mut splits: Vec<u32> = vec![1; bounds.len()];
         loop {
             let mut all = true;
             // a span's first level tried, where it inherits none (not the fork's, which
             // tries every level from 0): one coarser than the span before first proved
             let mut hint = 0_u32;
-            for (j, (bj, lj)) in bounds.iter_mut().zip(levels.iter_mut()).enumerate() {
+            for (j, ((bj, lj), &sj)) in bounds
+                .iter_mut()
+                .zip(levels.iter_mut())
+                .zip(&splits)
+                .enumerate()
+            {
                 k.check_cancelled(OP_CERTIFY)?;
                 if *bj < 0.0 {
                     let (Some(a), Some(b)) = (stations.get(j), stations.get(j + 1)) else {
@@ -2004,6 +2033,7 @@ impl GnSectionFsg {
                     };
                     let mut reuse = SpanReuse {
                         inherit: lj.as_deref(),
+                        split: sj,
                         start: hint,
                         ..SpanReuse::default()
                     };
@@ -2051,6 +2081,7 @@ impl GnSectionFsg {
             let mut next: Vec<GnStation> = Vec::new();
             let mut next_bounds: Vec<f64> = Vec::new();
             let mut next_levels: Vec<Option<Arc<CertifiedLevel>>> = Vec::new();
+            let mut next_splits: Vec<u32> = Vec::new();
             for ((pair, &bj), lj) in stations.windows(2).zip(&bounds).zip(&levels) {
                 k.check_cancelled(OP_CERTIFY)?;
                 let [a, b] = pair else { continue };
@@ -2058,45 +2089,54 @@ impl GnSectionFsg {
                 if bj <= target {
                     next_bounds.push(bj);
                     next_levels.push(None);
+                    next_splits.push(1);
                     continue;
                 }
-                let mid = 0.5 * (a.s + b.s);
-                let inside = mid > a.s && mid < b.s;
-                if !inside {
-                    return Err(SolidError::blend_failed(
-                        OP,
-                        "the span cannot be split (its midpoint is not inside it)",
-                    ));
+                // cut into the 2^cuts pieces the bound's h^4 scaling says reach the target,
+                // not halved again and again: each piece is certified as a half is
+                let cuts = cuts_to_target(bj, target);
+                let pieces = 1_u32 << cuts;
+                for i in 1..pieces {
+                    let t = f64::from(i) / f64::from(pieces);
+                    let s = a.s + t * (b.s - a.s);
+                    let inside = s > a.s && s < b.s && next.last().is_none_or(|p| s > p.s);
+                    if !inside {
+                        return Err(SolidError::blend_failed(
+                            OP,
+                            "the span cannot be split (its cut is not inside it)",
+                        ));
+                    }
+                    let mut seed = [0.0_f64; 4];
+                    for (c, sc) in seed.iter_mut().enumerate() {
+                        *sc = (1.0 - t) * param(a, c, 0, 0) + t * param(b, c, 0, 0);
+                    }
+                    let tol_at = solve_tol(s)?;
+                    let law_r = law_series(law, s, tr.s(), false)?;
+                    let mut st = solve_top(
+                        k,
+                        faces,
+                        center,
+                        s,
+                        seed,
+                        r,
+                        side,
+                        tr,
+                        tol_at,
+                        n,
+                        None,
+                        false,
+                        law_r.as_ref(),
+                    )?;
+                    if equal_area {
+                        gn_station_thumbweight(k, n, rr, &mut st)?;
+                    }
+                    next.push(st);
                 }
-                let mut seed = [0.0_f64; 4];
-                for (c, sc) in seed.iter_mut().enumerate() {
-                    *sc = 0.5 * (param(a, c, 0, 0) + param(b, c, 0, 0));
+                for _ in 0..pieces {
+                    next_bounds.push(-1.0);
+                    next_levels.push(lj.clone());
+                    next_splits.push(cuts);
                 }
-                let tol_mid = solve_tol(mid)?;
-                let law_r = law_series(law, mid, tr.s(), false)?;
-                let mut st = solve_top(
-                    k,
-                    faces,
-                    center,
-                    mid,
-                    seed,
-                    r,
-                    side,
-                    tr,
-                    tol_mid,
-                    n,
-                    None,
-                    false,
-                    law_r.as_ref(),
-                )?;
-                if equal_area {
-                    gn_station_thumbweight(k, n, rr, &mut st)?;
-                }
-                next.push(st);
-                next_bounds.push(-1.0);
-                next_bounds.push(-1.0);
-                next_levels.push(lj.clone());
-                next_levels.push(lj.clone());
             }
             if let Some(last) = stations.last() {
                 next.push(*last);
@@ -2104,6 +2144,7 @@ impl GnSectionFsg {
             stations = next;
             bounds = next_bounds;
             levels = next_levels;
+            splits = next_splits;
         }
         let mut bound = 0.0_f64;
         for &b in &bounds {
