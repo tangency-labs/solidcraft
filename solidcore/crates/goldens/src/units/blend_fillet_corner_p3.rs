@@ -37,7 +37,8 @@
 //! make upstream dereference null or free the harness's objects. To tell a default patch
 //! that reaches `MakeFaceBrep` from one that returns a status before it, the shim runs
 //! `MakeAnalyticCornerSurface`'s fits and the Coons patch's `CreateCornerBlend` on
-//! copies first. Its `SER` / `NER` exits (read as `TRUE`) add no surface, so the
+//! copies first. Its `SER` / `NER` exits (upstream reads them as `TRUE`; the port as
+//! `FALSE`, so it builds the Coons patch, WR-254) add no surface, so upstream's
 //! `MakeFaceBrep` after them copies the edges' curves only when the corner already had one
 //! surface (a planar corner's exit leaves the edge it was recomputing without a curve).
 //! Every refused case was checked by running the C++ natively with the pre-check bypassed,

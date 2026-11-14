@@ -46,7 +46,6 @@ use solidcore::Kernel;
 /// The flags SolidCraft's `fixes()` turns on at tangency-labs/solidcraft c494a18.
 const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_copy_keeps_parameterization",
-    "analytic_corner_failure_is_false",
     "analytic_inversion_answers_apart",
     "ascii_doubles_round_trip",
     "boolean2d_plane_covers_far_faces",
