@@ -286,78 +286,82 @@ fn section_normals_face_along_the_loft_and_turn_the_short_way() {
     }
 }
 
-/// Natural cubic interpolation through `p` with chord-length parameters, as a sketch spline is
-/// made: one cubic Bézier (its four control points) per span.
-fn natural_cubic(p: &[Vec3]) -> Vec<[Vec3; 4]> {
-    let n = p.len();
-    let h: Vec<f64> = p.windows(2).map(|w| w[0].dist(w[1])).collect();
-    // Second derivatives (zero at both ends) by the tridiagonal solve.
-    let m = n - 2;
-    let (mut diag, mut rhs) = (vec![0.0; m], vec![Vec3::ZERO; m]);
-    for i in 0..m {
-        diag[i] = 2.0 * (h[i] + h[i + 1]);
-        rhs[i] = ((p[i + 2] - p[i + 1]) * (1.0 / h[i + 1]) - (p[i + 1] - p[i]) * (1.0 / h[i])) * 6.0;
-    }
-    for i in 1..m {
-        let w = h[i] / diag[i - 1];
-        diag[i] -= w * h[i];
-        rhs[i] = rhs[i] - rhs[i - 1] * w;
-    }
-    let mut sol = vec![Vec3::ZERO; m];
-    for i in (0..m).rev() {
-        let next = if i + 1 < m { sol[i + 1] * h[i + 1] } else { Vec3::ZERO };
-        sol[i] = (rhs[i] - next) * (1.0 / diag[i]);
-    }
-    let mm = |i: usize| if i == 0 || i == n - 1 { Vec3::ZERO } else { sol[i - 1] };
-    (0..n - 1)
-        .map(|i| {
-            let slope = (p[i + 1] - p[i]) * (1.0 / h[i]);
-            let d0 = slope - (mm(i) * 2.0 + mm(i + 1)) * (h[i] / 6.0);
-            let d1 = slope + (mm(i) + mm(i + 1) * 2.0) * (h[i] / 6.0);
-            [p[i], p[i] + d0 * (h[i] / 3.0), p[i + 1] - d1 * (h[i] / 3.0), p[i + 1]]
-        })
-        .collect()
+// The hull side from #16754 as sketch splines draw it: the natural cubic through the issue's
+// points with chord-length parameters, one cubic Bézier (its control points) per span. The keel's
+// are in its sketch's (x, z), the sheer's in its sketch's (x, y), the rails' in world (x, y, z).
+const KEEL: [[[f64; 2]; 4]; 2] = [
+    [[0.0, -160.0], [1627.7635723078342, -388.7205147027603], [3255.527144615669, -617.4410294055205], [4880.0, -600.0]],
+    [[4880.0, -600.0], [6589.094991330999, -581.6504314603769], [8294.5474956655, -290.82521573018846], [10000.0, 0.0]],
+];
+const SHEER: [[[f64; 2]; 4]; 2] = [
+    [[0.0, 40.0], [1645.285360344809, 727.5583753839488], [3290.5707206896172, 1415.1167507678974], [5000.0, 1650.0]],
+    [[5000.0, 1650.0], [6627.886455125052, 1873.6788994950143], [8313.943227562526, 1686.8394497475072], [10000.0, 1500.0]],
+];
+const STEM: [[[f64; 3]; 4]; 3] = [
+    [
+        [0.0, 40.0, 1200.0],
+        [0.0, 44.00238687713236, 828.3597964181283],
+        [0.0, 48.00477375426472, 456.7195928362564],
+        [0.0, 45.373332545769244, -62.868622627622926],
+    ],
+    [
+        [0.0, 45.373332545769244, -62.868622627622926],
+        [0.0, 45.17215275750797, -102.59234772267868],
+        [0.0, 44.93219852666387, -143.18082264512174],
+        [0.0, 17.293450399707694, -155.24526595568008],
+    ],
+    [
+        [0.0, 17.293450399707694, -155.24526595568008],
+        [0.0, 12.159265663775223, -157.48636169590935],
+        [0.0, 6.079632831887611, -158.74318084795468],
+        [0.0, 0.0, -160.0],
+    ],
+];
+const TRANSOM: [[[f64; 3]; 4]; 2] = [
+    [
+        [10000.0, 0.0, 0.0],
+        [10000.0, 582.4951876137216, 23.059939931657393],
+        [10000.0, 1164.990375227443, 46.11987986331485],
+        [10000.0, 1377.2647194380875, 394.8316231623623],
+    ],
+    [
+        [10000.0, 1377.2647194380875, 394.8316231623623],
+        [10000.0, 1497.936056877575, 593.0633623827879],
+        [10000.0, 1498.9680284387875, 896.5316811913939],
+        [10000.0, 1500.0, 1200.0],
+    ],
+];
+
+/// Cubic Béziers as a section's curves.
+fn cubics(pieces: &[[[f64; 2]; 4]]) -> Vec<Seg2> {
+    let v = |p: [f64; 2]| Vec2::new(p[0], p[1]);
+    pieces.iter().map(|[a, b, c, d]| Seg2::Cubic { p0: v(*a), p1: v(*b), p2: v(*c), p3: v(*d) }).collect()
 }
 
-/// The spline through `p` as a rail: 200 points per span.
-fn spline_rail(p: &[Vec3]) -> Vec<Vec3> {
-    let mut out = vec![p[0]];
-    for [a, b, c, d] in natural_cubic(p) {
+/// Cubic Béziers as a rail: 200 points per piece.
+fn cubic_rail(pieces: &[[[f64; 3]; 4]]) -> Vec<Vec3> {
+    let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
+    let mut out = pieces.first().map(|p| vec![v(p[0])]).unwrap_or_default();
+    for [a, b, c, d] in pieces {
         for i in 1..=200 {
             let t = f64::from(i) / 200.0;
             let s = 1.0 - t;
-            out.push(a * (s * s * s) + b * (3.0 * s * s * t) + c * (3.0 * s * t * t) + d * (t * t * t));
+            out.push(v(*a) * (s * s * s) + v(*b) * (3.0 * s * s * t) + v(*c) * (3.0 * s * t * t) + v(*d) * (t * t * t));
         }
     }
     out
 }
 
-/// The spline through `p` as a section's curves on `plane`.
-fn spline_section(plane: &Plane, p: &[Vec3]) -> Vec<Seg2> {
-    let flat = |q: Vec3| Vec2::new((q - plane.origin).dot(plane.x), (q - plane.origin).dot(plane.y));
-    natural_cubic(p).into_iter().map(|[a, b, c, d]| Seg2::Cubic { p0: flat(a), p1: flat(b), p2: flat(c), p3: flat(d) }).collect()
-}
-
-/// A 10 m hull side (#13663): a keel and a sheer as sections, the stem and the transom as rails.
+/// A 10 m hull side (#16754): a keel and a sheer as sections, the stem and the transom as rails.
 /// The stem runs straight down from the sheer and then turns about 90° within some 120 mm into
 /// the forefoot. The loft's edges follow both rails all along, not only at its stations: every
 /// point of each rail is within 0.5 mm of the sheet, half the loft's tolerance (1e-4 of its size).
 /// With only even stations the stem strayed 2.7 mm from the sheet in the forefoot.
 #[test]
 fn a_hull_side_follows_a_stem_that_turns_tightly() {
-    let keel = [Vec3::new(0.0, 0.0, -160.0), Vec3::new(4880.0, 0.0, -600.0), Vec3::new(10000.0, 0.0, 0.0)];
-    let sheer = [Vec3::new(0.0, 40.0, 1200.0), Vec3::new(5000.0, 1650.0, 1200.0), Vec3::new(10000.0, 1500.0, 1200.0)];
-    let stem = [
-        Vec3::new(0.0, 40.0, 1200.0),
-        Vec3::new(0.0, 45.373332545769244, -62.868622627622926),
-        Vec3::new(0.0, 17.293450399707694, -155.24526595568008),
-        Vec3::new(0.0, 0.0, -160.0),
-    ];
-    let transom = [Vec3::new(10000.0, 0.0, 0.0), Vec3::new(10000.0, 1377.2647194380875, 394.8316231623623), Vec3::new(10000.0, 1500.0, 1200.0)];
     let keel_plane = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::new(0.0, 0.0, 1.0) };
-    let sheer_plane = at(1200.0);
-    let sections = [(keel_plane, spline_section(&keel_plane, &keel)), (sheer_plane, spline_section(&sheer_plane, &sheer))];
-    let rails = [spline_rail(&stem), spline_rail(&transom)];
+    let sections = [(keel_plane, cubics(&KEEL)), (at(1200.0), cubics(&SHEER))];
+    let rails = [cubic_rail(&STEM), cubic_rail(&TRANSOM)];
     for fit in [RailFit::Scale, RailFit::Stretch] {
         let b = loft_sheet_with_rails(&sections, &rails, fit).unwrap();
         for (name, r) in ["stem", "transom"].iter().zip(&rails) {
