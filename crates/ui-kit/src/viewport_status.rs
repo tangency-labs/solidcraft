@@ -156,18 +156,29 @@ fn target(item: &StatusItem, part: &str) -> String {
     format!("viewport_status:{}:{part}", item.id)
 }
 
+/// Diameter of a pill's round chevron and ✕ buttons.
+const ACTION_DIAMETER: f32 = 22.0;
+
 fn icon_action(ui: &mut Ui, item: &StatusItem, part: &str, icon: &str, label: &str, hint: &str, flipped: bool) -> Response {
     let t = Tokens::get();
     let height = ui.spacing().interact_size.y.max(t.control_height);
-    let (rect, _) = ui.allocate_exact_size(vec2(t.space_24, height), egui::Sense::hover());
-    let response = super::button_at(ui, &target(item, part), rect, "", Button::Ghost);
+    let (slot, _) = ui.allocate_exact_size(vec2(t.space_24, height), egui::Sense::hover());
+    // A round button with no frame: egui's own button would draw a square outline on hover
+    // and focus, so the circle, its hover fill and its focus ring are painted here.
+    let rect = Rect::from_center_size(slot.center(), vec2(ACTION_DIAMETER, ACTION_DIAMETER));
+    let response = ui.interact(rect, Id::unique(target(item, part)), egui::Sense::click());
     if response.clicked() {
         response.request_focus();
     }
-    // Ghost keeps native button interaction but intentionally omits egui's frame.
-    // Status actions still need the local hover target required by this element.
-    if response.hovered() {
-        ui.painter().rect_filled(response.rect, t.control_radius, t.hover);
+    let radius = ACTION_DIAMETER / 2.0;
+    if response.hovered() || response.is_pointer_button_down_on() {
+        ui.painter().circle_filled(rect.center(), radius, t.hover);
+    }
+    if response.has_focus() {
+        ui.painter().circle_stroke(rect.center(), radius + t.space_2, ui.visuals().selection.stroke);
+    }
+    if response.enabled() && response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     let glyph = Rect::from_center_size(response.rect.center(), vec2(t.space_24, t.space_24) - vec2(t.space_4, t.space_4) * 2.0);
     if flipped {
@@ -497,6 +508,16 @@ pub fn viewport_status_summary(
     actions
 }
 
+/// The details card under a pill: an opaque surface, so the model never shows through its rows,
+/// with a hairline border, a soft shadow and the card radius.
+pub fn viewport_status_card_frame() -> egui::Frame {
+    let t = Tokens::get();
+    Container::menu_frame()
+        .fill(t.dialog_body.to_opaque())
+        .corner_radius(t.radius_lg)
+        .inner_margin(egui::Margin::symmetric(t.space_12 as i8, t.space_10 as i8))
+}
+
 pub fn show_card(
     ctx: &egui::Context,
     free: Rect,
@@ -520,8 +541,7 @@ pub fn show_card(
         card.area(Id::unique("viewport_status_key")).order(egui::Order::Background).movable(false).fixed_pos(anchor + vec2(0.0, t.space_6)).show(
             ctx,
             |ui| {
-                let frame = card.frame(ctx, t.overlay, crate::frame::Side::Left).inner_margin(t.space_12);
-                card.show_frame(ui, frame, free, |ui| contents(ui, id));
+                card.show_frame(ui, viewport_status_card_frame(), free, |ui| contents(ui, id));
             },
         );
     solidcraft_ui_registry::publish_target("viewport_status:card", result.response.rect);
