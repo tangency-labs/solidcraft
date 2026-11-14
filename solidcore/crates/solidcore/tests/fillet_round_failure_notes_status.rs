@@ -10,7 +10,9 @@
 //! `offset_extension_as_itself` (the least set under which it shows; any one of them off and the
 //! round builds), the arc's round followed by the front edge's fails in the rollover
 //! (`SM_ERR_NULL_POINTER` from `blend::fillet_solver::p5`) and noted nothing: code 0 and no
-//! comment. It now notes `SM_FILERR_EDGE_PROBLEM` (4) with what failed.
+//! comment. It now notes `SM_FILERR_EDGE_PROBLEM` (4) with what failed. Since #14807 a trace
+//! whose fillet surface cannot be skinned fails there, before the rollover, and the note names
+//! that failure the same way.
 //!
 //! A round that fails after it has edited the body puts the body back as it came in: two of the
 //! three join edges of two cylinders joined at an angle.

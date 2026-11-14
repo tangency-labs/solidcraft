@@ -59,6 +59,8 @@ struct Access {
     corner_point: Point3,
     constant_results: Vec<bool>,
     corner_fail: Option<&'static str>,
+    /// The error `calc_fillet_geom` fails with.
+    geom_error: Option<SolidError>,
     /// A hand-built target body: `edges(Handle(0))` lists its edges as
     /// `Handle(BODY_EDGE + i)` and the manifold check runs on its records.
     body: Option<Brep>,
@@ -507,6 +509,9 @@ impl ExecutiveAccess<Handle> for Access {
         _: Handle,
         executive: &mut FilletExecutive<Handle>,
     ) -> Result<()> {
+        if let Some(error) = self.geom_error.clone() {
+            return Err(error);
+        }
         executive.error.code = 6;
         Ok(())
     }
@@ -1114,6 +1119,56 @@ fn insertion_hooks_share_mates_and_existing_ssi_with_subsequent_phases() {
     );
     assert!(executive.intersector.intersection_table().is_some());
     assert_eq!(executive.error.code, 6);
+}
+
+/// Not upstream (#14807): a solver whose trace could not skin its fillet surface fails with
+/// that error kept, in the note and as the cause, and the note says the solver status
+/// (`SM_FS_SURF_SKINNING_FAILURE`). Any other failure still notes upstream's bare
+/// surface-tracing failure.
+#[test]
+fn a_skinning_failure_keeps_its_error_in_the_note_and_as_the_cause() {
+    use crate::blend::fillet_intersector::SKINNING_FAILED;
+    let skinning = SolidError::blend_failed("test::flush_curve", SKINNING_FAILED);
+    let mut executive = state();
+    executive.solvers.push(Handle(3));
+    let mut access = Access {
+        geom_error: Some(skinning.clone()),
+        ..Access::default()
+    };
+    let error = executive
+        .calculate_solver_geometry(&mut Kernel::default(), &mut access)
+        .unwrap_err();
+    assert_eq!(error.upstream_status(), Some(1001), "{error}");
+    assert_eq!(error.cause(), Some(&skinning));
+    assert_eq!(executive.error.edge, Some(Handle(5)));
+    assert_eq!(executive.error.code, FilletErrorType::EdgeProblem as i32);
+    assert_eq!(
+        executive.error.status,
+        FilStatus::SurfSkinningFailure as i32
+    );
+    assert_eq!(
+        executive.error.comment,
+        format!("Fillet Surface Computation Failure: {skinning}")
+    );
+
+    let other = SolidError::blend_failed("test::flush_curve", "the trace failed");
+    let mut executive = state();
+    executive.solvers.push(Handle(3));
+    let mut access = Access {
+        geom_error: Some(other),
+        ..Access::default()
+    };
+    let error = executive
+        .calculate_solver_geometry(&mut Kernel::default(), &mut access)
+        .unwrap_err();
+    assert_eq!(error.upstream_status(), Some(1001), "{error}");
+    assert_eq!(error.cause(), None);
+    assert_eq!(executive.error.edge, Some(Handle(5)));
+    assert_eq!((executive.error.code, executive.error.status), (4, 10));
+    assert_eq!(
+        executive.error.comment,
+        "Fillet Surface Computation Failure"
+    );
 }
 
 #[test]

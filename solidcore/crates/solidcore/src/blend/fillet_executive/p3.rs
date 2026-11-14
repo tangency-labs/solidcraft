@@ -41,11 +41,12 @@ use std::collections::BTreeMap;
 use crate::blend::fillet_executive::p1::ExecutiveObjects;
 use crate::blend::fillet_executive::session::ball_regular::{BallCheck, BallStation};
 use crate::blend::fillet_geom::p1::{FilStatus, FilletCornerType, FilletEdgeType, FilletErrorType};
+use crate::blend::fillet_intersector::is_skinning_failure;
 use crate::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use crate::blend::fillet_solver::p5::RailsFit;
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
 use crate::error::blend::BlendFailure;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::assert_array::c_general;
 use crate::geom::object::NotifyOperation;
 use crate::geom::solution_array::SolutionObject;
@@ -69,8 +70,11 @@ fn smos_max(a: f64, b: f64) -> f64 {
 /// `FILEXEC_ERR` (`SM_ERR`): a step of the executive failed; the executive's error info
 /// says which.
 fn failure() -> SolidError {
-    SolidError::blend_failed(OP, "a step of the fillet executive failed")
+    SolidError::blend_failed(OP, FAILED)
 }
+
+/// The phrase of [`failure`].
+const FAILED: &str = "a step of the fillet executive failed";
 
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::InvalidInput {
@@ -2826,6 +2830,24 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Err(failure())
     }
 
+    /// Not upstream (#14807): the trace of `edge`'s solver could not skin its fillet surface
+    /// (`error`, [`is_skinning_failure`]). Upstream's trace ignores that error and the
+    /// blend fails later, as a corner with no surface to meet. Noted as the blend's surface
+    /// failure with what failed (`SM_FILERR_EDGE_PROBLEM`, `SM_FS_SURF_SKINNING_FAILURE`), and
+    /// the executive's `SM_ERR` keeps the trace's error as its cause.
+    fn record_skinning_failure(&mut self, edge: O, error: &SolidError) -> Result<()> {
+        let noted = self.record_solver_failure(
+            edge,
+            FilStatus::SurfSkinningFailure as i32,
+            &format!("Fillet Surface Computation Failure: {error}"),
+        );
+        noted.map_err(|_| {
+            Failure::new(OP, BlendFailure::Failed(FAILED))
+                .caused_by(error.clone())
+                .into_error()
+        })
+    }
+
     /// Build topology and then vertex geometry for each corner in native order.
     ///
     /// This is the corner-vertex component of `CreateFilletBrep`; its smooth-sequence
@@ -2935,7 +2957,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// Calculate every retained solver's geometry in native executive order.
     ///
     /// # Errors
-    /// Genuine dependency errors or native surface-tracing failure metadata.
+    /// Genuine dependency errors or native surface-tracing failure metadata; a fillet
+    /// surface that could not be skinned is noted with its error (not upstream, #14807:
+    /// `record_skinning_failure`).
     pub fn calculate_solver_geometry(
         &mut self,
         k: &mut Kernel,
@@ -2945,7 +2969,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
             k.check_cancelled(OP)?;
-            if ignore(access.geometry_calculate(k, solver, self))?.is_none() {
+            let calculated = access.geometry_calculate(k, solver, self);
+            if let Err(error) = &calculated {
+                if is_skinning_failure(error) {
+                    return self.record_skinning_failure(access.geometry_edge(solver)?, error);
+                }
+            }
+            if ignore(calculated)?.is_none() {
                 return self.record_solver_failure(
                     access.geometry_edge(solver)?,
                     10,

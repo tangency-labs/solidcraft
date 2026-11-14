@@ -131,6 +131,17 @@ const OP_SPAN: &str = "blend::fillet_intersector::FilletIntersector::test_span_a
 const OP_NEXT: &str = "blend::fillet_intersector::FilletIntersector::compute_next_point";
 const OP_FLUSH: &str = "blend::fillet_intersector::FilletIntersector::flush_curve";
 
+/// What `FlushCurve` fails with when it cannot skin the fillet surface (it sets
+/// `SurfSkinningFailure`). The trace passes it on and the executive notes it as the
+/// blend's surface failure (not upstream, #14807): [`is_skinning_failure`].
+pub(crate) const SKINNING_FAILED: &str = "the fillet surface could not be skinned";
+
+/// Whether `error` is `FlushCurve`'s failure to skin the fillet surface
+/// ([`SKINNING_FAILED`]), the error a trace ends with (not upstream, #14807).
+pub(crate) fn is_skinning_failure(error: &SolidError) -> bool {
+    error.blend_failure() == Some(&crate::error::blend::BlendFailure::Failed(SKINNING_FAILED))
+}
+
 /// `SOLV_BASE_TYPE`.
 const SOLV_BASE_TYPE: i64 = 19000;
 
@@ -2119,10 +2130,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             );
             let Some(s) = keep_unported(created)? else {
                 solver.set_status(FilStatus::SurfSkinningFailure)?;
-                return Err(SolidError::blend_failed(
-                    OP_FLUSH,
-                    "the fillet surface could not be skinned",
-                ));
+                return Err(SolidError::blend_failed(OP_FLUSH, SKINNING_FAILED));
             };
             fillet_surface = s;
         }
