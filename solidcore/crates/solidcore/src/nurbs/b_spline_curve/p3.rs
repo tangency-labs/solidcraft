@@ -584,7 +584,8 @@ const STRETCH_SLIVER_ULPS: f64 = 1024.0;
 /// (at most [`STRETCH_PIECES`] of them). On each, [`radius_clears_on_surface`] must clear
 /// half the growth line's value at the piece's near edge (`radius_tol 2^-(j+2)` on a whole
 /// dyadic piece; a quarter of the line's value at its far edge). This is a DEFINITION of
-/// the defect inside a zero-speed stretch: a radius below that is reported. A genuine
+/// the defect inside a zero-speed stretch, chosen in review: a radius below that is
+/// reported (`a_radius_below_half_the_growth_line_is_reported`: 0.4 times the line). A genuine
 /// zero-speed end has its radius on the line to first order, so the full line would leave
 /// it no margin at the near edges. It is looser than WR-668's own check, which accepts the
 /// radius at the stretch's far end within half the tolerance of the line (at least
@@ -3004,6 +3005,78 @@ mod tests {
             &[3, 2, 3],
         );
         assert!(radius_clears_on_surface(&k, &join, &surface, 0.0, 1.0, 1e-3).unwrap());
+        // a near-G1 corner, 1e-8 rad, at a double knot on a straight run of the unit plane:
+        // still a corner
+        let plane = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let bend: f64 = 1e-8;
+        let kinked = uv_quadratic(
+            &[
+                [0.2, 0.2],
+                [0.3, 0.2],
+                [0.4, 0.2],
+                [0.4 + 0.1 * bend.cos(), 0.2 + 0.1 * bend.sin()],
+                [0.4 + 0.2 * bend.cos(), 0.2 + 0.2 * bend.sin()],
+            ],
+            &[0.0, 0.5, 1.0],
+            &[3, 2, 3],
+        );
+        assert!(!radius_clears_on_surface(&k, &kinked, &plane, 0.0, 1.0, 1e-3).unwrap());
+        let straight = uv_quadratic(
+            &[[0.2, 0.2], [0.3, 0.2], [0.4, 0.2], [0.5, 0.2], [0.6, 0.2]],
+            &[0.0, 0.5, 1.0],
+            &[3, 2, 3],
+        );
+        assert!(radius_clears_on_surface(&k, &straight, &plane, 0.0, 1.0, 1e-3).unwrap());
+        // a knot of multiplicity 3 on a quadratic (the curve may jump there): refused
+        // (the raw NURB: the canonical constructor would reduce the knot)
+        let jump = curve(
+            2,
+            &[
+                [0.2, 0.2, 0.0],
+                [0.3, 0.2, 0.0],
+                [0.4, 0.2, 0.0],
+                [0.4, 0.2, 0.0],
+                [0.5, 0.2, 0.0],
+                [0.6, 0.2, 0.0],
+            ],
+            &[0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0],
+        );
+        assert!(!radius_clears_on_surface(&k, &jump, &plane, 0.0, 1.0, 1e-3).unwrap());
+    }
+
+    /// The half-line definition reports a real defect: the positive cubic of
+    /// [`a_genuine_zero_speed_end_clears_its_stretch`] read against a growth line 2.5 times
+    /// as steep as its own (the stretch taken as 0.4 times its WR-668 stretch), so that its
+    /// radius is 0.4 times the line, below the half the definition asks, does not clear;
+    /// against its own line it does.
+    #[test]
+    fn a_radius_below_half_the_growth_line_is_reported() {
+        let k = Kernel::default();
+        let plane = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let cubic = uv_cubic_on(&[[0.2, 0.2], [0.2, 0.2], [0.6, 0.2], [0.6, 0.6]], 0.0);
+        let tol = 1e-3;
+        let stretch = zero_speed_radius_stretch(&cubic, 0, tol).unwrap().unwrap();
+        let unit = Extent1d::from_raw(0.0, 1.0);
+        assert!(stretch_clears_on_surface(&k, &cubic, &plane, &unit, 0, stretch, tol).unwrap());
+        assert!(
+            !stretch_clears_on_surface(&k, &cubic, &plane, &unit, 0, 0.4 * stretch, tol).unwrap()
+        );
     }
 
     /// The cap is what lets a stretch whose first knot lies inside the uncapped sliver be
@@ -3011,7 +3084,10 @@ mod tests {
     /// `a = 0.9` times its sliver length inserted (Boehm: the same curve up to rounding).
     /// With the cap the sliver ends at `a`, inside one span, and the stretch clears. MEASURED
     /// by probe: without the cap the sliver crosses `a`, its extent certificate refuses it,
-    /// and the stretch is not certified.
+    /// and the stretch is not certified. The stretch is the plain cubic's: on the knotted
+    /// curve WR-668's stretch detection (`zero_speed_radius_stretch`) reads `C'''` off the
+    /// 1.8e-7 first span, where rounding swamps it, and finds no stretch, so the production
+    /// path never reaches the certificate here (a WR-668 limitation, recorded in the PR).
     #[test]
     fn a_zero_speed_end_with_a_knot_inside_its_sliver_clears() {
         let k = Kernel::default();

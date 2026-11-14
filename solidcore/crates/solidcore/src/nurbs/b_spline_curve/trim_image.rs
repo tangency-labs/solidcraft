@@ -59,6 +59,7 @@ use std::collections::VecDeque;
 
 use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
 use crate::blend::fillet_section::interval::{round_up, Ivl};
+use crate::blend::fillet_section::series::V3;
 use crate::blend::fillet_section::station::{as_b_spline, ders_basis, span, Nurbs};
 use crate::error::Result;
 use crate::kernel::Kernel;
@@ -182,13 +183,17 @@ pub(crate) fn radius_clears_on_surface(
     Ok(true)
 }
 
-/// Whether `curve` has a knot of multiplicity at least its degree strictly inside its
-/// domain and within `[lo, hi]` (ends included) whose left and right tangents are not
-/// certified parallel: a point where its tangent may jump (a C0 corner). The tangents on
-/// both sides are enclosed in rounded intervals ([`curve_derivs_over`] on each side's
-/// span); they are certified parallel where their cross product's enclosure holds 0 and
-/// their dot product's is positive, so a G1 join (parallel within rounding) is not a
-/// corner. A side whose tangent can vanish is a corner.
+/// Whether `curve` has a knot strictly inside its domain and within `[lo, hi]` (ends
+/// included) where it may turn a corner: a knot of multiplicity above its degree (the
+/// curve may jump there), or of multiplicity equal to its degree (C0) whose left and right
+/// tangents are not parallel to rounding. The tangents on both sides are enclosed in
+/// rounded intervals ([`curve_derivs_over`] on each side's span). They are parallel to
+/// rounding where the cross product's enclosure is at most [`PARALLEL_ULPS`] `ε` times
+/// the product of their lengths plus twice each enclosure's half-width times the other's
+/// length (the rounding of the derivatives' sums, which cancel by the trim's coordinates
+/// over its knot spans), and the dot product's is positive: a G1 join is not a corner.
+/// That a turn below that is rounding, not a corner, is ARGUED. A side
+/// whose tangent can vanish is a corner.
 fn has_corner_knot(curve: &NurbsCurve, lo: f64, hi: f64) -> bool {
     let (Some(&first), Some(&last)) = (curve.u.get(curve.p), curve.u.get(curve.n)) else {
         return true;
@@ -197,7 +202,10 @@ fn has_corner_knot(curve: &NurbsCurve, lo: f64, hi: f64) -> bool {
     while let Some(&x) = curve.u.get(i) {
         let mult = curve.u.iter().skip(i).take_while(|&&y| y == x).count();
         let inside = x > first && x < last && x >= lo && x <= hi;
-        if inside && mult >= curve.p {
+        if inside && mult > curve.p {
+            return true;
+        }
+        if inside && mult == curve.p {
             let (Some(left), right) = (i.checked_sub(1), i + mult - 1) else {
                 return true;
             };
@@ -211,7 +219,17 @@ fn has_corner_knot(curve: &NurbsCurve, lo: f64, hi: f64) -> bool {
             };
             let cross = a.x * b.y - a.y * b.x;
             let dot = a.x * b.x + a.y * b.y;
-            let parallel = cross.lo <= 0.0 && cross.hi >= 0.0 && dot.lo > 0.0;
+            let len = |v: V3<Ivl>| (v.x * v.x + v.y * v.y).sqrt();
+            // the enclosures' own widths: the rounding of the derivatives' sums
+            let width = |v: V3<Ivl>| {
+                let half = |x: Ivl| Ivl::from(0.5) * (Ivl::from(x.hi) - Ivl::from(x.lo));
+                (half(v.x) * half(v.x) + half(v.y) * half(v.y)).sqrt()
+            };
+            let (la, lb) = (len(a), len(b));
+            let rounding = (Ivl::from(PARALLEL_ULPS * f64::EPSILON) * la * lb
+                + Ivl::from(2.0) * (width(a) * lb + la * width(b)))
+            .hi;
+            let parallel = cross.mag() <= rounding && dot.lo > 0.0;
             if !parallel {
                 return true;
             }
@@ -220,6 +238,10 @@ fn has_corner_knot(curve: &NurbsCurve, lo: f64, hi: f64) -> bool {
     }
     false
 }
+
+/// The turn, in units of `ε` (as a cross product over the lengths), below which
+/// [`has_corner_knot`] reads a C0 knot's two tangents as parallel to rounding.
+const PARALLEL_ULPS: f64 = 64.0;
 
 /// Not upstream: whether the piece `[lo, hi]` of the trim `trim`, inside one of its knot
 /// spans, is a sliver at rounding level, in UV and on `surface`:
