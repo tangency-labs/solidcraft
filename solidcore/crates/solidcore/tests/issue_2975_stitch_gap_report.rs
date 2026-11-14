@@ -796,7 +796,6 @@ fn a_gap_inside_the_summed_local_zones_is_taken_only_by_the_stitch_scope() {
     let mut repair = AssertArray::default();
     let gaps = validate_and_update_tolerances(&mut k, &mut b, true, Some(&mut repair), 2).unwrap();
     assert!((gaps.max_vertex_edge_gap - 0.004).abs() < 1e-12);
-
 }
 
 /// The stitch's scope takes a gap past the rule for every body only where the tolerance tube that
@@ -822,7 +821,10 @@ fn the_edge_tube_proof_finds_a_face_inside_the_tube_and_clears_one_far_away() {
         assert_eq!(any, reaches, "distance {distance}");
         for v in b.vertex_list().to_vec() {
             if b.vertex(v).unwrap().tolerance == 0.006 {
-                assert!(!vertex_ball_reaches(&k, &mut b, v).unwrap(), "distance {distance}");
+                assert!(
+                    !vertex_ball_reaches(&k, &mut b, v).unwrap(),
+                    "distance {distance}"
+                );
             }
         }
     }

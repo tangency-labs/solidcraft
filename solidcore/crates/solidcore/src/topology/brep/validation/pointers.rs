@@ -1408,11 +1408,14 @@ fn plane_cell_box(k: &Kernel, surface: &Surface, cell: &Extent2d) -> Result<Opti
             _ => return Ok(None),
         }
     }
-    let mut found = Extent3d::from_point(corners.first().copied().unwrap_or(Vec3::new(0.0, 0.0, 0.0)));
+    let mut found =
+        Extent3d::from_point(corners.first().copied().unwrap_or(Vec3::new(0.0, 0.0, 0.0)));
     for p in corners.iter().skip(1) {
         found.add_point(*p);
     }
-    let scale = corners.iter().fold(1.0_f64, |m, p| m.max(p.x.abs()).max(p.y.abs()).max(p.z.abs()));
+    let scale = corners.iter().fold(1.0_f64, |m, p| {
+        m.max(p.x.abs()).max(p.y.abs()).max(p.z.abs())
+    });
     found.expand_absolute(scale * 1e-12);
     Ok(Some(found))
 }
@@ -1557,7 +1560,11 @@ pub fn edge_tube_reaches(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<bool> {
         }
         let first = edge::vertex(b, other)?;
         let last = edge::other_vertex(b, other, first)?;
-        if [first, last].into_iter().flatten().any(|v| ends.contains(&v)) {
+        if [first, last]
+            .into_iter()
+            .flatten()
+            .any(|v| ends.contains(&v))
+        {
             continue;
         }
         let data = b.edge(other)?;

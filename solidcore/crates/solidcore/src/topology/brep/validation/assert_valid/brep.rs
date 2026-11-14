@@ -417,10 +417,15 @@ fn validate_and_update_body(
                     };
                     ok = match gap {
                         Some(g) if g <= tol + incident => {
-                            if !ball_reaches.contains_key(&v) {
-                                ball_reaches.insert(v, vertex_ball_reaches(k, b, v)?);
-                            }
-                            ball_reaches.get(&v) == Some(&false)
+                            let reaches = match ball_reaches.get(&v) {
+                                Some(&known) => known,
+                                None => {
+                                    let found = vertex_ball_reaches(k, b, v)?;
+                                    ball_reaches.insert(v, found);
+                                    found
+                                }
+                            };
+                            !reaches
                         }
                         _ => false,
                     };
@@ -469,10 +474,15 @@ fn validate_and_update_body(
             let eu_tol = tedge::tolerance(b, e)?;
             let mut ok = !need || max_gap <= eu_tol;
             if !ok && rep.stitched && max_gap <= eu_tol + face_tol {
-                if !tube_reaches.contains_key(&e) {
-                    tube_reaches.insert(e, edge_tube_reaches(k, b, e)?);
-                }
-                ok = tube_reaches.get(&e) == Some(&false);
+                let reaches = match tube_reaches.get(&e) {
+                    Some(&known) => known,
+                    None => {
+                        let found = edge_tube_reaches(k, b, e)?;
+                        tube_reaches.insert(e, found);
+                        found
+                    }
+                };
+                ok = !reaches;
             }
             rep.add(b, ok, tolerance_test(4, eu, eu_tol), || max_gap)?;
 
