@@ -483,10 +483,21 @@ fn reverse_ignored(k: &Kernel, curve: &mut Curve, domain: &Extent1d) -> Result<b
 /// `ivl1` / `ivl2` of the two curves (`start.parameters = [t1, t2]`,
 /// `start.solution_value` the gap) is kept. Exact (gap below `SM_EFF_ZERO` or the
 /// scaled zero) and tangential (gap perpendicular to both tangents) answers are
-/// kept; an answer on an interval end where the curve continues (`conts*` at least
-/// `G1`) is dropped when the next interval gets closer; one on a curve end (`conts*`
-/// at most `C0`) is kept; others are dropped. `adjacency` 1 / 2 drops the shared end
-/// of adjacent spans in self intersection (`[1st, 2nd]` / `[2nd, 1st]`).
+/// kept. The scaled zero is `SM_EFF_ZERO` times one plus the largest of the solution
+/// points, tangents and parameters and `evaluation_scale`: the largest coordinate the
+/// curves' points are evaluated from (zero for analytic curves, whose points are the
+/// solution's own magnitude). A B-spline point is a convex combination of its control
+/// points, rounded to about `SM_EFF_ZERO` times their largest coordinate (Farouki and
+/// Rajan, "On the numerical condition of polynomials in Bernstein form", CAGD 4, 1987),
+/// so a gap of that size is as exact as the curve can give: upstream scaled the zero by
+/// the solution alone and dropped such crossings, for instance on a line's B-spline,
+/// whose control points lie at the infinite parameter, 1.2e6 mm out.
+///
+/// The other answers are kept or dropped as upstream: an answer on an interval end
+/// where the curve continues (`conts*` at least `G1`) is dropped when the next interval
+/// gets closer; one on a curve end (`conts*` at most `C0`) is kept; others are dropped.
+/// `adjacency` 1 / 2 drops the shared end of adjacent spans in self intersection
+/// (`[1st, 2nd]` / `[2nd, 1st]`).
 ///
 /// # Errors
 ///
@@ -500,6 +511,7 @@ pub fn filter_solution<C1, C2, O>(
     conts1: [ContinuityType; 2],
     conts2: [ContinuityType; 2],
     adjacency: u64,
+    evaluation_scale: f64,
     solution: &Solution<O>,
 ) -> Result<bool>
 where
@@ -530,14 +542,18 @@ where
     let [p1, t1] = pv1;
     let [p2, t2] = pv2;
 
-    // keep answers good to ScaledZero (sensitive to parameter values [B628])
+    // keep answers good to ScaledZero (sensitive to parameter values [B628]), and to the
+    // rounding of the curves' evaluation (not upstream)
     let scaled_zero = EFF_ZERO
         * (1.0
-            + max4(
-                max2(p1.max_dimension(), t1.max_dimension()),
-                max2(p2.max_dimension(), t2.max_dimension()),
-                s0,
-                s1,
+            + max2(
+                max4(
+                    max2(p1.max_dimension(), t1.max_dimension()),
+                    max2(p2.max_dimension(), t2.max_dimension()),
+                    s0,
+                    s1,
+                ),
+                evaluation_scale,
             ));
     if value < scaled_zero {
         return Ok(true);

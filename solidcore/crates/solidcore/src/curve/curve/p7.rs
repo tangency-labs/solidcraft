@@ -85,7 +85,8 @@ use crate::geom::tree::{NodeData, Tree, TreeNode};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, rad_to_deg, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
-use crate::nurbs::b_spline_curve::ProjectionType;
+use crate::nurbs::b_spline_curve::{BSplineCurve, ProjectionType};
+use crate::nurbs::math::{NOW, NOZ};
 
 const OP_CCI: &str = "curve::curve::p7::CciGlobalSolver::local_solve_branch";
 const OP_GPA: &str = "curve::curve::p7::Curve::global_property_analysis";
@@ -122,6 +123,28 @@ fn leaf_span<O: Copy + PartialEq>(tree: &Tree<O>, node: &TreeNode<O>) -> Result<
         return Err(SolidError::null_pointer(OP_CCI));
     }
     Ok(*tree.curve_span(node)?)
+}
+
+/// The largest coordinate a point of `curve` is evaluated from: that of its control points
+/// for a curve evaluated from them (a B-spline, a line made a B-spline by a mirror), zero for
+/// an analytic curve (a line, an ellipse, a parabola, a hyperbola), which evaluates from its
+/// own frame, and for the kinds without control points (not upstream: see `filter_solution`).
+fn evaluation_scale(curve: &Curve) -> f64 {
+    if curve.is_analytic() {
+        return 0.0;
+    }
+    let Some(Ok(points)) = curve.b_spline_base().map(BSplineCurve::control_points) else {
+        return 0.0;
+    };
+    points.iter().fold(0.0, |m, p| {
+        let w = if p.w == NOW || p.w == 0.0 {
+            1.0
+        } else {
+            p.w.abs()
+        };
+        let z = if p.z == NOZ { 0.0 } else { p.z.abs() };
+        max2(m, max2(max2(p.x.abs(), p.y.abs()), z) / w)
+    })
 }
 
 impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
@@ -180,6 +203,12 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
         let k: &Kernel = self
             .kernel
             .ok_or(SolidError::invalid_input(OP_CCI, "solver without kernel"))?;
+        // the largest coordinate the two curves' points are evaluated from (not upstream:
+        // see `filter_solution`)
+        let evaluation_scale = max2(
+            evaluation_scale(parent_curve1),
+            evaluation_scale(parent_curve2),
+        );
         let tol = self.base.tolerance_3d;
         let interval1 = self.interval1;
         let interval2 = self.interval2;
@@ -715,7 +744,16 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
 
                     // Now check the refined solution.
                     let keep = filter_solution(
-                        k, curve1, &ivl1, curve2, &ivl2, conts1, conts2, adjacency, sol,
+                        k,
+                        curve1,
+                        &ivl1,
+                        curve2,
+                        &ivl2,
+                        conts1,
+                        conts2,
+                        adjacency,
+                        evaluation_scale,
+                        sol,
                     )?;
 
                     // save aSolutions, which should be kept, to m_pSolutions
@@ -938,7 +976,16 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
                 // Filter out intersections which are actually outside of the boundary
                 // of the curve and are not of the tangent sort
                 let keep = filter_solution(
-                    k, curve1, &ivl1, curve2, &ivl2, conts1, conts2, adjacency, &solution,
+                    k,
+                    curve1,
+                    &ivl1,
+                    curve2,
+                    &ivl2,
+                    conts1,
+                    conts2,
+                    adjacency,
+                    evaluation_scale,
+                    &solution,
                 )?;
 
                 // Filter out the nasty end case where the intersection converges to
