@@ -4,6 +4,7 @@
 //!
 //! `--safe-mode` (or `SOLIDCRAFT_SAFE_MODE=1`) starts with default settings, no recovery offer and
 //! the software renderer; see `startup` and docs/book/src/guide/troubleshooting.md.
+//! `SOLIDCRAFT_SURFACE_LOG=<path>` appends renderer/lifecycle debug diagnostics for display-wake reports.
 //!
 //! A `.step`/`.stp` file opens as a new design holding the file's bodies (an Import feature); a
 //! `.3mf`/`.stl`/`.obj`/`.glb`/`.gltf` file as a new design holding mesh bodies.
@@ -45,6 +46,7 @@ mod open_documents;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
 mod startup;
+mod surface_log;
 #[cfg(any(target_os = "windows", test))]
 mod window_fit;
 
@@ -1089,6 +1091,7 @@ impl Drop for DriverClient {
 }
 
 fn main() -> eframe::Result {
+    surface_log::install();
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");
