@@ -807,20 +807,50 @@ impl Line {
         self.point + step_param * self.scale * self.vector
     }
 
+    /// Not upstream: the STEP parameter of NURB parameter `t` as
+    /// [`Self::convert_t_from_nurbs_to_step`] rounds it, with a bound on its distance from
+    /// the exact one. `None` for numbers not finite.
+    ///
+    /// On a bounded line with a NURB domain of nonzero length, `s = a0 + r` with
+    /// `r = (t - n) / L * A` (`n` the NURB end the parameter is measured from, `L` and `A`
+    /// the NURB and analytic lengths; the negation of an inside-out line is exact). The
+    /// difference, `L`, `A`, the quotient and the product round once each, so the computed
+    /// `r` is the exact one times at most five factors `(1 + δ)^±1`, off by at most
+    /// `5u / (1 - 10u) <= γ_6` of itself. The sum rounds once more: `|a0 + r| <= |s| /
+    /// (1 - u)` and `|r| <= |a0 + r| + |a0|`, so `s` is within `(u + γ_6) |s| / (1 - u) +
+    /// γ_6 |a0| <= γ_8 (|s| + |a0|)` of the exact parameter; the bound's own two roundings
+    /// are covered by `1 + γ_2`. That model is relative only: a quotient or product that
+    /// lands in the subnormal range is also off by up to half the smallest subnormal,
+    /// `η = 2^-1075` (sums and differences are exact there). The quotient's `η` is then
+    /// multiplied by `A`, the product's is not, so `(1 + |A|) · 2^-1074` covers both with
+    /// room for the bound's own rounding. The other branches copy or negate `t`, exactly.
+    fn step_param_enclosure(&self, t: f64) -> Option<(f64, f64)> {
+        let s = self.convert_t_from_nurbs_to_step(t);
+        let err = if self.is_bounded() && !is_zero(self.natural_interval().length()) {
+            let subnormal = (1.0 + self.anal_domain.length().abs()) * f64::from_bits(1);
+            gamma(8) * (s.abs() + self.anal_domain.min().abs()) * (1.0 + gamma(2)) + subnormal
+        } else {
+            0.0
+        };
+        (s.is_finite() && err.is_finite()).then_some((s, err))
+    }
+
     /// Not upstream: the points of the line at the ends of `interval` (NURB domain), each
     /// with the error bound of its coordinates, whose segment holds the line over
-    /// `interval`. A point is `P + s scale V` with `s` the STEP parameter; a rounded `s`
-    /// moves it along the line, the product and the sum round each coordinate by at most
-    /// `γ_3 (|P| + |s scale V|)`. `None` for numbers not finite.
+    /// `interval`. A point is `P + s scale V` with `s` the STEP parameter. The computed `s`
+    /// is within `δs` of the exact one ([`Self::step_param_enclosure`]), which moves the
+    /// point along the line by at most `δs |scale| |V|`; the product and the sum round each
+    /// coordinate by at most `γ_3 (|P| + |s scale V|)`. Both terms are widened by their own
+    /// rounding. `None` for numbers not finite.
     #[must_use]
     pub(crate) fn segment_over(&self, interval: &Extent1d) -> Option<[(Point3, f64); 2]> {
         let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
         let end = |t: f64| {
-            let s = self.convert_t_from_nurbs_to_step(t);
+            let (s, ds) = self.step_param_enclosure(t)?;
             let q = self.evaluate_point(t);
-            let e = gamma(3)
-                * (size(self.point) + (s * self.scale).abs() * size(self.vector))
-                * (1.0 + gamma(1));
+            let e = (gamma(3) * (size(self.point) + (s * self.scale).abs() * size(self.vector))
+                + ds * self.scale.abs() * size(self.vector))
+                * (1.0 + gamma(3));
             (q.x.is_finite() && q.y.is_finite() && q.z.is_finite() && e.is_finite())
                 .then_some((q, e))
         };
@@ -2570,5 +2600,36 @@ mod tests {
         .unwrap();
         assert_eq!(s.natural_interval(), Extent1d::from_min_max(0.0, 4.0));
         assert_eq!(s.step_interval(), Extent1d::from_min_max(0.0, 1.0));
+    }
+
+    /// A parameter whose conversion to the STEP domain rounds away (review on
+    /// #16146): on `[-1, 1]` both ways, `t = 2^-54` gives `t + 1 = 1` and the STEP
+    /// parameter `0`, while the exact one is `2^-54`; at scale `1e12` the exact end is
+    /// `5.55e-5` from the computed one. Its error bound covers that distance (it was `0`).
+    #[test]
+    fn segment_over_encloses_the_parameter_conversion() {
+        let domain = Extent1d::from_min_max(-1.0, 1.0);
+        let l = Line::bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            &domain,
+            &BoundedLineOptions {
+                scale: 1e12,
+                ..BoundedLineOptions::default()
+            },
+        );
+        assert_eq!(l.natural_interval(), domain);
+        let t = 2f64.powi(-54);
+        assert_eq!(l.convert_t_from_nurbs_to_step(t), 0.0);
+        let [lo, hi] = l
+            .segment_over(&Extent1d::from_min_max(0.0, t))
+            .expect("finite line");
+        // the exact ends: x = 0 and x = 1e12 * 2^-54
+        let exact_hi = 1e12 * t;
+        assert_eq!(hi.0, Vec3::ZERO);
+        assert!(hi.1 >= exact_hi, "bound {} below the miss {exact_hi}", hi.1);
+        assert!(lo.0.x.abs() <= lo.1);
+        // still tight: about 8 ulps of the parameter, times the scale
+        assert!(hi.1 < 1e-2);
     }
 }

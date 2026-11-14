@@ -1133,11 +1133,10 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     if app.preview.rolled_back {
         return;
     }
-    if !app
-        .dialog
-        .as_ref()
-        .is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(_) | crate::dialogs::Kind::InsertDrawing(_)) && d.previews())
-    {
+    if !app.dialog.as_ref().is_some_and(|d| {
+        matches!(d.kind, crate::dialogs::Kind::SketchModify(_) | crate::dialogs::Kind::InsertDrawing(_) | crate::dialogs::Kind::InsertAirfoil(_))
+            && d.previews()
+    }) {
         return;
     }
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);

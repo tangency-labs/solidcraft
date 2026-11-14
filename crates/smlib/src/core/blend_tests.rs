@@ -475,16 +475,14 @@ fn a_setback_short_of_where_the_rails_cross_names_the_least() {
 }
 
 /// A knife edge (the cusp of `knife_edge_chamfers`' profile: an arc of radius 21 running out
-/// tangent into the top line) chamfered 200: refused naming the distance 21 less the fit margin
-/// (a thousand edge tolerances, 20.99). A knife edge's chamfer has no wedge, so its solver
-/// keeps no chamfer definition; its offsets are its distance (the chord between the contacts
-/// of the ball of that radius), so the radius that fits is the distance that fits
-/// (`FilletSession::chamfer_fit`). The named distance builds the closed form's chamfer:
-/// the triangle flat contact, tip, wall contact less the wall's circular segment. The size
-/// named is the wall contact's limit (the ball's contact leaves the arc at d = 21), the value
-/// SolidCraft named before its refusals were ops'; it is not the chamfer's largest buildable
-/// size (184.033 by construction, where the overflowed chord takes the whole part), which
-/// the kernel does not compute yet (#15250).
+/// tangent into the top line) chamfered 200: refused naming the distance at which the chord
+/// takes the whole part, TIP² / R = 184.033 (its far bottom corner, the chord pivoting about
+/// the point opposite the tip), less the fit margin (a thousand edge tolerances). A knife
+/// edge's chamfer has no wedge, so its solver keeps no chamfer definition; its offsets are its
+/// distance (the chord between the contacts of the ball of that radius), so the radius that
+/// fits is the distance that fits (`FilletSession::chamfer_fit`). The named distance builds
+/// the closed form's chamfer: the sliver at the far bottom corner that the chord through
+/// (0, -2R) and the flat contact (-2 sqrt(R d), 0), from the tip, cuts off (#15250).
 #[test]
 fn a_knife_edge_chamfer_too_large_names_its_distance() {
     use super::sweep::extrude;
@@ -501,19 +499,64 @@ fn a_knife_edge_chamfer_too_large_names_its_distance() {
     ];
     let part = extrude(&profile, [0.0, 0.0, 1.0], H, 0.0, DraftCorner::Curvature, true).unwrap();
     let again = extrude(&profile, [0.0, 0.0, 1.0], H, 0.0, DraftCorner::Curvature, true).unwrap();
-    let before = (TIP - R) * R * H + R * R * (1.0 - PI / 4.0) * H;
     let tip = [TIP, 0.0, H / 2.0];
     let e = timed("knife_fit", move || blend(&again, Blend::Chamfer, &[tip], &[200.0], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err());
     let Error::TooLarge { size: d, kind: crate::FitKind::Distance, at: Some(at), .. } = e else { panic!("{e:?}") };
-    assert!((d - 20.99).abs() < 1e-9, "{d}");
+    let closed = TIP * TIP / R - 0.01;
+    assert!((d - closed).abs() < 1e-9, "{d}");
     assert!((0..3).all(|i| (at[i] - tip[i]).abs() < 1e-9), "{at:?}");
     let cut = timed("knife_fit_builds", move || blend(&part, Blend::Chamfer, &[tip], &[d], TOL, &[], &[], Corners::Filled).unwrap());
-    let flat = TIP - (4.0 * R * d).sqrt();
-    let wy = -R + (R - d) * R / (R + d);
-    let b = ((R - d) / (R + d)).acos();
-    let removed = (0.5 * ((TIP - flat) * wy).abs() - 0.5 * R * R * (b - b.sin())) * H;
+    let s = (R * d).sqrt();
+    let kept = 0.5 * (R * TIP / s - R) * (TIP - s) * H;
     let v = volume(&cut, 1e-8).unwrap();
-    assert!((v - (before - removed)).abs() < 1e-9 * v, "{v} vs {}", before - removed);
+    // the sliver's bound is the contact solve's, as in solidcore's
+    // `the_distance_named_builds_the_sliver_the_chord_keeps`: its legs lie on exact faces, so
+    // the error is in the chord; each station's Newton stops at `1e-9 * max(1, |m|)`
+    // (`fillet_section/section.rs`, `solve_tol`), m the ball's centre (TIP - 2s, -d, z), so the
+    // volume moves by at most `solve_tol * hypotenuse * H` (3.5e-9 absolute, 7e-4 of the sliver)
+    let hypotenuse = ((TIP - s).powi(2) + (R * TIP / s - R).powi(2)).sqrt();
+    let centre = ((TIP - 2.0 * s).powi(2) + d * d + H * H).sqrt();
+    let solve_tol = 1.0e-9 * centre.max(1.0);
+    assert!((v - kept).abs() <= solve_tol * hypotenuse * H, "{v} vs {kept}");
+    // the sliver's volume goes as the square of what the named distance falls short of
+    // TIP² / R, so its check is ill-conditioned; d = 100 keeps 611.83, well conditioned
+    let third = extrude(&profile, [0.0, 0.0, 1.0], H, 0.0, DraftCorner::Curvature, true).unwrap();
+    let cut = timed("knife_100_builds", move || blend(&third, Blend::Chamfer, &[tip], &[100.0], TOL, &[], &[], Corners::Filled).unwrap());
+    let s = (R * 100.0_f64).sqrt();
+    let kept = 0.5 * (R * TIP / s - R) * (TIP - s) * H;
+    let v = volume(&cut, 1e-8).unwrap();
+    assert!((v - kept).abs() < 1e-9 * v, "{v} vs {kept}");
+}
+
+/// The knife edge of `a_knife_edge_chamfer_too_large_names_its_distance` chamfered 200: the
+/// reason is an overflow that keeps nothing, not corners that take the whole edge (the knife
+/// edge's ends have no corners), and the distance named is where the chord takes all the
+/// part, `TIP² / R` (its far bottom corner, at x = -TIP, y = -R from the tip, the chord
+/// pivoting about the point opposite the tip, so `d = R (TIP / (2R - R))²`), less the fit
+/// margin (#15250).
+#[test]
+fn a_knife_edge_chamfer_wider_than_the_part_keeps_nothing() {
+    use super::sweep::extrude;
+    use crate::sweeps::{Curve, DraftCorner};
+    const R: f64 = 21.0;
+    const TIP: f64 = 62.0 + 1.0 / 6.0;
+    const H: f64 = 10.0;
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line { start: [a[0], a[1], 0.0], end: [b[0], b[1], 0.0] };
+    let profile = [
+        line([0.0, 0.0], [0.0, -R]),
+        line([0.0, -R], [TIP - R, -R]),
+        Curve::Arc { center: [TIP, -R, 0.0], axis: [0.0, 0.0, -1.0], reference: [1.0, 0.0, 0.0], radius: R, start: PI, end: 1.5 * PI },
+        line([TIP, 0.0], [0.0, 0.0]),
+    ];
+    let part = extrude(&profile, [0.0, 0.0, 1.0], H, 0.0, DraftCorner::Curvature, true).unwrap();
+    let tip = [TIP, 0.0, H / 2.0];
+    let e =
+        timed("knife_keeps_nothing", move || blend(&part, Blend::Chamfer, &[tip], &[200.0], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err());
+    let Error::TooLarge { size: d, kind: crate::FitKind::Distance, at: Some(_), why } = e else { panic!("{e:?}") };
+    assert_eq!(why, Some(crate::RoomReason::OverflowKeepsNothing));
+    assert_ne!(why, Some(crate::RoomReason::CornersTakeWholeEdge));
+    let closed = TIP * TIP / R - 0.01;
+    assert!((d - closed).abs() < 1e-9, "{d} vs {closed}");
 }
 
 /// A cliff overflow the fork refuses too (`fixes.fillet_cliff_overflow`, solidcore#960): the

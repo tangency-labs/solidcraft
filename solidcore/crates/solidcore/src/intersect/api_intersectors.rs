@@ -6,6 +6,7 @@
 //! | Rust                                                  | Upstream                       |
 //! |-------------------------------------------------------|--------------------------------|
 //! | [`intersect_curves`], [`CurveIntersections`]          | `SmApiIntersectCurves`         |
+//! | [`curve_crossings`]                                   | (not upstream)                 |
 //! | [`intersect_surfaces`]                                | `SmApiIntersectSurfaces`       |
 //! | [`intersect_surfaces_within`]                         | (not upstream)                 |
 //! | [`intersect_faces`], [`FaceBodies`], [`Intersections`] | `SmApiIntersectFaces`         |
@@ -69,6 +70,7 @@ use crate::topology::FaceId;
 
 const OP: &str = "intersect::api_intersectors::intersect_brep_with_plane";
 const OP_CURVES: &str = "intersect::api_intersectors::intersect_curves";
+const OP_CROSSINGS: &str = "intersect::api_intersectors::curve_crossings";
 const OP_SURFACES: &str = "intersect::api_intersectors::intersect_surfaces";
 
 /// The phrase of [`intersect_surfaces`]'s failure when the surfaces do not meet at all.
@@ -160,6 +162,83 @@ pub fn intersect_curves(
                 pt = p;
             }
             points.push(pt);
+        }
+    }
+    Ok(out)
+}
+
+/// Not upstream: where `curve1` over `interval1` and `curve2` over `interval2` cross within
+/// `tolerance`, each crossing by its parameter on both curves, in their order along
+/// `curve1`; none is an empty list. In space with `along` `None`; with a direction, as seen
+/// along it: both curves projected along it onto the plane through the origin square to it
+/// (the projection moves the control points and keeps the weights, so each curve keeps its
+/// parameters), then intersected (`GlobalCurveIntersect`). An overlap is reported by its
+/// start, as [`intersect_curves`] reports it; a crossing found twice (at both ends of a
+/// closed curve's seam) once, at its first parameter.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a tolerance not finite and positive, or a direction of
+/// no length; those of the projection and the curve intersection.
+pub fn curve_crossings(
+    k: &Kernel,
+    curve1: &Curve,
+    interval1: &Extent1d,
+    curve2: &Curve,
+    interval2: &Extent1d,
+    along: Option<Vec3>,
+    tolerance: f64,
+) -> Result<Vec<(f64, f64)>> {
+    if !(tolerance.is_finite() && tolerance > 0.0) {
+        return Err(SolidError::invalid_input(
+            OP_CROSSINGS,
+            "the tolerance is not positive",
+        ));
+    }
+    let projected = match along {
+        Some(d) => {
+            let l = d.length_squared();
+            if l.is_nan() || l <= 0.0 {
+                return Err(SolidError::invalid_input(
+                    OP_CROSSINGS,
+                    "the direction has no length",
+                ));
+            }
+            let flat = |c: &Curve| {
+                crate::topology::api_projection::plane_projection(k, c, Point3::ZERO, d, d)
+            };
+            Some((flat(curve1)?, flat(curve2)?))
+        }
+        None => None,
+    };
+    let (c1, c2) = match &projected {
+        Some((a, b)) => (a, b),
+        None => (curve1, curve2),
+    };
+    let solutions = c1.global_curve_intersect::<Unnamed>(
+        k,
+        interval1,
+        c2,
+        interval2,
+        tolerance,
+        &crate::curve::curve::p8::CurveIntersectOptions::default(),
+    )?;
+    let mut found = Vec::new();
+    for sol in solutions.as_slice() {
+        found.push((sol.start.param(0)?, sol.start.param(1)?));
+    }
+    found.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // a closed curve's seam is met at both its ends: one crossing, at the first
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    let mut kept: Vec<(Point3, Point3)> = Vec::new();
+    for (t1, t2) in found {
+        let (p1, p2) = (c1.evaluate_point(k, t1)?, c2.evaluate_point(k, t2)?);
+        let seen = kept
+            .iter()
+            .any(|(q1, q2)| p1.distance(*q1) <= tolerance && p2.distance(*q2) <= tolerance);
+        if !seen {
+            kept.push((p1, p2));
+            out.push((t1, t2));
         }
     }
     Ok(out)
@@ -693,6 +772,36 @@ mod tests {
             .map(|p| Point3::new(p[0], p[1], p[2]))
             .collect();
         Curve::from(crate::primitive::api_curves::create_curve(&points).unwrap())
+    }
+
+    /// Two curves in planes 4 apart meet nowhere in space; seen along the planes' normal they
+    /// cross, at parameters whose points lie one above the other, 4 apart. A zero tolerance
+    /// or direction is refused.
+    #[test]
+    fn curve_crossings_are_found_in_space_or_as_seen_along_a_direction() {
+        let k = Kernel::default();
+        let a = curve(&[[0., 0., 0.], [10., -3., 0.], [20., 3., 0.], [30., -6., 0.]]);
+        let b = curve(&[[10., -5., 4.], [15., -3., 4.], [10., 3., 4.], [20., 6., 4.]]);
+        let (ia, ib) = (a.natural_interval(), b.natural_interval());
+        assert!(curve_crossings(&k, &a, &ia, &b, &ib, None, 1e-6)
+            .unwrap()
+            .is_empty());
+        let seen =
+            curve_crossings(&k, &a, &ia, &b, &ib, Some(Vec3::new(0., 0., 1.)), 1e-6).unwrap();
+        assert!(!seen.is_empty());
+        for (t1, t2) in seen {
+            let (p, q) = (
+                a.evaluate_point(&k, t1).unwrap(),
+                b.evaluate_point(&k, t2).unwrap(),
+            );
+            assert!(
+                (p.x - q.x).abs() < 1e-6 && (p.y - q.y).abs() < 1e-6,
+                "{p:?} {q:?}"
+            );
+            assert!((q.z - p.z - 4.0).abs() < 1e-9, "{p:?} {q:?}");
+        }
+        assert!(curve_crossings(&k, &a, &ia, &b, &ib, None, 0.0).is_err());
+        assert!(curve_crossings(&k, &a, &ia, &b, &ib, Some(Vec3::ZERO), 1e-6).is_err());
     }
 
     #[test]

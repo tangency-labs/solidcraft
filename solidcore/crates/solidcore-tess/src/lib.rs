@@ -81,6 +81,120 @@ pub enum TessError {
 /// The mesher's result.
 pub type Result<T> = std::result::Result<T, TessError>;
 
+/// A planar fill for display: its vertices and its counter-clockwise triangles.
+pub type PlanarFill = (Vec<[f64; 2]>, Vec<[u32; 3]>);
+
+/// Triangulate closed planar boundary loops for display, preserving their holes.
+/// The first loop is the outer boundary; remaining loops are holes. The returned
+/// vertices are in the same coordinates as the input.
+/// # Errors
+/// A boundary with fewer than three finite points, more points than the limit, or loops the
+/// triangulator cannot fill.
+pub fn triangulate_planar(loops: &[Vec<[f64; 2]>]) -> Result<PlanarFill> {
+    par::guard("planar triangulation", || {
+        if loops.is_empty() {
+            return Err(TessError::Invalid(
+                "a planar region needs an outer boundary".into(),
+            ));
+        }
+        let mut points = Vec::new();
+        let mut ranges = Vec::new();
+        for boundary in loops {
+            let boundary = if boundary.first() == boundary.last() && boundary.len() > 1 {
+                boundary
+                    .get(..boundary.len() - 1)
+                    .ok_or_else(|| TessError::Invalid("invalid planar boundary".into()))?
+            } else {
+                boundary.as_slice()
+            };
+            if boundary.len() < 3 || boundary.iter().flatten().any(|value| !value.is_finite()) {
+                return Err(TessError::Invalid(
+                    "a planar boundary needs at least three finite points".into(),
+                ));
+            }
+            let start = points.len();
+            if boundary.len() > 500_000 - start {
+                return Err(TessError::Invalid(
+                    "planar boundary exceeds the point limit".into(),
+                ));
+            }
+            points.extend_from_slice(boundary);
+            ranges.push(start..points.len());
+        }
+        let fill = mesher::cdt::Fill {
+            seeds: &[],
+            refine: None,
+            shape: false,
+            lenient: false,
+            flat: None,
+        };
+        let (extra, triangles) = mesher::cdt::triangulate_clipped(&points, &ranges, fill)
+            .ok_or_else(|| {
+                TessError::Invalid("planar boundaries could not be triangulated".into())
+            })?;
+        points.extend(extra);
+        Ok((points, triangles))
+    })
+}
+
+/// Triangulate the union of planar regions for display, preserving their holes. Each region is
+/// its boundary loops (the largest is taken as its outline, the rest as its holes); regions that
+/// overlap or abut come back as one surface, with no seam where they meet. The returned vertices
+/// are in the same coordinates as the input.
+/// # Errors
+/// A region without an outline, a boundary with fewer than three finite points, more points than
+/// the limit, or loops the triangulator cannot fill.
+pub fn triangulate_union(regions: &[Vec<Vec<[f64; 2]>>]) -> Result<PlanarFill> {
+    par::guard("planar union", || {
+        if regions.is_empty() {
+            return Err(TessError::Invalid(
+                "a planar union needs at least one region".into(),
+            ));
+        }
+        let mut points: Vec<[f64; 2]> = Vec::new();
+        let mut loops: Vec<std::ops::Range<usize>> = Vec::new();
+        let mut region_of: Vec<usize> = Vec::new();
+        for (index, region) in regions.iter().enumerate() {
+            let mut named = 0usize;
+            for boundary in region {
+                let boundary = if boundary.first() == boundary.last() && boundary.len() > 1 {
+                    boundary
+                        .get(..boundary.len() - 1)
+                        .ok_or_else(|| TessError::Invalid("invalid planar boundary".into()))?
+                } else {
+                    boundary.as_slice()
+                };
+                if boundary.len() < 3 || boundary.iter().flatten().any(|value| !value.is_finite()) {
+                    return Err(TessError::Invalid(
+                        "a planar boundary needs at least three finite points".into(),
+                    ));
+                }
+                let start = points.len();
+                if boundary.len() > 500_000 - start {
+                    return Err(TessError::Invalid(
+                        "planar boundary exceeds the point limit".into(),
+                    ));
+                }
+                points.extend_from_slice(boundary);
+                loops.push(start..points.len());
+                region_of.push(index);
+                named += 1;
+            }
+            if named == 0 {
+                return Err(TessError::Invalid(
+                    "a planar region needs an outline".into(),
+                ));
+            }
+        }
+        let (extra, triangles) = mesher::cdt::triangulate_union(&points, &loops, &region_of)
+            .ok_or_else(|| {
+                TessError::Invalid("planar boundaries could not be triangulated".into())
+            })?;
+        points.extend(extra);
+        Ok((points, triangles))
+    })
+}
+
 /// Why the kernel's evaluator refused a curve or surface, in the words the mesher reports.
 pub(crate) fn eval_message(e: solidcore::eval::EvalError) -> String {
     match e {
@@ -104,6 +218,41 @@ pub(crate) fn with_room<T>(n: usize) -> Option<Vec<T>> {
 #[cfg(test)]
 mod reexport_tests {
     use solidcore_record::Vec3;
+
+    #[test]
+    fn planar_region_triangulation_keeps_holes() {
+        let loops = vec![
+            vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            vec![[3.0, 3.0], [3.0, 7.0], [7.0, 7.0], [7.0, 3.0]],
+        ];
+        let (points, triangles) = crate::triangulate_planar(&loops).unwrap();
+        let area: f64 = triangles
+            .iter()
+            .map(|triangle| {
+                let [a, b, c] = triangle.map(|index| points[index as usize]);
+                ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) * 0.5
+            })
+            .sum();
+        assert!((area - 84.0).abs() < 1e-9, "{area}");
+    }
+
+    #[test]
+    fn planar_region_triangulation_clips_crossing_and_overlapping_holes() {
+        let loops = vec![
+            vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            vec![[8.0, 2.0], [12.0, 2.0], [12.0, 6.0], [8.0, 6.0]],
+            vec![[9.0, 4.0], [11.0, 4.0], [11.0, 8.0], [9.0, 8.0]],
+        ];
+        let (points, triangles) = crate::triangulate_planar(&loops).unwrap();
+        let area: f64 = triangles
+            .iter()
+            .map(|triangle| {
+                let [a, b, c] = triangle.map(|index| points[index as usize]);
+                ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) * 0.5
+            })
+            .sum();
+        assert!((area - 90.0).abs() < 1e-9, "{area}");
+    }
 
     /// A plan's surfaces, read through this crate's names alone.
     fn surfaces(plan: &crate::TessPlan) -> &[crate::EvalSurface] {

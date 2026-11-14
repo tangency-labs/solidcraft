@@ -646,8 +646,14 @@ impl Builder<'_, '_> {
         let c = CurveEval::new(&curve).map_err(|m| m.to_string())?;
         if check {
             let m = c.point(0.5 * (interval[0] + interval[1])).ok_or("seam point")?;
-            let off = eval.project(m, None, f64::INFINITY).and_then(|q| eval.point(q)).map_or(f64::INFINITY, |s| s.dist(m));
-            if !(off <= self.tol) {
+            let gap = |p: Vec3| eval.project(p, None, f64::INFINITY).and_then(|q| eval.point(q)).map_or(f64::INFINITY, |s| s.dist(p));
+            // As far off as its ends are, at most: a vertex on an edge the file has a little off
+            // the surface (a spline rim 0.3 um off its cone, in a file stating 0.01 um) puts the
+            // seam's middle off by no more, and the seam's tolerance covers it as any edge's does
+            // (`measure_edges`). Vertices at different angles leave the chord between them far
+            // more than that inside the surface.
+            let allowed = self.tol.max(gap(pa).max(gap(pb)).min(super::MAX_TOLERANCE));
+            if !(gap(m) <= allowed) {
                 return Err(unsupported("a seam off its surface: loops with no vertices at one angle"));
             }
         }

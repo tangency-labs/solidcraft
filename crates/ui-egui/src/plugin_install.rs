@@ -124,6 +124,8 @@ fn install_now(app: &mut SolveApp, ask: &Ask) {
     let replace = ask.plugin.get("replaces").is_some_and(Value::is_string);
     match app.run("plugin.install", json!({"path": ask.path, "replace": replace})) {
         Ok(plugin) => {
+            // The ribbon's Plugins group reads the installed plugins again.
+            app.plugin_menu.loaded = false;
             let shown = std::format!("{} {}", text(&plugin, "name"), text(&plugin, "version"));
             app.set_status(format("plugin_install.done", &[("plugin", &shown)]), false);
         }

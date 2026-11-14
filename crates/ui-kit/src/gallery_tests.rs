@@ -1745,6 +1745,9 @@ pub const ELEMENTS: &[Element] = &[
     element!("expr_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         expr_row(ui, "Gallery", &mut s.value);
     }),
+    element!("action_row", "dialog:action:gallery", Some("dialog:action:gallery"), |ui, _| {
+        action_row(ui, "gallery", "Option");
+    }),
     element!("value_row", "dialog:row:Gallery", None, |ui, _| {
         value_row(ui, "Gallery", "XY plane");
     }),

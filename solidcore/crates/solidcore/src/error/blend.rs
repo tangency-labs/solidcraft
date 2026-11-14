@@ -14,7 +14,7 @@
 //!
 //! | Cause                                  | Class ([`ErrorKind`])                         |
 //! |----------------------------------------|-----------------------------------------------|
-//! | [`BlendFailure::NoRoom`]               | the reason's ([`no_room_class`]), 101 to 124 or 128 |
+//! | [`BlendFailure::NoRoom`]               | the reason's ([`no_room_class`]), 101 to 124, 128 or 129 |
 //! | [`BlendFailure::StationDidNotConverge`]| [`ErrorKind::StationDidNotConverge`] (125)    |
 //! | [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`] | [`ErrorKind::TrimLeaks`] (126) |
 //! | [`BlendFailure::StageFailed`]          | [`ErrorKind::StageFailed`] (127)              |
@@ -68,8 +68,8 @@ use crate::blend::fillet_executive::NoRoomReason;
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum BlendFailure {
-    /// A blend larger than its faces allow, for the reason named (classes 101 to 124, and
-    /// 128; [`no_room_class`]). A refusal: the failure's fit, where the
+    /// A blend larger than its faces allow, for the reason named (classes 101 to 124, 128
+    /// and 129; [`no_room_class`]). A refusal: the failure's fit, where the
     /// check computed one, is the size that builds.
     NoRoom(NoRoomReason),
     /// The solve of the ball's position at a station of the blend did not converge: a defect,
@@ -142,7 +142,8 @@ pub enum BlendFailure {
 
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
 /// refusal classes 101 to 124 (the cliff overflow's own refusals grouped by what decides
-/// them), or [`ErrorKind::TangentContinuationEnd`] (128).
+/// them), [`ErrorKind::TangentContinuationEnd`] (128) or [`ErrorKind::OverflowKeepsNothing`]
+/// (129).
 /// [`ErrorKind::CliffSubtractionLeavesNoSolid`] is the one defect among them.
 #[must_use]
 pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
@@ -181,6 +182,7 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
         R::EndRollsIntoSmoothEnd => ErrorKind::EndRollsIntoSmoothEnd,
         R::EndAtSeamVertex => ErrorKind::EndAtSeamVertex,
         R::TangentContinuationEndUnsupported => ErrorKind::TangentContinuationEnd,
+        R::OverflowKeepsNothing => ErrorKind::OverflowKeepsNothing,
     }
 }
 
@@ -646,6 +648,10 @@ mod tests {
             (
                 BlendFailure::NoRoom(R::TangentContinuationEndUnsupported),
                 ErrorKind::TangentContinuationEnd,
+            ),
+            (
+                BlendFailure::NoRoom(R::OverflowKeepsNothing),
+                ErrorKind::OverflowKeepsNothing,
             ),
             (
                 BlendFailure::StationDidNotConverge {

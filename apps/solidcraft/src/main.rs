@@ -284,7 +284,7 @@ impl eframe::App for App {
         self.come_forward.tick(ctx, _frame);
         #[cfg(target_os = "macos")]
         for f in if self.solve.file_picker_busy() { Vec::new() } else { open_documents::take() } {
-            self.solve.open_path_async(&f);
+            self.solve.open_chosen_file(&f);
         }
         #[cfg(target_os = "macos")]
         if let Some(menu) = &mut self.native_menu {
@@ -315,6 +315,10 @@ impl eframe::App for App {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         // First: the release of a press the last frame handed to a window move or resize (#13334).
         solidcraft_ui_egui::window_chrome::release_press_taken_by_os(ctx, raw);
+        // A native dialog or lost focus may have kept a release (#16460).
+        solidcraft_ui_egui::window_chrome::release_stale_input(ctx, raw);
+        // Wayland shows the last program's cursor until the window sets its own again (#16581).
+        solidcraft_ui_egui::window_chrome::reapply_cursor_on_return(ctx, raw);
         #[cfg(target_os = "macos")]
         if let Some(menu) = &mut self.native_menu {
             menu.raw_input_hook(&mut self.solve, ctx, raw);
@@ -1446,7 +1450,7 @@ fn main() -> eframe::Result {
                     // the files given at launch included.
                     solidcraft_ui_egui::open_elsewhere::start(app);
                     for f in &files {
-                        app.open_path_async(f);
+                        app.open_chosen_file(f);
                     }
                     // No file and no sample: the empty design takes Units of new designs (#1205).
                     // An opened file and the sample part keep the units they were saved or built with.
