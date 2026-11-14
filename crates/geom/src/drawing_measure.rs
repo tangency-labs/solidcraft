@@ -178,7 +178,7 @@ pub fn line_of(basis: &Plane, first: Vec3, last: Vec3, direction: LinearDirectio
 
 /// The unit direction `direction` measures along on a view, either way round: aligned being along
 /// `shown`, the line from first to last as the view shows it.
-fn axis(direction: LinearDirection, shown: Vec2) -> Result<Vec2> {
+pub fn axis(direction: LinearDirection, shown: Vec2) -> Result<Vec2> {
     match direction {
         LinearDirection::Horizontal => Ok(Vec2::new(1.0, 0.0)),
         LinearDirection::Vertical => Ok(Vec2::new(0.0, 1.0)),

@@ -14,6 +14,7 @@ use solidcraft_doc::drawing::dimension::{
     Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Resolved, SetKind, Silhouette, Status, TextPlace,
     check_chain_length, check_set_targets,
 };
+use solidcraft_doc::drawing::line_maths::LineCoords;
 use solidcraft_doc::drawing::{ByNumber, Drawing, kept_by_number};
 use solidcraft_doc::ids;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
@@ -549,14 +550,14 @@ fn diameter_by_default(points: &[Vec3]) -> bool {
 /// plane, at the depth of what it measures, asked of each shown body's B-rep exactly (inside or on
 /// its boundary is material). With material on both sides or neither, away from the middle of the
 /// view's model box; on that middle (a centre line, a symmetric pair) the fixed rule is +1, above
-/// or to the left ([`crate::drawing_dimension_paper::line_direction`]).
+/// or to the left ([`LineCoords::forward`]).
 fn side_by_default(s: &Session, drawing: &Drawing, view: u64, direction: LinearDirection, points: &[Vec3]) -> f64 {
     let (Ok(resolved), Ok(shown)) = (drawing.resolve_view(view), crate::drawing_view::shown(s)) else { return 1.0 };
     let basis = resolved.basis;
     let (Some(first), Some(last)) = (points.first(), points.last()) else { return 1.0 };
     let (a, b) = (basis.to_local(*first), basis.to_local(*last));
     // The plane's directions are paper's: a view's paper map only scales and shifts.
-    let Some(n) = crate::drawing_dimension_paper::line_direction(direction, b - a).map(Vec2::perp) else { return 1.0 };
+    let Some(n) = LineCoords::forward(direction, b - a).map(|coords| coords.normal) else { return 1.0 };
     let middle = (a + b) * 0.5;
     let beside = (basis.x * n.x + basis.y * n.y) * (LOOK_PAST_MM / resolved.scale.value.factor());
     let at = (*first + *last) * 0.5;

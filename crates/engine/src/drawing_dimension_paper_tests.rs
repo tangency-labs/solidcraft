@@ -421,64 +421,6 @@ fn ordinate_numbers_that_would_overlap_move_apart_and_their_leaders_jog() {
     assert!(lines.iter().any(|l| l.len() == 2 && close(l[0].x, 0.0)), "the origin's has room: {lines:?}");
 }
 
-/// Texts at least `pitch` apart, moved as little as can be: those with room stay, those that would
-/// overlap move apart, centred on their ideal places, whatever their number.
-#[test]
-fn spread_moves_only_what_would_overlap() {
-    let pitch = 4.5;
-    assert_eq!(spread(&[], pitch), Vec::<f64>::new());
-    assert_eq!(spread(&[7.0], pitch), [7.0]);
-    assert_eq!(spread(&[0.0, 10.0, 30.0], pitch), [0.0, 10.0, 30.0], "room for all");
-    assert_eq!(spread(&[0.0, 1.0], pitch), [-1.75, 2.75], "a pair, about its middle");
-    assert_eq!(spread(&[5.0, 5.0, 5.0], pitch), [0.5, 5.0, 9.5], "three at one place");
-    // A block that grows into a neighbour takes it in: 0, 1 and 4 pool round 5/3.
-    let pooled = spread(&[0.0, 1.0, 4.0, 20.0], pitch);
-    let expected = [5.0 / 3.0 - pitch, 5.0 / 3.0, 5.0 / 3.0 + pitch, 20.0];
-    assert!(pooled.iter().zip(expected).all(|(a, b)| close(*a, b)), "{pooled:?}");
-    let all = spread(&[3.0; 65], pitch);
-    assert!(close(all.iter().sum::<f64>() / 65.0, 3.0) && all.windows(2).all(|w| close(w[1] - w[0], pitch)), "{all:?}");
-}
-
-/// Any places, in order, at any spacing: as many places come back, in the same order, at least the
-/// pitch apart, finite, each run of touching texts centred on its members' ideal places, and a text
-/// that touches none where it was.
-#[test]
-fn spread_fuzz_keeps_its_rules() {
-    let mut state = 0x1305_2c0d_u64;
-    let mut next = move || {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        state
-    };
-    for round in 0..4000 {
-        let count = match round % 4 {
-            0 => 0,
-            1 => 1,
-            2 => 65,
-            _ => (next() % 12) as usize,
-        };
-        let pitch = [0.1, 1.0, 4.5, 30.0][(next() % 4) as usize];
-        let spacing = [0.0, 0.01, 1.0, 5.0, 50.0][(next() % 5) as usize];
-        let mut ideal: Vec<f64> = (0..count).map(|_| (next() % 1000) as f64 * spacing * 0.01 - 3.0).collect();
-        ideal.sort_by(f64::total_cmp);
-        let got = spread(&ideal, pitch);
-        assert_eq!(got.len(), ideal.len());
-        assert!(got.iter().all(|x| x.is_finite()), "{got:?}");
-        assert!(got.windows(2).all(|w| w[1] - w[0] >= pitch - 1e-9), "{ideal:?} -> {got:?}");
-        // Runs of texts that touch, each centred on its members' ideal places.
-        let mut from = 0;
-        for i in 1..=got.len() {
-            if i == got.len() || got[i] - got[i - 1] > pitch + 1e-9 {
-                let (a, b) = (&ideal[from..i], &got[from..i]);
-                let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
-                assert!((mean(a) - mean(b)).abs() < 1e-6, "{a:?} -> {b:?}");
-                from = i;
-            }
-        }
-    }
-}
-
 /// A chain as long as a chain goes, with tight spans between its points, stays in one group.
 #[test]
 fn a_chain_of_the_most_points_lays_out() {
@@ -994,24 +936,6 @@ fn hostile_points_and_offsets_never_panic() {
     }
 }
 
-/// A straight line inside a longer one along it is drawn by the longer one; a line that runs past
-/// its ends, beside it or across it isn't, and a bent line only by the same bent line.
-#[test]
-fn a_line_inside_a_longer_one_along_it_is_covered() {
-    let p = |x: f64, y: f64| Vec2::new(x, y);
-    let long = [p(0.0, 1.0), p(0.0, 20.0)];
-    assert!(covered(&[p(0.0, 1.0), p(0.0, 13.0)], &long));
-    assert!(covered(&[p(0.0, 20.0), p(0.0, 5.0)], &long), "either way round");
-    assert!(covered(&long, &long));
-    assert!(!covered(&[p(0.0, 1.0), p(0.0, 21.0)], &long), "past its end");
-    assert!(!covered(&[p(0.5, 1.0), p(0.5, 13.0)], &long), "beside it");
-    assert!(!covered(&[p(-1.0, 5.0), p(1.0, 5.0)], &long), "across it");
-    assert!(!covered(&long, &[p(0.0, 1.0), p(0.0, 13.0)]), "the shorter doesn't draw the longer");
-    let bent = [p(0.0, 0.0), p(5.0, 5.0), p(10.0, 0.0)];
-    assert!(covered(&bent, &bent) && !covered(&[p(0.0, 0.0), p(5.0, 5.0)], &bent));
-    assert!(!covered(&[p(0.0, 0.0), p(0.0, 0.0)], &[p(1.0, 0.0), p(1.0, 0.0)]), "two points apart");
-}
-
 /// A line inside a longer one along it leaves the longer one alone, whichever is drawn first: no
 /// layout sends the shorter one second today, so only this shows that order.
 #[test]
@@ -1021,7 +945,7 @@ fn a_line_inside_a_longer_one_is_drawn_once_whichever_comes_first() {
     for order in [[long.clone(), short.clone()], [short, long.clone()]] {
         let mut drawn = Drawn::default();
         order.into_iter().for_each(|line| drawn.line(LineRole::Extension, line));
-        assert!(drawn.lines.len() == 1 && same_line(&drawn.lines[0], &long), "{:?}", drawn.lines);
+        assert_eq!(drawn.lines, std::slice::from_ref(&long));
         assert_eq!(drawn.laid.lines, [(LineRole::Extension, long.clone())], "the layout keeps the longer line too");
     }
 }

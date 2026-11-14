@@ -11,6 +11,7 @@ use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
 use solidcore_record::{Seg2, Vec2};
 use solidcraft_doc::drawing::dimension::{Dimension, DimensionKind, LabelKind, Resolved, TextPlace};
+use solidcraft_doc::drawing::line_maths::{LineCoords, covers, spread_along};
 use solidcraft_geom::drawing_measure::LinearDirection;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::annotate::{ArrowShape, Terminator};
@@ -117,9 +118,9 @@ impl Drawn {
     /// layout as in the group. A chain's neighbours share an extension line, and a set's lines from
     /// its origin lie along each other.
     fn line(&mut self, role: LineRole, line: Vec<Vec2>) {
-        if !self.lines.iter().any(|other| covered(&line, other)) {
-            self.lines.retain(|other| !covered(other, &line));
-            self.laid.lines.retain(|(_, other)| !covered(other, &line));
+        if !self.lines.iter().any(|other| covers(&line, other, SAME_POINT_MM)) {
+            self.lines.retain(|other| !covers(other, &line, SAME_POINT_MM));
+            self.laid.lines.retain(|(_, other)| !covers(other, &line, SAME_POINT_MM));
             self.laid.lines.push((role, line.clone()));
             self.lines.push(line);
         }
@@ -205,8 +206,8 @@ fn pieces(dimension: &Dimension, resolved: &Resolved, on: &[Vec2], set: &impl Fn
     let text = || set(resolved.text.as_deref());
     match (&dimension.kind, on) {
         (DimensionKind::Linear { direction, .. } | DimensionKind::Length { direction, .. }, &[a, b]) => {
-            let dir = line_direction(*direction, b - a)?;
-            Some(vec![linear(a, b, dir, offset, place, text())])
+            let coords = LineCoords::forward(*direction, b - a)?;
+            Some(vec![linear(a, b, coords, offset, place, text())])
         }
         (DimensionKind::Angle { other_side, .. }, &[a0, a1, b0, b1]) => Some(vec![angular([a0, a1], [b0, b1], *other_side, offset, place, text())?]),
         // As an angle's, between its silhouettes running out from the apex, whatever its size: the
@@ -285,8 +286,8 @@ pub(crate) fn dragged(
     };
     match (&dimension.kind, on.as_slice(), drag) {
         (DimensionKind::Linear { direction, .. } | DimensionKind::Length { direction, .. }, &[a, b], _) => {
-            let dir = line_direction(*direction, b - a).ok_or(NotDragged::NoPlace)?;
-            linear_dragged(a, b, dir, place, drag, &half)
+            let coords = LineCoords::forward(*direction, b - a).ok_or(NotDragged::NoPlace)?;
+            linear_dragged(a, b, coords, place, drag, &half)
         }
         (DimensionKind::Cylinder { .. }, &[a0, a1, b0, b1], _) => across_dragged([a0, a1], [b0, b1], LinearDirection::Aligned, place, drag, &half),
         (DimensionKind::Silhouettes { direction, .. } | DimensionKind::Faces { direction, .. }, &[a0, a1, b0, b1], _) => {
@@ -296,8 +297,8 @@ pub(crate) fn dragged(
         // Its members share the line `offset` from the middle of its two ends.
         (DimensionKind::Chain { direction, .. }, points, Drag::Line(p)) => {
             let (Some(first), Some(last)) = (points.first(), points.last()) else { return Err(NotDragged::NoPlace) };
-            let dir = line_direction(*direction, *last - *first).ok_or(NotDragged::NoPlace)?;
-            Ok((encode_text(&DimFrame::Linear { p0: *first, p1: *last, dir }, p).y, place))
+            let coords = LineCoords::forward(*direction, *last - *first).ok_or(NotDragged::NoPlace)?;
+            Ok((encode_text(&DimFrame::Linear { p0: *first, p1: *last, dir: coords.unit }, p).y, place))
         }
         // Its arc is the offset's size round the vertex, its text towards its place.
         (DimensionKind::Angle { .. } | DimensionKind::Cone { .. }, &[a0, a1, b0, b1], _) => {
@@ -316,17 +317,17 @@ pub(crate) fn dragged(
     }
 }
 
-/// A line from `a` to `b` along `dir` ([`linear`]) dragged: through a line point, or with its text's
+/// A line from `a` to `b` along `coords` ([`linear`]) dragged: through a line point, or with its text's
 /// centre on a text point, as far across as it is less the lift above the line the layout gives a text.
 fn linear_dragged(
     a: Vec2,
     b: Vec2,
-    dir: Vec2,
+    coords: LineCoords,
     place: TextPlace,
     drag: Drag,
     half: &dyn Fn() -> Result<Vec2, NotDragged>,
 ) -> Result<(f64, TextPlace), NotDragged> {
-    let frame = DimFrame::Linear { p0: a, p1: b, dir };
+    let frame = DimFrame::Linear { p0: a, p1: b, dir: coords.unit };
     Ok(match drag {
         Drag::Line(p) => (encode_text(&frame, p).y, place),
         Drag::Text(p) => {
@@ -348,8 +349,8 @@ fn across_dragged(
     half: &dyn Fn() -> Result<Vec2, NotDragged>,
 ) -> Result<(f64, TextPlace), NotDragged> {
     for positive in [true, false] {
-        let (p, q, dir) = across_ends(a, b, direction, positive).ok_or(NotDragged::NoPlace)?;
-        let (offset, place) = linear_dragged(p, q, dir, place, drag, half)?;
+        let (p, q, coords) = across_ends(a, b, direction, positive).ok_or(NotDragged::NoPlace)?;
+        let (offset, place) = linear_dragged(p, q, coords, place, drag, half)?;
         if (offset >= 0.0) == positive {
             return Ok((offset, place));
         }
@@ -357,43 +358,28 @@ fn across_dragged(
     Err(NotDragged::BetweenEnds)
 }
 
-/// The unit direction a linear dimension's line runs in, on paper. Turned to run right, or up when
-/// it is upright, so a positive offset is above it or to its left whichever way round its points are.
-pub(crate) fn line_direction(direction: LinearDirection, seen: Vec2) -> Option<Vec2> {
-    let dir = match direction {
-        LinearDirection::Horizontal => Vec2::X,
-        LinearDirection::Vertical => Vec2::new(0.0, 1.0),
-        LinearDirection::Aligned => seen.normalized()?,
-        // A view's paper map only scales and shifts, so its plane's directions are paper's.
-        LinearDirection::Along(along) => along.normalized()?,
-    };
-    let forward = if dir.x.abs() > 1e-9 { dir.x > 0.0 } else { dir.y > 0.0 };
-    Some(if forward { dir } else { -dir })
-}
-
-/// A line from `a` to `b` along `dir`, `across` from their middle. Its text is at its `place`, or
+/// A line from `a` to `b` along `coords`, `across` from their middle. Its text is at its `place`, or
 /// in the middle when it fits there, or else beyond an arrow ([`DimText::Across`]).
-fn linear(a: Vec2, b: Vec2, dir: Vec2, across: f64, place: &TextPlace, text: Text) -> Piece {
-    let at = at_of(place).map_or(DimText::Across(across), |at| DimText::At(Vec2::new((at - (a + b) * 0.5).dot(dir), across)));
-    Piece { frame: DimFrame::Linear { p0: a, p1: b, dir }, at, text }
+fn linear(a: Vec2, b: Vec2, coords: LineCoords, across: f64, place: &TextPlace, text: Text) -> Piece {
+    let at = at_of(place).map_or(DimText::Across(across), |at| DimText::At(Vec2::new(coords.along(at - (a + b) * 0.5), across)));
+    Piece { frame: DimFrame::Linear { p0: a, p1: b, dir: coords.unit }, at, text }
 }
 
-/// A line from `a` to `b` along `dir`, `across` from their middle, with its text in the middle
+/// A line from `a` to `b` along `coords`, `across` from their middle, with its text in the middle
 /// whether it fits there or not: a set's member, whose texts beside each other need a rule of their own.
-fn centred(a: Vec2, b: Vec2, dir: Vec2, across: f64, text: Text) -> Piece {
-    Piece { frame: DimFrame::Linear { p0: a, p1: b, dir }, at: DimText::At(Vec2::new(0.0, across)), text }
+fn centred(a: Vec2, b: Vec2, coords: LineCoords, across: f64, text: Text) -> Piece {
+    Piece { frame: DimFrame::Linear { p0: a, p1: b, dir: coords.unit }, at: DimText::At(Vec2::new(0.0, across)), text }
 }
 
 /// A chain's members, each a line from one point to the next, all on one line `offset` from the
 /// middle of the chain's two ends, each member's text set by `set`.
 fn chain(points: &[Vec2], direction: LinearDirection, offset: f64, resolved: &Resolved, set: &impl Fn(Option<&str>) -> Text) -> Option<Vec<Piece>> {
     let (first, last) = (*points.first()?, *points.last()?);
-    let dir = line_direction(direction, last - first)?;
-    let n = dir.perp();
-    let line = ((first + last) * 0.5).dot(n) + offset;
+    let coords = LineCoords::forward(direction, last - first)?;
+    let line = coords.across((first + last) * 0.5) + offset;
     let member = |(i, (a, b)): (usize, (&Vec2, &Vec2))| {
         let text = resolved.members.get(i).map(|m| m.text.as_str());
-        centred(*a, *b, dir, line - ((*a + *b) * 0.5).dot(n), set(text))
+        centred(*a, *b, coords, line - coords.across((*a + *b) * 0.5), set(text))
     };
     Some(points.iter().zip(points.iter().skip(1)).enumerate().map(member).collect())
 }
@@ -409,10 +395,9 @@ fn baseline(
     set: &impl Fn(Option<&str>) -> Text,
 ) -> Option<Vec<Piece>> {
     let (origin, targets) = points.split_first()?;
-    let dir = line_direction(direction, *targets.last()? - *origin)?;
-    let n = dir.perp();
+    let coords = LineCoords::forward(direction, *targets.last()? - *origin)?;
     let side = if offset < 0.0 { -1.0 } else { 1.0 };
-    let outer = side * points.iter().map(|p| side * p.dot(n)).fold(f64::NEG_INFINITY, f64::max);
+    let outer = coords.reach(points, side);
     let value = |i: usize| resolved.members.get(i).map_or(0.0, |m| m.measured.value);
     let mut nearest_first: Vec<usize> = (0..targets.len()).collect();
     nearest_first.sort_by(|a, b| value(*a).total_cmp(&value(*b)));
@@ -420,7 +405,7 @@ fn baseline(
         let target = *targets.get(i)?;
         let line = outer + offset + side * STACK_MM * k as f64;
         let text = resolved.members.get(i).map(|m| m.text.as_str());
-        Some(centred(*origin, target, dir, line - ((*origin + target) * 0.5).dot(n), set(text)))
+        Some(centred(*origin, target, coords, line - coords.across((*origin + target) * 0.5), set(text)))
     };
     nearest_first.into_iter().enumerate().map(member).collect()
 }
@@ -428,7 +413,7 @@ fn baseline(
 /// An ordinate set: the origin (the first of `points`), shown as 0, and each target, each with a
 /// leader from a gap off its point out to one line `offset` past the outermost point on its side,
 /// and its number past the leader's end, reading along it. Numbers that would overlap along the
-/// set's line are moved apart as little as can be ([`spread`]); the leader of one that moved runs
+/// set's line are moved apart as little as can be ([`spread_along`]); the leader of one that moved runs
 /// straight to [`JOG_MM`] short of the line, then on a slant to its number.
 fn ordinate(
     points: &[Vec2],
@@ -439,20 +424,21 @@ fn ordinate(
     out: &mut Drawn,
 ) -> Option<()> {
     let (origin, targets) = points.split_first()?;
-    let dir = line_direction(direction, *targets.last()? - *origin)?;
-    let n = dir.perp();
+    let coords = LineCoords::forward(direction, *targets.last()? - *origin)?;
     let side = if offset < 0.0 { -1.0 } else { 1.0 };
-    let end = side * points.iter().map(|p| side * p.dot(n)).fold(f64::NEG_INFINITY, f64::max) + offset;
+    let end = coords.reach(points, side) + offset;
     let numbers = std::iter::once(Some("0")).chain((0..targets.len()).map(|i| resolved.members.get(i).map(|m| m.text.as_str())));
     let mut places: Vec<(Vec2, Text)> = points.iter().copied().zip(numbers.map(set)).collect();
-    places.sort_by(|(p, _), (q, _)| p.dot(dir).total_cmp(&q.dot(dir)));
+    places.sort_by(|(p, _), (q, _)| coords.along(*p).total_cmp(&coords.along(*q)));
     // Each number's height lies along the set's line: the tallest one's, and a gap, apart.
     let pitch = places.iter().map(|(_, text)| text.half.y * 2.0).fold(0.0, f64::max) + SIZES.gap;
-    let ideal: Vec<f64> = places.iter().map(|(p, _)| p.dot(dir)).collect();
-    let reading = line_direction(LinearDirection::Aligned, n)?;
-    let at = |along: f64, across: f64| dir * along + n * across;
-    for ((p, text), (&want, got)) in places.into_iter().zip(ideal.iter().zip(spread(&ideal, pitch))) {
-        let start = p + n * (side * SIZES.gap);
+    let ideal: Vec<f64> = places.iter().map(|(p, _)| coords.along(*p)).collect();
+    // A set is at most `MAX_SET_TARGETS` targets and its origin, so this refuses nothing a design holds.
+    let spread = spread_along(&ideal, pitch).ok()?;
+    let reading = LineCoords::forward(LinearDirection::Aligned, coords.normal)?.unit;
+    let at = |along: f64, across: f64| coords.unit * along + coords.normal * across;
+    for ((p, text), (&want, got)) in places.into_iter().zip(ideal.iter().zip(spread)) {
+        let start = p + coords.normal * (side * SIZES.gap);
         let leader =
             if (got - want).abs() <= SAME_POINT_MM { vec![start, at(want, end)] } else { vec![start, at(want, end - side * JOG_MM), at(got, end)] };
         // Each leader projects its point out to the line, as an extension line does.
@@ -463,43 +449,21 @@ fn ordinate(
     Some(())
 }
 
-/// Places along one line for texts whose ideal places are `ideal` (least first), at least `pitch`
-/// apart and moved as little as can be in all (least squares). Pool-adjacent-violators on the places
-/// less their spacing: texts that would overlap pool into blocks, each centred on its members' ideal
-/// places, and every other text stays where it is.
-fn spread(ideal: &[f64], pitch: f64) -> Vec<f64> {
-    // Each block: the sum of its members' places less their spacing, and how many they are.
-    let mut blocks: Vec<(f64, usize)> = Vec::with_capacity(ideal.len());
-    for (i, x) in ideal.iter().enumerate() {
-        blocks.push((x - pitch * i as f64, 1));
-        while let [.., (a, m), (b, k)] = blocks[..] {
-            if a / m as f64 <= b / k as f64 {
-                break;
-            }
-            blocks.truncate(blocks.len() - 2);
-            blocks.push((a + b, m + k));
-        }
-    }
-    let shifted = blocks.into_iter().flat_map(|(sum, k)| std::iter::repeat_n(sum / k as f64, k));
-    shifted.enumerate().map(|(i, place)| place + pitch * i as f64).collect()
-}
-
 /// A line between two silhouettes or faces, each from one end to the other, at the ends on the side `offset`
 /// is on, so a positive one clears what it measures. `Aligned` runs straight across them.
 fn across(a: [Vec2; 2], b: [Vec2; 2], direction: LinearDirection, offset: f64, place: &TextPlace, text: Text) -> Option<Vec<Piece>> {
-    let (p, q, dir) = across_ends(a, b, direction, offset >= 0.0)?;
-    Some(vec![linear(p, q, dir, offset, place, text)])
+    let (p, q, coords) = across_ends(a, b, direction, offset >= 0.0)?;
+    Some(vec![linear(p, q, coords, offset, place, text)])
 }
 
 /// The ends a line across two silhouettes or faces (each from one end to the other) runs between: on
-/// the side a `positive` offset is on, or a negative one. With the direction the line runs in.
-fn across_ends(a: [Vec2; 2], b: [Vec2; 2], direction: LinearDirection, positive: bool) -> Option<(Vec2, Vec2, Vec2)> {
+/// the side a `positive` offset is on, or a negative one. With the line's coordinates.
+fn across_ends(a: [Vec2; 2], b: [Vec2; 2], direction: LinearDirection, positive: bool) -> Option<(Vec2, Vec2, LineCoords)> {
     let [a0, a1] = a;
     let square = (a1 - a0).normalized()?.perp();
-    let dir = line_direction(direction, square)?;
-    let n = dir.perp();
-    let end = |[p, q]: [Vec2; 2]| if (p.dot(n) >= q.dot(n)) == positive { p } else { q };
-    Some((end(a), end(b), dir))
+    let coords = LineCoords::forward(direction, square)?;
+    let end = |[p, q]: [Vec2; 2]| if (coords.across(p) >= coords.across(q)) == positive { p } else { q };
+    Some((end(a), end(b), coords))
 }
 
 /// Where two lines (each from one end to the other) meet on the view. `None` when they are parallel
@@ -563,22 +527,6 @@ fn at_of(place: &TextPlace) -> Option<Vec2> {
         TextPlace::At([x, y]) => Some(Vec2::new(*x, *y)),
         TextPlace::Centred => None,
     }
-}
-
-fn same_line(a: &[Vec2], b: &[Vec2]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).all(|(p, q)| p.dist(*q) <= SAME_POINT_MM)
-}
-
-/// Whether `by` already draws `line`: the same line, or for two straight lines, `line` lies along
-/// `by` within its ends. Only one dimension's own lines are weighed, so no other's change.
-fn covered(line: &[Vec2], by: &[Vec2]) -> bool {
-    let (&[p, q], &[a, b]) = (line, by) else { return same_line(line, by) };
-    let Some(u) = (b - a).normalized() else { return same_line(line, by) };
-    let within = |x: Vec2| {
-        let along = (x - a).dot(u);
-        (x - a).dot(u.perp()).abs() <= SAME_POINT_MM && (-SAME_POINT_MM..=a.dist(b) + SAME_POINT_MM).contains(&along)
-    };
-    within(p) && within(q)
 }
 
 /// Ends `line` at the base of the arrowhead on its end, if it runs into one there, so no line shows
