@@ -529,7 +529,10 @@ fn exact_min(a: &Shape, b: &Shape, anchor: Option<Vec3>, unbounded: (bool, bool)
             _ => return None,
         };
         let (hp, hq) = ((p - point).dot(n), (q - point).dot(n));
-        if (x_runs_on || hp * hq <= 0.0) && hp != hq {
+        // An axis within 1e-6 rad of the plane (as `measure_shape::parallel` counts it) is
+        // parallel: its ends' heights then differ only by rounding.
+        let crosses = if x_runs_on { (hp - hq).abs() > 1e-6 * p.dist(q) } else { hp * hq <= 0.0 && hp != hq };
+        if crosses {
             let x = p.lerp(q, hp / (hp - hq));
             return Some((0.0, x, x));
         }
