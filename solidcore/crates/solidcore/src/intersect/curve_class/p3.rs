@@ -77,8 +77,8 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::tol::{
-    are_same, are_same_to_tol, eff_zero_param, eff_zero_sq, is_zero_to_tol, scaled_zero_sqrt_of,
-    xsect_tol_3d_from_zones, ScaledZero,
+    are_parallel, are_same, are_same_to_tol, eff_zero_param, eff_zero_sq, is_zero_to_tol,
+    scaled_zero_sqrt_of, xsect_tol_3d_from_zones, ScaledZero,
 };
 use crate::intersect::curve_class::p1::{
     object_dimension, src_zone_tol_3d_of, xsect_tol_2d_or_3d_for_classify_pair,
@@ -2037,9 +2037,12 @@ impl<O: ClassObject> CurveClassification<O> {
     ///
     /// Not upstream: an end the edge intersections left unclassified counts as on `E` when
     /// its point is within the intersection tolerance of `E`, farther than that from both
-    /// vertices of `E`, and the whole curve over the interval is proved within that
+    /// vertices of `E`, the curve is tangent to `E` at both ends of the interval
+    /// ([`tangent_to_edge`]), and the whole curve over the interval is proved within that
     /// tolerance of `E` on control points ([`piece_within_band`]); it is then classified to
-    /// `E` with its parameter on `E`. A curve that runs along an edge and ends on it without
+    /// `E` with its parameter on `E`. The tangency keeps out a curve that crosses `E` at the
+    /// interval's classified end and stops a hair past it: a piece that short lies within the
+    /// band whatever its angle to `E`. A curve that runs along an edge and ends on it without
     /// crossing it (an arc 1.4e-11 from another arc, ending 2.8e-5 short of that arc's
     /// corner) has no intersection there. Such an interval can have one end on a vertex and
     /// the other unclassified: `E` is then each edge of the classification's face at that
@@ -2138,8 +2141,9 @@ impl<O: ClassObject> CurveClassification<O> {
     /// unclassified and lies on it its parameter on `edge`. `None` when an end is elsewhere,
     /// when neither end is classified, when an unclassified end is within the intersection
     /// tolerance of a vertex of `edge` (it would be on that vertex, not inside the edge), or
-    /// when with an unclassified end the curve over the interval is not proved within that
-    /// tolerance of `edge` as a whole ([`piece_within_band`]).
+    /// when with an unclassified end the curve is not tangent to `edge` at both ends of the
+    /// interval ([`tangent_to_edge`]) or not proved within that tolerance of `edge` as a
+    /// whole ([`piece_within_band`]).
     fn ends_on_edge(
         &self,
         k: &Kernel,
@@ -2210,11 +2214,35 @@ impl<O: ClassObject> CurveClassification<O> {
         };
         let edge_crv = edge_curve(geometry, edge)?
             .ok_or_else(|| SolidError::intersect_missing(OP_EDGE_INTERVAL, "the edge's curve"))?;
-        let proved = params.is_some_and(|params| {
-            piece_within_band(curve, &ivl.interval, edge_crv, params, xsect_tol_3d)
-        });
+        let Some(params) = params else {
+            return Ok(None);
+        };
+        // A curve that crosses the edge at one end of a short interval keeps the whole piece
+        // within the band too, so the piece runs along the edge only when it leaves neither
+        // end across it: tangent to the edge at both
+        for (t, s) in [(t0, params[0]), (t1, params[1])] {
+            if !tangent_to_edge(k, curve, t, edge_crv, s)? {
+                return Ok(None);
+            }
+        }
+        let proved = piece_within_band(curve, &ivl.interval, edge_crv, params, xsect_tol_3d);
         Ok(proved.then_some(unclassified))
     }
+}
+
+/// Not upstream: whether `curve` at `t` runs parallel to `edge_curve` at `s`, either way,
+/// within the angle tolerance ([`are_parallel`]); never for a zero or non-finite tangent.
+fn tangent_to_edge(k: &Kernel, curve: &Curve, t: f64, edge_curve: &Curve, s: f64) -> Result<bool> {
+    let tangent = |c: &Curve, u: f64| -> Result<Option<Vec3>> {
+        let d = c.evaluate(k, u, 1, false, true)?;
+        Ok(d.get(1)
+            .copied()
+            .filter(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite()))
+    };
+    Ok(match (tangent(curve, t)?, tangent(edge_curve, s)?) {
+        (Some(a), Some(b)) => are_parallel(a, b, None),
+        _ => false,
+    })
 }
 
 /// Not upstream: whether `curve` over `interval` lies within `band` of `edge_curve` as a
@@ -2675,7 +2703,7 @@ mod tests {
         use crate::nurbs::math::{CPoint, NOW};
         // y(t) = 1e-6 (1 - t) + 1.25e-3 t (1 - t) (1 - 2 t) from x = 0.5 to the vertex at
         // x = 1: the start is 1e-6 off the edge and the middle 5e-7, both inside the band
-        // (2e-5), but at t = 0.25 the curve is 1.179375e-4 off it
+        // (1e-5), but at t = 0.25 the curve is 1.179375e-4 off it
         let (k3, y3) = (1.25e-3 / 3.0, 1e-6 / 3.0);
         let pw = vec![
             CPoint::new(0.5, 3.0 * y3, 1.0, NOW),
@@ -2701,8 +2729,22 @@ mod tests {
     }
 
     #[test]
+    fn a_short_piece_that_crosses_the_edge_into_its_end_is_left_alone() {
+        // the line arrives at the corner at 2.9 degrees to the edge (the angle tolerance is
+        // 0.5) and starts 5e-6 off it, 1e-4 from the corner: inside the band (1e-5) all
+        // along and clear of the vertex, but it crosses the edge, it does not run along it
+        // (a cut passing a hair off a sheet metal flange's corner, where classifying such an
+        // end onto the edge left an edge whose curve ends 1e-5 from its vertex)
+        let (k, geo, mut cc, _) = along_top_edge(Point3::new(1.0 - 1e-4, 5e-6, 1.0));
+        cc.classify_edge_interval(&k, &geo, 0).expect("classify");
+        let ivl = cc.at(0).expect("interval");
+        assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
+        assert_eq!(ivl.start.point_class(), PointClassType::Unknown);
+    }
+
+    #[test]
     fn an_unclassified_end_off_the_edge_or_at_its_vertex_is_left_alone() {
-        // 1e-4 off the edge (the band is 2e-5), and 1e-5 from the edge's far vertex
+        // 1e-4 off the edge (the band is 1e-5), and 1e-5 from the edge's far vertex
         for from in [Point3::new(0.5, 1e-4, 1.0), Point3::new(1e-5, 0.0, 1.0)] {
             let (k, geo, mut cc, _) = along_top_edge(from);
             cc.classify_edge_interval(&k, &geo, 0).expect("classify");
