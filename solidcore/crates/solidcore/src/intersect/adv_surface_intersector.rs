@@ -78,6 +78,11 @@
 //!   that this class overrides, `ComputeSingularityPoint`, dispatches through the
 //!   base's `advanced` flag. The start point is a zero-filled arena point
 //!   (`GetNewElement`, [`TsectPnt::zeroed`]).
+//! - **Empty trace (WR-80).** `FindInteriorCurves` traces a curve back the other way
+//!   with the base's [`SurfaceIntersector::trace_back`], only when `TraceCurve`
+//!   produced points. Upstream also reverses the empty curve of a tangent or
+//!   coincidence start point that already lies on a found curve, which fails the whole intersection with
+//!   `SM_ERR_NULL_POINTER` (the fork's tangency-labs/smlib@0dbe681).
 //! - **Recursion.** `SolveBranch` nests at most once per tree node; deeper nesting
 //!   (cyclic tree links, which recurse forever upstream) is
 //!   [`SolidError::InvalidInput`], as is nesting past the base solver's
@@ -1241,9 +1246,8 @@ fn trace_curve(
 
 /// The trace of `FindInteriorCurves` from the start point `start`: `TraceCurve`, then,
 /// for an open curve from an unbounded start point whose direction the trace did not
-/// reverse, the trace back the other way (reverse the curve points, negate the
-/// direction, `TraceCurve`, reverse the points back; upstream then multiplies the
-/// direction by 1.0, so it stays negated).
+/// reverse, the trace back the other way ([`SurfaceIntersector::trace_back`], the
+/// base's: not for a trace that produced no points, WR-80).
 fn trace_both_ways(
     k: &Kernel,
     si: &mut SurfaceIntersector<'_>,
@@ -1258,12 +1262,7 @@ fn trace_both_ways(
         && !si.point(start)?.is_bounded()
         && input_trace_direction == si.curve_trace_direction
     {
-        si.reverse_curve_direction()?;
-        si.curve_trace_direction *= -1.0;
-        trace_curve(k, si, start, curves_3d)?;
-
-        // restore the curve direction (upstream multiplies by 1.0)
-        si.reverse_curve_direction()?;
+        si.trace_back(k, start, curves_3d)?;
     }
     Ok(())
 }
