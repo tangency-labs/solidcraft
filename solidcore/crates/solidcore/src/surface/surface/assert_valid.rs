@@ -3238,10 +3238,11 @@ mod tests {
         expect(&cone(-1.0), 2, &[radius, pole]);
         // SM_LEVEL_GIVEN skips the base classes' checks
         expect(&cone(-1.0), LEVEL_GIVEN, &[radius, pole]);
-        // with the NURB form, its closure is not shown: the evaluations through the apex
-        // fail and are passed on (WR-663), so it is open in u and v, and its seam's
-        // boundaries coincide. (SMLib ignores those statuses, shows it closed both ways,
-        // and its control net, read as closed, doubles back: B-spline test 5.)
+        // with the NURB form, no point of it evaluates (its uv cannot be mapped to the
+        // cone's: "the polar curve of the surface of revolution" is missing), so its
+        // closure is not shown (WR-663) and its seam's boundaries are compared. SMLib
+        // compares unset points, shows it closed in u and in v (its ends are 3 apart in
+        // z), and reads its control net, as closed, doubling back: B-spline test 5.
         let seam = (
             SURFACE_TYPE,
             6,

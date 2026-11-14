@@ -1099,23 +1099,26 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
                 && is_zero(interval.max() - parent_ivl.max()))
             && curve.is_closed(k, &parent_ivl, 0.0)?
         {
-            // get pCurve1's end continuity (status ignored; passed on with the opt-in
-            // fix, tangency-labs/smlib 8311f8e)
+            // get pCurve1's end continuity across its closure. One the curve cannot
+            // measure (a tangent field has no second derivative) is not shown: the seam
+            // stays discontinuous, so its ends are examined as ends, which loses no
+            // solution. That is the safe value, not a status ignored, so it holds with
+            // the statuses passed on too (tangency-labs/smlib 8311f8e passed it on and
+            // failed every solve on such a curve)
             let mut continuity = ContinuityType::Discontinuous;
-            if let Some(c) = ignored_or_pass_on(
-                evaluate_continuity(
-                    k,
-                    curve,
-                    parent_ivl.min(),
-                    false,
-                    curve,
-                    parent_ivl.max(),
-                    true,
-                    CONTINUITY_ANGLE,
-                ),
-                pass_on,
-            )? {
-                continuity = c.continuity;
+            match evaluate_continuity(
+                k,
+                curve,
+                parent_ivl.min(),
+                false,
+                curve,
+                parent_ivl.max(),
+                true,
+                CONTINUITY_ANGLE,
+            ) {
+                Ok(c) => continuity = c.continuity,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => {}
             }
             // set span endContinuities as appropriate
             if is_zero(bez_ivl.min() - parent_ivl.min()) {
@@ -2968,18 +2971,15 @@ mod tests {
                 }
             }
         }
-        // the plain nearest point on the field is refused too, by the field: its local
-        // solve takes the second derivative, which a field does not have (its first is a
-        // divided difference), and the statuses are passed on (WR-663)
-        assert!(matches!(
-            solve(
-                &field,
-                (0.0, 1.0),
-                SolverOperation::Minimize,
-                SolutionRequested::Single,
-            ),
-            Err(SolidError::Failed(_))
-        ));
+        // the other operations on the field are not refused
+        let nearest = solve(
+            &field,
+            (0.0, 1.0),
+            SolverOperation::Minimize,
+            SolutionRequested::Single,
+        )
+        .unwrap();
+        assert_eq!(nearest.len(), 1);
     }
 
     /// #13677: with a tolerance wide enough to hold every point of that curve, All
