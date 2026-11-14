@@ -24,6 +24,7 @@
 //! | [`tangent_rollover_supports`] | none (solidcore-native) |
 //! | [`rolled_edge_point`] | none (solidcore-native) |
 //! | `section_seeds`, `SectionSeed` (crate) | none (solidcore-native) |
+//! | `planar_section`, `PlanarSection` (crate) | none (solidcore-native) |
 //!
 //! Deviations: none of upstream's; there is no recursion.
 //!
@@ -87,58 +88,22 @@ pub fn tangent_rollover_supports(
 ) -> Result<[Option<Rollover>; 2]> {
     let none = [None, None];
     let tol = target.tolerance();
-    let Some(curve) = edge::curve(target, filleted)?.cloned() else {
+    let Some(PlanarSection {
+        d,
+        ends,
+        m,
+        x,
+        y,
+        n2,
+        centre,
+    }) = planar_section(k, target, filleted, faces, offsets)?
+    else {
         return Ok(none);
     };
-    let Some((_, vector)) = curve.is_line(k, 3, CURVE_TOL)? else {
-        return Ok(none);
-    };
-    let Ok(d) = vector.unitize() else {
-        return Ok(none);
-    };
-    let ivl = edge::interval(target, filleted)?;
-    let ends = [
-        curve.evaluate_point(k, ivl.min())?,
-        curve.evaluate_point(k, ivl.max())?,
-    ];
-    let m = curve.evaluate_point(k, ivl.evaluate(0.5))?;
-    // each face a plane, its surface normal at the section, square to the edge
-    let mut normals = [Vec3::UNDEF; 2];
-    for (normal, &face) in normals.iter_mut().zip(&faces) {
-        let surface = crate::topology::face::p2::surface(target, face)?
-            .ok_or_else(|| SolidError::blend_failed(OP, "a face of the edge has no surface"))?
-            .clone_for_evaluation()?;
-        if !surface.is_planar(k, tol)?.is_planar {
-            return Ok(none);
-        }
-        let domain = surface.natural_uv_domain_with_nurb(k)?;
-        let dropped =
-            surface.drop_point::<NoObject>(k, m, &domain, &DropPointOptions::default())?;
-        if !dropped.success {
-            return Ok(none);
-        }
-        let n = surface.evaluate_normal(k, dropped.result_uv, KnotSide::Left, KnotSide::Left)?;
-        let Ok(n) = (n - d * n.dot(d)).unitize() else {
-            return Ok(none);
-        };
-        *normal = n;
-    }
-    // the section's frame: x along the first face's normal, y square to it and the edge
-    let x = normals[0];
-    let y = d.cross(x);
     let to2 = |p: Point3| {
         let v = p - m;
         (v.dot(x), v.dot(y))
     };
-    let n2 = normals.map(|n| (n.dot(x), n.dot(y)));
-    // the ball's centre: n_i . p = offset_i (both face lines pass through the section origin)
-    let [(a0, b0), (a1, b1)] = n2;
-    let det = a0 * b1 - b0 * a1;
-    if det.is_nan() || det.abs() <= DIR_TOL {
-        return Ok(none);
-    }
-    let [o0, o1] = offsets;
-    let centre = ((o0 * b1 - b0 * o1) / det, (a0 * o1 - o0 * a1) / det);
     let mut out = none;
     for (((slot, &(na, nb)), &offset), &face) in out.iter_mut().zip(&n2).zip(&offsets).zip(&faces) {
         // the contact: the centre's foot on the face's line
@@ -204,6 +169,113 @@ pub fn tangent_rollover_supports(
         }
     }
     Ok(out)
+}
+
+/// A constant round's section across the middle of a straight edge between two planes, in
+/// closed form ([`planar_section`]).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PlanarSection {
+    /// The edge's unit direction.
+    pub d: Vec3,
+    /// The edge's ends.
+    pub ends: [Point3; 2],
+    /// The edge's middle, the section's origin.
+    pub m: Point3,
+    /// The section's x axis: the first face's surface normal there, square to the edge.
+    pub x: Vec3,
+    /// The section's y axis, `d x x`.
+    pub y: Vec3,
+    /// Each face's surface normal in the section's frame.
+    pub n2: [(f64, f64); 2],
+    /// The ball's centre in the section's frame, where the offset lines meet.
+    pub centre: (f64, f64),
+}
+
+impl PlanarSection {
+    /// The ball's contact on face `rail`'s plane (the centre's foot on its line), in space,
+    /// for the offset `offset` of that face; `None` for a rail other than 0 or 1.
+    pub(crate) fn contact(&self, rail: usize, offset: f64) -> Option<Point3> {
+        let &(na, nb) = self.n2.get(rail)?;
+        let c = (self.centre.0 - na * offset, self.centre.1 - nb * offset);
+        Some(self.m + self.x * c.0 + self.y * c.1)
+    }
+}
+
+/// The section of the constant round of signed offsets `offsets` on `faces` across the middle
+/// of the straight edge `filleted`, both faces planes: the ball's centre is where the offset
+/// lines meet (the ball's centre lies at a face's point plus its surface normal times the
+/// offset). `None` where the edge has no curve or is not a line, a face is not a plane or its
+/// normal does not drop or is along the edge, or the faces' lines are parallel in the section.
+///
+/// # Errors
+///
+/// Those of the curve's recogniser, the evaluations and the drops; `SM_ERR` for a face without
+/// a surface.
+pub(crate) fn planar_section(
+    k: &Kernel,
+    target: &Brep,
+    filleted: EdgeId,
+    faces: [FaceId; 2],
+    offsets: [f64; 2],
+) -> Result<Option<PlanarSection>> {
+    let tol = target.tolerance();
+    let Some(curve) = edge::curve(target, filleted)?.cloned() else {
+        return Ok(None);
+    };
+    let Some((_, vector)) = curve.is_line(k, 3, CURVE_TOL)? else {
+        return Ok(None);
+    };
+    let Ok(d) = vector.unitize() else {
+        return Ok(None);
+    };
+    let ivl = edge::interval(target, filleted)?;
+    let ends = [
+        curve.evaluate_point(k, ivl.min())?,
+        curve.evaluate_point(k, ivl.max())?,
+    ];
+    let m = curve.evaluate_point(k, ivl.evaluate(0.5))?;
+    // each face a plane, its surface normal at the section, square to the edge
+    let mut normals = [Vec3::UNDEF; 2];
+    for (normal, &face) in normals.iter_mut().zip(&faces) {
+        let surface = crate::topology::face::p2::surface(target, face)?
+            .ok_or_else(|| SolidError::blend_failed(OP, "a face of the edge has no surface"))?
+            .clone_for_evaluation()?;
+        if !surface.is_planar(k, tol)?.is_planar {
+            return Ok(None);
+        }
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        let dropped =
+            surface.drop_point::<NoObject>(k, m, &domain, &DropPointOptions::default())?;
+        if !dropped.success {
+            return Ok(None);
+        }
+        let n = surface.evaluate_normal(k, dropped.result_uv, KnotSide::Left, KnotSide::Left)?;
+        let Ok(n) = (n - d * n.dot(d)).unitize() else {
+            return Ok(None);
+        };
+        *normal = n;
+    }
+    // the section's frame: x along the first face's normal, y square to it and the edge
+    let x = normals[0];
+    let y = d.cross(x);
+    let n2 = normals.map(|n| (n.dot(x), n.dot(y)));
+    // the ball's centre: n_i . p = offset_i (both face lines pass through the section origin)
+    let [(a0, b0), (a1, b1)] = n2;
+    let det = a0 * b1 - b0 * a1;
+    if det.is_nan() || det.abs() <= DIR_TOL {
+        return Ok(None);
+    }
+    let [o0, o1] = offsets;
+    let centre = ((o0 * b1 - b0 * o1) / det, (a0 * o1 - o0 * a1) / det);
+    Ok(Some(PlanarSection {
+        d,
+        ends,
+        m,
+        x,
+        y,
+        n2,
+        centre,
+    }))
 }
 
 /// The nearest point to `point` on the smooth edge a rail rolled over: where a ball of radius 0
