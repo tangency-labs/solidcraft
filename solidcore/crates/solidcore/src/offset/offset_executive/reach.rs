@@ -1413,12 +1413,11 @@ fn plane_net_piece(
 /// The certified upper bound of the reach over a piece where a quadric and a bare net (or
 /// the offset of one, [`net::Net`]) meet in the edge's normal sections
 /// ([`local_extension_reach`]): the section through the edge point `p` across its tangent
-/// `t`, each by its mean-value form over the piece, meets the quadric and the net (or its
-/// extension) at a point proved for every section of the piece
-/// ([`net::section_quadric_meets`]), whose distance from `p` is at most the length of their
-/// difference's enclosure; the same at the middle, from its own box, is the value that
-/// steers the halving. `guess` carries Newton's last root from piece to piece. A thread's
-/// flank moved beside its root and crest cylinders meets each of them so.
+/// meets the quadric and the net (or its extension) at a point proved for every section of
+/// the piece, its distance from `p` bounded ([`net::section_quadric_meets`], which takes the
+/// root's motion along the edge out of the proof); its distance at the middle steers the
+/// halving. `guess` carries Newton's last root from piece to piece. A thread's flank moved
+/// beside its root and crest cylinders meets each of them so.
 ///
 /// # Errors
 ///
@@ -1431,46 +1430,22 @@ fn quadric_net_piece(
     net: &net::Net,
     guess: &std::cell::Cell<Option<[f64; 2]>>,
 ) -> Result<PieceBound> {
-    let centred = |a: Dv, m: Dv| {
-        [
-            mean_value(a.x, m.x, dt),
-            mean_value(a.y, m.y, dt),
-            mean_value(a.z, m.z, dt),
-        ]
+    // the point and tangent (the point's rate) and their rates, over the piece and at its
+    // middle
+    let moving = |(p, t): (Dv, Dv)| net::Moving {
+        p: [p.x.v, p.y.v, p.z.v],
+        p_rate: [p.x.d, p.y.d, p.z.d],
+        t: [t.x.v, t.y.v, t.z.v],
+        t_rate: [t.x.d, t.y.d, t.z.d],
     };
-    let values = |a: Dv| [a.x.v, a.y.v, a.z.v];
-    let numbers = |a: Dv| Vec3::new(a.x.v.mid(), a.y.v.mid(), a.z.v.mid());
-    let at_middle = (numbers(mid.0), numbers(mid.1));
-    let section = (centred(over.0, mid.0), centred(over.1, mid.1));
-    // `|x − p|` over the piece: the length of the enclosed difference, rounded up
-    let distance = |x: [Ivl; 3], p: [Ivl; 3]| {
-        let [a, b, c] = x;
-        let [d, e, f] = p;
-        net::length_bound([a - d, b - e, c - f])
-    };
-    let Some(x) = net::section_quadric_meets(net, quadric, section, at_middle, guess)? else {
-        return Ok(PieceBound::Unknown);
-    };
-    let upper = distance(x, section.0);
-    // a meeting at the middle, from its own box: its distance only steers the halving (it
-    // need not be the nearest meeting there, nor rounded down)
-    let point = (values(mid.0), values(mid.1));
-    let lower = match net::section_quadric_meets(net, quadric, point, at_middle, guess)? {
-        Some([a, b, c]) => {
-            let [d, e, f] = point.0;
-            let gap = |x: Ivl, y: Ivl| (x - y).mig();
-            sqrt(gap(a, d).powi(2) + gap(b, e).powi(2) + gap(c, f).powi(2))
-        }
-        None => 0.0,
-    };
-    Ok(if upper.is_finite() {
-        PieceBound::Value {
+    let found = net::section_quadric_meets(net, quadric, &moving(over), &moving(mid), dt, guess)?;
+    Ok(match found {
+        Some((upper, lower)) => PieceBound::Value {
             upper,
             lower,
             crosses: false,
-        }
-    } else {
-        PieceBound::Unknown
+        },
+        None => PieceBound::Unknown,
     })
 }
 
@@ -2645,11 +2620,19 @@ fn corner(
                 // two quadrics and a net: where the net crosses the quadrics' meeting; one
                 // quadric surface (a cylinder in pieces, each its own copy) or two parallel
                 // ones meet the net in no one point, and the edges' meetings stand, as for a
-                // plane below (parallel taken either way round: the same from every face)
+                // plane below (parallel taken either way round: the same from every face).
+                // A moved net's move there is then the edges' too: the face's edges through
+                // the vertex beside the net bound it over their whole length, ends included
+                // (a moved net's shift is the reach of an edge beside it)
                 (&[], [a, c], [n]) => {
                     if quadric_pair(a, c, at.tolerance).is_some()
                         && quadric_pair(c, a, at.tolerance).is_some()
                     {
+                        for (on, which) in on_nets.iter_mut().zip(&moved_nets) {
+                            if which.is_none_or(|w| w == *fc || w == *fd) {
+                                *on = Some(on.unwrap_or(0.0));
+                            }
+                        }
                         None
                     } else {
                         Some(net::quadrics_and_net_meet(n, a, c, p)?.ok_or_else(refuse)?)

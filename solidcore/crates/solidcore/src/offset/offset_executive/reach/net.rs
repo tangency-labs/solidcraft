@@ -1588,29 +1588,57 @@ pub(super) fn quadrics_and_net_meet(
     Ok(on.then(|| length_bound(sub(jet.p, point(p)))))
 }
 
-/// Where the quadric `q` and the net meet in a normal section of an edge, the plane through
-/// the edge point `p` across its tangent `t` (both enclosed over a piece of the edge's
-/// parameters; `mid` the same at the piece's middle, as numbers): the enclosure of a
-/// meeting point proved for every section of the piece by Krawczyk's test on
-/// `t · (N(u, v) − p) = 0`, `F(N(u, v)) = 0` (`F` the quadric's implicit function,
-/// [`quadric_value_and_gradient`]; module docs), on the quadric's own nappe
-/// ([`super::quadric::on_nappe`]) and on the surface as built ([`Net::jet_as_built`]), or
-/// `None`. `guess` carries the last root from one piece to the next (Newton's start; else
-/// the net's point nearest `p` on its knots, [`Net::nearest_on_knots`]): it only steers
-/// Newton, and what is proved is decided by the box alone.
+/// A piece of an edge, enclosed over its parameters `t`: the point `p` and its rate `p'`,
+/// the tangent `τ` (the normal section's normal) and its rate `τ'`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Moving {
+    pub(super) p: I3,
+    pub(super) p_rate: I3,
+    pub(super) t: I3,
+    pub(super) t_rate: I3,
+}
+
+/// Where the quadric `q` and the net meet in the normal sections of a piece of an edge, the
+/// planes through the edge point `p(t)` across its tangent `τ(t)` (`over` the piece, `mid`
+/// its middle `t_m` as point enclosures, `h` the range of `t − t_m`): certified upper and
+/// lower bounds on the distance from `p(t)` of a meeting proved in every section of the
+/// piece, or `None`.
+///
+/// The meeting solves `F(u, v; t) = (τ · (N − p), Q(N)) = 0` (`N` the net at `(u, v)`, `Q` the
+/// quadric's implicit function, [`quadric_value_and_gradient`]; module docs). Along an edge
+/// the root moves with `t`, while the net's parameter along the edge is barely tied by `Q`
+/// (the net runs along the quadric there), so a box over all the roots of a piece is long
+/// in that parameter, and its Jacobian, enclosed over it, too wide for Krawczyk's test. The
+/// root's first-order motion is taken out instead: with `ỹ` Newton's root at `t_m`, `C` the
+/// inverse of `F′` there and `s = −C ∂F/∂t` (`∂F/∂t = (τ' · (N − p) − τ · p', 0)` at fixed
+/// `(u, v)`), the unknown is `δ` in `(u, v) = ỹ + s (t − t_m) + δ`, and for every `t` of the
+/// piece a root `δ(t)` is proved in one small box by Krawczyk's operator: `F` at `δ = 0`
+/// enclosed by its mean-value form in `t`, `F(t_m) + (dF/dt) h` with
+/// `dF/dt = (τ' · (N − p) + τ · (N_u s_u + N_v s_v − p'), ∇Q · (N_u s_u + N_v s_v))` over
+/// the box `B = ỹ + s h`, and `F′` over `B + δ`. The meeting is on the quadric's own nappe
+/// ([`super::quadric::on_nappe`]) and on the surface as built ([`Net::jet_as_built`]). Its
+/// offset from the edge point is, by the mean-value form from `ỹ`,
+/// `N(ỹ) − p(t_m) + (N_u s_u + N_v s_v − p') h + N_u δ_u + N_v δ_v`, the partials over the
+/// hull of `ỹ` and the proved box; the upper bound is that vector's length, the lower its
+/// least length at `t_m` (the value that steers the halving).
+///
+/// `guess` carries the last root from one piece to the next (Newton's start; else the net's
+/// point nearest `p(t_m)` on its knots, [`Net::nearest_on_knots`]): it only steers Newton,
+/// and what is proved is decided by the box alone.
 ///
 /// # Errors
 ///
 /// A cancel.
+#[allow(clippy::too_many_lines)] // the moving root's set-up, its proof and its distance
 pub(super) fn section_quadric_meets(
     net: &Net,
     q: &Implicit,
-    section: (I3, I3),
-    mid: (Vec3, Vec3),
+    over: &Moving,
+    mid: &Moving,
+    h: Ivl,
     guess: &Cell<Option<[f64; 2]>>,
-) -> Result<Option<I3>> {
-    let (p, t) = section;
-    let (mp, mt) = mid;
+) -> Result<Option<(f64, f64)>> {
+    let (mp, mt) = (middle(mid.p), middle(mid.t));
     let at = |y: [f64; 2]| -> Result<Linearised<2>> {
         let [u, v] = y;
         let Some((x, su, sv)) = net.at(u, v)? else {
@@ -1642,38 +1670,82 @@ pub(super) fn section_quadric_meets(
         return Ok(None);
     };
     guess.set(Some(root));
+    let Some((x, _, _)) = net.at(root[0], root[1])? else {
+        return Ok(None);
+    };
     let Some((_, j)) = at(root)? else {
         return Ok(None);
     };
     let Some(c) = inverse_of_columns2(&j) else {
         return Ok(None);
     };
-    let value = |y: [Ivl; 2]| -> Result<Option<[Ivl; 2]>> {
-        let [u, v] = y;
-        let Some(jet) = net.jet_near(u, v, mp)? else {
-            return Ok(None);
-        };
-        Ok(quadric_value_and_gradient(q, jet.p).map(|(f, _)| [dot(t, sub(jet.p, p)), f]))
+    // the root's rate along the edge, `s = −C ∂F/∂t` (a choice of centre only: any `s`
+    // keeps the proof valid)
+    let f_t = (x - mp).dot(middle(mid.t_rate)) - mt.dot(middle(mid.p_rate));
+    let [[c00, _], [c10, _]] = c;
+    let rate = [-c00 * f_t, -c10 * f_t];
+    if !rate.iter().all(|r| r.is_finite()) {
+        return Ok(None);
+    }
+    let [ru, rv] = rate.map(Ivl::from);
+    let [u0, v0] = root.map(Ivl::from);
+    let (bu, bv) = (u0 + ru * h, v0 + rv * h);
+    // `F` at `t_m` from the root's own point, and its rate over the piece
+    let (Some(at_root), Some(over_b)) = (net.jet_near(u0, v0, mp)?, net.jet_near(bu, bv, mp)?)
+    else {
+        return Ok(None);
     };
+    let (Some((q_root, _)), Some((_, g_b))) = (
+        quadric_value_and_gradient(q, at_root.p),
+        quadric_value_and_gradient(q, over_b.p),
+    ) else {
+        return Ok(None);
+    };
+    let moves = add(scale(over_b.su, ru), scale(over_b.sv, rv));
+    let f_mid = [dot(mid.t, sub(at_root.p, mid.p)), q_root];
+    let f_rate = [
+        dot(over.t_rate, sub(over_b.p, over.p)) + dot(over.t, sub(moves, over.p_rate)),
+        dot(g_b, moves),
+    ];
+    let [f0, f1] = f_mid;
+    let [d0, d1] = f_rate;
+    let at_zero = [f0 + d0 * h, f1 + d1 * h];
+    let value = |_: [Ivl; 2]| -> Result<Option<[Ivl; 2]>> { Ok(Some(at_zero)) };
     let jacobian = |y: [Ivl; 2]| -> Result<Option<[[Ivl; 2]; 2]>> {
-        let [u, v] = y;
-        let Some(jet) = net.jet_near(u, v, mp)? else {
+        let [du, dv] = y;
+        let Some(jet) = net.jet_near(bu + du, bv + dv, mp)? else {
             return Ok(None);
         };
         Ok(quadric_value_and_gradient(q, jet.p).map(|(_, g)| {
             [
-                [dot(t, jet.su), dot(g, jet.su)],
-                [dot(t, jet.sv), dot(g, jet.sv)],
+                [dot(over.t, jet.su), dot(g, jet.su)],
+                [dot(over.t, jet.sv), dot(g, jet.sv)],
             ]
         }))
     };
-    let Some([u, v]) = krawczyk(root, c, &value, &jacobian)? else {
+    let Some([du, dv]) = krawczyk([0.0; 2], c, &value, &jacobian)? else {
         return Ok(None);
     };
-    let Some(jet) = net.jet_as_built(u, v, mp)? else {
+    let (fu, fv) = (bu + du, bv + dv);
+    let Some(met) = net.jet_as_built(fu, fv, mp)? else {
         return Ok(None);
     };
-    Ok(super::quadric::on_nappe(q, jet.p).then_some(jet.p))
+    if !super::quadric::on_nappe(q, met.p) {
+        return Ok(None);
+    }
+    // the partials over the hull of the root and the proved box
+    let Some(hull) = net.jet_near(fu.hull(u0), fv.hull(v0), mp)? else {
+        return Ok(None);
+    };
+    let along = sub(add(scale(hull.su, ru), scale(hull.sv, rv)), over.p_rate);
+    let off = add(
+        add(sub(at_root.p, mid.p), scale(along, h)),
+        add(scale(hull.su, du), scale(hull.sv, dv)),
+    );
+    let upper = length_bound(off);
+    let least = sub(at_root.p, mid.p).map(Ivl::mig);
+    let lower = sqrt(least.iter().map(|x| x * x).sum::<f64>());
+    Ok(upper.is_finite().then_some((upper, lower)))
 }
 
 #[cfg(test)]
