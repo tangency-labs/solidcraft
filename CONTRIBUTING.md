@@ -429,7 +429,8 @@ and a fresh CI run:
 
 Commenting `/claim` assigns you, adds the `in progress` label, and replies with its automatic cleanup
 deadline. It frees a claim with no linked PR after 72 hours, or a claim with a PR after 14 days
-without pushes. These automatic cleanup deadlines are separate from the daily progress and
+without pushes. When the claiming PR closes without closing the issue (it merged as "Part of #N",
+or closed unmerged), the issue is free again at once. These automatic cleanup deadlines are separate from the daily progress and
 72-hour takeover policy above. A draft PR that references the issue claims it the same way.
 `/unclaim` releases the bot claim early (only you or a maintainer can). Issues a maintainer has
 taken are never freed automatically.
