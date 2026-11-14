@@ -1,0 +1,784 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/14415",
+ "test": "none: a regression between SolidCraft 0.30.1 (truck) and 0.40.0-rc.3 (solidcore); the report's script",
+ "summary": "TODO",
+ "cases": [
+  {
+   "name": "both_caps_at_90_degrees",
+   "note": "The report's case: both revolve 90 degrees, so both of the tool's end caps lie in the target's.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         8.0,
+         0.0
+        ],
+        [
+         8.0,
+         6.0
+        ],
+        [
+         2.0,
+         6.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 90.0
+    },
+    {
+     "op": "revolve",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        5.0,
+        3.0
+       ],
+       "radius": 1.5
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 90.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 227.226814067,
+     "tol": 0.001,
+     "formula": "36*5*rad(90) - 2.25*pi*5*rad(90) (Pappus: the square's area times its centroid's path, less the hole's; the tool removes nothing past the target's end cap); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "tool_at_100_degrees",
+   "note": "The report's ok.json: the tool turns 100 degrees, so only its start cap lies in the target's.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         8.0,
+         0.0
+        ],
+        [
+         8.0,
+         6.0
+        ],
+        [
+         2.0,
+         6.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 90.0
+    },
+    {
+     "op": "revolve",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        5.0,
+        3.0
+       ],
+       "radius": 1.5
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 100.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 227.226814067,
+     "tol": 0.001,
+     "formula": "36*5*rad(90) - 2.25*pi*5*rad(90) (Pappus: the square's area times its centroid's path, less the hole's; the tool removes nothing past the target's end cap); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "tool_at_80_degrees",
+   "note": "The tool turns 80 degrees: only its start cap lies in the target's.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         8.0,
+         0.0
+        ],
+        [
+         8.0,
+         6.0
+        ],
+        [
+         2.0,
+         6.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 90.0
+    },
+    {
+     "op": "revolve",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        5.0,
+        3.0
+       ],
+       "radius": 1.5
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 80.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 233.395316818,
+     "tol": 0.001,
+     "formula": "36*5*rad(90) - 2.25*pi*5*rad(80) (Pappus: the square's area times its centroid's path, less the hole's; the tool removes nothing past the target's end cap); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "square_hole_at_90_degrees",
+   "note": "Control from the report: a 3 x 3 square hole about (5, 3) in place of the circle, both 90 degrees (planar and cylindrical faces, no torus).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         8.0,
+         0.0
+        ],
+        [
+         8.0,
+         6.0
+        ],
+        [
+         2.0,
+         6.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 90.0
+    },
+    {
+     "op": "revolve",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         3.5,
+         1.5
+        ],
+        [
+         6.5,
+         1.5
+        ],
+        [
+         6.5,
+         4.5
+        ],
+        [
+         3.5,
+         4.5
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 90.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 212.057504117,
+     "tol": 0.001,
+     "formula": "36*5*rad(90) - 9*5*rad(90) (Pappus: the square's area times its centroid's path, less the hole's; the tool removes nothing past the target's end cap); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "both_caps_at_10_degrees",
+   "note": "Both revolve 10 degrees (the report's series: 10 and 180 built, 45 and 270 refused).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         8.0,
+         0.0
+        ],
+        [
+         8.0,
+         6.0
+        ],
+        [
+         2.0,
+         6.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 10.0
+    },
+    {
+     "op": "revolve",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        5.0,
+        3.0
+       ],
+       "radius": 1.5
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 25.247423785,
+     "tol": 0.001,
+     "formula": "36*5*rad(10) - 2.25*pi*5*rad(10) (Pappus: the square's area times its centroid's path, less the hole's; the tool removes nothing past the target's end cap); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "both_caps_at_45_degrees",
+   "note": "Both revolve 45 degrees (the report's series: 10 and 180 built, 45 and 270 refused).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         8.0,
+         0.0
+        ],
+        [
+         8.0,
+         6.0
+        ],
+        [
+         2.0,
+         6.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 45.0
+    },
+    {
+     "op": "revolve",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        5.0,
+        3.0
+       ],
+       "radius": 1.5
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 45.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 113.613407033,
+     "tol": 0.001,
+     "formula": "36*5*rad(45) - 2.25*pi*5*rad(45) (Pappus: the square's area times its centroid's path, less the hole's; the tool removes nothing past the target's end cap); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "both_caps_at_180_degrees",
+   "note": "Both revolve 180 degrees (the report's series: 10 and 180 built, 45 and 270 refused).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         8.0,
+         0.0
+        ],
+        [
+         8.0,
+         6.0
+        ],
+        [
+         2.0,
+         6.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 180.0
+    },
+    {
+     "op": "revolve",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        5.0,
+        3.0
+       ],
+       "radius": 1.5
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 180.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 454.453628134,
+     "tol": 0.001,
+     "formula": "36*5*rad(180) - 2.25*pi*5*rad(180) (Pappus: the square's area times its centroid's path, less the hole's; the tool removes nothing past the target's end cap); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "both_caps_at_270_degrees",
+   "note": "Both revolve 270 degrees (the report's series: 10 and 180 built, 45 and 270 refused).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         8.0,
+         0.0
+        ],
+        [
+         8.0,
+         6.0
+        ],
+        [
+         2.0,
+         6.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 270.0
+    },
+    {
+     "op": "revolve",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        5.0,
+        3.0
+       ],
+       "radius": 1.5
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 270.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 681.680442201,
+     "tol": 0.001,
+     "formula": "36*5*rad(270) - 2.25*pi*5*rad(270) (Pappus: the square's area times its centroid's path, less the hole's; the tool removes nothing past the target's end cap); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "both_full_turns",
+   "note": "Both revolve a whole turn, the report's 360: no end caps. The torus lies wholly inside the ring, so the cut leaves a closed cavity; that void is a region of its own, so lumps are not checked (as in 2005-closed-sweep-cuts-torus.json).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "block",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         0.0
+        ],
+        [
+         8.0,
+         0.0
+        ],
+        [
+         8.0,
+         6.0
+        ],
+        [
+         2.0,
+         6.0
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 360.0
+    },
+    {
+     "op": "revolve",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        5.0,
+        3.0
+       ],
+       "radius": 1.5
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 360.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 908.907256268,
+     "tol": 0.001,
+     "formula": "36*5*rad(360) - 2.25*pi*5*rad(360) (Pappus: the square's area times its centroid's path, less the hole's; the tool removes nothing past the target's end cap); tol 0.001 mm^3"
+    }
+   }
+  }
+ ]
+}

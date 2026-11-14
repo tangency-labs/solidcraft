@@ -26,6 +26,8 @@ use solidcore::blend::fillet_executive::api as fillet_api;
 use solidcore::blend::fillet_executive::FitKind;
 use solidcore::boolean::api_brep as boolean;
 use solidcore::curve::curve::Curve;
+use solidcore::error::SM_SUCCESS;
+use solidcore::geom::assert_array::obj_type_string;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::object::ObjectRef;
@@ -45,6 +47,7 @@ use solidcore::topology::brep::mirror::mirror;
 use solidcore::topology::brep::p1::regions;
 use solidcore::topology::brep::p2::ArenaNotifyState;
 use solidcore::topology::brep::p3;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::proto_topology::p1::api_transform::{
     api_rotate, api_translate, TransformObject,
 };
@@ -508,6 +511,12 @@ pub struct Expect {
     /// blend that leaves an open or non-manifold body must not pass on its volume alone.
     #[serde(default)]
     pub manifold: Option<bool>,
+    /// Whether `result` must pass solidcore's full check, `check_brep` at Level 2 (with
+    /// its warnings allowed): the check SolidCraft runs on every boolean, blend and offset
+    /// result, refusing one that fails it, so a result with the right volume can still be
+    /// what SolidCraft refuses.
+    #[serde(default)]
+    pub valid: Option<bool>,
 }
 
 /// A refusal a case expects: the step that fails and text its error contains.
@@ -929,6 +938,7 @@ pub fn validate(case: &Case) -> Result<(), String> {
             || e.cylinder_faces_max.is_some()
             || e.sheet_corner.is_some()
             || e.manifold.is_some()
+            || e.valid.is_some()
         {
             return Err(
                 "a refused case has no result to check: drop its other expectations".into(),
@@ -975,6 +985,25 @@ pub struct Measured {
     pub removed: Option<f64>,
     /// `SmBrep::IsManifoldSolid`: a closed solid with every edge on two faces.
     pub manifold: bool,
+    /// `check_brep` at Level 2, when the case asks for `valid`.
+    pub validity: Option<Validity>,
+}
+
+/// What `check_brep` at Level 2 found on `result`. Kept small: [`Run`] carries it and is
+/// itself an error value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Validity {
+    /// The tests it failed, its warnings not counted (a failed status or `AssertValid`
+    /// without a report counts as one): 0 for a valid body.
+    pub failures: u32,
+    /// The first failed test's index in its reporting type's table (2 in
+    /// `SmTrimmingTools::Test #2`); 0 when no test failed.
+    pub first_test: u32,
+    /// The first failed test's reporting type (`SmTrimmingTools`); empty when no test
+    /// failed.
+    pub first_kind: &'static str,
+    /// The first failed test's name (`UVEdge/UVEdge Gap`); empty when no test failed.
+    pub first_name: &'static str,
 }
 
 /// How a case's run ended.
@@ -1747,6 +1776,30 @@ fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
         ],
         cylinder_faces,
         removed: None,
+        validity: None,
+    })
+}
+
+/// `check_brep` at Level 2 on `b`, counted as SolidCraft counts it: every failed test that
+/// is not a warning, and one for a failed pointer status or `AssertValid` without a report.
+fn validity(k: &mut Kernel, b: &mut Brep) -> Result<Validity, SolidError> {
+    let c = check_brep(k, b, CheckLevel::Level2)?;
+    let mut failures = u32::try_from(c.failures().count()).unwrap_or(u32::MAX);
+    if failures == 0 && (c.pointers_status != SM_SUCCESS || c.assert_valid == Some(false)) {
+        failures = 1;
+    }
+    let (first_kind, first_test, first_name) = c.failures().next().map_or(("", 0, ""), |r| {
+        (
+            obj_type_string(r.reporting_type),
+            u32::try_from(r.test_index).unwrap_or(u32::MAX),
+            r.name,
+        )
+    });
+    Ok(Validity {
+        failures,
+        first_test,
+        first_kind,
+        first_name,
     })
 }
 
@@ -1837,7 +1890,15 @@ pub fn run_rust_on(mut k: Kernel, case: &Case) -> Run {
     }
     let mut m = match bodies.get_mut(RESULT) {
         Some(b) => match measure(&k, b) {
-            Ok(m) => m,
+            Ok(mut m) => {
+                if case.expect.valid.is_some() {
+                    match validity(&mut k, b) {
+                        Ok(v) => m.validity = Some(v),
+                        Err(e) => return solid(&e),
+                    }
+                }
+                m
+            }
             Err(e) => return solid(&e),
         },
         None => return Run::Error(format!("no body `{RESULT}`")),
@@ -1859,8 +1920,8 @@ pub fn run_rust_on(mut k: Kernel, case: &Case) -> Run {
 /// One expectation checked.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Check {
-    /// `lumps`, `volume`, `removed`, `cylinder_faces_max`, `manifold`, `sheet_corner`,
-    /// `refused`, `fit_size`.
+    /// `lumps`, `volume`, `removed`, `cylinder_faces_max`, `manifold`, `valid`,
+    /// `sheet_corner`, `refused`, `fit_size`.
     pub name: &'static str,
     /// `pass`, `fail` or `unchecked`.
     pub status: &'static str,
@@ -1924,6 +1985,29 @@ pub fn checks(e: &Expect, m: &Measured) -> Vec<Check> {
             name: "manifold",
             status: pass(m.manifold == want),
             detail: format!("expected {want}, got {}", m.manifold),
+        });
+    }
+    if let Some(want) = e.valid {
+        out.push(match m.validity {
+            Some(v) => Check {
+                name: "valid",
+                status: pass((v.failures == 0) == want),
+                detail: if v.failures == 0 {
+                    format!("expected {want}, got no failed test")
+                } else if v.first_kind.is_empty() {
+                    format!("expected {want}, got a failed status without a report")
+                } else {
+                    format!(
+                        "expected {want}, got {} failed test(s), the first {}::Test #{} {}",
+                        v.failures, v.first_kind, v.first_test, v.first_name
+                    )
+                },
+            },
+            None => Check {
+                name: "valid",
+                status: "unchecked",
+                detail: "the check was not run".into(),
+            },
         });
     }
     if e.sheet_corner.is_some() {
@@ -2070,6 +2154,10 @@ fn run_entry(run: &Run, verdict: &str, checks: &[Check]) -> Value {
             }
         }
         Run::Done(m) => {
+            let first_failed = m
+                .validity
+                .filter(|v| !v.first_kind.is_empty())
+                .map(|v| format!("{}::Test #{} {}", v.first_kind, v.first_test, v.first_name));
             e.insert(
                 "measured".into(),
                 json!({
@@ -2081,6 +2169,8 @@ fn run_entry(run: &Run, verdict: &str, checks: &[Check]) -> Value {
                     "cylinder_faces": m.cylinder_faces,
                     "removed": m.removed.map(crate::json::num),
                     "manifold": m.manifold,
+                    "check_failures": m.validity.map(|v| v.failures),
+                    "first_failed_test": first_failed,
                 }),
             );
             e.insert(
@@ -2330,7 +2420,8 @@ mod tests {
                     || e.removed.is_some()
                     || e.sheet_corner.is_some()
                     || e.refused.is_some()
-                    || e.manifold.is_some(),
+                    || e.manifold.is_some()
+                    || e.valid.is_some(),
                 "{}: nothing to check",
                 l.id
             );
@@ -2593,6 +2684,7 @@ mod tests {
             cylinder_faces: 0,
             removed: None,
             manifold: false,
+            validity: None,
         });
         let (v, c) = verdict(&e, &built);
         assert_eq!(v, "FAIL");
@@ -2644,6 +2736,7 @@ mod tests {
                 cylinder_faces: 0,
                 removed: None,
                 manifold,
+                validity: None,
             })
         };
         assert_eq!(verdict(&e, &m(true)).0, "PASS");
@@ -2653,6 +2746,57 @@ mod tests {
             c.iter().any(|c| c.name == "manifold" && c.status == "fail"),
             "{c:?}"
         );
+    }
+
+    #[test]
+    fn valid_expectation_checks_the_result() {
+        let e: Expect = serde_json::from_value(json!({"lumps": 1, "valid": true})).unwrap();
+        let m = |validity: Option<Validity>| {
+            Run::Done(Measured {
+                volume: 1.0,
+                lumps: 1,
+                topology: [6, 12, 8],
+                cylinder_faces: 0,
+                removed: None,
+                manifold: true,
+                validity,
+            })
+        };
+        let clean = Validity {
+            failures: 0,
+            first_test: 0,
+            first_kind: "",
+            first_name: "",
+        };
+        assert_eq!(verdict(&e, &m(Some(clean))).0, "PASS");
+        let gap = Validity {
+            failures: 2,
+            first_test: 2,
+            first_kind: "SmTrimmingTools",
+            first_name: "UVEdge/UVEdge Gap",
+        };
+        let (v, c) = verdict(&e, &m(Some(gap)));
+        assert_eq!(v, "FAIL");
+        assert!(
+            c.iter().any(|c| c.name == "valid"
+                && c.status == "fail"
+                && c.detail
+                    .contains("SmTrimmingTools::Test #2 UVEdge/UVEdge Gap")),
+            "{c:?}"
+        );
+        // A run that did not check leaves the expectation unchecked.
+        assert_eq!(verdict(&e, &m(None)).0, "UNCHECKED");
+        // A box passes the check run end to end.
+        let case: Case = serde_json::from_value(json!({
+            "name": "box-is-valid",
+            "steps": [{"op": "box", "id": "result", "origin": [0.0, 0.0, 0.0],
+                       "size": [1.0, 2.0, 3.0]}],
+            "expect": {"lumps": 1, "valid": true}
+        }))
+        .unwrap();
+        validate(&case).unwrap();
+        let run = run_rust(&case);
+        assert_eq!(verdict(&case.expect, &run).0, "PASS", "{run:?}");
     }
 
     #[test]
@@ -2745,6 +2889,7 @@ mod tests {
             sheet_corner: None,
             refused: None,
             manifold: None,
+            valid: None,
             removed: None,
         };
         let ok = Measured {
@@ -2754,6 +2899,7 @@ mod tests {
             cylinder_faces: 0,
             removed: None,
             manifold: true,
+            validity: None,
         };
         assert_eq!(verdict(&e, &Run::Done(ok)).0, "PASS");
         // The bug: the whole intersect came out empty.
@@ -2764,6 +2910,7 @@ mod tests {
             cylinder_faces: 0,
             removed: None,
             manifold: true,
+            validity: None,
         };
         let (v, c) = verdict(&e, &Run::Done(empty));
         assert_eq!(v, "FAIL");
@@ -2803,6 +2950,7 @@ mod tests {
             cylinder_faces: 0,
             removed: None,
             manifold: true,
+            validity: None,
         });
         let (v, c) = verdict(&e, &run);
         assert!(c.is_empty());
@@ -2909,6 +3057,7 @@ mod tests {
                         cylinder_faces: 0,
                         removed: None,
                         manifold: true,
+                        validity: None,
                     })
                 )
                 .0,
@@ -3040,6 +3189,7 @@ mod tests {
             cylinder_faces: 0,
             removed,
             manifold: true,
+            validity: None,
         };
         assert_eq!(verdict(&e, &Run::Done(m(Some(10.5)))).0, "PASS");
         assert_eq!(verdict(&e, &Run::Done(m(Some(12.0)))).0, "FAIL");

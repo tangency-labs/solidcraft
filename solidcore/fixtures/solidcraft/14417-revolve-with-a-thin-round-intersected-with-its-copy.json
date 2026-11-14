@@ -1,0 +1,586 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/14417",
+ "test": "none: a regression between SolidCraft 0.30.1 (truck) and 0.40.0-rc.3 (solidcore); the report's script",
+ "summary": "TODO",
+ "cases": [
+  {
+   "name": "round_0_03_intersected_with_its_copy",
+   "note": "The report's case: the corner rounded 0.03 (a torus of major radius about 12, minor 0.03), the revolve intersected with an identical copy.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "a",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        0.0
+       ],
+       "to": [
+        11.97,
+        0.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        11.97,
+        0.03
+       ],
+       "radius": 0.03,
+       "start_deg": -90.0,
+       "end_deg": 0.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        12.0,
+        0.03
+       ],
+       "to": [
+        12.0,
+        1.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        12.0,
+        1.0
+       ],
+       "to": [
+        10.0,
+        1.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        1.0
+       ],
+       "to": [
+        10.0,
+        0.0
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 90.0
+    },
+    {
+     "op": "revolve",
+     "id": "b",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        0.0
+       ],
+       "to": [
+        11.97,
+        0.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        11.97,
+        0.03
+       ],
+       "radius": 0.03,
+       "start_deg": -90.0,
+       "end_deg": 0.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        12.0,
+        0.03
+       ],
+       "to": [
+        12.0,
+        1.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        12.0,
+        1.0
+       ],
+       "to": [
+        10.0,
+        1.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        1.0
+       ],
+       "to": [
+        10.0,
+        0.0
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 90.0
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 34.553880588,
+     "tol": 0.001,
+     "formula": "pi/2 * (2*11 - (1 - pi/4)*0.03^2*(12 - c*0.03)), c = (10 - 3*pi)/(12 - 3*pi) (Pappus: the rectangle less the corner's spandrel, whose centroid lies c*r in from the corner); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "round_0_1_intersected_with_its_copy",
+   "note": "The report's ok.json: the corner rounded 0.1.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "a",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        0.0
+       ],
+       "to": [
+        11.9,
+        0.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        11.9,
+        0.1
+       ],
+       "radius": 0.1,
+       "start_deg": -90.0,
+       "end_deg": 0.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        12.0,
+        0.1
+       ],
+       "to": [
+        12.0,
+        1.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        12.0,
+        1.0
+       ],
+       "to": [
+        10.0,
+        1.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        1.0
+       ],
+       "to": [
+        10.0,
+        0.0
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 90.0
+    },
+    {
+     "op": "revolve",
+     "id": "b",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        0.0
+       ],
+       "to": [
+        11.9,
+        0.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        11.9,
+        0.1
+       ],
+       "radius": 0.1,
+       "start_deg": -90.0,
+       "end_deg": 0.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        12.0,
+        0.1
+       ],
+       "to": [
+        12.0,
+        1.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        12.0,
+        1.0
+       ],
+       "to": [
+        10.0,
+        1.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        1.0
+       ],
+       "to": [
+        10.0,
+        0.0
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 90.0
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 34.517142993,
+     "tol": 0.001,
+     "formula": "pi/2 * (2*11 - (1 - pi/4)*0.1^2*(12 - c*0.1)), c = (10 - 3*pi)/(12 - 3*pi) (Pappus: the rectangle less the corner's spandrel, whose centroid lies c*r in from the corner); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "round_0_01_intersected_with_its_copy",
+   "note": "The report's 0.01 (its table: fails).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "a",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        0.0
+       ],
+       "to": [
+        11.99,
+        0.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        11.99,
+        0.01
+       ],
+       "radius": 0.01,
+       "start_deg": -90.0,
+       "end_deg": 0.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        12.0,
+        0.01
+       ],
+       "to": [
+        12.0,
+        1.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        12.0,
+        1.0
+       ],
+       "to": [
+        10.0,
+        1.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        1.0
+       ],
+       "to": [
+        10.0,
+        0.0
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 90.0
+    },
+    {
+     "op": "revolve",
+     "id": "b",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        0.0
+       ],
+       "to": [
+        11.99,
+        0.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        11.99,
+        0.01
+       ],
+       "radius": 0.01,
+       "start_deg": -90.0,
+       "end_deg": 0.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        12.0,
+        0.01
+       ],
+       "to": [
+        12.0,
+        1.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        12.0,
+        1.0
+       ],
+       "to": [
+        10.0,
+        1.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        1.0
+       ],
+       "to": [
+        10.0,
+        0.0
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 90.0
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 34.55711475,
+     "tol": 0.001,
+     "formula": "pi/2 * (2*11 - (1 - pi/4)*0.01^2*(12 - c*0.01)), c = (10 - 3*pi)/(12 - 3*pi) (Pappus: the rectangle less the corner's spandrel, whose centroid lies c*r in from the corner); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "round_0_03_alone",
+   "note": "Control: the 0.03 revolve alone, without the intersection (the report: each body alone is valid).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        0.0
+       ],
+       "to": [
+        11.97,
+        0.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        11.97,
+        0.03
+       ],
+       "radius": 0.03,
+       "start_deg": -90.0,
+       "end_deg": 0.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        12.0,
+        0.03
+       ],
+       "to": [
+        12.0,
+        1.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        12.0,
+        1.0
+       ],
+       "to": [
+        10.0,
+        1.0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        1.0
+       ],
+       "to": [
+        10.0,
+        0.0
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 90.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 34.553880588,
+     "tol": 0.001,
+     "formula": "pi/2 * (2*11 - (1 - pi/4)*0.03^2*(12 - c*0.03)), c = (10 - 3*pi)/(12 - 3*pi) (Pappus: the rectangle less the corner's spandrel, whose centroid lies c*r in from the corner); tol 0.001 mm^3"
+    }
+   }
+  }
+ ]
+}
