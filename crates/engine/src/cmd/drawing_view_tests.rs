@@ -63,7 +63,7 @@ pub(crate) fn three_views_of(mut s: Session) -> (Session, [u64; 3]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None })]);
         id
     };
     let front_settings =
@@ -184,8 +184,10 @@ fn an_edit_is_one_undo_step_and_names_its_followers() {
     let turned = edit_view(&mut s, front, json!({"view": "top", "scale": "1:5"}));
     assert_eq!(turned["changed"], json!(["scale", "view"]));
     assert_eq!(turned["followers"], json!([ids::encode(top), ids::encode(right)]), "by id");
-    assert_eq!(edit_view(&mut s, right, json!({"place": {"at": [320.0, 150.0]}}))["changed"], json!(["place"]));
-    assert_eq!(edit_view(&mut s, top, json!({"reference_shown_percent": 5.0}))["changed"], json!(["reference_shown_percent"]));
+    assert_eq!(edit_view(&mut s, right, json!({"place": {"at": [320.0, 150.0]}}))["changed"], json!(["place", "label"]), "and given its letter");
+    // The top view was placed apart without a letter (built above, not by a command): its first edit gives it one.
+    let edited = edit_view(&mut s, top, json!({"reference_shown_percent": 5.0}));
+    assert_eq!(edited["changed"], json!(["reference_shown_percent", "label"]));
     assert_eq!(inspect_view(&mut s, top)["reference_shown_percent"], 5.0);
     for percent in [-1.0, 100.001, 1e308] {
         assert!(edit_refused(&mut s, top, json!({"reference_shown_percent": percent})).contains("reference_shown_percent"), "{percent}");
@@ -3138,4 +3140,202 @@ fn posed_views_refuse_and_report_centre_annotations() {
     );
     let inspected = run(&mut s, "drawing.center_line.inspect", json!({"line": line}));
     assert!(inspected["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("position of its own")), "{inspected}");
+}
+
+/// A view placed apart from its projection place is given the first free letter (#13044), as
+/// `projected`, `edit` and `move_to_sheet` place it; a base view and a view lined up with its parent
+/// get none, and a view lined up again keeps its own. A copy that doesn't need a letter never takes
+/// its original's. With letters not reused, a deleted view's letter never comes back.
+#[test]
+fn a_view_placed_apart_is_given_a_letter() {
+    let mut s = block_drawing();
+    let (base, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let (lined, right) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "right"}));
+    assert!(base.get("letter").is_none() && lined.get("letter").is_none(), "{base} {lined}");
+    let above = json!({"parent": ids::encode(front), "side": "above", "place": {"at": [200.0, 250.0]}});
+    let (apart, top) = create(&mut s, PROJECTED, above.clone());
+    assert_eq!(apart["letter"], "A");
+    let letter = |s: &Session, id: u64| saved(s, id).label.map(|label| label.letter);
+    let edited = edit_view(&mut s, right, json!({"place": {"at": [350.0, 150.0]}}));
+    assert_eq!(edited["changed"], json!(["place", "label"]));
+    assert_eq!(letter(&s, right).as_deref(), Some("B"));
+    edit_view(&mut s, right, json!({"place": {"aligned": 300.0}}));
+    assert_eq!(letter(&s, right).as_deref(), Some("B"), "lined up again, it keeps its letter");
+    let second = second_sheet(&mut s);
+    let (_, below) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "below"}));
+    to_sheet(&mut s, MOVE, json!({"view": ids::encode(below), "sheet": ids::encode(second), "break_alignment": true}));
+    assert_eq!(letter(&s, below).as_deref(), Some("C"), "moved apart");
+    // A projected view copied alone is a base view, and the linked views copied with a view are lined up.
+    let alone = listed(&to_sheet(&mut s, COPY, json!({"view": ids::encode(top), "sheet": ids::encode(second)})))[0];
+    let with = json!({"view": ids::encode(front), "sheet": ids::encode(second), "position_mm": [100.0, 100.0], "with_linked": true});
+    let linked = listed(&to_sheet(&mut s, COPY, with))[1];
+    assert_eq!((letter(&s, alone), letter(&s, linked)), (None, None), "no letter, never the original's");
+    run(&mut s, "drawing.set", json!({"view_letters_reuse": false}));
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    d.views.retain(|v| v.id != top);
+    s.doc_mut().put_drawing(Arc::new(d));
+    assert_eq!(create(&mut s, PROJECTED, above).0["letter"], "D", "A isn't given again");
+    assert_eq!(run(&mut s, "drawing.inspect", json!({}))["view_letters"], json!({"reuse": false, "given": 4}));
+}
+
+/// A label's parts are typed over, hidden and moved by `drawing.view.edit`, one undo step each, and
+/// inspect answers them with what the label reads and its box on the sheet: above the view until it
+/// is moved, then at its offset from the view's centre. A letter another view holds, a view with no
+/// label and hostile parts are refused, changing nothing.
+#[test]
+fn a_labels_parts_are_typed_over_hidden_and_moved() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2", "position_mm": [150.0, 150.0]}));
+    let (_, top) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above", "place": {"at": [150.0, 230.0]}}));
+    let label = inspect_view(&mut s, top)["label"].clone();
+    assert_eq!((label["letter"].clone(), label["text"].clone(), label["needed"].clone()), (json!("A"), json!("VIEW A"), json!(true)));
+    let middle = |label: &Value| (point(&label["box_mm"]["min"]) + point(&label["box_mm"]["max"])) * 0.5;
+    // The top view is 50 x 25 at 1:2 round (150, 230): its boundary's top is at 242.5.
+    assert!(point(&label["box_mm"]["min"]).y > 242.5 && (middle(&label).x - 150.0).abs() < 1.0, "{label}");
+    assert!(inspect_view(&mut s, front).get("label").is_none(), "a base view has none");
+    let steps = s.undo.len();
+    let edited = edit_view(&mut s, top, json!({"label": {"words": "", "name": "BRACKET END", "offset": [0.0, -30.0]}}));
+    assert_eq!((edited["changed"].clone(), s.undo.len()), (json!(["label"]), steps + 1));
+    let label = inspect_view(&mut s, top)["label"].clone();
+    assert_eq!((label["text"].clone(), label["offset"].clone()), (json!("A\nBRACKET END"), json!([0.0, -30.0])));
+    assert!(middle(&label).dist(Vec2::new(150.0, 200.0)) < 1.0, "{label}");
+    edit_view(&mut s, top, json!({"label": {"offset": null, "shown": false}}));
+    let label = inspect_view(&mut s, top)["label"].clone();
+    assert_eq!((label["letter"].clone(), label["shown"].clone(), label["text"].clone()), (json!("A"), json!(false), Value::Null));
+    assert!(label.get("box_mm").is_none() && label.get("offset").is_none(), "{label}");
+    let (_, other) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "right", "place": {"at": [300.0, 150.0]}}));
+    let before = s.drawing("test").unwrap().clone();
+    let held = edit_refused(&mut s, other, json!({"label": {"letter": "A"}}));
+    assert!(held.contains(&format!("view {} has the letter A", ids::encode(top))), "{held}");
+    assert!(edit_refused(&mut s, front, json!({"label": {"name": "X"}})).contains("it has no label"));
+    for (bad, why) in [
+        (json!({"letter": "a"}), "its letter is one to three capital letters A to Z"),
+        (json!({"letter": "ABCD"}), "its letter is one to three capital letters A to Z"),
+        (json!({"letter": "A1"}), "its letter is one to three capital letters A to Z"),
+        (json!({"words": "two\nlines"}), "a label is one line"),
+        (json!({"name": "x".repeat(5000)}), "a label is one line"),
+        (json!({"offset": [1e9, 0.0]}), "its label's offset is at most 5000 mm"),
+        (json!({"colour": "red"}), "colour"),
+    ] {
+        let message = edit_refused(&mut s, other, json!({"label": bad}));
+        assert!(message.contains(why), "{bad}: {message}");
+    }
+    assert_eq!(*s.drawing("test").unwrap(), before);
+}
+
+/// [`three_views`] in `projection`, with a view projected above the front view and lined up at y 220:
+/// the session, and the front view's, the right view's and that view's ids.
+fn lined_up_views(projection: Projection) -> (Session, [u64; 3]) {
+    let (mut s, [front, right, _]) = three_views();
+    set_projection(&mut s, projection);
+    let made = run(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above", "place": {"aligned": 220.0}}));
+    (s, [front, right, ids::decode(made["view"].as_str().unwrap()).unwrap()])
+}
+
+fn centre_of(s: &Session, view: u64) -> [f64; 2] {
+    let centre = s.drawing("test").unwrap().view_centre(view).unwrap();
+    [centre.x, centre.y]
+}
+
+fn dragged(s: &mut Session, view: u64, to: [f64; 2]) -> Value {
+    let reply = run(s, DRAG, json!({"view": ids::encode(view), "to_mm": to}));
+    let schema = output_schema_for::<ViewMoveResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    reply
+}
+
+/// Front moved (+20, +5) moves the top view (+20, 0) and the right view (0, +5), in both angles, and
+/// a lined-up view dragged off its line takes only its free axis, with its parent still. One step:
+/// undo puts all three back. Nothing is evaluated.
+#[test]
+fn a_dragged_view_keeps_its_line_up_and_its_followers_follow() {
+    for projection in [Projection::First, Projection::Third] {
+        let (mut s, [front, right, top]) = lined_up_views(projection);
+        let evaluations = s.evaluations;
+        let reply = dragged(&mut s, front, [170.0, 155.0]);
+        assert_eq!(centre_of(&s, front), [170.0, 155.0]);
+        assert_eq!(centre_of(&s, right), [300.0, 155.0]);
+        assert_eq!(centre_of(&s, top), [170.0, 220.0]);
+        assert_eq!(reply["place"], json!({"at": [170.0, 155.0]}), "{reply}");
+        let mut followers = [right, top];
+        followers.sort_unstable();
+        assert_eq!(reply["followers"], json!(followers.map(ids::encode)), "{reply}");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!((centre_of(&s, front), centre_of(&s, right), centre_of(&s, top)), ([150.0, 150.0], [300.0, 150.0], [150.0, 220.0]));
+
+        // Off its line: the right view takes only x.
+        let reply = dragged(&mut s, right, [320.0, 999.0]);
+        assert_eq!(centre_of(&s, right), [320.0, 150.0]);
+        assert_eq!(reply["place"], json!({"aligned": 320.0}), "{reply}");
+        assert_eq!(reply["followers"], json!([]), "{reply}");
+        // Above: the top view takes only y.
+        dragged(&mut s, top, [999.0, 240.0]);
+        assert_eq!(centre_of(&s, top), [150.0, 240.0]);
+        assert_eq!(s.evaluations, evaluations);
+    }
+}
+
+/// `break_alignment` places a lined-up view apart, where it was dragged; the views lined up with it
+/// go with it, and a view placed at a point takes both axes.
+#[test]
+fn breaking_alignment_places_a_view_apart() {
+    let (mut s, [front, right, _]) = lined_up_views(Projection::Third);
+    let reply = run(&mut s, DRAG, json!({"view": ids::encode(right), "to_mm": [320.0, 90.0], "break_alignment": true}));
+    assert_eq!(reply["place"], json!({"at": [320.0, 90.0]}), "{reply}");
+    assert_eq!(centre_of(&s, right), [320.0, 90.0]);
+    assert_eq!(centre_of(&s, front), [150.0, 150.0], "its parent stays");
+    let letter = |s: &Session| saved(s, right).label.map(|label| label.letter);
+    assert_eq!(letter(&s).as_deref(), Some("A"), "placed apart, it is given a letter");
+    dragged(&mut s, right, [330.0, 95.0]);
+    assert_eq!(centre_of(&s, right), [330.0, 95.0], "both axes now");
+    assert_eq!(letter(&s).as_deref(), Some("A"), "and keeps it");
+    // Lined up with a view placed apart, a child follows that view.
+    let (mut s, [_, right, top]) = three_views();
+    let before = centre_of(&s, top);
+    dragged(&mut s, right, [310.0, 0.0]);
+    assert_eq!(centre_of(&s, top), before, "placed apart, it stays");
+}
+
+/// A move to where it is makes no step, and neither does one that off-axis leaves it on its line. A
+/// view off the sheet is listed. Hostile places are refused and change nothing.
+#[test]
+fn a_move_to_where_it_is_makes_no_step_and_hostile_places_are_refused() {
+    let (mut s, [front, right, _]) = lined_up_views(Projection::Third);
+    let doc = s.doc.clone();
+    dragged(&mut s, front, [150.0, 150.0]);
+    assert!(Arc::ptr_eq(&doc, &s.doc), "no step");
+    dragged(&mut s, right, [300.0, 777.0]);
+    assert!(Arc::ptr_eq(&doc, &s.doc), "still on the same place");
+
+    let out = dragged(&mut s, front, [1000.0, 150.0]);
+    assert_eq!(out["outside"][0]["view"], json!(ids::encode(front)), "{out}");
+    run(&mut s, "edit.undo", json!({}));
+
+    let doc = s.doc.clone();
+    for to in [json!([1e300, 0.0]), json!([0.0, -1e300]), json!([5001.0, 0.0]), json!(["a", 0.0]), json!([0.0]), json!(null)] {
+        assert!(s.execute(DRAG, &json!({"view": ids::encode(front), "to_mm": to})).is_err(), "{to}");
+    }
+    assert!(s.execute(DRAG, &json!({"view": ids::encode(right), "to_mm": [1e300, 0.0]})).is_err());
+    assert!(s.execute(DRAG, &json!({"view": "AAAAAAAAAAAA", "to_mm": [0.0, 0.0]})).is_err());
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    run(&mut s, "drawing.close", json!({}));
+    assert!(s.execute(DRAG, &json!({"view": ids::encode(front), "to_mm": [0.0, 0.0]})).is_err(), "no drawing open");
+}
+
+/// A move to the view's own sheet with a position goes by the same rule as a drag: it was ignored.
+#[test]
+fn a_position_on_the_views_own_sheet_is_a_move() {
+    let (mut s, [front, right, _]) = lined_up_views(Projection::Third);
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let reply = run(&mut s, MOVE, json!({"view": ids::encode(front), "sheet": sheet, "position_mm": [170.0, 155.0]}));
+    assert_eq!(centre_of(&s, front), [170.0, 155.0]);
+    // It, then the views that went with it, as a move to another sheet lists them.
+    let views = reply["views"].as_array().cloned().unwrap_or_default();
+    assert_eq!((views.first(), views.len()), (Some(&json!(ids::encode(front))), 3), "{reply}");
+    let reply = run(&mut s, MOVE, json!({"view": ids::encode(right), "sheet": sheet, "position_mm": [320.0, 999.0]}));
+    assert_eq!(centre_of(&s, right), [320.0, 155.0], "on its line");
+    assert_eq!(reply["views"], json!([ids::encode(right)]), "{reply}");
+    // No position: nothing moves and nothing is listed.
+    let reply = run(&mut s, MOVE, json!({"view": ids::encode(front), "sheet": sheet}));
+    assert_eq!(reply["views"], json!([]), "{reply}");
 }

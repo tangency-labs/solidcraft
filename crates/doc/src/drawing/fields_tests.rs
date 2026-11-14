@@ -8,7 +8,7 @@ use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 use solidcraft_geom::title_block::default_block;
 
 use super::*;
-use crate::drawing::view::{View, ViewPlace};
+use crate::drawing::view::{View, ViewKind, ViewPlace};
 use crate::drawing::{Sheet, Source as DrawingSource};
 use crate::drawing_view::{ViewDirection, ViewOverrides};
 use crate::ids::IdSource;
@@ -218,7 +218,7 @@ fn a_sheets_scale_is_the_one_its_base_views_share() {
     let (first, second) = (d.sheets[0].id, d.sheets[1].id);
     let view = |id, sheet, kind, scale: &str| {
         let settings = ViewOverrides { scale: Some(scale.parse().unwrap()), ..ViewOverrides::default() };
-        Arc::new(View { id, sheet, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0 })
+        Arc::new(View { id, sheet, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0, label: None })
     };
     let base = |named| ViewKind::Base { source, view: ViewDirection::Named(named) };
     d.add_views([
@@ -247,6 +247,7 @@ fn a_sheets_scale_is_the_one_its_base_views_share() {
             place: ViewPlace::At([150.0, 150.0]),
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
+            label: None,
         })
     };
     d.add_views([projected(left, ProjectedSide::Left), projected(below, ProjectedSide::Below)]);

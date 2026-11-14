@@ -38,7 +38,7 @@ fn front_and_top_of(mut s: Session) -> (Session, u64, [u64; 2]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None })]);
         id
     };
     let half = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
@@ -841,7 +841,7 @@ fn two_assembled_one_apart() -> (Session, u64, [u64; 3], u64) {
         let id = d.allocate_id(&mut id_source).unwrap();
         let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), exploded, ..ViewOverrides::default() };
         let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
-        d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0 })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0, label: None })]);
         id
     };
     let views = [
@@ -1437,7 +1437,7 @@ fn each_dimension_on_a_sheet_takes_its_own_views_answer() {
     for (id, at, pose, exploded) in made {
         let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), pose, exploded, ..ViewOverrides::default() };
         let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Top) };
-        d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0 })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0, label: None })]);
     }
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
@@ -1552,7 +1552,7 @@ fn a_held_deferred_drawing_exports_the_same_from_a_scratch_copy() {
     let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(10431)).unwrap();
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Top) };
     let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
-    let view = View { id, sheet: other, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0 };
+    let view = View { id, sheet: other, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0, label: None };
     d.add_views([Arc::new(view)]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
@@ -1758,8 +1758,10 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
     };
     for title_block in [None, Some(solidcraft_geom::title_block::default_block())] {
         let record = Sheet { title_block, ..(**d.sheets.iter().find(|x| x.id == sheet).unwrap()).clone() };
-        let (empty, ..) =
-            assemble(&record, Projection::Third, &labels(&record), &[], &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap().finish().unwrap();
+        let (empty, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], &[], std::iter::empty::<(u64, Vec2, Drawn)>())
+            .unwrap()
+            .finish()
+            .unwrap();
         assert_eq!(empty.groups.len(), if record.title_block.is_some() { 4 } else { 3 });
         // The block's text and its fonts count too.
         let fonts = |scene: &Scene| Scene::new(scene.size_mm, Vec::new()).font_records_beyond(&scene.fonts);
@@ -1768,7 +1770,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
         let views = [lines(left - 22), lines(30), lines(18)];
         let centre = Vec2::new(100.0, 100.0);
         let views = views.iter().enumerate().map(|(i, v)| (i as u64, centre, v));
-        let (scene, states, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], views).unwrap().finish().unwrap();
+        let (scene, states, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], &[], views).unwrap().finish().unwrap();
         let statuses: Vec<&'static str> = states.iter().map(|v| v.status.name()).collect();
         assert_eq!(statuses, ["drawn", "failed", "drawn"]);
         let records = scene.groups.iter().map(Group::records).sum::<usize>() + fonts(&scene);
@@ -2136,7 +2138,7 @@ fn a_views_box_is_what_it_draws() {
             why: None,
         };
         let (_, _, objects, _, _) =
-            assemble(&record, Projection::Third, &labels(&record), &[], &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
+            assemble(&record, Projection::Third, &labels(&record), &[], &[], &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
         let object = objects.iter().find(|o| o.object == 7).unwrap();
         assert!(near(&object.bounds_mm, min, max), "{object:?}");
     }
@@ -2537,7 +2539,7 @@ fn a_sheet_note_paints_over_view_annotations_whatever_order_they_join_in() {
     let (text, _) = block_text(record, &lettering, &[], true).unwrap();
     let (notes, _) = sheet_notes(&s, &d, sheet, &lettering, true);
     let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(&s, &[], &shown, *id, view)));
-    let mut assembly = assemble(record, d.projection, &text, &[], &[], drawn).unwrap();
+    let mut assembly = assemble(record, d.projection, &text, &[], &[], &[], drawn).unwrap();
     let frames: BTreeMap<_, _> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let line_group = |view: u64| on.iter().find(|(id, ..)| *id == view).map(|(_, v, _)| v.line_group.value);
     let wanted = dimensions_on(&d, on.iter().map(|(id, ..)| *id));
@@ -2666,7 +2668,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         why: None,
     };
     let mut assembly =
-        assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
+        assemble(record, Projection::Third, &labels(record), &[], &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
     let stroke = |to: Vec2| Item::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: to }], closed: false, width_mm: 0.25, pattern: None };
     let dimension = |id, items| DrawnDimension {
         dimension: id,
@@ -2728,7 +2730,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let (a, b, too_big) = (text(1, "11", 0), text(2, "22", 0), text(3, "77", MAX_RECORDS));
     let shared = glyphs(&a) + glyphs(&b);
     let mut assembly =
-        assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view.clone()))).unwrap();
+        assemble(record, Projection::Third, &labels(record), &[], &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view.clone()))).unwrap();
     assembly.add_dimensions([&a, &too_big, &b].into_iter());
     let (scene, _, objects, states, _) = assembly.finish().unwrap();
     assert!(states[0].drawn && !states[1].drawn && states[2].drawn, "{states:?}");
@@ -2740,7 +2742,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
 
     // Past the limit only with its font's records: its group alone would fit. Without them, it joins.
     let mut assembly =
-        assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
+        assemble(record, Projection::Third, &labels(record), &[], &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
     let room = MAX_RECORDS - assembly.records;
     let records = |one: &DrawnDimension| one.group.as_ref().unwrap().records();
     let (bare, per_line) = (text(4, "8", 0), records(&text(4, "8", 1)) - records(&text(4, "8", 0)));
@@ -4223,7 +4225,7 @@ fn centre_annotations_respect_the_cumulative_paper_budget() {
     let (s, sheet, [front, _]) = front_and_top();
     let d = s.drawing("test").unwrap().clone();
     let record = sheet_of(&d, sheet).unwrap();
-    let mut assembly = assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap();
+    let mut assembly = assemble(record, Projection::Third, &labels(record), &[], &[], &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap();
     let stroke = Item::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: Vec2::X }], closed: false, width_mm: 0.18, pattern: None };
     // Group records are one plus two per stroke. Leave three or four records for the line.
     let count = (MAX_RECORDS - assembly.records - 4) / 2;
@@ -4338,4 +4340,61 @@ fn centre_annotations_refuse_a_motion_study_view() {
         .unwrap_err()
         .to_string();
     assert!(err.contains("centre annotations") && err.contains("position of its own"), "{err}");
+}
+
+/// A view placed apart from its projection place has its label above it (#13044): a group of its
+/// own kind, painted with the views' annotations, its box over the view's boundary and centred on it,
+/// and its state on the view. Moved, it sits at its offset from the view's centre and goes where the
+/// view goes; hidden, it isn't drawn. `build` and the provider give the same bytes.
+#[test]
+fn a_views_label_sits_above_it_and_moves_with_it() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let edit = |s: &mut Session, set: Value| run(s, "drawing.view.edit", json!({"view": ids::encode(top), "set": set}));
+    edit(&mut s, json!({"place": {"at": [300.0, 220.0]}}));
+    let label_box = |shown: &SheetScene| shown.objects.iter().find(|o| o.kind == ObjectKind::ViewLabel).map(|o| (o.object, o.bounds_mm));
+    let shown = built(&s, sheet);
+    let (object, bounds) = label_box(&shown).unwrap();
+    let boundary = shown.objects.iter().find(|o| o.kind == ObjectKind::View && o.object == top).and_then(|o| o.boundary_mm).unwrap();
+    assert_eq!(object, top);
+    assert!(bounds.min.y > boundary.max.y && (bounds.center().x - boundary.center().x).abs() < 1.0, "{bounds:?} over {boundary:?}");
+    let kinds: Vec<ObjectKind> = shown.scene.groups.iter().map(|g| g.kind).collect();
+    assert_eq!(kinds.last(), Some(&ObjectKind::ViewLabel), "after the views");
+    let state = |shown: &SheetScene, id: u64| shown.views.iter().find(|v| v.view == id).unwrap().label.clone();
+    assert_eq!((state(&shown, top), state(&shown, front)), (Some(LabelState { drawn: true, why: None }), None));
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&shown.scene));
+    edit(&mut s, json!({"label": {"offset": [0.0, -40.0]}}));
+    assert!(label_box(&built(&s, sheet)).unwrap().1.center().dist(Vec2::new(300.0, 180.0)) < 1.0);
+    edit(&mut s, json!({"place": {"at": [250.0, 220.0]}}));
+    assert!(label_box(&built(&s, sheet)).unwrap().1.center().dist(Vec2::new(250.0, 180.0)) < 1.0, "with its view");
+    edit(&mut s, json!({"label": {"shown": false}}));
+    let hidden = built(&s, sheet);
+    assert_eq!((label_box(&hidden), state(&hidden, top)), (None, None));
+}
+
+#[test]
+fn centre_annotations_and_view_labels_follow_the_same_moved_view() {
+    let (mut s, sheet, [_, top]) = front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"place": {"at": [300.0, 220.0]}}}));
+    let line =
+        run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(top), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0}))["line"]
+            .as_str()
+            .map(|id| ids::decode(id).unwrap())
+            .unwrap();
+    let before = settled(&mut s, sheet);
+    assert_eq!(bytes(&before.scene), bytes(&built(&s, sheet).scene));
+    let centre =
+        |shown: &SheetView, object, kind| shown.objects.iter().find(|item| item.object == object && item.kind == kind).unwrap().bounds_mm.center();
+    let line_before = centre(&before, line, ObjectKind::CentreLine);
+    let label_before = centre(&before, top, ObjectKind::ViewLabel);
+    let evaluations = s.evaluations;
+    run(&mut s, "drawing.view.move", json!({"view": ids::encode(top), "to_mm": [320.0, 230.0]}));
+    assert_eq!(s.evaluations, evaluations);
+    let moved = settled(&mut s, sheet);
+    for (object, kind, old) in [(line, ObjectKind::CentreLine, line_before), (top, ObjectKind::ViewLabel, label_before)] {
+        assert!(centre(&moved, object, kind).dist(old + Vec2::new(20.0, 10.0)) < 1e-8);
+    }
+    assert_eq!(bytes(&moved.scene), bytes(&built(&s, sheet).scene));
+    assert!(moved.annotation_failures.is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&before.scene));
 }

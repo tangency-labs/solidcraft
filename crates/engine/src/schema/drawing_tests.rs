@@ -8,7 +8,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     let create = ["font", "language", "line_group", "name", "projection", "template", "units"];
     assert_keys(input_schema_for::<DrawingCreateParams>(), &create);
-    let set = ["font", "language", "line_group", "name", "projection", "revision_numbering", "units", "updates"];
+    let set = ["font", "language", "line_group", "name", "projection", "revision_numbering", "units", "updates", "view_letters_reuse"];
     assert_keys(input_schema_for::<DrawingSetParams>(), &set);
     assert_keys(input_schema_for::<TemplateListParams>(), &[]);
     assert_keys(input_schema_for::<TemplateApplyParams>(), &["dry_run", "template"]);
