@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.sketch_export_svg": "Save As SVG",
+    "ui.exportSvg": "Export SVG…"
+  },
+  "ar": {
+    "cmd.sketch_export_svg": "حفظ بصيغة SVG",
+    "ui.exportSvg": "تصدير SVG…"
+  },
+  "he": {
+    "cmd.sketch_export_svg": "שמירה כ־SVG",
+    "ui.exportSvg": "ייצוא SVG…"
+  },
+  "ja": {
+    "cmd.sketch_export_svg": "SVG として保存",
+    "ui.exportSvg": "SVG をエクスポート…"
+  },
+  "vi": {
+    "cmd.sketch_export_svg": "Lưu dưới dạng SVG",
+    "ui.exportSvg": "Xuất tệp SVG…"
+  },
+  "zh": {
+    "cmd.sketch_export_svg": "另存为 SVG",
+    "ui.exportSvg": "导出 SVG…"
+  }
+}
