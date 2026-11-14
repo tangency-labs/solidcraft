@@ -193,6 +193,101 @@ fn face_of(s: &Surface) -> Cow<'_, Surface> {
     }
 }
 
+/// Not the fork's: the run of the centre line `center` a section between offsets `surfaces`
+/// is built over, `[lo, hi]`, where it is shorter than the centre line's interval. A trace
+/// past the end of a blended edge runs on over the faces' extensions until it leaves their
+/// extended domains, far past where the fillet ends: the fillet is cut back where its rails
+/// cross the faces' own edges, which are on the faces' own surfaces. So the run is where a
+/// rail's foot (its uv curve, `uvs`) lies in its face's own domain, from the first such
+/// parameter to the last (each end found on the uv curve by bisection between the stations
+/// in and out), widened each way by the ball's largest radius along the centre line, so the
+/// corner that cuts the fillet there finds the surface past its cut. `None` where that run
+/// is the whole interval (no extension reached), or for faces that are not offsets.
+///
+/// # Errors
+/// Those of the evaluations.
+fn kept_run(
+    k: &Kernel,
+    surfaces: [&Surface; 2],
+    uvs: [&BSplineCurve; 2],
+    center: &BSplineCurve,
+) -> Result<Option<[f64; 2]>> {
+    let mut domains = Vec::new();
+    let mut margin = 0.0_f64;
+    for s in surfaces {
+        let SurfaceKind::OffsetSurface(o) = s.kind() else {
+            return Ok(None);
+        };
+        domains.push(o.base_surface().natural_uv_domain_with_nurb(k)?);
+        margin = smax(margin, o.offset_distance().abs());
+    }
+    let (c_min, c_max) = interval(center);
+    let scale = smax(1.0, c_max - c_min);
+    // the stations to scan: the centre line's and the uv curves' knots
+    let mut at: Vec<f64> = center.knots(None)?.0;
+    for uv in uvs {
+        at.extend(uv.knots(None)?.0);
+    }
+    at.retain(|s| *s >= c_min && *s <= c_max);
+    at.push(c_min);
+    at.push(c_max);
+    at.sort_by(f64::total_cmp);
+    at.dedup_by(|a, b| (*a - *b).abs() <= 1.0e-12 * scale);
+    let on_face = |s: f64| -> Result<bool> {
+        for (uv, d) in uvs.iter().zip(&domains) {
+            let w = uv.evaluate_point(s)?;
+            if d.contains_point(Point2::new(w.x, w.y), 0.0) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    };
+    let mut inside = Vec::new();
+    for &s in &at {
+        inside.push(on_face(s)?);
+    }
+    let (Some(first), Some(last)) = (
+        inside.iter().position(|&i| i),
+        inside.iter().rposition(|&i| i),
+    ) else {
+        return Ok(None);
+    };
+    // the crossing between station `out` (off both faces) and `inn` (on one), by bisection
+    let crossing = |out: f64, inn: f64| -> Result<f64> {
+        let (mut a, mut b) = (out, inn);
+        for _ in 0..60 {
+            let m = 0.5 * (a + b);
+            if on_face(m)? {
+                b = m;
+            } else {
+                a = m;
+            }
+        }
+        Ok(b)
+    };
+    let lo = match first.checked_sub(1).and_then(|i| at.get(i)) {
+        Some(&out) => crossing(out, at.get(first).copied().unwrap_or(c_min))?,
+        None => c_min,
+    };
+    let hi = match at.get(last + 1) {
+        Some(&out) => crossing(out, at.get(last).copied().unwrap_or(c_max))?,
+        None => c_max,
+    };
+    // the margin, a distance along the centre line, as a parameter step at each end
+    let step = |s: f64| -> Result<f64> {
+        let d = center.evaluate(s, 1, true, false)?;
+        let speed = d.get(1).map_or(0.0, |v| v.length());
+        Ok(if speed > 0.0 { margin / speed } else { 0.0 })
+    };
+    let lo = (lo - step(lo)?).max(c_min);
+    let hi = (hi + step(hi)?).min(c_max);
+    let whole = lo <= c_min && hi >= c_max;
+    if whole || hi <= lo || hi.is_nan() || lo.is_nan() {
+        return Ok(None);
+    }
+    Ok(Some([lo, hi]))
+}
+
 /// `sm_GnSolveStation(apFace, rLeader, s, seed, adR, adSide, sTr, tol, rStation, pR,
 /// n, pSides, NULL, NULL, bBefore)` as `Build` calls it since 3bc54a4: the section's jets
 /// of order n and up are the face curves' normal parts (`pR`: a radius law's series,
@@ -1097,6 +1192,9 @@ impl GnSectionFsg {
         let [s1, s2] = surfaces;
         let (f1, f2) = (face_of(s1), face_of(s2));
         let faces = [f1.as_ref(), f2.as_ref()];
+        let [uv1, uv2] = uvs;
+        let run = kept_run(k, [s1, s2], [&*uv1, &*uv2], center_line)?;
+        let uvs = [uv1, uv2];
         self.build(
             k,
             center_line,
@@ -1109,6 +1207,7 @@ impl GnSectionFsg {
             false,
             None,
             None,
+            run,
         )?
         .map(|(s, _)| s)
         .ok_or_else(|| SolidError::blend_failed(OP, "no surface was built"))
@@ -1141,6 +1240,7 @@ impl GnSectionFsg {
             false,
             [0.0, 0.0],
             false,
+            None,
             None,
             None,
         )?
@@ -1179,6 +1279,7 @@ impl GnSectionFsg {
             replace_rails,
             [radius, radius],
             false,
+            None,
             None,
             None,
         )?
@@ -1224,6 +1325,7 @@ impl GnSectionFsg {
             [radius, radius],
             true,
             law,
+            None,
             None,
         )?;
         Ok(built.map(|(s, c)| {
@@ -1273,6 +1375,7 @@ impl GnSectionFsg {
             true,
             None,
             Some(chamfer),
+            None,
         )?;
         Ok(built.map(|(s, _)| s))
     }
@@ -1299,6 +1402,7 @@ impl GnSectionFsg {
         feet_check: bool,
         law_round: Option<&GnLawRound<'_>>,
         chamfer: Option<ChamferDefinition>,
+        run: Option<[f64; 2]>,
     ) -> Result<Option<Built>> {
         // a ball whose radius varies (the ball's circle only): its law r(t) and the curve
         // whose planes square to it at t hold the ball's centre (the solver's), t the
@@ -1460,6 +1564,12 @@ impl GnSectionFsg {
                 *l = c_max;
             }
             ss = unique;
+            // the run the fillet keeps (`kept_run`): its stations only, its ends the run's
+            if let Some([lo, hi]) = run {
+                ss.retain(|&s| s > lo + 1.0e-9 * scale && s < hi - 1.0e-9 * scale);
+                ss.insert(0, lo);
+                ss.push(hi);
+            }
         }
         if ss.len() < 2 {
             // "the rails have no length"
@@ -1469,8 +1579,9 @@ impl GnSectionFsg {
         // round's start, i_min, at its parameter on the rails; a piece of a law-cornered
         // round starts inside them, where the rails' own start may be past its ball's
         // fading to a point)
-        let s_first = match law_cp.first() {
-            Some(&cp) if law_round.is_some() => cp,
+        let s_first = match (law_cp.first(), ss.first()) {
+            (Some(&cp), _) if law_round.is_some() => cp,
+            (_, Some(&s)) => s,
             _ => c_min,
         };
 
