@@ -213,6 +213,13 @@ fn accepted_endpoint_status(
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many redrops [`accepted_redrop`] has judged on this thread: the span loop's call
+    /// path to it is what the loop-level test below counts.
+    static REDROPS_JUDGED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The endpoint a redrop from the actual start gives, when the redrop is accepted: the same
 /// rule as the initial endpoint's, so a redrop that lands on an interior pole or leaves the
 /// domain is a failed redrop (the caller keeps the saved point), however its solve ended.
@@ -223,6 +230,8 @@ fn accepted_redrop(
     keep_all_drop_curves: bool,
     approx_tol_3d: f64,
 ) -> Option<DropPt> {
+    #[cfg(test)]
+    REDROPS_JUDGED.with(|n| n.set(n.get() + 1));
     let status = accepted_endpoint_status(
         status,
         &mut redrop,
@@ -1942,6 +1951,7 @@ mod tests {
             3,
             false,
         ));
+        REDROPS_JUDGED.with(|n| n.set(0));
         let out = surface
             .drop_curve_base::<NoObject>(
                 &k,
@@ -1953,6 +1963,12 @@ mod tests {
                 None,
             )
             .unwrap();
+        // The span loop judges its redrops through `accepted_redrop` (the interior pole and
+        // domain exit rule): a loop that bypassed it would leave this at zero.
+        assert!(
+            REDROPS_JUDGED.with(std::cell::Cell::get) > 0,
+            "the span loop never judged a redrop"
+        );
         assert_eq!(out.uv_curves.len(), 2, "both seam sides remain available");
         for curve in &out.uv_curves {
             let (points, _) = curve.control_polygon().unwrap();
