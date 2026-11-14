@@ -492,7 +492,7 @@ fn sample<T: Copy>(v: &[T], max: usize) -> Vec<T> {
 }
 
 /// An origin plane (XY, XZ, YZ) or a construction plane's point and normal.
-fn plane_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
+pub(super) fn plane_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
     match name {
         "XY" => Some((Vec3::ZERO, Vec3::Z)),
         "XZ" => Some((Vec3::ZERO, Vec3::Y)),
@@ -502,7 +502,7 @@ fn plane_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
 }
 
 /// An origin axis (X, Y, Z) or a construction axis's point and unit direction.
-fn axis_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
+pub(super) fn axis_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
     match name {
         "X" => Some((Vec3::ZERO, Vec3::X)),
         "Y" => Some((Vec3::ZERO, Vec3::Y)),
