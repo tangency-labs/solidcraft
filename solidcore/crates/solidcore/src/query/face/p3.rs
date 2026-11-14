@@ -2984,7 +2984,7 @@ pub fn sector_classify_curve_on(
                         return Ok(res);
                     }
                     OrientType::Same => {}
-                    _ => return Ok(res),
+                    OrientType::Unknown => return Ok(res),
                 }
             }
             res.inside = false;
