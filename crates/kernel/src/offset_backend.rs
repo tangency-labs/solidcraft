@@ -174,15 +174,12 @@ pub(crate) fn draft(b: &Body, at: &[Vec3], neutral: &solidcore_record::Plane, pu
 /// The face of `b` under each point: the face of the nearest triangle, within the picking reach.
 fn faces_under(b: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
     let reach = pick_tolerance(b);
-    let mesh = b.mesh(&crate::MeshTolerance::chord((b.size() * 1e-3).max(1e-3)))?;
+    let (ops, order) = b.ops_body().ok_or_else(|| KernelError::Failed("offset faces: no ops body".into()))?;
+    let pts: Vec<[f64; 3]> = at.iter().map(|p| [p.x, p.y, p.z]).collect();
+    let dists = ops.face_distances_within(order, &pts, reach).map_err(|e| KernelError::Failed(e.to_string()))?;
     let mut out: Vec<usize> = Vec::new();
-    for p in at {
-        let near = mesh
-            .triangles
-            .iter()
-            .zip(&mesh.tri_face)
-            .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (solidcraft_geom::compare::closest_on_triangle(*p, x, y, z).dist(*p), *f as usize)))
-            .min_by(|x, y| x.0.total_cmp(&y.0));
+    for (pi, p) in at.iter().enumerate() {
+        let near = dists.iter().enumerate().filter_map(|(f, row)| Some((row.get(pi).copied().flatten()?, f))).min_by(|x, y| x.0.total_cmp(&y.0));
         match near {
             Some((d, f)) if d < reach => {
                 if !out.contains(&f) {
@@ -195,20 +192,14 @@ fn faces_under(b: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
     Ok(out)
 }
 
-/// One point inside each face `faces` of `b`: the centroid of its largest triangle.
+/// One point inside each face `faces` of `b`: its exact centroid.
 fn face_points(b: &Body, faces: &[usize]) -> Result<Vec<Vec3>> {
-    let mesh = b.mesh(&crate::MeshTolerance::chord((b.size() * 1e-3).max(1e-3)))?;
+    let (ops, order) = b.ops_body().ok_or_else(|| KernelError::Failed("offset faces: no ops body".into()))?;
     faces
         .iter()
         .map(|f| {
-            mesh.triangles
-                .iter()
-                .zip(&mesh.tri_face)
-                .filter(|(_, t)| **t as usize == *f)
-                .filter_map(|(t, _)| mesh.tri(t))
-                .max_by(|x, y| area(x).total_cmp(&area(y)))
-                .map(|[p, q, s]| (p + q + s) * (1.0 / 3.0))
-                .ok_or_else(|| KernelError::Failed(format!("offset faces: face {f} has no triangles")))
+            let c = ops.face_centroid(order, *f, 1e-4).map_err(|e| KernelError::Failed(e.to_string()))?;
+            Ok(Vec3::new(c.centroid[0], c.centroid[1], c.centroid[2]))
         })
         .collect()
 }

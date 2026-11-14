@@ -145,8 +145,6 @@ crates/kernel/src/helix.rs:sweep_helix_mesh models a thread as a triangle mesh f
 crates/kernel/src/intersection.rs:meeting_edges samples meeting edges from a mesh
 crates/kernel/src/lip.rs:face_at picks the planar face at a point by a mesh
 crates/kernel/src/measure.rs:measure counts a B-rep body's merged topology on a mesh
-crates/kernel/src/offset_backend.rs:face_points takes a point per face from mesh triangles
-crates/kernel/src/offset_backend.rs:faces_under picks the face under each point by the nearest mesh triangle
 crates/kernel/src/offset_backend.rs:with_offsets tags offset faces by a mesh
 crates/kernel/src/polyhedron.rs:offset_faces picks the faces to offset by a mesh
 crates/kernel/src/provenance.rs:blend_origins traces blend faces by meshes
