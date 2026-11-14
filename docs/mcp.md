@@ -111,7 +111,11 @@ Tool calls read, write and delete files only inside the server's folders:
 - the server's own scratch folder (a new private `solidcraft-mcp-*` folder in the temporary
   folder), where `screenshot` without a `path` goes;
 - every `--allow-path DIR` (repeat it for more). A folder named here is reached in full,
-  hidden files included.
+  hidden files included. A folder that does not exist (or can't be resolved) is left out and
+  stderr says so (`allow-path DIR ignored: it doesn't exist`); a refused path under it names that
+  `--allow-path` in the error. A folder that does not exist yet is not accepted: create it, then
+  name it. If every `--allow-path` is unusable the server refuses to start;
+  `--keep-missing-allow-path` starts it anyway with the other folders.
 
 The CLI removes its own scratch folder if it is empty when the MCP command returns, including
 after a startup error. A nonempty scratch folder is kept, so saved files are not deleted.
