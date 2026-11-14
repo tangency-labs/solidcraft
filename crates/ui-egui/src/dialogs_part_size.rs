@@ -131,7 +131,16 @@ impl Resize {
             _ => s.eq_ignore_ascii_case(&part.size),
         })?;
         let thread = crate::dialogs_parts::THREADS.iter().position(|t| Some(t.0) == part.thread.as_deref()).unwrap_or(0);
-        Some(Self { component, size, original_size: size, length: part.length, thread, original_thread: thread, family, source: app.session.doc.clone() })
+        Some(Self {
+            component,
+            size,
+            original_size: size,
+            length: part.length,
+            thread,
+            original_thread: thread,
+            family,
+            source: app.session.doc.clone(),
+        })
     }
 
     fn current(&self, app: &SolveApp) -> Result<(), String> {
