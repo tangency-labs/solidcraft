@@ -554,15 +554,23 @@ fn vertexuse_is_loop_vertexuse<O: ClassObject, G: ClassGeometry<O>>(
 
 /// `SmVertexuse::ComputeUVSector(sectorIO, FALSE)` (unit `topology.vertexuse`) with the
 /// status ignored: a failed computation keeps the outputs it wrote. With `bOkToMake` false
-/// nothing is created, so the port runs it on a copy of the B-rep (it takes `&mut Brep`).
+/// nothing is created; it reads the B-rep in place, and only where it would reach a step
+/// that can change the B-rep (a global point solve, which builds the face's surface cache)
+/// does the port run it on a copy of the B-rep (it takes `&mut Brep` there), so the
+/// B-rep is never changed. Copying the whole B-rep for each sector made the seam checks
+/// of a large body slow.
 fn vertexuse_compute_uv_sector<O: ClassObject, G: ClassGeometry<O>>(
     k: &Kernel,
     geometry: &G,
     vertexuse: O,
 ) -> Result<UvSectorIo<O>> {
     let (b, vu) = vertexuse_id(geometry, vertexuse, OP_CROSS)?;
-    let mut scratch = b.clone_sharing_surface_caches();
-    let io = topo_vertexuse::compute_uv_sector(k, &mut scratch, vu, false)?.io;
+    let io = if let Some(sector) = topo_vertexuse::compute_uv_sector_read_only(k, b, vu)? {
+        sector.io
+    } else {
+        let mut scratch = b.clone_sharing_surface_caches();
+        topo_vertexuse::compute_uv_sector(k, &mut scratch, vu, false)?.io
+    };
     let eu_handle = |eu: Option<EdgeuseId>| -> Result<Option<O>> {
         eu.map(|eu| handle_of(geometry, b, EntityRef::Edgeuse(eu), OP_CROSS))
             .transpose()
