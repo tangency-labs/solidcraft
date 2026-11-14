@@ -180,7 +180,24 @@ pub(super) fn assert_test_vertex1(
     // even an exact ideal corner ignores the incident faces' tolerance bands.
     // As on main, Test 1 reports the measured vertex/face gap. Strict corner
     // queries used by placement and repair keep their independent semantics.
-    Ok((face_gap <= tolerance, face_gap))
+    let passed = face_gap <= tolerance;
+    if passed {
+        // A tolerance absorbs a gap, not a misplaced vertex: the faces' corner is never
+        // farther from the vertex than a tolerance may grow to (`GROWTH_PAST_RATIO`), whatever
+        // the measured gaps say (a gap that could not be measured reads as none).
+        let (on_corner, corner) = corner::is_on_face_corner(k, b, v)?;
+        if !on_corner && corner.found_point {
+            let limit = super::brep::GROWTH_PAST_RATIO
+                * crate::geom::tol::LARGE_SMALL_SIZE_RATIO
+                * b.tolerance();
+            let off = corner.best_point.distance(b.vertex(v)?.point);
+            if off > limit.max(tolerance) {
+                // reported as the vertex's gap: its distance from the corner
+                return Ok((false, off));
+            }
+        }
+    }
+    Ok((passed, face_gap))
 }
 
 #[cfg(test)]
