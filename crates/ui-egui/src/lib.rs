@@ -1903,6 +1903,15 @@ impl SolveApp {
                 "view.navigation_bar" => {
                     self.ui.show_navigation_bar = v.get("visible").and_then(Value::as_bool).unwrap_or(!self.ui.show_navigation_bar)
                 }
+                // The Browser tree panel is a panel of the layout: closing it from its host menu
+                // leaves no way back, so this command opens it again (#16058).
+                "view.browser" => {
+                    let visible = v.get("visible").and_then(Value::as_bool).unwrap_or(!browser::panel_open(self));
+                    self.ui.show_browser = visible;
+                    if visible {
+                        browser::reveal_shared_panel(self, "browser");
+                    }
+                }
                 "view.next_tab" | "view.previous_tab" => documents::cycle(self, id == "view.next_tab"),
                 "view.toolbar_reset_all" => toolbar_custom::reset_all(self),
                 "view.ribbon_tabs_only" => {
@@ -2584,6 +2593,7 @@ impl SolveApp {
                 | "view.grid"
                 | "view.ground_shadow"
                 | "view.navigation_bar"
+                | "view.browser"
                 | "view.next_tab"
                 | "view.previous_tab"
                 | "tab.view.open"
