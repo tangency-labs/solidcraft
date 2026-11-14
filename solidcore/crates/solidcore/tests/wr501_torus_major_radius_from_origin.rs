@@ -74,7 +74,6 @@ fn revolved_tori(k: &mut Kernel) -> Vec<Torus> {
 fn wr501_revolved_torus_reports_its_major_radius_from_the_torus_origin() {
     let mut build = Kernel::default();
     // the public option that makes the revolve build an analytic torus face
-    build.fixes.revolve_analytic_profile_faces = true;
     let tori = revolved_tori(&mut build);
     assert_eq!(tori.len(), 2, "both half circles give a torus");
 

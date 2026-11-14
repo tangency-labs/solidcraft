@@ -180,7 +180,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "query_statuses_pass_on",
     "refine_cc_range_ends",
     "revolution_round_offset_collapses",
-    "revolve_analytic_profile_faces",
     "revolve_holed_profile_void",
     "revolve_nested_shells_as_cavities",
     "revolve_splits_curves_on_axis",

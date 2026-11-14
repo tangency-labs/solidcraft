@@ -313,8 +313,8 @@
 {"case":"ub215_degenerate_face_apex_top_line_9.9e-7","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"ub215_degenerate_face_base_line_5e-7","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"ub215_degenerate_face_base_line_9.9e-7_359","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"ub215_degenerate_face_side_line_5e-7","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"ub215_degenerate_face_side_line_9.9e-7","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"ub215_degenerate_face_side_line_5e-7","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1006.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"ub215_degenerate_face_side_line_9.9e-7","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1006.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"ub215_degenerate_face_top_line_1e-7","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"ub215_degenerate_face_top_line_1e-9","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"ub215_degenerate_face_top_line_5e-7_origin_1e5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
@@ -335,9 +335,9 @@
 {"case":"ub215b_cone_random_refused_2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"ub215b_cone_random_refused_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"ub215b_cone_random_refused_4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"ub215b_cone_random_refused_5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"ub215b_cone_random_refused_6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"ub215b_cone_random_refused_7","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"ub215b_cone_random_refused_5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1006.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"ub215b_cone_random_refused_6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1006.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"ub215b_cone_random_refused_7","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1006.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"ub215b_cone_top_1.0005e-6_at_1000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"ub215b_cone_top_1.1e-6_turn_-359.9","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"ub215b_cone_top_2e-6_at_1e5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}

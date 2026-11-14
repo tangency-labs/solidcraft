@@ -50,10 +50,8 @@
 //!   test (its sweep amount is unused); `SM_DEBUG_CODE` blocks, `SM_ASSERT`s and
 //!   `smos_WriteBuffer` messages are dropped.
 //! - **Analytic revolutions** (not upstream: WR-448, tangency-labs/solidcore#545;
-//!   SolidCraft change, tangency-labs/smlib 0b143f7). With
-//!   [`RotationalSweepGeometry::set_analytic_revolutions`] (off by default, so the
-//!   default follows `c9c5979`; `PrimitiveCreation`'s partial rotational sweep sets it
-//!   from `Kernel::fixes.revolve_analytic_profile_faces`), `EdgeSweepHigher` gives a line or circular arc its
+//!   SolidCraft change, tangency-labs/smlib 0b143f7; the only path since
+//!   tangency-labs/solidcraft#14425). `EdgeSweepHigher` gives a line or circular arc its
 //!   cylinder, cone, sphere or torus in the B-spline surface's layout (a line
 //!   falling along the axis: the reversed line's, its cylinder or cone built from the
 //!   low end and never inside out, as 9853e54's `AnalyticSurface`, #1463) instead of
@@ -482,9 +480,6 @@ pub struct RotationalSweepGeometry {
     angle: f64,
     /// `m_dEps`: the tolerance for geometry on the axis, zero sweep lengths, lines.
     eps: f64,
-    /// SolidCraft change (tangency-labs/smlib 0b143f7): sweep a line or circular arc
-    /// to its analytic surface (see [`Self::set_analytic_revolutions`]).
-    analytic_revolutions: bool,
 }
 
 impl RotationalSweepGeometry {
@@ -499,7 +494,6 @@ impl RotationalSweepGeometry {
             axis: axis.unitize_or_z(),
             angle: angle_deg,
             eps,
-            analytic_revolutions: false,
         }
     }
 
@@ -509,25 +503,8 @@ impl RotationalSweepGeometry {
     pub fn copy(&self) -> Self {
         let mut new = Self::new(self.base_pt, self.axis, self.angle, self.eps);
         new.base.set_make_analytics(self.base.make_analytics);
-        new.analytic_revolutions = self.analytic_revolutions;
         new.base.statuses_pass_on = self.base.statuses_pass_on;
         new
-    }
-
-    /// SolidCraft change (tangency-labs/smlib 0b143f7, tangency-labs/solidcore#545):
-    /// with `make_analytics` also set, [`Self::edge_sweep_higher`] gives an edge
-    /// whose curve is a line or circular arc in a plane through the axis its
-    /// cylinder, cone, sphere or torus ([`analytic_revolution`]) in place of the
-    /// B-spline surface of revolution, laid out as that B-spline so that its boundary
-    /// makes the same loop. Off by default, as upstream at `c9c5979`.
-    pub fn set_analytic_revolutions(&mut self, on: bool) {
-        self.analytic_revolutions = on;
-    }
-
-    /// Whether [`Self::set_analytic_revolutions`] is on.
-    #[must_use]
-    pub const fn analytic_revolutions(&self) -> bool {
-        self.analytic_revolutions
     }
 
     /// `m_sBasePt`.
@@ -924,7 +901,7 @@ impl RotationalSweepGeometry {
         // cone, sphere or torus the curve sweeps, in place of the B-spline before its
         // normal is taken (AnalyticSurface precedes it), which CopyAndAddAnalytics
         // does not give
-        let analytic = if self.base.make_analytics && self.analytic_revolutions && !is_plane {
+        let analytic = if self.base.make_analytics && !is_plane {
             analytic_revolution(
                 k,
                 &copied_orig_edge_curve,
@@ -1537,8 +1514,13 @@ mod tests {
         assert_eq!(s.face_tol, -1.0);
     }
 
+    /// Every line and circular arc swept a part turn is its analytic surface, never inside
+    /// out (#1463, #1490; fork 9853e54), and a full minor circle swept a quarter turn is the
+    /// torus of its radii (5 from the axis, 1.5) over that quarter: each point where the
+    /// sweep starts is turned 90 degrees about the axis where it ends
+    /// (tangency-labs/solidcraft#14425).
     #[test]
-    fn analytic_revolutions_keep_the_b_spline_loop() {
+    fn a_part_turn_sweeps_each_line_and_arc_to_its_analytic_surface() {
         use crate::surface::surface::SurfaceKind;
         let k = Kernel::default();
         let arc = |centre: Point3, x: Vec3, y: Vec3, r: f64, start: f64, end: f64| {
@@ -1567,138 +1549,63 @@ mod tests {
                 "cone",
                 wire(Vec3::new(2.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 0.0)),
             ),
-            ("drill point", wire(Vec3::new(1.0, 0.0, 1.0), Vec3::ZERO)),
+            ("cone", wire(Vec3::new(1.0, 0.0, 1.0), Vec3::ZERO)),
             (
                 "sphere",
                 arc(Vec3::ZERO, -Vec3::Z, Vec3::X, 3.0, 0.0, 180.0),
             ),
-            ("dome", arc(Vec3::ZERO, Vec3::X, Vec3::Z, 2.0, 0.0, 90.0)),
+            ("sphere", arc(Vec3::ZERO, Vec3::X, Vec3::Z, 2.0, 0.0, 90.0)),
             (
                 "torus",
                 arc(Vec3::new(5.0, 0.0, 0.0), Vec3::X, Vec3::Z, 1.5, 0.0, 360.0),
             ),
-            // a full minor circle from the bottom (the partial torus's)
             (
-                "minor circle from the bottom",
+                "torus",
                 arc(Vec3::new(5.0, 0.0, 0.0), -Vec3::Z, Vec3::X, 1.5, 0.0, 360.0),
             ),
             (
-                "fillet",
+                "torus",
                 arc(Vec3::new(4.0, 0.0, 1.0), Vec3::Z, Vec3::X, 1.0, 0.0, 90.0),
             ),
-            // a tube range across 0 degrees (-60..30 from X towards Z)
             (
-                "fillet",
+                "torus",
                 arc(Vec3::new(4.0, 0.0, 1.0), Vec3::X, Vec3::Z, 1.0, -60.0, 30.0),
             ),
         ];
-        for (name, (b, e)) in cases {
-            let upstream = RotationalSweepGeometry::new(Vec3::ZERO, Vec3::Z, 90.0, 1e-6);
-            assert!(!upstream.analytic_revolutions());
-            let mut g = upstream.copy();
-            g.set_analytic_revolutions(true);
-            assert!(g.copy().analytic_revolutions());
-            let old = upstream.edge_sweep_higher(&k, &b, e).unwrap();
-            let new = g.edge_sweep_higher(&k, &b, e).unwrap();
-            let surface = new.surface.as_ref().unwrap();
-            let analytic = match surface.kind() {
-                SurfaceKind::Cone(c) => {
-                    if c.is_cylinder_class() {
-                        "cylinder"
-                    } else {
-                        "cone"
-                    }
-                }
-                SurfaceKind::Sphere(_) => "sphere",
-                SurfaceKind::Torus(_) => "torus",
-                _ => "other",
+        let quarter = |p: Point3| Point3::new(-p.y, p.x, p.z);
+        for (i, (expected, (b, e))) in cases.into_iter().enumerate() {
+            let g = RotationalSweepGeometry::new(Vec3::ZERO, Vec3::Z, 90.0, 1e-6);
+            let swept = g.edge_sweep_higher(&k, &b, e).unwrap();
+            let surface = swept.surface.as_ref().unwrap();
+            let (kind, inside_out) = match surface.kind() {
+                SurfaceKind::Cone(c) if c.is_cylinder_class() => ("cylinder", c.inside_out()),
+                SurfaceKind::Cone(c) => ("cone", c.inside_out()),
+                SurfaceKind::Sphere(s) => ("sphere", s.inside_out()),
+                SurfaceKind::Torus(t) => ("torus", t.inside_out()),
+                _ => ("other", false),
             };
-            let expected = match name {
-                "dome" => "sphere",
-                "drill point" => "cone",
-                "fillet" | "minor circle from the bottom" => "torus",
-                n => n,
-            };
-            assert_eq!(analytic, expected, "{name}");
-            let (n_new, n_old) = (new.normal.unwrap(), old.normal.unwrap());
-            // #1463, #1490: never inside out (fork 9853e54)
-            let inside_out = match surface.kind() {
-                SurfaceKind::Cone(c) => c.inside_out(),
-                SurfaceKind::Sphere(s) => s.inside_out(),
-                SurfaceKind::Torus(t) => t.inside_out(),
-                _ => false,
-            };
-            assert!(!inside_out, "{name}");
-            if (n_new - n_old).length() >= 1e-12 {
-                // a curve falling along the axis or round its circle is laid out as the
-                // reversed curve's B-spline: the loop runs the other way round, its
-                // normal the analytic surface's at the curve's other end
-                assert!(
-                    matches!(
-                        name,
-                        "cone" | "drill point" | "fillet" | "minor circle from the bottom"
-                    ),
-                    "{name}: {n_new:?} {n_old:?}"
-                );
-                assert_eq!(new.trim_curves.len(), old.trim_curves.len(), "{name}");
-                assert_eq!(new.face_tol, old.face_tol, "{name}");
-                continue;
+            assert_eq!((kind, inside_out), (expected, false), "case {i}");
+            // the sweep runs a quarter turn: the domain's far u side is its near side turned
+            let d = surface.natural_uv_domain_with_nurb(&k).unwrap();
+            for v in [0.0, 0.5, 1.0] {
+                let near = surface.evaluate_point(&k, d.evaluate(0.0, v)).unwrap();
+                let far = surface.evaluate_point(&k, d.evaluate(1.0, v)).unwrap();
+                assert!((far - quarter(near)).length() < 1e-12, "case {i} at v {v}");
             }
-            // the same loop: roles, orientations, tolerances and the normal (the
-            // analytic surface's, to rounding)
-            assert!(
-                (n_new - n_old).length() < 1e-12,
-                "{name}: {n_new:?} {n_old:?}"
-            );
-            assert_eq!(new.trim_curves.len(), old.trim_curves.len(), "{name}");
-            assert_eq!(new.uv_trim_curves.len(), old.uv_trim_curves.len(), "{name}");
-            assert_eq!(new.orients, old.orients, "{name}");
-            assert_eq!(
-                (
-                    new.start_curve,
-                    new.far_end_curve,
-                    new.start_vert_curve,
-                    new.end_vert_curve
-                ),
-                (
-                    old.start_curve,
-                    old.far_end_curve,
-                    old.start_vert_curve,
-                    old.end_vert_curve
-                ),
-                "{name}"
-            );
-            assert_eq!(new.face_tol, old.face_tol, "{name}");
-            // each 3D trim has the B-spline trim's ends and lies on the new surface
-            for (i, (c, d)) in new.trim_curves.iter().zip(&old.trim_curves).enumerate() {
-                let (ci, di) = (c.natural_interval(), d.natural_interval());
-                // (a closed trim collapsed to a point still has matching ends)
-                let lc = c.approximate_length(&k, &ci, 16, false).unwrap().0;
-                let ld = d.approximate_length(&k, &di, 16, false).unwrap().0;
+            if i == 5 {
+                let SurfaceKind::Torus(t) = surface.kind() else {
+                    unreachable!()
+                };
                 assert!(
-                    (lc - ld).abs() <= 1e-3 * ld,
-                    "{name} trim {i}: length {lc} {ld}"
+                    (t.major_radius() - 5.0).abs() < 1e-12,
+                    "{}",
+                    t.major_radius()
                 );
-                assert!(!c.is_degenerate(&k, 1e-6, None).unwrap(), "{name} trim {i}");
-                for (t, s) in [(ci.min(), di.min()), (ci.max(), di.max())] {
-                    let p = c.evaluate_point(&k, t).unwrap();
-                    let q = d.evaluate_point(&k, s).unwrap();
-                    assert!((p - q).length() < 1e-9, "{name} trim {i}: {p:?} {q:?}");
-                }
-            }
-            for (c, uv) in new.trim_curves.iter().zip(&new.uv_trim_curves) {
-                let (ci, ui) = (c.natural_interval(), uv.natural_interval());
-                for f in [0.0, 0.25, 0.5, 0.75, 1.0] {
-                    let p = c.evaluate_point(&k, ci.evaluate(f)).unwrap();
-                    let w = uv.evaluate_point(ui.evaluate(f));
-                    let q = surface
-                        .evaluate_point(&k, crate::geom::vector2d::Point2::new(w.x, w.y))
-                        .unwrap();
-                    assert!(
-                        (p - q).length() < 1e-9,
-                        "{name} uv trim at {f}: {p:?} {q:?}"
-                    );
-                }
+                assert!(
+                    (t.minor_radius() - 1.5).abs() < 1e-12,
+                    "{}",
+                    t.minor_radius()
+                );
             }
         }
     }
