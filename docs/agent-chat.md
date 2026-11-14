@@ -409,6 +409,10 @@ the agent's own ways to sign in:
 - **A variable to set** for agents that take a key from the environment. The panel has no field
   for a coding agent's key, on purpose.
 
+A way to sign in that bills API credits for each use, such as Claude's Anthropic Console login or
+an API key, comes after the others and carries a warning. Claude's Console login also replaces
+Claude Code's login for the whole computer, so other Claude Code sessions bill the same way.
+
 Whatever you typed before signing in is sent once the agent is ready.
 
 ## What the agent can do

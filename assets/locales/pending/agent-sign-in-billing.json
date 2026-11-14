@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.agent_chat_auth_bills": "This sign-in is billed per use; a subscription is usually cheaper."
+  },
+  "ar": {
+    "ui.agent_chat_auth_bills": "يُحاسَب تسجيل الدخول هذا لكل استخدام؛ الاشتراك عادةً أرخص."
+  },
+  "de": {
+    "ui.agent_chat_auth_bills": "Diese Anmeldung wird pro Nutzung abgerechnet; ein Abonnement ist meist günstiger."
+  },
+  "he": {
+    "ui.agent_chat_auth_bills": "כניסה זו מחויבת לפי שימוש; מנוי זול יותר בדרך כלל."
+  },
+  "ja": {
+    "ui.agent_chat_auth_bills": "このサインインは使用ごとに課金されます。通常はサブスクリプションの方が安価です。"
+  },
+  "ko": {
+    "ui.agent_chat_auth_bills": "이 로그인은 사용할 때마다 요금이 부과됩니다. 보통 구독이 더 저렴합니다."
+  },
+  "vi": {
+    "ui.agent_chat_auth_bills": "Cách đăng nhập này tính phí theo mỗi lần dùng; gói đăng ký thường rẻ hơn."
+  },
+  "zh": {
+    "ui.agent_chat_auth_bills": "此登录方式按使用次数计费；订阅通常更便宜。"
+  }
+}

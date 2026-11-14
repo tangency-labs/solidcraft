@@ -385,7 +385,33 @@ pub enum AuthKind {
     EnvVar { vars: Vec<String> },
 }
 
+impl AuthMethod {
+    /// Whether this sign-in bills API credits for each use instead of a subscription (#14165):
+    /// the Claude adapter's Console login, or an API key. Agents name these only in free text.
+    pub fn bills_per_use(&self) -> bool {
+        let text = format!("{} {} {}", self.id, self.name, self.description).to_ascii_lowercase();
+        // "No API key required" describes a sign-in that bills no API key.
+        let text = ["no api key", "without an api key", "without api key", "api key not required", "api key is not required"]
+            .iter()
+            .fold(text, |text, negated| text.replace(negated, " "));
+        let named = ["api usage billing", "api-key", "api_key", "api key"].iter().any(|word| text.contains(word));
+        named
+            || match &self.kind {
+                AuthKind::Terminal { args, .. } => args.iter().any(|a| a == "--console"),
+                AuthKind::EnvVar { vars } => vars.iter().any(|v| v.to_ascii_uppercase().ends_with("_API_KEY")),
+                AuthKind::Agent => false,
+            }
+    }
+}
+
+/// The agent's sign-in methods, those that bill for each use after the others (#14165).
 pub fn auth_methods(init: &Value) -> Vec<AuthMethod> {
+    let mut methods = offered_auth_methods(init);
+    methods.sort_by_key(AuthMethod::bills_per_use);
+    methods
+}
+
+fn offered_auth_methods(init: &Value) -> Vec<AuthMethod> {
     let strings = |v: Option<&Value>| -> Vec<String> {
         v.and_then(Value::as_array).map(|a| a.iter().take(64).filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default()
     };
@@ -888,6 +914,34 @@ mod tests {
         let AuthKind::Terminal { args, command } = &methods[0].kind else { panic!("terminal method expected") };
         assert_eq!(args, &[r"C:\Program Files\Vibe\vibe-acp", "--setup"]);
         assert!(command.is_some());
+    }
+
+    #[test]
+    fn a_sign_in_that_bills_for_each_use_comes_last_and_is_marked() {
+        // The Claude adapter offers Console first or second depending on its version.
+        let init = json!({"authMethods": [
+            {"id": "console-login", "name": "Anthropic Console", "description": "Use Anthropic Console (API usage billing)",
+             "type": "terminal", "args": ["--cli", "auth", "login", "--console"]},
+            {"id": "claude-ai-login", "name": "Claude Subscription", "description": "Use Claude subscription",
+             "type": "terminal", "args": ["--cli", "auth", "login", "--claudeai"]}]});
+        let m = auth_methods(&init);
+        assert_eq!(m.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["claude-ai-login", "console-login"]);
+        assert_eq!(m.iter().map(AuthMethod::bills_per_use).collect::<Vec<_>>(), [false, true]);
+        // The args alone are enough, and so is a key the agent reads from the environment.
+        let init = json!({"authMethods": [
+            {"id": "a", "name": "A", "type": "terminal", "args": ["--console"]},
+            {"type": "env_var", "id": "b", "name": "B", "vars": [{"name": "OPENAI_API_KEY"}]},
+            {"id": "chatgpt", "name": "Login with ChatGPT"}]});
+        let m = auth_methods(&init);
+        assert_eq!(m.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["chatgpt", "a", "b"], "the order is otherwise kept");
+        assert_eq!(m.iter().map(AuthMethod::bills_per_use).collect::<Vec<_>>(), [false, true, true]);
+        // A sign-in that says it needs no API key is not one that bills for each use.
+        let init = json!({"authMethods": [
+            {"id": "sub", "name": "Subscription", "description": "Sign in with your plan, no API key required"},
+            {"id": "plan", "name": "Plan", "description": "Works without an API key"},
+            {"id": "key", "name": "API key", "description": "Paste an API key"}]});
+        let m = auth_methods(&init);
+        assert_eq!(m.iter().map(AuthMethod::bills_per_use).collect::<Vec<_>>(), [false, false, true]);
     }
 
     #[test]

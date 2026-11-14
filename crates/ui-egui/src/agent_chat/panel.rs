@@ -1873,6 +1873,9 @@ fn auth_box(chat: &mut AgentChat, ui: &mut egui::Ui) {
                 &if desc.is_empty() || desc == m.name { m.name.clone() } else { format!("{} — {desc}", m.name) },
                 ui_kit::Text::Report(&m.id, false),
             );
+            if m.bills_per_use() {
+                ui_kit::text(ui, tr("ui.agent_chat_auth_bills"), ui_kit::Text::Error("auth_bills"));
+            }
             match &m.kind {
                 acp::AuthKind::Terminal { args, .. } => {
                     ui_kit::text(ui, tr("ui.agent_chat_auth_terminal"), ui_kit::Text::Note("terminal"));
