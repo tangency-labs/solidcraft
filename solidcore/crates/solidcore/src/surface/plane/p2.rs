@@ -917,11 +917,18 @@ impl Plane {
             return Ok((false, out, None));
         }
 
-        // create output line and set outputs
+        // create output line and set outputs. Not upstream: the line is anchored at the
+        // solved start point (the line's point nearest the planes' middles), not at the
+        // segment's start, which for a plane extended far past its face (a local operation's
+        // new face is an unbounded plane) lies far from the model, 1.3e6 from a box of size
+        // 20: the line then evaluated near the model to the rounding at that size (5.8e-11
+        // off a tilted box's exact corners). Its parameter keeps the segment's length as its
+        // speed, the segment running over [t0, t0 + 1].
+        let t0 = line_dir.dot(seg_start - start_pt) / length_of_line;
         let line = Line::bounded(
-            seg_start,
+            start_pt,
             line_dir,
-            &Extent1d::from_min_max(0.0, 1.0),
+            &Extent1d::from_min_max(t0, t0 + 1.0),
             &BoundedLineOptions {
                 scale: length_of_line,
                 ..BoundedLineOptions::default()
