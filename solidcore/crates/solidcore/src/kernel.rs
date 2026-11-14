@@ -1128,18 +1128,6 @@ pub struct UpstreamFixes {
     /// against the untrimmed surface. Classifications outside editing are unchanged
     /// (WR-732, #2503; solidcore-native, no fork commit).
     pub brep_ray_classifies_current_trims: bool,
-    /// The cap of a blend corner's End at a smooth vertex (a round ending where its edge runs
-    /// on, tangentially, into an edge not blended) holds a face's end at the vertex: where one
-    /// of the round's faces ends there in a crease across the round's edge (its faces meeting
-    /// at more than the corner's 3D tolerance over the radius, so not a tangent edge the rail
-    /// rolls over), the cap's plane, otherwise square to the edge, is turned by under the
-    /// corner's tangency tolerance to hold that edge's tangent (or the plane through two such
-    /// edges). Square to the edge, the cap held the crease only while the round's other face
-    /// was square to it: beside a drafted face the rail ended past the crease, on the face
-    /// beyond, and the trim leaked. Off: the cap square to the edge
-    /// (`FilletCorner::make_end_at_smooth_vertex`; solidcore-native,
-    /// no fork commit).
-    pub fillet_end_cap_holds_crease: bool,
 }
 }
 

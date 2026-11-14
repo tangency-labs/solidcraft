@@ -50,125 +50,6 @@ pub struct EndAtSmoothTopologyEnv<'a> {
     pub solver_eu_solver: Option<FilletSolverId>,
 }
 
-/// Not the fork's (#15212's sibling): the normal of the End's cap at `vertex`. The fork's is
-/// the blended edge's `tangent` there. Where a face of the blend (`faces`) ends at the vertex in
-/// an edge other than the blended edge `blended` and the edges it runs on into (a shallow
-/// crease across the blended edge, its faces a few degrees apart), the cap is turned to hold
-/// that edge's tangent: else the rail on that face, ending on a plane square to the blended
-/// edge, crosses the edge and ends on the face beyond, which the blend does not touch
-/// tangentially, and the faces the rails enclose are not closed. A face end whose faces meet
-/// at the vertex within `crease_rad` is tangent, not a crease: the rail rolls over it (#2406),
-/// and it is not held. The turn is taken only when it is under `tol_rad` (the corner's
-/// tangency tolerance); one face edge is held, or two (the plane through both). Without such
-/// an edge, the fork's normal.
-///
-/// # Errors
-/// Those of the edge queries and evaluations.
-#[allow(clippy::too_many_arguments)] // the cap's vertex, edge, faces and tolerances
-fn cap_normal_through_face_ends(
-    k: &Kernel,
-    target: &mut Brep,
-    vertex: crate::topology::VertexId,
-    blended: crate::topology::EdgeId,
-    faces: [crate::topology::FaceId; 2],
-    tangent: Vec3,
-    crease_rad: f64,
-    tol_rad: f64,
-) -> Result<Vec3> {
-    // the tangents at the vertex of the face edges that are neither the blended edge nor one
-    // it runs on into (an edge leaving the vertex along the blended edge's line)
-    let along = 45.0_f64.to_radians().cos();
-    let mut held: Vec<Vec3> = Vec::new();
-    for face in faces {
-        for e in vertex::edges(target, vertex, Some(face))? {
-            if e == blended || !is_crease_at(k, target, vertex, e, crease_rad)? {
-                continue;
-            }
-            let Some(curve) = edge::curve(target, e)? else {
-                continue;
-            };
-            let ivl = edge::interval(target, e)?;
-            let at = if edge::start_vertex(target, e)? == Some(vertex) {
-                ivl.min()
-            } else {
-                ivl.max()
-            };
-            let Some(d) = curve.evaluate(k, at, 1, true, true)?.get(1).copied() else {
-                continue;
-            };
-            let Ok(d) = d.unitize() else {
-                continue;
-            };
-            if d.dot(tangent).abs() >= along {
-                continue;
-            }
-            if !held.iter().any(|h| h.cross(d).length() <= 1e-9) {
-                held.push(d);
-            }
-        }
-    }
-    let turned = match held.as_slice() {
-        [d] => tangent - *d * tangent.dot(*d),
-        [d0, d1] => d0.cross(*d1),
-        _ => return Ok(tangent),
-    };
-    let Ok(mut turned) = turned.unitize() else {
-        return Ok(tangent);
-    };
-    if turned.dot(tangent) < 0.0 {
-        turned = -turned;
-    }
-    let angle = turned.angle_between(tangent)?;
-    if angle > 1e-12 && angle <= tol_rad {
-        Ok(turned)
-    } else {
-        Ok(tangent)
-    }
-}
-
-/// Whether edge `e`'s two faces meet at `vertex` at an angle over `angle_rad`: each edge use's
-/// binormal there is off square to the other face's normal by more than it. A lamina or
-/// non-manifold edge is no crease.
-///
-/// # Errors
-/// Those of the edge queries and the binormal evaluations.
-fn is_crease_at(
-    k: &Kernel,
-    target: &mut Brep,
-    vertex: crate::topology::VertexId,
-    e: crate::topology::EdgeId,
-    angle_rad: f64,
-) -> Result<bool> {
-    if !edge::is_manifold(target, e)? {
-        return Ok(false);
-    }
-    let ivl = edge::interval(target, e)?;
-    let at = if edge::start_vertex(target, e)? == Some(vertex) {
-        ivl.min()
-    } else {
-        ivl.max()
-    };
-    let Some(eu0) = edge::primary_edgeuse(target, e)? else {
-        return Ok(false);
-    };
-    let Some(eu_other) = eu1::radial(target, eu0)? else {
-        return Ok(false);
-    };
-    let r0 = crate::topology::edgeuse::p2::binormal_ignoring_status(k, target, eu0, at, false)?;
-    let r1 =
-        crate::topology::edgeuse::p2::binormal_ignoring_status(k, target, eu_other, at, false)?;
-    let (Ok(n0), Ok(n1), Ok(b0), Ok(b1)) = (
-        r0.face_normal.unitize(),
-        r1.face_normal.unitize(),
-        r0.binormal.unitize(),
-        r1.binormal.unitize(),
-    ) else {
-        return Ok(false);
-    };
-    let off = b1.dot(n0).abs().max(b0.dot(n1).abs());
-    Ok(off.asin() > angle_rad)
-}
-
 impl FilletCorner {
     /// The fork's `SmBlendCorner::MakeEndAtSmoothVertex` (41a39ec): the End at a smooth
     /// vertex (`SM_BEND_AT_SMOOTH`). The blend is cut by the plane P through the vertex
@@ -231,36 +112,11 @@ impl FilletCorner {
             true,
         )?;
         let origin = vertex::point(target, corner_vertex)?;
-        let tangent = pv
+        let normal = pv
             .get(1)
             .copied()
             .ok_or_else(|| nul("the edge curve's tangent"))?
             .unitize()?;
-        // the angle at which a face's end is a crease, not a tangent edge the rail rolls over:
-        // the corner's 3D tolerance over the blend's radius
-        let mut radius: f64 = 0.0;
-        for slot in solver.surfaces.iter().flatten() {
-            radius = radius.max(slot.surface.offset_distance().abs());
-        }
-        let crease_rad = if radius > 0.0 {
-            self.approx_tol_3d / radius
-        } else {
-            self.tangency_tol_radians
-        };
-        let normal = if k.fixes.fillet_end_cap_holds_crease {
-            cap_normal_through_face_ends(
-                k,
-                target,
-                corner_vertex,
-                e,
-                faces,
-                tangent,
-                crease_rad,
-                self.tangency_tol_radians,
-            )?
-        } else {
-            tangent
-        };
         let mut x = if normal.x.abs() < 0.9 {
             Vec3::new(1.0, 0.0, 0.0)
         } else {
