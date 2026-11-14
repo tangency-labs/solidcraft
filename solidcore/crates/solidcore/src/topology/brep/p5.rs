@@ -65,9 +65,9 @@
 //! Debug drawing/assertions are omitted. No recursion is introduced.
 //! `DeleteTopologicalVertex` leaves the vertex in place (the routine's silent `SM_ERR`)
 //! for an edge curve that is not of an `SmBSplineCurve` kind, where upstream dereferences
-//! the null cast (WR-598, the fork's tangency-labs/smlib@829b982); joining a curve on a
-//! B-spline-kind surface along a constant-u or constant-v UV line as that iso curve is
-//! opt-in (`Kernel::fixes.delete_vertex_joins_seam_iso_curve`). A line joined through
+//! the null cast (WR-598, the fork's tangency-labs/smlib@829b982), except a curve on a
+//! B-spline-kind surface along a constant-u or constant-v UV line, which is joined as that
+//! iso curve. A line joined through
 //! the `SmBSplineCurve` join gets its NURB made first, as `GetOrCreateGwNurbPointer` does.
 //! Not upstream (#15718): once [`remove_topological_edges_and_vertices`] has deleted its
 //! topological vertices, each surviving edge on a line and its vertices grow to the
@@ -939,9 +939,9 @@ pub(crate) fn delete_topological_vertex_joining(
         // Upstream casts each copy to `SmBSplineCurve` and calls `Trim` through the
         // result unchecked, so an edge curve of another kind (an `SmCrvOnSurf`) is a null
         // dereference (WR-598). Here such a curve is not joined: the routine's silent
-        // error, with nothing changed yet (the fork's tangency-labs/smlib@829b982).
-        // `Kernel::fixes.delete_vertex_joins_seam_iso_curve` also joins a curve on a
-        // B-spline surface along a constant-u or constant-v UV line as that iso curve.
+        // error, with nothing changed yet (the fork's tangency-labs/smlib@829b982). A curve
+        // on a B-spline surface along a constant-u or constant-v UV line is joined as that
+        // iso curve.
         let Some(mut deleted_copy) = exact_bspline_of_edge(k, b, deleted, deleted_interval)? else {
             return Err(SolidError::topology_failed(
                 OP,
@@ -1120,11 +1120,10 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
 /// The edge's curve as a B-spline over the edge's interval, running the curve's way, to
 /// join it with its neighbour (the fork's `sm_ExactBSplineOfEdge`, tangency-labs/smlib@829b982):
 /// a curve of an `SmBSplineCurve` kind (lines and conics included) copied and trimmed, as
-/// upstream does. Any other curve is `None`; upstream dereferences the null cast instead
-/// (WR-598). With `Kernel::fixes.delete_vertex_joins_seam_iso_curve`, a curve on a
-/// B-spline-kind surface whose UV curve is a line of constant u or v (the seam an
-/// extrusion leaves on its wall) is that surface's iso curve over the stretch, which is
-/// the same curve exactly.
+/// upstream does. A curve on a B-spline-kind surface whose UV curve is a line of
+/// constant u or v (the seam an extrusion leaves on its wall) is that surface's iso
+/// curve over the stretch, which is the same curve exactly (WR-598). Any other curve is
+/// `None`; upstream dereferences the null cast instead.
 fn exact_bspline_of_edge(
     k: &Kernel,
     b: &Brep,
@@ -1144,9 +1143,6 @@ fn exact_bspline_of_edge(
             crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
         )?;
         return Ok(Some(copy));
-    }
-    if !k.fixes.delete_vertex_joins_seam_iso_curve {
-        return Ok(None);
     }
     let CurveKind::CrvOnSurf(cos) = curve.kind() else {
         return Ok(None);

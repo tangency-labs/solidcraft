@@ -55,7 +55,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.check_loop_vertex_tolerance = true;
     k.fixes.check_loop_projected_seam_ends = true;
-    k.fixes.edge_check_orders_tangent_faces = true;
     k.fixes.ellipse_step_interval_checks = true;
     k.fixes.oscillating_skips_failed_guesses = true;
     k.fixes.refine_cc_range_ends = true;
@@ -125,7 +124,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.ssi_singular_start_inside_direction = true;
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
     k.fixes.ssi_tangent_curve_tracer = true;
-    k.fixes.delete_vertex_joins_seam_iso_curve = true;
     k.fixes.boolean_new_face_closure_both_sides = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;

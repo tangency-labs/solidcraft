@@ -201,12 +201,11 @@ fn check(k: &mut Kernel, b: &mut Brep) {
 }
 
 /// The kernel of the peg's union: WR-599's cover across a closed seam (`cover`) and
-/// WR-598's seam iso-curve join (`delete_vertex_joins_seam_iso_curve`), which merges the seam's vertex the cover leaves on the
+/// WR-598's seam iso-curve join (always on), which merges the seam's vertex the cover leaves on the
 /// bar's bottom arc (the fork's counts need both).
 fn peg_kernel(cover: bool) -> Kernel {
     let mut k = Kernel::default();
     k.fixes.cover_wraps_across_closed_seam = cover;
-    k.fixes.delete_vertex_joins_seam_iso_curve = true;
     k
 }
 

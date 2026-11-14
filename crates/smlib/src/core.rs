@@ -142,7 +142,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_tangent_curve_tracer = true;
     f.torus_check_spindle_apex = true;
     f.local_operation_step_walls = true;
-    f.edge_check_orders_tangent_faces = true;
     f.thicken_planar_side_walls = true;
     f.fillet_knife_edge_rounds = true;
     f.revolution_round_offset_collapses = true;
@@ -158,7 +157,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.cover_wraps_across_closed_seam = true;
     f.fillet_rails_meet_at_one_end_point = true;
     f.fillet_trace_reaches_rails = true;
-    f.delete_vertex_joins_seam_iso_curve = true;
     f.box_face_failures_propagate = true;
     f.fillet_rail_end_on_continued_surface = true;
     f.fillet_removal_takes_ring_fillets = true;
@@ -200,7 +198,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.mirror_curve_keeps_euclidean_control_points = true;
     f.dupin_bottom_hyperbola_axis = true;
     f.offset_swap_uv_extended_distance = true;
-    f.validation_does_not_make_uv_trims = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
     f.bspline_trim_keeps_rational_end_spans = true;
@@ -221,7 +218,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
     f.curve_sweep_closed_path_joins_ends = true;
-    f.validate_tolerances_fixes_reported_gaps = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;

@@ -18,8 +18,8 @@
 //! evaluation propagates its error. Loop membership of an edge use (test 14) and wire
 //! membership (test 13) read sets built once per loop use / shell. `SmHyperbola` and
 //! `SmParabola` use the inherited `SmBSplineCurve` check with their own `MakeNurb`,
-//! `IsAnalytic` and `IsBounded`. Opt-in (WR-540,
-//! `Kernel::fixes.edge_check_orders_tangent_faces`, #383): where two faces round an edge
+//! `IsAnalytic` and `IsBounded`. Not upstream (WR-540,
+//! #383): where two faces round an edge
 //! leave it within `SM_ANG_TOL_DEG` of each other, test 9 orders every face by the
 //! direction to its point 20 edge tolerances into the face, square to the edge (the
 //! fork's tangency-labs/smlib@5533bbb). Not upstream (WR-668, tangency-labs/smlib
@@ -442,8 +442,7 @@ fn radial_order(
     // Must watch out for zero sectors: coincident faces.
     let mut have_nonzero_angle = false;
 
-    // Not upstream (WR-540), opt-in `Kernel::fixes.edge_check_orders_tangent_faces` (the
-    // fork's tangency-labs/smlib@5533bbb, #383): a sector between faces tangent along the
+    // Not upstream (WR-540; the fork's tangency-labs/smlib@5533bbb, #383): a sector between faces tangent along the
     // edge (a cylinder touching a plane it rests on, left by a boolean as a non-manifold
     // edge) has binormals that agree to first order, so the binormal angles tie (or differ
     // by rounding, either way round) and cannot show the order. Where any sector is that
@@ -451,9 +450,8 @@ fn radial_order(
     // step into the face (20 edge tolerances, as IsConvexRadialSector steps).
     let seq_param = extent.evaluate(0.456);
     let mut step_off = false;
-    let mut step_off_dist = 0.0;
-    if k.fixes.edge_check_orders_tangent_faces {
-        step_off_dist = 20.0 * tedge::tolerance(b, e)?;
+    let step_off_dist = 20.0 * tedge::tolerance(b, e)?;
+    {
         let tie_dot = (ANG_TOL_DEG * PI / 180.0).cos();
         let num_eus = b.edge(e)?.edgeuses.len();
         let mut eu = target;

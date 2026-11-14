@@ -129,23 +129,20 @@ fn kept_source_tolerances_check_clean() {
 }
 
 /// WR-679 at d = 0.5: `ValidateAndUpdateTolerances(FALSE)` after the WR-671 offset finds no
-/// gap to cover, with or without the fix, and reports nothing.
+/// gap to cover and reports nothing.
 #[test]
 fn updated_tolerances_at_a_half_have_nothing_to_grow() {
-    for fix in [false, true] {
-        let (mut k, mut r) = offset(0.5, true);
-        k.fixes.validate_tolerances_fixes_reported_gaps = fix;
-        let mut reports = AssertArray::new();
-        let gaps =
-            validate_and_update_tolerances(&mut k, &mut r, false, Some(&mut reports), 0).unwrap();
-        assert!(!gaps.violated_or_updated, "fix {fix}");
-        assert!(
-            gaps.max_vertex_edge_gap <= 1e-12,
-            "{}",
-            gaps.max_vertex_edge_gap
-        );
-        assert!(reports.reports().iter().all(|r| r.ok), "fix {fix}");
-    }
+    let (mut k, mut r) = offset(0.5, true);
+    let mut reports = AssertArray::new();
+    let gaps =
+        validate_and_update_tolerances(&mut k, &mut r, false, Some(&mut reports), 0).unwrap();
+    assert!(!gaps.violated_or_updated);
+    assert!(
+        gaps.max_vertex_edge_gap <= 1e-12,
+        "{}",
+        gaps.max_vertex_edge_gap
+    );
+    assert!(reports.reports().iter().all(|r| r.ok));
 }
 
 /// The sheet read from its file, copied and offset by `d` with the given flags set
@@ -192,10 +189,7 @@ fn offset_with(d: f64, flags: &[&str]) -> (Kernel, Brep) {
 /// checks clean, its gaps at rounding, its area the offset's without the update.
 #[test]
 fn offset_updates_its_result_tolerances() {
-    let flags = [
-        "offset_edges_keep_source_tolerance",
-        "validate_tolerances_fixes_reported_gaps",
-    ];
+    let flags = ["offset_edges_keep_source_tolerance"];
     let (mut k, mut r) = offset_with(0.5, &flags);
     let gap = largest_gap(&mut k, &mut r);
     assert!(gap <= 1e-12, "gap {gap}");
