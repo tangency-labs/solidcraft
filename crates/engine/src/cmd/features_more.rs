@@ -60,7 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("emboss")
         .contract(&EMBOSS_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] selecting a planar or complete exterior cylindrical wall (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
+        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] selecting a planar or complete cylindrical wall, outside or a bore (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
     CommandSpec::new("solid.replace_face", "Replace Face", crate::checked!("solid.replace_face", replace_face))
         .contract(&REPLACE_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
@@ -291,7 +291,7 @@ fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
                 targets = vec![name.to_owned()];
                 Some(face)
             }
-            _ => return Err(bad(cmd, "only planar faces and complete exterior cylindrical walls support emboss")),
+            _ => return Err(bad(cmd, "only planar faces and complete cylindrical walls, outside or a bore, support emboss")),
         }
     } else {
         let inferred = infer_emboss_selection(s, sketch, &profiles, &depth, deboss, &targets)?;

@@ -590,7 +590,7 @@ completed drawings publish atomically. The browser still exports synchronously.
   use the sketch-normal direction for each selected profile, including To Object and curved
   target trimming, independently of the selected axis sign.
 - Cylindrical emboss/deboss wraps bounded orthogonal line profiles, including holes, concave
-  outlines and nested islands, onto complete exterior cylinders or coaxial sleeves with exact
+  outlines and nested islands, onto complete cylinders, outside or bores, or coaxial sleeves with exact
   radial walls. New features infer a unique eligible cylinder when the face field is empty;
   ambiguous targets require an explicit face. Saved target
   and author occurrence paths retain the chosen placements; missing/split faces refuse rather
