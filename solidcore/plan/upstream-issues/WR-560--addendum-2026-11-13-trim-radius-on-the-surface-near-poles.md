@@ -19,10 +19,15 @@ of at most 52 dyadic pieces (`tol 2^-(j+2)` over the piece `stretch 2^-(j+1)` to
 `stretch 2^-j` from the end). A genuine zero-speed end has its radius on the line to first
 order, so the full line would leave it no margin; that half is enough is ARGUED (it echoes
 WR-668's own check, which accepts a radius within half the tolerance of the line). The
-pieces stop at `max(ulp(t_end), stretch 2^-52)` from the end, below which they would round
-onto the end. That sliver, which holds the zero-speed end itself, is not certified: no
-positive bound can clear it. Its image is about `|C''| cut^2 / 2` long (ARGUED, the Taylor
-term at a zero-speed end), far too short for a corner. The bound composes each polynomial piece
+pieces stop at a cut from the end: the largest of `ulp(t_end)` and `stretch 2^-52` (below
+which they would round onto the end), and the parameter length over which the trim covers
+a UV length of `256 ε |P|_max`, `sqrt(512 ε |P|_max / |c''(t_end)|)`. The enclosure's
+coefficients carry absolute widths of a few `ε |P|`, so shorter pieces cannot clear
+(measured: on a cubic with `P0 = P1`, pieces from about 1e-7 of the end inward do not
+clear even an eighth of the line). That sliver, which holds the zero-speed end itself, is
+not certified: no positive bound can clear it. Its UV length is about `256 ε |P|_max`, at
+the trim's own coordinate rounding (ARGUED, the Taylor term at a zero-speed end), too short
+for the trim to hold a corner it could represent. The bound composes each polynomial piece
 of the trim with each polynomial patch of the surface in rounded interval arithmetic and
 bounds `|g'|^3 / |g' x g''|` from the composed coefficients (no sampling); pieces that do not
 clear are halved, breadth first, at most 4096 pieces and 64 halvings each, no recursion. A
