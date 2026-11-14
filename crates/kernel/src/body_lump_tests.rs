@@ -308,3 +308,18 @@ fn points_classify_against_a_mesh_body() {
     assert_eq!(m.classify_point(Vec3::new(1.0, 1.0, 0.0)).unwrap(), OnBoundary);
     assert_eq!(m.classify_point(Vec3::X * 10.0).unwrap(), OnBoundary);
 }
+
+#[test]
+fn point_lies_on_face_is_decided_on_the_face_itself() {
+    let body = cube(10.0);
+    let faces = body.record().faces.len();
+    // The +X face of the cube: the one whose plane passes through (10, 0, 0).
+    let top =
+        (0..faces).find(|&f| matches!(body.point_lies_on_face(f, Vec3::new(10.0, 0.0, 0.0), 1e-6), Ok(Some(_)))).expect("one face holds (10, 0, 0)");
+    let on = body.point_lies_on_face(top, Vec3::new(10.0, 3.0, -4.0), 1e-6).unwrap().unwrap();
+    assert!(on.dist(Vec3::new(10.0, 3.0, -4.0)) < 1e-6);
+    // On the face's plane but off its trim, and off its plane altogether.
+    assert_eq!(body.point_lies_on_face(top, Vec3::new(10.0, 30.0, 0.0), 1e-6).unwrap(), None);
+    assert_eq!(body.point_lies_on_face(top, Vec3::new(12.0, 0.0, 0.0), 1e-6).unwrap(), None);
+    assert_eq!(body.point_lies_on_face(faces, Vec3::ZERO, 1e-6).unwrap(), None);
+}
