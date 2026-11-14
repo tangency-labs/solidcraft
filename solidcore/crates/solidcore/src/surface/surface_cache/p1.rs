@@ -3898,17 +3898,9 @@ mod tests {
         let cache = make_wr42_cache();
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 4.0);
 
-        // Kernel default has fix disabled.
-        let k_default = Kernel::default();
-        assert!(!k_default.fixes.surface_continuity_checks_last_v_knot);
-        let c_default = cache
-            .surface_continuity_with_kernel(&k_default, &domain)
-            .unwrap();
-        assert_eq!(c_default, ContinuityType::C1);
-
-        // Kernel with opt-in enabled.
-        let mut k_opt_in = Kernel::default();
-        k_opt_in.fixes.surface_continuity_checks_last_v_knot = true;
+        // the default kernel checks the last v knot too (SMLib skips it: C1)
+        let k_opt_in = Kernel::default();
+        assert!(k_opt_in.fixes.surface_continuity_checks_last_v_knot);
         let c_opt_in = cache
             .surface_continuity_with_kernel(&k_opt_in, &domain)
             .unwrap();

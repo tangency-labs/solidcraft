@@ -1099,23 +1099,26 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
                 && is_zero(interval.max() - parent_ivl.max()))
             && curve.is_closed(k, &parent_ivl, 0.0)?
         {
-            // get pCurve1's end continuity (status ignored; passed on with the opt-in
-            // fix, tangency-labs/smlib 8311f8e)
+            // get pCurve1's end continuity across its closure. One the curve cannot
+            // measure (a tangent field has no second derivative) is not shown: the seam
+            // stays discontinuous, so its ends are examined as ends, which loses no
+            // solution. That is the safe value, not a status ignored, so it holds with
+            // the statuses passed on too (tangency-labs/smlib 8311f8e passed it on and
+            // failed every solve on such a curve)
             let mut continuity = ContinuityType::Discontinuous;
-            if let Some(c) = ignored_or_pass_on(
-                evaluate_continuity(
-                    k,
-                    curve,
-                    parent_ivl.min(),
-                    false,
-                    curve,
-                    parent_ivl.max(),
-                    true,
-                    CONTINUITY_ANGLE,
-                ),
-                pass_on,
-            )? {
-                continuity = c.continuity;
+            match evaluate_continuity(
+                k,
+                curve,
+                parent_ivl.min(),
+                false,
+                curve,
+                parent_ivl.max(),
+                true,
+                CONTINUITY_ANGLE,
+            ) {
+                Ok(c) => continuity = c.continuity,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => {}
             }
             // set span endContinuities as appropriate
             if is_zero(bez_ivl.min() - parent_ivl.min()) {
@@ -2588,10 +2591,8 @@ mod tests {
             .unwrap();
             sols.get(0).unwrap().end
         };
-        let mut k = Kernel::default();
-        let end = run(&k);
-        assert_eq!((end.parameters[0], end.solution_value), (1.0, 0.001));
-        k.fixes.refine_cc_range_ends = true;
+        let k = Kernel::default();
+        assert!(k.fixes.refine_cc_range_ends);
         let end = run(&k);
         assert!((end.parameters[0] - 0.999).abs() < 1e-9, "{end:?}");
         assert!(end.solution_value < 1e-9, "{end:?}");

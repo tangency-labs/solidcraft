@@ -2978,21 +2978,12 @@ mod tests {
         Curve::from(BSplineCurve::new(3))
     }
 
-    fn kernels() -> (Kernel, Kernel) {
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        (Kernel::default(), on)
-    }
-
     #[test]
     fn issue_2009_unevaluable_curve_is_kept_by_cleanup() {
         // tangency-labs/smlib 8311f8e (SmCurve::CrvsCleanup): a curve that cannot be
         // evaluated is not shown tiny, it is kept; upstream compares unset points,
         // which coincide, and removes it. Discriminating.
-        let (off, on) = kernels();
-        let mut a = vec![unevaluable(), bseg([0.0; 3], [1.0, 0.0, 0.0])];
-        let r_off = crvs_cleanup(&off, &mut a, 1e-3).unwrap();
-        assert_eq!((r_off.removed, a.len()), (1, 1));
+        let on = Kernel::default();
         let mut b = vec![unevaluable(), bseg([0.0; 3], [1.0, 0.0, 0.0])];
         let r_on = crvs_cleanup(&on, &mut b, 1e-3).unwrap();
         assert_eq!((r_on.removed, b.len()), (0, 2));
@@ -3003,9 +2994,7 @@ mod tests {
         // tangency-labs/smlib 8311f8e (SmCurve::RemoveDuplicateCurves): points that
         // cannot be evaluated do not show a duplicate; upstream compares unset points
         // and drops the second curve. Discriminating.
-        let (off, on) = kernels();
-        let mut a = vec![Some(unevaluable()), Some(unevaluable())];
-        assert_eq!(remove_duplicate_curves(&off, &mut a).unwrap().len(), 1);
+        let on = Kernel::default();
         let mut b = vec![Some(unevaluable()), Some(unevaluable())];
         assert_eq!(remove_duplicate_curves(&on, &mut b).unwrap().len(), 2);
     }
@@ -3015,15 +3004,13 @@ mod tests {
         // tangency-labs/smlib 8311f8e (IsLinear, IsArc, IsLine): a curve that cannot
         // be evaluated is shown none of these. Coverage only: upstream's unset points
         // coincide, so it reaches the same answers.
-        let (off, on) = kernels();
+        let k = &Kernel::default();
         let c = unevaluable();
-        for k in [&off, &on] {
-            assert!(!c.is_linear(k, 1e-6, false).unwrap().linear);
-            assert!(is_arc_base(k, &c, |_, _| Ok(false), 10, 1e-6)
-                .unwrap()
-                .is_none());
-            assert!(curve_is_line_base(k, &c, 5, 1e-6).unwrap().is_none());
-        }
+        assert!(!c.is_linear(k, 1e-6, false).unwrap().linear);
+        assert!(is_arc_base(k, &c, |_, _| Ok(false), 10, 1e-6)
+            .unwrap()
+            .is_none());
+        assert!(curve_is_line_base(k, &c, 5, 1e-6).unwrap().is_none());
     }
 
     #[test]
@@ -3031,10 +3018,9 @@ mod tests {
         // tangency-labs/smlib 8311f8e (SmCurve::Length): the end-point distance of a
         // curve that does not tessellate passes on its evaluations. Discriminating:
         // upstream measures between unset points.
-        let (off, on) = kernels();
+        let on = Kernel::default();
         let c = unevaluable();
         let ivl = Extent1d::from_min_max(0.0, 1.0);
-        assert!(c.length(&off, &ivl, 1e-6).is_ok());
         assert!(c.length(&on, &ivl, 1e-6).is_err());
     }
 

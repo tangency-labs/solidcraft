@@ -4188,9 +4188,10 @@ mod tests {
     }
 
     #[test]
-    /// A "surface" that is a line segment (rows of equal control points): the
-    /// `Evaluate` failures of the overlap check are ignored, as upstream does.
-    fn degenerate_line_surface_coincidence_check_does_not_fail() {
+    /// A "surface" that is a line segment (rows of equal control points): the overlap
+    /// check passes on its `Evaluate` failure (no nonzero first derivatives), where SMLib
+    /// ignores it (WR-663, `query_statuses_pass_on`).
+    fn degenerate_line_surface_coincidence_check_passes_on_its_evaluation_failure() {
         use crate::nurbs::math::{CPoint, NOW};
         use crate::nurbs::srf_basic::Surface as NlSurface;
         let rows: [&[[f64; 3]]; 2] = [
@@ -4226,11 +4227,7 @@ mod tests {
         let s = Surface::from(BSplineSurface::from_nurb(nl, false));
         let k = Kernel::default();
         let r = s.base_coincidence_check(&k, &s.clone(), 1e-6, false);
-        // (the point solve behind the drop is unported: surface.surface_point_solve_p3)
-        assert!(
-            r.is_ok() || matches!(&r, Err(e) if e.is_unported()),
-            "{r:?}"
-        );
+        assert!(matches!(&r, Err(SolidError::Failed(_))), "{r:?}");
     }
 
     /// Opaque solution handles, as a B-rep's: they cannot reach their geometry.

@@ -2542,10 +2542,7 @@ mod tests {
         // evaluations. Upstream reads the default box, which is planar.
         // Discriminating.
         let c = Curve::from(BSplineCurve::new(3));
-        let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        assert!(c.is_planar(&off, EFF_ZERO).unwrap().is_planar);
+        let on = Kernel::default();
         assert!(!c.is_planar(&on, EFF_ZERO).unwrap().is_planar);
     }
 

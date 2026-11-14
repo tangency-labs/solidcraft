@@ -2035,13 +2035,10 @@ mod tests {
     #[test]
     fn issue_2009_unevaluable_tight_box_corners_are_passed_on() {
         // tangency-labs/smlib 21dcf69 (CalculateTightBoundingBox: SER on the corner
-        // evaluations of a 2x2 B-spline). Upstream boxes the unset points.
+        // evaluations of a 2x2 B-spline; SMLib boxes the unset points).
         let s = Surface::from(crate::nurbs::b_spline_surface::BSplineSurface::default());
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        assert!(s.calculate_tight_bounding_box(&off, &dom).is_ok());
+        let on = Kernel::default();
         assert!(s.calculate_tight_bounding_box(&on, &dom).is_err());
     }
 
@@ -2142,37 +2139,19 @@ mod tests {
         Ok((covered, this.step_uv_domain().u_interval().max()))
     }
 
-    /// With `fixes.cover_refuses_folded_continuation` (WR-407, #434; SolidCraft change,
-    /// tangency-labs/smlib 1b6f5fa) the cover across the fold fails and changes nothing.
+    /// With `fixes.cover_refuses_folded_continuation` (on by default; WR-407, #434;
+    /// SolidCraft change, tangency-labs/smlib 1b6f5fa) the cover across the fold fails and
+    /// changes nothing.
     #[test]
     fn issue_434_cover_refuses_a_continuation_that_folds() -> Result<()> {
-        let mut k = Kernel::default();
-        k.fixes.cover_refuses_folded_continuation = true;
+        let k = Kernel::default();
+        assert!(k.fixes.cover_refuses_folded_continuation);
         let (covered, u_max) = issue_434_cover_across_a_fold(&k)?;
         assert!(
             !covered.success,
             "the fold at u = 1.5 must not be covered: {covered:?}"
         );
         // Nothing was changed by the refused cover.
-        assert_eq!(u_max, 1.0);
-        Ok(())
-    }
-
-    /// Default (SMLib v1.0.1): the flat sheet is now planar to `SM_EFF_ZERO` (`IsPlanar`
-    /// tests the unpadded pseudo box, `SmSurface.cpp:22371` at `3fd5b95`), so
-    /// `GetMaxAnalyticDomain` expands it relatively by 100 instead of by half a span per
-    /// cubic direction. The search over that domain reaches the folded continuation and
-    /// the cover fails, changing nothing. At `c9c5979` the padded box was not planar; the
-    /// domain ended at the fold (u = 1.5) and the cover succeeded (WR-407).
-    #[test]
-    fn issue_434_default_refuses_the_fold_of_a_planar_sheet() -> Result<()> {
-        let k = Kernel::default();
-        assert!(!k.fixes.cover_refuses_folded_continuation);
-        let (covered, u_max) = issue_434_cover_across_a_fold(&k)?;
-        assert!(
-            !covered.success,
-            "the planar sheet's cover across the fold fails: {covered:?}"
-        );
         assert_eq!(u_max, 1.0);
         Ok(())
     }

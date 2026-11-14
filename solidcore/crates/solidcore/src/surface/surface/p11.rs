@@ -2436,15 +2436,10 @@ mod tests {
 
     #[test]
     fn wr99_flag_metadata_and_toggle() {
-        let mut k = Kernel::default();
-        assert!(!k.fixes.local_surface_intersect_guards_max_boundary_retry);
+        let k = Kernel::default();
+        assert!(k.fixes.local_surface_intersect_guards_max_boundary_retry);
         assert!(UpstreamFixes::NAMES.contains(&"local_surface_intersect_guards_max_boundary_retry"));
         assert!(UpstreamFixes::all().local_surface_intersect_guards_max_boundary_retry);
-
-        *k.fixes
-            .flag_mut("local_surface_intersect_guards_max_boundary_retry")
-            .unwrap() = true;
-        assert!(k.fixes.local_surface_intersect_guards_max_boundary_retry);
     }
 
     #[test]
@@ -2454,9 +2449,9 @@ mod tests {
         // solve repeatedly clamps u1 to 0 while v2 converges quadratically toward 0.5,
         // exiting OutOfBounds at sv ~= [0, 1, 0.35, 0.5]. Step 4's Surface 1 U-min
         // boundary solve finds the exact intersection S1(0, 1) == S2(0.5, 0.5) == (0,0,0),
-        // setting sv[1] = 1.0 (v1_max). Upstream's unguarded `|| sv[1] == v_max` then
-        // runs Surface 1's v = 1 iso-curve (which lies in S2's plane z = 0) and overwrites
-        // `found_solution` with `false`.
+        // setting sv[1] = 1.0 (v1_max). SMLib's unguarded `|| sv[1] == v_max` then runs
+        // Surface 1's v = 1 iso-curve (which lies in S2's plane z = 0) and overwrites
+        // `found_solution` with `false`; solidcore keeps the hit.
         let s1 = bspline_surface(
             1,
             1,
@@ -2490,25 +2485,7 @@ mod tests {
         let uv_guess = Point2::new(0.1, 0.5);
         let other_uv_guess = Point2::new(0.1, 0.9);
 
-        let k_default = Kernel::default();
-        let res_default = s1
-            .local_surface_intersect(
-                &k_default,
-                &dom,
-                &s2,
-                &dom,
-                1e-6,
-                uv_guess,
-                other_uv_guess,
-                &opts,
-            )
-            .unwrap();
-        assert!(res_default.is_none());
-
-        let mut k_fixed = Kernel::default();
-        k_fixed
-            .fixes
-            .local_surface_intersect_guards_max_boundary_retry = true;
+        let k_fixed = Kernel::default();
         let hit = s1
             .local_surface_intersect(
                 &k_fixed,
@@ -2539,11 +2516,7 @@ mod tests {
             previous_uv: None,
             do_boundary_testing: true,
         };
-        let k_default = Kernel::default();
-        let mut k_fixed = Kernel::default();
-        k_fixed
-            .fixes
-            .local_surface_intersect_guards_max_boundary_retry = true;
+        let k_fixed = Kernel::default();
 
         // Branch 3 (`SmSurface.cpp:27804`, Surface 2 U-max):
         // S1(u, v) = (v, u^2 - 0.25, 0), S2(u, v) = (v - 0.5, 0, u - 1).
@@ -2566,19 +2539,6 @@ mod tests {
                 &[Vec3::new(-0.5, 0.0, 0.0), Vec3::new(0.5, 0.0, 0.0)],
             ],
         );
-        assert!(s1_b
-            .local_surface_intersect(
-                &k_default,
-                &dom,
-                &s2_b,
-                &dom,
-                1e-6,
-                Point2::new(0.9, 0.1),
-                Point2::new(0.5, 0.1),
-                &opts,
-            )
-            .unwrap()
-            .is_none());
         let hit_b = s1_b
             .local_surface_intersect(
                 &k_fixed,
@@ -2624,19 +2584,6 @@ mod tests {
                 &[Vec3::new(1.0, 0.0, -1.0), Vec3::new(1.0, 0.0, 0.0)],
             ],
         );
-        assert!(s1_c
-            .local_surface_intersect(
-                &k_default,
-                &dom,
-                &s2_c,
-                &dom,
-                1e-6,
-                Point2::new(0.1, 0.9),
-                Point2::new(0.1, 0.5),
-                &opts,
-            )
-            .unwrap()
-            .is_none());
         let hit_c = s1_c
             .local_surface_intersect(
                 &k_fixed,
