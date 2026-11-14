@@ -107,7 +107,8 @@ use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
 use crate::curve::line::{BoundedLineOptions, Line};
-use crate::error::{ignore_status, Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -1069,7 +1070,10 @@ impl Plane {
             && operation != SolverOperation::Normalize
             && operation != SolverOperation::Intersect
         {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::surface_failed(
+                OP_DROP,
+                "the operation is neither minimize, normalize nor intersect",
+            ));
         }
 
         // init output
@@ -1223,11 +1227,10 @@ impl Plane {
     ) -> Result<SolutionArray<O>> {
         // `SER(SM_ERR_INVALID_INPUT)`: the exact status, which callers may ignore
         if line_vector.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::Upstream {
-                operation: OP_LINE,
-                code: SM_ERR_INVALID_INPUT,
-                entity: None,
-            });
+            return Err(SolidError::surface(
+                OP_LINE,
+                SurfaceFailure::InvalidValue("the line direction is the zero vector"),
+            ));
         }
 
         // init output
@@ -1371,7 +1374,10 @@ impl Plane {
             let det = pu.cross(pv).dot(lt);
             if det.abs() < EFF_ZERO {
                 // should never happen, we're in the non-parallel case here.
-                return Err(SolidError::sm_err(OP_LINE));
+                return Err(SolidError::surface_failed(
+                    OP_LINE,
+                    "the line is parallel to the plane",
+                ));
             }
 
             // Cramer's rule:
@@ -2536,6 +2542,7 @@ fn surface_drop_curve<O: SolutionObject>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR_INVALID_INPUT;
 
     fn unit_plane() -> Plane {
         Plane::new(

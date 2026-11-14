@@ -4,8 +4,10 @@ use serde_json::{Value, json};
 
 use super::{
     BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams, FeatureResult,
-    FilletParams, FilletResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, RevolveParams, ScaleParams, SphereParams, TorusParams,
+    FilletParams, FilletResult, MoveParams, MoveResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult,
+    RevolveParams, ScaleParams, SphereParams, TorusParams,
 };
+use super::{PatternCircularParams, PatternCircularResult};
 use super::{SurfaceSweepParams, SweepParams};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms, sketch_rectangle};
@@ -13,6 +15,24 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<MoveParams>(),
+        &[
+            "angle",
+            "axis",
+            "bodies",
+            "body_name",
+            "body_names",
+            "copy",
+            "matrix",
+            "name",
+            "occurrences",
+            "origin",
+            "participants",
+            "tolerance",
+            "translate",
+        ],
+    );
     assert_keys(
         input_schema_for::<BoxParams>(),
         &["body_name", "body_names", "center", "corner", "height", "length", "name", "operation", "participants", "targets", "touching", "width"],
@@ -33,6 +53,7 @@ fn schemas_and_the_key_check_agree() {
             "face",
             "face_body",
             "faces",
+            "fixed",
             "from",
             "name",
             "operation",
@@ -66,6 +87,7 @@ fn schemas_and_the_key_check_agree() {
             "exact_regions",
             "face",
             "face_body",
+            "fixed",
             "name",
             "operation",
             "participants",
@@ -381,6 +403,8 @@ fn sweep_schemas_and_the_key_check_agree() {
         "operation",
         "participants",
         "path",
+        "path_body",
+        "path_edges",
         "path_sketch",
         "profiles",
         "sketch",
@@ -390,10 +414,77 @@ fn sweep_schemas_and_the_key_check_agree() {
     solid.extend(shape);
     solid.sort_unstable();
     assert_keys(input_schema_for::<SweepParams>(), &solid);
-    let mut surface = vec!["body_name", "body_names", "curves", "exact_regions", "name", "participants", "path", "path_sketch", "profiles", "sketch"];
+    let mut surface = vec![
+        "body_name",
+        "body_names",
+        "curves",
+        "exact_regions",
+        "name",
+        "participants",
+        "path",
+        "path_body",
+        "path_edges",
+        "path_sketch",
+        "profiles",
+        "sketch",
+    ];
     surface.extend(shape);
     surface.sort_unstable();
     assert_keys(input_schema_for::<SurfaceSweepParams>(), &surface);
+}
+
+/// #2216: a sweep's path may be a chain of a body's edges (`path_body` and `path_edges`), so
+/// the contracts take those keys: a call with them is not refused, and a key that is not one
+/// of the command's still is.
+#[test]
+fn sweep_path_on_a_body_is_accepted_and_unknown_keys_are_not() {
+    let p = json!({"path_body": "Body1", "path_edges": [[0, 0, 0], [10, 0, 0]]});
+    let solid = crate::schema::TypedContract::<SweepParams>::new();
+    let surface = crate::schema::TypedContract::<SurfaceSweepParams>::new();
+    assert!(crate::schema::Contract::check(&solid, &p).is_empty(), "{p}");
+    assert!(crate::schema::Contract::check(&surface, &p).is_empty(), "{p}");
+    // A key that is not one of the command's is still refused.
+    let typo = json!({"path_body": "Body1", "path_edges": [[0, 0, 0]], "path_boddy": "Body1"});
+    for issues in [crate::schema::Contract::check(&solid, &typo), crate::schema::Contract::check(&surface, &typo)] {
+        assert_eq!(issues.len(), 1, "{typo}");
+        assert_eq!(issues[0].path, "path_boddy", "{typo}");
+        assert_eq!(issues[0].message, "unknown key `path_boddy`; did you mean `path_body`?", "{typo}");
+    }
+    // `path_body` is a body name, or `null` (which the handler reads as absent).
+    for p in [json!({"path_body": null}), json!({"path_body": "Body1", "path_edges": [[0, 0, 0]]})] {
+        assert!(crate::schema::Contract::check(&solid, &p).is_empty(), "{p}");
+        assert!(crate::schema::Contract::check(&surface, &p).is_empty(), "{p}");
+    }
+    for p in [json!({"path_body": 5}), json!({"path_body": true}), json!({"path_body": []})] {
+        for issues in [crate::schema::Contract::check(&solid, &p), crate::schema::Contract::check(&surface, &p)] {
+            assert_eq!(issues.len(), 1, "{p}");
+            assert_eq!(issues[0].path, "path_body", "{p}");
+            assert_eq!(issues[0].message, "`path_body` must be a body name", "{p}");
+        }
+    }
+    // `path_edges` is a list of 1 to 1000 points, as the handler's `path_edge_points` reads them.
+    for (p, message) in [
+        (json!({"path_edges": 5}), "`path_edges` must be a list of points"),
+        (json!({"path_edges": []}), "the path needs 1…1000 edges"),
+        (json!({"path_edges": [[0, 0, 0], [1]]}), "each `path_edges` entry must be a point [x,y,z]"),
+    ] {
+        for issues in [crate::schema::Contract::check(&solid, &p), crate::schema::Contract::check(&surface, &p)] {
+            assert_eq!(issues.len(), 1, "{p}");
+            assert_eq!(issues[0].path, "path_edges", "{p}");
+            assert_eq!(issues[0].message, message, "{p}");
+        }
+    }
+    // The schemas the commands publish list both keys.
+    for schema in [input_schema_for::<SweepParams>(), input_schema_for::<SurfaceSweepParams>()] {
+        let schema = schema.as_value();
+        assert_eq!(schema["properties"]["path_body"]["type"], json!(["string", "null"]), "{schema}");
+        // `path_edges` is published as a `$ref` to its own definition, as `path` is.
+        let name = schema["properties"]["path_edges"]["$ref"].as_str().unwrap_or_default().strip_prefix("#/$defs/").unwrap_or_default().to_string();
+        let edges = &schema["$defs"][name.clone()];
+        assert_eq!(edges["type"], "array", "{schema}");
+        assert_eq!(edges["minItems"], 1, "{schema}");
+        assert_eq!(edges["maxItems"], 1000, "{schema}");
+    }
 }
 
 /// The calls both sweeps refuse today, as `sweep` and `surface_sweep` read them, each run on
@@ -1031,4 +1122,178 @@ fn revolve_wrong_typed_keys_are_reported() {
         let mut strict = revolve_rig(ParamCheck::Strict);
         assert!(strict.execute("solid.revolve", &p).is_err(), "{p}");
     }
+}
+
+/// A box named `Post` away from the Z axis, and a component `Part` to place more of.
+fn ring_rig(level: ParamCheck) -> Session {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "name": "Post"})).unwrap_or_else(|e| panic!("{e}"));
+    s.execute("component.create", &json!({"name": "Part", "activate": false})).unwrap_or_else(|e| panic!("{e}"));
+    s.param_check = level;
+    s
+}
+
+fn ring() -> Value {
+    json!({"features": ["Post"], "axis": "Z", "count": 4})
+}
+
+fn ring_with(key: &str, value: Value) -> Value {
+    let mut p = ring();
+    p[key] = value;
+    p
+}
+
+#[test]
+fn circular_pattern_schema_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<PatternCircularParams>(),
+        &["alignment", "angle", "axis", "bodies", "body_name", "body_names", "components", "count", "features", "name", "participants", "reversed"],
+    );
+}
+
+/// Calls Circular Pattern refuses today get the same message in strict; an `angle` that isn't a
+/// number or text, which the handler ignores, is refused by the contract, and so is a misspelt key.
+#[test]
+fn circular_pattern_contract_keeps_the_handlers_errors() {
+    let cases = [
+        json!({"axis": "Z", "count": 4}),
+        ring_with("features", json!(5)),
+        ring_with("features", json!(["Nope"])),
+        ring_with("bodies", json!(["Nope"])),
+        ring_with("axis", json!("Nope")),
+        ring_with("axis", json!(5)),
+        ring_with("axis", json!({"origin": [0, 0], "dir": [0, 0, 1]})),
+        ring_with("axis", json!({"origin": [0, 0, 0]})),
+        ring_with("axis", json!({"origin": [0, 0, 0], "dir": [0, 0, 0]})),
+        ring_with("axis", json!({"dir": [0, 0, 0]})),
+        ring_with("count", json!(true)),
+        ring_with("count", json!("nope")),
+        ring_with("angle", json!("5 mm")),
+        ring_with("alignment", json!("up")),
+        ring_with("alignment", json!(null)),
+        ring_with("reversed", json!("yes")),
+        ring_with("reversed", json!(null)),
+    ];
+    for p in &cases {
+        let error = |level| ring_rig(level).execute("solid.pattern.circular", p).err().map(|e| e.to_string());
+        let off = error(ParamCheck::Off);
+        assert!(off.is_some(), "{p} should fail today");
+        assert_eq!(error(ParamCheck::Strict), off, "{p}");
+    }
+    assert!(!crate::schema::issues("solid.pattern.circular", &ring_with("angle", json!(true))).is_empty());
+    assert!(ring_rig(ParamCheck::Strict).execute("solid.pattern.circular", &ring_with("cuont", json!(4))).is_err());
+}
+
+/// Each form the handler takes passes strict, and every reply matches the output schema.
+#[test]
+fn circular_pattern_replies_match_the_output_schema() {
+    let schema = output_schema_for::<PatternCircularResult>();
+    let schema = schema.as_value();
+    let calls = [
+        ring(),
+        ring_with("axis", json!("z")),
+        ring_with("axis", json!({"dir": [0, 0, 1]})),
+        ring_with("axis", json!({"origin": ["0 mm", 0, 0], "dir": [0, 0, 1]})),
+        ring_with("count", json!("2 + 2")),
+        ring_with("angle", json!("180 deg")),
+        ring_with("alignment", json!("center")),
+        ring_with("reversed", json!(true)),
+        json!({"components": ["Part"], "axis": "Z", "count": 3}),
+    ];
+    for p in &calls {
+        let r = ring_rig(ParamCheck::Strict).execute("solid.pattern.circular", p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    }
+    let warned = json!({"components": ["Part"], "axis": "Z", "count": 3, "colour": "red"});
+    let r = ring_rig(ParamCheck::Warn).execute("solid.pattern.circular", &warned).unwrap_or_else(|e| panic!("{e}"));
+    assert!(r["param_warnings"].as_array().is_some_and(|w| !w.is_empty()) && conforms(schema, schema, &r), "{r}");
+}
+
+/// A 40 x 30 x 20 block from the origin, `Block`, with its top front edge rounded (radius 2) when
+/// `rounded` is true.
+fn press_pull_block(level: ParamCheck, rounded: bool) -> Session {
+    let mut s = Session { param_check: level, ..Session::default() };
+    s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0], "body_name": "Block"})).unwrap();
+    if rounded {
+        s.execute("solid.fillet", &json!({"edges": [[20, 0, 20]], "radius": 2})).unwrap();
+    }
+    s
+}
+
+/// Press Pull describes its keys, keeps today's errors, and each kind of reply it gives fits its
+/// output schema: a new feature from a flat face and from edges, and a fillet's size edited.
+#[test]
+fn press_pull_contract_and_replies() {
+    assert_keys(input_schema_for::<PressPullParams>(), &["body", "distance", "edges", "face"]);
+    assert_strict_keeps_todays_errors(&[
+        ("solid.press_pull", json!({"face": [0, 0, 0]})),
+        ("solid.press_pull", json!({"distance": 1})),
+        ("solid.press_pull", json!({"face": [0, 0, 0], "distance": true})),
+    ]);
+    let schema = output_schema_for::<PressPullResult>();
+    let schema = schema.as_value();
+    let root2 = 2f64.sqrt();
+    let replies = [
+        (false, json!({"face": [20, 15, 20], "distance": 5}), false),
+        (false, json!({"edges": [[20, 0, 20]], "distance": 1, "body": "Block"}), false),
+        // Half way round the 2 mm fillet on the top front edge.
+        (true, json!({"face": [20, 2.0 - root2, 18.0 + root2], "distance": 1}), true),
+    ];
+    for (rounded, p, edited) in replies {
+        let r = press_pull_block(ParamCheck::Strict, rounded).execute("solid.press_pull", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert_eq!(r.get("edited").is_some(), edited, "{r}");
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    }
+}
+
+/// With its contract, Press Pull refuses an unknown key in strict.
+#[test]
+fn press_pull_checks_its_keys() {
+    let p = json!({"face": [20, 15, 20], "distance": 5, "flp": true});
+    let error = press_pull_block(ParamCheck::Strict, false).execute("solid.press_pull", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`flp`"), "{error}");
+}
+
+/// The Move contract accepts an origin turn and a matrix, replies to its output schema, refuses an
+/// unknown key when strict and warns about it otherwise.
+#[test]
+fn move_contract_accepts_transforms_and_reports_unknown_keys() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Default::default() };
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "B"})).unwrap();
+    for p in [json!({"bodies": ["B"], "origin": [5, 5, 0], "angle": "90 deg"}), json!({"bodies": ["B"], "matrix": [[1,0,0,2], [0,1,0,0], [0,0,1,0]]})]
+    {
+        let output = s.execute("solid.move", &p).unwrap();
+        let schema = output_schema_for::<MoveResult>();
+        assert!(conforms(schema.as_value(), schema.as_value(), &output), "{output}");
+    }
+    let saved = s.doc.to_json();
+    assert!(s.execute("solid.move", &json!({"bodies": ["B"], "orgin": [5,5,0]})).is_err());
+    assert_eq!(s.doc.to_json(), saved);
+    s.param_check = ParamCheck::Warn;
+    let output = s.execute("solid.move", &json!({"bodies": ["B"], "orgin": [5,5,0]})).unwrap();
+    assert!(output["param_warnings"].as_array().is_some_and(|v| !v.is_empty()));
+    // The schema states the tolerance's bounds, as `occurrence.move`'s does.
+    let schema = input_schema_for::<MoveParams>().as_value().to_string();
+    assert!(schema.contains(r#""exclusiveMinimum":0"#) && schema.contains(r#""maximum":0.001"#), "{schema}");
+}
+
+/// Component copies, alone or with bodies split across frames, pass the strict contract and reply
+/// to the output schema.
+#[test]
+fn move_contract_accepts_component_copies_with_and_without_split_body_features() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Default::default() };
+    let made = s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Peg"})).unwrap();
+    s.execute("occurrence.move", &json!({"occurrence": made["occurrence"], "translate": [100, 0, 0]})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Top"})).unwrap();
+    let output = s.execute("solid.move", &json!({"occurrences": [[made["occurrence"]]], "copy": true, "translate": [20, 0, 0]})).unwrap();
+    assert_eq!(output["occurrences"].as_array().map(Vec::len), Some(1));
+    let schema = output_schema_for::<MoveResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &output), "{output}");
+    let output =
+        s.execute("solid.move", &json!({"bodies": ["Peg", "Top"], "occurrences": [[made["occurrence"]]], "copy": true, "angle": "90 deg"})).unwrap();
+    assert_eq!(output["features"].as_array().map(Vec::len), Some(2));
+    assert_eq!(output["occurrences"].as_array().map(Vec::len), Some(1));
+    assert!(conforms(schema.as_value(), schema.as_value(), &output), "{output}");
 }

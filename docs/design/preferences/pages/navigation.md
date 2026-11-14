@@ -48,6 +48,7 @@ its own page." Tag: In profile. Source today: Navigation page (`prefs/navigation
 | View navigator: Axes (signed) / Cube (compact) | Two picture cards (190 x 149) | `Prefs.navigator_style` (`NavigatorStyle`: Axes, Cube) | Axes | none | `navigator-axes`, `navigator-cube` | The cards have no ground rectangle. The Axes figure draws a disc with signed axis labels; the Cube figure draws the view cube with TOP, FRONT, RIGHT faces. Paint from the `Tokens` in the app's navigator (`cube_face`, `cube_border`, `cube_text`, `axis_x`..`axis_z`). |
 | Animate view changes | Checkbox | `Prefs.look_at_anim` | `true` | "Axis view, Look At, Home and Fit." | none | |
 | Animation speed | Slider, "1.00x" readout | `Prefs.look_at_speed` (0.25 to 4.0; slider 0.5 to 3.0) | `1.0` | none | none | Disabled while Animate view changes is off. |
+| Keep the highlight while the view moves | Checkbox | `Prefs.keep_hover_while_navigating` | `true` | "The face under the pointer keeps its highlight while the view moves under it (off: the highlight goes off while the view moves, as before, #2130)." | none | |
 
 ## Mismatches
 

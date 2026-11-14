@@ -1,5 +1,4 @@
-//! WR-707 (#2299): with `fixes.fillet_refuse_rounds_breaking_through` (and
-//! `fixes.fillet_gn_section_generator`), a convex round whose section between its rails
+//! WR-707 (#2299): with `fixes.fillet_refuse_rounds_breaking_through`, a convex round whose section between its rails
 //! would cross a face of the part inside that face is refused, naming the largest radius
 //! that stays inside, with that radius less the fit margin on the refusal
 //! ([`SolidError::FilletRefused`]).

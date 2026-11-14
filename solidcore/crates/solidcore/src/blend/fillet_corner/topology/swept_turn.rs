@@ -40,7 +40,7 @@ impl FilletCorner {
     ///
     /// `SM_ERR` for a corner that is not a Swept turn of two solver edge uses among
     /// three, or a round whose side rail is its common-face rail;
-    /// [`SolidError::null_pointer`] where the fork dereferences missing topology (`NER`);
+    /// `SM_ERR_NULL_POINTER` where the fork dereferences missing topology (`NER`);
     /// those of the solver and pseudo-topology operations.
     pub(crate) fn make_swept_topology(&mut self, env: Nx2TopologyEnv<'_>) -> Result<()> {
         fn lookup(corner: FilletCornerId, this: &FilletCorner) -> CornerLookup<'_> {
@@ -56,8 +56,11 @@ impl FilletCorner {
             corner,
             solvers,
         } = env;
-        let nul = || SolidError::null_pointer(OP_NX2);
-        let all = self.all_eus.clone().ok_or_else(nul)?;
+        let nul = |what: &'static str| SolidError::blend_missing(OP_NX2, what);
+        let all = self
+            .all_eus
+            .clone()
+            .ok_or_else(|| nul("the corner's outward edge uses"))?;
         let (eu_a, eu_b) = match self.solver_eus.as_deref() {
             Some(&[a, b])
                 if all.len() == 3
@@ -67,7 +70,12 @@ impl FilletCorner {
             {
                 (a, b)
             }
-            _ => return Err(SolidError::sm_err(OP_NX2)),
+            _ => {
+                return Err(SolidError::blend_failed(
+                    OP_NX2,
+                    "the corner is not a swept turn of two rounds and a third edge",
+                ))
+            }
         };
         let mut ring = None;
         for &eu in &all {
@@ -75,11 +83,12 @@ impl FilletCorner {
                 ring = Some(eu);
             }
         }
-        let ring = ring.ok_or_else(nul)?;
-        let side_eu = find_side_edgeuse(target, eu_a, ring)?.ok_or_else(nul)?;
+        let ring = ring.ok_or_else(|| nul("the corner's unblended edge use"))?;
+        let side_eu =
+            find_side_edgeuse(target, eu_a, ring)?.ok_or_else(|| nul("the side edge use"))?;
         self.swept = Some(SweptTurn::new(side_eu));
-        let common =
-            face_by_two_edgeuses(target, Some(eu_a), Some(eu_b), Some(side_eu))?.ok_or_else(nul)?;
+        let common = face_by_two_edgeuses(target, Some(eu_a), Some(eu_b), Some(side_eu))?
+            .ok_or_else(|| nul("the rounds' common face"))?;
 
         let side_eus = [side_eu, radial(target, side_eu)?];
         let mut geoms = Vec::with_capacity(2);
@@ -90,7 +99,10 @@ impl FilletCorner {
             let s = fs.find_index_of_rail_x_side_edgeuse(target, side)?;
             let f = fs.find_index_of_rail_on_face(target, Some(common))?;
             if s == f {
-                return Err(SolidError::sm_err(OP_NX2));
+                return Err(SolidError::blend_failed(
+                    OP_NX2,
+                    "a round's rails on the side and on the common face are the same rail",
+                ));
             }
             side_rails.push(s);
             face_rails.push(f);
@@ -150,11 +162,12 @@ impl FilletCorner {
 
         // the corner's edges in its face's loop order: S-A, A-B, B-S
         let (&[a, b], &[geom_a, geom_b]) = (plates.as_slice(), geoms.as_slice()) else {
-            return Err(nul());
+            return Err(nul("the corner's plate vertices or the rounds' geometries"));
         };
         for (from, to, own) in [(s, a, Some(geom_a)), (a, b, None), (b, s, Some(geom_b))] {
             let e = pseudo.make_fillet_edge(Some(from), Some(to), Some(corner))?;
-            let primary = eu1::primary_edgeuse(pseudo.brep(), e)?.ok_or_else(nul)?;
+            let primary = eu1::primary_edgeuse(pseudo.brep(), e)?
+                .ok_or_else(|| nul("the corner edge's primary edge use"))?;
             pseudo.set_edgeuse_fillet_geom(primary, own)?;
             let edge = pseudo.fillet_edge_mut(e)?;
             if own.is_some() {

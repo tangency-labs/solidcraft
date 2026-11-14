@@ -258,7 +258,7 @@ pub fn copy_as_bspline(curve: &Curve) -> Result<Curve> {
     }
     bspline_curve_of(curve)
         .map(|b| Curve::from(b.clone()))
-        .ok_or(SolidError::null_pointer(OP_COPY))
+        .ok_or_else(|| SolidError::surface_missing(OP_COPY, "the curve's B-spline"))
 }
 
 /// `SM_CAST_PTR(SmBSplineCurve, curve)`: the B-spline (base) of the B-spline kinds.
@@ -311,8 +311,9 @@ fn create_iso_parametric_curve(
         | SurfaceKind::SrfInVolume(_)
             if !matches!(r.curve.kind(), CurveKind::BSpline(_)) =>
         {
-            Err(SolidError::sm_err(
+            Err(SolidError::surface_failed(
                 "surface::surface_cache::p1::create_iso_parametric_curve",
+                "the iso curve is not a B-spline",
             ))
         }
         _ => Ok(r.curve),
@@ -600,7 +601,10 @@ pub fn compute_plane_from_3_points(
 
     // Check for safety (should be OK):
     if p123.dot(p231) < 0.0 || p231.dot(p312) < 0.0 || p312.dot(p123) < 0.0 {
-        return Err(SolidError::sm_err(OP_PLANE3));
+        return Err(SolidError::surface_failed(
+            OP_PLANE3,
+            "the three points do not turn one way",
+        ));
     }
 
     // If made it here, there exists a plane:
@@ -630,7 +634,10 @@ pub fn check_bounding_plane_separating_halfspace(
     let control_points = canonical.control_points;
 
     if num_control_points != control_points.len() {
-        return Err(SolidError::sm_err(OP_HALFSPACE));
+        return Err(SolidError::surface_failed(
+            OP_HALFSPACE,
+            "the control net's size does not match its point count",
+        ));
     }
 
     let mut sign = 0i32;
@@ -767,7 +774,8 @@ impl PatchBoundaryBoundingPlanes {
     ) -> Result<Curve> {
         let (spt, param) = self.iso_of(index);
         // SM_CAST_PTR(SmBSplineSurface, ..) and NER: the B-spline kinds
-        bspline_of(surface).ok_or(SolidError::null_pointer(OP_BOUNDARY))?;
+        bspline_of(surface)
+            .ok_or_else(|| SolidError::surface_missing(OP_BOUNDARY, "the B-spline kind surface"))?;
         // make the curve through the virtual (the SmPlane and SmSurfOfRevolution
         // overrides; 3D Tol SM_BIG_DOUBLE: not used by any of them)
         create_iso_parametric_curve(k, surface, spt, param, 0.0, None)
@@ -803,23 +811,25 @@ impl PatchBoundaryBoundingPlanes {
         let tolerance = 0.0001;
 
         // local
-        bspline_of(surface).ok_or(SolidError::null_pointer(OP_PLANES))?;
+        bspline_of(surface)
+            .ok_or_else(|| SolidError::surface_missing(OP_PLANES, "the B-spline kind surface"))?;
         // (the control point count and the canonical form read the NURB, made through
         // the virtual GetOrCreateGwNurbPointer when missing: a plane's, a cone's,
         // sphere's, torus's or surface of revolution's or extrusion's)
-        let bs = match surface.kind_with_nurb(k)? {
-            SurfaceKind::Plane(p) => p.base_for_query(),
-            SurfaceKind::SurfOfExtrusion(_) => match surface.extrusion_base_with_nurb(k) {
-                Ok(base) => base,
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => std::borrow::Cow::Borrowed(
-                    bspline_of(surface).ok_or(SolidError::null_pointer(OP_PLANES))?,
-                ),
-            },
-            made => std::borrow::Cow::Borrowed(
-                bspline_of_kind(made).ok_or(SolidError::null_pointer(OP_PLANES))?,
-            ),
-        };
+        let bs =
+            match surface.kind_with_nurb(k)? {
+                SurfaceKind::Plane(p) => p.base_for_query(),
+                SurfaceKind::SurfOfExtrusion(_) => match surface.extrusion_base_with_nurb(k) {
+                    Ok(base) => base,
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                    Err(_) => std::borrow::Cow::Borrowed(bspline_of(surface).ok_or_else(|| {
+                        SolidError::surface_missing(OP_PLANES, "the B-spline kind surface")
+                    })?),
+                },
+                made => std::borrow::Cow::Borrowed(bspline_of_kind(made).ok_or_else(|| {
+                    SolidError::surface_missing(OP_PLANES, "the surface's B-spline")
+                })?),
+            };
 
         // for every boundary
         for ii in 0..4 {
@@ -1200,7 +1210,10 @@ impl<O> FaceContainmentClassifier<O> for BaseClassifier {
         _uv_point: Point2,
         _src_zone_tol_3d: f64,
     ) -> Result<(i32, Option<O>)> {
-        Err(SolidError::sm_err(OP_CLASSIFY))
+        Err(SolidError::surface_failed(
+            OP_CLASSIFY,
+            "only a trimmed surface cache classifies points",
+        ))
     }
 }
 
@@ -1477,12 +1490,21 @@ impl AltSrfCache {
                 continue;
             }
             let Some(cached) = cached else {
-                return (out, Err(SolidError::null_pointer(OP_COPY)));
+                return (
+                    out,
+                    Err(SolidError::surface_missing(OP_COPY, "the cached curves")),
+                );
             };
             let mut list = Vec::with_capacity(cached.len());
             for c in cached {
                 let Some(bsc) = bspline_curve_of(c) else {
-                    return (out, Err(SolidError::null_pointer(OP_COPY)));
+                    return (
+                        out,
+                        Err(SolidError::surface_missing(
+                            OP_COPY,
+                            "the cached curve's B-spline",
+                        )),
+                    );
                 };
                 list.push(Curve::from(bsc.copy()));
             }
@@ -2208,7 +2230,8 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             return Ok(true);
         }
         if self.trimmed_dispatch {
-            self.face()?.ok_or(SolidError::null_pointer(OP_CLASSIFY))?;
+            self.face()?
+                .ok_or_else(|| SolidError::surface_missing(OP_CLASSIFY, "the face"))?;
             return Err(SolidError::unported(
                 "prepared face classifier for bound trim",
                 "query.face_p2",
@@ -2232,7 +2255,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         if !self.point_test_enabled || self.face_was_modified {
             return Ok((true, None));
         }
-        let face = self.face()?.ok_or(SolidError::null_pointer(OP_CLASSIFY))?;
+        let face = self
+            .face()?
+            .ok_or_else(|| SolidError::surface_missing(OP_CLASSIFY, "the face"))?;
         let service = queries.ok_or_else(|| {
             SolidError::unported("prepared face classifier for bound trim", "query.face_p2")
         })?;
@@ -2256,7 +2281,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         if !self.trimmed_dispatch {
             return self.point_classify(uv_point, src_zone_tol_3d);
         }
-        let face = self.face()?.ok_or(SolidError::null_pointer(OP_CLASSIFY))?;
+        let face = self
+            .face()?
+            .ok_or_else(|| SolidError::surface_missing(OP_CLASSIFY, "the face"))?;
         let (class, object) = queries.face_point_classify(k, face, uv_point, src_zone_tol_3d)?;
         Ok((class, if class == 100 { None } else { object }))
     }
@@ -2271,7 +2298,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         _uv_point: Point2,
         _src_zone_tol_3d: f64,
     ) -> Result<(i32, Option<O>)> {
-        Err(SolidError::sm_err(OP_CLASSIFY))
+        Err(SolidError::surface_failed(
+            OP_CLASSIFY,
+            "only a trimmed surface cache classifies points",
+        ))
     }
 
     /// `ImplantEdgeuse`: only the trimmed surface caches implant edge uses.
@@ -2280,7 +2310,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// Always `SM_ERR`.
     pub fn implant_edgeuse(&mut self, _edgeuse: O, _do_subdivision: bool) -> Result<()> {
-        Err(SolidError::sm_err(OP_IMPLANT_EU))
+        Err(SolidError::surface_failed(
+            OP_IMPLANT_EU,
+            "only a trimmed surface cache implants edge uses",
+        ))
     }
 
     /// `ImplantPolyEdge`: only the trimmed surface caches implant poly edges.
@@ -2289,7 +2322,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// Always `SM_ERR`.
     pub fn implant_poly_edge(&mut self, _poly_edge: O, _node: NodeId) -> Result<()> {
-        Err(SolidError::sm_err(OP_IMPLANT_PE))
+        Err(SolidError::surface_failed(
+            OP_IMPLANT_PE,
+            "only a trimmed surface cache implants poly edges",
+        ))
     }
 
     /// The copies of the curves of the first alternate cache matching the parameters
@@ -3907,5 +3943,45 @@ mod tests {
             cache.surface_continuity_opt_in(&sub_late, true).unwrap(),
             ContinuityType::C0
         );
+    }
+
+    /// The surface cache's failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
+            (
+                OP_CLASSIFY,
+                SurfaceFailure::Failed("only a trimmed surface cache classifies points"),
+                crate::error::SM_ERR,
+            ),
+            (
+                OP_PLANES,
+                SurfaceFailure::Missing("the B-spline kind surface"),
+                crate::error::SM_ERR_NULL_POINTER,
+            ),
+            (
+                OP_IMPLANT_EU,
+                SurfaceFailure::Failed("only a trimmed surface cache implants edge uses"),
+                crate::error::SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
+        }
     }
 }

@@ -54,8 +54,9 @@
 //! Deviations:
 //! - Out-params become return values; `SmTArray` outputs are `Vec`s; pointers are
 //!   typed ids and `None` is `NULL`. Where upstream dereferences a null pointer the
-//!   port returns [`SolidError::InvalidInput`]; `SM_ERR` returns are
-//!   [`SolidError::Upstream`] with that code.
+//!   port returns [`SolidError::InvalidInput`]; upstream's `SM_ERR`, `NER` and
+//!   `SM_ERR_INVALID_INPUT` returns are typed topology failures
+//!   ([`crate::error::topology::TopologyFailure`]) that keep that status.
 //! - The region list of the B-rep (`SmOwningTopology::m_pList`) is its recorded link
 //!   order (taken whenever the head moves), then the regions appended since in arena
 //!   order (`PostInsert`), rotated to [`Brep::region_list_head`]; `ResetInfiniteRegion`
@@ -172,9 +173,6 @@ pub const TYPE_STRING: &str = "SmBrep_TYPE";
 /// `SmBrep::GetClassString`.
 pub const CLASS_STRING: &str = "SmBrep";
 
-// `SM_ERR_INVALID_INPUT`.
-use crate::error::SM_ERR_INVALID_INPUT;
-
 /// Deepest loop nesting `sm_MarkLoopsToDelete` follows before failing (upstream
 /// recurses without bound).
 pub const MAX_LOOP_NESTING: u64 = 256;
@@ -187,18 +185,6 @@ pub const fn is_kind_of(t: i64) -> bool {
 
 fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
-}
-
-fn status(code: i32) -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code,
-        entity: None,
-    }
-}
-
-fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
 }
 
 // ---- SmBrep members (SmBrep.h inline functions) -----------------------------------------
@@ -882,12 +868,18 @@ pub fn reset_infinite_region(
 ) -> Result<()> {
     // No work: Null input
     let Some(new_infinite_region) = new_infinite_region else {
-        return Err(status(SM_ERR_INVALID_INPUT));
+        return Err(SolidError::topology_invalid_value(
+            OP,
+            "no new infinite region was given",
+        ));
     };
 
     // If given region is not one our our regions, fail.
     if !regions(b, None)?.contains(&new_infinite_region) {
-        return Err(status(SM_ERR_INVALID_INPUT));
+        return Err(SolidError::topology_invalid_value(
+            OP,
+            "the new infinite region is not a region of the B-rep",
+        ));
     }
 
     // Reset the infinite region, and make sure that the first in list is infinite region.
@@ -941,10 +933,16 @@ pub fn reset_infinite_region(
 pub fn set_region_is_void_flags_for_nested_solids(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     // check state - look for a properly labeled infinite region
     let Some(infinite) = b.infinite_region() else {
-        return Err(sm_err());
+        return Err(SolidError::topology_failed(
+            OP,
+            "the B-rep has no infinite region",
+        ));
     };
     if regions(b, None)?.first() != Some(&infinite) {
-        return Err(sm_err());
+        return Err(SolidError::topology_failed(
+            OP,
+            "the infinite region is not the head of the region list",
+        ));
     }
 
     // mark the infinite region as void
@@ -1258,20 +1256,25 @@ pub fn rm_and_del_old_loop_vertices(b: &mut Brep, vu: VertexuseId) -> Result<()>
         Ok(vertexuse::is_loop_vertexuse(b, other)? && vertexuse_loop(b, other)? == this_loop)
     };
 
-    let other = vertexuse_neighbour(b, vu, true)?.ok_or_else(|| SolidError::null_pointer(OP))?; // NER
+    let other = vertexuse_neighbour(b, vu, true)?
+        .ok_or_else(|| SolidError::topology_missing(OP, "the vertex use's next neighbour"))?; // NER
 
     // When OtherVU is a LoopVertexuse attached to the same Loop as input VU
     let del = if partner(b, other)? {
         other
     } else {
         // try the VU in the other direction of the Vertex's doubly linked Vertexuse list
-        let other =
-            vertexuse_neighbour(b, vu, false)?.ok_or_else(|| SolidError::null_pointer(OP))?; // NER
+        let other = vertexuse_neighbour(b, vu, false)?.ok_or_else(|| {
+            SolidError::topology_missing(OP, "the vertex use's previous neighbour")
+        })?; // NER
         if partner(b, other)? {
             other
         } else {
             // Unable to find the partner of this loop vertexuse
-            return Err(sm_err());
+            return Err(SolidError::topology_failed(
+                OP,
+                "the loop vertex use has no partner on the same loop",
+            ));
         }
     };
 
@@ -1346,13 +1349,22 @@ fn mark_loops_to_delete_bounded(
             .ok_or_else(|| null("sm_MarkLoopsToDelete: loop without edges"))?
             .ok_or_else(|| null("sm_MarkLoopsToDelete: edge use without edge"))?;
         if edge::is_wire(b, e)? {
-            return Err(sm_err());
+            return Err(SolidError::topology_failed(
+                OP,
+                "a loop to delete has a wire edge",
+            ));
         }
         if edge::is_lamina(b, e)? {
-            return Err(sm_err());
+            return Err(SolidError::topology_failed(
+                OP,
+                "a loop to delete has a lamina edge",
+            ));
         }
         if !edge::is_manifold(b, e)? {
-            return Err(sm_err());
+            return Err(SolidError::topology_failed(
+                OP,
+                "a loop to delete has a non-manifold edge",
+            ));
         }
 
         let eu = edge::primary_edgeuse(b, e)?
@@ -1504,11 +1516,17 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
 
     let dist_face_vrtx_start = face_3d_start.distance(vrtx_3d_start);
     if dist_face_vrtx_start > face_tol + vrtx_tol {
-        return Err(sm_err());
+        return Err(SolidError::topology_failed(
+            OP,
+            "the UV trim curve's start is off the start vertex",
+        ));
     }
     let dist_face_edge_start = face_3d_start.distance(edge_3d_start);
     if dist_face_edge_start > face_tol + edge_tol {
-        return Err(sm_err());
+        return Err(SolidError::topology_failed(
+            OP,
+            "the UV trim curve's start is off the edge's start",
+        ));
     }
 
     // Now the other end:
@@ -1532,11 +1550,17 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
 
     let dist_face_vrtx_end = face_3d_end.distance(vrtx_3d_end);
     if dist_face_vrtx_end > face_tol + vrtx_tol {
-        return Err(sm_err());
+        return Err(SolidError::topology_failed(
+            OP,
+            "the UV trim curve's end is off the end vertex",
+        ));
     }
     let dist_face_edge_end = face_3d_end.distance(edge_3d_end);
     if dist_face_edge_end > face_tol + edge_tol {
-        return Err(sm_err());
+        return Err(SolidError::topology_failed(
+            OP,
+            "the UV trim curve's end is off the edge's end",
+        ));
     }
     Ok(())
 }
@@ -1746,6 +1770,46 @@ pub fn find_side_of_curve(
     projection_direction: Vec3,
     tol: f64,
 ) -> Result<bool> {
+    match side_of_curve(k, curve, point, projection_direction, tol)? {
+        SideOfCurve::Right(right) => Ok(right),
+        SideOfCurve::Undecided(reason) => Err(SolidError::topology_failed(OP, reason)),
+        SideOfCurve::NoProjection => Err(SolidError::topology_failed(OP, NOT_ONCE)),
+    }
+}
+
+/// Why [`find_side_of_curve`] fails when the projection has no single solution.
+const NOT_ONCE: &str = "the point does not project onto the curve exactly once";
+
+/// What [`side_of_curve`] found for a point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SideOfCurve {
+    /// The point is off the curve: whether it lies on the right-hand side.
+    Right(bool),
+    /// The side is left open, as upstream's `UNSURE`: the point is on the curve (within
+    /// the tolerance), the tangent is along the projection direction, the projected
+    /// vector and the tangent are parallel, or the projection has no single solution
+    /// and the curve may be nearest at an end (a point beyond the end of the curve).
+    /// It carries the reason [`find_side_of_curve`] fails with.
+    Undecided(&'static str),
+    /// The projection gave no solution although the curve comes nearer to the point
+    /// inside its interval than at its ends: a nearest point exists there and was not
+    /// found, so nothing is known about the point (#13679).
+    NoProjection,
+}
+
+/// [`find_side_of_curve`] with its `SM_ERR` cases told apart: a caller that reads an
+/// undecided side as "on the curve" must not read a failed projection that way.
+///
+/// # Errors
+///
+/// Those of the solve and evaluation.
+pub(crate) fn side_of_curve(
+    k: &Kernel,
+    curve: &Curve,
+    point: Point3,
+    projection_direction: Vec3,
+    tol: f64,
+) -> Result<SideOfCurve> {
     // Project Point onto Curve along the Projection direction
     let vectors = [projection_direction];
     let solutions = curve.global_point_solve::<NoObject>(
@@ -1766,9 +1830,20 @@ pub fn find_side_of_curve(
 
     // Determine if point is on left or right side of the curve relative to the projection plane.
     if solutions.len() != 1 {
-        return Err(sm_err());
+        // No solution where the curve is nearest at an end is the projection's
+        // ordinary answer for a point beyond the end. Where the curve comes nearer
+        // inside, a nearest point exists that the projection did not find.
+        let missed = solutions.is_empty()
+            && nearer_inside_than_at_ends(k, curve, point, projection_direction, tol)?;
+        return Ok(if missed {
+            SideOfCurve::NoProjection
+        } else {
+            SideOfCurve::Undecided(NOT_ONCE)
+        });
     }
-    let sol = solutions.get(0).ok_or_else(sm_err)?;
+    let sol = solutions.get(0).ok_or_else(|| {
+        SolidError::topology_failed(OP, "the curve has no projection of the point")
+    })?;
 
     let pv = curve.evaluate(k, sol.start.param(0)?, 1, true, true)?;
     let (p0, p1) = match pv.as_slice() {
@@ -1780,9 +1855,33 @@ pub fn find_side_of_curve(
     // Project vectors into projection plane
     vec = projection_direction.cross(vec).cross(projection_direction);
 
+    // (not upstream, #13658) The nearest point of an open curve to a point beyond its
+    // end is that end, where the line to the point is not square to the curve. The
+    // projection returned no solution there before it answered at an interval's ends,
+    // and a point beyond the end of the curve is on neither of its sides, so it stays a
+    // failure. A closed curve has no such end: its seam is a point like any other.
+    let interval = curve.natural_interval();
+    let parameter = sol.start.param(0)?;
+    let at_end = [interval.min(), interval.max()]
+        .iter()
+        .any(|end| (parameter - end).abs() <= EFF_ZERO * (1.0 + end.abs()));
+    if at_end && !curve.is_closed(k, &interval, 0.0)? {
+        let along = projection_direction.cross(p1).cross(projection_direction);
+        let scale = vec.length() * along.length();
+        if vec.length() >= EFF_ZERO
+            && along.length() >= EFF_ZERO
+            && (vec.dot(along) / scale).abs() > EFF_ZERO_RAD
+        {
+            return Err(SolidError::topology_failed(
+                OP,
+                "the point does not project onto the curve exactly once",
+            ));
+        }
+    }
+
     // point is on the curve
     if vec.length() < tol {
-        return Err(sm_err());
+        return Ok(SideOfCurve::Undecided("the point is on the curve"));
     }
 
     vec = vec.unitize_or_z();
@@ -1790,18 +1889,51 @@ pub fn find_side_of_curve(
 
     // projection direction is the same as the curve tangent or curve tangent is zero
     if tan.length() < tol {
-        return Err(sm_err());
+        return Ok(SideOfCurve::Undecided(
+            "the curve tangent is zero or along the projection direction",
+        ));
     }
     tan = tan.unitize_or_z();
 
     // projected vec and curve tangent are parallel
     let side = tan.cross(vec);
     if side.length() < EFF_ZERO {
-        return Err(sm_err());
+        return Ok(SideOfCurve::Undecided(
+            "the point lies along the curve tangent",
+        ));
     }
 
     // set output
-    Ok(side.dot(projection_direction) <= 0.0)
+    Ok(SideOfCurve::Right(side.dot(projection_direction) <= 0.0))
+}
+
+/// Whether the curve, seen along `direction`, comes nearer to `point` at one of its
+/// knots, or of the 64 equal steps of its interval, than at both of its ends, by more
+/// than `tol`. `true` proves the nearest point is not an end; `false` proves nothing.
+fn nearer_inside_than_at_ends(
+    k: &Kernel,
+    curve: &Curve,
+    point: Point3,
+    direction: Vec3,
+    tol: f64,
+) -> Result<bool> {
+    const STEPS: u32 = 64;
+    let interval = curve.natural_interval();
+    let direction = direction.unitize_or_z();
+    let distance = |t: f64| -> Result<f64> {
+        Ok(direction
+            .cross(point - curve.evaluate_point(k, t)?)
+            .length())
+    };
+    let at_ends = distance(interval.evaluate(0.0))?.min(distance(interval.evaluate(1.0))?);
+    let (knots, _) = curve.knots(k, Some(&interval))?;
+    let steps = (1..STEPS).map(|i| interval.evaluate(f64::from(i) / f64::from(STEPS)));
+    for t in knots.into_iter().chain(steps) {
+        if distance(t)? + tol < at_ends {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 // ---- face sectors (sm_FindSectorOfFace) -------------------------------------------------
@@ -1886,7 +2018,9 @@ pub fn find_sector_of_face(
                 match crate::query::face::p2::face_surface_cache(k, b, face) {
                     Ok(lease) => Some(lease),
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => return Err(SolidError::null_pointer(OP)),
+                    Err(_) => {
+                        return Err(SolidError::topology_missing(OP, "the face's surface cache"))
+                    }
                 }
             };
             // Turn off point testing so GlobalPointSolve() will keep all point
@@ -1909,7 +2043,10 @@ pub fn find_sector_of_face(
             }
             let solutions = solved?;
             let Some(first) = solutions.get(0) else {
-                return Err(sm_err());
+                return Err(SolidError::topology_failed(
+                    OP,
+                    "the test point does not project onto the face's surface",
+                ));
             };
             let uv_found = uv_of(&first.start)?;
             let (surf_pnt, norm) = eval(uv_found)?;
@@ -1922,7 +2059,10 @@ pub fn find_sector_of_face(
 
     // Can't classify a point on the surface - that point won't be in a region sector
     if distance < EFF_ZERO {
-        return Err(sm_err());
+        return Err(SolidError::topology_failed(
+            OP,
+            "the test point is on the face's surface",
+        ));
     }
 
     // classify testPoint based on angle between FacePointNormal and TestVec
@@ -2434,7 +2574,7 @@ fn first_nonseparating_seam(
         let mut start_degree = 0usize;
         let mut end_degree = 0usize;
         for e in loopuse::edges(b, seam_lu, None)? {
-            let e = e.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let e = e.ok_or_else(|| SolidError::topology_missing(OP, "the seam loop's edge"))?;
             let record = b.edge(e)?;
             let Some(segment) = record.curve.as_ref().and_then(|c| match c.kind() {
                 CurveKind::CrvOnSurf(c) => Some(c.as_ref()),
@@ -2505,7 +2645,7 @@ fn first_nonseparating_seam(
         let lu = b
             .loop_(l)?
             .loopuse
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::topology_missing(OP, "the loop's loop use"))?;
         if loopuse::is_vertex_loopuse(b, lu)? {
             continue;
         }
@@ -2618,9 +2758,10 @@ pub fn make_vertex_split_uv_trim_curve(
     // its point evaluation is the UV curve point lifted by the face surface.
     let edge_to_split = eu1::edge(b, eu_orig)?
         .ok_or_else(|| null("sm_MakeVertexSplitUVTrimCurve: edge use without edge"))?;
-    let face = eu1::face(b, eu_orig)?.ok_or_else(|| SolidError::null_pointer(OP))?; // NER
+    let face = eu1::face(b, eu_orig)?
+        .ok_or_else(|| SolidError::topology_missing(OP, "the edge use's face"))?; // NER
     let surface = face2::surface(b, face)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?
         .clone_for_evaluation()?; // NER
     let lift = |t: f64| -> Result<Point3> {
         let p = new_uv_curve.evaluate_point(k, t)?;
@@ -2928,7 +3069,10 @@ pub fn create_corner_blend(
 ) -> Result<Vec<BSplineSurface>> {
     // Need at least two edges to blend
     if edgeuses.len() < 2 {
-        return Err(sm_err());
+        return Err(SolidError::topology_failed(
+            OP,
+            "a corner blend needs at least two edge uses",
+        ));
     }
     // locals
     let mut work_eus: Vec<EdgeuseId> = edgeuses.to_vec();
@@ -2943,7 +3087,9 @@ pub fn create_corner_blend(
 
     // set sWorkEUS = list of all input edgeuses running in the SM_OT_SAME direction
     for i in 0..work_eus.len() {
-        let eu = work_eus.get(i).copied().ok_or_else(sm_err)?;
+        let eu = work_eus.get(i).copied().ok_or_else(|| {
+            SolidError::topology_failed(OP, "the edge use list is shorter than its length")
+        })?;
         let eu = if eu1::orientation(b, eu)? == OrientType::Opposite {
             eu1::mate(b, eu)?
                 .ok_or_else(|| null("CreateCornerBlend: opposite edge use without mate"))?
@@ -2968,7 +3114,9 @@ pub fn create_corner_blend(
         .first()
         .ok_or_else(|| null("CreateCornerBlend: tangent flags shorter than edge uses"))?];
     ordered_eus.push(work_eus.remove(0));
-    let first_eu = *ordered_eus.first().ok_or_else(sm_err)?;
+    let first_eu = *ordered_eus
+        .first()
+        .ok_or_else(|| SolidError::topology_failed(OP, "the ordered edge use list is empty"))?;
     eu_orients.push(eu1::orientation(b, first_eu)?);
     work_tan.remove(0);
 
@@ -2980,11 +3128,15 @@ pub fn create_corner_blend(
 
         // for every sWorkEUS edgeuse - look for one sharing a common endPoint with the last
         for i in 0..work_eus.len() {
-            let eu = *work_eus.get(i).ok_or_else(sm_err)?;
+            let eu = *work_eus.get(i).ok_or_else(|| {
+                SolidError::topology_failed(OP, "the edge use list is shorter than its length")
+            })?;
             let tan = *work_tan
                 .get(i)
                 .ok_or_else(|| null("CreateCornerBlend: tangent flags shorter than edge uses"))?;
-            let last_eu = *ordered_eus.last().ok_or_else(sm_err)?;
+            let last_eu = *ordered_eus.last().ok_or_else(|| {
+                SolidError::topology_failed(OP, "the ordered edge use list is empty")
+            })?;
             let param = if eu_orients.last() == Some(&OrientType::Same) {
                 1.0
             } else {
@@ -3031,7 +3183,10 @@ pub fn create_corner_blend(
 
         // exit error: A gap in the input edgeuses
         if !found && tol_scale > 100.0 {
-            return Err(sm_err());
+            return Err(SolidError::topology_failed(
+                OP,
+                "the corner blend's edge uses leave a gap",
+            ));
         }
 
         // arrive here to try again - increase check tolerance and try searching the edgeuses again.
@@ -3077,10 +3232,14 @@ pub fn create_corner_blend(
             })?;
             let uv_copy = uv_curve.copy(k)?;
             let Some(uv_bspline) = bspline_part(&uv_copy) else {
-                return Err(sm_err());
+                return Err(SolidError::topology_failed(
+                    OP,
+                    "the UV trim curve is not a B-spline",
+                ));
             };
             ordered_uv.push(Some(uv_bspline));
-            let face = eu1::face(b, eu)?.ok_or_else(|| SolidError::null_pointer(OP))?; // NER
+            let face = eu1::face(b, eu)?
+                .ok_or_else(|| SolidError::topology_missing(OP, "the edge use's face"))?; // NER
 
             // pF->GetSurface(): the face's own surface (kind and owner), read below once
             // the edge uses are done editing the B-rep
@@ -3100,7 +3259,9 @@ pub fn create_corner_blend(
         }
 
         // grab the second curve - pass 1: use curve end, pass 2: use curve start
-        let curve_3d = ordered_3d.get(1).ok_or_else(sm_err)?;
+        let curve_3d = ordered_3d.get(1).ok_or_else(|| {
+            SolidError::topology_failed(OP, "the corner blend has no second curve")
+        })?;
         let mut param = if eu_orients.get(1) == Some(&OrientType::Same) {
             1.0
         } else {
@@ -3194,8 +3355,8 @@ pub fn create_edge_edge_blend(
     curves_dir_flag: u64,
     opt_ds_def: Option<&mut DerivSurfDefinition<'_>>,
 ) -> Result<Surface> {
-    let eu_1 = eu_1.ok_or_else(|| SolidError::null_pointer(OP))?; // NER
-    let eu_2 = eu_2.ok_or_else(|| SolidError::null_pointer(OP))?; // NER
+    let eu_1 = eu_1.ok_or_else(|| SolidError::topology_missing(OP, "the first edge use"))?; // NER
+    let eu_2 = eu_2.ok_or_else(|| SolidError::topology_missing(OP, "the second edge use"))?; // NER
 
     // eu_2's B-rep: `b_2`, or `b_1` when both edge uses are in one B-rep (each edge use's
     // reads touch only its own B-rep, as upstream's)
@@ -3219,7 +3380,10 @@ pub fn create_edge_edge_blend(
 
     // locals
     let (Some(edge1), Some(edge2)) = (eu1::edge(b_1, eu_1)?, eu1::edge(b2!(), eu_2)?) else {
-        return Err(status(SM_ERR_INVALID_INPUT)); // Could not fetch Edge from Edgeuse
+        return Err(SolidError::topology_invalid_value(
+            OP,
+            "an edge use has no edge",
+        )); // Could not fetch Edge from Edgeuse
     };
 
     // edge locals
@@ -3229,10 +3393,16 @@ pub fn create_edge_edge_blend(
     let rail2 = edge::create_trimmed_nurbs_curve(k, b2!(), edge2)?;
     let tolerance = max2(edge::tolerance(b_1, edge1)?, edge::tolerance(b2!(), edge2)?);
     let (Some(rail1), Some(rail2)) = (rail1, rail2) else {
-        return Err(status(SM_ERR_INVALID_INPUT)); // Could not build BSplineCurves from Edges
+        return Err(SolidError::topology_invalid_value(
+            OP,
+            "an edge has no trimmed B-spline curve",
+        )); // Could not build BSplineCurves from Edges
     };
     let (Some(mut rail1), Some(mut rail2)) = (bspline_part(&rail1), bspline_part(&rail2)) else {
-        return Err(status(SM_ERR_INVALID_INPUT));
+        return Err(SolidError::topology_invalid_value(
+            OP,
+            "an edge's trimmed curve is not a B-spline",
+        ));
     };
 
     // to preserve previous behavior - use backward compatible style for ruled surfaces
@@ -3313,7 +3483,10 @@ pub fn create_edge_edge_blend(
         face2::surface(b2!(), face2_)?.is_some(),
     );
     if !(surfaces_present.0 && surfaces_present.1) {
-        return Err(status(SM_ERR_INVALID_INPUT)); // Could not fetch Surface from Edgeuse
+        return Err(SolidError::topology_invalid_value(
+            OP,
+            "an edge use's face has no surface",
+        )); // Could not fetch Surface from Edgeuse
     }
 
     // set the bIntoFace values for curve/Surface pairs
@@ -3417,8 +3590,10 @@ pub fn create_edge_edge_blend(
     let curve1 = Curve::from(rail1);
     let curve2 = Curve::from(rail2);
     // (the face surfaces fetched above; re-borrowed past the edge use evaluations)
-    let surface1 = face2::surface(b_1, face1)?.ok_or_else(|| SolidError::null_pointer(OP))?;
-    let surface2 = face2::surface(b2!(), face2_)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let surface1 = face2::surface(b_1, face1)?
+        .ok_or_else(|| SolidError::topology_missing(OP, "the first face's surface"))?;
+    let surface2 = face2::surface(b2!(), face2_)?
+        .ok_or_else(|| SolidError::topology_missing(OP, "the second face's surface"))?;
     surface1.create_blend_surface(
         k,
         &curve1,
@@ -3698,6 +3873,7 @@ pub fn heal_brep(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR_INVALID_INPUT;
     use crate::geom::a_object;
     use crate::topology::Region;
 
@@ -3963,13 +4139,8 @@ mod tests {
                 fail_status: SM_ERR_INVALID_INPUT,
                 ..DropCurveFail::default()
             }));
-            assert!(matches!(
-                redistribute_fixture(&mut b, edge),
-                Err(SolidError::Upstream {
-                    code: SM_ERR_INVALID_INPUT,
-                    ..
-                })
-            ));
+            assert!(redistribute_fixture(&mut b, edge)
+                .is_err_and(|e| e.upstream_status() == Some(SM_ERR_INVALID_INPUT)));
             assert_eq!(seam_sides(&b, uses), [0.0, 1.0]);
         }
     }
@@ -4142,6 +4313,66 @@ mod tests {
         assert_eq!((rs.clone(), vs.clone()), (vec![a, c, None], vec![2, 2, 3]));
         assert_eq!(find_highest_vote(&rs, &vs).unwrap(), None);
         assert!(find_highest_vote(&rs, &[1]).is_err());
+    }
+
+    /// #13658: a point beside a line has a side; a point beyond either end of it has
+    /// none, although the line's nearest point to it is now found (that end).
+    #[test]
+    fn a_point_beyond_the_end_of_a_curve_has_no_side() {
+        use crate::nurbs::b_spline_curve::p1::BSplineCurve;
+        let k = Kernel::default();
+        let line = Curve::from(
+            BSplineCurve::create_line_segment(3, Vec3::new(-1.0, 0.0, 0.0), Vec3::X).unwrap(),
+        );
+        let side =
+            |x: f64, y: f64| find_side_of_curve(&k, &line, Vec3::new(x, y, 0.0), Vec3::Z, 1e-6);
+        assert_eq!(side(0.25, 0.5), Ok(false));
+        assert_eq!(side(0.25, -0.5), Ok(true));
+        let not_once = SolidError::topology_failed(
+            OP,
+            "the point does not project onto the curve exactly once",
+        );
+        for (x, y) in [(2.0, 0.5), (2.0, -0.5), (-3.0, 1.0), (1.5, 0.0)] {
+            assert_eq!(side(x, y), Err(not_once.clone()), "({x}, {y})");
+        }
+    }
+
+    /// The side of a point whose nearest point is a corner of a closed curve does not
+    /// depend on where the curve's seam is. Before #13658 the projection found the
+    /// corner when it was inside the curve and nothing when it was the seam.
+    #[test]
+    fn the_side_of_a_closed_curve_does_not_depend_on_its_seam() {
+        use crate::nurbs::b_spline_curve::p1::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as Net;
+        use crate::nurbs::math::{CPoint, NOW};
+        let k = Kernel::default();
+        let square = |points: [(f64, f64); 5]| {
+            let controls = points
+                .iter()
+                .map(|(x, y)| CPoint::new(*x, *y, 0.0, NOW))
+                .collect();
+            let knots = vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0];
+            Curve::from(BSplineCurve::from_nurb(
+                Net::new(controls, 1, knots).unwrap(),
+                3,
+                false,
+            ))
+        };
+        // the unit square, counter-clockwise: its seam at the corner (0, 0), then at (1, 0)
+        let seam_at_corner = square([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)]);
+        let corner_inside = square([(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0), (1.0, 0.0)]);
+        // outside a counter-clockwise square is the right of the walk; (-1, -1) and
+        // (-1, -0.5) are nearest the corner (0, 0), (0.5, -1) the bottom edge
+        for (x, y) in [(-1.0, -1.0), (-1.0, -0.5), (0.5, -1.0), (2.0, 2.0)] {
+            let point = Vec3::new(x, y, 0.0);
+            for curve in [&seam_at_corner, &corner_inside] {
+                assert_eq!(
+                    find_side_of_curve(&k, curve, point, Vec3::Z, 1e-6),
+                    Ok(true),
+                    "({x}, {y})"
+                );
+            }
+        }
     }
 
     #[test]

@@ -21,7 +21,7 @@ use solidcore::curve::ellipse::Ellipse;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_trim_ops::create_planar_faces;
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::{Brep, Kernel};
 
 /// A planar face bounded by the circle r 2 about (x, y, 0) (`smlib_planar_faces` of one
 /// full arc: `SmApiCreatePlanarFaces` of an `SmCircle`).
@@ -86,7 +86,7 @@ fn fork_67b8a1e_four_far_disks_join_with_the_fix() {
 fn fork_67b8a1e_four_far_disks_join_fails_by_default() {
     let (_, all) = joins(false);
     assert!(
-        matches!(all, Err(SolidError::Upstream { code: 1006, .. })),
+        matches!(&all, Err(e) if solidcore::error::upstream_status(e) == Some(1006)),
         "{:?}",
         all.map(|b| b.face_list().len())
     );

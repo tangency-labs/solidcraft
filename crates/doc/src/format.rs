@@ -243,6 +243,31 @@ use serde_json::Value;
 
 use crate::{DocError, Document, Result};
 
+pub use solidcraft_format::{Alias, Newer};
+
+/// A kind of file whose format is versioned here: designs, and drawings (#3890). Each family has
+/// its own format tag, its own numbers and its own folder of change files (`build.rs` lists them);
+/// reading a file's format, telling a file a newer build saved and the upgrade are the same code
+/// for every family, the shared `solidcraft_format`.
+pub type Family<'a> = solidcraft_format::Family<'a, DocError>;
+
+/// A family's upgrade path: the steps written out by hand (designs' up to [`HAND_WRITTEN`]), the
+/// folded formats after them (each a list of changes) and the pending changes, which make the
+/// next format.
+pub(crate) type Formats<'a> = solidcraft_format::Formats<'a, DocError>;
+
+/// One change to a family's file format: a file in its `v<N>/` or `pending/` folder.
+pub(crate) type Part = solidcraft_format::Part<DocError>;
+
+impl From<solidcraft_format::FormatError> for DocError {
+    fn from(e: solidcraft_format::FormatError) -> Self {
+        match e {
+            solidcraft_format::FormatError::Invalid(why) => DocError::Invalid(why),
+            solidcraft_format::FormatError::Cancelled => DocError::Invalid("cancelled".into()),
+        }
+    }
+}
+
 /// The format this build writes: the last folded one, or the next while changes are pending.
 pub const FORMAT: u32 = FORMATS.current();
 
@@ -250,221 +275,59 @@ pub const FORMAT: u32 = FORMATS.current();
 /// of [`Part`]s (`src/format/`, listed by `build.rs`).
 const HAND_WRITTEN: u32 = 22;
 
-/// One change to a family's file format: a file in its `v<N>/` or `pending/` folder.
-pub(crate) struct Part {
-    /// The file's name, which a file written while the change was pending lists.
-    pub name: &'static str,
-    /// How a file from before the change is rewritten as it opens, if it is.
-    pub step: Option<JsonStep>,
-}
-
 include!(concat!(env!("OUT_DIR"), "/format_parts.rs"));
 
 /// Every format this build knows and how to upgrade a design through them.
 const FORMATS: Formats<'static> = Formats { hand: &JSON_STEPS, folded: FOLDED, pending: PENDING };
 
-/// A kind of file whose format is versioned here: designs, and drawings (#3890). Each family has
-/// its own format tag, its own numbers and its own folder of change files (`build.rs` lists them);
-/// reading a file's format, telling a file a newer build saved and the upgrade are the same code
-/// for every family.
-pub struct Family<'a> {
-    /// What a file of the family is called in messages.
-    noun: &'static str,
-    /// The tag before the number in a file's `format`.
-    prefix: &'static str,
-    /// The tag files saved before the rename carry: read, never written (docs/compatibility.md).
-    legacy_prefix: Option<&'static str>,
-    /// The format of a file that names none: designs saved before format strings are format 1; a
-    /// drawing always names its own.
-    untagged: Option<u32>,
-    formats: Formats<'a>,
-}
+/// Another spelling a design of format 29 may carry: the personal format-29 renderer's name for
+/// the engineering material cards. Its card schema is unchanged; recognising the alias must never
+/// grant support to another reader, so it counts only while this build has the change.
+const DESIGN_ALIASES: [Alias; 1] = [Alias { format: 29, name: "physical-material-cards", known_as: "material-engineering-cards" }];
 
 /// Designs (`solidcraft/N`): the upgrade steps written out up to format 22, then the change files
 /// in `src/format/`.
-pub const DESIGN: Family<'static> =
-    Family { noun: "design", prefix: "solidcraft/", legacy_prefix: Some(LEGACY_FORMAT_PREFIX), untagged: Some(1), formats: FORMATS };
+pub const DESIGN: Family<'static> = Family {
+    app: "SolidCraft",
+    noun: "design",
+    prefix: "solidcraft/",
+    legacy_prefix: Some(LEGACY_FORMAT_PREFIX),
+    untagged: Some(1),
+    aliases: &DESIGN_ALIASES,
+    formats: FORMATS,
+};
 
 /// Drawings (`solidcraft-drawing/N`, #3890): format 1 is the first drawing record, and every later
 /// change is a file in `src/drawing/format/`.
 pub const DRAWING: Family<'static> = Family {
+    app: "SolidCraft",
     noun: "drawing",
     prefix: "solidcraft-drawing/",
     legacy_prefix: None,
     untagged: None,
+    aliases: &[],
     formats: Formats { hand: &[], folded: DRAWING_FOLDED, pending: DRAWING_PENDING },
 };
 
-impl Family<'_> {
-    /// The format this build writes: the last folded one, or the next while changes are pending.
-    pub const fn current(&self) -> u32 {
-        self.formats.current()
-    }
-
-    /// The names of the pending changes this build writes into a file (`format_pending`).
-    pub fn pending_names(&self) -> Vec<String> {
-        self.formats.pending.iter().map(|p| p.name.to_string()).collect()
-    }
-
-    /// The format tag of format `n`.
-    pub fn format_string(&self, n: u32) -> String {
-        format!("{}{n}", self.prefix)
-    }
-
-    /// The version in one of this family's format tags; `None` for any other tag, another
-    /// family's included.
-    pub fn version_of(&self, s: &str) -> Option<u32> {
-        s.strip_prefix(self.prefix).or_else(|| self.legacy_prefix.and_then(|p| s.strip_prefix(p)))?.parse().ok()
-    }
-
-    /// Read a file's format and take its `format_pending` out of its JSON, before anything else
-    /// in it is read: a file that isn't this family's is refused here. One a newer build saved is
-    /// not: [`Family::newer`] says so.
-    pub fn take_version(&self, v: &mut Value) -> Result<(u32, Option<Vec<String>>)> {
-        let noun = self.noun;
-        let not_ours = |what: String| DocError::Invalid(format!("not a SolidCraft {noun} ({what})"));
-        let Some(obj) = v.as_object() else { return Err(not_ours("expected a JSON object".into())) };
-        let version = match obj.get("format") {
-            None => self.untagged.ok_or_else(|| not_ours("no format".into()))?,
-            Some(Value::String(f)) => self.version_of(f).ok_or_else(|| not_ours(format!("format `{f}`")))?,
-            Some(_) => return Err(not_ours("format is not a string".into())),
-        };
-        let applied = take_names(v, "format_pending", noun)?;
-        if version == 0 {
-            return Err(not_ours("format 0".into()));
-        }
-        Ok((version, applied))
-    }
-
-    /// What says a file of format `version` with the changes `applied` came from a newer build:
-    /// a number past this build's, or a change this build doesn't have anywhere in its history.
-    /// `None` for a file this build fully knows.
-    pub fn newer(&self, version: u32, applied: Option<&[String]>) -> Option<Newer> {
-        self.formats.newer(version, applied)
-    }
-
-    /// Bring a file of format `version` up to this build's; `applied` is its `format_pending`
-    /// (both from [`Family::take_version`]).
-    pub fn upgrade(&self, v: &mut Value, version: u32, applied: Option<&[String]>) -> Result<()> {
-        self.formats.upgrade(self.noun, v, version, applied)
-    }
-
-    /// Every number a file of the family holds is in range ([`check_numbers`]), but for its
-    /// top-level `kept` field: other tools' data (a design's `metadata`, a drawing's `properties`),
-    /// kept as it is and never read as a number (#1015); parsing already bounds its nesting.
-    pub(crate) fn check_numbers(&self, v: &Value, kept: &str) -> Result<()> {
-        match v {
-            Value::Object(m) => m.iter().filter(|(k, _)| k.as_str() != kept).try_for_each(|(_, x)| check_numbers(x, self.noun, 1)),
-            v => check_numbers(v, self.noun, 0),
-        }
-    }
+/// Every number a file of a family holds is in range ([`check_numbers`]), but for its top-level
+/// `kept` field: other tools' data (a design's `metadata`, a drawing's `properties`), kept as it is
+/// and never read as a number (#1015); parsing already bounds its nesting.
+pub(crate) trait CheckNumbers {
+    fn check_numbers(&self, v: &Value, kept: &str) -> Result<()>;
 }
 
-/// How a file shows a newer build saved it ([`Family::newer`]).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Newer {
-    /// The number the file says.
-    pub format: u32,
-    /// The number this build reads up to.
-    pub reads_up_to: u32,
-    /// The changes the file names that this build doesn't have.
-    pub unknown_changes: Vec<String>,
+impl CheckNumbers for Family<'_> {
+    fn check_numbers(&self, v: &Value, kept: &str) -> Result<()> {
+        match v {
+            Value::Object(m) => m.iter().filter(|(k, _)| k.as_str() != kept).try_for_each(|(_, x)| check_numbers(x, self.noun(), 1)),
+            v => check_numbers(v, self.noun(), 0),
+        }
+    }
 }
 
 /// The names of the pending changes this build writes into a design (`format_pending`).
 pub fn pending_names() -> Vec<String> {
     DESIGN.pending_names()
-}
-
-/// A family's upgrade path: the steps written out by hand (designs' up to [`HAND_WRITTEN`]), the
-/// folded formats after them (each a list of changes) and the pending changes, which make the
-/// next format.
-struct Formats<'a> {
-    hand: &'a [JsonStep],
-    folded: &'a [(u32, &'a [Part])],
-    pending: &'a [Part],
-}
-
-impl Formats<'_> {
-    const fn current(&self) -> u32 {
-        self.hand.len() as u32 + 1 + self.folded.len() as u32 + if self.pending.is_empty() { 0 } else { 1 }
-    }
-
-    /// The changes format `version` is made of, if it is made of changes.
-    fn parts(&self, version: u32) -> Option<&[Part]> {
-        let after = version.checked_sub(self.hand.len() as u32 + 2)? as usize;
-        match self.folded.get(after) {
-            Some((_, parts)) => Some(parts),
-            None if after == self.folded.len() && !self.pending.is_empty() => Some(self.pending),
-            None => None,
-        }
-    }
-
-    /// A concept is implemented only when this reader registers its descriptor.
-    fn knows_part_name(&self, name: &str) -> bool {
-        self.folded.iter().flat_map(|(_, parts)| *parts).chain(self.pending).any(|part| part.name == name)
-    }
-
-    /// Read-only spelling from the personal format-29 renderer. Its card schema is
-    /// unchanged; recognizing the alias must never grant support to another reader.
-    fn canonical_applied_name<'name>(&self, version: u32, name: &'name str) -> &'name str {
-        if version == 29 && name == "physical-material-cards" && self.knows_part_name("material-engineering-cards") {
-            "material-engineering-cards"
-        } else {
-            name
-        }
-    }
-
-    /// [`Family::newer`]. Changes are recognized across the entire history: a branch's pending
-    /// change may have landed at a later number. A list beside a format that isn't made of changes
-    /// means nothing (a tool or a test set an older number on a newer file).
-    fn newer(&self, version: u32, applied: Option<&[String]>) -> Option<Newer> {
-        let current = self.current();
-        let listed = applied.filter(|_| version > current || self.parts(version).is_some()).unwrap_or_default();
-        let unknown_changes: Vec<String> =
-            listed.iter().filter(|name| !self.knows_part_name(self.canonical_applied_name(version, name))).cloned().collect();
-        (version > current || !unknown_changes.is_empty()).then_some(Newer { format: version, reads_up_to: current, unknown_changes })
-    }
-
-    /// Bring a `noun` of format `version` up to [`Formats::current`]. `applied` is the file's
-    /// `format_pending`: the changes of its format it already has, when it was written while they
-    /// were pending; the others' steps run first, and already-applied changes never run again at
-    /// their later number. A file past this build's number has no steps to run.
-    fn upgrade(&self, noun: &str, v: &mut Value, version: u32, applied: Option<&[String]>) -> Result<()> {
-        if version == 0 {
-            return Err(DocError::Invalid(format!("not a SolidCraft {noun} (format 0)")));
-        }
-        // A list beside a format that isn't made of changes is ignored, like any field an upgrade
-        // drops.
-        let applied = applied.filter(|_| self.parts(version).is_some());
-        let already_applied =
-            |part: &Part| applied.is_some_and(|names| names.iter().any(|name| self.canonical_applied_name(version, name) == part.name));
-        if applied.is_some() {
-            for part in self.parts(version).unwrap_or_default().iter().filter(|part| !already_applied(part)) {
-                part.step.map_or(Ok(()), |step| step(v))?;
-            }
-        }
-        for from in version..self.current() {
-            match self.hand.get(from as usize - 1) {
-                Some(step) => step(v)?,
-                None => {
-                    for part in self.parts(from + 1).unwrap_or_default().iter().filter(|part| !already_applied(part)) {
-                        part.step.map_or(Ok(()), |step| step(v))?;
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Take a short list of names out of a file's JSON: its `format_pending` (the pending changes it
-/// has).
-fn take_names(v: &mut Value, key: &str, noun: &str) -> Result<Option<Vec<String>>> {
-    let Some(list) = v.as_object_mut().and_then(|o| o.remove(key)) else { return Ok(None) };
-    let invalid = || DocError::Invalid(format!("damaged {noun}: `{key}` is not a short list of names"));
-    let list = list.as_array().filter(|l| l.len() <= 1000).ok_or_else(invalid)?;
-    list.iter().map(|n| n.as_str().filter(|n| n.len() <= 128).map(str::to_string).ok_or_else(invalid)).collect::<Result<_>>().map(Some)
 }
 
 pub fn format_string(n: u32) -> String {
@@ -482,7 +345,7 @@ pub fn version_of(s: &str) -> Option<u32> {
 
 /// JSON-level upgrades up to [`HAND_WRITTEN`]: entry `i` turns format `i + 1` into `i + 2`.
 /// Never add to it: a new format is a file in `src/format/pending/`.
-type JsonStep = fn(&mut Value) -> Result<()>;
+type JsonStep = solidcraft_format::Step<DocError>;
 const JSON_STEPS: [JsonStep; HAND_WRITTEN as usize - 1] = [
     |_| Ok(()),
     v2_to_v3,
@@ -819,8 +682,9 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     if !all_unique(d.features.iter().map(|f| f.id))
         || !all_unique(d.components.iter().map(|c| c.id))
         || !all_unique(d.occurrences.iter().map(|o| o.id))
+        || !all_unique(d.configs.rows.iter().map(|r| r.id))
     {
-        return Err(DocError::Invalid("damaged design: duplicate feature, component or occurrence id".into()));
+        return Err(DocError::Invalid("damaged design: duplicate feature, component, occurrence or configuration row id".into()));
     }
     let component_ids: std::collections::BTreeSet<_> = d.components.iter().map(|component| component.id).chain(std::iter::once(0)).collect();
     for feature in &d.features {
@@ -830,6 +694,7 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
             sketch.validate_patterns().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_periodic_splines().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_spline_knots().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_spline_handles().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
         }
         if let crate::FeatureKind::BodyTransfer { from, to, .. } = &feature.kind
             && [from, to].into_iter().any(|id| !component_ids.contains(id))
@@ -864,8 +729,9 @@ fn all_unique(ids: impl Iterator<Item = u64>) -> bool {
     ids.into_iter().all(|id| seen.insert(id))
 }
 
-/// The caps interactive editing enforces, applied to the raw JSON so an oversized sketch is
-/// never deserialised. Every sketch in the timeline is solved when the design opens, and the
+/// The sketch ceilings ([`solidcraft_sketch::CEILING_POINTS`] and the others, the highest the
+/// limit interactive editing enforces may be raised to), applied to the raw JSON so an oversized
+/// sketch is never deserialised. Every sketch in the timeline is solved when the design opens, and the
 /// solver sizes its dense matrices by the sketch, so a file with hundreds of thousands of
 /// points would ask the allocator for terabytes and abort before anything could report it.
 fn validate_sketch_sizes(value: &Value) -> Result<()> {
@@ -877,12 +743,30 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
         }
         let Some(sketch) = feature.get("sketch") else { continue };
         let len = |key: &str| sketch.get(key).and_then(Value::as_array).map_or(0, Vec::len);
-        if len("points") > solidcraft_sketch::MAX_POINTS
-            || len("curves") > solidcraft_sketch::MAX_CURVES
-            || len("constraints") > solidcraft_sketch::MAX_CONSTRAINTS
-            || len("patterns") > solidcraft_sketch::MAX_CONSTRAINTS
+        // The ceilings, not the limits in force: a design made where the limit was raised opens (#10874).
+        if len("points") > solidcraft_sketch::CEILING_POINTS
+            || len("curves") > solidcraft_sketch::CEILING_CURVES
+            || len("constraints") > solidcraft_sketch::CEILING_CONSTRAINTS
+            || len("patterns") > solidcraft_sketch::CEILING_CONSTRAINTS
         {
             return Err(invalid());
+        }
+        if let Some(curves) = sketch.get("curves").and_then(Value::as_array) {
+            let mut point_references = 0usize;
+            for curve in curves {
+                for key in ["pts", "handles"] {
+                    if let Some(points) = curve.get(key) {
+                        let Some(points) = points.as_array() else { return Err(invalid()) };
+                        point_references = point_references.saturating_add(points.len());
+                        if points.len() > solidcraft_sketch::MAX_SPLINE_POINTS || point_references > 1_000_000 {
+                            return Err(invalid());
+                        }
+                    }
+                }
+                if curve.get("spline_handle_of").and_then(Value::as_str).is_some_and(|id| id.len() > 512) {
+                    return Err(invalid());
+                }
+            }
         }
         if let Some(patterns) = sketch.get("patterns").and_then(Value::as_array) {
             let mut points = 0usize;
@@ -891,7 +775,7 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
             for pattern in patterns {
                 let Some(entities) = pattern.get("entities").and_then(Value::as_array) else { return Err(invalid()) };
                 let Some(instances) = pattern.get("instances").and_then(Value::as_array) else { return Err(invalid()) };
-                if entities.len() > solidcraft_sketch::MAX_CURVES + solidcraft_sketch::MAX_POINTS || instances.len() >= 500 {
+                if entities.len() > solidcraft_sketch::CEILING_CURVES + solidcraft_sketch::CEILING_POINTS || instances.len() >= 500 {
                     return Err(invalid());
                 }
                 for instance in instances {
@@ -899,9 +783,9 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
                     points = points.saturating_add(size("points"));
                     curves = curves.saturating_add(size("curves"));
                     constraints = constraints.saturating_add(size("constraints"));
-                    if points > solidcraft_sketch::MAX_POINTS
-                        || curves > solidcraft_sketch::MAX_CURVES
-                        || constraints > solidcraft_sketch::MAX_CONSTRAINTS
+                    if points > solidcraft_sketch::CEILING_POINTS
+                        || curves > solidcraft_sketch::CEILING_CURVES
+                        || constraints > solidcraft_sketch::CEILING_CONSTRAINTS
                     {
                         return Err(invalid());
                     }
@@ -1359,30 +1243,30 @@ mod tests {
     #[test]
     fn pending_changes_apply_in_order_after_older_formats() {
         let pending = [traced("a-first"), traced("b-second")];
-        let formats = Formats { hand: &JSON_STEPS, folded: FOLDED, pending: &pending };
+        let formats = Family { formats: Formats { hand: &JSON_STEPS, folded: FOLDED, pending: &pending }, ..DESIGN };
         let next = HAND_WRITTEN + FOLDED.len() as u32 + 1;
         assert_eq!(formats.current(), next);
         for version in [1, HAND_WRITTEN, next - 1] {
             let mut v = serde_json::json!({"features": [], "assembly": {"joints": [{"flip": false}]}});
-            formats.upgrade("design", &mut v, version, None).unwrap();
+            formats.upgrade(&mut v, version, None).unwrap();
             assert_eq!(trace_of(&v), ["a", "b"], "from format {version}");
             // The hand-written steps ran too: format 3's joints were flipped on the way up.
             assert_eq!(v["assembly"]["joints"][0]["flip"], Value::Bool(version < 4), "from format {version}");
         }
         // A design of the pending number written before `b-second` existed gets just that step.
         let mut v = serde_json::json!({});
-        formats.upgrade("design", &mut v, next, Some(&["a-first".to_string()])).unwrap();
+        formats.upgrade(&mut v, next, Some(&["a-first".to_string()])).unwrap();
         assert_eq!(trace_of(&v), ["b"]);
         // One that has both, or that this build wrote, needs nothing.
         let mut v = serde_json::json!({});
-        formats.upgrade("design", &mut v, next, Some(&["a-first".into(), "b-second".into()])).unwrap();
+        formats.upgrade(&mut v, next, Some(&["a-first".into(), "b-second".into()])).unwrap();
         assert_eq!(trace_of(&v), Vec::<&str>::new());
         // A change this build doesn't know is a newer build's: said, and kept.
         let said = formats.newer(next, Some(&["c-later".into()])).unwrap();
         assert_eq!(said, Newer { format: next, reads_up_to: next, unknown_changes: vec!["c-later".into()] });
         // A list on a format that isn't made of changes means nothing.
         let mut v = serde_json::json!({});
-        formats.upgrade("design", &mut v, HAND_WRITTEN, Some(&["a-first".into()])).unwrap();
+        formats.upgrade(&mut v, HAND_WRITTEN, Some(&["a-first".into()])).unwrap();
         assert_eq!(trace_of(&v), ["a", "b"]);
     }
 
@@ -1394,16 +1278,16 @@ mod tests {
         let mut folded: Vec<(u32, &[Part])> = FOLDED.to_vec();
         let next = HAND_WRITTEN + folded.len() as u32 + 1;
         folded.push((next, &parts));
-        let formats = Formats { hand: &JSON_STEPS, folded: &folded, pending: &[] };
+        let formats = Family { formats: Formats { hand: &JSON_STEPS, folded: &folded, pending: &[] }, ..DESIGN };
         assert_eq!(formats.current(), next);
         let mut old = serde_json::json!({});
-        formats.upgrade("design", &mut old, HAND_WRITTEN, None).unwrap();
+        formats.upgrade(&mut old, HAND_WRITTEN, None).unwrap();
         assert_eq!(trace_of(&old), ["a", "b"]);
         let mut nightly = serde_json::json!({});
-        formats.upgrade("design", &mut nightly, next, Some(&["a-first".into()])).unwrap();
+        formats.upgrade(&mut nightly, next, Some(&["a-first".into()])).unwrap();
         assert_eq!(trace_of(&nightly), ["b"]);
         let mut released = serde_json::json!({});
-        formats.upgrade("design", &mut released, next, None).unwrap();
+        formats.upgrade(&mut released, next, None).unwrap();
         assert_eq!(trace_of(&released), Vec::<&str>::new());
     }
 
@@ -1412,11 +1296,11 @@ mod tests {
         let hand: [JsonStep; 27] = [|_| Ok(()); 27];
         let first = [traced("a-first")];
         let cards = [traced("material-engineering-cards")];
-        let pending = Formats { hand: &hand, folded: &[(29, &first)], pending: &cards };
-        let folded = Formats { hand: &hand, folded: &[(29, &first), (30, &cards)], pending: &[] };
+        let pending = Family { formats: Formats { hand: &hand, folded: &[(29, &first)], pending: &cards }, ..DESIGN };
+        let folded = Family { formats: Formats { hand: &hand, folded: &[(29, &first), (30, &cards)], pending: &[] }, ..DESIGN };
         for formats in [pending, folded] {
             let mut file = serde_json::json!({"trace": ["b"]});
-            formats.upgrade("design", &mut file, 29, Some(&["physical-material-cards".into()])).unwrap();
+            formats.upgrade(&mut file, 29, Some(&["physical-material-cards".into()])).unwrap();
             assert_eq!(trace_of(&file), ["b", "a"], "never replay existing card semantics");
         }
     }
@@ -1425,7 +1309,7 @@ mod tests {
     fn personal_card_alias_without_support_is_a_newer_builds() {
         let hand: [JsonStep; 27] = [|_| Ok(()); 27];
         let first = [traced("a-first")];
-        let formats = Formats { hand: &hand, folded: &[(29, &first)], pending: &[] };
+        let formats = Family { formats: Formats { hand: &hand, folded: &[(29, &first)], pending: &[] }, ..DESIGN };
         let said = formats.newer(29, Some(&["physical-material-cards".into()])).unwrap();
         assert_eq!(said.unknown_changes, ["physical-material-cards"]);
     }
@@ -1436,7 +1320,7 @@ mod tests {
         let first = [traced("a-first")];
         let second = [traced("b-second")];
         let cards = [traced("material-engineering-cards")];
-        let formats = Formats { hand: &hand, folded: &[(28, &first), (29, &second), (30, &cards)], pending: &[] };
+        let formats = Family { formats: Formats { hand: &hand, folded: &[(28, &first), (29, &second), (30, &cards)], pending: &[] }, ..DESIGN };
         for version in [28, 30] {
             let said = formats.newer(version, Some(&["physical-material-cards".into()])).unwrap();
             assert_eq!(said.unknown_changes, ["physical-material-cards"]);
@@ -1448,7 +1332,7 @@ mod tests {
         let hand: [JsonStep; 27] = [|_| Ok(()); 27];
         let first = [traced("a-first")];
         let cards = [traced("material-engineering-cards")];
-        let formats = Formats { hand: &hand, folded: &[(29, &first)], pending: &cards };
+        let formats = Family { formats: Formats { hand: &hand, folded: &[(29, &first)], pending: &cards }, ..DESIGN };
         for names in
             [["physical-material-cards".into(), "unknown-card-codec".into()], ["unknown-card-codec".into(), "physical-material-cards".into()]]
         {
@@ -1460,14 +1344,14 @@ mod tests {
     fn alias_and_canonical_markers_never_reapply_the_card_migration() {
         let hand: [JsonStep; 27] = [|_| Ok(()); 27];
         let first = [traced("a-first"), traced("material-engineering-cards")];
-        let formats = Formats { hand: &hand, folded: &[(29, &first)], pending: &[] };
+        let formats = Family { formats: Formats { hand: &hand, folded: &[(29, &first)], pending: &[] }, ..DESIGN };
         for names in [
             vec!["physical-material-cards".into()],
             vec!["physical-material-cards".into(), "material-engineering-cards".into()],
             vec!["material-engineering-cards".into(), "physical-material-cards".into()],
         ] {
             let mut file = serde_json::json!({"trace": ["b"]});
-            formats.upgrade("design", &mut file, 29, Some(&names)).unwrap();
+            formats.upgrade(&mut file, 29, Some(&names)).unwrap();
             assert_eq!(trace_of(&file), ["b", "a"]);
         }
     }
@@ -1477,10 +1361,10 @@ mod tests {
         let hand: [JsonStep; 27] = [|_| Ok(()); 27];
         let first = [traced("a-first")];
         let cards = [traced("material-engineering-cards")];
-        let formats = Formats { hand: &hand, folded: &[(29, &first)], pending: &cards };
+        let formats = Family { formats: Formats { hand: &hand, folded: &[(29, &first)], pending: &cards }, ..DESIGN };
         let mut file = serde_json::json!({"trace": ["a"], "metadata": {"format_pending": ["physical-material-cards"]}});
         let metadata = file["metadata"].clone();
-        formats.upgrade("design", &mut file, 29, None).unwrap();
+        formats.upgrade(&mut file, 29, None).unwrap();
         assert_eq!(trace_of(&file), ["a", "b"]);
         assert_eq!(file["metadata"], metadata);
     }
@@ -1492,7 +1376,7 @@ mod tests {
         let parts = [traced("a-first")];
         let later = [traced("b-second")];
         for pending in [&[][..], &later[..]] {
-            let formats = Formats { hand: &[], folded: &[(2, &parts)], pending };
+            let formats = Family { formats: Formats { hand: &[], folded: &[(2, &parts)], pending }, ..DESIGN };
             assert_eq!(formats.newer(2, Some(&["experimental-card".into()])).unwrap().unknown_changes, ["experimental-card"]);
         }
     }
@@ -1503,14 +1387,14 @@ mod tests {
     fn pending_concepts_moved_to_later_formats_are_not_reapplied() {
         let first = [traced("a-first")];
         let later = [traced("b-second")];
-        let pending = Formats { hand: &[], folded: &[(2, &first)], pending: &later };
-        let folded = Formats { hand: &[], folded: &[(2, &first), (3, &later)], pending: &[] };
+        let pending = Family { formats: Formats { hand: &[], folded: &[(2, &first)], pending: &later }, ..DESIGN };
+        let folded = Family { formats: Formats { hand: &[], folded: &[(2, &first), (3, &later)], pending: &[] }, ..DESIGN };
         for formats in [pending, folded] {
             let mut experimental = serde_json::json!({"trace": ["b"]});
-            formats.upgrade("design", &mut experimental, 2, Some(&["b-second".into()])).unwrap();
+            formats.upgrade(&mut experimental, 2, Some(&["b-second".into()])).unwrap();
             assert_eq!(trace_of(&experimental), ["b", "a"]);
             let mut released = serde_json::json!({"trace": ["a"]});
-            formats.upgrade("design", &mut released, 2, None).unwrap();
+            formats.upgrade(&mut released, 2, None).unwrap();
             assert_eq!(trace_of(&released), ["a", "b"], "ordinary released files still get later migrations");
         }
     }
@@ -1940,6 +1824,7 @@ mod tests {
                     width: "4".into(),
                     height: "6".into(),
                     operation: Operation::NewBody,
+                    centred: false,
                 },
                 None,
             )
@@ -2118,7 +2003,7 @@ mod tests {
         let first = pts[0];
         let neighbor = pts[1];
         let closing = pts[3];
-        sketch.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None }, None).unwrap();
+        sketch.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None).unwrap();
         let mut document = Document::new("periodic file validation");
         document.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
         assert_eq!(read(&document.to_json()).unwrap(), document);
@@ -2205,14 +2090,16 @@ mod tests {
                     width: "20".into(),
                     height: "5".into(),
                     operation: crate::Operation::NewBody,
+                    centred: false,
                 },
                 None,
             )
             .unwrap();
         d.configs.columns = vec![Column::Param("width".into()), Column::Suppress(feature)];
+        let ids = [d.allocate_id().unwrap(), d.allocate_id().unwrap()];
         d.configs.rows = vec![
-            ConfigRow { name: "Default".into(), cells: vec!["10 mm".into(), "false".into()] },
-            ConfigRow { name: "Alternate".into(), cells: vec!["width / 2 + 5 mm".into(), "yes".into()] },
+            ConfigRow { id: ids[0], name: "Default".into(), cells: vec!["10 mm".into(), "false".into()] },
+            ConfigRow { id: ids[1], name: "Alternate".into(), cells: vec!["width / 2 + 5 mm".into(), "yes".into()] },
         ];
         d.configs.active = Some("Default".into());
         let mut legacy: Value = serde_json::from_str(&d.to_json()).unwrap();
@@ -2236,6 +2123,7 @@ mod tests {
         let mut d = Document::new("configured styles");
         d.configs.columns = vec![Column::Material("Body".into()), Column::Appearance("Body".into())];
         d.configs.rows = vec![ConfigRow {
+            id: d.allocate_id().unwrap(),
             name: "Blue steel".into(),
             cells: vec!["Steel".into(), r#"{"name":"Custom blue","color":[40,90,186],"opacity":0.4}"#.into()],
         }];
@@ -2328,6 +2216,7 @@ mod tests {
                     width: "10".into(),
                     height: "10".into(),
                     operation: crate::Operation::NewBody,
+                    centred: false,
                 },
                 Some(&format!("Box{i}")),
             )
@@ -2358,6 +2247,7 @@ mod tests {
                     width: "10".into(),
                     height: "10".into(),
                     operation: crate::Operation::NewBody,
+                    centred: false,
                 },
                 None,
             )
@@ -2457,7 +2347,7 @@ mod tests {
     /// file too, before the arrays are deserialised.
     #[test]
     fn oversized_sketches_are_refused_before_typed_decoding() {
-        use solidcraft_sketch::{MAX_CONSTRAINTS, MAX_CURVES, MAX_POINTS, Sketch};
+        use solidcraft_sketch::{CEILING_CONSTRAINTS, CEILING_CURVES, CEILING_POINTS, MAX_POINTS, Sketch};
 
         // A sketch right at the point cap, chained by coincident constraints.
         let mut sketch = Sketch::new();
@@ -2472,8 +2362,8 @@ mod tests {
         let at_cap: Value = serde_json::from_str(&doc.to_json()).unwrap();
         assert!(read(&at_cap.to_string()).is_ok(), "a sketch at the caps must still load");
 
-        // One past each cap, grown at the JSON level: no typed array is ever built.
-        for (key, cap) in [("points", MAX_POINTS), ("constraints", MAX_CONSTRAINTS), ("curves", MAX_CURVES)] {
+        // One past each ceiling, grown at the JSON level: no typed array is ever built.
+        for (key, cap) in [("points", CEILING_POINTS), ("constraints", CEILING_CONSTRAINTS), ("curves", CEILING_CURVES)] {
             let mut value = at_cap.clone();
             let slot = &mut value["features"][0]["sketch"][key];
             let first = slot.as_array().and_then(|a| a.first()).cloned().unwrap_or(Value::Null);
@@ -2481,6 +2371,19 @@ mod tests {
             let error = read(&value.to_string()).unwrap_err().to_string();
             assert!(error.contains("sketch too large"), "{key}: {error}");
         }
+    }
+
+    /// #10874: a design whose sketch is past the default limit (made where Preferences › Sketch ›
+    /// Largest sketch was raised) passes the size check when it opens, whatever the limit here.
+    #[test]
+    fn a_sketch_past_the_default_limit_opens() {
+        use solidcraft_sketch::{MAX_CURVES, MAX_POINTS};
+        let points: Vec<Value> = (0..MAX_POINTS + 1).map(|i| serde_json::json!({"id": format!("p{}", i + 1), "pos": [i as f64, 0.0]})).collect();
+        let curves: Vec<Value> =
+            (0..MAX_CURVES + 1).map(|i| serde_json::json!({"id": format!("l{}", i + 1), "kind": {"type": "line", "a": i, "b": i + 1}})).collect();
+        let mut v: Value = serde_json::from_str(&Document::new("dense drawing").to_json()).unwrap();
+        v["features"] = serde_json::json!([{"type": "sketch", "sketch": {"points": points, "curves": curves}}]);
+        assert!(validate_sketch_sizes(&v).is_ok(), "{} points and {} curves", MAX_POINTS + 1, MAX_CURVES + 1);
     }
 
     fn two_components_one_occurrence() -> Document {
@@ -2534,12 +2437,15 @@ mod tests {
             ("contact_sets", json!({"id": 100, "name": "Contact", "occurrences": []})),
             ("studies", json!({"id": 100, "name": "Study", "steps": 10, "keys": []})),
             ("exploded", json!({"id": 100, "name": "View", "moves": []})),
+            ("configs", json!({"columns": [], "rows": [{"id": 100, "name": "Row", "cells": []}]})),
         ];
         for (field, item) in cases {
             let json = edited(&Document::new("Legacy IDs"), |v| {
                 v.as_object_mut().unwrap().remove("next_id");
                 if matches!(field, "browser_groups" | "timeline_groups" | "canvases") {
                     v[field] = json!([item]);
+                } else if field == "configs" {
+                    v[field] = item;
                 } else {
                     v["assembly"] = json!({field: [item]});
                 }
@@ -2550,6 +2456,7 @@ mod tests {
             back.timeline_groups.clear();
             back.canvases.clear();
             back.assembly = Default::default();
+            back.configs = Default::default();
             let mut reopened = read(&back.to_json()).unwrap();
             assert_eq!(reopened.allocate_id().unwrap(), 101, "{field}: deleted legacy id was forgotten");
             assert_eq!(reopened.allocate_id().unwrap(), 102, "{field}");

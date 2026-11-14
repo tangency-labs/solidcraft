@@ -437,7 +437,7 @@ pub fn default_weight() -> f32 {
 }
 
 pub fn validate_weight(weight: f32) -> PanelResult<()> {
-    if !weight.is_finite() || weight < 0.0 || weight > MAX_LOGICAL {
+    if !weight.is_finite() || !(0.0..=MAX_LOGICAL).contains(&weight) {
         return Err(error(Rule::Bounds, "weight must be finite and in [0, 32768]"));
     }
     Ok(())

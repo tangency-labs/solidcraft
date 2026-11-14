@@ -27,7 +27,7 @@
 //!   ([`crate::blend::blend_setback::fill_hole`] at its order and tolerance). The net is the
 //!   rule's patch (bound 0); its certificate is the rule's own: G1 (or G2) to the rounds
 //!   and to the other patches exactly in homogeneous coordinates, a G1 fill certified convex,
-//!   and the fill within the corner's half-spaces ([`crate::blend::blend_setback::containment`],
+//!   and the fill within the corner's half-spaces ([`crate::blend::blend_setback::containment_kept`],
 //!   certified by the convex hull). Re-certified by running the rule again from the
 //!   definition: the fill and its certificates are made anew and the net must be its patch,
 //!   number for number.
@@ -53,7 +53,7 @@
 use std::sync::Arc;
 
 use crate::blend::blend_corner::mixed::algebra::{self, Crv, Side, V4};
-use crate::blend::blend_setback::{containment, fill_hole, Face, Fill, Round};
+use crate::blend::blend_setback::{containment_kept, fill_hole, Face, Fill, Round};
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::are_same;
@@ -271,7 +271,7 @@ fn same_form(a: &BSplineSurface, b: &BSplineSurface) -> bool {
 /// weights positive), so no point of one is farther from the other's at the same
 /// parameters. `None` where no orientation matches but for the control points and weights
 /// (another parametrization, a piece).
-fn net_distance(a: &BSplineSurface, b: &BSplineSurface) -> Option<f64> {
+pub(crate) fn net_distance(a: &BSplineSurface, b: &BSplineSurface) -> Option<f64> {
     let (a, b) = (a.gw_nurb()?, b.gw_nurb()?);
     let grid = |s: &crate::nurbs::srf_basic::Surface| -> Vec<Vec<crate::nurbs::math::CPoint>> {
         s.rows().map(<[_]>::to_vec).collect()
@@ -571,7 +571,7 @@ impl SetbackFill {
     }
 
     /// The fill the definition gives: the rule run on it ([`fill_hole`]), and its
-    /// containment certified within the tolerance ([`containment`]).
+    /// containment certified within the tolerance ([`containment_kept`]).
     ///
     /// # Errors
     ///
@@ -589,7 +589,7 @@ impl SetbackFill {
             })
             .collect();
         let fill = fill_hole(k, &self.faces, &rounds, self.order, self.tol).map_err(|r| r.error)?;
-        if containment(k, &fill, &self.faces, self.convex, self.tol)? > self.tol {
+        if containment_kept(k, &fill, &self.faces, self.tol)? > self.tol {
             return Err(refuse("a setback's fill stands past a face it meets"));
         }
         Ok(fill)
@@ -698,7 +698,7 @@ impl MixedDefinition {
                 seg.iter_mut().for_each(map);
             }
         };
-        for s in self.sides.iter_mut() {
+        for s in &mut *self.sides {
             crv(&mut s.c);
             crv(&mut s.dir);
             crv(&mut s.t);

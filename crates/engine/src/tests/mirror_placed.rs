@@ -467,6 +467,52 @@ fn a_joint_drive_evaluates_only_what_reads_the_mirrored_copy() {
     }
 }
 
+/// A combined mirror inside the part a joint moves, of that part's own body picked where the part
+/// is placed, reads nothing that moves relative to the part: driving the joint to a new angle
+/// keeps it and the cut after it (#14271). The same mirror made in the root still follows each
+/// pose of the part.
+#[test]
+fn a_joint_drive_keeps_a_combined_mirror_inside_the_part_it_moves() {
+    for inside in [true, false] {
+        let mut s = Session::default();
+        let (component, _) = moved_arm(&mut s);
+        run(
+            &mut s,
+            "joint.as_built",
+            json!({"type": "revolute", "name": "Pan", "a": 0, "b": "Arm", "at": {"occurrence": 0, "point": [0, 0, 0], "z": [0, 0, 1]}}),
+        );
+        if inside {
+            run(&mut s, "component.activate", json!({"component": component}));
+        }
+        run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody"], "plane": "YZ", "combine": true}));
+        let placed =
+            s.doc.features.iter().any(|f| matches!(&f.kind, solidcraft_doc::FeatureKind::Mirror { placements, .. } if !placements.is_empty()));
+        assert!(placed, "the mirror keeps the placement it picked the body at");
+        if inside {
+            run(
+                &mut s,
+                "solid.box",
+                json!({"corner": [12, 1, 2], "length": 2, "width": 2, "height": 10, "operation": "cut", "targets": ["ArmBody"]}),
+            );
+            run(&mut s, "component.activate", json!({"component": 0}));
+        }
+        for angle in [20, -35, 60] {
+            run(&mut s, "joint.drive", json!({"joint": "Pan", "value": angle, "quiet": true}));
+            let recomputed = s.model.last_recomputed + s.model.last_restored;
+            if inside {
+                assert_eq!(recomputed, 0, "nothing in the arm at {angle}°");
+            } else {
+                assert_eq!(recomputed, 1, "the root's mirror at {angle}°");
+            }
+            assert_model_as_evaluated_afresh(&s);
+        }
+        for command in ["edit.undo", "edit.redo"] {
+            run(&mut s, command, json!({}));
+            assert_model_as_evaluated_afresh(&s);
+        }
+    }
+}
+
 /// A saved model's pose-only mirror was made at the pose the design had when it was saved: one
 /// adopted for a design posed otherwise is evaluated again, not taken from the cache (#12139).
 #[test]

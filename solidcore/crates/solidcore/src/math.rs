@@ -13,6 +13,7 @@
 //! | [`Transform::concat`]        | `SmTransform::ConcatTransform` / `smgu_4x4Mult`|
 //! | [`Transform::transform_point`]  | `SmTransform::TransformPoint`               |
 //! | [`Transform::transform_vector`] | `SmTransform::TransformVector`              |
+//! | [`Transform::rotation`], [`Transform::uniform_scaling`], [`Transform::reflection`] | (not upstream) |
 //! | [`EFF_ZERO`] etc.            | `SM_EFF_ZERO` etc.                             |
 //! | [`is_infinite_param`]        | `SM_IS_INFINITE`                               |
 //! | [`max2`], [`min2`], [`max3`], [`min3`], [`max4`], [`min4`] | `smos_Max`, `smos_Min`, `smos_3Max`, `smos_3Min`, `smos_4Max`, `smos_4Min` |
@@ -409,9 +410,264 @@ impl Transform {
     }
 }
 
+/// The operation name of the refusals of the maps built from their numbers.
+const OP_MAPS: &str = "math::Transform";
+
+/// Whether every coordinate of `v` is finite.
+fn finite3(v: Vec3) -> bool {
+    v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
+}
+
+/// Not upstream: the rigid motions and scalings an application asks for by their numbers
+/// (a turn about a line, a scale about a point, a mirror in a plane), built here so the
+/// layers above the kernel only pass the numbers on. Each is in the row-vector convention
+/// of [`Transform`]: rows 0 to 2 the images of x, y and z, row 3 the translation.
+impl Transform {
+    /// The linear map whose rows are `x`, `y` and `z`, about the point `fixed`, which it
+    /// keeps: `p' = (p - fixed) A + fixed`, its translation `fixed - fixed A`.
+    fn about(fixed: Point3, x: Vec3, y: Vec3, z: Vec3) -> Self {
+        let image = x * fixed.x + y * fixed.y + z * fixed.z;
+        Self::from_axes(x, y, z, fixed - image)
+    }
+
+    /// The turn by `angle` radians, right-handed about `axis`, about the line through
+    /// `point` along `axis` (any length, made unit here): Rodrigues' rotation formula,
+    /// `R = c I + s [k]x + (1 - c) k kᵀ` with `k` the unit axis, `c` and `s` the cosine and
+    /// sine of the angle, transposed for the row-vector convention.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a point, axis or angle not finite, or an axis whose squared
+    /// length is below [`EFF_ZERO_SQ`].
+    pub fn rotation(point: Point3, axis: Vec3, angle: f64) -> crate::error::Result<Self> {
+        use crate::error::SolidError;
+        if !(finite3(point) && finite3(axis) && angle.is_finite()) {
+            return Err(SolidError::invalid_input(
+                OP_MAPS,
+                "a turn's numbers not finite",
+            ));
+        }
+        let k = axis
+            .unitize()
+            .map_err(|_| SolidError::invalid_input(OP_MAPS, "a turn's axis of no length"))?;
+        let (s, c) = angle.sin_cos();
+        let v = 1.0 - c;
+        let (x, y, z) = (k.x, k.y, k.z);
+        Ok(Self::about(
+            point,
+            Vec3::new(c + x * x * v, x * y * v + z * s, x * z * v - y * s),
+            Vec3::new(x * y * v - z * s, c + y * y * v, y * z * v + x * s),
+            Vec3::new(x * z * v + y * s, y * z * v - x * s, c + z * z * v),
+        ))
+    }
+
+    /// The scale by `factor` in every direction about `centre`, which it keeps. A negative
+    /// factor turns the scale through the centre as well.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a centre or factor not finite, or a factor of zero (a map with
+    /// no inverse).
+    pub fn uniform_scaling(centre: Point3, factor: f64) -> crate::error::Result<Self> {
+        use crate::error::SolidError;
+        if !(finite3(centre) && factor.is_finite()) || factor == 0.0 {
+            return Err(SolidError::invalid_input(
+                OP_MAPS,
+                "a scale's numbers not finite, or a factor of zero",
+            ));
+        }
+        Ok(Self::about(
+            centre,
+            Vec3::new(factor, 0.0, 0.0),
+            Vec3::new(0.0, factor, 0.0),
+            Vec3::new(0.0, 0.0, factor),
+        ))
+    }
+
+    /// The mirror in the plane through `origin` square to `normal` (any length, made unit
+    /// here): `p' = p - 2 ((p - origin)·n) n`, its linear part `I - 2 n nᵀ` (symmetric, so
+    /// the same in either convention) and its translation `2 (origin·n) n`. For a normal
+    /// along an axis every entry is exact, so the mirror twice is the identity exactly.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an origin or normal not finite, or a normal whose squared length
+    /// is below [`EFF_ZERO_SQ`].
+    pub fn reflection(origin: Point3, normal: Vec3) -> crate::error::Result<Self> {
+        use crate::error::SolidError;
+        if !(finite3(origin) && finite3(normal)) {
+            return Err(SolidError::invalid_input(
+                OP_MAPS,
+                "a mirror's numbers not finite",
+            ));
+        }
+        let n = normal
+            .unitize()
+            .map_err(|_| SolidError::invalid_input(OP_MAPS, "a mirror's normal of no length"))?;
+        let row = |e: Vec3, ni: f64| e - n * (2.0 * ni);
+        Ok(Self::from_axes(
+            row(Vec3::X, n.x),
+            row(Vec3::Y, n.y),
+            row(Vec3::Z, n.z),
+            n * (2.0 * origin.dot(n)),
+        ))
+    }
+
+    /// The map that undoes this one: `p = (p' - t) A⁻¹`, its linear part `A⁻¹` (the adjugate
+    /// over the determinant: with `a`, `b`, `c` the rows of `A`, row `i` holds the `i`-th
+    /// components of `b × c`, `c × a` and `a × b`, over `a · (b × c)`) and its translation
+    /// `-t A⁻¹`. A mirror in a plane through the origin square to an axis is its own inverse
+    /// exactly.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a map not proved regular ([`Transform::is_regular`] at ratio 0: an
+    /// entry not finite, a fourth column that is not `(0, 0, 0, 1)`, a determinant not
+    /// proved apart from 0).
+    pub fn inverse(&self) -> crate::error::Result<Self> {
+        if !self.is_regular(0.0).is_yes() {
+            return Err(crate::error::SolidError::invalid_input(
+                OP_MAPS,
+                "a map not proved regular has no inverse",
+            ));
+        }
+        let (a, b, c) = (self.x_axis(), self.y_axis(), self.z_axis());
+        let (bc, ca, ab) = (b.cross(c), c.cross(a), a.cross(b));
+        let s = 1.0 / a.dot(bc);
+        let linear = Self::from_axes(
+            Vec3::new(bc.x, ca.x, ab.x) * s,
+            Vec3::new(bc.y, ca.y, ab.y) * s,
+            Vec3::new(bc.z, ca.z, ab.z) * s,
+            Point3::ZERO,
+        );
+        let t = linear.transform_vector(self.translation_part());
+        Ok(Self::from_axes(
+            linear.x_axis(),
+            linear.y_axis(),
+            linear.z_axis(),
+            -t,
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The largest difference between two matrices' entries.
+    fn apart(a: &Transform, b: &Transform) -> f64 {
+        a.m.iter()
+            .flatten()
+            .zip(b.m.iter().flatten())
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn a_quarter_turn_about_z_takes_x_to_y_and_keeps_its_line() {
+        use crate::geom::certified::Verdict;
+        let q = core::f64::consts::FRAC_PI_2;
+        let turn = Transform::rotation(Point3::ZERO, Vec3::new(0.0, 0.0, 2.0), q).unwrap();
+        let want = Transform::from_axes(Vec3::Y, -Vec3::X, Vec3::Z, Point3::ZERO);
+        assert!(apart(&turn, &want) <= 1e-15, "{turn:?}");
+        // about the line through (10, 0, 0) along z: that point stays, (11, 0, 0) goes to
+        // (10, 1, 0)
+        let p = Point3::new(10.0, 0.0, 0.0);
+        let turn = Transform::rotation(p, Vec3::Z, q).unwrap();
+        assert!(turn.transform_point(p).distance(p) <= 1e-14);
+        let image = turn.transform_point(Point3::new(11.0, 0.0, 0.0));
+        assert!(
+            image.distance(Point3::new(10.0, 1.0, 0.0)) <= 1e-14,
+            "{image:?}"
+        );
+        // a turn about a skew axis keeps lengths and its axis
+        let axis = Vec3::new(1.0, 2.0, 2.0);
+        let turn = Transform::rotation(p, axis, 0.7).unwrap();
+        assert!(
+            turn.transform_point(p + axis * 3.0)
+                .distance(p + axis * 3.0)
+                <= 1e-12
+        );
+        for r in turn.row_lengths() {
+            assert!((r - 1.0).abs() <= 1e-14);
+        }
+        assert_eq!(turn.is_regular(1e-9), Verdict::Yes);
+    }
+
+    #[test]
+    fn a_scale_keeps_its_centre_and_a_mirror_twice_is_the_identity() {
+        let c = Point3::new(1.0, -2.0, 3.0);
+        let scale = Transform::uniform_scaling(c, 2.5).unwrap();
+        assert!(scale.transform_point(c).distance(c) <= 1e-14);
+        let p = scale.transform_point(c + Vec3::X);
+        assert!(p.distance(c + Vec3::X * 2.5) <= 1e-14, "{p:?}");
+        // the mirror in y = 5, an axis normal of any length: every entry exact
+        let mirror =
+            Transform::reflection(Point3::new(7.0, 5.0, -1.0), Vec3::new(0.0, 3.0, 0.0)).unwrap();
+        assert_eq!(
+            mirror.transform_point(Point3::new(1.0, 2.0, 3.0)),
+            Point3::new(1.0, 8.0, 3.0)
+        );
+        assert_eq!(mirror.concat(&mirror), Transform::IDENTITY);
+        // a slanted mirror keeps its plane's points and reverses its normal
+        let n = Vec3::new(1.0, 1.0, 0.0);
+        let mirror = Transform::reflection(c, n).unwrap();
+        assert!(mirror.transform_point(c).distance(c) <= 1e-14);
+        let back = mirror.transform_point(c + n);
+        assert!(back.distance(c - n) <= 1e-14, "{back:?}");
+    }
+
+    #[test]
+    fn a_map_after_its_inverse_is_the_identity_and_a_singular_one_has_none() {
+        // a turn about a line off the origin, then a move and a scale
+        let turn = Transform::rotation(Point3::new(1.0, 2.0, 3.0), Vec3::new(1.0, -2.0, 2.0), 0.7)
+            .unwrap();
+        let map = turn
+            .concat(&Transform::translation(Vec3::new(4.0, -5.0, 6.0)))
+            .concat(&Transform::uniform_scaling(Point3::new(-1.0, 0.5, 2.0), 2.5).unwrap());
+        let inv = map.inverse().unwrap();
+        let size = map.m.iter().flatten().fold(1.0_f64, |a, x| a.max(x.abs()));
+        for (p, q) in [(map, inv), (inv, map)] {
+            let back = p.concat(&q);
+            assert!(
+                apart(&back, &Transform::IDENTITY) <= 1e-15 * size,
+                "{back:?}"
+            );
+        }
+        // a mirror in a plane square to an axis is its own inverse, exactly
+        let mirror = Transform::reflection(Point3::new(7.0, 5.0, -1.0), Vec3::Y).unwrap();
+        assert_eq!(mirror.inverse().unwrap(), mirror);
+        // a flattening and a projective map have none
+        let mut flat = Transform::IDENTITY;
+        flat.m[2] = [0.0; 4];
+        let mut projective = Transform::IDENTITY;
+        projective.m[0][3] = 1.0;
+        for m in [flat, projective] {
+            assert!(matches!(
+                m.inverse(),
+                Err(crate::error::SolidError::InvalidInput { operation, .. }) if operation == OP_MAPS
+            ));
+        }
+    }
+
+    #[test]
+    fn maps_from_numbers_refuse_what_is_not_finite_or_has_no_size() {
+        let bad = |r: crate::error::Result<Transform>| matches!(r, Err(crate::error::SolidError::InvalidInput { operation, .. }) if operation == OP_MAPS);
+        assert!(bad(Transform::rotation(Point3::ZERO, Vec3::ZERO, 1.0)));
+        assert!(bad(Transform::rotation(Point3::ZERO, Vec3::Z, f64::NAN)));
+        assert!(bad(Transform::rotation(
+            Point3::new(f64::INFINITY, 0.0, 0.0),
+            Vec3::Z,
+            1.0
+        )));
+        assert!(bad(Transform::uniform_scaling(Point3::ZERO, 0.0)));
+        assert!(bad(Transform::uniform_scaling(Point3::ZERO, f64::NAN)));
+        assert!(bad(Transform::reflection(Point3::ZERO, Vec3::ZERO)));
+        assert!(bad(Transform::reflection(
+            Point3::ZERO,
+            Vec3::new(f64::NAN, 1.0, 0.0)
+        )));
+    }
 
     #[test]
     fn a_rigid_motion_is_regular_and_a_flattening_is_not() {

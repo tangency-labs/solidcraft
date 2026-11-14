@@ -110,7 +110,6 @@ fn kernel() -> Kernel {
     k.fixes.fillet_run_on_past_far_end_only = true;
     k.fixes.fillet_run_on_bspline_trims = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.fillet_torus_span_from_start_section = true;
     k.fixes.cover_wraps_across_closed_seam = true;
     k
 }

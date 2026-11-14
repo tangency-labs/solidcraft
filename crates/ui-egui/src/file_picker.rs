@@ -362,6 +362,9 @@ mod tests {
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
         crate::documents::new_design(&mut h.app);
         h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+        // One dialog per tab is the preference's behaviour; by default several unsaved designs
+        // are asked about once, in one list (#11680).
+        h.app.preferences.save_prompt_one_at_a_time = true;
         crate::documents::request_quit(&mut h.app);
         for i in 0..2 {
             let answer = picker(&mut h.app, true);
@@ -538,19 +541,20 @@ mod tests {
             let center = [60 + 45 * (i % 4), 50 + 60 * (i / 4), 60];
             h.app.run("solid.torus", json!({"major": 30, "minor": 8, "center": center, "operation": "new_body"})).unwrap();
         }
-        for command in ["canvas.insert", "canvas.decal"] {
+        for (index, command) in ["canvas.insert", "canvas.decal"].into_iter().enumerate() {
             for step in [
                 json!({"make_image": "pic.png"}),
                 json!({"choose_file": "pic.png"}),
                 json!({"call": "ui.view", "params": {"view": "iso"}}),
                 json!({"start": command}),
+                json!({"call": "ui.camera", "params": {"target": [30, 30, 40], "distance": 450}}),
                 json!({"click": {"world": [30, 30, 40]}}),
             ] {
                 h.step(&step).unwrap();
             }
+            assert_eq!(h.app.session.doc.canvases.len(), index + 1, "{command}: the image is placed");
         }
         let doc = &h.app.session.doc;
-        assert_eq!(doc.canvases.len(), 2, "both images are placed");
         let (vals, _) = doc.param_values();
         for canvas in &doc.canvases {
             let plane = doc.canvas_plane(&vals, canvas).unwrap();

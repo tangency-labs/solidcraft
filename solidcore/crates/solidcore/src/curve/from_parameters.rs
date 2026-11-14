@@ -140,6 +140,30 @@ pub fn from_parameters(k: &Kernel, record: &Record, interval: [f64; 2]) -> Resul
     }
 }
 
+/// The record's parameter of the kernel's parameter `t` on the curve [`from_parameters`] makes
+/// of `record` over `interval`, where `at` is the kernel curve's point at `t`: the inverse of its
+/// map. On a circle or ellipse the kernel's conic is a rational quadratic, whose parameter in
+/// degrees is not the angle, so the record's parameter is the angle of `at` on the record's frame
+/// (`atan2(y / ry, x / rx)`, the angle the record evaluates `at` at), taken in the turn of the
+/// interval: the whole turn nearest `t` in radians, moved back by the turns [`from_parameters`]
+/// moved the interval by (the two differ by less than a quarter turn). On the other kinds `t`
+/// itself.
+#[must_use]
+pub fn record_parameter(record: &Record, interval: [f64; 2], t: f64, at: Point3) -> f64 {
+    use core::f64::consts::TAU;
+    let (frame, rx, ry) = match record {
+        Record::Circle { frame, radius } => (frame, *radius, *radius),
+        Record::Ellipse { frame, radii } => (frame, radii[0], radii[1]),
+        _ => return t,
+    };
+    let [lo, _] = interval;
+    let [moved, _] = turned(interval);
+    let near = t.to_radians() + (lo - moved);
+    let d = at - p3(frame.origin);
+    let angle = (d.dot(p3(frame.y_axis)) / ry).atan2(d.dot(p3(frame.x_axis)) / rx);
+    angle + TAU * ((near - angle) / TAU).round()
+}
+
 /// A circle or ellipse edge on its NURBS form `form` (a spline or rational spline, the
 /// parameter the edge's interval and trims are in): the conic of the record's numbers
 /// (`conic`), keeping `form` as its NURBS, over the form's interval. The form must lie on the
@@ -427,7 +451,7 @@ pub fn record_of(k: &Kernel, c: &Curve, interval: &Extent1d) -> Result<RecordCur
 
 /// The B-spline a curve is (every kernel line, conic and spline is one, its NURB made on a
 /// copy where it has none yet); `None` for the curves that are not.
-fn b_spline_part<'c>(k: &Kernel, c: &'c Curve) -> Result<Option<Cow<'c, BSplineCurve>>> {
+pub(crate) fn b_spline_part<'c>(k: &Kernel, c: &'c Curve) -> Result<Option<Cow<'c, BSplineCurve>>> {
     use crate::curve::curve::CurveKind;
     Ok(Some(match c.kind() {
         CurveKind::BSpline(b) => Cow::Borrowed(b),
@@ -570,17 +594,48 @@ fn p3(a: [f64; 3]) -> Point3 {
 }
 
 /// A record frame's origin and axes, the axes checked unit and square to rounding.
-fn axes(f: &Frame) -> Result<(Point3, Vec3, Vec3)> {
+/// Unit and square axes, each within 8 ulps of 1: the record construction's
+/// and the exact-form check's shared frame test.
+fn unit_square(x: Vec3, y: Vec3) -> bool {
     let ulps = 8.0 * f64::EPSILON;
-    let (x, y) = (p3(f.x_axis), p3(f.y_axis));
     let unit = |v: Vec3| (v.length() - 1.0).abs() <= ulps;
-    if !(unit(x) && unit(y) && x.dot(y).abs() <= ulps) {
+    unit(x) && unit(y) && x.dot(y).abs() <= ulps
+}
+
+fn axes(f: &Frame) -> Result<(Point3, Vec3, Vec3)> {
+    let (x, y) = (p3(f.x_axis), p3(f.y_axis));
+    if !unit_square(x, y) {
         return Err(SolidError::invalid_input(
             OP,
             "the frame's axes are not unit and square",
         ));
     }
     Ok((p3(f.origin), x, y))
+}
+
+/// Check an ellipse's attached rational form against its analytic support using
+/// the same exact-class certificate as record construction. Public curve
+/// parameters remain the attached form's parameters.
+pub(crate) fn ellipse_form_is_exact(e: &Ellipse) -> Result<bool> {
+    let placement = e.position();
+    let (o, x, y) = (placement.origin(), placement.x_axis(), placement.y_axis());
+    let (rx, ry) = (e.x_radius(), e.y_radius());
+    if !(rx > 0.0
+        && ry > 0.0
+        && rx.is_finite()
+        && ry.is_finite()
+        && [o.x, o.y, o.z].iter().all(|x| x.is_finite())
+        && unit_square(x, y))
+    {
+        return Ok(false);
+    }
+    let mut form = e.base().clone_exact();
+    for point in form.get_or_create_gw_nurb()?.cpts_mut() {
+        if point.z == NOZ {
+            point.z = 0.0;
+        }
+    }
+    curve_on_quadrics(&form, &quadrics(o, x, y, rx, ry, false))
 }
 
 /// The plane of a conic and its sphere (a circle) or elliptic cylinder (an ellipse), as

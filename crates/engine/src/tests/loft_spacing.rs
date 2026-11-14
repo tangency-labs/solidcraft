@@ -75,3 +75,61 @@ fn a_hollow_elbow_is_cut_for_any_number_of_sections() {
         assert!(rel(got, want) < 3e-3, "{degrees} degrees, {sections} sections: {got} vs {want}");
     }
 }
+
+/// #15263: both ends of this arch are separate regions of one XY sketch. Measuring the
+/// loft used to fail with "no mass", even though all six faces had been built.
+#[test]
+fn a_loft_returning_to_its_start_plane_has_mass_properties() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Ends"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, 0], "p1": [30, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [15, 0, 5], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Middle"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.loft",
+        json!({"sections": [
+            {"sketch": "Ends", "profiles": [{"point": [5, 5]}]},
+            {"sketch": "Middle"},
+            {"sketch": "Ends", "profiles": [{"point": [25, 5]}]}
+        ], "operation": "new", "body_name": "Arch"}),
+    );
+
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1);
+    let body = &state.bodies[0].body;
+    assert!(!body.is_surface());
+    assert_eq!(body.shell_count(), 1);
+    assert_eq!(body.face_count(), 6);
+
+    let faces = run(&mut s, "model.faces", json!({"body": "Arch"}));
+    let cap_normals: Vec<_> = faces["faces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|f| f["plane_normal"].as_array())
+        .filter(|n| n[2].as_f64().unwrap().abs() > 0.999999)
+        .collect();
+    assert_eq!(cap_normals.len(), 2, "{faces}");
+    assert!(cap_normals.iter().all(|n| n[2].as_f64().unwrap() < -0.999999), "{faces}");
+
+    let measured = run(&mut s, "inspect.measure", json!({"bodies": ["Arch"]}));
+    assert_eq!(measured["body_count"], 1, "{measured}");
+    let arch = &measured["bodies"][0];
+    eprintln!("returning loft mass properties: {arch}");
+    assert_eq!(arch["closed"], true, "{measured}");
+    for property in ["volume_mm3", "area_mm2", "mass_g"] {
+        let value = arch[property].as_f64().unwrap_or_else(|| panic!("missing {property}: {measured}"));
+        assert!(value.is_finite() && value > 0.0, "{property}: {measured}");
+    }
+    // Exact area between the untwisted quadratic arch boundaries, times width 10.
+    let volume = arch["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 8000.0 / 3.0).abs() < 1e-5, "{measured}");
+    assert!(
+        arch["center_of_mass"].as_array().is_some_and(|p| p.len() == 3 && p.iter().all(|v| v.as_f64().is_some_and(f64::is_finite))),
+        "{measured}"
+    );
+}

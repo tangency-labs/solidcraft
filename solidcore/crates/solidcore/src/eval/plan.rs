@@ -14,11 +14,10 @@
 
 // SolidCraft's plan evaluator, moved here from its geom crate as it is (RFC 0003, item 1.1), so
 // it stays the same text as its history; where it overlaps the rest of `solidcore::eval`, the two
-// are unified in a later step. Its slice indexing is within bounds the code checks before it;
-// checked access and the rest of the kernel's lints come with that step.
+// are unified in a later step. Its slice indexing is checked access;
+// the rest of the kernel's lints come with that step.
 #![allow(
     missing_docs,
-    clippy::indexing_slicing,
     clippy::neg_cmp_op_on_partial_ord,
     clippy::assigning_clones,
     clippy::doc_markdown,
@@ -110,9 +109,9 @@ impl EvalCurve {
         let (mut a, mut da) = ([0.0; 4], [0.0; 4]);
         for (k, (n0, n1)) in ders[0].iter().zip(&ders[1]).take(p + 1).enumerate() {
             let c = self.ctrl.get(span + k - p)?;
-            for d in 0..4 {
-                a[d] += n0 * c[d];
-                da[d] += n1 * c[d];
+            for ((ad, dad), cd) in a.iter_mut().zip(da.iter_mut()).zip(c.iter()) {
+                *ad += n0 * cd;
+                *dad += n1 * cd;
             }
         }
         rational(a, da)
@@ -131,8 +130,7 @@ impl EvalSurface {
     /// that still fails gives the origin and +Z rather than a NaN.
     pub fn eval(&self, u: f64, v: f64) -> (Vec3, Vec3) {
         let Some((p, du, dv)) = self.derivs(u, v) else { return (Vec3::ZERO, Vec3::Z) };
-        let n = self.oriented(du.cross(dv));
-        if let Some(n) = n.normalized().filter(|_| n.len2() > 1e-20 * (du.len2() * dv.len2()).max(1e-300)) {
+        if let Some(n) = self.regular_normal(du, dv) {
             return (p, n);
         }
         // Step into the parameter domain around the degenerate point: never past the end of an
@@ -148,6 +146,20 @@ impl EvalSurface {
             }
         }
         (p, Vec3::Z)
+    }
+
+    /// The unit normal from the first partials `du` and `dv`, oriented as the surface; `None` at
+    /// a degenerate point, where they are parallel or one vanishes.
+    fn regular_normal(&self, du: Vec3, dv: Vec3) -> Option<Vec3> {
+        let n = self.oriented(du.cross(dv));
+        n.normalized().filter(|_| n.len2() > 1e-20 * (du.len2() * dv.len2()).max(1e-300))
+    }
+
+    /// Point and unit normal at `(u, v)` where the first partials give one there; `None` at a
+    /// degenerate point (a cone's apex, a sphere's pole) or off the surface.
+    pub fn regular(&self, u: f64, v: f64) -> Option<(Vec3, Vec3)> {
+        let (p, du, dv) = self.derivs(u, v)?;
+        Some((p, self.regular_normal(du, dv)?))
     }
 
     /// The active parameter interval along `d` (0: u, 1: v) of a spline, or of a revolution's
@@ -188,10 +200,10 @@ impl EvalSurface {
         }
         let EvalSurface::Nurbs { closed, .. } = self else { return uv };
         let mut out = uv;
-        for d in 0..2 {
-            if let (true, Some(r)) = (closed[d], self.interval(d)) {
-                if !(r.0..=r.1).contains(&uv[d]) {
-                    out[d] = uv::wrap_into(uv[d], r);
+        for (d, (x, shut)) in out.iter_mut().zip(closed.iter()).enumerate() {
+            if let (true, Some(r)) = (*shut, self.interval(d)) {
+                if !(r.0..=r.1).contains(&*x) {
+                    *x = uv::wrap_into(*x, r);
                 }
             }
         }
@@ -290,8 +302,8 @@ fn nurbs_second(degree: [usize; 2], knots: &[Vec<f64>; 2], count: [usize; 2], ct
             let c = ctrl.get((sv + j - pv) * nu + su + i - pu)?;
             let w = [bi[0] * bj[0], bi[1] * bj[0], bi[0] * bj[1], bi[2] * bj[0], bi[1] * bj[1], bi[0] * bj[2]];
             for (sum, w) in a.iter_mut().zip(w) {
-                for d in 0..4 {
-                    sum[d] += w * c[d];
+                for (sd, cd) in sum.iter_mut().zip(c.iter()) {
+                    *sd += w * cd;
                 }
             }
         }
@@ -351,10 +363,10 @@ fn nurbs_derivs(degree: [usize; 2], knots: &[Vec<f64>; 2], count: [usize; 2], ct
     for (b, (nv0, nv1)) in bv[0].iter().zip(&bv[1]).take(pv + 1).enumerate() {
         for (a, (nu0, nu1)) in bu[0].iter().zip(&bu[1]).take(pu + 1).enumerate() {
             let c = ctrl.get((sv + b - pv) * nu + su + a - pu)?;
-            for d in 0..4 {
-                s[d] += nu0 * nv0 * c[d];
-                s_u[d] += nu1 * nv0 * c[d];
-                s_v[d] += nu0 * nv1 * c[d];
+            for (((sd, sud), svd), cd) in s.iter_mut().zip(s_u.iter_mut()).zip(s_v.iter_mut()).zip(c.iter()) {
+                *sd += nu0 * nv0 * cd;
+                *sud += nu1 * nv0 * cd;
+                *svd += nu0 * nv1 * cd;
             }
         }
     }
@@ -400,7 +412,7 @@ fn basis_funs(knots: &[f64], span: usize, p: usize, t: f64, n: &mut [f64; W]) ->
             *nr = saved + right * temp;
             saved = left * temp;
         }
-        n[j] = saved;
+        *n.get_mut(j)? = saved;
     }
     Some(())
 }
@@ -433,16 +445,16 @@ fn basis_ders_into(knots: &[f64], span: usize, p: usize, t: f64, ders: &mut [[f6
         if r >= 1 {
             let den = kn(span + r)? - kn((span + r).checked_sub(p)?)?;
             if den != 0.0 {
-                d += slopes[r - 1] / den;
+                d += *slopes.get(r - 1)? / den;
             }
         }
         if r < p {
             let den = kn(span + r + 1)? - kn((span + r + 1).checked_sub(p)?)?;
             if den != 0.0 {
-                d -= slopes[r] / den;
+                d -= *slopes.get(r)? / den;
             }
         }
-        slopes[r] = d * p as f64;
+        *slopes.get_mut(r)? = d * p as f64;
     }
     Some(())
 }

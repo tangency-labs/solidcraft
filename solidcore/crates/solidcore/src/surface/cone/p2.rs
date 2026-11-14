@@ -55,6 +55,12 @@
 //!   `CreateCanonical` without checking its status (a `NULL` cone crashes, a
 //!   non-finite height recurses without bound); here that construction's error is
 //!   returned.
+//! - **Offset truncation height.** Where one offset radius falls below the tolerance,
+//!   upstream takes the kept cone's height as `new_top_radius * height / old_top_radius`
+//!   (and the mirror), which holds only for a full apex cone. Here the slope comes from
+//!   the radius's span, `height / (old_top_radius - old_bot_radius)`, so a truncated
+//!   cone's offset keeps its slope and stays `S + d n` at the same parameters; full apex
+//!   cones give the same value.
 //! - **NURB.** As in `surface::cone::p1`, the cone is expected to have its NURB
 //!   ([`Cone::make_nurb`]); upstream makes a missing one inside `const` queries, which
 //!   the port does (and keeps) at the `Surface` level (`Surface::kind_with_nurb`).
@@ -73,6 +79,12 @@
 //!   (upstream copies a null NURB). With the opt-in
 //!   `Kernel::fixes.nurb_cylinder_inside_out_frame` (WR-496, #1463) an inside-out
 //!   NURB gets `IsNurbSurfaceCone`'s frame (top-knot circle, reversed Z).
+//! - **Cylinder iso arcs from control points.** [`Cone::is_nurb_surface_cylinder`] makes its
+//!   end circles from the iso curves' control points (`iso_arc_exact`, The NURBS Book §7.3,
+//!   §7.5), not fitted through three samples as `IsArc` does: two fitted end circles of an
+//!   extruded arc put its axis off the extrusion's direction by more than rounding (1.4e-13
+//!   rad on a 94 mm r 40 wall), so the cylinder was off its own NURBS form and failed the
+//!   exact-class proof (`implicit::lies_on`). The cone recogniser and the rebuild keep `IsArc`.
 //! - **Recursion.** None of these functions recurses.
 //! - **Debug code.** The `SM_DEBUG_CODE` checks and drawing are omitted.
 
@@ -80,7 +92,7 @@ use super::Cone;
 use crate::curve::curve::Curve;
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
-use crate::error::{ignore_status, ignored, Result, SolidError, SM_ERR};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -105,10 +117,6 @@ const OP_NURB_CYLINDER: &str = "surface::cone::p2::Cone::is_nurb_surface_cylinde
 const OP_REBUILD: &str = "surface::cone::p2::Cone::rebuild_step_from_nurb_parameters";
 const OP_REPARAM: &str = "surface::cone::p2::Cone::reparameterize";
 const OP_TRIM: &str = "surface::cone::p2::ellipse_trim_intervals";
-
-/// The `SmSurfOfRevolution::STEPInversion` operation whose `SM_ERR` means "the rotated
-/// point is not on the generator" (upstream sets `SM_LT_EXTERIOR` there).
-const OP_REV_STEP_INV: &str = "surface::surf_of_revolution::p2::SurfOfRevolution::step_inversion";
 
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
 const ANALYTIC_TOL_SCALE: f64 = 100.0;
@@ -153,6 +161,152 @@ fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<
         radius,
         start_ang,
         end_ang,
+    }))
+}
+
+/// The circle a rational quadratic iso curve is, made from its control points (not
+/// upstream, which fits a circle through three samples, `pIsoCrv->IsArc(5, dScaledZero, ..)`).
+///
+/// Each Bézier segment `Q0, Q1, Q2` (weights `w0, w1, w2`) of a circular arc has equal
+/// tangent legs `|Q1 − Q0| = |Q2 − Q1|`, and its middle weight in standard form,
+/// `w1 / √(w0 w2)`, is the cosine of the half sweep `α`, the angle between the leg
+/// `Q1 − Q0` and the chord `Q2 − Q0` (The NURBS Book, Piegl and Tiller, §7.3 and §7.5). The
+/// centre is then `Q0 + r n`, `n` the unit normal into the arc in its plane and
+/// `r = |Q1 − Q0| / tan α`: the circle passes through `Q0` exactly, so an error in `r`
+/// and the matching one in the centre cancel along the arc instead of growing with
+/// `1 / (1 − w1²)` as the centre found from the legs' meeting does. Everything is built from
+/// differences of control points, so rows that are translates of each other (an extruded
+/// arc) give circles that are translates of each other, and the axis through their centres
+/// is the extrusion's direction to rounding, where two independently fitted circles tilt
+/// it (#13536).
+///
+/// The circle is made from the first segment at least half as wide as the widest, a well
+/// conditioned one, and
+/// the curve is that circle when every segment is an arc of it, end to end: its legs equal and
+/// its weight the half sweep's cosine (within `EFF_ZERO_SQRT`), its plane parallel (within
+/// `EFF_ZERO_SQRT`), its end points on the circle and its middle point `r / cos α` from the
+/// centre, the lengths within `scaled_zero`. (A segment a hair long, an arc's extension, fixes
+/// a centre of its own only to the rounding of its points over its sweep, so it is checked on
+/// the circle, not compared by its own centre.)
+/// The frame's X axis points to the start point and its Z axis about which the curve turns
+/// counter-clockwise; the start angle is `0` and the end angle the sweep in degrees, as
+/// `IsArc` gives them. `None` for a degenerate curve, a degree other than 2, or a curve that
+/// is no circle.
+///
+/// # Errors
+///
+/// Those of the degeneracy test and the Bézier decomposition.
+fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<IsoArc>> {
+    /// One Bézier segment: its Euclidean control points, half sweep and plane normal.
+    struct Segment {
+        q0: Point3,
+        q1: Point3,
+        q2: Point3,
+        half: f64,
+        normal: Option<Vec3>,
+    }
+    if curve.is_degenerate(k, scaled_zero, None)? {
+        return Ok(None);
+    }
+    let Some(nurb) = curve.nurb.as_ref() else {
+        return Ok(None);
+    };
+    let mut segments = Vec::new();
+    for segment in nurb.decompose_bez()? {
+        if segment.degree() != 2 {
+            return Ok(None);
+        }
+        let points = segment.cpts();
+        let (Some(&a), Some(&b), Some(&c)) = (points.first(), points.get(1), points.get(2)) else {
+            return Ok(None);
+        };
+        if !(a.w > 0.0 && b.w > 0.0 && c.w > 0.0) {
+            return Ok(None);
+        }
+        let (q0, q1, q2) = (to_euclid(a), to_euclid(b), to_euclid(c));
+        let (leg0, leg1, chord) = (q1 - q0, q2 - q1, q2 - q0);
+        if (leg0.length() - leg1.length()).abs() > scaled_zero {
+            return Ok(None);
+        }
+        // the legs made unit before their cross product: a short arc's legs are short, and
+        // the product of their lengths would fall under the unit vector's absolute floor
+        let (Ok(tangent), Ok(next)) = (leg0.unitize(), leg1.unitize()) else {
+            return Ok(None);
+        };
+        // the half sweep, from the leg and the chord
+        let half = tangent.cross(chord).length().atan2(tangent.dot(chord));
+        let weight = b.w / (a.w * c.w).sqrt();
+        if (weight - half.cos()).abs() > EFF_ZERO_SQRT {
+            return Ok(None);
+        }
+        segments.push(Segment {
+            q0,
+            q1,
+            q2,
+            half,
+            normal: tangent.cross(next).unitize().ok(),
+        });
+    }
+    // The circle is made from a segment of large sweep, well conditioned: a segment a hair
+    // long (an arc's extension past its face) fixes its centre only to the rounding of its
+    // points over its sweep. The first segment at least half as wide as the widest is taken,
+    // so equal sweeps (a whole circle's quarters) take the first. Every segment must then
+    // lie on that circle.
+    let widest = segments.iter().fold(0.0_f64, |m, s| m.max(s.half));
+    let Some(base) = segments.iter().find(|s| s.half >= 0.5 * widest) else {
+        return Ok(None);
+    };
+    let Some(normal) = base.normal else {
+        return Ok(None);
+    };
+    let (leg0, leg1, chord) = (base.q1 - base.q0, base.q2 - base.q1, base.q2 - base.q0);
+    let (Ok(tangent), Ok(across)) = (leg0.unitize(), chord.unitize()) else {
+        return Ok(None);
+    };
+    // r = |leg| / tan α = |leg| cos α / sin α, from the leg's direction and the chord's
+    let radius = leg0.length() * tangent.dot(across) / tangent.cross(across).length();
+    // as `IsArc`: a radius too large for the arc's length makes no accurate circle
+    if radius.is_nan() || radius > (leg0.length() + leg1.length()) / EFF_ZERO_SQRT {
+        return Ok(None);
+    }
+    let centre = base.q0 + normal.cross(tangent) * radius;
+    let mut sweep = 0.0_f64;
+    for s in &segments {
+        let on = |p: Point3| ((p - centre).length() - radius).abs() <= scaled_zero;
+        // the middle point is where the end tangents meet, r / cos α from the centre
+        let corner = ((s.q1 - centre).length() * s.half.cos() - radius).abs() <= scaled_zero;
+        let flat = s
+            .normal
+            .is_none_or(|n| n.dot(normal) >= 1.0 - EFF_ZERO_SQRT);
+        if !(on(s.q0) && on(s.q2) && corner && flat) {
+            return Ok(None);
+        }
+        sweep += 2.0 * s.half;
+    }
+    let Some(first) = segments.first() else {
+        return Ok(None);
+    };
+    // X toward the start point: away from the centre, square to the first segment's tangent
+    let Ok(start_tangent) = (first.q1 - first.q0).unitize() else {
+        return Ok(None);
+    };
+    let x_axis = start_tangent.cross(normal);
+    // the segments run one way round: each starts where the one before it ends
+    if segments.windows(2).any(|w| match w {
+        [a, b] => a.q2.distance(b.q0) > scaled_zero,
+        _ => false,
+    }) {
+        return Ok(None);
+    }
+    let end_ang = sweep.to_degrees();
+    if !(end_ang > 0.0 && end_ang <= 360.0 + EFF_ZERO_SQRT) {
+        return Ok(None);
+    }
+    Ok(Some(IsoArc {
+        frame: Axis2Placement::new(centre, x_axis, normal.cross(x_axis)),
+        radius,
+        start_ang: 0.0,
+        end_ang: end_ang.min(360.0),
     }))
 }
 
@@ -268,7 +422,12 @@ impl Cone {
     /// `SM_ERR` unless this is a cylinder with a NURB whose radius stays positive; those of
     /// the control point edits and of the rebuild.
     pub fn lean_cylinder(&self, k: &Kernel, slope: f64, neutral_height: f64) -> Result<Cone> {
-        let err = || SolidError::sm_err("surface::cone::p2::Cone::lean_cylinder");
+        let err = || {
+            SolidError::surface_failed(
+                "surface::cone::p2::Cone::lean_cylinder",
+                "the surface is not a cylinder with a NURB whose radius stays positive",
+            )
+        };
         let canonical = self.canonical();
         if !self.is_cylinder()
             || canonical.radius.partial_cmp(&EFF_ZERO) != Some(core::cmp::Ordering::Greater)
@@ -338,7 +497,7 @@ impl Cone {
             ignore_status(self.make_nurb(k))?;
         }
         if self.rev.base.gw_nurb().is_none() {
-            return Err(SolidError::null_pointer(OP_REPARAM));
+            return Err(SolidError::surface_missing(OP_REPARAM, "the cone's NURB"));
         }
         let inside_out = self.inside_out;
         self.rev
@@ -400,7 +559,11 @@ impl Cone {
     ///   [`Self::create_canonical`] (same `swap_uv` and `inside_out`), its NURB
     ///   reparameterised to the matching part of this NURB domain (upstream scales the
     ///   domain maximum, not its span), the generator's NURB interval set to match and
-    ///   the polar converter rebuilt;
+    ///   the polar converter rebuilt; the matching part is anchored at the end that
+    ///   survives (an inside-out
+    ///   cone's NURB runs the generator backwards, so its ends swap), so every point of
+    ///   the kept cone keeps its parameter and the face's UV trims lift onto the offset
+    ///   unchanged;
     /// * else a copy with the new base radius and origin, every NURB control point
     ///   moved by the offset of its generator row (computed from the next control
     ///   point at the apex) and the generator translated by the offset vector.
@@ -453,20 +616,22 @@ impl Cone {
 
         // only the BotRadius or TopRadius has gone negative
         if new_bot_radius < approx_tol_3d || new_top_radius < approx_tol_3d {
-            // compute BotOrigin, Height, Bot and Top radii for new truncated cone
-            let (new_height, bot_origin) = if new_bot_radius < approx_tol_3d {
-                let tan_ang = height / old_top_radius;
-                let new_height = new_top_radius * tan_ang;
+            // compute BotOrigin, Height, Bot and Top radii for new truncated cone.
+            // The kept cone runs between its new apex (where the offset radius reaches
+            // zero) and the surviving end, at the original's slope: the radius spans
+            // `old_top_radius - old_bot_radius` over `height`.
+            let (new_height, bot_origin, collapsed_at_base) = if new_bot_radius < approx_tol_3d {
+                let new_height = new_top_radius * height / (old_top_radius - old_bot_radius);
                 new_bot_radius = 0.0;
                 (
                     new_height,
                     origin + (height + off_z_dist - new_height) * z_axis,
+                    true,
                 )
             } else {
-                let tan_ang = height / old_bot_radius;
-                let new_height = new_bot_radius * tan_ang;
+                let new_height = new_bot_radius * height / (old_bot_radius - old_top_radius);
                 new_top_radius = 0.0;
-                (new_height, origin + off_z_dist * z_axis)
+                (new_height, origin + off_z_dist * z_axis, false)
             };
 
             // New Cone Position - truncated at new apex position
@@ -484,21 +649,37 @@ impl Cone {
             )?;
 
             // compute the offsetSurf Nurb domain to be a properly trimmed subset of the
-            // input Nurb domain
-            let tgt_nurb_domain = if self.rev.swap_uv {
-                Extent2d::from_bounds(
-                    nurb_domain.min().x,
-                    nurb_domain.min().y,
-                    nurb_domain.min().x + new_height / height * nurb_domain.max().x,
-                    nurb_domain.max().y,
-                )
-            } else {
-                Extent2d::from_bounds(
-                    nurb_domain.min().x,
-                    nurb_domain.min().y,
-                    nurb_domain.max().x,
-                    nurb_domain.min().y + new_height / height * nurb_domain.max().y,
-                )
+            // input Nurb domain: the part the truncated cone stands for. Its span is the
+            // kept height's share of this domain's, anchored at the end that survives,
+            // so a point of the kept cone keeps its parameter: the offset's rim stays at
+            // the rim's parameter and the face's UV trims lift onto it unchanged (the
+            // offset of S is S + d n at the same parameters). An inside-out cone's NURB
+            // runs the generator backwards (`cone_convert_uv_from_nurbs_to_step`), so the
+            // surviving end is the domain's other end there.
+            let at_max_end = collapsed_at_base != self.inside_out;
+            let tgt_nurb_domain = {
+                let ratio = new_height / height;
+                if self.rev.swap_uv {
+                    let lo = nurb_domain.min().x;
+                    let hi = nurb_domain.max().x;
+                    let span = hi - lo;
+                    let (min_x, max_x) = if at_max_end {
+                        (hi - ratio * span, hi)
+                    } else {
+                        (lo, lo + ratio * span)
+                    };
+                    Extent2d::from_bounds(min_x, nurb_domain.min().y, max_x, nurb_domain.max().y)
+                } else {
+                    let lo = nurb_domain.min().y;
+                    let hi = nurb_domain.max().y;
+                    let span = hi - lo;
+                    let (min_y, max_y) = if at_max_end {
+                        (hi - ratio * span, hi)
+                    } else {
+                        (lo, lo + ratio * span)
+                    };
+                    Extent2d::from_bounds(nurb_domain.min().x, min_y, nurb_domain.max().x, max_y)
+                }
             };
 
             // update the pOffCone NurbDomain (status ignored)
@@ -511,11 +692,9 @@ impl Cone {
             } else {
                 tgt_nurb_domain.v_interval()
             };
-            let gen = off_cone
-                .rev
-                .gen_curve
-                .as_mut()
-                .ok_or(SolidError::null_pointer(OP_OFFSET))?;
+            let gen = off_cone.rev.gen_curve.as_mut().ok_or_else(|| {
+                SolidError::surface_missing(OP_OFFSET, "the offset cone's generator curve")
+            })?;
             ignore_status(gen.edit_parameterization(k, &tgt_gen_nurb_ivl))?;
 
             // rebuild the PolarCurve to make sure all is coordinated (status ignored)
@@ -612,11 +791,9 @@ impl Cone {
         // translate the NewCone->GenCurve from current center line (status ignored)
         let mut mv = Axis2Placement::IDENTITY;
         mv.translate(off_vec);
-        let gen = off_cone
-            .rev
-            .gen_curve
-            .as_mut()
-            .ok_or(SolidError::null_pointer(OP_OFFSET))?;
+        let gen = off_cone.rev.gen_curve.as_mut().ok_or_else(|| {
+            SolidError::surface_missing(OP_OFFSET, "the offset cone's generator curve")
+        })?;
         ignore_status(gen.transform(k, &mv, None))?;
 
         Ok(Some(off_cone))
@@ -899,7 +1076,7 @@ impl Cone {
         if top_iso.is_degenerate(k, pt_tol, None)? {
             return Ok(None);
         }
-        let Some(top) = iso_arc(k, &top_iso, pt_tol)? else {
+        let Some(top) = iso_arc_exact(k, &top_iso, pt_tol)? else {
             return Ok(None);
         };
 
@@ -909,7 +1086,7 @@ impl Cone {
         if bot_iso.is_degenerate(k, pt_tol, None)? {
             return Ok(None);
         }
-        let Some(bot) = iso_arc(k, &bot_iso, pt_tol)? else {
+        let Some(bot) = iso_arc_exact(k, &bot_iso, pt_tol)? else {
             return Ok(None);
         };
 
@@ -978,9 +1155,9 @@ impl Cone {
         // (error recovery: the constructor always makes its generator)
 
         // the cylinder's NURB is a copy of the tested one
-        let nurb = test_surface
-            .gw_nurb()
-            .ok_or_else(|| SolidError::null_pointer(OP_NURB_CYLINDER))?;
+        let nurb = test_surface.gw_nurb().ok_or_else(|| {
+            SolidError::surface_missing(OP_NURB_CYLINDER, "the tested surface's NURB")
+        })?;
         cylinder.rev.base.nurb = Some(copy_nurb_surface(nurb)).into();
         cylinder.rev.base.nurb_is_borrowed = false;
 
@@ -1035,7 +1212,10 @@ impl Cone {
             || linear_iso_param == SurfParamType::Neither
         {
             // Modified Nurb SmCone: no longer has degree 1 and 2 basis functions
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the NURB is no longer of degree 1 by 2 and rational",
+            ));
         }
 
         // evaluate Nurb min/max domain points (the cone's EvaluatePoint; statuses
@@ -1081,13 +1261,19 @@ impl Cone {
         )?
         else {
             // Modified Nurb SmCone: no longer has circular top and bottom IsoParamCurves
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the NURB's top and bottom iso curves are not circular",
+            ));
         };
 
         // not a cone - top/bot start angles or top/bot end angles vary by more than
         // tolerance
         if twisted(&top, &bot, ang_tol)? {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the top and bottom arcs' angles differ by more than the tolerance",
+            ));
         }
 
         // get the cone height = length of axis vector from botCurve Center to TopCurve
@@ -1099,13 +1285,19 @@ impl Cone {
 
         // not a cone - height of cone is degenerate (cone is a disk)
         if height < EFF_ZERO_SQRT {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the cone's height is degenerate",
+            ));
         }
         nurb_z_axis = nurb_z_axis.unitize_or_z();
 
         // not a cone - bottom arc's plane is not perpendicular to cone axis
         if !nurb_z_axis.is_parallel_to(bot.frame.z_axis(), ang_tol) {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the bottom arc's plane is not perpendicular to the axis",
+            ));
         }
 
         // when the CenterBot to CenterTop vector opposes the circle Z axis, bInsideOut
@@ -1127,7 +1319,10 @@ impl Cone {
                 bot.radius = mean;
                 top.radius = mean;
             } else {
-                return Err(SolidError::sm_err(OP_REBUILD));
+                return Err(SolidError::surface_failed(
+                    OP_REBUILD,
+                    "the cylinder's top and bottom radii differ",
+                ));
             }
         }
 
@@ -1205,11 +1400,10 @@ fn cone_inversion(
         Ok(inv) => Ok((inv.location, inv.uv)),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
         // rotated point not on the generator: upstream sets SM_LT_EXTERIOR
-        Err(SolidError::Upstream {
-            operation: OP_REV_STEP_INV,
-            code: SM_ERR,
-            ..
-        }) => Ok((LocationType::Exterior, Point2::UNDEF)),
+        // (by its status, so also a typed failure that replaced the `Upstream`, #13790)
+        Err(e) if crate::surface::surf_of_revolution::p2::is_off_generator(&e) => {
+            Ok((LocationType::Exterior, Point2::UNDEF))
+        }
         // the fork (tangency-labs/smlib dfc7cb6, `SER` unless `STEPInversionAnswered`):
         // a failure is passed on instead of read as SM_LT_EXTERIOR
         Err(e) if k.fixes.analytic_inversion_answers_apart => Err(e),
@@ -1547,6 +1741,61 @@ mod tests {
         Kernel::default()
     }
 
+    /// The r 40 corner of the battery case's plan outline (#13536): a 0.156 rad arc about
+    /// (-133.12369073537272, -163.5) extruded along z from -1 to 93, its NURBS form as the
+    /// record holds it, which SolidCraft's import recognises. The cylinder recogniser finds the
+    /// cylinder on the form at bound 0, with the extrusion's axis. (Their end circles were
+    /// fitted through samples: its axis tilted 1.44e-13 rad, 1.35e-11 mm
+    /// off the form at the top, so the case wall had no exact class and its shell was
+    /// refused.)
+    #[test]
+    fn an_extruded_short_arc_is_recognised_on_its_form() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as Nurb;
+        use crate::surface::implicit::{lies_on, AnalyticSupport};
+        let k = kernel();
+        let w = 0.996_964_674_751_439_2;
+        // (x w, y w, w) of each column, at z = -1 and 93
+        let columns = [
+            (-133.123_690_735_372_72, -203.5, 1.0),
+            (-129.605_407_717_687_06, -202.882_311_311_917_87, w),
+            (-126.914_177_375_687_37, -203.015_085_016_179_46, 1.0),
+        ];
+        let net = columns
+            .into_iter()
+            .map(|(x, y, w)| vec![CPoint::new(x, y, -w, w), CPoint::new(x, y, 93.0 * w, w)])
+            .collect();
+        let knot = 6.234_728_055_932_869;
+        let nurb = Nurb::new(
+            net,
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, knot, knot, knot],
+            vec![0.0, 0.0, 94.0, 94.0],
+        )
+        .unwrap();
+        let form = BSplineSurface::from_nurb(nurb, false);
+        let found = [Cone::is_nurb_surface_cylinder(&k, &form, 1.0).unwrap()];
+        for cone in found {
+            let surface = crate::surface::surface::Surface::from(cone.expect("a cylinder"));
+            let support = AnalyticSupport::of(&surface).expect("an analytic surface");
+            assert!(lies_on(&form, &support.implicit()).unwrap(), "{support:?}");
+            let (AnalyticSupport::Cylinder { placement, .. }
+            | AnalyticSupport::Cone { placement, .. }) = support
+            else {
+                panic!("{support:?}");
+            };
+            let axis = placement.z_axis();
+            assert!(axis.x.abs() < 1e-15 && axis.y.abs() < 1e-15, "{axis:?}");
+        }
+    }
+
+    /// A canonical cylinder of radius 2.94 (the goldens' gen0196), its net reaching ±1.2e6
+    /// along its axis, recognised at a thousandth of the default tolerance. Its control points
+    /// are known to the rounding of coordinates that large (about 2.3e-10), which turns its
+    /// middle circle's plane by about 2.5e-11 rad, more than that scaled tolerance (1.75e-11
+    /// rad): the circle checks take at least the angle that rounding allows, so the cylinder is
+    /// still found (#13536).
     fn canonical(k: &Kernel, bot: f64, top: f64, h: f64, swap: bool, inside: bool) -> Cone {
         Cone::create_canonical(k, &Axis2Placement::IDENTITY, bot, top, h, swap, inside).unwrap()
     }
@@ -1866,6 +2115,153 @@ mod tests {
         // one radius below the tolerance: truncated at the new apex
         let trunc = cone.create_offset_surface(&k, -1.2, 1e-6).unwrap().unwrap();
         assert!(trunc.top_radius().abs() < 1e-12);
+    }
+
+    /// The offset of a cone truncated at its new apex is reparameterised to the matching
+    /// part of this NURB domain, anchored at the end that survives (an inside-out cone's
+    /// NURB runs the generator backwards), so a point of the kept cone keeps its
+    /// parameter and the face's UV trims lift onto the offset unchanged
+    /// (tangency-labs/solidcraft#11774: the part sat at the domain's other end, the
+    /// rim's UV moved, and a shell's edge-use mapping could not pair the rim, so the
+    /// shell refused a cone with an apex).
+    #[test]
+    fn offset_truncation_keeps_the_surviving_ends_parameters() {
+        let k = kernel();
+        for inside in [false, true] {
+            // negated inside out: the shrinking offset is -1.2 there and 1.2 here
+            let d = if inside { 1.2 } else { -1.2 };
+            // full apex cones: (bot, top) = (0, 2) collapses at the bot end under the
+            // offset, (2, 0) at the top; truncated cones (1, 2) and (2, 1) likewise,
+            // where the kept height follows the radius's span top - bot, not the
+            // surviving radius alone
+            for (bot, top) in [(0.0, 2.0), (2.0, 0.0), (1.0, 2.0), (2.0, 1.0)] {
+                let cone = canonical(&k, bot, top, 3.0, false, inside);
+                let off = cone.create_offset_surface(&k, d, 1e-6).unwrap().unwrap();
+                // the radii move by cos(semi) * d along the NURB normal (negated
+                // inside out); the kept cone runs from where that radius reaches zero
+                // to the surviving end, at the slope (top - bot) / 3
+                let semi = cone.semi_angle_deg() * PI / 180.0;
+                let moved = (if inside { -1.0 } else { 1.0 }) * d * semi.cos();
+                let (new_bot, new_top) = (bot + moved, top + moved);
+                let collapsed_bot = new_bot < new_top;
+                let (want_bot, want_top, want_height) = if collapsed_bot {
+                    (0.0, new_top, 3.0 * new_top / (top - bot))
+                } else {
+                    (new_bot, 0.0, 3.0 * new_bot / (bot - top))
+                };
+                assert!(
+                    (off.bot_radius() - want_bot).abs() < 1e-9
+                        && (off.top_radius() - want_top).abs() < 1e-9,
+                    "bot {bot} top {top} inside {inside}: radii {:?} {:?}",
+                    off.bot_radius(),
+                    off.top_radius()
+                );
+                assert!(
+                    (off.height(&k).unwrap() - want_height).abs() < 1e-9,
+                    "bot {bot} top {top} inside {inside}: height {:?}, the radius's span gives {want_height}",
+                    off.height(&k)
+                );
+
+                // The matching part of this NURB domain, anchored at the surviving end:
+                // the bot sits at the domain's minimum and the top at its maximum, and an
+                // inside-out cone's NURB runs that generator backwards, so the surviving
+                // end is the maximum one when the collapsed end is the bot's, and the
+                // minimum one when the collapsed end is the top's, and the other way
+                // round inside out.
+                let at_max_end = collapsed_bot != inside;
+                let dom0 = cone.rev().base().natural_uv_domain();
+                let dom = off.rev().base().natural_uv_domain();
+                let (lo, hi) = (dom0.min().y, dom0.max().y);
+                let span = hi - lo;
+                let kept = want_height / 3.0 * span;
+                let (want_min, want_max) = if at_max_end {
+                    (hi - kept, hi)
+                } else {
+                    (lo, lo + kept)
+                };
+                assert!(
+                    (dom.min().y - want_min).abs() < 1e-9 && (dom.max().y - want_max).abs() < 1e-9,
+                    "bot {bot} top {top} inside {inside}: domain {dom:?}, matching part [{want_min}, {want_max}]"
+                );
+
+                // the offset of S is S + d n at the same parameters: sampled points of
+                // the kept cone keep their distance from the original
+                for t in [0.3, 0.7] {
+                    let uv = Point2::new(0.37, want_min + t * (want_max - want_min));
+                    let s = cone.evaluate_point(&k, uv).unwrap();
+                    let o = off.evaluate_point(&k, uv).unwrap();
+                    assert!(
+                        (s.distance(o) - d.abs()).abs() < 1e-9,
+                        "bot {bot} top {top} inside {inside} at {uv:?}: {}",
+                        s.distance(o)
+                    );
+                }
+            }
+        }
+    }
+
+    /// tangency-labs/solidcraft#15165: a truncated cone (bot 1, top 2, height 3) offset
+    /// inward by 1.2 collapses at its bot end. Its radii move by `cos(semi) d` with
+    /// `tan(semi) = 1 / 3`, so the offset top radius is `2 - 1.2 * 3 / sqrt(10)` =
+    /// 0.86158 and, at the original's slope (the radius grows 1 over 3 of height), the
+    /// kept cone is `3 * 0.86158 / 1` = 2.58474 high (2.5848 in the issue, from 0.8616).
+    /// The old height `0.86158 * 3 / 2` = 1.29237 took the slope from the top radius
+    /// alone, as for a full apex cone. The
+    /// offset is `S + d n` at the same parameters, with the closed-form unit normal
+    /// `(cos(semi) cos(t), cos(semi) sin(t), -sin(semi))` of the identity-placed cone.
+    /// The mirror cone (bot 2, top 1) collapses at its top by the same amount.
+    #[test]
+    fn offset_truncation_of_a_truncated_cone_keeps_its_slope() {
+        let k = kernel();
+        let (cos_semi, sin_semi) = (3.0 / 10f64.sqrt(), 1.0 / 10f64.sqrt());
+        let d = -1.2;
+        let kept_radius = 2.0 + d * cos_semi;
+        let want_height = 3.0 * kept_radius / 1.0;
+        // the issue's figures: 0.8616 to four places, and 3 * 0.8616 = 2.5848 (the
+        // unrounded height is 2.58474)
+        assert!((kept_radius - 0.8616).abs() < 5e-5, "{kept_radius}");
+        assert!((want_height - 2.5848).abs() < 3.0 * 5e-5, "{want_height}");
+        for (bot, top) in [(1.0, 2.0), (2.0, 1.0)] {
+            let cone = canonical(&k, bot, top, 3.0, false, false);
+            let off = cone.create_offset_surface(&k, d, 1e-6).unwrap().unwrap();
+            let height = off.height(&k).unwrap();
+            assert!(
+                (height - want_height).abs() < 1e-12,
+                "bot {bot} top {top}: height {height}, the radius's span gives {want_height}"
+            );
+            let (want_bot, want_top) = if bot < top {
+                (0.0, kept_radius)
+            } else {
+                (kept_radius, 0.0)
+            };
+            assert!(
+                (off.bot_radius() - want_bot).abs() < 1e-12
+                    && (off.top_radius() - want_top).abs() < 1e-12,
+                "bot {bot} top {top}: radii {} {}",
+                off.bot_radius(),
+                off.top_radius()
+            );
+
+            // S + d n at the same parameters, n the outward unit normal of the cone
+            // whose radius grows with z (bot < top) or shrinks (bot > top)
+            let tilt = if bot < top { sin_semi } else { -sin_semi };
+            let dom = off.rev().base().natural_uv_domain();
+            for (su, sv) in [(0.1, 0.2), (0.37, 0.5), (0.8, 0.9), (0.5, 1.0)] {
+                let uv = Point2::new(
+                    dom.min().x + su * (dom.max().x - dom.min().x),
+                    dom.min().y + sv * (dom.max().y - dom.min().y),
+                );
+                let s = cone.evaluate_point(&k, uv).unwrap();
+                let o = off.evaluate_point(&k, uv).unwrap();
+                let t = s.y.atan2(s.x);
+                let n = Vec3::new(cos_semi * t.cos(), cos_semi * t.sin(), -tilt);
+                let want = s + d * n;
+                assert!(
+                    o.distance(want) < 1e-12,
+                    "bot {bot} top {top} at {uv:?}: offset {o:?}, S + d n {want:?}"
+                );
+            }
+        }
     }
 
     #[test]

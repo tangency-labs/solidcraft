@@ -448,8 +448,19 @@ fn the_mirrored_notch_leaves_the_same_solid() {
 /// 641498.913182 mm3 (the closed form plus the 0.056814 mm3 the offset plane adds to
 /// the prism, derived in the finding). This test holds today's answer instead, so that
 /// a fix shows up as this test failing.
+///
+/// Since #15718 (exactly placed definitions combine within their summed tolerances, not
+/// five times them) the defect has changed form: the result is one closed solid that
+/// passes Level 2, but still has 9 faces. The ninth is a sliver triangle whose base is the
+/// two cap points 2.36e-5 apart (an Edge/Face and a Vertex/Face definition, each of
+/// tolerance 1e-5, kept apart at their summed radius) and whose two long edges, 52.6 long,
+/// diverge linearly from a shared apex, so they lie within the intersection tolerance
+/// 2e-5 of each other over the first 85% of their length: two coincident edges
+/// (validity invariant 7), which Level 2 does not check. The target stays 8 faces
+/// (tangency-labs/solidcraft#16349).
 #[test]
 fn the_repros_rounded_slant_plane_leaves_a_sliver_near_the_seam() {
+    use solidcore::topology::brep::p1 as bp1;
     let mut k = Kernel::default();
     k.fixes = UpstreamFixes::all();
     let a = the_box(&mut k);
@@ -472,14 +483,91 @@ fn the_repros_rounded_slant_plane_leaves_a_sliver_near_the_seam() {
         .collect();
     println!("the repro's own rounded rotation: faces {faces} solid {solid} {names:?}");
     assert_eq!(faces, 9, "today: a ninth, sliver face");
-    assert!(!solid, "today: not a closed manifold solid");
-    assert!(!check.is_valid(), "today: the Level2 check refuses it");
+    assert!(solid, "today: a closed manifold solid");
+    assert!(check.is_valid(), "today: Level 2 passes: {names:?}");
+    // the sliver: a triangle of area about 6.2e-4 whose base, between the two cap points,
+    // is longer than the intersection tolerance 2e-5 but under 3e-5, and whose two other
+    // edges, over 50 long, meet at an apex; so they lie within 2e-5 of each other over
+    // more than 2/3 of their length
+    let mut slivers = Vec::new();
+    for f in bp1::faces(&brep, None).unwrap() {
+        let area =
+            solidcore::mass::integrator::properties::face_area(&k, &mut brep, f, 1e-9).unwrap();
+        if area >= 1e-2 {
+            continue;
+        }
+        // each side: its chord length and N points along its curve
+        let mut sides: Vec<(f64, Vec<Point3>)> =
+            solidcore::topology::face::p4::edges(&brep, f, None, false, None)
+                .unwrap()
+                .into_iter()
+                .map(|e| {
+                    let ed = brep.edge(e).unwrap();
+                    let c = ed.curve.as_ref().unwrap();
+                    let n = 4000;
+                    let pts: Vec<Point3> = (0..=n)
+                        .map(|i| {
+                            c.evaluate_point(&k, ed.interval.evaluate(f64::from(i) / f64::from(n)))
+                                .unwrap()
+                        })
+                        .collect();
+                    (pts[0].distance(pts[n as usize]), pts)
+                })
+                .collect();
+        sides.sort_by(|a, b| a.0.total_cmp(&b.0));
+        slivers.push((area, sides));
+    }
+    assert_eq!(slivers.len(), 1, "one sliver face: {slivers:?}");
+    let (area, sides) = &slivers[0];
+    let lengths: Vec<f64> = sides.iter().map(|s| s.0).collect();
+    assert!((5e-4..8e-4).contains(area), "sliver area {area}");
+    assert_eq!(lengths.len(), 3, "a triangle: {lengths:?}");
+    let tol = 2e-5;
     assert!(
-        names.contains(&"SmFace#36".to_owned()),
-        "the issue's own report, face test 36: {names:?}"
+        lengths[0] > tol && lengths[0] < 3e-5,
+        "sliver base {lengths:?}"
     );
     assert!(
-        names.contains(&"SmEdge#9".to_owned()),
-        "the sliver's edge, test 9: {names:?}"
+        lengths[1] > 50.0 && lengths[2] > 50.0,
+        "sliver sides {lengths:?}"
+    );
+    // How much of each long side lies within the tolerance of the other, measured on the
+    // curves: 4001 points along each side, each one's distance to the other side's
+    // polyline through its 4001 points, the share of the side's polyline length whose
+    // both ends are within the tolerance. (The polyline is within its chord sagitta of
+    // the curve; for these 52-long, nearly straight sides that is far below 2e-5.)
+    let to_polyline = |p: Point3, line: &[Point3]| {
+        line.windows(2)
+            .map(|w| {
+                let (a, b) = (w[0], w[1]);
+                let ab = b - a;
+                let len2 = ab.dot(ab);
+                let t = if len2 > 0.0 {
+                    ((p - a).dot(ab) / len2).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                p.distance(a + ab * t)
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    let within = |side: &[Point3], other: &[Point3]| {
+        let near: Vec<bool> = side.iter().map(|&p| to_polyline(p, other) <= tol).collect();
+        let (mut inside, mut total) = (0.0, 0.0);
+        for (w, n) in side.windows(2).zip(near.windows(2)) {
+            let l = w[0].distance(w[1]);
+            total += l;
+            if n[0] && n[1] {
+                inside += l;
+            }
+        }
+        inside / total
+    };
+    let f1 = within(&sides[1].1, &sides[2].1);
+    let f2 = within(&sides[2].1, &sides[1].1);
+    println!("long sides within the tolerance of each other: {f1:.4}, {f2:.4}");
+    assert!(
+        (0.8..0.9).contains(&f1) && (0.8..0.9).contains(&f2),
+        "the long sides lie within {tol} of each other over 80-90% of their length: {f1}, {f2}"
     );
 }

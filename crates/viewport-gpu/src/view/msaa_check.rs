@@ -109,6 +109,7 @@ impl Renderer {
             pv_hide: false,
             preview_bounds: None,
             view_proj: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.5, 1.0]],
+            turned_depth: None,
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
             clip: [0.0; 4],

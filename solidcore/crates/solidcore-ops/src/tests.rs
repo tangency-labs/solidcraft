@@ -36,9 +36,10 @@ fn a_volume_accuracy_is_the_kernels_to_refuse() {
         (at - 4.0 / 3.0 * std::f64::consts::PI * 125.0).abs() < 1e-6,
         "{at}"
     );
-    assert_eq!(
-        ball.volume(f64::INFINITY).err(),
-        Some(Error::Status(crate::error::INVALID_INPUT))
+    let refused = ball.volume(f64::INFINITY).err();
+    assert!(
+        matches!(refused, Some(Error::Refused { reason, .. }) if !reason.is_empty()),
+        "{refused:?}"
     );
 }
 
@@ -643,6 +644,82 @@ fn the_result_contract() {
     );
 }
 
+/// `check_solid` names the test a body fails (#15035): a box passes; a sheet is not manifold; a
+/// box with every face flipped fails the pointer check; a box with its material outside is
+/// proved inside out. The body checked is unchanged.
+#[test]
+fn check_solid_names_the_test_a_body_fails() {
+    use crate::SolidTest;
+    use solidcore::primitive::api_primitives::{create_box, create_plane};
+    use solidcore::topology::brep::p1::regions;
+    all_fixes();
+    let boxed = |k: &mut solidcore::Kernel| {
+        create_box(k, solidcore::Vec3::new(0.0, 0.0, 0.0), 1.0, 2.0, 3.0)
+    };
+    let solid = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    assert_eq!(solid.check_solid(), Ok(()));
+    let bodies = run("check_solid bodies", |k| {
+        let sheet = create_plane(k, solidcore::Vec3::new(0.0, 0.0, 0.0), 1.0, 1.0)?;
+        let mut flipped = boxed(k)?;
+        for f in flipped.face_list().to_vec() {
+            flip_face_orientation(&mut flipped, f)?;
+        }
+        let mut inside_out = boxed(k)?;
+        for r in regions(&inside_out, None)? {
+            let g = inside_out.region_mut(r)?;
+            g.is_void = 1 - g.is_void;
+        }
+        Ok(Some([sheet, flipped, inside_out].map(Body::new)))
+    })
+    .unwrap()
+    .unwrap();
+    let before = bodies.each_ref().map(|b| b.to_smb(true).unwrap());
+    let tests = bodies.each_ref().map(|b| b.check_solid().err());
+    assert_eq!(
+        tests,
+        [
+            Some(Error::NotSolidBecause(SolidTest::NotManifold)),
+            Some(Error::NotSolidBecause(SolidTest::PointersInvalid)),
+            Some(Error::NotSolidBecause(SolidTest::VolumeNegative)),
+        ]
+    );
+    assert_eq!(bodies.each_ref().map(|b| b.to_smb(true).unwrap()), before);
+}
+
+/// A kernel invariant found broken is `Invariant`: the kernel's class of it, marked a defect,
+/// the operation and what did not hold; a call made before its preparation stays `Exception`
+/// (#15035). No input reaches a broken invariant (each one found is a defect, fixed), so the
+/// kernel's error is made here.
+#[test]
+fn a_broken_kernel_invariant_is_named_not_an_exception() {
+    use solidcore::error::ErrorKind;
+    use solidcore::SolidError;
+    let invariant = crate::error::status(SolidError::PortInvariant {
+        operation: "offset::close_loop_gaps",
+        reason: "a kept edge without a 3D curve",
+    });
+    assert_eq!(
+        invariant,
+        Error::Invariant {
+            class: ErrorKind::PortInvariant,
+            defect: true,
+            operation: "offset::close_loop_gaps",
+            reason: "a kept edge without a 3D curve",
+        }
+    );
+    assert_eq!(
+        invariant.to_string(),
+        "solidcore broke its own invariant in offset::close_loop_gaps \
+         (port_invariant, a defect to report): a kept edge without a 3D curve"
+    );
+    assert_eq!(
+        crate::error::status(SolidError::PreparationRequired {
+            operation: "query::distance",
+        }),
+        Error::Exception
+    );
+}
+
 /// What a refused edit must give back as it came in, beyond the `.smb` bytes (which carry no
 /// attributes): the naming, the key, the locked box, and every face's and edge's attributes in
 /// order (a temporary one and the provenance among them), with the geometry and topology.
@@ -837,4 +914,63 @@ fn a_body_goes_to_the_record_and_back_in_record_order() {
         Body::from_record(&bad, true),
         Err(Error::Record(_))
     ));
+}
+
+/// A record's structure is checked before the kernel sees it: a use's interval outside its
+/// curve's range, a coordinate that is not a number, a circle of no radius, are refused as
+/// invalid records (the kernel's pcurve takes converted, checked values).
+#[test]
+fn pcurves_of_malformed_records_are_refused_as_invalid() {
+    use crate::pcurve::{pcurves, EdgeUse, Error};
+    use solidcore_record::brep::{Curve, Frame, Surface};
+    let plane = Surface::Plane {
+        origin: [0.; 3],
+        u_axis: [1., 0., 0.],
+        v_axis: [0., 1., 0.],
+    };
+    let line = Curve::Line {
+        start: [0.; 3],
+        end: [1., 0., 0.],
+    };
+    let one = |curve: &Curve, interval: [f64; 2]| {
+        let c = curve.clone();
+        pcurves(
+            &plane,
+            &[vec![EdgeUse {
+                edge: 0,
+                curve: &c,
+                interval,
+                forward: true,
+                tolerance: 0.0,
+                given: None,
+            }]],
+            1e-6,
+        )
+    };
+    for interval in [
+        [1., 1.],
+        [2., 1.],
+        [f64::NAN, 1.],
+        [0., f64::INFINITY],
+        [0., 1e13],
+    ] {
+        assert!(
+            matches!(one(&line, interval), Err(Error::Invalid(_))),
+            "{interval:?}"
+        );
+    }
+    let nan = Curve::Line {
+        start: [f64::NAN, 0., 0.],
+        end: [1., 0., 0.],
+    };
+    assert!(matches!(one(&nan, [0., 1.]), Err(Error::Invalid(_))));
+    let frame = Frame {
+        origin: [0.; 3],
+        x_axis: [1., 0., 0.],
+        y_axis: [0., 1., 0.],
+    };
+    let collapsed = Curve::Circle { frame, radius: 0. };
+    assert!(matches!(one(&collapsed, [0., 1.]), Err(Error::Invalid(_))));
+    // And a well-formed one still gets its pcurve.
+    assert!(one(&line, [0., 1.]).is_ok());
 }

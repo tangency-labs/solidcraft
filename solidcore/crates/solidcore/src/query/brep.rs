@@ -121,6 +121,7 @@ use crate::topology::brep_cache::{
 };
 use crate::topology::{edge, face, vertex, Brep, BrepId, NamingScheme, RegionId};
 
+const OP_TIGHT_BOX: &str = "query::brep::calculate_tight_bounding_box";
 const OP_CLASSIFY: &str = "query::brep::BrepQuery::point_3d_classify";
 const OP_EVAL_POINT: &str = "query::brep::evaluate_surface_point";
 const OP_EVAL_NORMAL: &str = "query::brep::evaluate_surface_normal";
@@ -268,8 +269,10 @@ pub fn calculate_tight_bounding_box<'a>(
         brep_bbox = brep_bbox.union(&v_bbox);
     }
 
-    // Union all of the Tight Edge bounding boxes.
+    // Union all of the Tight Edge bounding boxes. (not upstream) cooperative cancellation
+    // once per edge and face (solidcore#3247).
     for e in bp1::edges(b, None)? {
+        k.check_cancelled(OP_TIGHT_BOX)?;
         // (CalculateBoundingBox initialises the box first)
         let mut edge_bbox = ignored(crate::error::passed_on(
             qe::calculate_bounding_box(k, b, e, NORMAL_BOX, false),
@@ -294,6 +297,7 @@ pub fn calculate_tight_bounding_box<'a>(
     // face).
     let mut face_bbox = Extent3d::new();
     for f in bp1::faces(b, None)? {
+        k.check_cancelled(OP_TIGHT_BOX)?;
         if let Some(loose) = ignored(crate::error::passed_on(
             qf1::calculate_bounding_box(k, lb.get(), f, false),
             k.fixes.brep_edit_statuses_pass_on,
@@ -807,7 +811,9 @@ impl<'a> BrepQuery<'a> {
             // when the point is on a Brep Face
             if let Some(sol) = solutions.get(0) {
                 // Just grab the first one -- we asked for Single.
-                let object = sol.objects[0].ok_or(SolidError::null_pointer(OP_CLASSIFY))?;
+                let object = sol.objects[0].ok_or_else(|| {
+                    SolidError::query_missing(OP_CLASSIFY, "the object the ray solution hit")
+                })?;
                 pc.load_from_intersection(
                     point_zone_tol_3d,
                     bp2::cache_entity(object)?,
@@ -874,7 +880,9 @@ impl<'a> BrepQuery<'a> {
             }
         }
 
-        let region = region.ok_or(SolidError::sm_err(OP_CLASSIFY))?;
+        let region = region.ok_or_else(|| {
+            SolidError::query_failed(OP_CLASSIFY, "no ray fired from the point found its region")
+        })?;
 
         // load output
         pc.set_class_object(PointClassType::Region, Some(EntityRef::Region(region)));

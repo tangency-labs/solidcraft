@@ -35,6 +35,8 @@
 //!   It must disable point testing on that SAME cache for BOTH endpoint solves.
 //! - Signed B-rep/curve and shape/curve queries test only the start parameter and
 //!   rewrite only start parameters, preserving upstream's `i < 1` behavior.
+//! - A near-zero vertex/edge answer never ends a maximum query: the remaining
+//!   edges and faces can contain a larger answer, regardless of retention tolerance.
 
 use super::p1::TopologyObjects;
 use super::p1::{self, best_answer_so_far, CurveRef};
@@ -44,7 +46,9 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::Branch;
-use crate::geom::global_solver::{GlobalSolve, SolutionRequested, SolverOperation};
+use crate::geom::global_solver::{
+    GlobalSolve, OperationCategory, SolutionRequested, SolverOperation,
+};
 use crate::geom::object::{Shape, ShapeMember};
 use crate::geom::solution_array::SolutionObject;
 use crate::geom::solution_array::{Solution, SolutionArray, SolutionType, SortKey};
@@ -76,16 +80,12 @@ impl<'t, O: SolutionObject + 't> TopologySolver<'t, '_, O> {
         let tree2 = self.base.tree(1)?;
         let node1 = self.base.branch_node(branch, 0)?;
         let node2 = self.base.branch_node(branch, 1)?;
-        let id1 = branch
-            .first()
-            .copied()
-            .flatten()
-            .ok_or(SolidError::null_pointer(OP_LOCAL))?;
-        let id2 = branch
-            .get(1)
-            .copied()
-            .flatten()
-            .ok_or(SolidError::null_pointer(OP_LOCAL))?;
+        let id1 = branch.first().copied().flatten().ok_or_else(|| {
+            SolidError::intersect_missing(OP_LOCAL, "the branch's first tree node")
+        })?;
+        let id2 = branch.get(1).copied().flatten().ok_or_else(|| {
+            SolidError::intersect_missing(OP_LOCAL, "the branch's second tree node")
+        })?;
         let first_objects = if node1.aux_type == AuxDataType::ObjectList {
             tree1.node_object_list(id1)?
         } else {
@@ -109,7 +109,7 @@ impl<'t, O: SolutionObject + 't> TopologySolver<'t, '_, O> {
                 let mut local = self
                     .local_solver
                     .take()
-                    .ok_or(SolidError::null_pointer(OP_LOCAL))?;
+                    .ok_or_else(|| SolidError::intersect_missing(OP_LOCAL, "the local solver"))?;
                 let result = local.solve_it(k, self, object1.object, object2.object);
                 self.local_solver = Some(local);
                 result?;
@@ -128,7 +128,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         object2: Option<O>,
     ) -> Result<()> {
         let vertex = if self.swap_order { object2 } else { object1 }
-            .ok_or(SolidError::null_pointer(OP_VF))?;
+            .ok_or_else(|| SolidError::intersect_missing(OP_VF, "the vertex to solve against"))?;
         self.point_vertex = Some(vertex);
         self.point = ts.objects.vertex_point(vertex)?;
         self.solve_point_face(k, ts, object1, object2)
@@ -148,10 +148,13 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         } else {
             point_curve.interval = self.interval;
         }
-        let vertex = object2.ok_or(SolidError::null_pointer(OP_CV))?;
+        let vertex = object2
+            .ok_or_else(|| SolidError::intersect_missing(OP_CV, "the vertex to solve against"))?;
         point_curve.point_vertex = Some(vertex);
         point_curve.point = ts.objects.vertex_point(vertex)?;
-        let curve = self.curve.ok_or(SolidError::null_pointer(OP_CV))?;
+        let curve = self
+            .curve
+            .ok_or_else(|| SolidError::intersect_missing(OP_CV, "the curve to solve against"))?;
         point_curve.point_curve(k, ts, curve.curve, Some(curve.handle))
     }
 }
@@ -166,14 +169,18 @@ fn swap_curve_surface_parameters<O>(solution: &mut Solution<O>) -> Result<()> {
         .start
         .parameters
         .get_mut(..3)
-        .ok_or(SolidError::sm_err(OP_CF))?
+        .ok_or_else(|| {
+            SolidError::intersect_failed(OP_CF, "the solution has fewer than three parameters")
+        })?
         .rotate_left(1);
     if solution.solution_type == SolutionType::RangeOfValues {
         solution
             .end
             .parameters
             .get_mut(..3)
-            .ok_or(SolidError::sm_err(OP_CF))?
+            .ok_or_else(|| {
+                SolidError::intersect_failed(OP_CF, "the solution has fewer than three parameters")
+            })?
             .rotate_left(1);
     }
     Ok(())
@@ -320,12 +327,12 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         object2: Option<O>,
     ) -> Result<()> {
         let vertex = if self.swap_order { object1 } else { object2 }
-            .ok_or(SolidError::null_pointer(OP_EV))?;
+            .ok_or_else(|| SolidError::intersect_missing(OP_EV, "the vertex to solve against"))?;
         // Upstream selects this SAME object as pCurve (SmTopologySolver.cpp:1032):
         // for a real vertex that cast is invalid. Validate the selected object class
         // instead of reinterpreting memory or silently correcting the operand.
         let curve_object = if self.swap_order { object1 } else { object2 }
-            .ok_or(SolidError::null_pointer(OP_EV))?;
+            .ok_or_else(|| SolidError::intersect_missing(OP_EV, "the curve to solve against"))?;
         if curve_object.kind() != crate::geom::solution_array::ObjectKind::Curve {
             return Err(SolidError::invalid_input(
                 OP_EV,
@@ -361,7 +368,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         object2: Option<O>,
     ) -> Result<()> {
         let curve = if self.swap_order { object2 } else { object1 }
-            .ok_or(SolidError::null_pointer(OP_EF))?;
+            .ok_or_else(|| SolidError::intersect_missing(OP_EF, "the curve to solve against"))?;
         let edge = ts.objects.curve_edge(curve)?;
         if self.in_shape(ts.objects, edge) {
             let edge = edge.ok_or(SolidError::invalid_input(OP_EF, "curve without an edge"))?;
@@ -387,7 +394,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         object2: Option<O>,
     ) -> Result<()> {
         let surface_handle = if self.swap_order { object1 } else { object2 }
-            .ok_or(SolidError::null_pointer(OP_CF))?;
+            .ok_or_else(|| SolidError::intersect_missing(OP_CF, "the surface to solve against"))?;
         let owner = self
             .curve_edge
             .or(self.curve_face)
@@ -402,7 +409,9 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
             return Ok(());
         }
         let face = face.ok_or(SolidError::invalid_input(OP_CF, "surface without a face"))?;
-        let curve = self.curve.ok_or(SolidError::null_pointer(OP_CF))?;
+        let curve = self
+            .curve
+            .ok_or_else(|| SolidError::intersect_missing(OP_CF, "the curve to solve against"))?;
         if ts.base.projected_operation {
             let (curves, uv_curves) = p1::face_silhouettes(
                 ts.kernel,
@@ -428,7 +437,12 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                 local.curve_edge2 = None;
                 local.interval2 = other.natural_interval();
                 local.curve_face2 = Some(face);
-                local.surface_curve2 = Some(uv_curves.get(i).ok_or(SolidError::sm_err(OP_CF))?);
+                local.surface_curve2 = Some(uv_curves.get(i).ok_or_else(|| {
+                    SolidError::intersect_failed(
+                        OP_CF,
+                        "the silhouette has no UV curve at that index",
+                    )
+                })?);
                 // (the silhouette curve exists only for this solve)
                 local.temporary_curves = true;
                 local.solve_curve_curve(k, ts)?;
@@ -586,8 +600,12 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         object1: Option<O>,
         object2: Option<O>,
     ) -> Result<()> {
-        let surface1 = object1.ok_or(SolidError::null_pointer(OP_FF))?;
-        let surface2 = object2.ok_or(SolidError::null_pointer(OP_FF))?;
+        let surface1 = object1.ok_or_else(|| {
+            SolidError::intersect_missing(OP_FF, "the first surface to solve against")
+        })?;
+        let surface2 = object2.ok_or_else(|| {
+            SolidError::intersect_missing(OP_FF, "the second surface to solve against")
+        })?;
         let face1 = ts.objects.surface_face(surface1)?;
         let face2 = ts.objects.surface_face(surface2)?;
         if !self.in_shape(ts.objects, face1) || !self.in_shape(ts.objects, face2) {
@@ -620,7 +638,12 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                 local.curve_face = Some(face1);
                 local.curve_edge = None;
                 local.interval = curve.natural_interval();
-                local.surface_curve = Some(uv_curves.get(i).ok_or(SolidError::sm_err(OP_FF))?);
+                local.surface_curve = Some(uv_curves.get(i).ok_or_else(|| {
+                    SolidError::intersect_failed(
+                        OP_FF,
+                        "the silhouette has no UV curve at that index",
+                    )
+                })?);
                 local.solve_curve_face(k, ts, Some(surface2), Some(surface2))?;
             }
         } else {
@@ -771,10 +794,17 @@ fn curve_tree<O: SolutionObject>(
             true,
         )?
         .normal
-        .ok_or(SolidError::sm_err(OP))?;
-    let root = tree.top_node().ok_or(SolidError::sm_err(OP))?;
+        .ok_or_else(|| {
+            SolidError::intersect_failed(OP, "the curve's bounding box has no normal cone")
+        })?;
+    let root = tree
+        .top_node()
+        .ok_or_else(|| SolidError::intersect_failed(OP, "the curve tree has no top node"))?;
     tree.node_mut(root)?.bbox = bbox;
-    let list = tree.node(root)?.list_head().ok_or(SolidError::sm_err(OP))?;
+    let list = tree
+        .node(root)?
+        .list_head()
+        .ok_or_else(|| SolidError::intersect_failed(OP, "the curve tree's top node has no list"))?;
     let item = tree.list_mut(list)?;
     item.bbox = bbox;
     item.object = Some(curve.handle);
@@ -801,7 +831,8 @@ fn early_point_answer<O: SolutionObject>(
     ts: &TopologySolver<'_, '_, O>,
     options: TopologySolveOptions<'_>,
 ) -> bool {
-    options.requested == SolutionRequested::Single
+    ts.base.category != OperationCategory::Maximize
+        && options.requested == SolutionRequested::Single
         && ts
             .base
             .solutions
@@ -832,7 +863,8 @@ fn rewrite_endpoint_solutions<O: SolutionObject>(
 
 impl<'t, O: SolutionObject + 't> TopologySolver<'t, '_, O> {
     /// Solves a query point against a B-rep's vertex, edge and face trees
-    /// (`BrepPointSolve`), retaining upstream's early single-answer exits.
+    /// (`BrepPointSolve`), retaining early single-answer exits only for
+    /// non-maximizing operations.
     ///
     /// # Errors
     /// Invalid operation or null B-rep, unavailable B-rep cache, or a local solve.
@@ -847,7 +879,8 @@ impl<'t, O: SolutionObject + 't> TopologySolver<'t, '_, O> {
         if !valid_point_operation(options.operation) {
             return Err(SolidError::invalid_input(OP, "unsupported operation"));
         }
-        let brep = brep.ok_or(SolidError::null_pointer(OP))?;
+        let brep =
+            brep.ok_or_else(|| SolidError::intersect_missing(OP, "the B-rep to solve against"))?;
         let mut ts = new_topology_solver(kernel, objects, options);
         let trees = objects.brep_trees(brep)?;
         let query = point_tree(point);
@@ -926,7 +959,10 @@ impl<'t, O: SolutionObject + 't> TopologySolver<'t, '_, O> {
             options.operation = SolverOperation::Intersect;
         }
         let mut ts = new_topology_solver(kernel, objects, options);
-        let trees = objects.brep_trees(brep.ok_or(SolidError::null_pointer(OP))?)?;
+        let trees =
+            objects.brep_trees(brep.ok_or_else(|| {
+                SolidError::intersect_missing(OP, "the B-rep to solve against")
+            })?)?;
         let query = curve_tree(kernel, curve, interval)?;
         if options.operation != SolverOperation::Normalize {
             let mut vertices = LocalSolver::new(LocalSolverKind::CurveVertex, false, None);
@@ -1097,8 +1133,12 @@ impl<'t, O: SolutionObject + 't> TopologySolver<'t, '_, O> {
             return Err(SolidError::invalid_input(OP, "unsupported operation"));
         }
         let mut ts = new_topology_solver(kernel, objects, options);
-        let first = objects.brep_trees(first.ok_or(SolidError::null_pointer(OP))?)?;
-        let second = objects.brep_trees(second.ok_or(SolidError::null_pointer(OP))?)?;
+        let first = objects.brep_trees(first.ok_or_else(|| {
+            SolidError::intersect_missing(OP, "the first B-rep to solve against")
+        })?)?;
+        let second = objects.brep_trees(second.ok_or_else(|| {
+            SolidError::intersect_missing(OP, "the second B-rep to solve against")
+        })?)?;
         ts.solve_two_tree_sets(first, second)?;
         Ok(ts.base.solutions)
     }

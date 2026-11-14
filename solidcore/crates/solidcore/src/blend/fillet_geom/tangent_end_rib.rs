@@ -16,9 +16,7 @@
 //! Newton solve takes at most 40 steps.
 
 use crate::blend::fillet_section::section::GnSectionFsg;
-use crate::blend::fillet_solver::p1::{
-    FilletSolver, FilletSurfaceGenerator, FilletSurfaceGeneratorType,
-};
+use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::global_solver::SolverOperation;
@@ -47,7 +45,7 @@ fn smax(a: f64, b: f64) -> f64 {
 
 /// `sm_SectionContactOrder`: the order of contact `k` of a fillet's cross-section with
 /// the faces it meets: 1 for a chamfer's straight section, 2 for a round's circular
-/// one, `n + 1` for a blend curve of Gn continuity. The section stands off its face as
+/// one; a G^n section's is [`gn_section_contact_order`]'s. The section stands off its face as
 /// `c s^k` at distance `s` from the contact line; where the face runs tangent into an
 /// end face whose normal curvature across the seam differs by `dk`, the end rib leaves
 /// the tangent end as `a ~ s^(k/2)` along the rail.
@@ -58,24 +56,20 @@ fn smax(a: f64, b: f64) -> f64 {
 pub fn section_contact_order(solver: &FilletSolver) -> Result<u32> {
     let fsg = solver
         .fillet_surface_generator()
-        .ok_or_else(|| SolidError::null_pointer(OP_ORDER))?;
+        .ok_or_else(|| SolidError::blend_missing(OP_ORDER, "the solver's surface generator"))?;
     match fsg.fillet_surface_generator_type() {
         FilletSurfaceGeneratorType::Linear => Ok(1),
         FilletSurfaceGeneratorType::Circular => Ok(2),
-        // ((SmBlendCurveCrossSectionFSG*)pFSG)->GetContinuity() + 1
-        FilletSurfaceGeneratorType::BlendCurve => match fsg {
-            FilletSurfaceGenerator::BlendCurve(g) => g
-                .continuity
-                .checked_add(1)
-                .ok_or_else(|| SolidError::sm_err(OP_ORDER)),
-            _ => Err(SolidError::sm_err(OP_ORDER)),
-        },
-        FilletSurfaceGeneratorType::Unknown => Err(SolidError::sm_err(OP_ORDER)),
+        // ((SmBlendCurveCrossSectionFSG*)pFSG)->GetContinuity() + 1: that generator is
+        // retired (WR-685); a G^n section's order is [`gn_section_contact_order`]'s
+        FilletSurfaceGeneratorType::BlendCurve | FilletSurfaceGeneratorType::Unknown => Err(
+            SolidError::blend_failed(OP_ORDER, "the surface generator has no known contact order"),
+        ),
     }
 }
 
-/// The fork's `sm_SectionContactOrder` for a G^n section (`SM_FSG_BLEND_CURVE` with
-/// `fixes.fillet_gn_section_generator`, WR-685; tangency-labs/smlib@11ea2d9): the order of
+/// The fork's `sm_SectionContactOrder` for a G^n section (`SM_FSG_BLEND_CURVE`, WR-685;
+/// tangency-labs/smlib@11ea2d9): the order of
 /// contact k of the section with the face it meets at `at`, a point of one of its rails:
 /// `n + 1`, or `n + 2` where its jets make the `t^(n+1)` term vanish (two planes), found at
 /// that rail's station (`SmGnSectionFSG::ContactOrderAt`). The rail through `at` is the one
@@ -118,7 +112,10 @@ pub fn gn_section_contact_order(
     }
     if rail > 1 || best > tol {
         // "sm_SectionContactOrder(): the point is on no rail"
-        return Err(SolidError::sm_err(OP_ORDER));
+        return Err(SolidError::blend_failed(
+            OP_ORDER,
+            "the point is on no rail",
+        ));
     }
     let [uv0, uv1] = uvs;
     let [r0, r1] = rails;
@@ -127,7 +124,9 @@ pub fn gn_section_contact_order(
     let seed = [w0.x, w0.y, w1.x, w1.y];
     let points = [r0.evaluate_point(k, s)?, r1.evaluate_point(k, s)?];
     let order = g.contact_order_at(k, faces, center, s, seed, points, rail)?;
-    u32::try_from(order).map_err(|_| SolidError::sm_err(OP_ORDER))
+    u32::try_from(order).map_err(|_| {
+        SolidError::blend_failed(OP_ORDER, "the contact order is negative or too large")
+    })
 }
 
 /// `D[0][0]`, `D[1][0]` (u) and `D[0][1]` (v) of `surface` at `uv`
@@ -141,10 +140,9 @@ fn first_derivs(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(Vec3, Vec3
     };
     let d = surface.evaluate(k, uv, 1, 1, flags)?;
     let at = |i: usize, j: usize| {
-        d.get(i)
-            .and_then(|row| row.get(j))
-            .copied()
-            .ok_or_else(|| SolidError::sm_err(OP_RIB))
+        d.get(i).and_then(|row| row.get(j)).copied().ok_or_else(|| {
+            SolidError::blend_failed(OP_RIB, "the surface's evaluation has no first derivatives")
+        })
     };
     Ok((at(0, 0)?, at(1, 0)?, at(0, 1)?))
 }
@@ -246,7 +244,7 @@ pub fn tangent_end_rib(
     reverse: bool,
     approx_tol: f64,
 ) -> Result<TangentEndRib> {
-    let fail = || SolidError::sm_err(OP_RIB);
+    let fail = |what| SolidError::blend_failed(OP_RIB, what);
 
     // both ends on the fillet surface and on the end surface
     let fil_dom = fillet.natural_uv_domain_with_nurb(k)?;
@@ -259,12 +257,12 @@ pub fn tangent_end_rib(
             fillet.drop_point::<crate::surface::surface::p4::NoObject>(k, p, &fil_dom, &opts)?;
         if !d.success || d.gap > approx_tol {
             // an end of the rib is off the fillet surface
-            return Err(fail());
+            return Err(fail("an end of the rib is off the fillet surface"));
         }
         let e = end.drop_point::<crate::surface::surface::p4::NoObject>(k, p, &end_dom, &opts)?;
         if !e.success || e.gap > approx_tol {
             // an end of the rib is off the end surface
-            return Err(fail());
+            return Err(fail("an end of the rib is off the end surface"));
         }
         if let (Some(f), Some(g)) = (fil_uv.get_mut(kk), end_uv.get_mut(kk)) {
             *f = d.result_uv;
@@ -289,7 +287,9 @@ pub fn tangent_end_rib(
         1
     } else {
         // the rib's ends are not on the fillet surface's two rails
-        return Err(fail());
+        return Err(fail(
+            "the rib's ends are not on the fillet surface's two rails",
+        ));
     };
     let (sigma0, sigma1, alpha0, alpha1) = if section == 0 {
         (fil0.x, fil1.x, fil0.y, fil1.y)
@@ -298,7 +298,7 @@ pub fn tangent_end_rib(
     };
     if (alpha1 - alpha0).abs() <= EFF_ZERO_SQRT * smax(1.0, alpha0.abs()) {
         // the rib's ends lie on one section
-        return Err(fail());
+        return Err(fail("the rib's ends lie on one section"));
     }
     let odd = order % 2 == 1;
     let sigma_at = |t: f64| sigma0 + (sigma1 - sigma0) * (if odd { t * t } else { t });
@@ -326,7 +326,7 @@ pub fn tangent_end_rib(
         let det = a * c - b * b;
         if det <= EFF_ZERO * a * c {
             // the end surface is singular at the tangent end
-            return Err(fail());
+            return Err(fail("the end surface is singular at the tangent end"));
         }
         let r_u = e_u.dot(d2_x);
         let r_v = e_v.dot(d2_x);
@@ -336,7 +336,7 @@ pub fn tangent_end_rib(
         if off_plane.length() > EFF_ZERO_SQRT * smax(1.0, d2_x.length()) {
             // the fillet surface's section leaves the end surface's tangent plane at the
             // tangent end
-            return Err(fail());
+            return Err(fail("the fillet surface's section leaves the end surface's tangent plane at the tangent end"));
         }
         (d2_x, d2_fil, d2_end)
     } else {
@@ -360,13 +360,15 @@ pub fn tangent_end_rib(
             // the interpolation's solve gives the second to rounding, and it is the
             // first.
             if c.number_control_points()? < 2 {
-                return Err(fail());
+                return Err(fail(
+                    "the zero-speed end's interpolation has fewer than two control points",
+                ));
             }
             let (cpt0, _) = c.control_point(ControlPointForm::NonRational, 0)?;
             let (cpt1, _) = c.control_point(ControlPointForm::NonRational, 1)?;
             if cpt1.distance(cpt0) > EFF_ZERO_SQRT * smax(1.0, cpt0.max_dimension()) {
                 // the zero-speed end's interpolation leaves its end
-                return Err(fail());
+                return Err(fail("the zero-speed end's interpolation leaves its end"));
             }
             c.set_control_point(ControlPointForm::NonRational, 1, cpt0, 1.0)?;
             return Ok(c);
@@ -426,7 +428,9 @@ pub fn tangent_end_rib(
                         es.get(jj - 1),
                         es.get(jj - 2),
                     ) else {
-                        return Err(fail());
+                        return Err(fail(
+                            "the rib has fewer than two earlier points to extrapolate from",
+                        ));
                     };
                     (
                         2.0 * a1 - a2,
@@ -450,10 +454,12 @@ pub fn tangent_end_rib(
                 spans *= 2;
                 continue;
             }
-            let last = xs.get_mut(spans).ok_or_else(fail)?;
+            let last = xs
+                .get_mut(spans)
+                .ok_or_else(|| fail("the rib has no last point"))?;
             if last.distance(other_end) > approx_tol {
                 // the rib does not reach its other end
-                return Err(fail());
+                return Err(fail("the rib does not reach its other end"));
             }
             *last = other_end;
             stations = true;
@@ -491,7 +497,7 @@ pub fn tangent_end_rib(
                 es.get(jj),
                 es.get(jj + 1),
             ) else {
-                return Err(fail());
+                return Err(fail("a span of the rib has no ends"));
             };
             let t = 0.5 * (t0 + t1);
             let alpha = 0.5 * (a0 + a1);
@@ -542,7 +548,7 @@ pub fn tangent_end_rib(
         for &(jj, alpha, uv, exact) in off.iter().rev() {
             let at = jj + 1;
             let (Some(&t0), Some(&t1)) = (ts.get(at - 1), ts.get(at)) else {
-                return Err(fail());
+                return Err(fail("a span of the rib has no ends"));
             };
             ts.insert(at, 0.5 * (t0 + t1));
             alphas.insert(at, alpha);
@@ -553,5 +559,28 @@ pub fn tangent_end_rib(
     }
 
     // no stations give the rib within tolerance
-    Err(fail())
+    Err(fail("no stations give the rib within the tolerance"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::blend::BlendFailure;
+    use crate::error::SM_ERR_NULL_POINTER;
+
+    /// A solver without a surface generator has no contact order: a typed blend failure
+    /// that keeps the bare `Upstream`'s status (#13790).
+    #[test]
+    fn a_solver_without_surface_generator_has_no_contact_order() {
+        let solver = FilletSolver::new(1e-5, 1e-3, 0.017);
+        let e = section_contact_order(&solver).unwrap_err();
+        assert_eq!(e.operation(), OP_ORDER);
+        assert_eq!(
+            (e.blend_failure(), e.upstream_status()),
+            (
+                Some(&BlendFailure::Missing("the solver's surface generator")),
+                Some(SM_ERR_NULL_POINTER)
+            )
+        );
+    }
 }

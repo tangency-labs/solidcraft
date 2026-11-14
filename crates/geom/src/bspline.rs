@@ -16,9 +16,15 @@ use std::ops::{Add, AddAssign, Mul, Sub};
 
 use solidcore_record::Vec3;
 
+mod curve;
+mod interval;
+
+pub use curve::{CurvePiece, NurbsCurve};
+
 /// Highest polynomial degree accepted in either direction: the B-rep record's own bound
 /// (`Brep::validate`), so every spline a record may hold can be evaluated. A G4 blend is of
-/// degree 9 (five conditions at each end).
+/// degree 9 (five conditions at each end). A [`NurbsCurve`] has the same bound, which bounds
+/// the work a hostile curve can ask for.
 pub const MAX_SPLINE_DEGREE: usize = solidcore_record::brep::MAX_SPLINE_DEGREE;
 /// Most knots accepted in one knot vector.
 pub const MAX_KNOTS: usize = 1 << 14;
@@ -93,6 +99,33 @@ impl Mul<f64> for HPoint {
 impl AddAssign for HPoint {
     fn add_assign(&mut self, o: HPoint) {
         *self = *self + o;
+    }
+}
+
+/// A homogeneous control point as knot insertion combines it: in floating point ([`HPoint`]), or
+/// enclosed in intervals that hold the exact result ([`interval::HInterval`]). One implementation
+/// of insertion and clamping serves both.
+pub(crate) trait Blend: Copy {
+    /// What a point is weighted by: a number, or an interval holding one.
+    type Factor: Copy;
+    const ZERO: Self;
+    /// The factors of the later and the earlier point for `u` between `lo < hi`:
+    /// `((u − lo)/(hi − lo), (hi − u)/(hi − lo))`, both from knot differences (`1 − α` loses α's
+    /// digits when α is near 1, and a weight of 10¹² beside one of 1 shows it).
+    fn factors(lo: f64, u: f64, hi: f64) -> (Self::Factor, Self::Factor);
+    /// `self·a + other·b`.
+    fn blend(self, a: Self::Factor, other: Self, b: Self::Factor) -> Self;
+}
+
+impl Blend for HPoint {
+    type Factor = f64;
+    const ZERO: HPoint = HPoint::ZERO;
+    fn factors(lo: f64, u: f64, hi: f64) -> (f64, f64) {
+        let den = hi - lo;
+        ((u - lo) / den, (hi - u) / den)
+    }
+    fn blend(self, a: f64, other: HPoint, b: f64) -> HPoint {
+        self * a + other * b
     }
 }
 
@@ -257,6 +290,11 @@ pub fn find_span(knots: &[f64], p: usize, n: usize, u: f64) -> Option<usize> {
 /// points (Boehm; NURBS Book eq. 5.10 / A5.1). `u` must lie in the domain `[knots[p],
 /// knots[n]]`; the curve is unchanged.
 pub fn insert_knot(p: usize, knots: &[f64], ctrl: &[HPoint], u: f64) -> SplineResult<(Vec<f64>, Vec<HPoint>)> {
+    insert_row(p, knots, ctrl, u)
+}
+
+/// [`insert_knot`] for either kind of point ([`Blend`]).
+pub(crate) fn insert_row<P: Blend>(p: usize, knots: &[f64], ctrl: &[P], u: f64) -> SplineResult<(Vec<f64>, Vec<P>)> {
     let n = ctrl.len();
     if n <= p || knots.len() != n + p + 1 {
         return invalid("knot and control point counts do not match the degree");
@@ -267,17 +305,18 @@ pub fn insert_knot(p: usize, knots: &[f64], ctrl: &[HPoint], u: f64) -> SplineRe
     check_knots(knots)?;
     let k = find_span(knots, p, n, u).ok_or_else(|| SplineError::Invalid(format!("knot {u} is outside the domain")))?;
     let kn = |i: usize| knots.get(i).copied().unwrap_or(0.0);
-    let pt = |i: usize| ctrl.get(i).copied().unwrap_or(HPoint::ZERO);
+    let pt = |i: usize| ctrl.get(i).copied().unwrap_or(P::ZERO);
     let mut q = Vec::with_capacity(n + 1);
     for i in 0..=n {
         q.push(if i + p <= k {
             pt(i)
         } else if i > k {
             pt(i - 1)
+        } else if kn(i + p) > kn(i) {
+            let (alpha, beta) = P::factors(kn(i), u, kn(i + p));
+            pt(i).blend(alpha, pt(i - 1), beta)
         } else {
-            let den = kn(i + p) - kn(i);
-            let alpha = if den > 0.0 { (u - kn(i)) / den } else { 1.0 };
-            pt(i) * alpha + pt(i - 1) * (1.0 - alpha)
+            pt(i)
         });
     }
     let mut nk = knots.to_vec();
@@ -338,7 +377,7 @@ pub fn bernstein(p: usize, i: usize, x: f64) -> f64 {
 /// basis functions that vanish on the domain dropped (a basis function's last span does not
 /// depend on its first knot, so that knot moves to the domain end). The curve on the domain is
 /// unchanged.
-pub(crate) fn clamp_row(p: usize, knots: &[f64], row: &[HPoint]) -> SplineResult<(Vec<f64>, Vec<HPoint>)> {
+pub(crate) fn clamp_row<P: Blend>(p: usize, knots: &[f64], row: &[P]) -> SplineResult<(Vec<f64>, Vec<P>)> {
     let n = row.len();
     let (Some(&a), Some(&b)) = (knots.get(p), knots.get(n)) else { return invalid("too few knots") };
     let (mut knots, mut row) = (knots.to_vec(), row.to_vec());
@@ -347,10 +386,10 @@ pub(crate) fn clamp_row(p: usize, knots: &[f64], row: &[HPoint]) -> SplineResult
         let mut guard = 0;
         while mult(&knots) < p {
             guard += 1;
-            if guard > MAX_SPLINE_DEGREE + 1 {
+            if guard > p + 1 {
                 return invalid("clamping did not converge");
             }
-            (knots, row) = insert_knot(p, &knots, &row, x)?;
+            (knots, row) = insert_row(p, &knots, &row, x)?;
         }
         let n = row.len();
         let (first, last) = if at_end {
@@ -369,7 +408,7 @@ pub(crate) fn clamp_row(p: usize, knots: &[f64], row: &[HPoint]) -> SplineResult
         } else {
             nk.first_mut().into_iter().for_each(|y| *y = x);
         }
-        row = row.get(first..last).map(<[HPoint]>::to_vec).unwrap_or_default();
+        row = row.get(first..last).map(<[P]>::to_vec).unwrap_or_default();
         knots = nk;
     }
     Ok((knots, row))
@@ -804,6 +843,20 @@ pub(crate) mod tests {
         assert!(worst < 1e-13, "deviation {worst}");
         assert!(insert_knot(p, &KNOTS, &ctrl, 1.5).is_err());
         assert!(insert_knot(p, &KNOTS, &ctrl, f64::NAN).is_err());
+        // Beside a weight of 10¹², α = (1.5 − 2⁻⁵²)/1.5 is so near 1 that `1 − α` keeps a
+        // quarter of the other factor wrong; from knot differences it stays on the curve.
+        let ub = 1.5 - 2f64.powi(-52);
+        let heavy = [
+            HPoint::weighted(Vec3::new(0.0, 0.0, 0.0), 1.0),
+            HPoint::weighted(Vec3::new(10.0, 20.0, 0.0), 1e12),
+            HPoint::weighted(Vec3::new(20.0, 0.0, 0.0), 1.0),
+        ];
+        let open = [0.0, 0.0, 0.0, 1.5, 1.5, 1.5];
+        let (kn, pts) = insert_knot(2, &open, &heavy, ub).unwrap();
+        for u in [0.75, 1.4, ub, 1.5] {
+            let off = curve(2, &open, &heavy, u).dist(curve(2, &kn, &pts, u));
+            assert!(off < 1e-9, "{off:e} off the curve at {u}");
+        }
     }
 
     pub(crate) fn random_surface(seed: u64, ku: Vec<f64>, kv: Vec<f64>, degree: [usize; 2]) -> NurbsSurface {

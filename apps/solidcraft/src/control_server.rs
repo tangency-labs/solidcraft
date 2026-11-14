@@ -3,7 +3,7 @@
 //! with what SolidCraft's requests mean ([`SolidCraft`]).
 
 use std::net::TcpListener;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, OnceLock};
 
 use serde_json::{Value, json};
@@ -12,6 +12,7 @@ use solidcraft_control::{ControlRequest, auth};
 use solidcraft_engine::MAX_LINE;
 use solidcraft_engine::control_auth::APP;
 use solidcraft_engine::control_pending;
+use solidcraft_ui_egui::control_switch;
 
 /// The token files this launch wrote (its control port, the agent chat's endpoint) and the
 /// token in each, removed when the app ends unless another launch has written the file since.
@@ -85,40 +86,60 @@ pub fn remove_token_file() {
 /// The port the app's own channel listens on and its token, for removing the discovery file at exit.
 static APP_PORT: std::sync::Mutex<Option<(u16, String)>> = std::sync::Mutex::new(None);
 
-pub fn start(listen_on: auth::Listen, ctx: egui::Context) -> Receiver<ControlRequest> {
+/// Open the app's control channel (at launch, or turned on in the settings): its listener, its
+/// token file and the discovery file. Stopping it removes both files again.
+pub fn start(listen_on: auth::Listen, ctx: egui::Context) -> Result<control_switch::Started, control_switch::StartError> {
+    use control_switch::StartError;
     let (tx, rx) = channel::<ControlRequest>();
     // Every connection must show the token before anything runs (docs/control-protocol.md).
-    match APP.env_token().or_else(server::new_token) {
-        Some(token) => {
-            let listener = match listen_on {
-                auth::Listen::Exact(port) => TcpListener::bind(("127.0.0.1", port)),
-                auth::Listen::Default => auth::bind_with_fallback(APP.default_port, auth::PORT_TRIES),
-            };
-            match listener {
-                Ok(l) => {
-                    if let Some(port) = listen_on_listener(l, token.clone(), tx, ctx, false) {
-                        if matches!(listen_on, auth::Listen::Default) {
-                            solidcraft_engine::note!(
-                                "solidcraft: control channel on the default port 127.0.0.1:{port} (Preferences > Assistant turns it off)"
-                            );
-                        }
-                        // The discovery file: where `solidcraft-cli mcp` finds this app with no arguments.
-                        match APP.write_current_port(port) {
-                            Ok(_) => {
-                                if let Ok(mut p) = APP_PORT.lock() {
-                                    *p = Some((port, token));
-                                }
-                            }
-                            Err(e) => solidcraft_engine::note!("solidcraft: could not write the control discovery file ({e})"),
-                        }
-                    }
-                }
-                Err(e) => solidcraft_engine::note!("solidcraft: control server failed to bind 127.0.0.1: {e}"),
+    let Some(token) = APP.env_token().or_else(server::new_token) else {
+        solidcraft_engine::note!("solidcraft: control server not started: no random token available");
+        return Err(StartError::Failed("no random token available".into()));
+    };
+    let listener = match listen_on {
+        auth::Listen::Exact(port) => TcpListener::bind(("127.0.0.1", port)),
+        auth::Listen::Default => auth::bind_with_fallback(APP.default_port, auth::PORT_TRIES),
+    };
+    let listener = listener.map_err(|e| {
+        solidcraft_engine::note!("solidcraft: control server failed to bind 127.0.0.1: {e}");
+        match (listen_on, e.kind()) {
+            // In use; Windows reports a port another program holds exclusively as denied.
+            (auth::Listen::Exact(port), std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied) => StartError::PortTaken(port),
+            (auth::Listen::Default, std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied) => StartError::PortTaken(APP.default_port),
+            _ => StartError::Failed(e.to_string()),
+        }
+    })?;
+    let (port, stop) =
+        listen_on_listener(listener, token.clone(), tx, ctx, false).ok_or_else(|| StartError::Failed("the listener did not start".into()))?;
+    if matches!(listen_on, auth::Listen::Default) {
+        solidcraft_engine::note!("solidcraft: control channel on the default port 127.0.0.1:{port} (Preferences > Assistant turns it off)");
+    }
+    // The discovery file: where `solidcraft-cli mcp` finds this app with no arguments.
+    match APP.write_current_port(port) {
+        Ok(_) => {
+            if let Ok(mut p) = APP_PORT.lock() {
+                *p = Some((port, token.clone()));
             }
         }
-        None => solidcraft_engine::note!("solidcraft: control server not started: no random token available"),
+        Err(e) => solidcraft_engine::note!("solidcraft: could not write the control discovery file ({e})"),
     }
-    rx
+    let stop = Box::new(move || {
+        stop.stop();
+        if let Ok(mut p) = APP_PORT.lock()
+            && p.as_ref().is_some_and(|(held, _)| *held == port)
+        {
+            *p = None;
+        }
+        APP.remove_current_port(port, &token);
+        if let Some(path) = APP.token_path(port) {
+            auth::remove_token_file(&path, &token);
+            if let Ok(mut files) = TOKEN_FILES.lock() {
+                files.retain(|(p, _)| *p != path);
+            }
+        }
+        solidcraft_engine::note!("solidcraft: control channel on 127.0.0.1:{port} closed");
+    });
+    Ok(control_switch::Started { port, requests: rx, stop })
 }
 
 /// The agent chat's own endpoint for its agent's MCP server (docs/agent-chat.md): a free loopback
@@ -137,12 +158,19 @@ pub fn listen_agent(tx: Sender<ControlRequest>, ctx: egui::Context) -> Option<u1
             return None;
         }
     };
-    listen_on_listener(listener, token, tx, ctx, true)
+    // The chat's endpoint lives as long as the app.
+    listen_on_listener(listener, token, tx, ctx, true).map(|(port, _)| port)
 }
 
-/// Serve `listener` (loopback) with `token`; the port it listens on.
+/// Serve `listener` (loopback) with `token`; the port it listens on and how to stop it.
 /// `patient`: every request may wait as long as a batch (a person decides on it).
-fn listen_on_listener(listener: TcpListener, token: String, tx: Sender<ControlRequest>, ctx: egui::Context, patient: bool) -> Option<u16> {
+fn listen_on_listener(
+    listener: TcpListener,
+    token: String,
+    tx: Sender<ControlRequest>,
+    ctx: egui::Context,
+    patient: bool,
+) -> Option<(u16, server::Stop)> {
     let port = listener.local_addr().ok()?.port();
     match APP.token_path(port) {
         Some(path) => match APP.write_token_file(&path, &token) {
@@ -164,8 +192,8 @@ fn listen_on_listener(listener: TcpListener, token: String, tx: Sender<ControlRe
             )
         }
     }
-    match hub(ctx).listen(listener, token, tx, patient) {
-        Ok(()) => Some(port),
+    match hub(ctx).listen_stoppable(listener, token, tx, patient) {
+        Ok(stop) => Some((port, stop)),
         Err(e) => {
             solidcraft_engine::note!("solidcraft: control server not started: {e}");
             None

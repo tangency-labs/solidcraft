@@ -34,6 +34,7 @@ use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
+use solidcore::mass::enclosure::EnclosureStop;
 use solidcore::mass::enclosure::{
     enclose_volume, volume_sign, VolumeEnclosure, VolumeSign, CELL_BUDGET,
 };
@@ -107,6 +108,50 @@ fn a_thin_shell_below_the_estimates_error_decides_positive() {
         // the solid test reads the same sign: on the estimate (-180.05 at r 1e4) it was false
         let mut b = quarter_shell(&mut k, r, t);
         assert!(is_outward_solid(&mut k, &mut b).unwrap(), "r {r} t {t}");
+    }
+}
+
+/// The quarter shell at r 1e4, t 1e-3 is a solid facing out. Its faces are checked with
+/// their UV trims made (#15040); two of its loops (area 15.7 against a box of 1e8) came
+/// out zero area while `compute_loop_orientation` compared a sampled polygon's area with
+/// its box's, and are oriented from their certified signed area (#15107).
+#[test]
+fn the_far_thin_shell_is_an_outward_solid() {
+    let mut k = Kernel::default();
+    let mut b = quarter_shell(&mut k, 1e4, 1e-3);
+    assert!(is_outward_solid(&mut k, &mut b).unwrap());
+}
+
+/// The far thin shell's loops are oriented by a decided sign, not by the absence of a
+/// zero-area report: every face's outer loop is `Same` on its UV trims, and run backwards
+/// it is `Opposite`, and the body check then fails Loop Orientation (a reversed loop near
+/// the shell is still caught).
+#[test]
+fn the_far_thin_shells_loops_reversed_are_caught() {
+    use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use solidcore::topology::face::p2::loops;
+    use solidcore::topology::face::p3::compute_loop_orientation;
+    use solidcore::topology::loopuse::flip_loop_orientation;
+    let mut k = Kernel::default();
+    let count = faces(&quarter_shell(&mut k, 1e4, 1e-3), None)
+        .unwrap()
+        .len();
+    assert_eq!(count, 6);
+    for i in 0..count {
+        let mut b = quarter_shell(&mut k, 1e4, 1e-3);
+        let f = faces(&b, None).unwrap()[i];
+        let l = loops(&b, f, false, None).unwrap()[0];
+        let o = compute_loop_orientation(&k, &mut b, f, l, None, false).unwrap();
+        assert_eq!(o, OrientType::Same, "face {i}");
+        flip_loop_orientation(&mut b, l).unwrap();
+        let o = compute_loop_orientation(&k, &mut b, f, l, None, false).unwrap();
+        assert_eq!(o, OrientType::Opposite, "face {i} reversed");
+        let c = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(
+            c.lines().iter().any(|l| l.contains("Loop Orientation")),
+            "face {i} reversed: {:?}",
+            c.lines()
+        );
     }
 }
 
@@ -251,10 +296,8 @@ fn solids_touching_along_an_edge_pair_their_sides() {
 
 #[test]
 fn a_g2_round_decides_around_its_volume() {
-    // the G^n section's flag and the one its plane rails need: the round a bare net
-    let mut bare = Kernel::default();
-    bare.fixes.fillet_gn_section_generator = true;
-    bare.fixes.fillet_surface_plane_curve_on_plane_equation = true;
+    // the default kernel: the round a bare net
+    let bare = Kernel::default();
     let v = 24000.0 - 40.0 * 9.0 * (1.0 - PI / 4.0);
     for (name, mut k, certified) in [
         ("bare net", bare, false),
@@ -319,4 +362,157 @@ fn a_face_without_a_nurbs_form_is_an_error_not_a_sign() {
     b.face_mut(f).unwrap().surface = Some(Surface::from(off));
     let r = volume_sign(&k, &mut b);
     assert!(matches!(r, Err(SolidError::Unsupported { .. })), "{r:?}");
+}
+
+/// The solid test names the test a body fails (#15035), the first in the order the tests run:
+/// a sheet is not manifold (and not closed solids, for the touching test); a box with a vertex
+/// tolerance 1000 times the body's, and a box with every face flipped, fail the pointer check;
+/// the quarter horn torus of #1954, its internal pole read as upstream reads it, fails
+/// `AssertValid`; the box with its material outside is proved inside out; the quarter
+/// shell R 10, t 1e-6 leaves its sign undecided. A box passes every test.
+#[test]
+fn the_solid_test_names_the_test_a_body_fails() {
+    use solidcore::primitive::api_primitives::create_plane;
+    use solidcore::topology::brep::p2::is_manifold_solid;
+    use solidcore::topology::brep::{
+        outward_solid_failure, outward_touching_solids_failure, SolidTest,
+    };
+    use solidcore::topology::face::p1::flip_face_orientation;
+    let mut k = Kernel::default();
+    let boxed = |k: &mut Kernel| create_box(k, Point3::new(1.0, 2.0, 3.0), 4.0, 5.0, 6.0).unwrap();
+
+    let mut b = boxed(&mut k);
+    assert_eq!(outward_solid_failure(&mut k, &mut b).unwrap(), None);
+    assert_eq!(
+        outward_touching_solids_failure(&mut k, &mut b).unwrap(),
+        None
+    );
+
+    let mut sheet = create_plane(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 1.0).unwrap();
+    assert_eq!(
+        outward_solid_failure(&mut k, &mut sheet).unwrap(),
+        Some(SolidTest::NotManifold)
+    );
+    assert_eq!(
+        outward_touching_solids_failure(&mut k, &mut sheet).unwrap(),
+        Some(SolidTest::NotClosedSolids)
+    );
+
+    let mut loose = boxed(&mut k);
+    let v = loose.vertex_list()[0];
+    let tolerance = loose.tolerance() * 1000.0;
+    loose.vertex_mut(v).unwrap().tolerance = tolerance;
+    assert!(is_manifold_solid(&loose).unwrap());
+    assert_eq!(
+        outward_solid_failure(&mut k, &mut loose).unwrap(),
+        Some(SolidTest::PointersInvalid)
+    );
+
+    let mut flipped = boxed(&mut k);
+    for f in flipped.face_list().to_vec() {
+        flip_face_orientation(&mut flipped, f).unwrap();
+    }
+    assert_eq!(
+        outward_solid_failure(&mut k, &mut flipped).unwrap(),
+        Some(SolidTest::PointersInvalid)
+    );
+
+    // the quarter horn torus of #1954 (a circle of radius 5 revolved a quarter turn about
+    // an axis through its seam vertex, capped): with `internal_pole_row_through_knot` off,
+    // `AssertValid` reports an internal pole (B-spline surface test 2) after a clean
+    // pointer check
+    {
+        use solidcore::curve::curve::Curve;
+        use solidcore::curve::ellipse::Ellipse;
+        use solidcore::geom::extent1d::Extent1d;
+        use solidcore::sweep::api_brep::create_rotational_sweep;
+        let mut k = Kernel::default();
+        k.fixes.internal_pole_row_through_knot = false;
+        let frame = Axis2Placement::new(Point3::new(0.0, 0.0, 20.0), Vec3::X, Vec3::Y);
+        let circle = Curve::from(
+            Ellipse::create_canonical_circle(
+                &k,
+                &frame,
+                5.0,
+                Some(&Extent1d::from_min_max(0.0, 360.0)),
+                None,
+            )
+            .unwrap(),
+        );
+        let mut horn = create_rotational_sweep(
+            &mut k,
+            &[Some(&circle)],
+            Point3::new(5.0, 0.0, 20.0),
+            Vec3::Y,
+            90.0,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            outward_solid_failure(&mut k, &mut horn).unwrap(),
+            Some(SolidTest::Invalid)
+        );
+    }
+
+    let mut inside_out = boxed(&mut k);
+    for r in regions(&inside_out, None).unwrap() {
+        let g = inside_out.region_mut(r).unwrap();
+        g.is_void = 1 - g.is_void;
+    }
+    assert_eq!(
+        outward_solid_failure(&mut k, &mut inside_out).unwrap(),
+        Some(SolidTest::VolumeNegative)
+    );
+
+    let mut thin = quarter_shell(&mut k, 10.0, 1e-6);
+    assert_eq!(
+        outward_solid_failure(&mut k, &mut thin).unwrap(),
+        Some(SolidTest::VolumeUndecided)
+    );
+}
+
+/// #15173: an enclosure asked narrower than the part no cut narrows (the caps' and loops'
+/// rounding terms, and strips that settle) is still refined, and a tighter request is never
+/// answered wider. For the sphere of radius 2, asking 1e-11 returned the 8 starting cells,
+/// 3e4 wide, while asking 1e-10 returned 5.3e-10.
+#[test]
+fn a_width_below_the_floor_is_refined_not_given_up() {
+    let mut k = Kernel::default();
+    let v = 4.0 / 3.0 * PI * 8.0;
+    let mut last = f64::INFINITY;
+    for width in [1e-6, 1e-8, 1e-11] {
+        let mut b = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0).unwrap();
+        let e = enclose_volume(&k, &mut b, width).unwrap();
+        assert!(holds(&e, v), "{width}: {e:?} misses {v}");
+        assert!(e.width() <= last, "{width}: {e:?} wider than {last}");
+        // as narrow as asked, or it says why not
+        assert_eq!(
+            e.stop == EnclosureStop::Reached,
+            e.width() <= width,
+            "{width}: {e:?}"
+        );
+        last = e.width();
+    }
+    assert!(last <= 1e-9, "1e-11: {last}");
+}
+
+/// #15173: refining past where the rounding grows faster than the cells shrink does not
+/// widen the enclosure: the narrowest seen is kept. On a box, spending the whole budget took
+/// the width from 1.7e-10 (asked 1e-9) to 1.5e-9.
+#[test]
+fn spending_the_budget_never_widens_the_enclosure() {
+    let mut k = Kernel::default();
+    let boxed = |k: &mut Kernel| create_box(k, Point3::new(1.0, 2.0, 3.0), 4.0, 5.0, 6.0).unwrap();
+    let mut b = boxed(&mut k);
+    let asked = enclose_volume(&k, &mut b, 1e-9).unwrap();
+    let mut b = boxed(&mut k);
+    let spent = enclose_volume(&k, &mut b, f64::MIN_POSITIVE).unwrap();
+    assert!(holds(&asked, 120.0), "{asked:?}");
+    assert!(holds(&spent, 120.0), "{spent:?}");
+    assert_eq!(asked.stop, EnclosureStop::Reached, "{asked:?}");
+    assert_ne!(spent.stop, EnclosureStop::Reached, "{spent:?}");
+    assert!(
+        spent.width() <= asked.width(),
+        "{spent:?} wider than {asked:?}"
+    );
 }

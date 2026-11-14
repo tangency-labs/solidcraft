@@ -583,6 +583,26 @@ fn cylinder_deboss_is_connected_and_unsupported_profile_failure_is_atomic() {
 }
 
 #[test]
+fn cylinder_emboss_accepts_a_pick_on_either_half_of_the_wall() {
+    // #3425: the kernel splits a full cylinder wall into two half-faces; a pick on the half the
+    // sketch is not tangent to was refused with "saved selection no longer identifies ...".
+    for mode in ["emboss", "deboss"] {
+        let mut volumes = Vec::new();
+        for pick in [[0., 10., 7.5], [0., -10., 7.5]] {
+            let mut s = cylinder_badge();
+            let params = json!({"sketch":"Badge","face":pick,"depth":1,"mode":mode,"targets":["Sleeve"],"name":"Badge Wrap"});
+            run(&mut s, "solid.emboss", params);
+            assert_eq!(s.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
+            let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Default::default() };
+            loaded.refresh();
+            assert!(loaded.model.results.iter().all(|f| f.error.is_none()), "{:?}", loaded.model.results);
+            volumes.push(exact_cylinder_volume(&loaded));
+        }
+        assert!((volumes[0] - volumes[1]).abs() < 1e-6, "{mode}: {volumes:?}");
+    }
+}
+
+#[test]
 fn cylinder_small_chord_pick_is_saved_on_the_exact_surface() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius":"0.1mm","height":"0.2mm","body_name":"Tiny"}));
@@ -2410,6 +2430,9 @@ fn a_sketch_coil_refuses_profiles_it_cannot_sweep() {
     run(&mut s, "sketch.finish", json!({}));
     let e = s.execute("solid.coil", &json!({"sketch": "Section", "revolutions": 3, "pitch": 0.5})).unwrap_err().to_string();
     assert!(e.contains("runs into itself"), "{e}");
+    // A section exactly one pitch wide is named as touching turns, with the way out, not as a bad profile (#14490).
+    let e = s.execute("solid.coil", &json!({"sketch": "Section", "revolutions": 3, "pitch": 1})).unwrap_err().to_string();
+    assert!(e.contains("turns touch") && e.contains("slightly smaller"), "{e}");
 }
 
 #[test]
@@ -2600,6 +2623,64 @@ fn an_imported_assembly_with_a_repeated_part_moves_as_one() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #13382: a design saved by a version whose STEP reader numbered the file's bodies otherwise
+/// opens with each body where it was and with its own shape. Here the older reader left the
+/// file's first body out, so every stored name and tree index after it is one lower. The names
+/// went by index: each body took the next one's name, and that name put it in the next part's
+/// component.
+#[test]
+fn an_import_saved_by_an_older_step_reader_opens_with_its_bodies_in_place() {
+    use solidcraft_doc::FeatureKind;
+    use solidcraft_doc::kernel::StepNode;
+    let dir = std::env::temp_dir().join(format!("solidcraft-13382-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("parts.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    // Three parts of different sizes, each in its own component and placed apart.
+    for (k, (name, size)) in [("Small", [10, 10, 10]), ("Long", [40, 6, 6]), ("Tall", [8, 8, 30])].into_iter().enumerate() {
+        let made = run(&mut src, "component.create", json!({"name": name}));
+        run(&mut src, "solid.box", json!({"length": size[0], "width": size[1], "height": size[2], "body_name": name}));
+        run(&mut src, "component.activate", json!({"component": 0}));
+        // The first part is grounded where it is made.
+        if k > 0 {
+            run(&mut src, "occurrence.move", json!({"occurrence": made["occurrence"], "translate": [100 * k, 0, 0], "space": "world"}));
+        }
+    }
+    run(&mut src, "file.export", json!({"path": path}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 3, "{names:?}");
+    let before: Vec<_> = names.iter().map(|n| placed_bounds(&s, n)).collect();
+
+    // The design as the older reader saved it: no body 0, the others numbered from 0.
+    let mut doc = (*s.doc).clone();
+    let f = doc.features.iter_mut().find(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+    let first = f.body_names.remove(0);
+    fn renumber(nodes: &mut [StepNode]) {
+        for n in nodes {
+            n.bodies = n.bodies.iter().filter(|b| **b != 0).map(|b| b - 1).collect();
+            renumber(&mut n.children);
+        }
+    }
+    if let FeatureKind::Import { components, skip, .. } = &mut f.kind {
+        renumber(components);
+        assert!(skip.is_empty(), "no part is placed twice: {skip:?}");
+    }
+
+    let opened = Session::opened(doc, None);
+    let now: Vec<String> = opened.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(now.len(), 3, "the body the older reader left out is built too: {now:?}");
+    for (n, b) in names.iter().zip(&before) {
+        if *n == first {
+            continue;
+        }
+        let got = placed_bounds(&opened, n);
+        assert!(shifted(*b, got, [0.0; 3]), "{n} opened at {got:?}, was at {b:?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A 20 × 30 × 8 plate made in its own component and stood up by its placement (turned
 /// `angle` degrees about X), the way an imported part set upright is: in the world it lies
 /// flat at `x0`..`x0 + 20`, y 0..30, z 0..8. The design is active again afterwards.
@@ -2709,4 +2790,344 @@ fn an_emboss_that_works_has_no_warning() {
         assert!(reply["warning"].is_null(), "{mode}: {reply}");
         run(&mut s, "edit.undo", json!({}));
     }
+}
+
+/// #6612: a converted mesh's faces have no history that can keep an attachment, so extruding
+/// one is refused, and the refusal offers `fixed:true`. Extrude takes it: the sketch goes on the
+/// face's plane as a fixed plane and the face extrudes. A 20 x 20 x 10 block with a bore of
+/// radius 3, through STL and Convert Mesh, joined 5 up from its top face.
+#[test]
+fn a_converted_meshs_face_extrudes_on_a_fixed_plane_when_asked() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-6612-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("Block.stl");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 30, "base": [10, 10, -5], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    let [name] = names.as_slice() else { panic!("{names:?}") };
+    run(&mut s, "mesh.convert", json!({"body": name}));
+    let before = body_volume(&s, name);
+    let top = json!({"face": [2, 2, 10], "distance": 5, "operation": "join"});
+    let refused = s.execute("solid.extrude", &top).expect_err("the face keeps no attachment").to_string();
+    assert!(refused.contains("fixed:true"), "{refused}");
+    let mut fixed = top.clone();
+    fixed["fixed"] = json!(true);
+    run(&mut s, "solid.extrude", fixed);
+    let area = 400.0 - std::f64::consts::PI * 9.0;
+    let grown = body_volume(&s, name) - before;
+    assert!((grown - area * 5.0).abs() < 1e-3 * area * 5.0, "the join added {grown}, not {}", area * 5.0);
+    let not_a_bool =
+        s.execute("solid.extrude", &json!({"face": [2, 2, 15], "distance": 5, "fixed": "yes"})).expect_err("fixed is a boolean").to_string();
+    assert!(not_a_bool.contains("`fixed` must be true or false"), "{not_a_bool}");
+}
+
+/// A 40 x 10 stadium (two lines, two tangent arcs) extruded 10 mm. The top rim runs on smoothly
+/// through the points where a line meets an arc, so picking one of those points names the rim,
+/// not an ambiguous corner (#12215).
+fn stadium_block() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.line", json!({"points":[[5.0,0.0],[35.0,0.0]],"closed":false}));
+    run(&mut s, "sketch.arc.center_point", json!({"center":[35.0,5.0],"start":[35.0,0.0],"end":[35.0,10.0]}));
+    run(&mut s, "sketch.line", json!({"points":[[35.0,10.0],[5.0,10.0]],"closed":false}));
+    run(&mut s, "sketch.arc.center_point", json!({"center":[5.0,5.0],"start":[5.0,10.0],"end":[5.0,0.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":10.0}));
+    s
+}
+
+#[test]
+fn chamfer_picked_where_a_line_meets_a_tangent_arc_takes_the_whole_rim() {
+    let mut s = stadium_block();
+    let before = volume(&mut s);
+    run(&mut s, "solid.chamfer", json!({"edges": [[35.0, 0.0, 10.0]], "distance": 0.2}));
+    let rim = 2.0 * 30.0 + 2.0 * std::f64::consts::PI * 5.0;
+    let removed = before - volume(&mut s);
+    let want = 0.5 * 0.2 * 0.2 * rim;
+    assert!((removed - want).abs() < 0.02 * want, "removed {removed} vs {want}");
+}
+
+/// A box corner is not a tangent join: a pick there still says several edges meet (#5173).
+#[test]
+fn chamfer_picked_at_a_box_corner_is_still_refused() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0.0,0.0],"p1":[20.0,10.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":10.0}));
+    let err = s.execute("solid.chamfer", &json!({"edges": [[20.0, 0.0, 10.0]], "distance": 0.2})).unwrap_err().to_string();
+    assert!(err.contains("edges meet"), "{err}");
+}
+
+/// #9969: a cut whose tool lies clear of the body reported "operation complete" and changed
+/// nothing, with no warning. It now says it removed no material; a cut that works says nothing.
+#[test]
+fn a_cut_that_removes_nothing_says_so() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    let before = volume(&mut s);
+    // A square drawn 100 mm beside the box: its prism never meets the body.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 100], "p1": [110, 110]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"direction": "negative", "distance": 5, "operation": "cut"}));
+    let warning = reply["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("the cut removes no material"), "{reply}");
+    assert!((volume(&mut s) - before).abs() < 1e-9 * before);
+    // The same cut over the box takes material and says nothing.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [20, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"direction": "negative", "distance": 5, "operation": "cut"}));
+    assert!(reply["warning"].is_null(), "{reply}");
+    assert!(volume(&mut s) < before - 400.0);
+}
+
+/// #9969 through sheet metal: a cut the flat pattern takes, drawn clear of the sheet, changes
+/// nothing and says so; the same cut over the sheet takes material and says nothing.
+#[test]
+fn a_sheet_metal_cut_that_removes_nothing_says_so() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    let before = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Away"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [200, 200], "p1": [210, 210]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"sketch": "Away", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    let warning = reply["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("the cut removes no material"), "{reply}");
+    assert!((volume(&mut s) - before).abs() < 1e-9 * before);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Over"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [20, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"sketch": "Over", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    assert!(!reply["warning"].as_str().unwrap_or_default().contains("removes no material"), "{reply}");
+    assert!(volume(&mut s) < before - 50.0);
+}
+
+/// Align by a frame picked on a part in the second copy of a sub-assembly placed twice (#11426):
+/// the frame is the part's own, so the move is the one a pick on the first copy gives, and every
+/// copy shows it. Header (Pin, a 10 mm cube, and Peg, a 2 mm cube at x = 20) sits in Board, placed
+/// at the origin and at +100 mm X.
+#[test]
+fn align_by_a_frame_picked_on_another_copy_moves_the_part_in_its_own_coordinates() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Board", "parent": "root"}));
+    run(&mut s, "component.create", json!({"name": "Header", "parent": "Board"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [20, 0, 0], "body_name": "Peg"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let second = run(&mut s, "occurrence.copy", json!({"component": "Board", "translate": [100, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let header = s.doc.find_component("Header").and_then(|c| s.doc.occurrence_of(c)).map(|o| o.id).unwrap();
+    // Peg's bottom onto Pin's top, picked on the second copy: Peg sits on Pin in both copies.
+    let top = json!({"occurrence": header, "path": [second, header], "face": [105, 5, 10]});
+    run(&mut s, "solid.align", json!({"bodies": ["Peg"], "from_frame": {"face": [21, 1, 0]}, "to_frame": top}));
+    assert_bounds(&mut s, "Peg", [4., 4., 10.], [6., 6., 12.]);
+    assert_bounds(&mut s, "Peg (Board:2/Header:1)", [104., 4., 10.], [106., 6., 12.]);
+}
+
+/// A coil cut from a sketch follows that sketch when its points move, and the body it cuts when
+/// that changes upstream: its cached result is not taken back while either differs.
+#[test]
+fn a_sketch_coil_cut_follows_its_profile_and_target() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Shaft", "name": "ShaftFeature"}));
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Groove"}));
+    // A 1 x 1 mm square, 18..19 mm from the axis.
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [18, 1], "p1": [19, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = volume(&mut s);
+    run(&mut s, "solid.coil", json!({"sketch": "Groove", "revolutions": 3, "pitch": 8, "operation": "cut", "targets": ["Shaft"]}));
+    let removed = before - volume(&mut s);
+    assert!(rel(removed, 2.0 * PI * 3.0 * 18.5) < 1e-3, "{removed}");
+    // Widen the square inward to 17..19 mm: twice the area, centroid at 18 mm.
+    run(&mut s, "sketch.edit", json!({"sketch": "Groove"}));
+    run(&mut s, "sketch.move_point", json!({"point": "p1", "to": [17, 1]}));
+    run(&mut s, "sketch.move_point", json!({"point": "p4", "to": [17, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let removed = before - volume(&mut s);
+    assert!(rel(removed, 2.0 * PI * 3.0 * 2.0 * 18.0) < 1e-3, "the groove kept the old profile: {removed}");
+    // A thinner shaft upstream (radius 18): the groove now cuts only 17..18 mm of it.
+    run(&mut s, "timeline.edit", json!({"feature": "ShaftFeature", "set": {"radius": "18"}}));
+    let removed = PI * 18.0 * 18.0 * 40.0 - volume(&mut s);
+    assert!(rel(removed, 2.0 * PI * 3.0 * 17.5) < 1e-3, "the groove kept the old shaft: {removed}");
+}
+
+/// On a body in a placed component, an origin (as a list or as x/y/z keys) and a matrix are read
+/// in world coordinates and land the plate in the same place.
+#[test]
+fn move_origin_and_matrix_use_world_coordinates_for_placed_bodies() {
+    use solidcore_record::Vec3;
+    for transform in [
+        json!({"origin": ["110 mm", "15 mm", 0], "angle": "90 deg", "translate": ["0 mm", "0 mm", "7 mm"]}),
+        json!({"matrix": [0,-1,0,125, 1,0,0,-95, 0,0,1,7]}),
+        json!({"origin": {"x": "110 mm", "y": 15, "z": 0}, "angle": "90 deg", "translate": {"x": 0, "y": 0, "z": "7 mm"}}),
+    ] {
+        let mut s = Session::default();
+        placed_plate(&mut s, "Plate", 100.0, 90.0);
+        let mut p = transform;
+        p["bodies"] = json!(["Plate"]);
+        run(&mut s, "solid.move", p);
+        let b = world_bounds(&s, "Plate");
+        assert!(b.min.dist(Vec3::new(95.0, 5.0, 7.0)) < 1e-6 && b.max.dist(Vec3::new(125.0, 25.0, 15.0)) < 1e-6, "{b:?}");
+    }
+}
+
+/// A matrix turn of bodies in two differently placed components turns each about the world
+/// origin, in one undo step.
+#[test]
+fn a_matrix_turn_maps_each_translated_component_about_the_world_origin() {
+    use solidcore_record::Vec3;
+    let mut s = Session::default();
+    for (name, x) in [("A", 100), ("B", 200)] {
+        let component = run(&mut s, "component.create", json!({"name": name, "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": name}));
+        run(&mut s, "occurrence.move", json!({"occurrence": component["occurrence"], "translate": [x, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+    }
+    let undo = s.undo.len();
+    run(&mut s, "solid.move", json!({"bodies": ["A", "B"], "matrix": [0,-1,0,0, 1,0,0,0, 0,0,1,0]}));
+    for (name, y) in [("A", 100.0), ("B", 200.0)] {
+        let bounds = world_bounds(&s, name);
+        assert!(bounds.min.dist(Vec3::new(-10.0, y, 0.0)) < 1e-6 && bounds.max.dist(Vec3::new(0.0, y + 10.0, 10.0)) < 1e-6, "{name}: {bounds:?}");
+    }
+    assert_eq!(s.undo.len(), undo + 1);
+}
+
+/// A turn with no `origin` on a body in a placed component keeps its old default, the
+/// component's own origin, with or without an axis; `origin: [0, 0, 0]` asks for the world
+/// origin instead. The component here is only shifted 100 mm along X.
+#[test]
+fn a_turn_with_no_pivot_keeps_the_components_origin_in_a_placed_component() {
+    use solidcore_record::Vec3;
+    let about_component = (Vec3::new(90.0, 0.0, 0.0), Vec3::new(100.0, 10.0, 10.0));
+    let about_world = (Vec3::new(-10.0, 100.0, 0.0), Vec3::new(0.0, 110.0, 10.0));
+    for (extra, (min, max)) in [
+        (json!({}), about_component),
+        (json!({"axis": [0, 0, 1]}), about_component),
+        (json!({"origin": [0, 0, 0]}), about_world),
+        (json!({"origin": [0, 0, 0], "axis": [0, 0, 1]}), about_world),
+    ] {
+        let mut s = Session::default();
+        let component = run(&mut s, "component.create", json!({"name": "Offset", "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": component["occurrence"], "translate": [100, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        let mut turn = extra.clone();
+        turn["bodies"] = json!(["Cube"]);
+        turn["angle"] = json!("90 deg");
+        run(&mut s, "solid.move", turn);
+        let bounds = world_bounds(&s, "Cube");
+        assert!(bounds.min.dist(min) < 1e-6 && bounds.max.dist(max) < 1e-6, "{extra}: {bounds:?}");
+    }
+}
+
+/// A turn with no `axis` on a body in a turned component keeps its old default, the
+/// component's own Z: the plate stood up by +90° about X has its Z along world −Y.
+#[test]
+fn a_turn_with_no_axis_keeps_the_components_z_in_a_turned_component() {
+    use solidcore_record::Vec3;
+    let mut s = Session::default();
+    placed_plate(&mut s, "Plate", 0.0, 90.0);
+    run(&mut s, "solid.move", json!({"bodies": ["Plate"], "angle": "90 deg"}));
+    // A quarter turn about −Y through the origin: (x, z) → (−z, x). About world Z it would
+    // lie at x −30..0, y 0..20 instead.
+    let b = world_bounds(&s, "Plate");
+    assert!(b.min.dist(Vec3::new(-8.0, 0.0, 0.0)) < 1e-6 && b.max.dist(Vec3::new(0.0, 30.0, 20.0)) < 1e-6, "{b:?}");
+}
+
+/// An origin or a matrix moves each repeated placement of one part alike, in one undo step.
+#[test]
+fn move_origin_and_matrix_apply_to_each_repeated_placement() {
+    use solidcore_record::Vec3;
+    for transform in [json!({"origin": ["50 mm", 0, 0], "angle": "90 deg"}), json!({"matrix": [0,-1,0,50, 1,0,0,-50, 0,0,1,0]})] {
+        let mut s = Session::default();
+        let (a, b) = twice_placed_blade(&mut s);
+        let mut p = transform;
+        p["bodies"] = json!([a, b]);
+        let undo = s.undo.len();
+        let result = run(&mut s, "solid.move", p);
+        assert_eq!(result["placements"].as_array().unwrap().len(), 2);
+        let a = placed_bounds(&s, &a);
+        let b = placed_bounds(&s, &b);
+        assert!(a.min.dist(Vec3::new(42.0, -50.0, 0.0)) < 1e-6 && a.max.dist(Vec3::new(50.0, -30.0, 30.0)) < 1e-6, "{a:?}");
+        assert!(b.min.dist(Vec3::new(50.0, 50.0, 0.0)) < 1e-6 && b.max.dist(Vec3::new(80.0, 70.0, 8.0)) < 1e-6, "{b:?}");
+        assert_eq!(s.undo.len(), undo + 1);
+    }
+}
+
+/// A ball of radius 12.5 resting on the origin, revolved from a half disc sketched upright on
+/// the XZ plane, with a 10 wide slot cut from its top down to z = 15 right through it (walls at
+/// x = ±5). The ball's seam ends on the top of the x = +5 wall's arc, so that arc is two edges in
+/// the record and its mirror one (#16122).
+fn slotted_ball() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"name": "Sketch1", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 25]]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, 0], "through": [12.5, 12.5], "end": [0, 25]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Sketch1", "axis": "Z", "angle": "360 deg", "operation": "new", "body_name": "Ball"}));
+    run(&mut s, "sketch.create", json!({"name": "Sketch2", "plane": {"origin": [0, 0, 15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [5, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Sketch2", "distance": 15, "operation": "cut"}));
+    s
+}
+
+/// The record edge passing nearest `p`, sampled along its exact curve.
+fn record_edge_near(body: &solidcraft_kernel::Body, p: solidcore_record::Vec3) -> usize {
+    let off = |e: &solidcore_record::brep::Edge| {
+        let c = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).unwrap();
+        let [t0, t1] = e.interval;
+        (0..=256).filter_map(|k| c.point(t0 + (t1 - t0) * k as f64 / 256.0)).map(|q| q.dist(p)).fold(f64::INFINITY, f64::min)
+    };
+    let (i, d) = body.record().edges.iter().map(off).enumerate().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+    assert!(d < 0.05, "no edge passes near {p:?} (nearest {i} at {d})");
+    i
+}
+
+/// The reporter's two picks on the slotted ball: one half of the seam-split x = +5 arc and the
+/// middle of the whole x = -5 arc. The half is one edge with its other half, the mirror arc
+/// alone; rounding either arc from one pick removes the same material.
+#[test]
+fn a_slot_arc_split_by_a_balls_seam_selects_and_rounds_like_its_mirror() {
+    use solidcore_record::Vec3;
+    let half_pick = Vec3::new(5.0, -7.16004021723299, 21.435908825062725);
+    let mirror_pick = Vec3::new(-5.0, 0.0, 23.956439237387144);
+    let s = slotted_ball();
+    let state = s.model.state();
+    let ball = state.body("Ball").unwrap();
+    let half = record_edge_near(&ball.body, half_pick);
+    let other_half = record_edge_near(&ball.body, Vec3::new(5.0, 7.16004021723299, 21.435908825062725));
+    assert_ne!(half, other_half, "the seam splits the x = +5 arc in the record");
+    let mut both = vec![half, other_half];
+    both.sort_unstable();
+    assert_eq!(ball.whole_edge(half), both);
+    assert_eq!(ball.whole_edge(other_half), both);
+    let mirror = record_edge_near(&ball.body, mirror_pick);
+    assert_eq!(ball.whole_edge(mirror), vec![mirror]);
+    // The rounds guard the leaving direction `whole_edge` now shares with the blend chain walk
+    // and the round running on across the seam vertex (#13752), not the grouping above.
+    let before = body_volume(&s, "Ball");
+    let removed = |pick: Vec3| {
+        let mut s = slotted_ball();
+        run(&mut s, "solid.fillet", json!({"edges": [[pick.x, pick.y, pick.z]], "radius": 2}));
+        let body = s.model.state().body("Ball").unwrap().body.clone();
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+        before - body_volume(&s, "Ball")
+    };
+    let (plus, minus) = (removed(half_pick), removed(mirror_pick));
+    assert!((plus - 89.8218).abs() < 1e-2, "rounding the split arc removes {plus}");
+    assert!((plus - minus).abs() < 1e-3, "the split arc's round removes {plus}, its mirror's {minus}");
 }

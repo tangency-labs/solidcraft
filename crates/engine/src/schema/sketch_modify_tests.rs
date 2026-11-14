@@ -3,8 +3,8 @@ use serde_json::{Value, json};
 use super::{
     BreakParams, BreakResult, ChamferDistanceAngleParams, ChamferEqualParams, ChamferResult, ChamferTwoParams, CircularPatternParams, ExtendParams,
     ExtendResult, FilletParams, FilletResult, MirrorParams, MirrorResult, MoveParams, MoveResult, OffsetBreakParams, OffsetBreakResult, OffsetParams,
-    OffsetResult, OffsetSide, PatternResult, RectangularPatternParams, ScaleParams, ScaleResult, TrimOutcome, TrimParams, TrimPathParams,
-    TrimPathResult, TrimResult,
+    OffsetResult, OffsetSide, PatternResult, RectangularPatternParams, ScaleParams, ScaleResult, TransformParams, TransformResult, TrimOutcome,
+    TrimParams, TrimPathParams, TrimPathResult, TrimResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, conforms};
@@ -62,6 +62,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<MirrorParams>(), &["entities", "line", "sketch"]);
     assert_keys(input_schema_for::<MoveParams>(), &["angle", "center", "copy", "entities", "rotate_constraints", "sketch", "translate"]);
     assert_keys(input_schema_for::<ScaleParams>(), &["base", "entities", "factor", "sketch"]);
+    assert_keys(input_schema_for::<TransformParams>(), &["angle", "center", "entities", "factor", "sketch", "translate"]);
     assert_keys(input_schema_for::<CircularPatternParams>(), &["alignment", "angle", "center", "count", "entities", "pattern", "reversed", "sketch"]);
     assert_keys(
         input_schema_for::<RectangularPatternParams>(),
@@ -209,6 +210,22 @@ fn strict_keeps_todays_errors() {
         ("sketch.scale", json!({"entities": ["l1"], "factor": 2, "base": [1]})),
         ("sketch.scale", json!({"factor": 2})),
         ("sketch.scale", json!({"entities": "l1", "factor": 2, "sketch": false})),
+        ("sketch.transform", json!({"entities": ["l1"], "factor": 0})),
+        ("sketch.transform", json!({"entities": ["l1"], "factor": "2"})),
+        ("sketch.transform", json!({"entities": ["l1"], "factor": 1e6})),
+        ("sketch.transform", json!({"entities": ["l1"], "angle": "30"})),
+        ("sketch.transform", json!({"entities": ["l1"], "angle": null})),
+        ("sketch.transform", json!({"entities": ["l1"], "angle": true})),
+        ("sketch.transform", json!({"entities": ["l1"], "translate": 5})),
+        ("sketch.transform", json!({"entities": ["l1"], "translate": null})),
+        ("sketch.transform", json!({"entities": ["l1"], "translate": [1]})),
+        ("sketch.transform", json!({"entities": ["l1"], "center": true})),
+        ("sketch.transform", json!({"entities": ["l1"], "center": null})),
+        ("sketch.transform", json!({"entities": ["l1"], "center": [1]})),
+        ("sketch.transform", json!({"entities": null})),
+        ("sketch.transform", json!({"entities": [true]})),
+        ("sketch.transform", json!({"factor": 2})),
+        ("sketch.transform", json!({"entities": "l1", "translate": [1, 2], "sketch": false})),
         ("sketch.pattern.circular", json!({})),
         ("sketch.pattern.circular", json!({"entities": ["l1"], "center": [20, 0]})),
         ("sketch.pattern.circular", json!({"entities": ["l1"], "center": [20, 0], "count": true})),
@@ -345,6 +362,16 @@ fn the_types_read_each_key_as_the_handler_does() {
     assert_eq!(warnings("sketch.scale", json!({"entities": ["l1"], "factor": 2, "base": [1, 2]})), none);
     assert_eq!(warnings("sketch.scale", json!({"entities": ["l1"], "factor": 0})), ["`factor` must be a positive number"]);
     assert_eq!(warnings("sketch.scale", json!({"entities": ["l1"], "factor": 2, "base": 7})), ["`base` must be [x, y] or a point id"]);
+    // Transform: every key is read only when it is there, because each one has a default.
+    assert_eq!(warnings("sketch.transform", json!({"entities": "l1"})), none);
+    assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "factor": 2, "angle": -90, "center": "p1", "translate": [1, 2]})), none);
+    assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "center": [1, 2]})), none);
+    assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "factor": 0})), ["`factor` must be a positive number"]);
+    assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "factor": 1e6})), ["`factor` must be a positive number"]);
+    assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "angle": "90"})), ["`angle` must be a number (degrees)"]);
+    assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "translate": [1]})), ["`translate` must be a point [x, y]"]);
+    assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "center": 7})), ["`center` must be [x, y] or a point id"]);
+    assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "sketch": false})), ["`sketch` must be an id or a name"]);
     // Mirror: a curve id, an axis, or an origin axis as an object.
     assert_eq!(warnings("sketch.mirror", json!({"entities": ["l1", "p2"], "line": "y"})), none);
     assert_eq!(warnings("sketch.mirror", json!({"entities": ["l1"], "line": {"axis": "Y"}})), none);
@@ -459,6 +486,19 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"entities": ["l1"], "factor": 2, "base": "p1"}), true),
             (json!({"entities": ["l1"], "factor": 0}), false),
             (json!({"entities": ["l1"]}), false),
+        ],
+    );
+    takes(
+        input_schema_for::<TransformParams>(),
+        &[
+            (json!({"entities": ["l1"]}), true),
+            (json!({"entities": "l1", "factor": 2, "angle": 90, "center": "p1", "translate": [1, 2]}), true),
+            (json!({"entities": ["l1"], "center": [1, 2]}), true),
+            (json!({"entities": ["l1"], "factor": 0}), false),
+            (json!({"entities": ["l1"], "angle": "90"}), false),
+            (json!({"entities": ["l1"], "center": [1]}), false),
+            (json!({"entities": ["l1"], "translate": [1, 2, 3]}), false),
+            (json!({"factor": 2}), false),
         ],
     );
     takes(
@@ -666,6 +706,25 @@ fn mirror_move_scale_and_pattern_replies_match_the_output_schema() {
     matches(pattern, "sketch.pattern.rectangular", &edited);
 }
 
+/// `sketch.transform` answers with the object its output schema describes: the curves it moved,
+/// with an ellipse's axes, and the sketch's solve.
+#[test]
+fn a_transform_answers_with_the_curves_it_moved_and_the_solve() {
+    let schema = output_schema_for::<TransformResult>();
+    let (mut s, _) = editing(ParamCheck::Warn);
+    let line = id_of(&run(&mut s, "sketch.line", json!({"points": [[-5, 20], [5, 20]], "infer": false})), "curves");
+    let r = run(&mut s, "sketch.transform", json!({"entities": [line], "factor": 2, "angle": 90, "center": [0, 0], "translate": [1, 1]}));
+    assert_eq!(r["curves"], json!([line]), "{r}");
+    assert!(r["sketch"]["solved"].is_boolean() && r["sketch"]["dof"].is_number(), "{r}");
+    matches(schema.clone(), "sketch.transform", &r);
+    // An ellipse takes its axis lines along, and the reply lists all three.
+    let ellipse = id_of(&run(&mut s, "sketch.ellipse", json!({"center": [0, 30], "major": [10, 30], "minor": [0, 36]})), "curves");
+    let r = run(&mut s, "sketch.transform", json!({"entities": [ellipse], "factor": 2}));
+    let moved = r["curves"].as_array().unwrap_or_else(|| panic!("{r}"));
+    assert!(moved.contains(&json!(ellipse)) && moved.len() == 3, "{r}");
+    matches(schema, "sketch.transform", &r);
+}
+
 /// A misspelt key still runs in Warn, and says so, with a reply that matches.
 #[test]
 fn a_misspelt_key_is_reported_in_warn() {
@@ -686,6 +745,7 @@ fn a_misspelt_key_is_reported_in_warn() {
         ("sketch.mirror", |_| json!({"entities": ["l1"], "line": "l3", "lines": 1})),
         ("sketch.move", |_| json!({"entities": ["l1"], "translate": [1, 2], "translat": 1})),
         ("sketch.scale", |_| json!({"entities": ["l1"], "factor": 2, "facter": 1})),
+        ("sketch.transform", |_| json!({"entities": ["l1"], "factor": 2, "facter": 1})),
     ];
     for (id, call) in calls {
         let (mut s, _) = editing(ParamCheck::Warn);

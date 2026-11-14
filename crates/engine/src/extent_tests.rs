@@ -234,3 +234,85 @@ fn cut_to_the_far_side_of_a_curved_wall() {
     assert!((removed - want).abs() < want * 2e-2, "removed {removed}, want {want}");
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
 }
+
+/// #12617: a To Object offset past a curved face used to change nothing: the tool is cut back to
+/// the face, which removes the very part the offset added, so the Cut took nothing off. It is
+/// refused with a reason instead. An offset of 0 or short of the face is not refused.
+#[test]
+fn a_to_offset_past_a_curved_face_is_refused_not_ignored() {
+    let window = |s: &mut Session, to_offset: f64| {
+        run(s, "sketch.create", json!({"plane": {"origin": [0, -30, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+        run(s, "sketch.rectangle.two_point", json!({"p0": [-3, 8], "p1": [3, 12]}));
+        run(s, "sketch.finish", json!({}));
+        s.execute("solid.extrude", &json!({"to": [0, -18, 10], "to_offset": to_offset, "operation": "cut"}))
+    };
+    let tube = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 20, "body_name": "Tube"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Bore"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 18}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Bore", "distance": 20, "operation": "cut"}));
+        s
+    };
+    let mut s = tube();
+    let whole = body(&mut s, "Tube")["volume_mm3"].as_f64().unwrap();
+    let err = window(&mut s, 2.0).expect_err("an offset past the curved wall is refused");
+    assert!(err.to_string().contains("curved") && err.to_string().contains("offset"), "{err}");
+    assert_eq!(body(&mut s, "Tube")["volume_mm3"].as_f64().unwrap(), whole, "a refused cut changes nothing");
+    // No offset, and an offset short of the wall, are not refused.
+    for to_offset in [0.0, -1.0] {
+        let mut s = tube();
+        window(&mut s, to_offset).unwrap_or_else(|e| panic!("offset {to_offset}: {e}"));
+    }
+}
+
+/// A To offset that carries the end back across the start, away from a curved To face, ends at
+/// that level as for a plane: the extrusion never meets the face, so it is not run through the
+/// part and trimmed back to it. Here the counterbore's ceiling, extruded down to a point 1 mm up
+/// the bore with an offset of -3, fills the counterbore from 1 mm to 3 mm. It used to keep the
+/// whole run-through tool, a post far out of the plate's bottom, and SMLib refused that join on
+/// an imported plate.
+#[test]
+fn a_to_offset_back_across_the_start_from_a_curved_face_ends_at_its_level() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-20, -20, 0], "length": 40, "width": 40, "height": 6, "body_name": "Plate"}));
+    for (name, radius, depth) in [("Counterbore", 8.0, 3.0), ("Bore", 3.2, 6.0)] {
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": name}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": radius}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": name, "distance": depth, "operation": "cut"}));
+    }
+    let before = body(&mut s, "Plate")["volume_mm3"].as_f64().unwrap();
+    let wall = [3.2 * 0.8_f64.cos(), 3.2 * 0.8_f64.sin(), 4.0];
+    run(&mut s, "solid.extrude", json!({"face": [5, 0, 3], "to": wall, "to_offset": -3, "operation": "join"}));
+    let b = body(&mut s, "Plate");
+    assert!(b["bbox"]["min"][2].as_f64().unwrap().abs() < 1e-6, "nothing below the plate: {b}");
+    let added = b["volume_mm3"].as_f64().unwrap() - before;
+    let expected = PI * (8.0 * 8.0 - 3.2 * 3.2) * 2.0;
+    assert!((added - expected).abs() / expected < 1e-3, "added {added}, expected {expected}");
+}
+
+/// #13188: a stored taper of 0 is a straight extrusion, also for a profile with a hole.
+#[test]
+fn extrude_with_a_taper_of_zero_on_a_profile_with_a_hole_is_straight() {
+    let volume = |taper: Option<&str>| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+        run(&mut s, "sketch.circle.center", json!({"center": [20, 15], "radius": 5}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"distance": 10, "body_name": "Plate"});
+        if let Some(t) = taper {
+            p["taper"] = json!(t);
+        }
+        run(&mut s, "solid.extrude", p);
+        body(&mut s, "Plate")["volume_mm3"].as_f64().unwrap()
+    };
+    let plain = volume(None);
+    // Rectangle less the hole, 10 mm tall; the circle is faceted, so within a thousandth.
+    let expected = (40.0 * 30.0 - PI * 25.0) * 10.0;
+    assert!((plain - expected).abs() / expected < 1e-3, "{plain} vs {expected}");
+    let zero = volume(Some("0 deg"));
+    assert!((zero - plain).abs() < 1e-6 * plain, "taper 0 gives {zero}, none gives {plain}");
+}

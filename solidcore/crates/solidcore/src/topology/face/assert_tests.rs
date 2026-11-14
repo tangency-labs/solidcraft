@@ -40,7 +40,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -48,6 +48,7 @@ use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
 use crate::geom::tol::xsect_tol_3d_from_zones;
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ};
+use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::topology::brep::validation::spatial::SpatialIndex;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3 as eu3;
@@ -365,56 +366,206 @@ fn uv_curve(k: &Kernel, b: &mut Brep, eu: crate::topology::EdgeuseId) -> Result<
     Ok(eu1::uv_trim_curve(b, eu)?.0.cloned())
 }
 
+/// A UV trim curve as test 38 compares it: the curve, its natural interval and the
+/// box of a B-spline or line over that interval (`None`: always compared).
+struct UvTrim {
+    curve: Curve,
+    interval: Extent1d,
+    bbox: Option<Extent3d>,
+}
+
+/// [`uv_curve`] of `eu` with its interval and box.
+fn uv_trim(k: &Kernel, b: &mut Brep, eu: crate::topology::EdgeuseId) -> Result<Option<UvTrim>> {
+    let Some(curve) = uv_curve(k, b, eu)? else {
+        return Ok(None);
+    };
+    let interval = curve.natural_interval();
+    let req = BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+    let bbox = match curve.kind() {
+        CurveKind::BSpline(_) | CurveKind::Line(_) => curve
+            .calculate_bounding_box(k, &interval, req, true)
+            .ok()
+            .and_then(|found| found.normal),
+        _ => None,
+    };
+    Ok(Some(UvTrim {
+        curve,
+        interval,
+        bbox,
+    }))
+}
+
+/// One face loop's edge uses and the UV trims test 38 has read for them, kept across
+/// its loop pairs. `trims[i]` is `None` until edge use `i` is read, and stays `None`
+/// when its trim does not build (read again wherever upstream reads it again).
+struct LoopTrims {
+    edgeuses: Vec<crate::topology::EdgeuseId>,
+    trims: Vec<Option<UvTrim>>,
+    /// Every edge use has been read once (in order).
+    read: bool,
+    /// The box index of the trims, once every edge use has been read (a trim that
+    /// had not built then is unbounded: always a candidate).
+    index: Option<SpatialIndex>,
+    /// The union of the trims' boxes, once every edge use has been read and every
+    /// trim has a box.
+    bbox: Option<Extent3d>,
+}
+
+impl LoopTrims {
+    fn new(b: &Brep, l: LoopId) -> Result<Self> {
+        let edgeuses = loopuse::loop_edgeuses(b, l)?;
+        let trims = edgeuses.iter().map(|_| None).collect();
+        Ok(Self {
+            edgeuses,
+            trims,
+            read: false,
+            index: None,
+            bbox: None,
+        })
+    }
+
+    /// Marks every edge use read, and takes the loop's box when every trim has one.
+    fn finish_read(&mut self) {
+        self.read = true;
+        let mut boxes = self.trims.iter().map(|t| t.as_ref().and_then(|t| t.bbox));
+        self.bbox = boxes
+            .next()
+            .flatten()
+            .and_then(|first| boxes.try_fold(first, |acc, b| Some(acc.union(&b?))));
+    }
+
+    /// Trim `i`, read now unless it already was (a trim, once built, reads back the
+    /// same: `GetOrCreateUVTrimCurve` only builds a missing one).
+    fn get(&mut self, k: &Kernel, b: &mut Brep, i: usize) -> Result<Option<&UvTrim>> {
+        let Some(&eu) = self.edgeuses.get(i) else {
+            return Ok(None);
+        };
+        let Some(slot) = self.trims.get_mut(i) else {
+            return Ok(None);
+        };
+        if slot.is_none() {
+            *slot = uv_trim(k, b, eu)?;
+        }
+        Ok(slot.as_ref())
+    }
+}
+
+/// Whether two trims' boxes come within `margin`, or a box is unknown (always
+/// compared).
+fn trims_near(t1: &UvTrim, t2: &UvTrim, margin: Option<f64>) -> bool {
+    match (t1.bbox, t2.bbox, margin) {
+        (Some(b1), Some(b2), Some(m)) => !b1.are_disjoint(&b2, m),
+        _ => true,
+    }
+}
+
+/// `GlobalCurveIntersect` of two UV trims at `uv_tol`: whether it gives a solution
+/// (`false` when it fails: status ignored).
+fn trims_intersect(k: &Kernel, t1: &UvTrim, t2: &UvTrim, uv_tol: f64) -> Result<bool> {
+    let Some(solutions) = ignored_assert_result(t1.curve.global_curve_intersect::<CurveHandle>(
+        k,
+        &t1.interval,
+        &t2.curve,
+        &t2.interval,
+        uv_tol,
+        &crate::curve::curve::p8::CurveIntersectOptions::default(),
+    ))?
+    else {
+        return Ok(false); // inconclusive - the intersector gave up on this pair
+    };
+    // any solution at all places the two Loops on one another
+    Ok(!solutions.is_empty())
+}
+
+/// The work test 38 did: loop pairs, trim pairs whose boxes were compared, and trim
+/// pairs intersected.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Face38Counts {
+    loop_pairs: usize,
+    trim_pairs: usize,
+    intersections: usize,
+}
+
 /// `sm_DoLoopsIntersectInUV`: whether any UV trim curve of `loop1` meets one of `loop2`
-/// (`GlobalCurveIntersect` at the surface zone tolerance mapped to UV at the domain
-/// middle gives a solution). Missing trim curves are built; edge uses whose curve does
-/// not build, and pairs whose intersection fails, are skipped.
+/// (`GlobalCurveIntersect` at `uv_tol`, the surface zone tolerance mapped to UV at the
+/// domain middle, gives a solution). Missing trim curves are built; edge uses whose
+/// curve does not build, and pairs whose intersection fails, are skipped.
+///
+/// Deviation (pruning only, never a different answer): a pair of B-spline or line
+/// trims whose boxes are farther apart than `margin` is not intersected, nor a pair
+/// of loops whose trims all have boxes, with the loops' boxes that far apart.
+/// `GlobalCurveIntersect` gives such a pair no solution: two lines' boxes, one grown
+/// by the tolerance, are disjoint (its first test); a curve's cache tree is built
+/// from the control boxes of its Bézier spans, which lie inside the curve's control
+/// box, so the root boxes are disjoint (its first test after the analytic one); and
+/// the curves themselves are farther apart than the tolerance either way. `margin`
+/// is twice the tolerance so that rounding in those tests cannot keep a pair this one
+/// drops. The trims are read in upstream's order (each trim when upstream first reads
+/// it, never one it would not reach before returning; one that did not build is read
+/// again wherever upstream reads it again), so the trims built, the verdict and the
+/// first error are upstream's. The work is linear in the loops' trims, not their
+/// product.
 fn do_loops_intersect_in_uv(
     k: &Kernel,
     b: &mut Brep,
-    loop1: LoopId,
-    loop2: LoopId,
-    surface: &crate::surface::surface::Surface,
+    loop1: &mut LoopTrims,
+    loop2: &mut LoopTrims,
+    uv_tol: f64,
+    counts: &mut Face38Counts,
 ) -> Result<bool> {
-    let edgeuses1 = loopuse::loop_edgeuses(b, loop1)?;
-    let edgeuses2 = loopuse::loop_edgeuses(b, loop2)?;
+    let margin = (uv_tol.is_finite() && uv_tol >= 0.0).then_some(2.0 * uv_tol);
 
-    // UVTrimCurves are measured in UVSpace, so the 3d ZoneTol has to be mapped there
-    let zone_tol_3d = crate::surface::surface::p1::zone_tol_3d(k, surface)?;
-    let mid = surface.natural_uv_domain_with_nurb(k)?.mid();
-    let uv_tol = crate::surface::surface::p1::map_to_2d(k, zone_tol_3d, mid, surface)?;
+    // both loops read, every trim boxed, and the loops' boxes apart: no pair meets
+    if let (Some(b1), Some(b2), Some(m)) = (loop1.bbox, loop2.bbox, margin) {
+        if b1.are_disjoint(&b2, m) {
+            return Ok(false);
+        }
+    }
 
     // for every Loop1 UVTrimCurve
-    for &eu1_id in &edgeuses1 {
-        let Some(uv_curve1) = uv_curve(k, b, eu1_id)? else {
+    for i in 0..loop1.edgeuses.len() {
+        let Some(t1) = loop1.get(k, b, i)? else {
             continue; // inconclusive - nothing to intersect
         };
-        let interval1 = uv_curve1.natural_interval();
 
-        // for every Loop2 UVTrimCurve
-        for &eu2_id in &edgeuses2 {
-            let Some(uv_curve2) = uv_curve(k, b, eu2_id)? else {
+        // the first time: every Loop2 UVTrimCurve in order, as upstream reads them;
+        // later only those whose boxes come near this one, in order (a trim without
+        // box, or one that did not build, is always visited)
+        let candidates: Vec<usize> = match (loop2.read, t1.bbox, margin) {
+            (true, Some(bbox), Some(m)) => {
+                let trims = &loop2.trims;
+                loop2
+                    .index
+                    .get_or_insert_with(|| {
+                        SpatialIndex::new(trims.iter().map(|t| t.as_ref().and_then(|t| t.bbox)))
+                    })
+                    .boxes_in_box(&bbox, m)
+            }
+            _ => (0..loop2.edgeuses.len()).collect(),
+        };
+        for j in candidates {
+            let Some(t2) = loop2.get(k, b, j)? else {
                 continue; // inconclusive - nothing to intersect
             };
-            let interval2 = uv_curve2.natural_interval();
-            let Some(solutions) =
-                ignored_assert_result(uv_curve1.global_curve_intersect::<CurveHandle>(
-                    k,
-                    &interval1,
-                    &uv_curve2,
-                    &interval2,
-                    uv_tol,
-                    &crate::curve::curve::p8::CurveIntersectOptions::default(),
-                ))?
-            else {
-                continue; // inconclusive - the intersector gave up on this pair
-            };
-
-            // any solution at all places the two Loops on one another
-            if !solutions.is_empty() {
+            counts.trim_pairs += 1;
+            if !trims_near(t1, t2, margin) {
+                continue; // boxes apart: no solution
+            }
+            counts.intersections += 1;
+            if trims_intersect(k, t1, t2, uv_tol)? {
                 return Ok(true);
             }
         }
+        if !loop2.read {
+            loop2.finish_read();
+        }
+    }
+    if !loop1.read {
+        loop1.finish_read();
     }
 
     // arrive here when no intersection was found
@@ -431,6 +582,12 @@ fn do_loops_intersect_in_uv(
 /// it); those of the loop, trim curve, tolerance and intersection computations
 /// ([`SolidError::Unported`] included).
 pub fn assert_test_face38(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> {
+    Ok(assert_test_face38_counted(k, b, f)?.0)
+}
+
+/// [`assert_test_face38`] with the work it did.
+fn assert_test_face38_counted(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<(bool, Face38Counts)> {
+    let mut counts = Face38Counts::default();
     let loops = crate::topology::face::p2::loops(b, f, false, None)?;
     let surface = crate::topology::face::p2::surface(b, f)?
         .ok_or_else(|| null("sm_AssertTestFace38: face without surface"))?
@@ -438,20 +595,53 @@ pub fn assert_test_face38(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> {
 
     // no work - a Face with fewer than 2 Loops has no Loop pair to intersect
     if loops.len() < 2 {
-        return Ok(true);
+        return Ok((true, counts));
     }
 
+    // each loop's edge uses and trims, read when upstream first reads them; the UV
+    // tolerance, which depends on the surface alone, once
+    let mut trims: Vec<Option<LoopTrims>> = loops.iter().map(|_| None).collect();
+    let mut uv_tol = None;
+
     // for every pair of Face Loops
-    for (ii, &l1) in loops.iter().enumerate() {
-        for &l2 in loops.iter().skip(ii + 1) {
-            if do_loops_intersect_in_uv(k, b, l1, l2, &surface)? {
-                return Ok(false);
+    for ii in 0..loops.len() {
+        for jj in ii + 1..loops.len() {
+            counts.loop_pairs += 1;
+            for (slot, &l) in [(ii, loops.get(ii)), (jj, loops.get(jj))]
+                .iter()
+                .filter_map(|&(i, l)| l.map(|l| (i, l)))
+            {
+                if let Some(t @ None) = trims.get_mut(slot) {
+                    *t = Some(LoopTrims::new(b, l)?);
+                }
+            }
+            let tol = if let Some(tol) = uv_tol {
+                tol
+            } else {
+                // UVTrimCurves are measured in UVSpace, so the 3d ZoneTol has to be
+                // mapped there
+                let zone_tol_3d = crate::surface::surface::p1::zone_tol_3d(k, &surface)?;
+                let mid = surface.natural_uv_domain_with_nurb(k)?.mid();
+                let tol = crate::surface::surface::p1::map_to_2d(k, zone_tol_3d, mid, &surface)?;
+                *uv_tol.insert(tol)
+            };
+            // the second loop is taken out while the first is borrowed, then put back
+            let mut second = trims.get_mut(jj).and_then(Option::take);
+            let (Some(Some(l1)), Some(l2)) = (trims.get_mut(ii), second.as_mut()) else {
+                return Err(null("sm_AssertTestFace38: loop out of range"));
+            };
+            let met = do_loops_intersect_in_uv(k, b, l1, l2, tol, &mut counts)?;
+            if let Some(slot) = trims.get_mut(jj) {
+                *slot = second;
+            }
+            if met {
+                return Ok((false, counts));
             }
         }
     }
 
     // arrive here when no two Face Loops intersect
-    Ok(true)
+    Ok((true, counts))
 }
 
 #[cfg(test)]
@@ -773,5 +963,219 @@ mod tests {
             assert!(!assert_test_face38(&k, &mut b, f).unwrap(), "{f:?}");
         }
         assert_eq!(two_loop_faces, 2);
+    }
+
+    /// A plate `10n` square, its outline cut into `n` segments a side, with `n x n`
+    /// square holes of side 4 (one every 10), extruded 5 along z.
+    fn plate_with_holes(k: &mut Kernel, n: u32) -> Brep {
+        use crate::curve::line::Line;
+        let side = 10.0 * f64::from(n);
+        let mut loops: Vec<Vec<Point3>> = Vec::new();
+        let mut outline = Vec::new();
+        for (x0, y0, dx, dy) in [
+            (0.0, 0.0, 1.0, 0.0),
+            (side, 0.0, 0.0, 1.0),
+            (side, side, -1.0, 0.0),
+            (0.0, side, 0.0, -1.0),
+        ] {
+            for s in 0..n {
+                let t = 10.0 * f64::from(s);
+                outline.push(Point3::new(x0 + dx * t, y0 + dy * t, 0.0));
+            }
+        }
+        loops.push(outline);
+        for i in 0..n {
+            for j in 0..n {
+                let (x, y) = (10.0 * f64::from(i) + 3.0, 10.0 * f64::from(j) + 3.0);
+                loops.push(vec![
+                    Point3::new(x, y, 0.0),
+                    Point3::new(x, y + 4.0, 0.0),
+                    Point3::new(x + 4.0, y + 4.0, 0.0),
+                    Point3::new(x + 4.0, y, 0.0),
+                ]);
+            }
+        }
+        let mut curves = Vec::new();
+        for pts in &loops {
+            for (i, &a) in pts.iter().enumerate() {
+                let b = pts[(i + 1) % pts.len()];
+                curves.push(Curve::from(
+                    Line::create_line_segment(3, a, b, None).unwrap(),
+                ));
+            }
+        }
+        let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+        crate::sweep::api_brep::create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 5.0, true)
+            .unwrap()
+    }
+
+    /// The faces of `b` with more than two loops (the plate's caps).
+    fn holed_faces(b: &Brep) -> Vec<FaceId> {
+        crate::topology::brep::p1::faces(b, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&f| p2::loops(b, f, false, None).unwrap().len() > 2)
+            .collect()
+    }
+
+    /// Test 38 as upstream runs it, every trim pair of every loop pair (the path
+    /// before pruning), with the number of intersections it ran.
+    fn all_pairs_face38(k: &Kernel, b: &mut Brep, f: FaceId) -> (bool, usize) {
+        let loops = p2::loops(b, f, false, None).unwrap();
+        let surface = p2::surface(b, f).unwrap().unwrap().clone();
+        let mut count = 0;
+        for (ii, &l1) in loops.iter().enumerate() {
+            for &l2 in loops.iter().skip(ii + 1) {
+                let edgeuses1 = loopuse::loop_edgeuses(b, l1).unwrap();
+                let edgeuses2 = loopuse::loop_edgeuses(b, l2).unwrap();
+                let uv_tol = face_uv_tol(k, &surface);
+                for &eu1_id in &edgeuses1 {
+                    let Some(c1) = uv_curve(k, b, eu1_id).unwrap() else {
+                        continue;
+                    };
+                    let i1 = c1.natural_interval();
+                    for &eu2_id in &edgeuses2 {
+                        let Some(c2) = uv_curve(k, b, eu2_id).unwrap() else {
+                            continue;
+                        };
+                        let i2 = c2.natural_interval();
+                        count += 1;
+                        let found =
+                            ignored_assert_result(c1.global_curve_intersect::<CurveHandle>(
+                                k,
+                                &i1,
+                                &c2,
+                                &i2,
+                                uv_tol,
+                                &crate::curve::curve::p8::CurveIntersectOptions::default(),
+                            ))
+                            .unwrap();
+                        if found.is_some_and(|s| !s.is_empty()) {
+                            return (false, count);
+                        }
+                    }
+                }
+            }
+        }
+        (true, count)
+    }
+
+    fn face_uv_tol(k: &Kernel, surface: &crate::surface::surface::Surface) -> f64 {
+        let zone_tol_3d = crate::surface::surface::p1::zone_tol_3d(k, surface).unwrap();
+        let mid = surface.natural_uv_domain_with_nurb(k).unwrap().mid();
+        crate::surface::surface::p1::map_to_2d(k, zone_tol_3d, mid, surface).unwrap()
+    }
+
+    /// Moves loop `l`'s edges and vertices `dx` along x, dropping their UV trims.
+    fn shift_loop(k: &Kernel, b: &mut Brep, l: LoopId, dx: f64) {
+        let shift = Axis2Placement::new(
+            Point3::new(dx, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+        );
+        let mut moved = std::collections::BTreeSet::new();
+        for e in loopuse::loop_edges(b, l).unwrap().into_iter().flatten() {
+            let mut curve = b.edge(e).unwrap().curve.clone().unwrap();
+            curve.transform(k, &shift, None).unwrap();
+            b.edge_mut(e).unwrap().curve = Some(curve);
+            for v in b.edge(e).unwrap().vertices {
+                if moved.insert(v) {
+                    let p = b.vertex(v).unwrap().point;
+                    b.vertex_mut(v).unwrap().point = Point3::new(p.x + dx, p.y, p.z);
+                }
+            }
+            for eu in b.edge(e).unwrap().edgeuses.clone() {
+                b.edgeuse_mut(eu).unwrap().uv_trim_curve = None;
+            }
+        }
+    }
+
+    /// Test 38's box pruning gives the all-pairs verdict on faces with many holes:
+    /// as built, and with one hole moved to overlap, touch, or come within a few
+    /// tolerances of its neighbour (on both sides of the pruning margin).
+    #[test]
+    fn face38_pruned_matches_all_pairs() {
+        let mut k = Kernel::default();
+        let b = plate_with_holes(&mut k, 3);
+        let caps = holed_faces(&b);
+        assert_eq!(caps.len(), 2);
+        let mut verdicts = Vec::new();
+        for &f in &caps {
+            let surface = p2::surface(&b, f).unwrap().unwrap().clone();
+            let tol = face_uv_tol(&k, &surface);
+            // the hole at (3, 3) and its neighbour at (13, 3): 6 apart in x
+            for gap in [
+                None,
+                Some(-0.5),
+                Some(0.0),
+                Some(0.5 * tol),
+                Some(1.5 * tol),
+                Some(2.5 * tol),
+                Some(4.0 * tol),
+                Some(1e-3),
+            ] {
+                let mut b1 = b.clone_standing_for_self().unwrap();
+                if let Some(gap) = gap {
+                    let loops = p2::loops(&b1, f, false, None).unwrap();
+                    let hole = loops
+                        .iter()
+                        .copied()
+                        .find(|&l| {
+                            loopuse::loop_vertices(&b1, l)
+                                .unwrap()
+                                .into_iter()
+                                .flatten()
+                                .any(|v| {
+                                    let p = b1.vertex(v).unwrap().point;
+                                    (p.x - 3.0).abs() < 1e-9 && (p.y - 3.0).abs() < 1e-9
+                                })
+                        })
+                        .unwrap();
+                    shift_loop(&k, &mut b1, hole, 6.0 - gap);
+                }
+                let mut b2 = b1.clone_standing_for_self().unwrap();
+                let (pruned, counts) = assert_test_face38_counted(&k, &mut b1, f).unwrap();
+                let (all_pairs, all_count) = all_pairs_face38(&k, &mut b2, f);
+                assert_eq!(pruned, all_pairs, "{f:?} gap {gap:?}");
+                assert!(counts.intersections <= all_count, "{f:?} gap {gap:?}");
+                verdicts.push(pruned);
+            }
+        }
+        // both verdicts are reached
+        assert!(
+            verdicts.contains(&true) && verdicts.contains(&false),
+            "{verdicts:?}"
+        );
+    }
+
+    /// Test 38's work grows with the face's trims, not with their pairs: from 16 to
+    /// 64 holes (80 to 288 trims) the all-pairs path runs about 12 times as many
+    /// intersections, the pruned one compares about 3.6 times as many trim pairs.
+    #[test]
+    fn face38_work_is_linear_in_trims() {
+        let mut work = Vec::new();
+        for n in [4, 8] {
+            let mut k = Kernel::default();
+            let b = plate_with_holes(&mut k, n);
+            let f = holed_faces(&b)[0];
+            let mut b1 = b.clone_standing_for_self().unwrap();
+            let mut b2 = b.clone_standing_for_self().unwrap();
+            let (ok, counts) = assert_test_face38_counted(&k, &mut b1, f).unwrap();
+            let (all_ok, all_count) = all_pairs_face38(&k, &mut b2, f);
+            assert!(ok && all_ok);
+            work.push((counts, all_count));
+        }
+        let [(small, small_all), (large, large_all)] = work[..] else {
+            unreachable!()
+        };
+        assert!(large_all >= 10 * small_all, "{small_all} -> {large_all}");
+        assert!(
+            large.trim_pairs <= 6 * small.trim_pairs,
+            "{small:?} -> {large:?}"
+        );
+        assert!(
+            large.intersections <= 6 * small.intersections.max(1),
+            "{small:?} -> {large:?}"
+        );
     }
 }

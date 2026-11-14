@@ -37,10 +37,14 @@ solidcraft-control = { workspace = true }
 # The D3D12 shader compiler the window starts with (#6756).
 solidcraft-gpu = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
+# SolidCraft's look (icons, glyphs, built-in themes), installed at startup.
+solidcraft-look = { workspace = true }
 solidcraft-ui-text = { workspace = true }
 solidcraft-theme = { workspace = true }
 solidcraft-space-mouse = { workspace = true }
-eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }
+# "clipboard" is not a default here: eframe 0.37 builds egui-winit without it, and then every
+# Copy and Paste on the desktop silently does nothing (see src/clipboard_tests.rs).
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links", "clipboard"] }
 egui = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

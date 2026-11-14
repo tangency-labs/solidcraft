@@ -665,6 +665,59 @@ mod extrude_view_preference {
     }
 }
 
+/// #14128: Extrude clicked while an edited sketch is still open ends the sketch on its way. The
+/// sketch is already used by an earlier extrude, so once it is finished it is hidden, and its new
+/// rectangle could not be picked: the Extrude dialog showed no profiles to click. The sketch stays
+/// shown while the Extrude it started is open, a click inside the new rectangle picks it, and OK
+/// builds a solid from it, the same as after Finish Sketch. Closing the dialog hides it again.
+#[test]
+fn extrude_from_an_open_used_sketch_picks_its_new_profile() {
+    use serde_json::json;
+    for close in ["OK", "Cancel"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let sketch = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        // The rectangle by its curves, as the Extrude dialog stores it: the new one stays a profile.
+        h.app.run("solid.extrude", json!({"distance": 10, "profiles": [0]})).unwrap();
+        assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, sketch), "{close}: the extrude hides the sketch it uses");
+        h.app.edit_feature(sketch);
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, Some(sketch), "{close}");
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [60, 0], "p1": [80, 30]})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+        let features = h.app.session.doc.features.len();
+        h.step(&json!({"start": "solid.extrude"})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, None, "{close}: Extrude ended the sketch");
+        assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Extrude { .. })), "{close}: Extrude is open");
+        assert!(solidcraft_engine::view::sketch_shown(&h.app.session, sketch), "{close}: the sketch stays shown while its Extrude is open");
+        h.step(&json!({"click": {"world": [70, 15, 0]}})).unwrap();
+        h.settle();
+        let picked = h.app.dialog.as_ref().and_then(|d| d.inputs.first()).map(|i| i.items.clone()).unwrap_or_default();
+        let new_profile = crate::open_meshing::session_world(&h.app.session)
+            .sketch(sketch)
+            .and_then(|ss| ss.profiles.iter().position(|p| p.contains(solidcore_record::Vec2::new(70.0, 15.0))))
+            .unwrap();
+        assert_eq!(picked, vec![solidcraft_engine::Sel::Profile { sketch, index: new_profile }], "{close}: the click picks the new rectangle");
+        h.step(&json!({"widget": close})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "{close}");
+        assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, sketch), "{close}: hidden again once the dialog closes");
+        if close == "Cancel" {
+            assert_eq!(h.app.session.doc.features.len(), features, "Cancel adds nothing");
+            continue;
+        }
+        assert_eq!(h.app.session.doc.features.len(), features + 1, "OK adds the extrude");
+        let Some(FeatureKind::Extrude { thin, .. }) = h.app.session.doc.features.last().map(|f| &f.kind) else { panic!("an extrude") };
+        assert!(thin.is_none(), "a solid from the profile, not a thin wall along its lines");
+        let volume = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+        assert!((volume - (40.0 * 30.0 * 10.0 + 20.0 * 30.0 * 10.0)).abs() < 1e-6, "both blocks are solid: {volume}");
+    }
+}
+
 /// #8127: a sketch inside an inserted fastener, opened from its row in the browser, activates the
 /// fastener's component while it is open; Finish and Cancel make the design active again, so the
 /// other bodies are no longer drawn faded. Editing it with the fastener already active leaves the

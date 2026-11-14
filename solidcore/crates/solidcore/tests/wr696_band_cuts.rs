@@ -1,6 +1,5 @@
 //! WR-696 (#2273, step 5 of the generic blend; the fork's tangency-labs/smlib#79, 862971f,
-//! e568e45 and aac4288, merged at 5e8c9c1): with `fixes.fillet_gn_section_generator` a
-//! convex blend that would take all of the part between its rails somewhere along its edge
+//! e568e45 and aac4288, merged at 5e8c9c1): a convex blend that would take all of the part between its rails somewhere along its edge
 //! (a round or chamfer through the bridge over a slot) is refused before anything is built
 //! (`SmFilletSolver::BandCutsThePart`), naming the largest size that keeps the part whole and
 //! noting it, less the fit margin, as the fit size ([`FilletSession::fit_size`]).
@@ -25,23 +24,26 @@
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
 use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
+use solidcore::math::Vec3;
+use solidcore::primitive::api_curves as curves;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::edge_closest_point;
+use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p1::regions;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::EdgeId;
 use solidcore::{Brep, Kernel};
 
-fn kernel(gn: bool) -> Kernel {
-    let mut k = Kernel::default();
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_gn_section_generator = gn;
-    k.fixes = fixes;
-    k
+fn kernel() -> Kernel {
+    Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    }
 }
 
 fn pick(k: &Kernel, b: &Brep, q: Point3) -> EdgeId {
@@ -99,7 +101,7 @@ fn bridged_block(k: &mut Kernel) -> Brep {
 /// fit 7.8184271464117412 (2.2e-8 over the closed form's).
 #[test]
 fn a_round_through_a_bridge_is_refused_naming_the_radius_that_keeps_it_whole() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     // the round on the continued wall; with `fillet_round_ends_on_outline` it ends on the
     // body's outline (`wr730_round_ends_on_outline.rs`)
     k.fixes.fillet_round_ends_on_outline = false;
@@ -131,7 +133,7 @@ fn a_round_through_a_bridge_is_refused_naming_the_radius_that_keeps_it_whole() {
 /// whole", fit 4.9900000000036382.
 #[test]
 fn a_chamfer_through_a_bridge_is_refused_naming_the_setback_that_keeps_it_whole() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = bridged_block(&mut k);
     let refusal = blend(&mut k, &mut b, Point3::new(2.0, 0.0, 10.0), 6.0, 0).expect_err("refused");
     eprintln!("{} fit {:?}", refusal.comment, refusal.fit);
@@ -165,7 +167,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// Blends the bridged block's top front edge by `r` (`xsect` as [`blend`]): built, a
 /// manifold solid in one piece (the outside and one solid region), its volume.
 fn built_volume(r: f64, xsect: u32) -> f64 {
-    let mut k = kernel(true);
+    let mut k = kernel();
     // the round on the continued wall; with `fillet_round_ends_on_outline` it ends on the
     // body's outline (`wr730_round_ends_on_outline.rs`)
     k.fixes.fillet_round_ends_on_outline = false;
@@ -218,18 +220,27 @@ fn a_chamfer_past_the_rim_over_the_opening_keeps_the_bridge() {
     );
 }
 
-/// Without the flag the cut is not judged: no refusal names it, and no fit is noted.
+/// A sheet: two walls, the open profile (0, 0) -> (10, 0) -> (10, 10) swept 10 up without
+/// caps, their corner edge x = 10, y = 0 rounded r 1 on the default kernel. A sheet's edges
+/// bound no material, so there is no part for the band to cut, and the round builds. Before,
+/// `sm_BlendAddsMaterial` found no use of the edge on a material side and failed
+/// (`SM_ERR` from `IsConcaveEdge`), and the fillet with it (the goldens' `stubs4-*` rounds of
+/// upstream's open sheets, `test8.smb`, `shell_fillet.smb` and others).
 #[test]
-fn without_the_flag_the_cut_is_not_judged() {
-    let mut k = kernel(false);
-    let mut b = bridged_block(&mut k);
-    if let Err(refusal) = blend(&mut k, &mut b, Point3::new(2.0, 0.0, 10.0), 9.0, 1) {
-        assert!(refusal.fit.is_none());
-        assert_ne!(refusal.reason, Some(NoRoomReason::CutsThePart));
-        assert!(
-            !refusal.comment.contains("cut it into pieces"),
-            "{}",
-            refusal.comment
-        );
-    }
+fn a_round_on_a_sheet_has_no_part_to_cut() {
+    let mut k = Kernel::default();
+    let p = Point3::new;
+    let profile = [
+        Curve::from(curves::create_line_segment(p(0.0, 0.0, 0.0), p(10.0, 0.0, 0.0)).unwrap()),
+        Curve::from(curves::create_line_segment(p(10.0, 0.0, 0.0), p(10.0, 10.0, 0.0)).unwrap()),
+    ];
+    let refs: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+    let mut b = create_linear_sweep(&mut k, &refs, Vec3::new(0.0, 0.0, 1.0), 10.0, false).unwrap();
+    let e = pick(&k, &b, p(10.0, 0.0, 5.0));
+    let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[e], 1.0, 1, 1, 1.0)
+        .unwrap();
+    let done = session.do_fillet(&mut k);
+    assert!(done.is_ok(), "{done:?}: {}", session.error_info().comment);
 }

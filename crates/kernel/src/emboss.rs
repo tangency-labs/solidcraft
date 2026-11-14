@@ -46,7 +46,7 @@ fn wall_angles(b: &Brep, face: usize, o: Vec3, axis: Vec3, radial: Vec3, tangent
         // (`interval` is on its NURBS form where it has one) about the angle of its middle (a
         // whole turn, from the seam, for a wall in one piece).
         let c = CurveEval::new(&e.curve).ok()?;
-        let [t0, t1] = solidcraft_geom::brep::label::edge_curve_interval(e)?;
+        let [t0, t1] = solidcore_ops::label::edge_curve_interval(e)?;
         let am = angle(c.point(0.5 * (t0 + t1))?, o, axis, radial, tangent);
         let half = 0.5 * (t1 - t0);
         return Some((am - half, am + half));
@@ -850,6 +850,7 @@ mod tests {
         // A pick anywhere on the exterior wall identifies it (#3782); one on the bore does not.
         assert!(emboss_cylinder_at(&sleeve, -Vec3::Y * 10. + Vec3::Z * 7.5, &plane(), &[profile()], 1.).is_ok());
         assert!(emboss_cylinder_at(&sleeve, -Vec3::Y * 8. + Vec3::Z * 7.5, &plane(), &[profile()], 1.).is_err());
+        assert!(emboss_cylinder_at(&sleeve, -Vec3::Y * 10. + Vec3::Z * 20., &plane(), &[profile()], 1.).is_err());
         assert_eq!(crate::step_export(&[&sleeve], "unchanged").unwrap(), before);
     }
 }

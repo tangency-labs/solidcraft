@@ -27,6 +27,10 @@ pub struct Body {
     /// The body in SMLib, built from `record` on first use (or kept from the operation that
     /// made it), shared by clones because they share the record.
     pub(crate) smlib: std::sync::Arc<std::sync::OnceLock<std::result::Result<solidcraft_smlib::Brep, Refusal>>>,
+    /// The record as solidcore-ops' body, for the kernel's answers about its faces
+    /// ([`Body::flat_spline_face`]): made on first use, shared by clones as `smlib` is. None
+    /// when the record was refused, kept like `smlib`'s refusal so it is not tried again.
+    pub(crate) ops: std::sync::Arc<std::sync::OnceLock<Option<(solidcore_ops::Body, solidcore_ops::Order)>>>,
     /// Bounding-box diagonal of the vertices, measured when the body was made; 0 means "not
     /// measured, walk the geometry". Every kernel tolerance is a fraction of it.
     pub(crate) size: f64,
@@ -236,14 +240,32 @@ pub struct Paint {
     /// 1 = opaque.
     pub opacity: f32,
     pub faces: Vec<FacePaint>,
+    /// The body colour's name in the file it came from (a STEP `COLOUR_RGB` name), if it had one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
-/// A face's own colour: the B-rep face index (`face_iter` order), sRGB as 0..1, opacity.
+/// A face's own colour: the B-rep face index (`face_iter` order), sRGB as 0..1, opacity, and
+/// its name in the file it came from, if it had one.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FacePaint {
     pub face: usize,
     pub color: [f32; 3],
     pub opacity: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// The most characters a colour name read from a file keeps (as a design look's name).
+pub const COLOUR_NAME_MAX: usize = 128;
+
+/// A colour name read from a file, made safe to show and keep: control characters dropped,
+/// surrounding space trimmed, at most [`COLOUR_NAME_MAX`] characters. `None` when nothing is left.
+pub fn colour_name(raw: &str) -> Option<String> {
+    let cleaned: String = raw.chars().filter(|c| !c.is_control()).collect();
+    let name: String = cleaned.trim().chars().take(COLOUR_NAME_MAX).collect();
+    let name = name.trim_end();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// A B-rep edge as seen by the rest of the application.
@@ -332,7 +354,7 @@ fn same_shared<T: PartialEq>(a: &Option<std::sync::Arc<T>>, b: &Option<std::sync
 /// canonical order) and at least one face. A solid's faces bound material; a surface body's lie
 /// in open shells.
 fn solid_record(record: Brep) -> Result<Brep> {
-    solidcraft_geom::brep::check::validate_built(&record).map_err(|e| KernelError::Invalid(e.to_string()))?;
+    solidcore_ops::record_check::validate_built(&record).map_err(|e| KernelError::Invalid(e.to_string()))?;
     if record.faces.is_empty() {
         return Err(KernelError::Failed("empty result".into()));
     }
@@ -378,6 +400,15 @@ pub enum PointClass {
     OnBoundary,
 }
 
+/// SMLib's class of a point as the kernel's.
+fn point_class(c: solidcraft_smlib::PointClass) -> PointClass {
+    match c {
+        solidcraft_smlib::PointClass::Inside => PointClass::Inside,
+        solidcraft_smlib::PointClass::Outside => PointClass::Outside,
+        solidcraft_smlib::PointClass::OnBoundary => PointClass::OnBoundary,
+    }
+}
+
 /// The kind of surface a face lies on, as a person modelling would name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SurfaceKind {
@@ -421,7 +452,7 @@ impl SurfaceKind {
             S::Cone { .. } => SurfaceKind::Cone,
             S::Sphere { .. } | S::BallPatch { .. } => SurfaceKind::Sphere,
             S::Torus { .. } => SurfaceKind::Torus,
-            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } => SurfaceKind::Freeform,
+            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } | S::Blend { .. } => SurfaceKind::Freeform,
         }
     }
 }
@@ -433,6 +464,7 @@ impl Body {
         Body {
             record: std::sync::Arc::new(record),
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
+            ops: std::sync::Arc::new(std::sync::OnceLock::new()),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
             bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -681,7 +713,8 @@ impl Body {
     }
 
     /// Exact current planar surface for an explicitly fixed snapshot, without source lineage: the
-    /// face's plane as the face faces (out of the material in a closed shell).
+    /// face's plane as the face faces (out of the material in a closed shell). A plane surface,
+    /// or a B-spline face the kernel finds flat ([`Body::flat_spline_face`], #14346).
     pub fn planar_face(&self, index: usize) -> Option<solidcore_record::Plane> {
         let face = self.record.faces.get(index)?;
         let (o, u, v) = match &face.surface {
@@ -690,10 +723,48 @@ impl Body {
                 let o = v3(*origin);
                 (o, v3(*u_point) - o, v3(*v_point) - o)
             }
+            Surface::Spline { .. } | Surface::RationalSpline { .. } => return self.flat_spline_face(index),
             _ => return None,
         };
         let v = if self.face_forward(index) { v } else { -v };
         solidcore_record::Plane::new(o, u, v)
+    }
+
+    /// The plane of B-spline face `index` when the kernel finds it flat: SMLib's `IsPlanar` at
+    /// the face's own tolerance, with the normal facing out of the material as the face is used
+    /// ([`solidcore_ops::Body::face_plane_normal`]), through the face's first vertex. A loft's
+    /// side through three or more sections is skinned as a B-spline patch even when it is flat,
+    /// as a face of an imported design can be (#14346).
+    fn flat_spline_face(&self, index: usize) -> Option<solidcore_record::Plane> {
+        let face = self.record.faces.get(index)?;
+        let vertex = face.loops.iter().find_map(|l| match l {
+            Loop::Edges { edges } => edges.first().and_then(|u| self.record.edges.get(u.edge as usize)).and_then(|e| e.vertices.first().copied()),
+            Loop::Vertex { vertex } => Some(*vertex),
+        })?;
+        let point = v3(self.record.vertices.get(vertex as usize)?.point);
+        let (body, order) = self.ops_body()?;
+        let normal = body.face_plane_normal(order, index).ok()??;
+        solidcore_record::Plane::from_normal(point, v3(normal.value))
+    }
+
+    /// The record as solidcore-ops' body and the order of its entities, made on first use and
+    /// kept for every later face. A refusal of the record is kept too, as `smlib`'s is: the same
+    /// record is refused the same way again. A refusal of the moment is not kept, so a later
+    /// query tries again: a call from inside a kernel call or from solidcore-ops' failure
+    /// callback ([`solidcore_ops::Error::Reentered`]), or a cancelled one. None for a mesh body.
+    pub(crate) fn ops_body(&self) -> Option<&(solidcore_ops::Body, solidcore_ops::Order)> {
+        if self.is_mesh() {
+            return None;
+        }
+        if let Some(kept) = self.ops.get() {
+            return kept.as_ref();
+        }
+        // Converted outside the cell: a failure callback that asked about this body again
+        // would otherwise reenter the cell while it is being filled.
+        match solidcraft_smlib::stop::unstoppable(|| solidcore_ops::Body::from_record(&self.record, true)) {
+            Err(solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled) => None,
+            made => self.ops.get_or_init(|| made.ok()).as_ref(),
+        }
     }
 
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
@@ -936,21 +1007,24 @@ impl Body {
         self.paint.as_deref()
     }
 
-    /// The same body with opacity and face colours for export (`None` or opaque with no face
-    /// colours clears them).
+    /// The same body with opacity, face colours and colour names for export (`None`, or opaque
+    /// with no face colours and no name, clears them).
     pub fn with_paint(mut self, p: Option<Paint>) -> Body {
         let clean = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 };
         self.paint = p
             .map(|mut p| {
                 p.opacity = clean(p.opacity);
+                p.name = p.name.as_deref().and_then(colour_name);
                 p.faces.retain(|f| f.color.iter().all(|x| x.is_finite()));
                 for f in &mut p.faces {
                     f.color = f.color.map(|x| x.clamp(0.0, 1.0));
                     f.opacity = clean(f.opacity);
+                    f.name = f.name.as_deref().and_then(colour_name);
                 }
                 p
             })
-            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty())
+            // An opaque body colour's name is kept with it: the paint holds it.
+            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty() || p.name.is_some())
             .map(std::sync::Arc::new);
         self.regularization_protected |= self.paint().is_some_and(|paint| !paint.faces.is_empty());
         self
@@ -1016,28 +1090,20 @@ impl Body {
         Ok(b)
     }
 
-    /// The body's volume from a mesh at `tol`, measured once per (record, tolerance): clones of
-    /// a body share the measurement. `None` when the body cannot be meshed, or a face of it was
-    /// left out of the mesh (an open mesh has no volume).
-    pub fn volume_at(&self, tol: f64) -> Option<f64> {
-        let key = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
-        let key = key.to_bits();
+    /// The body's volume: measured with exact mass properties via SMLib for B-rep bodies,
+    /// or from mesh triangles for mesh bodies.
+    pub fn volume_at(&self, _tol: f64) -> Option<f64> {
         if let Some(cell) = &self.volume
             && let Ok(cached) = cell.lock()
-            && let Some((cached_tol, volume)) = *cached
-            && cached_tol == key
+            && let Some((_, volume)) = *cached
         {
             return Some(volume);
         }
-        let mesh = self.mesh(&MeshTolerance::chord(f64::from_bits(key))).ok()?;
-        if self.faces_without_triangles(&mesh) > 0 {
-            return None;
-        }
-        let volume = mesh.measure().volume;
+        let volume = crate::measure(self).ok()?.volume;
         if let Some(cell) = &self.volume
             && let Ok(mut slot) = cell.lock()
         {
-            *slot = Some((key, volume));
+            *slot = Some((0, volume));
         }
         Some(volume)
     }
@@ -1212,20 +1278,6 @@ impl Body {
         plan.faces_with_triangles(self.face_count()).iter().filter(|h| !**h).count()
     }
 
-    /// Faces of the body with no triangles in its mesh `m` (left out by the mesher).
-    fn faces_without_triangles(&self, m: &Mesh) -> usize {
-        if self.is_mesh() {
-            return 0;
-        }
-        let mut has = vec![false; self.face_count()];
-        for f in &m.tri_face {
-            if let Some(h) = has.get_mut(*f as usize) {
-                *h = true;
-            }
-        }
-        has.iter().filter(|h| !**h).count()
-    }
-
     /// A mesh with its edges flagged for display (seams, tangent joins, protected creases).
     fn flagged(&self, mut m: Mesh) -> Result<Mesh> {
         if self.is_mesh() {
@@ -1238,15 +1290,26 @@ impl Body {
 
     /// Edges with polylines (index = the record's edge index).
     pub fn edges(&self, tol: f64) -> Result<Vec<EdgeInfo>> {
-        let m = self.mesh(&MeshTolerance::chord(tol))?;
-        Ok(m.edges
-            .into_iter()
-            .enumerate()
-            .map(|(index, points)| {
-                let (mid, length) = polyline_mid(&points);
-                EdgeInfo { index, points, mid, length }
-            })
-            .collect())
+        if let Some(mb) = &self.mesh {
+            let m = mb.to_mesh();
+            return Ok(m
+                .edges
+                .into_iter()
+                .enumerate()
+                .map(|(index, points)| {
+                    let (mid, length) = polyline_mid(&points);
+                    EdgeInfo { index, points, mid, length }
+                })
+                .collect());
+        }
+        let rec = self.record();
+        let mut out = Vec::with_capacity(rec.edges.len());
+        for (index, edge) in rec.edges.iter().enumerate() {
+            let points = edge_points(edge, tol)?;
+            let (mid, length) = polyline_mid(&points);
+            out.push(EdgeInfo { index, points, mid, length });
+        }
+        Ok(out)
     }
 
     /// How far [`Body::planar_edges`] lets a piece it reads as a line or an arc lie from the
@@ -1351,11 +1414,23 @@ impl Body {
             });
         }
         let class = self.smlib()?.classify_point([p.x, p.y, p.z]).map_err(|e| KernelError::smlib("SMLib point classification", e))?;
-        Ok(match class {
-            solidcraft_smlib::PointClass::Inside => PointClass::Inside,
-            solidcraft_smlib::PointClass::Outside => PointClass::Outside,
-            solidcraft_smlib::PointClass::OnBoundary => PointClass::OnBoundary,
-        })
+        Ok(point_class(class))
+    }
+
+    /// [`Body::classify_point`] for each of `points`, in order, through one classification of
+    /// the body: SMLib's copy of it and its search structures are made once for all the points,
+    /// where a call a point makes them again each time (on a large body far more work than a
+    /// point's own solve). The first point that cannot be classified fails them all.
+    pub fn classify_points(&self, points: &[Vec3]) -> Result<Vec<PointClass>> {
+        if let Some(p) = points.iter().find(|p| !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite())) {
+            return Err(KernelError::Invalid(format!("point classification: the point {p:?} is not finite")));
+        }
+        if self.mesh.is_some() || points.len() < 2 {
+            return points.iter().map(|&p| self.classify_point(p)).collect();
+        }
+        let at: Vec<[f64; 3]> = points.iter().map(|p| [p.x, p.y, p.z]).collect();
+        let classes = self.smlib()?.classify_points(&at).map_err(|e| KernelError::smlib("SMLib point classification", e))?;
+        classes.into_iter().map(|c| c.map(point_class).map_err(|e| KernelError::smlib("SMLib point classification", e))).collect()
     }
 
     /// B-rep faces (a mesh body is one face; [`crate::measure`] counts its triangles).

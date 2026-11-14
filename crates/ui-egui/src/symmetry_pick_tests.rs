@@ -1,6 +1,7 @@
 //! The Symmetry tool's third pick may be the origin point or an origin axis (#1075); with three
 //! lines, the construction line between the other two is the symmetry line in any pick order (#1796).
-//! A constraint tool's pick may be a body's edge, a mirrored copy's too (#6348).
+//! A constraint tool's pick may be a body's edge, a mirrored copy's too (#6348), and Collinear's or
+//! Tangent's an origin axis (#15461).
 
 use serde_json::json;
 use solidcore_record::Vec2;
@@ -130,4 +131,25 @@ fn collinear_with_an_edge_of_a_mirrored_body_projects_the_edge() {
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(links(&h), 1, "undone with the constraint");
     assert!((point(&h, "side.start").x + 100.0).abs() < 1e-6);
+}
+
+/// #15461: with the Collinear tool running, a line and then the X axis are clicked: the line lands
+/// on the axis, as it does with the sketch's own `x` given to the command.
+#[test]
+fn collinear_with_a_clicked_origin_axis() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(true);
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[5,8],[25,11]],"infer":false,"connect":false})).unwrap();
+    h.app.cam.distance = 120.0;
+    h.settle();
+    h.app.start("sketch.constraint.collinear");
+    // The line's middle, then the X axis (drawn from the origin along +x) away from the origin
+    // point and the line.
+    for xy in [[15.0, 9.5], [6.0, 0.0]] {
+        let at = h.call("ui.at", json!({ "sketch": xy }))["result"].clone();
+        h.step(&json!({ "click": at })).unwrap();
+    }
+    let (a, b) = (point(&h, "l1.start"), point(&h, "l1.end"));
+    assert!(a.y.abs() < 1e-6 && b.y.abs() < 1e-6, "on the X axis: {a:?} {b:?} ({:?})", h.app.status);
 }

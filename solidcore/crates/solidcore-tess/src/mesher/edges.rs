@@ -7,9 +7,12 @@ use solidcore::eval::CurveEval;
 use solidcore_convert as kernel;
 use crate::vec::VecExt as _;
 
-use super::size::Rules;
+use super::size::{Rules, SizeAt};
 use crate::{Result, TessError};
 
+/// How near, as a fraction of its segment's parameter length, a node put in on an edge may lie to
+/// another before it is that node ([`insert_at`]).
+const NEAR: f64 = 1e-6;
 /// Most nodes on one edge.
 pub(crate) const MAX_EDGE_NODES: usize = 20_000;
 /// Deepest bisection of one edge segment.
@@ -20,6 +23,7 @@ const MAX_DEPTH: u32 = 24;
 pub(crate) const QUARTER_TURN: f64 = std::f64::consts::FRAC_PI_2 * (1.0 + 1e-9);
 
 /// An edge's nodes, from its start vertex (interval min) to its end vertex (interval max).
+#[derive(Default)]
 pub(crate) struct Nodes {
     pub points: Vec<Vec3>,
     /// The curve's parameter at each node (the edge's interval, ends included): where each
@@ -29,6 +33,11 @@ pub(crate) struct Nodes {
     /// within the chord tolerance (see [`snap`]): in a face that runs both edges such a node is
     /// the other's point of the face, a pinch, not a crossing.
     pub snapped: Vec<f64>,
+    /// Where a bound of the sampling stopped a chord that still wanted splitting: the bound,
+    /// the farthest any of the edge's chords lies from its curve (mm), and the most any chord
+    /// exceeds its rules (its sag over the tolerance, its length over the side asked, its turn
+    /// over a quarter turn; past 1 for a rule broken).
+    pub capped: Option<(crate::EdgeCap, f64, f64)>,
 }
 
 /// Nodes of edge `ei` of `b` from its start to its end: every chord within the tolerance of
@@ -38,6 +47,14 @@ pub(crate) struct Nodes {
 /// exactly. A curve that does not evaluate somewhere on its interval is an error naming the
 /// edge.
 pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> Result<Nodes> {
+    sample_edge_sized(b, ei, rules, h, None)
+}
+
+/// [`sample_edge`], where no segment is longer than the size function `size_at` asks at its
+/// middle either (the mesh path's, [`super::Purpose::Mesh`]; `None`: `h` alone). A line is
+/// divided evenly by `h` as there, then its segments are halved, on the line, wherever the
+/// function asks for less; a curve is bisected to both.
+pub(crate) fn sample_edge_sized(b: &brep::Brep, ei: usize, rules: &Rules, h: f64, size_at: Option<SizeAt<'_>>) -> Result<Nodes> {
     let fail = |why: String| TessError::Failed(format!("tessellation: edge {ei}: {why}"));
     let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
     let vertex = |k: usize| {
@@ -45,7 +62,6 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
         Ok::<Vec3, TessError>(Vec3::new(v.point[0], v.point[1], v.point[2]))
     };
     let (front, back) = (vertex(0)?, vertex(1)?);
-    let tol = rules.tol;
     let [t0, t1] = edge.interval;
     if !(t0.is_finite() && t1.is_finite() && t1 > t0) {
         return Err(fail(format!("interval [{t0}, {t1}]")));
@@ -56,13 +72,25 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
         // runs the edge backwards starts its loop with that node, where the face running it
         // forwards takes the next edge's first node (the vertex) — a crack.
         let n = if h > 0.0 { (front.dist(back) / h).ceil().clamp(1.0, (MAX_EDGE_NODES - 1) as f64) as usize } else { 1 };
+        if let Some(f) = size_at {
+            // The line's even division by `h`, each segment then halved on the line while the
+            // size function asks for less at its middle. Its chords lie on it: no sag to split.
+            let initial = u32::try_from(n).map_err(|_| fail(format!("{n} segments")))?;
+            let along = back - front;
+            let on_line = |t: f64| -> Result<Vec3> { Ok(front + along * ((t - t0) / (t1 - t0))) };
+            let local = |pa: Vec3, pb: Vec3| super::size::local(h, Some(f), (pa + pb) * 0.5);
+            return bisect_at(&on_line, [t0, t1], [front, back], initial, rules, &local);
+        }
         let mut pts: Vec<Vec3> = (0..=n).map(|i| front + (back - front) * (i as f64 / n as f64)).collect();
         let mut params: Vec<f64> = (0..=n).map(|i| t0 + (t1 - t0) * (i as f64 / n as f64)).collect();
         if let (Some(p), Some(t)) = (pts.last_mut(), params.last_mut()) {
             *p = back;
             *t = t1;
         }
-        return Ok(Nodes { points: pts, params, snapped: Vec::new() });
+        // A line's chords lie on it; past the node bound its sides are longer than asked.
+        let side = front.dist(back) / n as f64;
+        let capped = (h > 0.0 && side > h * (1.0 + 1e-9)).then(|| (crate::EdgeCap::Nodes, 0.0, side / h));
+        return Ok(Nodes { points: pts, params, snapped: Vec::new(), capped });
     }
     let curve_value = kernel::curve(edge.parameters()).map_err(|e| fail(e.to_string()))?;
     let curve = CurveEval::new(&curve_value).map_err(|e| fail(crate::eval_message(e)))?;
@@ -71,6 +99,31 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
     // A closed curve's chord between its ends is empty: start it from a few segments. An open
     // one starts whole, so an arc the tolerance leaves flat stays one segment.
     let initial: u32 = if edge.vertices[0] == edge.vertices[1] { 4 } else { 1 };
+    match size_at {
+        None => bisect(&at, [t0, t1], [front, back], initial, rules, h),
+        Some(f) => bisect_at(&at, [t0, t1], [front, back], initial, rules, &|pa: Vec3, pb: Vec3| super::size::local(h, Some(f), (pa + pb) * 0.5)),
+    }
+}
+
+/// The nodes of a curve over `[t0, t1]` by bisection: from `initial` even segments, each split
+/// until its chord is within the tolerance of the curve (checked at the quarter points), at most
+/// `h` long, within the rules' facet angle and spanning at most a quarter turn. The end nodes
+/// are `ends` themselves, not the curve's points there. `at` evaluates the curve.
+pub(crate) fn bisect(at: &impl Fn(f64) -> Result<Vec3>, ts: [f64; 2], ends: [Vec3; 2], initial: u32, rules: &Rules, h: f64) -> Result<Nodes> {
+    bisect_at(at, ts, ends, initial, rules, &|_: Vec3, _: Vec3| h)
+}
+
+/// [`bisect`], with the longest side asked of each segment given by `h` from its two end
+/// points (the mesh path's size function, [`sample_edge_sized`]).
+pub(crate) fn bisect_at(
+    at: &impl Fn(f64) -> Result<Vec3>,
+    [t0, t1]: [f64; 2],
+    [front, back]: [Vec3; 2],
+    initial: u32,
+    rules: &Rules,
+    h: &dyn Fn(Vec3, Vec3) -> f64,
+) -> Result<Nodes> {
+    let tol = rules.tol;
     let t_at = |i: u32| t0 + (t1 - t0) * f64::from(i) / f64::from(initial);
     let ends: Vec<Vec3> = (0..=initial).map(|i| at(t_at(i))).collect::<Result<_>>()?;
     // Depth-first bisection, segment by segment, keeping the output ordered. Each segment
@@ -91,6 +144,7 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
         let i = i as u32;
         stack.push(Seg { a: t_at(i), b: t_at(i + 1), pa, pb, mid: None, depth: 0 });
     }
+    let (mut worst_sag, mut capped): (f64, Option<(crate::EdgeCap, f64, f64)>) = (0.0, None);
     while let Some(sg) = stack.pop() {
         let (a, b, pa, pb) = (sg.a, sg.b, sg.pa, sg.pb);
         let m = 0.5 * (a + b);
@@ -100,8 +154,9 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
         };
         let (q1, q3) = (at(a + 0.25 * (b - a))?, at(a + 0.75 * (b - a))?);
         let done = sg.depth >= MAX_DEPTH || out.len() + stack.len() >= MAX_EDGE_NODES;
+        let sag = [q1, pm, q3].iter().map(|q| q.dist_to_segment(pa, pb)).fold(0.0, f64::max);
+        let h = h(pa, pb);
         let fine = || {
-            let sag = [q1, pm, q3].iter().map(|q| q.dist_to_segment(pa, pb)).fold(0.0, f64::max);
             let short = !(pa.dist(pb) > h * (1.0 + 1e-9));
             // The two half chords of an arc turning θ differ by θ/2.
             let bend = 2.0 * turn(pm - pa, pb - pm);
@@ -112,17 +167,30 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
             let quarter = bend <= QUARTER_TURN;
             short && straight && quarter && sag <= tol
         };
-        if !done && !fine() {
+        let ok = fine();
+        if !done && !ok {
             stack.push(Seg { a: m, b, pa: pm, pb, mid: Some(q3), depth: sg.depth + 1 });
             stack.push(Seg { a, b: m, pa, pb: pm, mid: Some(q1), depth: sg.depth + 1 });
         } else {
+            worst_sag = worst_sag.max(sag);
+            if !ok {
+                // A bound stopped a chord that still wants splitting: named, with by how much.
+                let cap = if sg.depth >= MAX_DEPTH { crate::EdgeCap::Depth } else { crate::EdgeCap::Nodes };
+                let bend = 2.0 * turn(pm - pa, pb - pm);
+                let over = (sag / tol).max(if h > 0.0 { pa.dist(pb) / h } else { 0.0 }).max(bend / QUARTER_TURN);
+                capped = Some(match capped {
+                    Some((c, _, x)) => (if c == cap { c } else { crate::EdgeCap::Nodes }, 0.0, x.max(over)),
+                    None => (cap, 0.0, over),
+                });
+            }
             out.push((b, pb));
         }
     }
     if let Some(p) = out.last_mut() {
         *p = (t1, back);
     }
-    Ok(Nodes { points: out.iter().map(|p| p.1).collect(), params: out.iter().map(|p| p.0).collect(), snapped: Vec::new() })
+    let capped = capped.map(|(c, _, x)| (c, worst_sag, x));
+    Ok(Nodes { points: out.iter().map(|p| p.1).collect(), params: out.iter().map(|p| p.0).collect(), snapped: Vec::new(), capped })
 }
 
 /// Edge `ei`'s nodes with each of its segments `segs` (counted from its start) halved at the
@@ -164,6 +232,56 @@ pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs:
         };
         points.push(pm);
         params.push(m);
+    }
+    nodes.points = points;
+    nodes.params = params;
+    Ok(())
+}
+
+/// Edge `ei`'s nodes with a node put in at each of the curve parameters `ts` that lies strictly
+/// inside a segment, on the curve (on a line, along its segment, as [`split_segments`] puts a
+/// line's), in order: where the mesh path's shaping split a boundary side of a face of the edge,
+/// so every face of it takes the node. Two faces splitting one side in a round give its
+/// fraction each in its own metric, apart by their rounding: a parameter within [`NEAR`] of
+/// its segment's length from a node, or from one put in before it, is the same node and left
+/// out, so no two nodes lie a rounding apart. The nodes are unchanged on an error: more than
+/// [`MAX_EDGE_NODES`] nodes, or a curve that does not evaluate there, naming the edge.
+pub(crate) fn insert_at(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64]) -> Result<()> {
+    let fail = |why: String| TessError::Failed(format!("tessellation: edge {ei}: {why}"));
+    let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
+    let mut ts: Vec<f64> = ts.iter().copied().filter(|t| t.is_finite()).collect();
+    ts.sort_by(f64::total_cmp);
+    ts.dedup();
+    if nodes.points.len() + ts.len() > MAX_EDGE_NODES {
+        return Err(fail(format!("more than {MAX_EDGE_NODES} nodes")));
+    }
+    let curve = match edge.curve {
+        Curve::Line { .. } => None,
+        _ => Some(CurveEval::new(&kernel::curve(edge.parameters()).map_err(|e| fail(e.to_string()))?).map_err(|e| fail(crate::eval_message(e)))?),
+    };
+    let n = nodes.points.len().min(nodes.params.len());
+    let (mut points, mut params) = (Vec::new(), Vec::new());
+    let mut next = ts.into_iter().peekable();
+    for k in 0..n {
+        let (Some(&p), Some(&t)) = (nodes.points.get(k), nodes.params.get(k)) else { continue };
+        points.push(p);
+        params.push(t);
+        let (Some(&q), Some(&u)) = (nodes.points.get(k + 1), nodes.params.get(k + 1)) else { continue };
+        // The last node of the segment so far: the one at `t`, then each put in.
+        let mut last = t;
+        while let Some(m) = next.next_if(|m| *m < u) {
+            let near = NEAR * (u - t);
+            if !(m - last > near && u - m > near) {
+                continue;
+            }
+            last = m;
+            let pm = match &curve {
+                None => p + (q - p) * ((m - t) / (u - t)),
+                Some(c) => c.point(m).filter(|p| p.is_finite()).ok_or_else(|| fail(format!("the curve does not evaluate at t = {m}")))?,
+            };
+            points.push(pm);
+            params.push(m);
+        }
     }
     nodes.points = points;
     nodes.params = params;

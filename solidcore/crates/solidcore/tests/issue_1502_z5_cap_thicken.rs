@@ -8,8 +8,8 @@
 //!
 //! Issue #1502 attributes the C++ failure to a second trim point repeated across a closed
 //! offset curve's seam. These Rust-only tests do not establish that internal mechanism or
-//! compare the cap against C++. They exercise the existing #403 opt-in
-//! `Kernel::fixes.offset_closed_curve_trim_arc` (WR-463), which keeps each half's own arc.
+//! compare the cap against C++. They exercise the default
+//! `TrimExtendedEdge` closed-curve arc choice (WR-463), which keeps each half's own arc.
 //! `issue_1502_thicken_rim_halves.rs` covers related stitched quarter-sphere sheets and
 //! equator/pole caps.
 //!
@@ -104,9 +104,7 @@ fn thicken(k: &mut Kernel, mut sheet: Brep, distance: f64) -> solidcore::Result<
 
 /// The issue's configuration: the existing #403 opt-in on (WR-463), nothing else.
 fn wr463() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.offset_closed_curve_trim_arc = true;
-    k
+    Kernel::default()
 }
 
 /// The sector between the sphere's radii 10 and 11 over the cap's solid angle pi.

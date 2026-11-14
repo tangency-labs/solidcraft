@@ -392,25 +392,28 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         caches: &'t mut [SurfaceCache<O>],
     ) -> Result<()> {
         if caches.is_empty() {
-            return Err(SolidError::null_pointer(OP_SET_CACHES));
+            return Err(SolidError::intersect_missing(
+                OP_SET_CACHES,
+                "a surface cache to intersect",
+            ));
         }
         let second = usize::from(caches.len() > 1);
         for i in [0, second] {
             let c = caches
                 .get_mut(i)
-                .ok_or(SolidError::null_pointer(OP_SET_CACHES))?;
+                .ok_or_else(|| SolidError::intersect_missing(OP_SET_CACHES, "the surface cache"))?;
             c.get_tree(k).map_err(|e| {
                 if e.is_unported_or_cancelled() {
                     e
                 } else {
-                    SolidError::null_pointer(OP_SET_CACHES)
+                    SolidError::intersect_missing(OP_SET_CACHES, "the surface cache's tree")
                 }
             })?;
         }
         let caches: &'t [SurfaceCache<O>] = caches;
-        let cache1 = caches
-            .first()
-            .ok_or(SolidError::null_pointer(OP_SET_CACHES))?;
+        let cache1 = caches.first().ok_or_else(|| {
+            SolidError::intersect_missing(OP_SET_CACHES, "the first surface cache")
+        })?;
         let cache2 = caches.get(second).unwrap_or(cache1);
         self.bind_caches(cache1, cache2)
     }
@@ -428,7 +431,11 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         cache1: &'t SurfaceCache<O>,
         cache2: &'t SurfaceCache<O>,
     ) -> Result<()> {
-        let tree = |c: &'t SurfaceCache<O>| c.tree().ok_or(SolidError::null_pointer(OP_SET_CACHES));
+        let tree = |c: &'t SurfaceCache<O>| {
+            c.tree().ok_or_else(|| {
+                SolidError::intersect_missing(OP_SET_CACHES, "the surface cache's tree")
+            })
+        };
         let t1 = tree(cache1)?;
         let t2 = tree(cache2)?;
         self.solver.trees[0] = Some(t1);
@@ -479,13 +486,11 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
 
     /// The `SmBezierPatch` of node `id` of tree `index` (`(SmBezierPatch*)m_pData`).
     fn patch(&self, index: usize, id: Option<NodeId>) -> Result<&'t BezierPatch<O>> {
-        let cache = self
-            .caches
-            .get(index)
-            .copied()
-            .flatten()
-            .ok_or(SolidError::null_pointer(OP_LOCAL))?;
-        let id = id.ok_or(SolidError::null_pointer(OP_LOCAL))?;
+        let cache = self.caches.get(index).copied().flatten().ok_or_else(|| {
+            SolidError::intersect_missing(OP_LOCAL, "the surface cache of the patch")
+        })?;
+        let id =
+            id.ok_or_else(|| SolidError::intersect_missing(OP_LOCAL, "the patch's tree node"))?;
         cache.patch(id)
     }
 
@@ -927,13 +932,11 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
 
     /// `((SmBezierAux2d*)m_pData)->GetPolarBox()` of node `id` of tree `index`.
     fn polar_box(&self, k: &Kernel, index: usize, id: Option<NodeId>) -> Result<PolarBox> {
-        let cache = self
-            .caches
-            .get(index)
-            .copied()
-            .flatten()
-            .ok_or(SolidError::null_pointer(OP_GAUSS))?;
-        let id = id.ok_or(SolidError::null_pointer(OP_GAUSS))?;
+        let cache = self.caches.get(index).copied().flatten().ok_or_else(|| {
+            SolidError::intersect_missing(OP_GAUSS, "the surface cache of the patch")
+        })?;
+        let id =
+            id.ok_or_else(|| SolidError::intersect_missing(OP_GAUSS, "the patch's tree node"))?;
         // built lazily upstream; built without storing it here (the caches are
         // shared), which gives the same box
         cache.polar_box_unstored(k, id)
@@ -1851,7 +1854,10 @@ impl SurfaceIntersector<'_> {
         }
 
         // a single singular direction is not a valid result
-        Err(SolidError::sm_err(OP_SING))
+        Err(SolidError::intersect_failed(
+            OP_SING,
+            "only one singular direction was found, which is not a valid result",
+        ))
     }
 
     /// The singularity/coincidence case of matching principal curvatures and

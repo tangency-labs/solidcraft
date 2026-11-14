@@ -321,3 +321,160 @@ fn newly_catalogued_dialog_labels_show_in_german() {
     assert!(h.widget("ISO metrisch").is_some(), "the thread.iso_metric label must be translated");
     assert!(h.widget("ISO metric").is_none(), "the label must not fall back to English");
 }
+
+/// The kit's widgets in SolidCraft's languages: they translate labels once, show options in the
+/// user's language and fit German text.
+mod kit_translation {
+    use crate::scenario;
+    use crate::ui_kit::{ContentWidth, row, scope, segmented, test_support, theme_option_notice};
+    use egui::{Rect, vec2};
+    use solidcraft_theme::Tokens;
+
+    /// `label_width` and `sized_row` share `indented_label`, so a label is translated once. German
+    /// `Profiles` is `Profile`, which is itself an English key that would translate again to
+    /// `Profil`; the row must show `Profile`, not the second translation.
+    #[test]
+    fn a_label_is_translated_once() {
+        crate::i18n::install();
+        let _de = solidcraft_ui_text::scope("de");
+        let ctx = crate::fonts::test_context();
+        let shown = |label: &str| {
+            let output = test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| scope(ui, |ui| row(ui, label, |_| ())));
+            let mut texts = Vec::new();
+            for clipped in &output.shapes {
+                test_support::each_shape(&clipped.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        texts.push(text.galley.job.text.clone());
+                    }
+                });
+            }
+            texts
+        };
+        assert_eq!(shown("Profiles"), ["Profile"]);
+        assert_eq!(shown("  Profiles"), ["  Profile"]);
+        assert_eq!(shown("Profile"), ["Profil"]);
+    }
+
+    /// A segment shows its option in the user's language, as the dropdown it falls back to does, and
+    /// keeps the option as passed in its handle.
+    #[test]
+    fn segments_show_their_options_translated() {
+        let ctx = crate::fonts::test_context();
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 120.0));
+        let _japanese = solidcraft_ui_text::scope("ja");
+        let mut selected = 0;
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
+            row(ui, "Section", |ui| segmented(ui, &mut selected, &["Circular", "Square"], Default::default()));
+        });
+        output.textures_delta.clear();
+        let painted = |text: &str| output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.job.text == text));
+        for (option, shown) in [("Circular", "円形"), ("Square", "正方形")] {
+            assert!(painted(shown) && !painted(option), "{option} shows as {shown}");
+            assert!(scenario::handle_at(&format!("dialog:Section:{option}")).is_some(), "{option} keeps its handle");
+        }
+    }
+
+    #[test]
+    fn theme_notice_actions_fit_wrap_and_accept_native_pointer_clicks_in_both_themes() {
+        const NOTICE: &str = "A theme option changed. Undo restores the previous value; dismiss keeps the current value and closes this notice.";
+
+        fn frame(ctx: &egui::Context, width: f32, can_undo: bool, events: Vec<egui::Event>) -> (bool, bool) {
+            scenario::clear_handles();
+            let mut clicked = (false, false);
+            crate::test_support::frame(
+                ctx,
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200.0, 1600.0))),
+                    events,
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut content = Rect::NOTHING;
+                    let allocated = ui.allocate_ui_with_layout(vec2(width, ui.available_height()), egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui.set_width(width);
+                        content = ui.max_rect().intersect(ui.clip_rect());
+                        ui.set_clip_rect(content);
+                        scope(ui, |ui| {
+                            clicked = theme_option_notice(ui, "guard", NOTICE, solidcraft_ui_text::tr("prefs.theme_notice_dismiss"), can_undo);
+                        });
+                    });
+                    for (target, present) in [("prefs:theme_notice_undo:guard", can_undo), ("prefs:theme_notice_dismiss:guard", true)] {
+                        let rect = scenario::rect_of(target);
+                        if present {
+                            let rect = rect.expect("notice action");
+                            assert!(content.contains_rect(rect), "{target} clips at width {width}: {rect:?} outside {content:?}");
+                            assert!(allocated.response.rect.contains_rect(rect), "{target} must be inside the allocated notice content");
+                            assert!(rect.is_positive());
+                            assert_eq!(scenario::handle_at(target), Some(rect.center()));
+                        } else {
+                            assert!(rect.is_none(), "Undo must be absent when unavailable");
+                        }
+                    }
+                },
+            );
+            clicked
+        }
+
+        let previous = solidcraft_theme::is_dark();
+        for dark in [false, true] {
+            solidcraft_theme::set_dark(dark);
+            for language in ["en", "de"] {
+                let _language = solidcraft_ui_text::scope(language);
+                let t = Tokens::get();
+                let mut undo_width = 0.0;
+                let mut dismiss_width = 0.0;
+                let mut label_wrap_width = 0.0;
+                test_support::frame(&crate::fonts::test_context(), vec![], |ui| {
+                    undo_width = ContentWidth::button(ui, solidcraft_ui_text::tr("ui.undo"));
+                    dismiss_width = ContentWidth::button(ui, solidcraft_ui_text::tr("prefs.theme_notice_dismiss"));
+                    label_wrap_width = (ContentWidth::label(ui, solidcraft_ui_text::tr("prefs.theme_notice_dismiss")) / 3.0).ceil();
+                });
+                let actions_width = undo_width + dismiss_width + t.space_8 * 2.0;
+                let narrow_width = undo_width.max(dismiss_width);
+                for (width, stacked, label_wrap) in
+                    [(actions_width + t.form_card_width, false, false), (narrow_width, true, false), (label_wrap_width, true, true)]
+                {
+                    for can_undo in [true, false] {
+                        let ctx = crate::fonts::test_context();
+                        assert_eq!(frame(&ctx, width, can_undo, vec![]), (false, false));
+                        let text = scenario::rect_of("dialog:hint:guard").expect("notice text");
+                        let dismiss = scenario::rect_of("prefs:theme_notice_dismiss:guard").expect("Dismiss");
+                        let undo = scenario::rect_of("prefs:theme_notice_undo:guard");
+                        if stacked {
+                            assert!(dismiss.top() >= text.bottom(), "Dismiss must move below the text");
+                            if let Some(undo) = undo {
+                                assert!(undo.top() >= text.bottom(), "Undo must move below the text");
+                                assert!(dismiss.top() >= undo.bottom(), "actions must wrap onto separate rows at width {width}");
+                            }
+                        } else {
+                            assert_eq!(dismiss.top(), text.top(), "wide notices retain the inline layout");
+                            if let Some(undo) = undo {
+                                assert_eq!(undo.top(), text.top());
+                                assert!(dismiss.left() >= undo.right());
+                            }
+                            // The wide notice retains the original action budget and text allocation.
+                            let expected = width - dismiss_width - t.space_8 - if can_undo { undo_width + t.space_8 } else { 0.0 };
+                            assert_eq!(text.width(), expected);
+                        }
+                        if label_wrap {
+                            assert!(dismiss.height() > t.control_height, "an individual long action label must wrap");
+                        }
+                        for (target, expected) in
+                            [("prefs:theme_notice_undo:guard", (true, false)), ("prefs:theme_notice_dismiss:guard", (false, true))]
+                        {
+                            if expected.0 && !can_undo {
+                                continue;
+                            }
+                            let at = if expected.0 { undo.expect("Undo").center() } else { dismiss.center() };
+                            assert_eq!(frame(&ctx, width, can_undo, test_support::pointer(at, true)), (false, false), "{target} on press");
+                            assert_eq!(frame(&ctx, width, can_undo, test_support::pointer(at, false)), expected, "{target} on release");
+                            assert_eq!(frame(&ctx, width, can_undo, vec![]), (false, false), "{target} must not repeat");
+                        }
+                    }
+                }
+            }
+        }
+        solidcraft_theme::set_dark(previous);
+    }
+}

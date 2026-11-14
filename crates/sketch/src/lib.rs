@@ -24,6 +24,7 @@ mod ends;
 mod equation;
 mod fonts;
 mod freeform_offset;
+pub mod limits;
 pub mod linalg;
 mod link;
 mod loci;
@@ -35,6 +36,7 @@ mod pattern;
 mod periodic;
 pub mod pierce;
 mod profiles;
+mod profiles3d;
 #[cfg(feature = "solver-profiling")]
 pub mod profiling;
 mod shape;
@@ -47,20 +49,24 @@ mod wire;
 
 pub use curves::{
     MAX_SPLINE_POINTS, bspline_beziers, conic_point, conic_rho_from_point, ellipse_point, end_curvature, fit_beziers, fit_beziers_mode,
-    spline_end_tangent, spline_end_tangent_mode, spline_point, spline_point_mode, spline_polyline, spline_polyline_mode,
+    fit_beziers_with_handles, fit_tangent_handles, spline_end_tangent, spline_end_tangent_mode, spline_end_tangent_with_handles, spline_point,
+    spline_point_mode, spline_point_with_handles, spline_polyline, spline_polyline_mode, spline_polyline_with_handles,
 };
 pub use decompose::Budget;
 pub use dims::{
-    DimFrame, DimLayout, chain_centres, default_text, default_text_offset, dim_frame, dim_layout, dim_layout_reaching, dim_reach, encode_text,
+    DimFrame, DimLayout, chain_centres, default_text, default_text_offset, dim_frame, dim_frame_at, dim_layout, dim_layout_reaching, dim_reach,
+    encode_text,
 };
 pub use ends::{END_TOL, EndReport, EndTouch, UntiedEnd, loose_ends};
 pub use equation::{EquationCurve, MAX_EQUATION_TEXT, VariableUnit};
-pub use fonts::{DEFAULT_FONT_FAMILY, FontData, families_in, find_style_in, font_data, font_data_styled, installed_families, set_font_file_check};
+pub use fonts::{
+    DEFAULT_FONT_FAMILY, FontData, families_in, find_style_in, font_data, font_data_styled, font_file_path, installed_families, set_font_file_check,
+};
 pub use freeform_offset::{FreeformOffset, FreeformOffsetOutput, OFFSET_TOLERANCE};
 pub use link::{Link, LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES, SKETCH_AXIS_HALF, TextExprs, sketch_axis_geom};
 pub use model::{
-    Constraint, ConstraintKind, Curve, CurveKind, MAX_CONSTRAINTS, MAX_COORD, MAX_CURVES, MAX_POINTS, PointExprs, SPoint, Sketch, SketchBatch,
-    SketchError, SketchView, TwoCircles,
+    CEILING_CONSTRAINTS, CEILING_CURVES, CEILING_POINTS, Constraint, ConstraintKind, Curve, CurveKind, MAX_CONSTRAINTS, MAX_COORD, MAX_CURVES,
+    MAX_POINTS, PointExprs, SPoint, Sketch, SketchBatch, SketchError, SketchView, TwoCircles,
 };
 pub use nurbs::Nurbs;
 pub use offset::OffsetChain;
@@ -71,6 +77,7 @@ pub use profiles::{
     CurvePick, ENDPOINT_JOIN_TOL, MAX_PROFILE_EDGES, Profile, ProfileSearch, distinct_curves, find_drawn_profiles, find_profiles,
     find_profiles_checked, merge_regions, profile_at_point, profile_by_curves, without_text_counters,
 };
+pub use profiles3d::{Profile3D, find_planar_3d_profiles};
 pub use shape::{Shape, intersections, intersections_within, nearest_crossing, nearest_curve_intersection};
 pub use solver::solve_after_edit_with_analysis;
 pub use solver::{
@@ -78,7 +85,7 @@ pub use solver::{
     flips_from_stored, measure_dimension, move_line_towards, move_point_towards, point_along, solve, solve_after_edit, solve_after_link_move,
     solve_after_value_edit, solve_holding, solve_with,
 };
-pub use text::{MAX_TEXT_CHARS, TextAlign, TextMetrics, TextStyle, text_geometry, text_geometry_in, text_geometry_styled};
+pub use text::{MAX_TEXT_CHARS, TextAlign, TextMetrics, TextStyle, TextVerticalAlign, text_geometry, text_geometry_in, text_geometry_styled};
 pub use thin::{MAX_THIN_SEGMENTS, thin_wall_regions};
 pub use wire::{MAX_FIT_POINTS, MAX_WIRE_POINTS, Wire, WireArc, WireCurve, WireSpace, arc_from_3_points, arc_polyline, arc_sweep, fit_polyline};
 
