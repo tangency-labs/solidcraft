@@ -665,6 +665,9 @@ pub struct Session {
     render_jobs: render_jobs::Jobs,
     /// The visibility the design file holds (what `is_dirty` compares with).
     saved_visibility: Visibility,
+    /// The design as `doc.open` made it from a STEP, IGES or mesh file, never saved yet: while it
+    /// is still that, closing it loses nothing the file doesn't hold ([`Session::unchanged_import`]).
+    opened_import: Option<Arc<Document>>,
     /// States to go back to (`edit.checkpoint`, `edit.restore_checkpoint`): how batches of
     /// commands are undone however long the undo history is.
     pub(crate) checkpoints: Vec<Checkpoint>,
@@ -927,6 +930,7 @@ impl Session {
             next_checkpoint: 1,
             replacements: 0,
             saved_visibility: visibility.clone(),
+            opened_import: None,
             visibility,
             camera: None,
             render_viewport: None,
@@ -1034,6 +1038,21 @@ impl Session {
     /// component moved and not captured yet (#9736).
     pub fn is_dirty(&self) -> bool {
         self.document_differs() || self.visibility != self.saved_visibility || self.moved_uncaptured()
+    }
+
+    /// The design is a STEP, IGES or mesh file just opened (`doc.open`) and not changed since:
+    /// not saved as a design yet, so [`Session::is_dirty`], but closing it loses nothing the file
+    /// doesn't hold, and its tab closes without asking (#15111).
+    pub fn unchanged_import(&self) -> bool {
+        self.path.is_none()
+            && self.opened_import.as_ref().is_some_and(|opened| Arc::ptr_eq(opened, &self.doc) || **opened == *self.doc)
+            && self.visibility == self.saved_visibility
+            && !self.moved_uncaptured()
+    }
+
+    /// Remember the design as `doc.open` just made it from another kind of file.
+    pub(crate) fn opened_from_import(&mut self) {
+        self.opened_import = Some(self.doc.clone());
     }
 
     /// A component was moved and its position not captured yet (#9736). The placements of an
@@ -2119,6 +2138,7 @@ impl Session {
             render_viewport: self.render_viewport.clone(),
             render_jobs: self.render_jobs.scratch(),
             saved_visibility: self.saved_visibility.clone(),
+            opened_import: self.opened_import.clone(),
             evaluations: 0,
             motion_traces: self.motion_traces.clone(),
             command_check: self.command_check.clone(),

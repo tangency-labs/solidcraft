@@ -1501,6 +1501,39 @@ fn step_box_file(tag: &str) -> std::path::PathBuf {
     p
 }
 
+/// #15111: a STEP file just opened is a design never saved, yet closing it loses nothing the file
+/// doesn't hold: `unchanged_import` says so until the design changes, a body is hidden or it is
+/// saved as a design. A design file opened is never one.
+#[test]
+fn an_opened_step_file_is_an_unchanged_import_until_it_changes() {
+    let p = step_box_file("unchanged");
+    let open = || {
+        let mut s = Session::default();
+        run(&mut s, "doc.open", json!({"path": p.to_string_lossy()}));
+        s
+    };
+    let mut s = open();
+    assert!(s.is_dirty() && s.unchanged_import());
+    run(&mut s, "inspect.measure", json!({}));
+    assert!(s.unchanged_import(), "measuring changes nothing");
+    let body = s.model.state().bodies[0].name.clone();
+    run(&mut s, "browser.visibility", json!({"items": [body], "visible": false}));
+    assert!(!s.unchanged_import(), "a hidden body is a change to save");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.unchanged_import(), "undone, the design is the file again");
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0]}));
+    assert!(!s.unchanged_import(), "a new feature is a change");
+
+    let mut s = open();
+    let saved = p.with_extension("sc");
+    run(&mut s, "file.save_as", json!({"path": saved.to_string_lossy()}));
+    assert!(!s.is_dirty() && !s.unchanged_import(), "saved, it is a design like any other");
+    let mut again = Session::default();
+    run(&mut again, "doc.open", json!({"path": saved.to_string_lossy()}));
+    assert!(!again.unchanged_import(), "a design file is not an import");
+    let _ = std::fs::remove_dir_all(p.parent().unwrap());
+}
+
 /// File → Open of a STEP file gives an Import base feature, and features work on its faces.
 #[test]
 fn step_open_then_model_on_it() {
