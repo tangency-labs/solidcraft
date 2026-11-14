@@ -9,6 +9,7 @@
 //! otherwise unproved meeting is refused. No recursion; the shared solvers have fixed caps.
 
 use super::{mean_value, Di, Dv, Implicit, Ivl, Kernel, Result, Vec3, LOCAL_OP};
+use crate::geom::expansion as exact;
 use crate::geom::krawczyk::{inverse_of_columns3, krawczyk, newton};
 
 type I3 = [Ivl; 3];
@@ -23,6 +24,30 @@ fn enclosed(x: I3) -> Dv {
         d: Ivl::from(0.0),
     });
     Dv { x, y, z }
+}
+
+/// `1 - axis.axis`, without losing its small value to the rounding of a unit norm.
+/// Exact products are accumulated as an expansion; out-of-range products retain their
+/// rounded enclosure. Zero is kept exact, including cardinal axes.
+fn norm_defect(axis: Vec3) -> Option<Ivl> {
+    let mut expansion = vec![1.0];
+    let mut remainder = None;
+    for a in [axis.x, axis.y, axis.z] {
+        if !a.is_finite() {
+            return None;
+        }
+        if let Some(product) = exact::product(a, a) {
+            expansion = exact::sub(&expansion, &product);
+        } else {
+            let squared = Ivl::from(a) * Ivl::from(a);
+            remainder = Some(remainder.unwrap_or_else(|| Ivl::from(0.0)) - squared);
+        }
+    }
+    let mut terms = expansion.into_iter().filter(|&v| v != 0.0);
+    let first = terms.next().map_or_else(|| Ivl::from(0.0), Ivl::from);
+    let defect = terms.fold(first, |sum, v| sum + Ivl::from(v));
+    let defect = remainder.map_or(defect, |r| defect + r);
+    defect.is_finite().then_some(defect)
 }
 
 /// The polynomial used by `implicit::lies_on`, its exact gradient, and the cone radius.
@@ -43,11 +68,22 @@ fn evaluate(q: &Implicit, x: Dv) -> Option<(Di, Dv, Di)> {
             let z = v.dot(a);
             let t = Di::constant(tan_angle);
             let r = Di::constant(radius) + t * z;
-            Some((
-                v.dot(v) - z * z - r * r,
-                v.scale(two).sub(a.scale(two * (z + r * t))),
-                r,
-            ))
+            let pv = v.sub(a.scale(z));
+            // Algebraically v.v - z², even when axis.axis is only nearly 1.
+            // The projected form avoids subtracting two large axial squares. For an
+            // exactly unit axis these are the previous net solver's operations, bit for bit.
+            let defect = norm_defect(axis)?;
+            let base = pv.dot(pv) - r * r;
+            let f = if defect.lo == 0.0 && defect.hi == 0.0 {
+                base
+            } else {
+                base + Di {
+                    v: defect,
+                    d: Ivl::from(0.0),
+                } * z
+                    * z
+            };
+            Some((f, pv.scale(two).sub(a.scale(two * r * t)), r))
         }
         Implicit::Sphere { centre, radius } => {
             let v = x.sub(Dv::constant(centre));

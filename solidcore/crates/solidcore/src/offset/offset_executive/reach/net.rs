@@ -1115,7 +1115,16 @@ mod tests {
 
     /// The plane x = `x` as a bilinear net over y in [−5, 5], z in [−5, 5].
     fn plane_net_at_x(x: f64) -> Surface {
-        let row = |y: f64| vec![CPoint::new(x, y, -5.0, NOW), CPoint::new(x, y, 5.0, NOW)];
+        plane_net_at_height(x, 0.0)
+    }
+
+    fn plane_net_at_height(x: f64, height: f64) -> Surface {
+        let row = |y: f64| {
+            vec![
+                CPoint::new(x, y, height - 5.0, NOW),
+                CPoint::new(x, y, height + 5.0, NOW),
+            ]
+        };
         let patch = Patch::new(
             vec![row(-5.0), row(5.0)],
             1,
@@ -1389,5 +1398,75 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(found >= want && found <= want + 1e-9, "{found} vs {want}");
+    }
+    /// The shared cone evaluator preserves the previous projected expression's value
+    /// and gradient enclosures exactly for cardinal unit axes, even at large heights.
+    /// The expanded v.v-z² form loses that sharpness by subtracting large squares.
+    #[test]
+    fn a_cardinal_cones_enclosures_match_the_previous_projected_form() {
+        use super::super::{quadric, Di, Dv};
+        for axis in [Vec3::X, Vec3::Y, Vec3::Z, -Vec3::Z] {
+            for height in [0.0, 1000.0, -1e6, 1e6, 1e8] {
+                for slope in [0.0, 0.02, -0.05] {
+                    let q = Implicit::Cone {
+                        origin: Vec3::ZERO,
+                        axis,
+                        radius: 2.0,
+                        tan_angle: slope,
+                    };
+                    let centre = axis * height + Vec3::new(1.0, 1.5, 0.5);
+                    let x = [centre.x, centre.y, centre.z].map(|c| Ivl::new(c - 1e-4, c + 1e-4));
+                    let [xx, yy, zz] = x.map(|v| Di {
+                        v,
+                        d: Ivl::from(0.0),
+                    });
+                    let v = Dv {
+                        x: xx,
+                        y: yy,
+                        z: zz,
+                    }
+                    .sub(Dv::constant(Vec3::ZERO));
+                    let a = Dv::constant(axis);
+                    let z = v.dot(a);
+                    let t = Di::constant(slope);
+                    let r = Di::constant(2.0) + t * z;
+                    let pv = v.sub(a.scale(z));
+                    let old_f = (pv.dot(pv) - r * r).v;
+                    let old_g = pv
+                        .scale(Di::constant(2.0))
+                        .sub(a.scale(Di::constant(2.0) * r * t));
+                    let (f, g) = quadric::value_and_gradient(&q, x).unwrap();
+                    let bits = |v: Ivl| (v.lo.to_bits(), v.hi.to_bits());
+                    assert_eq!(bits(f), bits(old_f));
+                    assert_eq!(g.map(bits), [old_g.x.v, old_g.y.v, old_g.z.v].map(bits));
+                }
+            }
+        }
+    }
+
+    /// A plane/net x = 1, a cylinder r = 2 and the plane z = H meet at
+    /// (1, √3, H), distance √3-1.5 from (1, 1.5, H), independently of H.
+    /// This exercises the existing plane/quadric/net corner certificate itself.
+    #[test]
+    fn a_plane_quadric_net_corner_still_certifies_at_large_axial_heights() {
+        let k = Kernel::default();
+        let q = Implicit::Cone {
+            origin: Vec3::ZERO,
+            axis: Vec3::Z,
+            radius: 2.0,
+            tan_angle: 0.0,
+        };
+        let want = 3.0_f64.sqrt() - 1.5;
+        for height in [0.0, -1e6, 1e6, 1000.0] {
+            let n = net(&k, &plane_net_at_height(1.0, height));
+            let p = Vec3::new(1.0, 1.5, height);
+            let found = plane_quadric_and_net_meet(&n, &q, Vec3::new(0.0, 0.0, height), Vec3::Z, p)
+                .unwrap()
+                .unwrap_or_else(|| panic!("H={height}: the corner was not certified"));
+            assert!(
+                found >= want && found <= want + 1e-8,
+                "H={height}: {found} vs {want}"
+            );
+        }
     }
 }

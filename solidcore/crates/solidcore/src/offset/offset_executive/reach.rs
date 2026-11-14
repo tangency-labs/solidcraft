@@ -1330,20 +1330,18 @@ fn quadric_pair_piece(
     dt: Ivl,
     a: &Implicit,
     b: &Implicit,
-) -> PieceBound {
+) -> Result<PieceBound> {
     let (over, mid) = (quadric::Section::edge(over), quadric::Section::edge(mid));
-    let Ok(Some(meeting)) = quadric::meet(k, a, b, over, mid, dt) else {
-        return PieceBound::Unknown;
+    let Some(meeting) = quadric::meet(k, a, b, over, mid, dt)? else {
+        return Ok(PieceBound::Unknown);
     };
-    let lower = quadric::meet(k, a, b, mid, mid, Ivl::from(0.0))
-        .ok()
-        .flatten()
-        .map_or(0.0, |m| m.distance.lo.max(0.0));
-    PieceBound::Value {
+    let lower =
+        quadric::meet(k, a, b, mid, mid, Ivl::from(0.0))?.map_or(0.0, |m| m.distance.lo.max(0.0));
+    Ok(PieceBound::Value {
         upper: meeting.distance.hi,
         lower,
         crosses: meeting.transverse,
-    }
+    })
 }
 
 /// The reach at one edge point (a piece's middle, whose `line` and `q` are point
@@ -1663,7 +1661,7 @@ fn spans(cn: &NurbsCurve, interval: crate::geom::extent1d::Extent1d) -> Vec<(f64
 fn edge_interval_maximum(
     b: &Brep,
     e: crate::topology::EdgeId,
-    f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> PieceBound,
+    f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> Result<PieceBound>,
     tolerance: f64,
     bounds: &mut EdgeBounds,
     of: EdgeQuantity,
@@ -1691,7 +1689,7 @@ fn edge_interval_maximum(
 fn interval_maximum(
     cn: &NurbsCurve,
     interval: crate::geom::extent1d::Extent1d,
-    f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> PieceBound,
+    f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> Result<PieceBound>,
     tolerance: f64,
 ) -> Result<Option<(f64, bool, bool)>> {
     let mut undecided = spans(cn, interval);
@@ -1701,7 +1699,7 @@ fn interval_maximum(
         let over = point_and_tangent(cn, Ivl::new(t0, t1))?;
         let mid = point_and_tangent(cn, Ivl::from(tm))?;
         Ok(match (over, mid) {
-            (Some(over), Some(mid)) => match f(over, mid, Ivl::checked(t0 - tm, t1 - tm)) {
+            (Some(over), Some(mid)) => match f(over, mid, Ivl::checked(t0 - tm, t1 - tm))? {
                 PieceBound::Value { upper, .. } if !upper.is_finite() => PieceBound::Unknown,
                 bound => bound,
             },
@@ -2227,7 +2225,7 @@ pub fn local_extension_reach(
             let hull = |f: &dyn Fn(Vec3) -> f64| -> Result<f64> {
                 edge_maximum(b, e, f, tolerance)?.ok_or_else(uncertified)
             };
-            let pieces = |f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> PieceBound,
+            let pieces = |f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> Result<PieceBound>,
                           bounds: &mut EdgeBounds,
                           of: EdgeQuantity,
                           surfaces: Option<&[u64]>|
@@ -2243,7 +2241,7 @@ pub fn local_extension_reach(
                         Exact::Plane(t) => hull(&|x| plane_distance(x, *t)).map(Some),
                         Exact::Quadric(q) => {
                             let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
-                                quadric_distance_piece(over.0, mid.0, dt, q)
+                                Ok(quadric_distance_piece(over.0, mid.0, dt, q))
                             };
                             let surfaces = exact_bits(c);
                             let of = EdgeQuantity::Shift(face);
@@ -2287,7 +2285,7 @@ pub fn local_extension_reach(
                 (&Exact::Plane(plane), Exact::Quadric(q))
                 | (Exact::Quadric(q), &Exact::Plane(plane)) => {
                     let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
-                        plane_quadric_piece(over, mid, dt, plane, q, tolerance)
+                        Ok(plane_quadric_piece(over, mid, dt, plane, q, tolerance))
                     };
                     let pair =
                         EdgeQuantity::Meeting(own_face.min(other_face), own_face.max(other_face));
@@ -2303,7 +2301,7 @@ pub fn local_extension_reach(
                 (&Exact::Plane(plane), Exact::Net(n)) | (Exact::Net(n), &Exact::Plane(plane)) => {
                     let guess = std::cell::Cell::new(None);
                     let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
-                        plane_net_piece(over, mid, dt, plane, n, &guess)
+                        Ok(plane_net_piece(over, mid, dt, plane, n, &guess))
                     };
                     // a net's bound is not recorded: it carries no bits to key it on
                     let pair =
@@ -3108,8 +3106,9 @@ mod tests {
         let Some(Exact::Quadric(q)) = exact_class(&k, &wider).unwrap() else {
             panic!("the cylinder r 2 is a quadric");
         };
-        let piece =
-            |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| quadric_distance_piece(over.0, mid.0, dt, &q);
+        let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
+            Ok(quadric_distance_piece(over.0, mid.0, dt, &q))
+        };
         let (at_seam, apart, _) = edge_interval_maximum(
             &b,
             seam,
@@ -3140,7 +3139,7 @@ mod tests {
         let calls = std::cell::Cell::new(0_usize);
         let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
             calls.set(calls.get() + 1);
-            quadric_distance_piece(over.0, mid.0, dt, &q)
+            Ok(quadric_distance_piece(over.0, mid.0, dt, &q))
         };
         let ask = |bounds: &mut EdgeBounds, tol: f64, of: EdgeQuantity, on: Option<&[u64]>| {
             let before = calls.get();
@@ -3575,7 +3574,7 @@ mod tests {
         };
         let guess = std::cell::Cell::new(None);
         let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
-            plane_net_piece(over, mid, dt, into, &net, &guess)
+            Ok(plane_net_piece(over, mid, dt, into, &net, &guess))
         };
         let (reach, apart, _) = edge_interval_maximum(
             &b,
@@ -3661,7 +3660,7 @@ mod tests {
         };
         let guess = std::cell::Cell::new(None);
         let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
-            plane_net_piece(over, mid, dt, tilted, &net, &guess)
+            Ok(plane_net_piece(over, mid, dt, tilted, &net, &guess))
         };
         let (reach, apart, _) = edge_interval_maximum(
             &b,
@@ -3776,8 +3775,38 @@ mod tests {
     fn spherical_bored_slab(k: &mut Kernel, half: bool) -> (Brep, FaceId) {
         use crate::boolean::api_brep::boolean_with_options;
         use crate::boolean::merge::MergeOptions;
+        use crate::curve::curve::Curve;
         use crate::geom::a_object::BooleanOperation;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
         use crate::primitive::api_primitives as ap;
+        // Revolve the two cap endpoints and the bore seam together. The later slab
+        // cut cannot touch the full bore, whose radius is strictly less than 2.
+        k.fixes.revolve_analytic_profile_faces = true;
+        let angle = (1.0_f64 / 3.0).acos().to_degrees();
+        let arc = Curve::from(
+            BSplineCurve::create_circle_segment(
+                3,
+                &crate::geom::axis2_placement::Axis2Placement::new(Point3::ZERO, Vec3::X, Vec3::Z),
+                3.0,
+                -angle,
+                angle,
+                crate::nurbs::b_spline_curve::NurbCircleParam::Quadratic,
+            )
+            .unwrap(),
+        );
+        let span = arc.natural_interval();
+        let bottom = arc.evaluate_point(k, span.min()).unwrap();
+        let top = arc.evaluate_point(k, span.max()).unwrap();
+        let side = Curve::from(BSplineCurve::create_line_segment(3, top, bottom).unwrap());
+        let ring = crate::sweep::api_brep::create_rotational_sweep(
+            k,
+            &[Some(&side), Some(&arc)],
+            Point3::ZERO,
+            Vec3::Z,
+            360.0,
+            true,
+        )
+        .unwrap();
         let slab = ap::create_box(
             k,
             Point3::new(-2.0, if half { 0.0 } else { -2.0 }, -4.0),
@@ -3786,22 +3815,11 @@ mod tests {
             8.0,
         )
         .unwrap();
-        let ball = ap::create_sphere(k, Point3::ZERO, 3.0).unwrap();
-        let slab = boolean_with_options(
-            k,
-            slab,
-            ball,
-            BooleanOperation::Intersection,
-            MergeOptions::default(),
-        )
-        .unwrap()
-        .result;
-        let bore = ap::create_cylinder(k, Point3::new(0.0, 0.0, -5.0), 1.0, 10.0).unwrap();
         let b = boolean_with_options(
             k,
+            ring,
             slab,
-            bore,
-            BooleanOperation::Difference,
+            BooleanOperation::Intersection,
             MergeOptions::default(),
         )
         .unwrap()
@@ -3844,6 +3862,171 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    /// Let B = 1 + t² and a = 1, R = 3. The cap intersections solve
+    /// Bz² + 2at z + a² - R² = 0, with roots (-at ± √(R²B-a²))/B.
+    /// Integrating the annular area π[R²-z²-(a+tz)²] between those roots gives
+    /// V(t) = (4π/3)(R²B-a²)^(3/2)/B². Hence ΔV = V(t)-V(0).
+    /// The cone stays inside x,y = ±2 at both cap intersections for these angles,
+    /// so the slab clips the same exterior volume before and after; it cancels.
+    /// The half slab has exactly half the change by reflection in y = 0.
+    fn spherical_bored_slab_draft_volume(half: bool, degrees: f64) {
+        use crate::mass::integrator::properties::brep_volume_default;
+        use crate::offset::draft::{draft_surface, Draft};
+        use crate::topology::brep::{local_operation::local_operation_simple, p2};
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let (mut b, bore) = spherical_bored_slab(&mut k, half);
+        let before = brep_volume_default(&k, &mut b, 1e-7).unwrap();
+        let angle = degrees.to_radians();
+        let draft = Draft::new(Point3::ZERO, Vec3::Z, Vec3::Z, angle).unwrap();
+        let cone = draft_surface(&k, &b, bore, &draft).unwrap().unwrap();
+        local_operation_simple(&mut k, &mut b, &[bore], vec![cone]).unwrap();
+        assert!(p2::is_closed_manifold(&b).unwrap());
+        assert!(p2::is_manifold_solid(&b).unwrap());
+        let after = brep_volume_default(&k, &mut b, 1e-7).unwrap();
+        let t = angle.tan();
+        let big_b = 1.0 + t * t;
+        let delta = 4.0 * core::f64::consts::PI / 3.0
+            * ((9.0 * big_b - 1.0).powf(1.5) / (big_b * big_b) - 8.0_f64.powf(1.5));
+        let expected = before + delta * if half { 0.5 } else { 1.0 };
+        println!("spherical bore half={half}, angle={degrees}: before={before:.12}, after={after:.12}, expected={expected:.12}");
+        // Absolute integration error is far below the smallest (1 degree) change.
+        assert!(
+            (after - expected).abs() < 1e-5,
+            "half={half}, angle={degrees}: before={before}, after={after}, expected={expected}"
+        );
+    }
+
+    #[test]
+    fn a_full_spherical_bored_slab_drafts_one_degree_to_its_closed_form_volume() {
+        spherical_bored_slab_draft_volume(false, 1.0);
+    }
+
+    #[test]
+    fn a_full_spherical_bored_slab_drafts_five_degrees_to_its_closed_form_volume() {
+        spherical_bored_slab_draft_volume(false, 5.0);
+    }
+
+    #[test]
+    fn a_half_spherical_bored_slab_drafts_one_degree_to_its_closed_form_volume() {
+        spherical_bored_slab_draft_volume(true, 1.0);
+    }
+
+    #[test]
+    fn a_half_spherical_bored_slab_drafts_five_degrees_to_its_closed_form_volume() {
+        spherical_bored_slab_draft_volume(true, 5.0);
+    }
+
+    #[test]
+    fn cancelling_a_quadric_solve_does_not_cache_an_uncertified_edge() {
+        use crate::kernel::CancelToken;
+        let mut k = Kernel::default();
+        let (b, bore) = spherical_bored_slab(&mut k, false);
+        let sphere = bp1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                matches!(
+                    exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap()).unwrap(),
+                    Some(Exact::Quadric(Implicit::Sphere { .. }))
+                )
+            })
+            .unwrap();
+        let e = edge_between(&b, bore, sphere);
+        let cone = exact_class(&k, &drafted_bore(&k)).unwrap().unwrap();
+        let ball = exact_class(&k, b.face(sphere).unwrap().surface.as_ref().unwrap())
+            .unwrap()
+            .unwrap();
+        let (Exact::Quadric(a), Exact::Quadric(c)) = (&cone, &ball) else {
+            panic!("quadrics")
+        };
+        let mut surfaces = exact_bits(&cone).unwrap();
+        surfaces.extend(exact_bits(&ball).unwrap());
+        let of = EdgeQuantity::Meeting(Some(bore.min(sphere)), Some(bore.max(sphere)));
+        let mut held = EdgeBounds::default();
+        let calls = std::cell::Cell::new(0);
+        let token = CancelToken::after_polls(2);
+        k.set_cancel_token(token.clone());
+        {
+            let piece = |over, mid, dt| {
+                calls.set(calls.get() + 1);
+                quadric_pair_piece(&k, over, mid, dt, a, c)
+            };
+            let err =
+                edge_interval_maximum(&b, e, &piece, b.tolerance(), &mut held, of, Some(&surfaces))
+                    .unwrap_err();
+            assert!(matches!(err, SolidError::Cancelled { .. }), "{err:?}");
+        }
+        assert_eq!(token.polls(), Some(2)); // Newton entered, then cancelled mid-solve.
+        assert_eq!(calls.get(), 1);
+        assert_eq!(held.held(), 0);
+        k.clear_cancel_token();
+        let piece = |over, mid, dt| {
+            calls.set(calls.get() + 1);
+            quadric_pair_piece(&k, over, mid, dt, a, c)
+        };
+        let first =
+            edge_interval_maximum(&b, e, &piece, b.tolerance(), &mut held, of, Some(&surfaces))
+                .unwrap();
+        assert!(first.is_some());
+        assert!(calls.get() > 1, "cleared cancellation must solve afresh");
+        let solved = calls.get();
+        assert_eq!(
+            edge_interval_maximum(&b, e, &piece, b.tolerance(), &mut held, of, Some(&surfaces))
+                .unwrap(),
+            first
+        );
+        assert_eq!(calls.get(), solved, "the successful solve is cached");
+    }
+
+    /// At the tangent equator of the old sphere/cylinder, replacing r = 3 by
+    /// r(z) = 2.99 - 0.05z gives z = (0.299 ± √0.3296)/2.005.
+    /// The negative root (~-0.137) is nearer the old edge than the positive (~0.435)
+    /// but is on the sphere's continuation, outside its retained upper hemisphere.
+    #[test]
+    fn a_curved_tangent_crossing_refuses_an_uncertified_branch() {
+        use crate::primitive::api_primitives as ap;
+        use crate::topology::brep::local_operation::local_operation_simple;
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let sphere = ap::create_sphere(&mut k, Point3::ZERO, 3.0).unwrap();
+        let cylinder = ap::create_cylinder(&mut k, Point3::new(0.0, 0.0, -3.0), 3.0, 3.0).unwrap();
+        let mut b = crate::boolean::api_brep::boolean_union(&mut k, sphere, cylinder).unwrap();
+        assert!(crate::topology::brep::p2::is_manifold_solid(&b).unwrap());
+        let side = bp1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                matches!(
+                    exact_class(&k, b.face(f).unwrap().surface.as_ref().unwrap()).unwrap(),
+                    Some(Exact::Quadric(Implicit::Cone { .. }))
+                )
+            })
+            .unwrap();
+        // Draft the original cylinder so the replacement keeps its seam frame and UV
+        // period. At z = -0.2 its radius stays 3, hence r(z) = 2.99 - 0.05z.
+        let draft = crate::offset::draft::Draft::new(
+            Point3::new(0.0, 0.0, -0.2),
+            Vec3::Z,
+            Vec3::Z,
+            0.05_f64.atan(),
+        )
+        .unwrap();
+        let cone = crate::offset::draft::draft_surface(&k, &b, side, &draft)
+            .unwrap()
+            .unwrap();
+        let err = local_operation_simple(&mut k, &mut b, &[side], vec![cone]).unwrap_err();
+        assert_eq!(
+            err.offset_failure(),
+            Some(&OffsetFailure::TangentBranchUncertified),
+            "{err:?}"
+        );
     }
 
     #[test]
