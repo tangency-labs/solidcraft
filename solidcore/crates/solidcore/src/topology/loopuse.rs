@@ -687,6 +687,31 @@ fn edgeuse_end_point(
     }
 }
 
+/// The zone tolerance of the vertex `this` ends on when `next` starts on the same one,
+/// else 0 (not upstream: WR-784).
+fn shared_vertex_zone_tol_3d(
+    k: &Kernel,
+    b: &Brep,
+    this: EdgeuseId,
+    next: EdgeuseId,
+) -> Result<f64> {
+    let Some(start_use) = eu1::vertexuse(b, next)? else {
+        return Ok(0.0);
+    };
+    let Some(mate) = eu1::mate(b, this)? else {
+        return Ok(0.0);
+    };
+    let Some(end_use) = eu1::vertexuse(b, mate)? else {
+        return Ok(0.0);
+    };
+    let start_vertex = b.vertexuse(start_use)?.vertex;
+    let end_vertex = b.vertexuse(end_use)?.vertex;
+    match start_vertex.filter(|v| Some(*v) == end_vertex) {
+        Some(v) => Ok(tol::zone_tol3d(k, b.vertex(v)?.tolerance)),
+        None => Ok(0.0),
+    }
+}
+
 /// `IsClosed3d`: whether every gap between an edge use's end and its CCW neighbour's
 /// start is within their cross-section tolerance (`ZoneTol3d + ZoneTol3d`), with the
 /// gap reported; `true` for a vertex loop use (outputs zero). By default the
@@ -744,6 +769,13 @@ pub fn is_closed_3d(k: &Kernel, b: &Brep, lu: LoopuseId, check_all_gaps: bool) -
 
         // EdgeEnd/EdgeEnd tolerance
         let xsect_tol_3d = tol::xsect_tol_3d_from_zones(k, this_zone_tol_3d, next_zone_tol_3d);
+        // not upstream (WR-784, where gaps are reported at all: WR-93): the vertex the two
+        // ends share covers the gap between them, as in `CheckLoop` (WR-381).
+        let xsect_tol_3d = if k.fixes.loop_use_reports_open_gaps {
+            xsect_tol_3d.max(shared_vertex_zone_tol_3d(k, b, this_eu, next_eu)?)
+        } else {
+            xsect_tol_3d
+        };
         let xsect_tol_3d_sq = tol::tol3d(xsect_tol_3d * xsect_tol_3d);
 
         // When Gap is largest - save maxGap values
@@ -1885,6 +1917,43 @@ mod tests {
         assert_eq!(c.edgeuse, None);
         assert_eq!(c.max_gap, 0.0);
         assert_eq!(c.xsect_tol_3d, 0.0);
+    }
+
+    #[test]
+    fn is_closed_3d_takes_the_shared_vertex_tolerance() {
+        // WR-784: two curve ends 1e-3 apart at a vertex widened to cover them. The edges'
+        // own cross-section tolerance is 2e-4, which alone would report the loop open.
+        let mut k = Kernel::default();
+        k.fixes.loop_use_reports_open_gaps = true;
+        let mut b = square(1e-3);
+        let gap = curve_end(&b, &k, eu(2), false).distance(curve_end(&b, &k, eu(4), true));
+        let c = is_closed_3d(&k, &b, lu(0), true).unwrap();
+        assert!(!c.closed);
+        assert_eq!(c.xsect_tol_3d, 2e-4);
+
+        // The shared vertex's zone covers the gap.
+        let shared = b
+            .vertexuse(eu1::vertexuse(&b, eu(4)).unwrap().unwrap())
+            .unwrap()
+            .vertex
+            .unwrap();
+        b.vertex_mut(shared).unwrap().tolerance = 2.0 * gap;
+        let c = is_closed_3d(&k, &b, lu(0), true).unwrap();
+        assert!(c.closed);
+        assert_eq!(c.edgeuse, Some(eu(2)));
+        assert_eq!(c.xsect_tol_3d, 2.0 * gap);
+
+        // A vertex narrower than the gap leaves the loop open, against the larger of the
+        // two tolerances.
+        b.vertex_mut(shared).unwrap().tolerance = 0.5 * gap;
+        let c = is_closed_3d(&k, &b, lu(0), true).unwrap();
+        assert!(!c.closed);
+        assert_eq!(c.xsect_tol_3d, 0.5 * gap);
+
+        // Pinned C++ (no gap reporting): the edges' tolerance, whatever the vertex has.
+        let c = is_closed_3d(&Kernel::default(), &b, lu(0), true).unwrap();
+        assert!(c.closed);
+        assert_eq!(c.xsect_tol_3d, 2e-4);
     }
 
     #[test]
