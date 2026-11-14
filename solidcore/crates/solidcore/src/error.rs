@@ -135,6 +135,7 @@ pub(crate) fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
 pub(crate) fn native_failure<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
+        Err(e) if e.is_not_certified() => Err(e),
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
@@ -1620,6 +1621,7 @@ impl SolidError {
     pub(crate) fn nl_ser(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
             Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
+            e if e.is_not_certified() => e,
             _ => Self::sm_err(operation),
         }
     }
@@ -1729,12 +1731,26 @@ impl SolidError {
 
     /// True when this error must never be swallowed or remapped by an upstream
     /// status-ignoring fallback ([`SolidError::Unported`], [`SolidError::Cancelled`]
-    /// or [`SolidError::FaceTrimsUnavailable`], which no upstream status stands for).
+    /// or [`SolidError::FaceTrimsUnavailable`], which no upstream status stands for), or is a
+    /// blend certificate that ran out of its work budget
+    /// ([`crate::error::blend::BlendFailure::NotCertified`]): like a cancellation, work given
+    /// up never becomes a different geometric result.
     #[must_use]
-    pub(crate) const fn is_unported_or_cancelled(&self) -> bool {
+    pub(crate) fn is_unported_or_cancelled(&self) -> bool {
         matches!(
             self,
             Self::Unported { .. } | Self::Cancelled { .. } | Self::FaceTrimsUnavailable { .. }
+        ) || self.is_not_certified()
+    }
+
+    /// True for a blend certificate that spent its work budget
+    /// ([`crate::error::blend::BlendFailure::NotCertified`]). Every filter that passes a
+    /// cancellation on passes this on too: work given up never becomes another result.
+    #[must_use]
+    pub fn is_not_certified(&self) -> bool {
+        matches!(
+            self.blend_failure(),
+            Some(blend::BlendFailure::NotCertified { .. })
         )
     }
 
@@ -2019,6 +2035,30 @@ pub fn upstream_status(error: &SolidError) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A blend certificate that spent its work budget passes every status-ignoring
+    /// helper, as a cancellation does.
+    #[test]
+    fn a_certificate_past_its_budget_passes_every_status_filter() {
+        let e = SolidError::blend(
+            "t",
+            blend::BlendFailure::NotCertified {
+                halvings: 1,
+                stations: 2,
+            },
+        );
+        assert!(e.is_not_certified() && e.is_unported_or_cancelled());
+        assert_eq!(ignored::<()>(Err(e.clone())), Err(e.clone()));
+        assert_eq!(native_failure::<()>(Err(e.clone())), Err(e.clone()));
+        assert_eq!(ignore_status::<()>(Err(e.clone())), Err(e.clone()));
+        assert_eq!(
+            passed_on::<()>(Err(e.clone()), false).map(|_| ()),
+            Err(e.clone())
+        );
+        assert_eq!(status_passed_on(Some(e.clone()), false), Err(e.clone()));
+        assert_eq!(SolidError::nl_ser("op")(e.clone()), e);
+        assert!(!SolidError::sm_err("t").is_not_certified());
+    }
 
     #[test]
     fn native_failures_keep_upstream_statuses_and_propagate_port_errors() {

@@ -381,6 +381,22 @@ fn a_status_error_with_a_port_failure_or_cancellation_as_cause_fails_the_call() 
     assert!(answer::<()>(Err(cancelled)).is_err());
 
     assert!(answer::<()>(Err(SolidError::invalid_input("test::input", "bad"))).is_err());
+
+    // a blend certificate that spent its work budget is work given up, like a cancellation: it
+    // fails the call, on top or as a cause, although its status alone is a status answer
+    let given_up = || {
+        Failure::new(
+            "test::certificate",
+            solidcore::error::blend::BlendFailure::NotCertified {
+                halvings: 1,
+                stations: 2,
+            },
+        )
+        .into_error()
+    };
+    assert!(given_up().is_status_answer() && given_up().is_not_certified());
+    assert!(matches!(answer::<()>(Err(given_up())), Err(e) if e.is_not_certified()));
+    assert!(answer::<()>(Err(wrap(given_up()))).is_err());
 }
 
 /// The body's vertex points, in its order.

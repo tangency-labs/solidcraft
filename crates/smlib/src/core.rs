@@ -475,12 +475,14 @@ fn call_on<T: dump::Answer>(
 /// (unported code, invalid input to an adapter, a missing record...) is not a status the C++
 /// path returns, so it fails the call instead of hiding as a skipped entity. So does a status
 /// error whose cause chain holds a solidcore-side failure or a cancellation
-/// ([`SolidError::is_status_answer`](solidcore::SolidError::is_status_answer)), the rule of
+/// ([`SolidError::is_status_answer`](solidcore::SolidError::is_status_answer)), or a blend
+/// certificate that spent its work budget
+/// ([`SolidError::is_not_certified`](solidcore::SolidError::is_not_certified)), the rule of
 /// solidcore-ops' `session::answer`.
 pub(crate) fn answer<T>(r: std::result::Result<T, solidcore::SolidError>) -> std::result::Result<Option<T>, solidcore::SolidError> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_status_answer() => Ok(None),
+        Err(e) if e.is_status_answer() && !std::iter::successors(Some(&e), |e| e.cause()).any(|e| e.is_not_certified()) => Ok(None),
         Err(e) => Err(e),
     }
 }

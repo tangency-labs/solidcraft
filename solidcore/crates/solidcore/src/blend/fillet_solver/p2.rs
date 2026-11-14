@@ -1429,7 +1429,14 @@ impl FilletSolver {
             k.fixes.fillet_statuses_pass_on,
         )? {
             Ok(a) => a,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(e)
+                if matches!(
+                    e,
+                    SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                ) || e.is_not_certified() =>
+            {
+                return Err(e)
+            }
             Err(_) => 0.0,
         };
         if span_ang < ANG_TOL_RAD {

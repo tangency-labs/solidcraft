@@ -918,12 +918,17 @@ impl FilletCorner {
     ) -> Result<bool> {
         match self.analytic_corner_surface(env) {
             Ok(made) => Ok(made),
-            Err(
-                e @ (SolidError::Unported { .. }
-                | SolidError::Cancelled { .. }
-                | SolidError::InvalidInput { .. }
-                | SolidError::PortInvariant { .. }),
-            ) => Err(e),
+            Err(e)
+                if matches!(
+                    e,
+                    SolidError::Unported { .. }
+                        | SolidError::Cancelled { .. }
+                        | SolidError::InvalidInput { .. }
+                        | SolidError::PortInvariant { .. }
+                ) || e.is_not_certified() =>
+            {
+                Err(e)
+            }
             // `return sErr` / `return SM_ERR_NULL_POINTER` as an SmBoolean: with the
             // opt-in fix they read as FALSE (WR-254).
             Err(e)
@@ -1868,12 +1873,17 @@ fn unitize_ser(v: Vec3, operation: &'static str) -> Result<Vec3> {
 fn soft<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(
-            e @ (SolidError::Unported { .. }
-            | SolidError::Cancelled { .. }
-            | SolidError::InvalidInput { .. }
-            | SolidError::PortInvariant { .. }),
-        ) => Err(e),
+        Err(e)
+            if matches!(
+                e,
+                SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::InvalidInput { .. }
+                    | SolidError::PortInvariant { .. }
+            ) || e.is_not_certified() =>
+        {
+            Err(e)
+        }
         Err(_) => Ok(None),
     }
 }
@@ -2051,6 +2061,23 @@ fn new_rail_x_edgeuse_vertex_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A G^n section certificate that spent its work budget inside a corner's surface
+    /// (`make_{variable,constant}_radius_fillet_with`, the analytic corner) is passed on,
+    /// never read as a soft FALSE that makes the corner another way.
+    #[test]
+    fn a_certificate_past_its_budget_passes_the_corner_s_soft_statuses() {
+        let e = SolidError::blend(
+            "t",
+            crate::error::blend::BlendFailure::NotCertified {
+                halvings: 1,
+                stations: 2,
+            },
+        );
+        assert_eq!(soft::<()>(Err(e.clone())), Err(e.clone()));
+        assert_eq!(soft(Ok(2)), Ok(Some(2)));
+        assert_eq!(soft::<()>(Err(SolidError::sm_err("t"))), Ok(None));
+    }
     use crate::blend::fillet_corner::p3::FilletCornerKind;
     use crate::curve::line::Line;
     use crate::primitive::api_curves::create_analytic_circle;
