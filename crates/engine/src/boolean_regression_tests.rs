@@ -83,6 +83,66 @@ fn volume(s: &Session, body: &str) -> f64 {
     s.model.state().body(body).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0)
 }
 
+/// #14419: solids touching along a line and joined as one body (`touching: one_body`) keep a
+/// copy each of that line and its end points in the record. A later boolean whose tool met the
+/// line sent both copies to SMLib: a tool on one of them could not be related to both ("relate:
+/// another entity is already related to the other one"), and a cut through the line left a face
+/// with two coincident vertices. The operand now shares them, as SMLib's union made it.
+#[test]
+fn booleans_on_solids_joined_where_they_touch_along_a_line() {
+    use std::f64::consts::PI;
+    let total = |s: &Session| s.model.state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum::<f64>();
+    let counts = |s: &Session, body: &str| {
+        let m = solidcraft_kernel::measure(&s.model.state().body(body).unwrap().body).unwrap();
+        (m.merged.faces, m.merged.edges, m.merged.vertices)
+    };
+
+    // The reported case: the joined pair intersected with a cylinder exactly on the first.
+    let s = replay(include_str!("../../../examples/regressions/tangent_cylinders_one_body_intersect.json"));
+    let got = volume(&s, "A");
+    println!("#14419 tangent cylinders ∩ coincident cylinder: {got:.6} mm³, expected {:.6}", 2.0 * PI);
+    assert!((got - 2.0 * PI).abs() < 1e-6, "{got}");
+    assert_eq!(counts(&s, "A"), (3, 3, 2));
+
+    // The pair with a gap of `gap` between them, joined as one body, then `tool` combined with it.
+    let pair = |gap: f64, tool: (&str, Value), operation: &str| {
+        let mut s = Session::default();
+        s.execute("solid.cylinder", &json!({"radius": 1, "height": 2, "base": [0, 0, 0], "axis": "Z", "body_name": "A"})).unwrap();
+        s.execute("solid.cylinder", &json!({"radius": 1, "height": 2, "base": [2.0 + gap, 0, 0], "axis": "Z", "body_name": "A2"})).unwrap();
+        s.execute("solid.combine", &json!({"target": "A", "tools": ["A2"], "operation": "join", "touching": "one_body"})).unwrap();
+        assert_eq!(s.model.state().body("A").map(|b| b.body.shell_count()), Some(2));
+        s.execute(tool.0, &tool.1).unwrap();
+        s.execute("solid.combine", &json!({"target": "A", "tools": ["T"], "operation": operation}))
+            .unwrap_or_else(|e| panic!("gap {gap}, {} {operation}: {e}", tool.0));
+        s
+    };
+    let cylinder = |height: f64| ("solid.cylinder", json!({"radius": 1, "height": height, "base": [0, 0, 0], "axis": "Z", "body_name": "T"}));
+
+    // A shorter coincident cylinder: itself.
+    let s = pair(0.0, cylinder(1.0), "intersect");
+    assert!((volume(&s, "A") - PI).abs() < 1e-6, "{}", volume(&s, "A"));
+    assert_eq!(counts(&s, "A"), (3, 3, 2));
+    // A join of the coincident cylinder adds nothing.
+    let s = pair(0.0, cylinder(2.0), "join");
+    assert!((total(&s) - 4.0 * PI).abs() < 1e-6, "{}", total(&s));
+    // A box cutting the top 1 mm off both cylinders, through the line.
+    let s = pair(0.0, ("solid.box", json!({"length": 6, "width": 4, "height": 2, "corner": [-2, -2, 1], "body_name": "T"})), "cut");
+    assert!((total(&s) - 2.0 * PI).abs() < 1e-6, "{}", total(&s));
+    // Apart by 0.1 mm, as before.
+    let s = pair(0.1, cylinder(2.0), "intersect");
+    assert!((volume(&s, "A") - 2.0 * PI).abs() < 1e-6, "{}", volume(&s, "A"));
+
+    // Two boxes touching along an edge, intersected with a box exactly on the first.
+    let mut s = Session::default();
+    let unit = |corner: [f64; 3], name: &str| json!({"length": 1, "width": 1, "height": 2, "corner": corner, "body_name": name});
+    s.execute("solid.box", &unit([0.0, 0.0, 0.0], "A")).unwrap();
+    s.execute("solid.box", &unit([1.0, 1.0, 0.0], "A2")).unwrap();
+    s.execute("solid.combine", &json!({"target": "A", "tools": ["A2"], "operation": "join", "touching": "one_body"})).unwrap();
+    s.execute("solid.box", &unit([0.0, 0.0, 0.0], "T")).unwrap();
+    s.execute("solid.combine", &json!({"target": "A", "tools": ["T"], "operation": "intersect"})).unwrap();
+    assert!((volume(&s, "A") - 2.0).abs() < 1e-9, "{}", volume(&s, "A"));
+}
+
 /// #5562: a quarter disc in a box's side face, at its corner, revolved 360° about the box's
 /// edge through the corner and cut: a hemisphere centred on the corner, its pole on that edge.
 /// Dividing one of the cut's intersection edges met a point that projects onto neither surface,
