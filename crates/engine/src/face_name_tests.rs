@@ -429,3 +429,66 @@ fn a_chamfer_whose_old_name_and_pick_fit_two_edges_asks_again() {
     let result = reopened.model.result(reopened.doc.features[bevel].id).unwrap();
     assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{:?}", result.error);
 }
+
+/// A design saved by 0.30.1 numbered the pieces of a cylinder's round side (`F1:side#2`), which the
+/// kernel now builds whole. A cosmetic thread picked on it is found again on that side when its
+/// pick lies on it (#16602), for either piece number, and a pick off the face asks again.
+#[test]
+fn a_thread_saved_under_a_numbered_side_piece_of_a_cylinder_is_found_at_its_pick() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "base": [0, 0, 0], "body_name": "Shaft"}));
+    run(&mut s, "solid.thread", json!({"face": [0, 5, 15], "designation": "M10", "modeled": false, "name": "Thread1"}));
+    let thread = s.doc.features.iter().position(|f| f.name == "Thread1").unwrap();
+    assert_eq!(s.doc.features[thread].face_names, vec!["F1:side".to_string()]);
+
+    for piece in ["F1:side#1", "F1:side#2"] {
+        let mut saved = (*s.doc).clone();
+        saved.features[thread].face_names = vec![piece.to_string()];
+        let reopened = Session::opened_at(saved, None, None);
+        let result = reopened.model.result(reopened.doc.features[thread].id).unwrap();
+        assert!(result.error.is_none(), "{piece}: {:?}", result.error);
+        assert_eq!(reopened.model.state().threads.len(), 1, "{piece}");
+    }
+
+    let mut off = (*s.doc).clone();
+    off.features[thread].face_names = vec!["F1:side#2".to_string()];
+    if let solidcraft_doc::FeatureKind::Thread { face, .. } = &mut off.features[thread].kind {
+        face.0 = Vec3::new(0.0, 5.0, 45.0);
+    }
+    let reopened = Session::opened_at(off, None, None);
+    let result = reopened.model.result(reopened.doc.features[thread].id).unwrap();
+    assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{:?}", result.error);
+}
+
+/// The same for a modelled thread in a hole: 0.30.1 built the hole's wall in pieces, named by number
+/// (`F4:bore:side:0#1`) or by a later index (`F4:bore:side:1`); it is one face now (#16602).
+#[test]
+fn a_modelled_thread_saved_under_a_numbered_bore_wall_is_found_at_its_pick() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 40, "base": [40, 0, 0], "body_name": "Boss"}));
+    run(&mut s, "solid.hole", json!({"position": [40, 0, 40], "diameter": 8.5, "depth": 25, "body_name": "Boss"}));
+    run(&mut s, "solid.thread", json!({"face": [44.25, 0, 20], "designation": "M10", "modeled": true, "name": "Tapped"}));
+    let thread = s.doc.features.iter().position(|f| f.name == "Tapped").unwrap();
+    let whole = s.doc.features[thread].face_names.clone();
+    assert!(whole[0].contains("bore:side"), "{whole:?}");
+    let volume_whole = volume(&mut s, "Boss");
+
+    let old_index = format!("{}:1", whole[0].strip_suffix(":0").unwrap_or(&whole[0]));
+    for piece in [format!("{}#1", whole[0]), old_index.clone()] {
+        let mut saved = (*s.doc).clone();
+        saved.features[thread].face_names = vec![piece.clone()];
+        let mut reopened = Session::opened_at(saved, None, None);
+        let result = reopened.model.result(reopened.doc.features[thread].id).unwrap();
+        assert!(result.error.is_none(), "{piece}: {:?}", result.error);
+        assert!((volume(&mut reopened, "Boss") - volume_whole).abs() < 1e-6, "{piece}");
+    }
+
+    let mut off = (*s.doc).clone();
+    off.features[thread].face_names = vec![format!("{}#1", whole[0])];
+    if let solidcraft_doc::FeatureKind::Thread { face, .. } = &mut off.features[thread].kind {
+        face.0 = Vec3::new(50.0, 0.0, 20.0);
+    }
+    let reopened = Session::opened_at(off, None, None);
+    let result = reopened.model.result(reopened.doc.features[thread].id).unwrap();
+    assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{:?}", result.error);
+}

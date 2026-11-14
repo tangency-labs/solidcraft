@@ -223,3 +223,14 @@ two such cases, and only where that point decides exactly one edge:
 Tests: `a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone`,
 `a_chamfer_saved_under_a_top_faces_old_neighbours_is_found_at_its_pick`,
 `a_chamfer_whose_old_name_and_pick_fit_two_edges_asks_again` (`crates/engine/src/face_name_tests.rs`).
+
+Numbered round faces (#16602): 0.30.1 split a cylinder's or cone's round side into numbered pieces
+(`F1:side#2`) and built a round tool's wall in several pieces (`F4:bore:side:1`, now
+`F4:bore:side:0`), so a thread, hole or plane saved then names a face that is whole now. Any face
+reference finds the whole face when it is the only face of that stem, is a cylinder or cone, and
+the saved pick lies on it (exact geometry, not the mesh). A pick off the face, or a stem that still
+has several faces, asks to be picked again. A flat numbered face is still found only when its
+original construction feature made it. Tests:
+`a_thread_saved_under_a_numbered_side_piece_of_a_cylinder_is_found_at_its_pick`,
+`a_modelled_thread_saved_under_a_numbered_bore_wall_is_found_at_its_pick`
+(`crates/engine/src/face_name_tests.rs`).
