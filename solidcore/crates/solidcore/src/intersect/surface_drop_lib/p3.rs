@@ -71,7 +71,9 @@
 //! - **Subdivision endpoint state.** Pending endpoints retain their complete drop
 //!   point, including 3D derivatives and boundary classification. Once a split
 //!   point changes the start, the pending endpoint is dropped again from that start
-//!   before testing its span. An unresolved closed-direction seam jump cannot use
+//!   before testing its span. A failed restored drop abandons this trace, as a
+//!   failed initial endpoint does; it is not an accuracy subdivision request.
+//!   An unresolved closed-direction seam jump cannot use
 //!   the inaccurate-short-span escape: subdivision must resolve its branch.
 //! - **Bounded subdivision.** The span stack of the subdivision loop is at most
 //!   [`MAX_SPAN_DEPTH`] drop points deep (upstream fixtures reach about 15: a span
@@ -1344,6 +1346,7 @@ impl Surface {
                 // subdivide the span until every piece passes the accuracy test
                 let mut stack = vec![(start.t, end)];
                 let mut stop_spans = false;
+                let mut span_failure_path = CreateUvTrimCurvePathType::DropStartPointFail;
                 while !stack.is_empty() {
                     // A pending endpoint was dropped relative to an earlier start.
                     // After accepting a split point, restore its complete state and
@@ -1355,8 +1358,10 @@ impl Surface {
                     })?;
                     end = saved_end;
                     let endpoint_t = end.t;
-                    let endpoint_ready = queued_start_t == start.t
-                        || match start.get_next_point(
+                    ret_status = if queued_start_t == start.t {
+                        SM_SUCCESS
+                    } else {
+                        match start.get_next_point(
                             k,
                             this,
                             &mut offset,
@@ -1369,44 +1374,41 @@ impl Surface {
                             endpoint_t,
                             &mut end,
                         ) {
-                            Ok(code) => checked_endpoint_status(code, &end, interval) == SM_SUCCESS,
+                            Ok(code) => checked_endpoint_status(code, &end, interval),
                             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                            Err(_) => false,
-                        };
-                    if endpoint_ready {
-                        ignore_status(ivl.set_min_max(start.t, end.t))?;
-
-                        // fix boundary tangents
-                        let _fix_bt_change = start.fix_boundary_tangents(
-                            &s_uv_domain,
-                            &mut end,
-                            uv_tol_x,
-                            uv_tol_y,
-                            approx_tol_3d,
-                        );
-                    }
-
-                    // test the span
-                    let acc = if endpoint_ready {
-                        start.test_span_accuracy(
-                            k,
-                            this,
-                            &s_uv_domain,
-                            curve,
-                            &end,
-                            approx_tol_3d,
-                            uv_tol_x,
-                            uv_tol_y,
-                            true,
-                        )?
-                    } else {
-                        super::p1::SpanAccuracy {
-                            passes: false,
-                            max_drop_to_surf: 0.0,
-                            max_approx_dev: 0.0,
-                            max_drop_to_surf_param: start.t,
+                            Err(e) => status_of(&e),
                         }
                     };
+                    if ret_status != SM_SUCCESS {
+                        // A failed projection cannot be repaired by accepting
+                        // successively closer midpoints. End this trace so other
+                        // starts and the caller's projection fallback can run.
+                        stop_spans = true;
+                        break;
+                    }
+                    ignore_status(ivl.set_min_max(start.t, end.t))?;
+
+                    // fix boundary tangents
+                    let _fix_bt_change = start.fix_boundary_tangents(
+                        &s_uv_domain,
+                        &mut end,
+                        uv_tol_x,
+                        uv_tol_y,
+                        approx_tol_3d,
+                    );
+
+                    // test the span
+                    let acc = start.test_span_accuracy(
+                        k,
+                        this,
+                        &s_uv_domain,
+                        curve,
+                        &end,
+                        approx_tol_3d,
+                        uv_tol_x,
+                        uv_tol_y,
+                        true,
+                    )?;
                     let mut span_passes = acc.passes;
                     let drop_to_surf = acc.max_drop_to_surf;
                     let approx_dev = acc.max_approx_dev;
@@ -1421,7 +1423,6 @@ impl Surface {
                             && (end.uv_pd[0].y - start.uv_pd[0].y).abs()
                                 > srf_nat_domain.v_interval().length() / 2.0);
                     if !span_passes
-                        && endpoint_ready
                         && !crosses_closed_seam
                         && (end.t - start.t).abs() < s_interval.length() / 8000.0
                     {
@@ -1490,25 +1491,7 @@ impl Surface {
 
                     // no split point drops: give up on this start point
                     if !found_good_one {
-                        fs.set(
-                            &mut record,
-                            3,
-                            ret_status,
-                            CreateUvTrimCurvePathType::SplitDropStepFail,
-                            &FailOut {
-                                rd_max_drop: out.max_drop_to_surf,
-                                rd_max_dev: out.max_approx_dev,
-                                max_drop: max_drop_to_surf,
-                                solutions: Some(&solutions),
-                                ctrl_poly: Some(&ctrl_poly),
-                                knots: Some(&knots),
-                                uv_curves: Some(&out.uv_curves),
-                            },
-                        );
-                        ctrl_poly.clear();
-                        knots.clear();
-                        max_drop_to_surf = max_drop_to_surf_before_trace;
-                        max_approx_dev = max_approx_dev_before_trace;
+                        span_failure_path = CreateUvTrimCurvePathType::SplitDropStepFail;
                         stop_spans = true;
                         break;
                     }
@@ -1530,6 +1513,25 @@ impl Surface {
                     stack.push((start.t, end));
                 }
                 if stop_spans {
+                    fs.set(
+                        &mut record,
+                        3,
+                        ret_status,
+                        span_failure_path,
+                        &FailOut {
+                            rd_max_drop: out.max_drop_to_surf,
+                            rd_max_dev: out.max_approx_dev,
+                            max_drop: max_drop_to_surf,
+                            solutions: Some(&solutions),
+                            ctrl_poly: Some(&ctrl_poly),
+                            knots: Some(&knots),
+                            uv_curves: Some(&out.uv_curves),
+                        },
+                    );
+                    ctrl_poly.clear();
+                    knots.clear();
+                    max_drop_to_surf = max_drop_to_surf_before_trace;
+                    max_approx_dev = max_approx_dev_before_trace;
                     break;
                 }
             }

@@ -101,7 +101,11 @@
 //!   seam's own edge) is that edge's end, so its gap across the curve is bounded by the
 //!   vertex's tolerance, not by the fixed `1000 * SM_EFF_ZERO`: a near miss only past the
 //!   tolerance. This applies at a shared interval boundary from either side of
-//!   its coincident edge. A cut wall whose seam edge ends on a body edge 1e-7 to 1e-5 across the
+//!   its coincident edge. The interval's quarter, midpoint and three-quarter
+//!   stations must also agree across the seam within surface 1; these samples
+//!   prevent a midpoint coincidence from concealing a bow, without counting
+//!   off-surface displacement as a sliver. This is not a whole-span certificate.
+//!   A cut wall whose seam edge ends on a body edge 1e-7 to 1e-5 across the
 //!   seam (the cut's sketch circle that far off the edge) read as a near miss; its loop
 //!   closes at the vertex within tolerance, and no sliver lies beside the seam.
 //! - **Recursion.** None.
@@ -711,65 +715,152 @@ impl<O: ClassObject> CurveClassification<O> {
             None
         };
         let near_miss_dist_3d = EFF_ZERO * 1000.0;
-        // `on_curve`: the vertex ends a coincident edge that lies on the curve, so it is
-        // that edge's own end, and its gap across the curve is the edge's end gap, which
-        // the vertex's tolerance bounds (deviation, see the file header)
-        let vertex_misses =
-            |pc: &PointClassification<O>, t: f64, end: bool, on_curve: bool| -> Result<bool> {
-                if pc.point_class() != PointClassType::Vertex
-                    || pc.gap_3d(k, geometry, surface)? < near_miss_dist_3d
-                {
-                    return Ok(false);
-                }
-                let across = match self.surface1().and_then(|s| geometry.surface(s)) {
-                    Some(s) => self.gap_across_curve(k, geometry, pc, t, end, s)?,
-                    None => None,
-                };
-                // A shared classification boundary is the same vertex from
-                // either neighboring interval. Its coincident edge may be on
-                // the other side of the interval being visited.
-                let mut on_curve = on_curve;
-                if !on_curve && pc.object().is_some() {
-                    for adjacent in self.intervals() {
-                        let shared_start =
-                            adjacent.interval.min() == t && adjacent.start.object() == pc.object();
-                        let shared_end =
-                            adjacent.interval.max() == t && adjacent.end.object() == pc.object();
-                        if (shared_start || shared_end)
-                            && adjacent.mid.point_class() == PointClassType::Edge
-                            && adjacent.mid.gap_3d(k, geometry, surface)? < near_miss_dist_3d
-                        {
-                            on_curve = true;
-                            break;
-                        }
+        // Only a potentially missed vertex needs the sampled span evidence for
+        // its own-edge tolerance; ordinary endpoints require no extra drops.
+        let vertex_misses = |pc: &PointClassification<O>, t: f64, end: bool| -> Result<bool> {
+            if pc.point_class() != PointClassType::Vertex
+                || pc.gap_3d(k, geometry, surface)? < near_miss_dist_3d
+            {
+                return Ok(false);
+            }
+            let across = match self.surface1().and_then(|s| geometry.surface(s)) {
+                Some(s) => self.gap_across_curve(k, geometry, pc, t, end, s)?,
+                None => None,
+            };
+            if across.is_some_and(|gap| gap < near_miss_dist_3d) {
+                return Ok(false);
+            }
+            // A shared classification boundary is the same vertex from
+            // either neighboring interval. Its coincident edge may be on
+            // the other side of the interval being visited.
+            let mut on_curve = false;
+            if pc.object().is_some() {
+                for adjacent in self.intervals() {
+                    let shared_start =
+                        adjacent.interval.min() == t && adjacent.start.object() == pc.object();
+                    let shared_end =
+                        adjacent.interval.max() == t && adjacent.end.object() == pc.object();
+                    if (shared_start || shared_end)
+                        && adjacent.mid.point_class() == PointClassType::Edge
+                        && adjacent.mid.gap_3d(k, geometry, surface)? < near_miss_dist_3d
+                        && self.coincident_span_lies_on_curve(
+                            k,
+                            geometry,
+                            adjacent,
+                            near_miss_dist_3d,
+                        )?
+                    {
+                        on_curve = true;
+                        break;
                     }
                 }
-                let threshold = if on_curve && !self.edge_runs_beside(k, geometry, pc)? {
-                    max2(
-                        near_miss_dist_3d,
-                        object_zone_tol_3d(k, geometry, pc.object())?,
-                    )
-                } else {
-                    near_miss_dist_3d
-                };
-                Ok(across.is_none_or(|gap| gap >= threshold))
+            }
+            let threshold = if on_curve && !self.edge_runs_beside(k, geometry, pc)? {
+                max2(
+                    near_miss_dist_3d,
+                    object_zone_tol_3d(k, geometry, pc.object())?,
+                )
+            } else {
+                near_miss_dist_3d
             };
+            Ok(across.is_none_or(|gap| gap >= threshold))
+        };
 
         for ivl in self.intervals() {
             let mid = &ivl.mid;
             let coincident = mid.point_class() == PointClassType::Edge;
             let beside = coincident && mid.gap_3d(k, geometry, surface)? >= near_miss_dist_3d;
-            let on_curve = coincident && !beside;
-
-            if vertex_misses(&ivl.start, ivl.interval.min(), false, on_curve)?
+            if vertex_misses(&ivl.start, ivl.interval.min(), false)?
                 || beside
-                || vertex_misses(&ivl.end, ivl.interval.max(), true, on_curve)?
+                || vertex_misses(&ivl.end, ivl.interval.max(), true)?
             {
                 return Ok(true);
             }
         }
 
         Ok(false)
+    }
+
+    /// Samples the classified span at one quarter, one half and three quarters
+    /// before treating its edge as the curve's own edge. A midpoint alone can
+    /// conceal a bow beside the seam. This is sampled evidence, not a certified
+    /// whole-span bound; only the in-surface component across the seam counts,
+    /// consistently with the vertex-end measurement.
+    fn coincident_span_lies_on_curve(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        interval: &CurveInterval<O>,
+        threshold: f64,
+    ) -> Result<bool> {
+        let (Some(curve), Some(uv_curve), Some(surface), Some(object)) = (
+            self.curve().and_then(|c| geometry.curve(c)),
+            self.uv_curve1().and_then(|c| geometry.curve(c)),
+            self.surface1().and_then(|s| geometry.surface(s)),
+            interval.mid.object(),
+        ) else {
+            return Ok(false);
+        };
+        let (other, domain) =
+            if let Some((b, EntityRef::Edge(e))) = geometry.topology_entity(object) {
+                let edge = b.edge(e)?;
+                let Some(other) = edge.curve.as_ref() else {
+                    return Ok(false);
+                };
+                (other, edge.interval)
+            } else {
+                let Some(other) = geometry.curve(object) else {
+                    return Ok(false);
+                };
+                (other, other.natural_interval())
+            };
+        let tolerance = object_zone_tol_3d(k, geometry, Some(object))?;
+        for fraction in [0.25, 0.5, 0.75] {
+            let t = interval.interval.evaluate(fraction);
+            let Some(values) = ignored(curve.evaluate(k, t, 1, true, false))? else {
+                return Ok(false);
+            };
+            let (Some(&point), Some(&tangent)) = (values.first(), values.get(1)) else {
+                return Ok(false);
+            };
+            let Some(uv) = ignored(uv_curve.evaluate_point(k, t))? else {
+                return Ok(false);
+            };
+            let Some(normal) = ignored(surface.evaluate_normal(
+                k,
+                Point2::new(uv.x, uv.y),
+                Side::Left,
+                Side::Left,
+            ))?
+            else {
+                return Ok(false);
+            };
+            let Ok(across) = normal.cross(tangent).unitize() else {
+                return Ok(false);
+            };
+            let Some(drop) = ignored(other.drop_point(
+                k,
+                &domain,
+                point,
+                None,
+                tolerance,
+                None,
+                SolverOperation::Minimize,
+            ))?
+            else {
+                return Ok(false);
+            };
+            if !drop.success {
+                return Ok(false);
+            }
+            let Some(other_point) = ignored(other.evaluate_point(k, drop.parameter))? else {
+                return Ok(false);
+            };
+            if (other_point - point).dot(across).abs() >= threshold {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Whether an edge at the vertex end `pc` other than the curve's own edges runs beside
@@ -3019,6 +3110,87 @@ mod tests {
         // no UV curve or no surface to measure across in: the whole gap counts
         assert!(quarter_ending_off([1.0, 0.0, 0.0], 5, 0));
         assert!(quarter_ending_off([1.0, 0.0, 0.0], 1, 5));
+    }
+
+    #[test]
+    fn a_midpoint_coincidence_does_not_hide_a_bow_beside_the_seam() {
+        use crate::geom::extent2d::Extent2d;
+        use crate::math::Vec2;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let k = Kernel::default();
+        for normal_offset in [false, true] {
+            let control = |x, offset| {
+                if normal_offset {
+                    CPoint::new(x, 0.0, offset, NOW)
+                } else {
+                    CPoint::new(x, offset, 0.0, NOW)
+                }
+            };
+            // The edge agrees at both ends and the midpoint, but has opposite
+            // bows at the quarter stations, each inside the vertex's zone.
+            let bowed = Curve::from(BSplineCurve::from_nurb(
+                NurbCurve::new(
+                    vec![
+                        control(0.0, 0.0),
+                        control(1.0 / 3.0, -1e-5 / 6.0),
+                        control(2.0 / 3.0, 1e-5 / 6.0),
+                        control(1.0, 0.0),
+                    ],
+                    3,
+                    vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+                )
+                .unwrap(),
+                3,
+                false,
+            ));
+            let geo = SeamGeo {
+                curves: vec![
+                    line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+                    bowed,
+                    line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+                ],
+                plane: Surface::from(crate::surface::plane::Plane::new(
+                    Vec3::ZERO,
+                    Vec3::X,
+                    Vec3::Y,
+                    Vec2::new(1.0, 1.0),
+                    &Extent2d::from_bounds(-1.0, -1.0, 2.0, 1.0),
+                )),
+                vertex: Point3::new(0.0, 1e-8, 0.0),
+            };
+            for shared in [false, true] {
+                let params: &[f64] = if shared {
+                    &[-1.0, 0.0, 1.0]
+                } else {
+                    &[0.0, 1.0]
+                };
+                let mut cc = classification(&k, params);
+                cc.set_uv_curve1(Some(H(2, K::Curve)));
+                cc.set_surface1(Some(H(0, K::Surface)));
+                let own = usize::from(shared);
+                let ivl = cc.at_mut(own).unwrap();
+                ivl.mid
+                    .set_class_object(PointClassType::Edge, Some(H(1, K::Edge)));
+                ivl.mid.set_gap_3d(0.0);
+                ivl.start
+                    .set_class_object(PointClassType::Vertex, Some(H(0, K::Vertex)));
+                ivl.start.set_t_param(0.0, false);
+                ivl.start.set_gap_3d(1e-8);
+                if shared {
+                    let end = &mut cc.at_mut(0).unwrap().end;
+                    end.set_class_object(PointClassType::Vertex, Some(H(0, K::Vertex)));
+                    end.set_t_param(0.0, false);
+                    end.set_gap_3d(1e-8);
+                }
+                assert_eq!(
+                    cc.has_near_misses(&k, &geo, false).unwrap(),
+                    !normal_offset,
+                    "shared={shared}, normal_offset={normal_offset}"
+                );
+            }
+        }
     }
 
     #[test]
