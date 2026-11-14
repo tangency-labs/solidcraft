@@ -76,9 +76,9 @@
 //!   these tests; the port propagates their errors (as `validation.rs` does; except
 //!   the extrusion's `GlobalPropertyAnalysis`, see **Angles**), and a
 //!   failed `MakeNurb` is ignored, as upstream.
-//! - **Extrusion origin zero (WR-511, #1508).** Test 8 uses the pinned unscaled
-//!   `SM_EFF_ZERO` by default; `Kernel::fixes.extrusion_origin_scaled_zero` uses
-//!   `SM_EFF_ZERO * (1 + origin.max_dimension())` for that solve only.
+//! - **Extrusion origin zero (WR-511, #1508).** Test 8 point-solves the origin with
+//!   `SM_EFF_ZERO * (1 + origin.max_dimension())`, where upstream uses an unscaled
+//!   `SM_EFF_ZERO`; that solve only.
 //! - `SmSTEPSurface` has no override and runs the base check.
 //! - **Contained checks.** Curve-bounded basis checks carry an explicit nesting
 //!   counter bounded by `MAX_GEOMETRY_NESTING` (32; fixtures reach at most 3).
@@ -136,7 +136,6 @@ use crate::geom::tol::{
     is_zero_to_tol, tol3d, xsect_tol_3d_from_zones, zone_tol_3d_of_curve, SmallTopoType,
     ANG_TOL_DEG, ZONE_TOL_3D,
 };
-use crate::geom::vector3d::acos as sm_acos;
 use crate::geom::vector3d::asin as sm_asin;
 use crate::kernel::Kernel;
 use crate::math::{
@@ -881,9 +880,9 @@ fn index(v: i64) -> Result<usize> {
 /// `SmBSplineSurface::HasInternalPole`: some interior knot line has a patch boundary
 /// span whose control points all lie within `tol` (`<= 0`: `SM_ZONE_TOL_3D`) of one
 /// another (for the u lines, also a singularity, `IsSingularity` of `s`).
-/// `false` without NURB. The row tested at each interior knot is upstream's unless
-/// [`UpstreamFixes::internal_pole_row_through_knot`](crate::kernel::UpstreamFixes::internal_pole_row_through_knot)
-/// (WR-505, #1515) is on.
+/// `false` without NURB. At each interior knot it tests the row through the knot, where
+/// upstream moves one row further for each repeated copy of the knot (WR-505;
+/// tangency-labs/smlib#41).
 ///
 /// # Errors
 ///
@@ -923,13 +922,9 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
 
         // one additional basis function becomes zero for each multiplicity at sMults[ii]
         let row_cnt_u = degree_u - (mult(&mults_u, ii)? - 1);
-        // upstream moves one row further for each repeated copy of the knot; with the opt-in
-        // the row through the knot (WR-505, #1515; tangency-labs/smlib#41)
-        let cp_index_u = if k.fixes.internal_pole_row_through_knot {
-            knt_cnt_u - 1 - degree_u
-        } else {
-            knt_cnt_u - row_cnt_u - 1
-        };
+        // Not upstream (WR-505; tangency-labs/smlib#41): the row through the knot, where
+        // upstream's `kntCntU - rowCntU - 1` moves one row further for each repeated copy
+        let cp_index_u = knt_cnt_u - 1 - degree_u;
 
         // for every V direction knot span - seek patch arrays of coincident control points
         let mut knt_cnt_v = 0;
@@ -982,12 +977,8 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
         knt_cnt_v += mult(&mults_v, ii)?;
 
         let row_cnt_v = degree_v - (mult(&mults_v, ii)? - 1);
-        // as the U walk: the row through the knot with the opt-in (WR-505, #1515)
-        let cp_index_v = if k.fixes.internal_pole_row_through_knot {
-            knt_cnt_v - 1 - degree_v
-        } else {
-            knt_cnt_v - row_cnt_v - 1
-        };
+        // as the U walk: the row through the knot (WR-505)
+        let cp_index_v = knt_cnt_v - 1 - degree_v;
 
         // for every U direction knot span - seek patch arrays of coincident control points
         let mut knt_cnt_u = 0;
@@ -2097,11 +2088,9 @@ fn surf_of_extrusion_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>)
     // 4. check that m_vOrigin is a point on m_pGenCurve
     let gen_ivl = gen.natural_interval();
     let origin = ext.origin();
-    let origin_tol = if k.fixes.extrusion_origin_scaled_zero {
-        EFF_ZERO * (1.0 + origin.max_dimension())
-    } else {
-        EFF_ZERO
-    };
+    // Not upstream (WR-511, #1508; tangency-labs/smlib#31): a coordinate-aware zero, where
+    // upstream's unscaled SM_EFF_ZERO misses an origin on the curve at coordinates of ~10
+    let origin_tol = EFF_ZERO * (1.0 + origin.max_dimension());
     let solutions = gen.global_point_solve(
         k,
         &gen_ivl,
@@ -2437,10 +2426,9 @@ fn sphere_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) -> Result<
 
 /// `SmTorus::AssertValid` (the U and V tests read U and V and report as 3 and 4, their
 /// labels, where pinned upstream reads the U interval twice and reports them as 2 and 3,
-/// WR-538. A spindle torus's self-intersection test clears the result with no report and
-/// tests the U interval against an `acos` range; with
-/// `Kernel::fixes.torus_check_spindle_apex`, WR-539, it reports test 5 for an apex inside
-/// the V interval).
+/// WR-538. A spindle torus reports test 5 for an apex inside the V interval, WR-539,
+/// where upstream clears the result with no report and tests the U interval against an
+/// `acos` range).
 fn torus_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) -> Result<bool> {
     const CLASS: i64 = TORUS_TYPE;
     let mut rtn = true;
@@ -2459,39 +2447,31 @@ fn torus_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) -> Result<b
 
     let anal = t.base().step_uv_domain();
     if major < minor {
-        if k.fixes.torus_check_spindle_apex {
-            /*  5 */
-            // Not upstream (WR-539, the fork's tangency-labs/smlib@daba678): a spindle
-            // torus's minor circles cross the axis where R + r cos(V) = 0, at the apexes
-            // V = +-(90 + asin(R/r)) degrees; like a sphere's poles (its tests 4 and 5),
-            // an apex may bound the V domain but not lie inside it.
-            let apex_deg = 90.0 + sm_asin(major / minor) * 180.0 / PI;
-            let apex_ivl_v = anal.v_interval();
-            for apex in [apex_deg, -apex_deg] {
-                let c = apex_ivl_v.contains_periodic_value(apex, 360.0, EFF_ZERO_DEG);
-                // (test 5 is the fork's: labelled from the extended table, so the
-                // class's `SM_GetAssertLabelList` table stays upstream's)
-                let class_string = r.class_string;
-                rtn &= r.report_from(
-                    TORUS_WITH_SPINDLE_APEX,
-                    CLASS,
-                    CLASS,
-                    class_string,
-                    5,
-                    0,
-                    !c.contained
-                        || is_zero_to_tol(c.dist_to_min, EFF_ZERO_DEG)
-                        || is_zero_to_tol(c.dist_to_max, EFF_ZERO_DEG),
-                    EFF_ZERO_DEG,
-                    min2(c.dist_to_min, c.dist_to_max),
-                )?;
-            }
-        } else {
-            let angle_limit_deg = 90.0 + sm_acos(major / minor) * 180.0 / PI;
-            let self_intersect = Extent1d::from_min_max(angle_limit_deg, 360.0 - angle_limit_deg);
-            if !self_intersect.are_disjoint_periodic(&anal.u_interval(), 360.0, -1.0) {
-                rtn &= false;
-            }
+        /*  5 */
+        // Not upstream (WR-539, the fork's tangency-labs/smlib@daba678): a spindle
+        // torus's minor circles cross the axis where R + r cos(V) = 0, at the apexes
+        // V = +-(90 + asin(R/r)) degrees; like a sphere's poles (its tests 4 and 5),
+        // an apex may bound the V domain but not lie inside it.
+        let apex_deg = 90.0 + sm_asin(major / minor) * 180.0 / PI;
+        let apex_ivl_v = anal.v_interval();
+        for apex in [apex_deg, -apex_deg] {
+            let c = apex_ivl_v.contains_periodic_value(apex, 360.0, EFF_ZERO_DEG);
+            // (test 5 is the fork's: labelled from the extended table, so the
+            // class's `SM_GetAssertLabelList` table stays upstream's)
+            let class_string = r.class_string;
+            rtn &= r.report_from(
+                TORUS_WITH_SPINDLE_APEX,
+                CLASS,
+                CLASS,
+                class_string,
+                5,
+                0,
+                !c.contained
+                    || is_zero_to_tol(c.dist_to_min, EFF_ZERO_DEG)
+                    || is_zero_to_tol(c.dist_to_max, EFF_ZERO_DEG),
+                EFF_ZERO_DEG,
+                min2(c.dist_to_min, c.dist_to_max),
+            )?;
         }
     }
 
@@ -2790,19 +2770,13 @@ mod tests {
 
     /// WR-539 (the fork's tangency-labs/smlib@daba678): the spindle torus R 1, r 2 has its
     /// apexes at V = +-120. Upstream fails every spindle torus with a whole turn of U and
-    /// reports nothing; with `torus_check_spindle_apex` V [0, 360] reports test 5 and the
-    /// outer sheet V [-120, 120] passes.
+    /// reports nothing; here V [0, 360] reports test 5 and the outer sheet V [-120, 120]
+    /// passes.
     #[test]
     fn wr_539_spindle_torus_reports_an_apex_inside() {
         let whole = torus_over(0.0, 360.0, 1.0, 2.0);
         let outer = torus_over(-120.0, 120.0, 1.0, 2.0);
-        let mut k = Kernel::default();
-        for s in [&whole, &outer] {
-            let (ok, upstream) = failed_tests(&k, s);
-            assert!(!ok);
-            assert!(!upstream.contains(&(TORUS_TYPE, 5)), "{upstream:?}");
-        }
-        k.fixes.torus_check_spindle_apex = true;
+        let k = Kernel::default();
         let (ok, fixed) = failed_tests(&k, &whole);
         assert!(!ok);
         assert!(fixed.contains(&(TORUS_TYPE, 5)), "{fixed:?}");
@@ -2815,7 +2789,7 @@ mod tests {
     /// tangency-labs/solidcore#1515 (WR-505): a horn torus (major radius = minor radius)
     /// touches its axis, where the corner rows of its NURB coincide. Upstream's
     /// `HasInternalPole` tests one row one step too far at each repeated knot and reports
-    /// a pole there; with `internal_pole_row_through_knot` it finds none.
+    /// a pole there; testing the row through the knot finds none.
     #[test]
     fn issue_1515_horn_torus_has_no_internal_pole() {
         use crate::geom::axis2_placement::Axis2Placement;
@@ -2837,14 +2811,12 @@ mod tests {
             has_internal_pole(k, &s, &part, ZONE_TOL_3D / 10.0).unwrap()
         };
 
-        let mut k = Kernel::default();
-        assert!(horn(&k), "upstream reports a pole on the horn torus");
-        k.fixes.internal_pole_row_through_knot = true;
+        let k = Kernel::default();
         assert!(!horn(&k), "no internal pole on the horn torus");
     }
 
     /// A real pole at a double knot (row 2 of a 5 x 3 net, collapsed to one point at the
-    /// knot 0.5) is found with the opt-in. Upstream tests the corner row one step further
+    /// knot 0.5) is found. Upstream tests the corner row one step further
     /// (row 3) at that knot, so it misses the pole (WR-505, #1515).
     #[test]
     fn issue_1515_real_pole_at_a_double_knot_is_found() {
@@ -2864,14 +2836,12 @@ mod tests {
             &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
             &pts,
         );
-        let pole = |flag: bool| {
-            let mut k = Kernel::default();
-            k.fixes.internal_pole_row_through_knot = flag;
-            let part = make_nurb(&k, &s).unwrap().unwrap();
-            has_internal_pole(&k, &s, &part, ZONE_TOL_3D / 10.0).unwrap()
-        };
-        assert!(!pole(false), "upstream misses the pole at the double knot");
-        assert!(pole(true), "the opt-in finds the pole at the double knot");
+        let k = Kernel::default();
+        let part = make_nurb(&k, &s).unwrap().unwrap();
+        assert!(
+            has_internal_pole(&k, &s, &part, ZONE_TOL_3D / 10.0).unwrap(),
+            "the pole at the double knot is found"
+        );
     }
 
     #[test]

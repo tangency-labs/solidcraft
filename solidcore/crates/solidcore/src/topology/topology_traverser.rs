@@ -34,9 +34,8 @@
 //! ray (the build is deterministic, so a retry fails the same way).
 //! Existing co-ported accessors are reused.
 //! `ClosureTraversalFromBothSides` is not in the pinned upstream: it is the fork's
-//! (tangency-labs/smlib@69c5198), used only under
-//! [`UpstreamFixes::boolean_new_face_closure_both_sides`](crate::kernel::UpstreamFixes::boolean_new_face_closure_both_sides)
-//! (WR-584). Its `std::unordered_map` side table becomes a vector indexed by face-use
+//! (tangency-labs/smlib@69c5198), used by `SmBrep::TestClosureSplitRegion` in place of
+//! `ClosureTraversal` (WR-584). Its `std::unordered_map` side table becomes a vector indexed by face-use
 //! arena slot (lookups only, as the fork; no iteration).
 
 use std::collections::{BTreeMap, BTreeSet};
