@@ -8,6 +8,8 @@
 //! engine regression), their forms as the blend definitions' records hold them
 //! (`data/raked_wedge_supports.jsonl`), whose recognised numbers `build` refused, and those of
 //! `the_pleats_join_at_every_wall_from_2_4_to_2_6_mm` (`data/pleated_case_supports.jsonl`).
+//! And two surfaces of revolution swept under half a degree, a chained round's short pieces
+//! (`data/short_swept_revolution_nets.jsonl`), derived with `derive_revolution`.
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
@@ -362,5 +364,47 @@ fn horn_tori_round_trip_from_a_collapsed_boundary_sweep() {
                 );
             }
         }
+    }
+}
+
+/// The two short pieces of a chained 2 mm round where a plane meets a 45 degree cone about the
+/// world z axis (tangency-labs/solidcraft#17004), their nets as the body's record holds them
+/// (`data/short_swept_revolution_nets.jsonl`): surfaces of revolution swept 0.4466 degrees at a
+/// radius of about 15.6 mm, mirror images of each other in y = 0. The recogniser's axis is a
+/// circle's through three evaluated points of so short an arc; its centre lay 4e-11 mm off
+/// sideways, which turned the second net's swept points past their rounding, so the body could
+/// not be read back. Both derive, about the z axis through the origin, over their own sweep.
+#[test]
+fn short_swept_revolution_nets_derive_about_their_own_axis() {
+    use solidcore::surface::surface::SurfaceKind;
+    let k = Kernel::default();
+    let forms: Vec<Form> = include_str!("data/short_swept_revolution_nets.jsonl")
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(forms.len(), 2);
+    for form in &forms {
+        assert_eq!(form.kind, "Revolution");
+        let surface = form.surface();
+        let derived = AnalyticSupport::derive_revolution(&k, &surface).unwrap();
+        let SurfaceKind::SurfOfRevolution(rev) = derived.kind() else {
+            panic!("not a surface of revolution: {:?}", derived.kind());
+        };
+        let position = rev.position();
+        let axis = position.x_axis().cross(position.y_axis());
+        assert!(axis.x.hypot(axis.y) < 1e-9, "axis {axis:?}");
+        let origin = position.origin();
+        assert!(origin.x.hypot(origin.y) < 1e-9, "origin {origin:?}");
+        // the sweep about the z axis from the net's first to its last control point, which
+        // are on the surface
+        let angle = |n: usize| {
+            let [x, y, _] = form.points[n];
+            y.atan2(x)
+        };
+        let sweep = (angle(form.v_count - 1) - angle(0)).abs().to_degrees();
+        let domain = rev.step_uv_domain();
+        let derived_sweep = domain.max().x - domain.min().x;
+        assert!((derived_sweep - sweep).abs() < 1e-9, "{derived_sweep} for {sweep}");
+        assert!((sweep - 0.4466).abs() < 1e-4, "{sweep}");
     }
 }
