@@ -13,6 +13,7 @@ use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::query::api_queries::surface_closest_point;
 use solidcore::sweep::loft_rails::{loft_rails, RailLoftOptions, RailSection, RailedLoft};
+use solidcore::sweep::stations::RailFit;
 use solidcore::Kernel;
 
 /// A B-spline curve of `degree` through the control points `points` with the full knots
@@ -178,6 +179,60 @@ fn a_straight_rail_tapering_similar_sections_gives_the_frustum() {
     let corner = line(a1, b1);
     let off = sampled_off(&k, &made, &corner, 50);
     assert!(off <= 1e-9, "{off}");
+}
+
+/// The rectangle and trapezoid lie on perpendicular planes. Their corresponding
+/// corners interpolate to nonplanar closed wires, which are valid skin sections.
+/// At x in [-2, 2], the YZ area is (20 * (22.5 + 1.25*x) - 10^2) / 2:
+/// the outer triangle less the inner triangle. Integrating over x gives 700 mm^3.
+#[test]
+fn perpendicular_sections_with_a_guide_can_have_nonplanar_interior_wires() {
+    let mut k = Kernel::default();
+    let first = [
+        Point3::new(-2.0, 0.0, 10.0),
+        Point3::new(2.0, 0.0, 10.0),
+        Point3::new(2.0, 0.0, 20.0),
+        Point3::new(-2.0, 0.0, 20.0),
+    ];
+    let last = [
+        Point3::new(-2.0, 10.0, 0.0),
+        Point3::new(2.0, 10.0, 0.0),
+        Point3::new(2.0, 25.0, 0.0),
+        Point3::new(-2.0, 20.0, 0.0),
+    ];
+    let wire = |points: &[Point3; 4]| {
+        points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .map(|(&a, &b)| line(a, b))
+            .collect::<Vec<_>>()
+    };
+    let lower = wire(&first);
+    let upper = wire(&last);
+    let sections = [
+        RailSection {
+            origin: Point3::ZERO,
+            normal: -Vec3::Y,
+            curves: lower.iter().collect(),
+        },
+        RailSection {
+            origin: Point3::ZERO,
+            normal: Vec3::Z,
+            curves: upper.iter().collect(),
+        },
+    ];
+    let rail = line(Point3::new(0.0, 0.0, 10.0), Point3::new(0.0, 10.0, 0.0));
+    let mut opts = RailLoftOptions::new(1e-6);
+    opts.fit = RailFit::Stretch;
+    opts.closed = true;
+    opts.cap = true;
+    let mut made = loft_rails(&mut k, &sections, &[&rail], &opts).unwrap();
+    assert!(made.bounds.iter().all(|&b| b <= opts.tolerance));
+    assert!(solidcore::topology::brep::is_outward_solid(&mut k, &mut made.skin.brep).unwrap());
+    let volume =
+        solidcore::mass::integrator::properties::brep_volume_default(&k, &mut made.skin.brep, 1e-9)
+            .unwrap();
+    assert!((volume - 700.0).abs() < 1e-6, "volume {volume} vs 700");
 }
 
 /// The hull side of #3140 (the case its first comment gives): keel and sheer sections, stem and transom rails, each a
