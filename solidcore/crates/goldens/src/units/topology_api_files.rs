@@ -998,3 +998,102 @@ impl UnitDiff for Runner {
         serde_json::to_value(op).ok()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::topology::database_io::{fixed16, round_trip};
+
+    /// The file a `write_bytes` output records (`rec`: `0, 0, n, bytes...`).
+    fn file_of(out: &Output) -> Option<Vec<u8>> {
+        let rec = out.ints.get("rec")?;
+        if rec.first() != Some(&0) || rec.get(1) != Some(&0) {
+            return None;
+        }
+        Some(rec.get(3..)?.iter().map(|&c| c as u8).collect())
+    }
+
+    /// `bytes` read with the Rust reader under the write cases' file identities, then
+    /// written as a binary file under the same identities (binary doubles are exact).
+    fn binary_after_reading(bytes: Vec<u8>, file_type: FileType) -> Vec<u8> {
+        let mut k = Kernel::default();
+        let mut records = NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        {
+            let mut env = TopologyEnv {
+                all_attributes: &[],
+                attributes: &mut attributes,
+                key_of: &write_file_key,
+                records: &mut records,
+                next_key: WRITE_GEOMETRY_KEYS,
+            };
+            read_from_file(&mut k, &mut b, bytes, file_type, false, &mut env).unwrap();
+        }
+        let out = write_rec(&k, &b, &write_file_key, &records, &attributes, false);
+        file_of(&out).unwrap()
+    }
+
+    /// Certificate for the ASCII `write_bytes` rows (WR-655): every double in each ASCII
+    /// file is written as the shortest text that reads back as itself (`round_trip`, no
+    /// `%.16f` text left), and the file carries every double exactly: read back and written
+    /// as a binary file, it gives the same bytes as the case's own binary file read back
+    /// and written the same way.
+    #[test]
+    fn ascii_files_carry_every_double_exactly() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let mut covered = Vec::new();
+        let mut lossy = Vec::new();
+        for case in &cases {
+            let Ok(Op::WriteBytes { brep, ascii: true }) = case.parse::<Op>() else {
+                continue;
+            };
+            let ascii = rust(&Op::WriteBytes {
+                brep: brep.clone(),
+                ascii: true,
+            })
+            .unwrap();
+            let binary = rust(&Op::WriteBytes {
+                brep: brep.clone(),
+                ascii: false,
+            })
+            .unwrap();
+            let name = &case.name;
+            let Some(text) = file_of(&ascii) else {
+                // a refused source or write: the binary case is refused the same way
+                assert_eq!(file_of(&binary), None, "{name}");
+                continue;
+            };
+            let bin = file_of(&binary).unwrap_or_else(|| panic!("{name}: no binary file"));
+            let s = String::from_utf8(text.clone()).unwrap();
+            let mut loses = false;
+            for token in s.split_whitespace() {
+                let Ok(v) = token.parse::<f64>() else {
+                    continue;
+                };
+                if token.contains(['.', 'e', 'n', 'i']) {
+                    assert_eq!(round_trip(v), token, "{name}: double {token}");
+                    // upstream's `%.16f` text of the same double
+                    loses |= !v.is_nan()
+                        && fixed16(v).parse::<f64>().map_or(true, |w| w.to_bits() != v.to_bits());
+                }
+            }
+            assert_eq!(
+                binary_after_reading(text, FileType::Ascii),
+                binary_after_reading(bin, FileType::Binary),
+                "{name}: the ASCII file does not carry the binary file's doubles"
+            );
+            if loses {
+                lossy.push(name.clone());
+            }
+            covered.push(name.clone());
+        }
+        println!("ASCII_EXACT covered {}: {covered:?}", covered.len());
+        println!("ASCII_EXACT %.16f loses a double in {}: {lossy:?}", lossy.len());
+        assert!(!covered.is_empty());
+    }
+}

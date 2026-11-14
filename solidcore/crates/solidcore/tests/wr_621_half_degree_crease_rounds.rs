@@ -1,7 +1,7 @@
 //! Regression test for WR-621 (#1808; the fork's tangency-labs/smlib@2e8758b, capi test
 //! `crease_rounds_from_half_a_degree`): `SmEdge::GetBlendEdgeuse` takes two faces for
-//! tangent within 2 degrees, so a crease of 0.5 to 2 degrees cannot be rounded. With
-//! `fillet_half_degree_crease` the limit is half a degree.
+//! tangent within 2 degrees, so a crease of 0.5 to 2 degrees cannot be rounded. The port's
+//! limit is half a degree (`edge::CREASE_ANGLE`).
 //!
 //! The part is a block 40 x 20, 20 deep, whose top rises to a crease at x = 20, each half
 //! sloping `turn / 2` degrees, so the faces turn by `turn` across it. A round of radius r
@@ -79,9 +79,8 @@ fn crease(k: &Kernel, b: &Brep, turn: f64) -> EdgeId {
 
 /// The crease of the block turning `turn` degrees rounded `r`: the volume removed, or
 /// the round's failure.
-fn round(half_degree: bool, turn: f64, r: f64) -> solidcore::Result<f64> {
+fn round(turn: f64, r: f64) -> solidcore::Result<f64> {
     let mut k = Kernel::default();
-    let _ = half_degree; // the flag is retired
     let mut b = block(&mut k, turn);
     let before = volume(&k, &mut b);
     let e = crease(&k, &b, turn);
@@ -102,7 +101,7 @@ fn removed(turn: f64, r: f64) -> f64 {
 fn wr_621_creases_from_half_a_degree_round() {
     for turn in [1.0, 3.0] {
         for r in [2.0, 20.0] {
-            let got = round(true, turn, r)
+            let got = round(turn, r)
                 .unwrap_or_else(|e| panic!("turn {turn}, r {r}: the round failed: {e:?}"));
             let want = removed(turn, r);
             assert!(
@@ -113,20 +112,6 @@ fn wr_621_creases_from_half_a_degree_round() {
     }
     // within half a degree the faces are tangent: nothing to round
     for r in [2.0, 20.0] {
-        assert!(round(true, 0.3, r).is_err(), "0.3 degrees, r {r}");
-    }
-}
-
-/// Without the opt-in a 1 degree crease is taken for a smooth edge (within 2 degrees),
-/// as upstream does; a 3 degree one rounds either way.
-#[test]
-fn wr_621_without_the_opt_in_a_one_degree_crease_is_refused() {
-    for r in [2.0, 20.0] {
-        assert!(round(false, 1.0, r).is_err(), "1 degree, r {r}");
-        let got = round(false, 3.0, r).unwrap();
-        assert!(
-            (got - removed(3.0, r)).abs() < 1e-6,
-            "3 degrees, r {r}: {got}"
-        );
+        assert!(round(0.3, r).is_err(), "0.3 degrees, r {r}");
     }
 }

@@ -3723,8 +3723,9 @@ mod tests {
             true,
             &mut shift
         ));
-        // closed in neither direction: default returns SM_SUCCESS (true) for C++ parity
-        assert!(check_seam_crossing(
+        // closed in neither direction: no seam is crossed (upstream's SM_SUCCESS reads
+        // as true, WR-87)
+        assert!(!check_seam_crossing(
             &mut uv1,
             Point2::new(9.0, 9.0),
             &dom,
@@ -3835,7 +3836,9 @@ mod tests {
         let _ = s;
         let mut k = Kernel::default();
         let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
-        assert_eq!(r.uv, vec![Point2::new(1.0 / 3.0, 1.0)]);
+        // one point: the centre of [0, 1] x [0, 2] (WR-86; upstream's 1/3 in u comes from
+        // the search count's column increment)
+        assert_eq!(r.uv, vec![Point2::new(0.5, 1.0)]);
         assert_eq!(r.pv.len(), 2);
         assert_eq!(r.pv[1], Vec3::Z);
         let r = points_in_face(&mut k, &mut b, f, 7).unwrap();
@@ -3868,16 +3871,12 @@ mod tests {
     }
 
     #[test]
-    fn points_in_face_span_domain_samples_from_the_domain() {
+    fn points_in_face_samples_from_the_domain() {
         let bounds = (3.0, -7.0, 4.0, -6.5);
         let (mut b, f) = rectangular_face(bounds);
 
-        // the default stays pinned: fractions of the domain's lengths from zero
-        let mut k = Kernel::default();
-        let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
-        assert_eq!(r.uv, vec![Point2::new(1.0 / 3.0, 0.25)]);
-
-        // opt-in: count 1 is the centre of the domain, in u and v
+        // count 1 is the centre of the domain, in u and v (upstream's fractions from
+        // zero gave (1/3, 0.25), outside it; WR-86)
         let mut k = Kernel::default();
         let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
         assert_eq!(r.uv, vec![Point2::new(3.5, -6.75)]);
@@ -3911,22 +3910,23 @@ mod tests {
             assert_eq!(r.pv[2 * i + 1], Vec3::Z);
         }
 
-        // the flag changes the grid, not the number or order of the RNG draws
+        // one RNG draw per point, as upstream's rand() per point
         let opts = KernelOptions {
             seed: 12_345,
             ..KernelOptions::default()
         };
-        let mut off = Kernel::new(&opts);
-        let mut on = Kernel::new(&opts);
-        let r_off = points_in_face(&mut off, &mut b, f, 7).unwrap();
-        let r_on = points_in_face(&mut on, &mut b, f, 7).unwrap();
-        assert_eq!(r_off.uv.len(), 7);
-        assert_eq!(r_on.uv.len(), 7);
-        assert_eq!(off.rng.next_f64(), on.rng.next_f64());
+        let mut sampled = Kernel::new(&opts);
+        let mut drawn = Kernel::new(&opts);
+        let r = points_in_face(&mut sampled, &mut b, f, 7).unwrap();
+        assert_eq!(r.uv.len(), 7);
+        for _ in 0..7 {
+            drawn.rng.next_f64();
+        }
+        assert_eq!(sampled.rng.next_f64(), drawn.rng.next_f64());
     }
 
     #[test]
-    fn points_in_face_span_domain_boundary_counts() {
+    fn points_in_face_boundary_counts() {
         let bounds = (3.0, -7.0, 4.0, -6.5);
         let (mut b, f) = rectangular_face(bounds);
         let opts = KernelOptions {
@@ -3934,16 +3934,17 @@ mod tests {
             ..KernelOptions::default()
         };
         for count in [30, 31] {
-            let mut off = Kernel::new(&opts);
-            let mut on = Kernel::new(&opts);
-            let r_off = points_in_face(&mut off, &mut b, f, count).unwrap();
-            let r_on = points_in_face(&mut on, &mut b, f, count).unwrap();
-            assert_eq!(r_off.uv.len(), count as usize);
-            assert_eq!(r_on.uv.len(), count as usize);
-            for uv in &r_on.uv {
+            let mut sampled = Kernel::new(&opts);
+            let mut drawn = Kernel::new(&opts);
+            let r = points_in_face(&mut sampled, &mut b, f, count).unwrap();
+            assert_eq!(r.uv.len(), count as usize);
+            for uv in &r.uv {
                 assert_inside(bounds, *uv);
             }
-            assert_eq!(off.rng.next_f64(), on.rng.next_f64());
+            for _ in 0..count {
+                drawn.rng.next_f64();
+            }
+            assert_eq!(sampled.rng.next_f64(), drawn.rng.next_f64());
         }
 
         // 31 points still fill only 16 of the 30 columns: the row planner is unchanged

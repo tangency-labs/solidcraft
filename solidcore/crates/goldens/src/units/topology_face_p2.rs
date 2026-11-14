@@ -2222,6 +2222,112 @@ mod tests {
         assert_eq!(rust, format!("export: {CONTRACT}"));
     }
 
+    /// Certificate for the `GetPointsInFace` rows on rectangularly trimmed faces (WR-86):
+    /// every such case of the unit (fixtures and the generated extras) is rebuilt as
+    /// [`run_rust`] builds it, sampled again on the same default kernel, and each point is
+    /// checked against the closed-form grid: column `c` of `n' = min(count, 30)` at
+    /// `u = umin + (c + 1) L_u / (n' + 1)` (to the rounding of the `c + 1` additions that
+    /// make it), row `j` of `J` at `v = vmin + (j + 1) L_v / (J + 1)` plus a dither of at
+    /// most `(RAND_MAX / 2 + 1) / (1.2 RAND_MAX) < 0.4167` of a row (none for one point),
+    /// so every point lies strictly inside the face's UV domain. The case's recorded row
+    /// must be this sample's projection, its 3D points the surface's point and normal there.
+    #[test]
+    fn rectangular_face_points_are_the_domain_grid() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let mut covered = Vec::new();
+        for case in &cases {
+            let Ok(i) = case.parse::<Inputs>() else {
+                continue;
+            };
+            let OpIn::Points { .. } = &i.op else {
+                continue;
+            };
+            // the row as recorded; a case refused before sampling has no grid to check
+            let Ok(out) = run_rust(&i) else {
+                continue;
+            };
+            let Some(row) = out.values.get("state").cloned() else {
+                continue;
+            };
+            let mut k = Kernel::default();
+            let brep = i.brep.as_ref().unwrap();
+            let path = path_of(&i).unwrap();
+            let Ok((mut b, c)) = own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps).unwrap()
+            else {
+                continue;
+            };
+            let Ok(OpIn::Points { f, count, dom }) = resolve(&i.op, &counts_of(c)) else {
+                continue;
+            };
+            let fid = FaceId::from_index(f as u32);
+            if let Some(d) = dom {
+                if fp2::set_uv_domain(&mut b, fid, &Extent2d::from_bounds(d[0], d[1], d[2], d[3]))
+                    .is_err()
+                {
+                    continue;
+                }
+            }
+            let face = b.face(fid).unwrap().clone();
+            if face.rectangular_trim != 1 || row.first().copied() != Some(0.0) || count == 0 {
+                continue;
+            }
+            let mut k = Kernel::default();
+            let r = fp2::points_in_face(&mut k, &mut b, fid, count).unwrap();
+            let name = &case.name;
+            assert_eq!(r.uv.len() as u64, count, "{name}: point count");
+            let (u_ivl, v_ivl) = (face.uv_domain.u_interval(), face.uv_domain.v_interval());
+            let (umin, vmin, lu, lv) = (u_ivl.min(), v_ivl.min(), u_ivl.length(), v_ivl.length());
+            let cols = count.min(30);
+            let rows = count.div_ceil(cols);
+            let du = lu / (cols + 1) as f64;
+            let dv = lv / (rows + 1) as f64;
+            let eps = f64::EPSILON;
+            for (p, uv) in r.uv.iter().enumerate() {
+                let (col, j) = (p as u64 / rows, p as u64 % rows);
+                let u_want = umin + (col + 1) as f64 * du;
+                // c + 2 roundings (the increment, then c + 1 additions), each within
+                // eps of a magnitude below |umin| + L_u
+                let u_slack = (col + 3) as f64 * eps * (umin.abs() + lu);
+                assert!(
+                    (uv.x - u_want).abs() <= u_slack,
+                    "{name}: point {p} u {} not {u_want}",
+                    uv.x
+                );
+                let v_centre = vmin + (j + 1) as f64 * dv;
+                let v_slack = if count > 1 { 0.4167 * dv } else { 0.0 }
+                    + (j + 4) as f64 * eps * (vmin.abs() + lv);
+                assert!(
+                    (uv.y - v_centre).abs() <= v_slack,
+                    "{name}: point {p} v {} not within {v_slack} of {v_centre}",
+                    uv.y
+                );
+                assert!(
+                    uv.x > umin && uv.x < umin + lu && uv.y > vmin && uv.y < vmin + lv,
+                    "{name}: point {p} {uv:?} outside the domain"
+                );
+            }
+            // the recorded row is this sample (its projection for more than one point)
+            let mut body = vec![0.0, r.uv.len() as f64];
+            body.extend(r.uv.iter().flat_map(|p| [p.x, p.y]));
+            body.extend(r.pv.iter().flat_map(|p| [p.x, p.y, p.z]));
+            assert_eq!(project_points(&body, count, &face, dom), row, "{name}: row");
+            // its 3D points are the surface's at those UVs
+            let surf = face.surface.as_ref().unwrap();
+            for (p, uv) in r.uv.iter().enumerate() {
+                if let Ok(pnt) = surf.evaluate_point(&k, *uv) {
+                    assert_eq!(r.pv[2 * p], pnt, "{name}: point {p}");
+                }
+            }
+            covered.push(name.clone());
+        }
+        println!("POINTS_GRID covered {}: {covered:?}", covered.len());
+        assert!(!covered.is_empty());
+    }
+
     /// The inputs of nightly fuzz case `topology.face_p2/fuzz00020`.
     const FUZZ00020: &str = r#"{"brep":{"dom":[0.0,0.0,1.0,1.0],"kind":"face","surface":{"bspline":{"form":0,"net":[[[0.0,0.0,0.48290885450886867,1.0],[0.0,1.0,0.026558355163892045,-1.7976931348623157e+308],[0.0,2.0,0.3236024010000994,-1.7976931348623157e+308]],[[1.0,0.0,0.16008492196929902,-1.7976931348623157e+308],[1.0,1.0,-0.3818595663202652,-1.7976931348623157e+308],[1.0,2.0,0.42438880397299017,-1.7976931348623157e+308]],[[2.0,0.0,-0.39686080956013436,-1.7976931348623157e+308],[2.0,1.0,0.05611566788706901,-1.7976931348623157e+308],[2.0,2.0,0.3283143419234992,-1.7976931348623157e+308]],[[3.0,0.0,0.363745333750945,-1.7976931348623157e+308],[3.0,1.0,0.36228231985820736,-1.7976931348623157e+308],[3.0,2.0,0.027268171389889018,-1.7976931348623157e+308]],[[4.0,0.0,-0.345322603754885,-1.7976931348623157e+308],[4.0,1.0,-0.32212985152181606,-1.7976931348623157e+308],[4.0,2.0,-0.4060463095725655,-1.7976931348623157e+308]]],"oob":false,"p":3,"q":1,"u":[0.0,0.0,0.0,0.0,0.5811054631449626,1.0,1.0,1.0,1.0],"v":[0.0,0.0,0.8672390488922626,1.0,1.0]}}},"cands":[{"curve":{"cpts":[[0.7895661339805444,-0.17171284016679556,1.7976931348623157e+308,-1.7976931348623157e+308],[0.8055199936793002,0.08681972422832687,1.7976931348623157e+308,-1.7976931348623157e+308],[0.7898024725911749,0.32205588150363834,1.7976931348623157e+308,-1.7976931348623157e+308]],"dim":2,"p":1,"u":[-1.5099557060603712,-1.5099557060603712,3.4113170103733608,5.537417838142818,5.537417838142818]},"kind":1,"orient":1},{"curve":{"cpts":[[0.41791217040037293,0.6071607649021995,-1e+300,1.846060688685256],[0.44522646681436484,0.38625390666912246,1.7976931348623157e+308,1.2398708818883835],[0.7494185757767893,0.6328648305934458,1.7976931348623157e+308,1.8680767293062457],[0.7900457641165108,0.4428112016048782,1.7976931348623157e+308,1.7317769440249347],[0.8780064788048215,0.3577346108988606,1.7976931348623157e+308,1.8293958767881109]],"dim":2,"p":3,"u":[0.0,0.0,0.0,0.0,0.6994601289283375,1.0,1.0,1.0,1.0]},"kind":1,"orient":1},{"curve":null,"kind":2,"orient":1}],"eu":870782,"init_gaps":true,"op":"best_uv","validate_only":false}"#;
 }
