@@ -42,11 +42,11 @@ fn validate_whole_reference(value: &Value) -> Result<()> {
         exact_keys(profile, &["outer", "holes"])?;
         let mut boundary = |value: &Value| -> Result<Vec<String>> {
             let values = value.as_array().ok_or_else(invalid)?;
-            if values.is_empty() || values.len() > 512 {
+            if values.is_empty() || values.len() > crate::profile_refs::MAX_WHOLE_LOOP_CURVES {
                 return Err(invalid());
             }
-            total += values.len();
-            if total > 20_000 {
+            total = total.saturating_add(values.len());
+            if total > crate::profile_refs::MAX_WHOLE_CURVES {
                 return Err(invalid());
             }
             // Bound each raw ID before any owned allocation. A loop is a set of curves: its
@@ -288,18 +288,24 @@ mod tests {
         let many = (0..129).map(|index| json!({"outer":[format!("c{index:03}")],"holes":[]})).collect::<Vec<_>>();
         assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":&many[..128]})).is_ok());
         assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":many})).is_err());
-        let oversized = (0..513).map(|index| format!("c{index:03}")).collect::<Vec<_>>();
+        // The outline of a line of script text has hundreds of curves: it loads (it used to stop
+        // at 512). One loop past what a sketch may hold does not.
+        use crate::profile_refs::{MAX_WHOLE_CURVES, MAX_WHOLE_LOOP_CURVES};
+        let script = (0..600).map(|index| format!("c{index:03}")).collect::<Vec<_>>();
+        assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":[{"outer":script,"holes":[]}]})).is_ok());
+        let oversized = (0..=MAX_WHOLE_LOOP_CURVES).map(|index| format!("c{index}")).collect::<Vec<_>>();
         assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":[{"outer":oversized,"holes":[]}]})).is_err());
         let too_many_holes = (0..129).map(|index| vec![format!("hole{index:03}")]).collect::<Vec<_>>();
         assert!(
             whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":[{"outer":["outer"],"holes":too_many_holes}]})).is_err()
         );
-        let aggregate = (0..40)
-            .map(|profile| {
-                let outer = (0..512).map(|curve| format!("profile{profile:03}curve{curve:03}")).collect::<Vec<_>>();
-                json!({"outer":outer,"holes":[]})
-            })
-            .collect::<Vec<_>>();
+        let full = |profile: usize| {
+            let outer = (0..MAX_WHOLE_LOOP_CURVES).map(|curve| format!("p{profile}c{curve}")).collect::<Vec<_>>();
+            json!({"outer":outer,"holes":[]})
+        };
+        let mut aggregate = (0..MAX_WHOLE_CURVES / MAX_WHOLE_LOOP_CURVES).map(full).collect::<Vec<_>>();
+        assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":aggregate})).is_ok());
+        aggregate.push(json!({"outer":["one more"],"holes":[]}));
         assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":aggregate})).is_err());
     }
 
