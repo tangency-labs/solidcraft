@@ -1,0 +1,9 @@
+#### WR-785. The fillet trace drops a skinning failure, and the round fails later as a corner error
+- **Severity:** Wrong result
+- **Area:** Blends / fillets
+- **Location:** `source/SMLib/src/SmFilletSolver.cpp:2093-2467`, `SmFilletSolver::CalcFilletGeom`'s `while (!bFoundAllPoints)` loop, which ignores the status of `DoPointIntersection`; `SmFilletIntersector::FlushCurve`, which sets `SM_FS_SURF_SKINNING_FAILURE` and fails when the fillet surface generator's `CreateSurface` fails.
+- **What happens:** `FlushCurve` fills the points' curve parameters before it skins the fillet surface. When the skinning fails (for example, `CreateSkinnedSurface`: "the boundary continuity cannot be met"), the trace finds no missed point and ends with success, so `CalcFilletGeom` returns `SM_SUCCESS` with no fillet surface for that blend. The corner's second pass then finds the rail end unprocessed, and the fillet fails as "Corner Edge Computation Failure" (generic status 1001) instead of the blend's "Fillet Surface Computation Failure".
+- **Trigger:** golden `blend.fillet_executive_p3` case `sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1` with #13891's seam-angle change.
+- **How found:** the golden above, tangency-labs/solidcraft#14807.
+- **Confirmed:** in the port, by `blend::fillet_solver::p4::tests_c4::trace_fails_with_the_skinning_failure_instead_of_recovering` and `only_a_skinning_failure_ends_the_trace`.
+- **Rust port:** fixed unconditionally (no flag): `c4_trace` returns the `DoPointIntersection` error when the solver's status is `SurfSkinningFailure` (`c4_skinning_failure` in `crates/solidcore/src/blend/fillet_solver/p4.rs`). The executive then notes the blend's surface failure (`SM_FILERR_EDGE_PROBLEM`, "Fillet Surface Computation Failure"). Every other `DoPointIntersection` failure only sets the status, as upstream does.

@@ -2518,8 +2518,9 @@ mod tests_c3 {
 
 /// :2093-2467, `while (!bFoundAllPoints)`: the ten-pass cap (`SetStatus`,
 /// `RecordFilletError`, `SM_ERR`); the reversed extension flags (every pass);
-/// `DoPointIntersection` on a snapshot of the points (written back; a failure only
-/// sets the status); missed points (`curve_parameter < 0`); the boundary branch; the
+/// `DoPointIntersection` on a snapshot of the points (written back; a failure sets the
+/// status, and a skinning failure ends the trace, not upstream: [`c4_skinning_failure`]);
+/// missed points (`curve_parameter < 0`); the boundary branch; the
 /// cusp branch (centre-line end, `GlobalPointSolve`, twenty skips with
 /// `binormal_guess_point(.., half = false)`, `sm_FindFilletTsectPnt`,
 /// `IsPointOnCurve`, insert in front).
@@ -2587,6 +2588,9 @@ fn c4_trace(
         if stat.is_err() && ops.solver().status == FilStatus::Unprocessed {
             ops.solver_mut().set_status(FilStatus::SurfTracingFailure);
         }
+        // Not upstream (#14807): a fillet surface that could not be skinned fails the
+        // trace here, rather than leaving the blend with no surface.
+        c4_skinning_failure(stat, ops.solver().status)?;
 
         // Check all points, after the first one, to make sure
         // that they were properly processed by DoPointIntersection().
@@ -2628,6 +2632,19 @@ fn c4_trace(
     }
 
     Ok(())
+}
+
+/// Not upstream (#14807): the error of a `DoPointIntersection` whose `FlushCurve` could
+/// not skin the fillet surface (`status` is `SurfSkinningFailure`). Upstream ignores the
+/// error. `FlushCurve` fills the points' curve parameters before it skins, so no point
+/// counts as missed and the trace used to end with success but no fillet surface. The
+/// corner then failed later as a corner error, not as the blend's surface failure. Any
+/// other outcome is `Ok`: the trace goes on as upstream does.
+fn c4_skinning_failure(stat: Result<()>, status: super::p1::FilStatus) -> Result<()> {
+    match stat {
+        Err(e) if status == super::p1::FilStatus::SurfSkinningFailure => Err(e),
+        _ => Ok(()),
+    }
 }
 
 /// The `RecordFilletError` message at :2103 and :2332.
@@ -2873,6 +2890,75 @@ mod tests_c4 {
             assert_eq!(c4_next_t(t, skip, ii).to_bits(), expected.to_bits());
         }
         assert_eq!(c4_next_t(1.0, 0.5, 0), 1.5);
+    }
+
+    #[test]
+    fn only_a_skinning_failure_ends_the_trace() {
+        use super::super::p1::FilStatus;
+        let skinning = SolidError::blend_failed(OP, "the fillet surface could not be skinned");
+        assert_eq!(
+            c4_skinning_failure(Err(skinning.clone()), FilStatus::SurfSkinningFailure),
+            Err(skinning.clone())
+        );
+        // any other failure only sets the status, as upstream: the trace goes on
+        for status in [
+            FilStatus::Unprocessed,
+            FilStatus::SurfTracingFailure,
+            FilStatus::Processed,
+        ] {
+            assert_eq!(c4_skinning_failure(Err(skinning.clone()), status), Ok(()));
+        }
+        assert_eq!(
+            c4_skinning_failure(Ok(()), FilStatus::SurfSkinningFailure),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn trace_fails_with_the_skinning_failure_instead_of_recovering() {
+        use super::super::p1::FilStatus;
+        use crate::blend::fillet_geom::p1::FilletGeom;
+
+        let k = Kernel::default();
+        let mut solver = FilletSolver::new(1.0e-5, 0.01, 0.01);
+        solver.extend_before = true;
+        solver.extend_after = false;
+        // the status FlushCurve leaves when the fillet surface cannot be skinned
+        solver.set_status(FilStatus::SurfSkinningFailure);
+        let mut target = Brep::new();
+        let mut fillets = FilletBrep::new();
+        let g = fillets.add_geom(FilletGeom::new(&k, None, FilletGeomType::Default).unwrap());
+        solver.fillet_geoms.push(g);
+        let mut cx = Cx {
+            k: &k,
+            target: &mut target,
+            fillets: &mut fillets,
+            solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
+        };
+        let mut st = state(&[0.0, -1.0, 1.0]);
+        st.trace.reverse_tracing = true;
+        st.trace.extend_before = true;
+        st.trace.extend_after = false;
+        let s = surfaces();
+        let d = Extent2d::from_bounds(-1.0, -1.0, 2.0, 2.0);
+        let mut fi: TraceIntersector<'_> =
+            FilletIntersector::new(&k, &s[0], &d, &s[1], &d, None).unwrap();
+
+        // DoPointIntersection fails as in
+        // `trace_swaps_reversed_flags_then_defers_in_cusp_recovery`, but with the
+        // skinning status its error ends the trace: no missed-point pass, no cusp
+        // recovery (whose error would be the missing fillet surface).
+        let e = c4_trace(&mut solver, &mut cx, &mut st, &mut fi).unwrap_err();
+        assert_ne!(e, SolidError::blend_missing(OP, "the fillet surface"));
+        assert!(!e.is_unported_or_cancelled(), "{e:?}");
+        assert_eq!(solver.status, FilStatus::SurfSkinningFailure);
+        // the reversed flags only: bExtendBefore = m_bExtendAfter, not TRUE for a
+        // missed point
+        assert!(!st.trace.extend_before);
+        assert!(st.trace.extend_after);
+        // no RemoveAt(0, ii)
+        assert_eq!(st.tsect_pnts.len(), 3);
     }
 
     #[test]
