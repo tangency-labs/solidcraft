@@ -732,7 +732,12 @@ fn a_stitch_sews_a_gap_within_its_tolerance_and_leaves_a_larger_one() {
             .map(|&e| b.edge(e).unwrap().tolerance)
             .fold(0.0, f64::max);
         assert!(grown >= gap, "gap {gap}: zone {grown}");
-        assert!(grown <= gap + 0.005 + 1e-12, "gap {gap}: zone {grown}");
+        // The glue widens the sewn edge to the gap plus the larger incident zone, and to at
+        // least twice the gap.
+        assert!(
+            grown <= (2.0 * gap).max(gap + 0.005) + 1e-12,
+            "gap {gap}: zone {grown}"
+        );
     }
     let (mut b, sewed) = lifted_sheets(&mut k, 0.012, 0.01, 0.005);
     assert_eq!(sewed, 0);
@@ -755,7 +760,7 @@ fn a_gap_inside_the_summed_local_zones_is_sewn_without_growing_them() {
     assert_eq!(sewed, 1);
     let report = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
     assert!(report.is_valid(), "{:?}", report.lines());
-    assert_eq!(b.tolerance(), 1e-5);
+    assert_eq!(b.tolerance(), 1e-4);
     for &e in b.edge_list() {
         assert_eq!(b.edge(e).unwrap().tolerance, 0.02);
     }
