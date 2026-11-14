@@ -261,6 +261,10 @@ pub fn answer_disk(app: &mut SolveApp, answer: DiskAnswer) {
     if !std::mem::take(&mut app.disk_prompt) {
         return;
     }
+    app.webdav.overwrite = crate::webdav::managed(app) && answer == DiskAnswer::Overwrite;
+    if let Some(notify) = &app.services.save_conflict_answer {
+        notify(answer);
+    }
     match answer {
         DiskAnswer::SaveCopy => crate::toolbar::save_copy(app),
         DiskAnswer::Overwrite => {

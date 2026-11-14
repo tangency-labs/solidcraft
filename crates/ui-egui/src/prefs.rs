@@ -1595,6 +1595,9 @@ preference_settings! {
     color_vision: solidcraft_theme::ColorVision = solidcraft_theme::ColorVision::Off, PAGE_APPEARANCE;
     /// Check for updates at start and once a day (docs/updates.md).
     check_updates: bool = true, 0;
+    webdav_enabled: bool = false, PAGE_GENERAL;
+    webdav_url: String = String::new(), PAGE_GENERAL;
+    webdav_user: String = String::new(), PAGE_GENERAL;
     /// When the last update check ran, and the versions skipped or put off (`update::Memo`).
     update: crate::update::Memo = crate::update::Memo::default();
     /// The variant last started in each split tool family (Rectangle, Circle, Arc, Slot, Polygon, Line,
@@ -2029,6 +2032,7 @@ pub struct Snapshot {
     panel_visibility: crate::panel_runtime::PanelVisibilitySnapshot,
     /// With no record yet, keep the small deferred legacy import state too.
     panel_layout_deferred: Option<crate::panel_runtime::PanelLayoutPreferences>,
+    webdav_password: String,
     dark: bool,
     layout: crate::ui_kit::LayoutMode,
     grid: bool,
@@ -2059,6 +2063,7 @@ impl Snapshot {
             panel_layout_state: crate::panel_runtime::panel_layout_snapshot(app),
             panel_visibility: crate::panel_runtime::PanelVisibilitySnapshot::capture(app),
             panel_layout_deferred,
+            webdav_password: app.webdav.password.clone(),
             dark: app.ui.dark,
             layout: app.ui.layout,
             grid: app.ui.show_grid,
@@ -2094,6 +2099,7 @@ impl Snapshot {
         sync_surface_analysis(app);
         crate::render_workspace::apply_memory_policy(app);
         app.preferences.stand_up_answers = stand_up_answers;
+        app.webdav.password = self.webdav_password;
         app.preferences.update = update;
         if units_changed {
             default_units_changed(app);
@@ -2148,6 +2154,7 @@ impl Snapshot {
             toolbar,
             favourites,
             profile,
+            webdav_password,
         } = self;
         // Update bookkeeping isn't a setting and Cancel keeps it (`restore_other_preferences`), so it isn't a change.
         let same_prefs = {
@@ -2176,6 +2183,7 @@ impl Snapshot {
             && *toolbar == app.toolbar_custom.prefs()
             && *favourites == app.sbox.pinned
             && *profile == app.settings_profiles.active
+            && *webdav_password == app.webdav.password
     }
 }
 
@@ -11742,6 +11750,32 @@ mod tests {
         assert!(set(&mut app, &json!({"up_axis": "x"})).is_err());
         assert!(set(&mut app, &json!({"theme": "sepia"})).is_err());
         assert!(set(&mut app, &json!({"language": "xx"})).is_err());
+    }
+
+    #[test]
+    fn webdav_password_changes_enable_apply_and_cancel_restores_the_last_applied_password() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.webdav.password = "original".into();
+        let opened = control(&mut app, &json!({"open": "General"})).unwrap();
+        assert_eq!(opened["apply_enabled"], false);
+
+        app.webdav.password = "edited".into();
+        assert_eq!(control(&mut app, &json!({})).unwrap()["apply_enabled"], true);
+        app.webdav.password = "original".into();
+        assert_eq!(control(&mut app, &json!({})).unwrap()["apply_enabled"], false);
+        app.webdav.password = "edited".into();
+        control(&mut app, &json!({"button": "cancel"})).unwrap();
+        assert_eq!(app.webdav.password, "original");
+
+        control(&mut app, &json!({"open": "General"})).unwrap();
+        app.webdav.password = "applied".into();
+        let applied = control(&mut app, &json!({"button": "apply"})).unwrap();
+        assert_eq!(applied["apply_enabled"], false);
+        assert_eq!(app.webdav.password, "applied");
+        app.webdav.password = "discarded".into();
+        control(&mut app, &json!({"button": "cancel"})).unwrap();
+        assert_eq!(app.webdav.password, "applied");
+        assert!(!app.prefs().contains("applied"), "passwords stay out of saved preferences");
     }
 
     /// Apply is disabled while nothing changed since the dialog opened or since the last Apply,

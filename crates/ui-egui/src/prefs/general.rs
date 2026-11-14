@@ -168,6 +168,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let discord = setting::show_discord_button(app, ui).backing_on_hover_text(app.tr("prefs.show_discord_button_help"));
             crate::scenario::publish_target("prefs:show_discord_button", discord.rect);
         });
+
+        crate::webdav::settings(app, ui);
         ui_kit::settings_section(ui, "updates", app.tr("prefs.updates"), |ui| {
             crate::update::prefs_rows(app, ui);
         });

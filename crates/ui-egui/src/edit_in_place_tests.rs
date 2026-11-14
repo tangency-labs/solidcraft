@@ -456,6 +456,39 @@ fn saving_the_assembly_from_the_window_waits_while_it_reads_its_links_for_the_pa
 }
 
 #[test]
+fn finish_editing_waits_for_the_host_to_acknowledge_the_parts_save() {
+    use std::{cell::RefCell, rc::Rc, task::Poll};
+
+    for success in [false, true] {
+        let mut f = assembly(if success { "host-save-success" } else { "host-save-failure" });
+        double_click_component(&mut f.app, json!({"component": f.plate}));
+        settle(&mut f.app);
+        f.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new"})).unwrap();
+        let answer = Rc::new(RefCell::new(None));
+        let reply = answer.clone();
+        f.app.services.persist_save = Some(Box::new(move |_| {
+            let reply = reply.clone();
+            Some(Box::pin(std::future::poll_fn(move |_| reply.borrow_mut().take().map_or(Poll::Pending, Poll::Ready))))
+        }));
+        finish(&mut f.app);
+        crate::save_job::tick(&mut f.app, true);
+        assert!(f.app.host_save.is_some());
+        tick(&mut f.app);
+        assert!(f.app.edit_in_place.finish_after_save.is_some(), "Finish Edit still waits for the upload");
+        assert!(f.app.edit_in_place.active.is_some() && showing(&f.app, &f.plate_file));
+        *answer.borrow_mut() = Some(if success { Ok(()) } else { Err("server save failed".into()) });
+        crate::save_job::tick(&mut f.app, false);
+        settle(&mut f.app);
+        assert!(f.app.edit_in_place.finish_after_save.is_none());
+        assert_eq!(f.app.edit_in_place.active.is_none(), success);
+        assert_eq!(f.app.docs.count(), if success { 1 } else { 2 });
+        if !success {
+            assert!(showing(&f.app, &f.plate_file) && f.app.session.is_dirty());
+        }
+    }
+}
+
+#[test]
 fn finish_editing_waits_for_what_is_open_in_the_part() {
     let mut f = assembly("waits");
     double_click_component(&mut f.app, json!({"component": f.plate}));

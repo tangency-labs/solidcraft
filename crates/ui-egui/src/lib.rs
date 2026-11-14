@@ -359,6 +359,7 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+pub mod webdav;
 pub use solidcraft_ui_kit::window_chrome;
 mod wireframe_silhouettes;
 pub mod workspace;
@@ -484,6 +485,11 @@ impl Default for UiState {
 /// Host services injected by the app so this crate stays portable.
 #[derive(Default)]
 pub struct Services {
+    pub webdav_http: Option<webdav::Http>,
+    /// Wait for a host-backed save before allowing the design to close.
+    pub persist_save: Option<Box<dyn Fn(&str) -> Option<save_job::PersistFuture>>>,
+    /// Notify the host of the existing changed-elsewhere question’s answer.
+    pub save_conflict_answer: Option<Box<dyn Fn(open_elsewhere::DiskAnswer)>>,
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
@@ -597,6 +603,7 @@ pub struct SolveApp {
     pub(crate) blur_session: blur::Session,
     pub(crate) viewport_status: ui_kit::StatusPresentation,
     pub(crate) viewport_status_fixture: viewport_status_fixture::Fixture,
+    pub webdav: webdav::State,
     /// Compact browser embed: retain model panels and joint controls without application chrome.
     pub embedded: bool,
     /// Editing embed (#8517): the host page owns the files and the window's chrome. No
@@ -771,6 +778,7 @@ pub struct SolveApp {
     pub disk_prompt: bool,
     /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
     pub network_prompt: Option<network_prompt::NetworkPrompt>,
+    pub(crate) host_save: Option<save_job::HostSave>,
     /// Designs left by crashed apps, offered for recovery.
     pub recoverable: Vec<solidcraft_engine::recovery::Entry>,
     /// The recovery folder holding this launch's reopen-guard marker (#5064); `None` when
@@ -957,6 +965,7 @@ impl SolveApp {
             pre_sketch_component: None,
             pre_edit_component: None,
             services,
+            webdav: Default::default(),
             file_picker: None,
             slicer_wait: None,
             easyprint: Default::default(),
@@ -1029,6 +1038,7 @@ impl SolveApp {
             lock_prompts: Vec::new(),
             disk_prompt: false,
             network_prompt: None,
+            host_save: None,
             recoverable: Vec::new(),
             reopen_guard_dir: None,
             recovery_discard_all: false,
@@ -1425,7 +1435,7 @@ impl SolveApp {
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
         }
-        if self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some() {
+        if self.file_load_holds() || self.file_picker.is_some() || webdav::busy(self) || self.saving.is_some() || self.host_save.is_some() {
             return Err("a file operation is in progress".into());
         }
         // The editor's own marker moves come through here, so only Undo, Redo and Play close it.
@@ -1448,6 +1458,9 @@ impl SolveApp {
             let action = serde_json::from_value(reply["action"].clone()).map_err(|e| e.to_string())?;
             timeline::request_playback(self, action)?;
             return Ok(reply);
+        }
+        if matches!(id, "file.save" | "file.save_as") && webdav::managed(self) {
+            self.webdav.overwrite = params.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
         }
         let t0 = now_ms();
         let revision = self.session.revision;
@@ -1519,6 +1532,13 @@ impl SolveApp {
             }
             if matches!(id, "render.lights.set" | "render.lights.add" | "render.lights.duplicate" | "render.lights.remove") {
                 render_workspace::light::edited(self, id, params, v);
+            }
+        }
+        if let Ok(value) = &done {
+            match id {
+                "file.save" => save_job::begin_programmatic(self, "file.save", value.clone()),
+                "file.save_as" => save_job::begin_programmatic(self, "file.save_as", value.clone()),
+                _ => {}
             }
         }
         done
@@ -3545,7 +3565,7 @@ impl SolveApp {
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
             edit_in_place::back(self);
         }
-        if self.saving.is_some() || self.verifying.is_some() || self.edit_in_place.refreshing() {
+        if self.saving.is_some() || self.host_save.is_some() || self.verifying.is_some() || self.edit_in_place.refreshing() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
         open_meshing::tick(self, ctx);
@@ -3807,6 +3827,7 @@ impl SolveApp {
         kicad_import_dialog::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
+        webdav::show(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
         update::show(self, ui.ctx());
@@ -3917,8 +3938,12 @@ impl SolveApp {
             // window, inspection and screenshots still answer, #1989). `engine.script` runs
             // directly, past `SolveApp::run`'s guard, so without the save here it changed the
             // design the save was taken up for (#6003).
-            let waits =
-                self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() || self.control_job.is_some() || self.agent.busy();
+            let waits = self.file_load.busy()
+                || self.file_picker.is_some()
+                || self.saving.is_some()
+                || self.host_save.is_some()
+                || self.control_job.is_some()
+                || self.agent.busy();
             // A screenshot waiting for an opened design to be meshed holds what came after it.
             let shot_waits = open_meshing::active(self) && self.control_held.front().is_some_and(|r| r.method == "ui.screenshot");
             // Held requests go first, in order, once nothing makes them wait.
@@ -3991,9 +4016,17 @@ impl SolveApp {
             return;
         };
         let reply = req.reply.clone();
+        let host_was_pending = self.host_save.is_some();
         match control::handle(self, ctx, &req) {
             control::Outcome::Done(v) => {
-                let _ = reply.send(v);
+                if !host_was_pending
+                    && webdav::managed(self)
+                    && let Some(save) = self.host_save.as_mut()
+                {
+                    save.reply = Some((reply, v));
+                } else {
+                    let _ = reply.send(v);
+                }
             }
             control::Outcome::Screenshot { path } => self.shots.request(ctx, path, reply, req.chat_turn, now_ms()),
         }
