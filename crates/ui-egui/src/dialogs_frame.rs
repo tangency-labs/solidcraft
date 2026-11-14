@@ -1,7 +1,7 @@
 //! Frame Member (`frame.member`): structural members along the lines of a frame sketch and between
 //! pairs of points. Lines and points are picked in the view into the path, where consecutive points
 //! pair up in pick order; the section is a built-in profile with its dimensions, or the profiles
-//! picked in another sketch. Anchor, angle and mirror place the section on each member.
+//! picked in another sketch. Anchor, angle, mirror and the up axis place the section on each member.
 
 use serde_json::{Map, Value, json};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
@@ -79,6 +79,9 @@ fn corner_index(corner: &CornerType) -> usize {
     CORNER_TYPES.iter().position(|c| name.as_ref().and_then(Value::as_str) == Some(c.0)).unwrap_or(NONE)
 }
 
+/// The up axes as `frame.member` names them, and their labels: world +Z (the default) first.
+const UP_AXES: &[(&str, &str)] = &[("Z", "Z"), ("Y", "Y"), ("X", "X"), ("-Z", "-Z"), ("-Y", "-Y"), ("-X", "-X")];
+
 /// The Frame Member dialog's values (the picks are its selection inputs).
 #[derive(Clone, Debug)]
 pub struct Member {
@@ -95,6 +98,8 @@ pub struct Member {
     pub anchor: usize,
     pub angle: String,
     pub mirror: bool,
+    /// The world axis that is up for the profile (an index into `UP_AXES`; 0, Z, is the default).
+    pub up: usize,
     pub name: String,
     /// The path's items as last synced ([`Member::sync`]); `refs` and `pair_ids` are parallel to it.
     pub path: Vec<Sel>,
@@ -426,6 +431,7 @@ impl Member {
             anchor: 0,
             angle: String::new(),
             mirror: false,
+            up: 0,
             name: String::new(),
             path: Vec::new(),
             refs: Vec::new(),
@@ -1130,6 +1136,8 @@ fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &[SelI
     choice_row(ui, "Anchor", "frame_anchor", &mut m.anchor, &anchors);
     enter |= hint_row(ui, "Angle", &mut m.angle, "0 deg");
     form_row(ui, "Mirror", |ui| check(ui, &mut m.mirror));
+    let ups: Vec<&str> = UP_AXES.iter().map(|a| a.1).collect();
+    choice_row(ui, "Up Axis", "frame_up", &mut m.up, &ups);
     enter |= text_row(ui, "Name", &mut m.name, tr("from the profile")).0;
     form_row(ui, "Ghost Frame Members", |ui| check(ui, &mut m.ghost));
     enter
@@ -1306,6 +1314,11 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
     if !corners.is_empty() {
         p["corners"] = json!(corners);
     }
+    if m.up != 0
+        && let Some((up, _)) = UP_AXES.get(m.up)
+    {
+        p["up"] = json!(up);
+    }
     if let Value::Object(o) = &mut p {
         for (key, v) in extra {
             o.entry(key.clone()).or_insert_with(|| v.clone());
@@ -1425,6 +1438,8 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
     m.anchor = ANCHORS.iter().position(|(a, _)| anchor.as_ref().and_then(Value::as_str) == Some(*a)).unwrap_or(0);
     m.angle = angle.as_deref().map(|a| shown_expr(a, ValueKind::Angle)).unwrap_or_default();
     m.mirror = *mirror;
+    let up = serde_json::to_value(up).ok();
+    m.up = UP_AXES.iter().position(|(a, _)| up.as_ref().and_then(Value::as_str) == Some(*a)).unwrap_or(0);
     m.name = body_name.clone().unwrap_or_default();
     // The dialog has no field for a located point: an edit keeps it, so the member stays where it
     // is attached.
@@ -1472,10 +1487,6 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
     }
     if !missing.is_empty() {
         extra.insert("corners".into(), json!(missing));
-    }
-    // The dialog has no field for the up axis either: an edit keeps the member's own.
-    if !up.is_z() {
-        extra.insert("up".into(), json!(up));
     }
     Some((Kind::Frame(m), inputs, extra))
 }
