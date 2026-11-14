@@ -27,6 +27,7 @@ use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::from_parameters::{from_parameters, record_parameter, EdgeCurve};
 use solidcore::geom::certified::Verdict;
 use solidcore::geom::global_solver::SolverOperation;
+use solidcore::intersect::api_intersectors;
 use solidcore::intersect::views::{curves_from_views, views_do_not_meet};
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -494,7 +495,8 @@ pub enum CurveExtension {
     /// The same knots and control points, the control polygon stretched along itself from the
     /// other end so each point keeps its share of it (the kernel's
     /// [`solidcore::nurbs::crv_basic::Curve::extend_keeping_proportion`]): the curve grows by the
-    /// length to the kernel's stop, its shape slides along the polygon.
+    /// length, its growth certified within `1e-7` of the growth asked, relatively, its shape slides along the polygon;
+    /// refused ([`Error::NotExact`]) where that is not certified.
     Proportion,
 }
 
@@ -510,7 +512,8 @@ pub enum CurveExtension {
 /// clamped spline or rational spline, a closed one (a periodic curve, or one whose ends meet
 /// to the kernel's model tolerance), or an extension the record cannot hold; the kernel's
 /// status otherwise (a natural extension of a rational curve whose weights leave the
-/// kernel's range).
+/// kernel's range); [`Error::NotExact`] for a proportional extension whose length is not
+/// certified.
 pub fn extend_curve(
     curve: &Curve,
     at: CurveEndAt,
@@ -539,6 +542,7 @@ pub fn extend_curve(
                     extended = match extended.extend_keeping_proportion(length, end) {
                         Ok((curve, _)) => curve,
                         Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+                        Err(SolidError::ExtendRefused { .. }) => return Ok(Err(Error::NotExact)),
                         Err(e) => return Err(e),
                     };
                 }
@@ -831,7 +835,7 @@ pub fn crossings(
             Ok(m) => m,
             Err(e) => return Ok(Err(e)),
         };
-        let found = match solidcore::intersect::api_intersectors::curve_crossings(
+        let found = match api_intersectors::curve_crossings(
             k,
             &ka.curve,
             &ka.interval,
@@ -859,6 +863,48 @@ pub fn crossings(
     })?
 }
 
+/// Isolated intersections of `curve` over the record's parameter `interval` with `plane`,
+/// in curve order and in the plane's local coordinates. The kernel solves the exact curve
+/// against the plane at its model tolerance; contacts at both interval endpoints count.
+/// A curve lying in the plane has no isolated intersections and gives an empty list.
+///
+/// # Errors
+/// [`Error::Argument`] for invalid curve data, a nonfinite or reversed interval, or a plane
+/// that is not finite and orthonormal; the kernel's status otherwise.
+pub fn plane_crossings(
+    curve: &Curve,
+    interval: [f64; 2],
+    plane: &solidcore_record::Plane,
+) -> Result<Vec<solidcore_record::Vec2>> {
+    if !interval.iter().all(|t| t.is_finite())
+        || ![plane.origin, plane.x, plane.y]
+            .iter()
+            .all(|p| coord_ok(&<[f64; 3]>::from(*p)))
+        || check_curve(curve, &mut Budget::input()).is_err()
+    {
+        return Err(Error::Argument);
+    }
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    let frame = solidcore_convert::plane(plane);
+    run("curve::plane_crossings", |k| {
+        let made = match from_parameters(k, &record, interval) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let found =
+            match api_intersectors::curve_plane_crossings(k, &made.curve, &made.interval, &frame) {
+                Ok(found) => found,
+                Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+                Err(e) => return Err(e),
+            };
+        Ok(Ok(found
+            .into_iter()
+            .map(|p| solidcore_record::Vec2::new(p.x, p.y))
+            .collect()))
+    })?
+}
+
 pub use solidcore::curve::stretch::Stretch;
 
 /// `curve` with the control points `picked` stretched by a drag `delta` of point `handle` from
@@ -867,7 +913,9 @@ pub use solidcore::curve::stretch::Stretch;
 /// it over its length from the pivot to the handle (the pivot stays, the handle moves by `delta`
 /// whole); with [`Stretch::None`] each by `delta`. With `plane` (as
 /// [`crate::curve_plane::plane_of`] gives it), `delta` is first taken into the plane, so a
-/// planar curve stays planar. A closed periodic spline's repeated points move with their twins.
+/// planar curve stays planar. A closed periodic spline's repeated points are one editable point:
+/// picks, pivot and handle use its first occurrence along the stored control polygon, and all
+/// copies move together. Picking more than one copy does not change the stretch.
 ///
 /// # Errors
 /// [`Error::Argument`] for another kind of curve than a spline or polyline, an index past its
@@ -886,11 +934,32 @@ pub fn stretch_cvs(
     let (Curve::Spline { points, .. } | Curve::Polyline { points }) = curve else {
         return Err(Error::Argument);
     };
+    let period = match curve {
+        Curve::Spline { knots, points } => periodic_twin(knots, points, 0),
+        _ => None,
+    };
+    let canonical = |index: usize| -> Result<usize> {
+        if index >= points.len() {
+            return Err(Error::Argument);
+        }
+        match period {
+            Some(period) => index.checked_rem(period).ok_or(Error::Argument),
+            None => Ok(index),
+        }
+    };
+    let pivot = canonical(pivot)?;
+    let handle = canonical(handle)?;
+    let mut picked: Vec<usize> = picked
+        .iter()
+        .map(|&i| canonical(i))
+        .collect::<Result<_>>()?;
+    picked.sort_unstable();
+    picked.dedup();
     let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
     let given: Vec<Point3> = points.iter().map(|p| v(*p)).collect();
     let stretched = solidcore::curve::stretch::stretch_points(
         &given,
-        picked,
+        &picked,
         pivot,
         handle,
         v(delta),
@@ -899,7 +968,14 @@ pub fn stretch_cvs(
     )
     .map_err(|_| Error::Argument)?;
     let mut out = curve.clone();
-    for &i in picked {
+    let (Curve::Spline { points: moved, .. } | Curve::Polyline { points: moved }) = &mut out else {
+        return Err(Error::Argument);
+    };
+    for (i, point) in moved.iter_mut().enumerate() {
+        let i = canonical(i)?;
+        if picked.binary_search(&i).is_err() {
+            continue;
+        }
         let to = stretched
             .get(i)
             .map(|p| [p.x, p.y, p.z])
@@ -907,7 +983,7 @@ pub fn stretch_cvs(
         if !coord_ok(&to) {
             return Err(Error::Argument);
         }
-        out = move_cv(&out, i, to)?;
+        *point = to;
     }
     Ok(out)
 }
@@ -917,6 +993,63 @@ pub fn stretch_cvs(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plane_crossings_keep_line_endpoints_and_refuse_hostile_inputs() {
+        use solidcore_record::{Plane, Vec2, Vec3};
+
+        for (start, end, expected) in [
+            ([-1.0, -2.0, 0.0], [1.0, 0.0, 0.0], 1.0),
+            ([-1.0, 0.0, 0.0], [1.0, -2.0, 0.0], -1.0),
+            ([-1.0, -2.0, 0.0], [1.0, 2.0, 0.0], 0.0),
+        ] {
+            assert_eq!(
+                plane_crossings(&Curve::Line { start, end }, [0.0, 1.0], &Plane::XZ),
+                Ok(vec![Vec2::new(expected, 0.0)])
+            );
+        }
+        let line = Curve::Line {
+            start: [-1.0, -2.0, 0.0],
+            end: [1.0, 2.0, 0.0],
+        };
+        for interval in [[0.0, f64::NAN], [0.0, f64::INFINITY], [1.0, 0.0]] {
+            assert_eq!(
+                plane_crossings(&line, interval, &Plane::XZ),
+                Err(Error::Argument)
+            );
+        }
+        for plane in [
+            Plane {
+                origin: Vec3::new(f64::NAN, 0.0, 0.0),
+                ..Plane::XZ
+            },
+            Plane {
+                x: Vec3::ZERO,
+                ..Plane::XZ
+            },
+            Plane {
+                y: Vec3::X,
+                ..Plane::XZ
+            },
+            Plane {
+                x: Vec3::new(f64::INFINITY, 0.0, 0.0),
+                ..Plane::XZ
+            },
+        ] {
+            assert_eq!(
+                plane_crossings(&line, [0.0, 1.0], &plane),
+                Err(Error::Argument)
+            );
+        }
+        let invalid = Curve::Line {
+            start: [f64::NAN, 0.0, 0.0],
+            end: [1.0, 2.0, 0.0],
+        };
+        assert_eq!(
+            plane_crossings(&invalid, [0.0, 1.0], &Plane::XZ),
+            Err(Error::Argument)
+        );
+    }
 
     const SQUARE: [[f64; 3]; 4] = [
         [0.0, 0.0, 0.0],

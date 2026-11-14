@@ -3584,6 +3584,152 @@ pub fn remove_slit_loops_where_solids_touch(
     Ok(removed)
 }
 
+/// Not upstream (#16640): collapses the faces of no area whose loop is two edges between the
+/// same two vertices, where two surfaces graze each other within tolerance (an arc that
+/// crosses the plane of a coplanar face by a fraction of the tolerance). Such a face is the
+/// sliver the classification kept between two edges that coincide to within their
+/// tolerance, yet were never made one edge: each of the two edges bounds one other face.
+/// The face goes (as [`delete_face`] removes it, without the region nesting a solid that
+/// stays closed does not need), the first edge takes over the other edge's two uses, with
+/// the larger of the two tolerances, and the other edge is destroyed, so the two faces
+/// that met the sliver meet at one edge. A face whose edges do not have that shape, or
+/// whose uses do not pair up as the radial list of a solid edge's does, is left as it is.
+/// Returns whether a face was collapsed.
+///
+/// # Errors
+///
+/// `SM_ERR_NULL_POINTER` for a loop, edge use or edge the topology lacks (`NER`); those of
+/// the face deletion, the topology reads and the edge destruction.
+pub fn collapse_zero_area_two_edge_faces(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+) -> Result<bool> {
+    let mut collapsed = false;
+    for f in p1::faces(b, None)? {
+        let loops = face2::loops(b, f, false, None)?;
+        let [l] = loops[..] else {
+            continue;
+        };
+        let lu = b
+            .loop_(l)?
+            .loopuse
+            .ok_or_else(|| ner("the loop's loop use"))?;
+        let uses = lu1::edgeuses(b, lu, None, None)?;
+        let [use1, use2] = uses[..] else {
+            continue;
+        };
+        let (Some(keep), Some(gone)) = (eu1::edge(b, use1)?, eu1::edge(b, use2)?) else {
+            continue;
+        };
+        if keep == gone {
+            continue;
+        }
+        // the edges run between the same two vertices, the same way
+        let ends = edge::start_end_vertices(b, keep)?;
+        if ends != edge::start_end_vertices(b, gone)? || ends.0 == ends.1 || ends.0.is_none() {
+            continue;
+        }
+        // the loop has no area
+        let area = crate::topology::face::p3::compute_loop_orientation(k, b, f, l, None, false);
+        if !matches!(area, Ok(OrientType::Unknown)) {
+            continue;
+        }
+        // each edge is used by this face and by one other, as a solid edge is
+        let (Some(rest_keep), Some(rest_drop)) = (
+            other_face_edge_uses(b, keep, f)?,
+            other_face_edge_uses(b, gone, f)?,
+        ) else {
+            continue;
+        };
+        // the uses of the other edge, in the order the list keeps its pairs: the use that
+        // runs with the list's primary use first, on the opposite side of the face
+        let primary = eu1::orientation(b, rest_keep[0])?;
+        let drop_pair = if eu1::orientation(b, rest_drop[0])? == primary {
+            rest_drop
+        } else {
+            [rest_drop[1], rest_drop[0]]
+        };
+        if eu1::orientation(b, drop_pair[0])? != primary
+            || eu1::orientation(b, rest_keep[1])? == primary
+            || eu1::orientation(b, drop_pair[1])? == primary
+            || is_upward_use(b, rest_keep[0])? == is_upward_use(b, drop_pair[0])?
+        {
+            continue;
+        }
+        let Some(other_face) = eu1::face(b, drop_pair[0])? else {
+            continue;
+        };
+
+        delete_face_in(
+            k,
+            b,
+            env,
+            &mut DeletionMarks::Retained,
+            f,
+            DeleteFaceOptions {
+                delete_edges_vertices: false,
+                do_region_nesting: false,
+                region_to_keep: None,
+            },
+            None,
+        )?;
+
+        // the other face's uses move to the edge that stays
+        for eu in drop_pair {
+            b.edgeuse_mut(eu)?.edge = Some(keep);
+        }
+        let tolerance = b.edge(keep)?.tolerance.max(b.edge(gone)?.tolerance);
+        {
+            let kept = b.edge_mut(keep)?;
+            kept.edgeuses = rest_keep.into_iter().chain(drop_pair).collect();
+            kept.tolerance = tolerance;
+        }
+        b.edge_mut(gone)?.edgeuses.clear();
+        for l in face2::loops(b, other_face, false, None)? {
+            for used in &mut b.loop_mut(l)?.edges {
+                if used.edge == gone {
+                    used.edge = keep;
+                }
+            }
+        }
+        edge::destroy(k, b, gone, env)?;
+        collapsed = true;
+    }
+    Ok(collapsed)
+}
+
+/// The two uses of `e` that are not on face `f`, in the order of the edge's use list, when
+/// the list is `f`'s pair and one other face's pair.
+fn other_face_edge_uses(b: &Brep, e: EdgeId, f: FaceId) -> Result<Option<[EdgeuseId; 2]>> {
+    let list = &b.edge(e)?.edgeuses;
+    if list.len() != 4 {
+        return Ok(None);
+    }
+    let mut rest = Vec::with_capacity(2);
+    for &eu in list {
+        if eu1::face(b, eu)? != Some(f) {
+            rest.push(eu);
+        }
+    }
+    let [first, second] = rest[..] else {
+        return Ok(None);
+    };
+    let other = eu1::face(b, first)?;
+    if other.is_none() || other != eu1::face(b, second)? {
+        return Ok(None);
+    }
+    Ok(Some([first, second]))
+}
+
+/// Whether the edge use is on its face's upward face use.
+fn is_upward_use(b: &Brep, eu: EdgeuseId) -> Result<bool> {
+    let Some(f) = eu1::face(b, eu)? else {
+        return Ok(false);
+    };
+    Ok(face2::upward_faceuse(b, f)? == eu1::faceuse(b, eu)?)
+}
+
 /// Not upstream (tangency-labs/solidcore#746, the fork's
 /// `SmBrep::SplitDisconnectedShells`): splits each shell into its connected parts, as
 /// [`delete_face`] splits a shell a removed face leaves in pieces. The face uses

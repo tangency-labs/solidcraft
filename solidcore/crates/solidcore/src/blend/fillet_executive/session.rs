@@ -69,6 +69,7 @@ use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletCornerId, FilletCornerType, FilletSolverId, FilletVertexType,
 };
 use crate::blend::fillet_geom::p3::SplitCorners;
+use crate::blend::fillet_geom::p4::rail_crossing_nearest;
 use crate::blend::fillet_geom::p5::FilletEdgeContext;
 use crate::blend::fillet_section::section::OperationScope;
 use crate::blend::fillet_solver::curve_blend_sih::MakeCurveBlendSih;
@@ -4272,9 +4273,10 @@ fn band_rails(
                 // The rail runs on past its ends (the surfaces are not trimmed yet),
                 // as far as a mitre at a corner needs and beyond: the band is the
                 // rail's part between the vertices that end it, where the corners have
-                // placed them (an end no corner has placed is the rail's own; a rail
-                // whose ends are one vertex is closed and whole). The fork's
-                // tangency-labs/smlib@d548305 (WR-649).
+                // placed them, or, at an End at a smooth vertex, where its cap will (any
+                // other end no corner has placed is the rail's own; a rail whose ends are
+                // one vertex is closed and whole). The fork's tangency-labs/smlib@d548305
+                // (WR-649).
                 let ivl = curve.natural_interval();
                 let pseudo = this.pseudo.brep();
                 let prim = eu::primary_edgeuse(pseudo, rail)?
@@ -4293,7 +4295,28 @@ fn band_rails(
                 let mut t_ends = [ivl.min(), ivl.max()];
                 if end0 != end1 {
                     for (t_end, end) in t_ends.iter_mut().zip([end0, end1]) {
-                        if !this.pseudo.fillet_vertex(end)?.is_processed() {
+                        let fv = this.pseudo.fillet_vertex(end)?;
+                        if !fv.is_processed() {
+                            // An End at a smooth vertex places its rails' ends on its cap
+                            // only in the corners' second pass, after this check. Where the
+                            // face a rail rolls on runs on past that vertex, its run-on would
+                            // be taken for band: its end is the rail's crossing with the cap
+                            // nearest the vertex, as that pass finds it.
+                            let Some(id) = fv.fillet_corner() else {
+                                continue;
+                            };
+                            let corner = CornerLookup::table(&this.corners).corner(id)?;
+                            let (Some(cap), Some(vertex)) =
+                                (corner.end_cap.as_ref(), corner.filleted_vertex())
+                            else {
+                                continue;
+                            };
+                            let near = crate::topology::vertex::point(this.target, vertex)?;
+                            if let Some((t, _)) =
+                                rail_crossing_nearest(k, &curve, cap, near, base.approx_tol_3d)?
+                            {
+                                *t_end = t;
+                            }
                             continue;
                         }
                         let at = crate::topology::vertex::point(pseudo, end)?;

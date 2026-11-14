@@ -1289,6 +1289,13 @@ fn feature_row_body(
             let _ = app.run_heavy("timeline.suppress", json!({"feature": id}));
             ui.close();
         }
+        // An extra entry for the selection; the one above still acts on this feature alone.
+        if let Some((label, params)) = crate::timeline::suppress_selected(app, id)
+            && crate::ui_kit::menu::button(ui, &label, "suppress").clicked()
+        {
+            let _ = app.run_heavy("timeline.suppress", params);
+            ui.close();
+        }
         if crate::ui_kit::menu::button(ui, "Roll Back Here", "rollback").clicked() {
             let _ = app.run_heavy("timeline.roll_to", json!({"feature": id}));
             ui.close();

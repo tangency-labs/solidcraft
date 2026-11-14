@@ -412,6 +412,8 @@ most 1e-6 d. `Extended::extension` is the extension's own certified bound agains
 An extension that cannot be made exactly is refused with `SolidError::ExtendRefused` and an
 `ExtendRefusal`, naming a distance that works: `WeightVanishes` (a weight would not be positive),
 `PastPole`, `PastApex`, `OverATurn`, `NotExact` (the length could not be measured to the stop).
+A curve's proportional extension (§6.7) refuses with `LengthNotMet`, naming no distance: the
+growth asked was not bracketed or found, or its certified enclosure is not within 1e-7 d of d.
 
 ### 6.4 Extended by the definition
 
@@ -461,8 +463,26 @@ derived reach is zero and the operation has no offset to add past it.
 ### 6.7 Curves
 
 Curve extension on main is still upstream's `Curve::extend_by_dist` (`nurbs/crv_adv`,
-`N_CrvExtendByDist`), whose `Cmax` case fits its length and removes knots again. An exact curve
-extension by arc length is open work; until it lands, a curve extension is not in the exact class.
+`N_CrvExtendByDist`), whose `Cmax` case fits its length and removes knots again. That extension
+is not in the exact class.
+
+The proportional extension, `Curve::extend_keeping_proportion` (`nurbs/crv_proportion.rs`,
+`CurveExtension::Proportion` in solidcore-ops), keeps the knots, degree and weights and stretches
+the control polygon along itself from the pinned end. Its stretch is bracketed by doubling (the
+arc length is not monotone in it where the polygon turns back) and solved by Illinois false
+position on the middles of certified length enclosures. The arc lengths of the curve and of the
+result are enclosed per Bézier piece: the chord below and the control polygon above (corner
+cutting, which holds for positive weights too); for a polynomial piece also a third-order bound
+from its squared speed q (Taylor's theorem about q's mean, with q's mean, its variance and its
+Bernstein hull computed exactly up to counted rounding); for a rational piece also a bound from
+its derivative; the tighter taken at each end. A polynomial piece's rounding is counted once per
+halving as a change in length, not carried into every piece below it. Pieces are halved until
+each enclosure is within d/4 · 1e-7, and the result is returned only when the enclosures differ
+by within 1e-7 d of d. The margin is
+relative to d, not to the curve's length, so no growth short of d (1 − 1e-7) is returned; a growth
+too small for the lengths to resolve is refused (`LengthNotMet`, §6.3). It moves the curve over its
+old domain, so it is not an extension of the curve in the sense of §6.1; what it certifies is the
+length.
 
 ## 7. Invariants
 

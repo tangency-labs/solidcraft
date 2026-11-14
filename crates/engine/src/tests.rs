@@ -1153,6 +1153,7 @@ fn hostile_params_never_panic() {
         "size",
         "web",
         "clip",
+        "margin",
         "through_all",
         "depth",
         "dot_grid",

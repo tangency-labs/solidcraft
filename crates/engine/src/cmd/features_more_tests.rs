@@ -448,6 +448,29 @@ fn rib_to_the_next_face_fills_the_corner() {
 }
 
 #[test]
+fn rib_finds_a_tray_floor_whatever_the_tray_length() {
+    // An open tray L x 30 x 12 with 2 mm walls and floor, a rib line across it at z = 8 on the
+    // mid plane x = L / 2: the rib runs down to the floor. Finding the material side and the
+    // floor by samples spaced by the tray's size passed over the 2 mm floor at some lengths
+    // and refused the rib (#16874).
+    for (l, t) in [(40.0, 0.1), (80.0, 0.1), (100.0, 0.1), (150.0, 0.1), (160.0, 0.1), (200.0, 0.1), (400.0, 0.1), (400.0, 4.0)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": l, "width": 30, "height": 12, "corner": [0, 0, 0], "operation": "new", "body_name": "T"}));
+        run(&mut s, "solid.box", json!({"length": l - 4.0, "width": 26, "height": 12, "corner": [2, 2, 2], "operation": "cut", "targets": ["T"]}));
+        let tray = l * 30.0 * 12.0 - (l - 4.0) * 26.0 * 10.0;
+        assert!(rel(volume(&mut s), tray) < 1e-9, "L = {l}");
+        run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": l / 2.0, "name": "R"}));
+        run(&mut s, "sketch.line", json!({"points": [[5, 8], [25, 8]], "closed": false}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.rib", json!({"sketch": "R", "curves": ["l1"], "thickness": t}));
+        // 20 long, 6 from the line down to the floor; it goes into the 2 mm floor to merge
+        // but not out below it, however thick the rib.
+        assert!(rel(volume(&mut s), tray + 20.0 * 6.0 * t) < 1e-6, "L = {l}, t = {t}: {}", volume(&mut s));
+        assert_eq!(measure(&mut s)["body_count"], 1, "L = {l}, t = {t}");
+    }
+}
+
+#[test]
 fn rib_with_a_depth_and_web() {
     let mut s = bracket();
     run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "depth": 2}));
@@ -486,6 +509,26 @@ fn rib_along_the_sketch_normal_reaches_the_body() {
     assert!(rel(volume(&mut s), 4000.0 + 128.0) < 1e-6, "{}", volume(&mut s));
     let e = s.execute("solid.rib", &json!({"sketch": "Front", "curves": ["l1"], "thickness": 2, "direction": "sideways"}));
     assert!(e.is_err_and(|e| e.to_string().contains("unknown direction")));
+}
+
+#[test]
+fn rib_along_the_sketch_normal_stops_at_a_thin_plate() {
+    // A 0.5 thick plate 3.8 behind the sketch (y = -6.2..-5.7) and a 300 long block far
+    // beyond it. Steps of the block's size (about 1.5) passed over the plate and ran the rib
+    // on to the block, 310 away (#16874); it stops at the plate, going into it but not out
+    // beyond it.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 0.5, "height": 10, "corner": [0, -6.2, 0], "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 300, "height": 10, "corner": [0, 300, 0], "operation": "new", "body_name": "Block"}));
+    let before = volume(&mut s);
+    assert!(rel(before, 100.0 + 60000.0) < 1e-9, "{before}");
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -10, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Front"}));
+    run(&mut s, "sketch.line", json!({"points": [[2, 5], [18, 5]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "Front", "curves": ["l1"], "thickness": 2, "direction": "normal"}));
+    // 16 long, 2 thick, the 3.8 to the plate; what goes into the plate adds nothing.
+    let added = volume(&mut s) - before;
+    assert!(rel(added, 32.0 * 3.8) < 1e-6, "{added}");
 }
 
 #[test]

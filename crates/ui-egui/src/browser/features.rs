@@ -1941,4 +1941,45 @@ mod tests {
         h.step(&json!({"move":[5, 5]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, None);
     }
+
+    #[test]
+    fn timeline_hover_marks_feature_and_sketch_in_browser() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.app.ui.show_timeline = true;
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+        let round = h.app.run("solid.fillet", json!({"edges":[[0,0,10]],"radius":2,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY","name":"MySketch"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sketch = h.app.session.doc.find_feature("MySketch").unwrap().id;
+        h.app.tree.expanded.insert("c0/features".into());
+        h.app.tree.expanded.insert("c0/sketches".into());
+        h.frames(2);
+
+        // Hovering a feature on the timeline sets hover_feature and marks the feature in the browser.
+        let item_feature = crate::scenario::handle_at("timeline:Round").unwrap();
+        h.step(&json!({"move":[item_feature.x, item_feature.y]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(round));
+        let mut lit = Lit::of(&mut h.app);
+        assert_eq!(lit.features_from_view(&h.app), [Some(round), None]);
+
+        // Hovering a sketch on the timeline sets hover_feature and marks the sketch in the browser.
+        let item_sketch = crate::scenario::handle_at("timeline:MySketch").unwrap();
+        h.step(&json!({"move":[item_sketch.x, item_sketch.y]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(sketch));
+        let mut lit = Lit::of(&mut h.app);
+        assert_eq!(lit.features_from_view(&h.app), [Some(sketch), None]);
+        let sketches = entries(&h.app, 0, "sketches");
+        let sketch_entry = sketches.iter().find(|e| e.key == sketch.to_string()).unwrap();
+        assert_eq!(lit.row(&h.app, sketch_entry), (false, crate::ui_kit::Mark::Here));
+
+        // Moving the cursor away clears the hover and the browser marks.
+        h.step(&json!({"move":[5, 5]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, None);
+        let mut lit = Lit::of(&mut h.app);
+        assert_eq!(lit.features_from_view(&h.app), [None, None]);
+        assert_eq!(lit.row(&h.app, sketch_entry), (false, crate::ui_kit::Mark::None));
+    }
 }

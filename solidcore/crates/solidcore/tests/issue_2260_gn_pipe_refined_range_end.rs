@@ -46,14 +46,11 @@ use solidcore::Kernel;
 /// The flags SolidCraft's `fixes()` turns on at tangency-labs/solidcraft c494a18.
 const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_copy_keeps_parameterization",
-    "analytic_corner_failure_is_false",
     "analytic_inversion_answers_apart",
     "ascii_doubles_round_trip",
-    "boolean2d_plane_covers_far_faces",
     "boolean_cleanup_removes_slits",
     "boolean_new_face_closure_both_sides",
     "boolean_outer_shell_first",
-    "boolean_skips_faces_apart",
     "boolean_splits_definition_across_split",
     "boolean_union_refuses_solid_leak",
     "boolean_vertex_by_best_crossing",
@@ -193,7 +190,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "torus_signed_gen_curve_interval",
     "transform_model_size_from_body_box",
     "transform_scales_each_tolerance",
-    "twist_simple_duw_sign",
     "uv_trim_corner_end_points_only",
     "validate_tolerances_fixes_reported_gaps",
     "validation_does_not_make_uv_trims",
