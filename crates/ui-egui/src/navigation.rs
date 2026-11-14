@@ -12,6 +12,7 @@
 
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
+use solidcore_ops::{point_displacement, point_distance, point_set_summary};
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_viewport::Camera;
@@ -226,7 +227,9 @@ pub(crate) fn immediate_wheel(
     for event in &input.events {
         let egui::Event::MouseWheel { unit, delta, modifiers, phase, source, .. } = event else { continue };
         let modifier_zoom = claims_scroll(*modifiers, zoom_modifier);
-        if !modifier_zoom && modifiers.matches_any(options.zoom_modifier) {
+        // A gesture always ends, whatever keys are down by then (#16460).
+        let closes = matches!(phase, egui::TouchPhase::End | egui::TouchPhase::Cancel);
+        if !modifier_zoom && !closes && modifiers.matches_any(options.zoom_modifier) {
             continue;
         }
         out.modifier_scroll |= modifier_zoom;
@@ -420,12 +423,37 @@ pub(crate) fn axis_wheel(ctx: &egui::Context, page_height: f32) -> (f32, f32, f3
 }
 
 /// Give this frame's wheel to the widget under the pointer that uses it itself (a value field
-/// stepping its number, `value_step`): no scroll area or camera under it moves as well.
+/// stepping its number, `value_step`): no scroll area or camera under it moves as well. A
+/// gesture's `Start` and `End` stay, with nothing to scroll: the camera follows the bracket
+/// around a trackpad gesture, and an `End` taken here would leave the view navigating, with
+/// every pick off, until the next gesture (#16460).
 pub(crate) fn claim_wheel(ctx: &egui::Context) {
     ctx.input_mut(|i| {
         i.smooth_scroll_delta = egui::Vec2::ZERO;
-        i.events.retain(|e| !matches!(e, egui::Event::MouseWheel { .. }));
+        i.events.retain_mut(|e| match e {
+            egui::Event::MouseWheel { phase: egui::TouchPhase::Move, .. } => false,
+            egui::Event::MouseWheel { delta, .. } => {
+                *delta = egui::Vec2::ZERO;
+                true
+            }
+            _ => true,
+        });
     });
+}
+
+/// Runs `f` on the camera as the view draws it. The stored camera's angle can differ from the drawn one
+/// (the perspective preference), and a zoom behaves differently in orthographic and perspective (#16601).
+fn with_fov(cam: &mut Camera, fov: f64, f: impl FnOnce(&mut Camera)) {
+    let stored = cam.fov;
+    cam.fov = fov;
+    f(cam);
+    cam.fov = stored;
+}
+
+/// `Camera::zoom_at` on the app's camera at the drawn angle.
+fn zoom_in_view(app: &mut SolveApp, factor: f64, anchor: Option<Vec3>) {
+    let fov = app.view_fov();
+    with_fov(&mut app.cam, fov, |cam| cam.zoom_at(factor, anchor));
 }
 
 /// Zoom anchor: the model point under the cursor, else the target's depth.
@@ -452,7 +480,10 @@ fn zoom_point(app: &mut SolveApp, rect: Rect, point: Option<Pos2>, surface: bool
         let (o, d) = proj.ray(p);
         let n = app.cam.back();
         let den = d.dot(n);
-        if den.abs() > 1e-9 { o + d * ((app.cam.target - o).dot(n) / den) } else { app.cam.target }
+        // The point on the cursor's ray at the target's depth, never behind the eye or far off: a ray
+        // nearly parallel to that plane would otherwise send the anchor, and the target, far away (#16628).
+        let t = (app.cam.target - o).dot(n) / den;
+        if den.abs() > 1e-9 && t.is_finite() && (t >= 0.0 || proj.cam.fov <= 0.0) { o + d * t } else { app.cam.target }
     })
 }
 
@@ -535,7 +566,7 @@ fn zoom_key(key: egui::Key) -> Option<bool> {
 }
 
 /// View keys (#1541): the arrows turn the view 15° (with Shift a quarter turn, as the navigation
-/// cube's arrows), Ctrl+arrows pan it a tenth of the view, and Ctrl+8 looks straight at the
+/// navigator's arrows), Ctrl+arrows pan it a tenth of the view, and Ctrl+8 looks straight at the
 /// selected face, plane or sketch. PageUp/PageDown and +/− zoom (#717). Held longer than a tap,
 /// an arrow keeps turning the view at a steady rate (`step_key_hold`); the operating system's key
 /// repeat does nothing. Not while a menu, the command box or a focused widget has the keys.
@@ -545,6 +576,16 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
     let menu_open = view_keys_blocked(app, ctx, None);
     let ctrl = mods.command || mods.ctrl;
     if mods.alt || menu_open {
+        return false;
+    }
+    // The Browser has the keyboard (its last click was on a row): plain arrows move through its
+    // tree instead of turning the view (#17931).
+    if app.preferences.browser_arrow_keys
+        && matches!(key, Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown)
+        && !ctrl
+        && !mods.shift
+        && app.tree.content.browser_focused()
+    {
         return false;
     }
     let result = crate::render_workspace::result_active(app);
@@ -562,7 +603,7 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
             let zoom = |app: &mut SolveApp| {
                 app.cancel_view_animation();
                 app.viewport.orbit_free = None;
-                app.cam.zoom_at(f, None);
+                zoom_in_view(app, f, None);
             };
             if result {
                 crate::render_workspace::with_result_camera(app, zoom);
@@ -658,7 +699,7 @@ pub(crate) struct CameraInput {
     pub primary_pressed: bool,
     /// The pointer is over this view and available for canvas input.
     pub inside: bool,
-    /// The axis view or navigation cube's rectangle.
+    /// The axis view or navigator's rectangle.
     pub axes: Rect,
     pub pinch: f32,
     pub pan: egui::Vec2,
@@ -675,6 +716,24 @@ pub(crate) struct CameraInput {
 /// selectable, so a press that would start a selection navigates as on empty space; with
 /// `caps.orbit` off, bindings that orbit do nothing and pan and zoom work as usual.
 pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::Response, caps: NavCaps) -> CameraInput {
+    let input = handle_input(app, ui, rect, resp, caps);
+    hold_perspective_distance(app);
+    input
+}
+
+/// The one place a perspective eye is kept off the target, whichever input moved the camera (#16628).
+pub(crate) fn hold_perspective_distance(app: &mut SolveApp) {
+    if app.view_fov() > 0.0 {
+        let min = crate::viewport::min_zoom_distance(app);
+        let mut cam = app.cam;
+        cam.fov = app.view_fov();
+        cam.hold_min_distance(min);
+        app.cam.target = cam.target;
+        app.cam.distance = cam.distance;
+    }
+}
+
+fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::Response, caps: NavCaps) -> CameraInput {
     // A framed Render image and its gray letterbox share input ownership, but
     // camera deltas and anchors use the exact image projection's pixel scale.
     let input_rect = rect;
@@ -682,7 +741,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     let picking = caps.pick;
     let (hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, primary_released, delta) = ui.input(|i| {
         (
-            i.pointer.hover_pos(),
+            // egui-winit ends a touch with PointerGone in the release frame.
+            i.pointer.hover_pos().or_else(|| i.pointer.any_released().then(|| i.pointer.interact_pos()).flatten()),
             i.smooth_scroll_delta.y,
             i.modifiers,
             i.pointer.middle_down(),
@@ -709,6 +769,15 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         && resp.contains_pointer()
         && ui.rect_contains_pointer(input_rect)
         && hover.is_some_and(|p| !axes.contains(p) && !readout.is_some_and(|r| r.contains(p)));
+    // A touch release can remove hover in the same frame. Its response owns the full input
+    // surface, including letterbox outside the camera's projection rectangle.
+    let inside = if ui.input(|i| i.pointer.hover_pos().is_none()) {
+        ui.is_enabled()
+            && (resp.clicked() || resp.drag_stopped())
+            && hover.is_some_and(|p| resp.rect.contains(p) && !axes.contains(p) && !readout.is_some_and(|r| r.contains(p)))
+    } else {
+        inside
+    };
     // The wheel and trackpad gestures go on under a box anchored to the model (a value box such
     // as Extrude's distance, a dimension's editor): it scrolls nothing, and a pan, orbit or zoom
     // stopped as it crossed one (#10061). Its clicks stay its own. Not while the wheel steps the
@@ -728,6 +797,10 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     middle_double_click(app, ui, inside);
     // The 3D mouse's motion this frame, with what this page's camera may do.
     device(app, rect, caps);
+
+    let touch_enabled = app.preferences.touchscreen_navigation && app.tool.is_none() && app.dialog.is_none() && app.viewport.context_menu.is_none();
+    let had_touch = app.viewport.touch.owned;
+    let touch = app.viewport.touch.frame(ui, resp.rect, &[axes, readout.unwrap_or(Rect::NOTHING)], inside, touch_enabled, caps.orbit);
 
     // ---- navigation ----
     let trackpad_pan = app.preferences.trackpad_pans();
@@ -791,7 +864,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         scroll
     } + raw.modifier_zoom;
     // Pinch-to-zoom (trackpad): direct manipulation, never smoothed.
-    let pinch = ui.input(|i| pinch_factor(i, options, page_height, zoom_modifier));
+    let pinch = if touch.active { 1.0 } else { ui.input(|i| pinch_factor(i, options, page_height, zoom_modifier)) };
     let h = rect.height().max(1.0) as f64;
     if wheel_inside && pinch != 1.0 {
         app.viewport.orbit_free = None;
@@ -806,7 +879,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             camera_motion(app, rect, params);
         } else {
             app.cancel_view_animation();
-            app.cam.zoom_at(f, anchor);
+            zoom_in_view(app, f, anchor);
         }
     }
     if wheel_inside && scroll.is_finite() && scroll != 0.0 {
@@ -821,7 +894,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             camera_motion(app, rect, params);
         } else {
             app.cancel_view_animation();
-            app.cam.zoom_at(f, anchor);
+            zoom_in_view(app, f, anchor);
         }
     }
     // Two-finger scroll pans the model with the fingers.
@@ -899,6 +972,9 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         app.viewport.primary_nav = preset.or(ctrl_orbit.then_some(NavMode::Orbit));
     } else if zoom_drag || (!primary_down && !primary_released) {
         app.viewport.primary_nav = None;
+    }
+    if had_touch || touch.active {
+        app.viewport.primary_nav = touch.mode;
     }
     // Hold Space for a momentary pan: the hand tool of design apps. It overrides whatever the
     // left button would otherwise do - selecting, dragging geometry, the preset's binding or the
@@ -980,7 +1056,21 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             }
         })
         .filter(|m| allowed(*m));
-    if let Some((mode, delta)) = motion {
+    let mode = if touch.active { touch.mode } else { mode };
+    if touch.active {
+        if touch.delta != egui::Vec2::ZERO || touch.zoom != 1.0 && touch.zoom > 0.0 {
+            app.cancel_view_animation();
+        }
+        if touch.mode == Some(NavMode::Orbit) && caps.orbit && touch.delta != egui::Vec2::ZERO {
+            orbit(app, rect, f64::from(touch.delta.x), f64::from(touch.delta.y), touch.centre);
+        } else if touch.mode == Some(NavMode::Pan) && touch.delta != egui::Vec2::ZERO {
+            app.cam.pan(f64::from(touch.delta.x), f64::from(touch.delta.y), h);
+        }
+        if touch.zoom.is_finite() && touch.zoom > 0.0 && touch.zoom != 1.0 {
+            let anchor = zoom_anchor(app, rect, touch.centre, caps.orbit);
+            app.cam.zoom_at(f64::from(touch.zoom).powf(-crate::prefs::zoom_sign(app)), anchor);
+        }
+    } else if let Some((mode, delta)) = motion {
         if delta != egui::Vec2::ZERO {
             let mut params = json!({"motion":if mode == NavMode::Pan {"pan"} else {"orbit"},"delta":[delta.x,delta.y]});
             if mode == NavMode::Orbit {
@@ -1028,7 +1118,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                         && button == Some(crate::prefs::NavButton::Right)
                         && mods.alt;
                     let movement = if horizontal { -delta.x } else { delta.y };
-                    app.cam.zoom_at((f64::from(movement) * 0.01 * sign * crate::prefs::zoom_sign(app)).exp(), anchor);
+                    let f = (f64::from(movement) * 0.01 * sign * crate::prefs::zoom_sign(app)).exp();
+                    zoom_in_view(app, f, anchor);
                 }
                 _ => {}
             }
@@ -1215,13 +1306,15 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     });
     if let Some(queued) = app.viewport.device_motion.take() {
         let before = app.cam;
-        device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.free_orbit, anchor, pivot);
+        let (free, fov) = (app.preferences.free_orbit, app.view_fov());
+        with_fov(&mut app.cam, fov, |cam| device_camera(cam, queued.motion, queued.seconds, height, turn, free, anchor, pivot));
         app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
     // A device app's motion (the navigation bridge), on the same terms.
     if let Some(queued) = app.viewport.bridge_motion.take() {
         let before = app.cam;
-        bridge_camera(&mut app.cam, queued, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit, anchor, pivot);
+        let (reverse, free, fov) = (app.preferences.zoom_reverse, app.preferences.free_orbit, app.view_fov());
+        with_fov(&mut app.cam, fov, |cam| bridge_camera(cam, queued, height, turn, reverse, free, anchor, pivot));
         app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
 }
@@ -1395,8 +1488,8 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
     if app.preferences.free_orbit {
         target = snapped_quarter_roll(target, free);
     }
-    // The cursor, origin and view-centre pivots stay still; the axis gizmo has no pivot (it orbits about the
-    // view centre, see `axis_view`).
+    // The cursor, origin and view-centre pivots stay still. The axis gizmo uses the origin when selected;
+    // otherwise it orbits about the camera target, see `axis_view`.
     let pivot = if around_cursor {
         match app.preferences.orbit_around {
             crate::prefs::OrbitAround::Origin => Some(Vec3::ZERO),
@@ -1457,21 +1550,47 @@ pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Opti
         return;
     }
     // The drag's whole turn so far, applied to the camera it began with: the view depends on
-    // where the pointer is, not on the path it took, so fast or erratic drags (a pitch held at
-    // straight up or down for a while, many tiny steps) can't drift. Anything else that moves
+    // where the pointer is, not on the path it took (once the view is upright; while it stands
+    // up, each step turns through the roll it has then), so fast or erratic drags (a pitch held
+    // at straight up or down for a while, many tiny steps) can't drift. Anything else that moves
     // the camera meanwhile (a wheel zoom, a new pivot) starts the sum again from there.
     let from = match app.viewport.orbit_from {
         Some(f) if f.last == app.cam && f.pivot == pivot => f,
         _ => OrbitFrom { start: app.cam, dx: 0.0, dy: 0.0, pivot, last: app.cam },
     };
-    let (dx, dy) = (from.dx + dx, from.dy + dy);
+    if !app.preferences.upright_orbit_unrolls {
+        // Off: a rolled view keeps its roll and turns about the world's up axis, as before.
+        let (dx, dy) = (from.dx + dx, from.dy + dy);
+        app.cam = from.start;
+        match pivot {
+            Some(p) => app.cam.orbit_about(dx, dy, p),
+            None => app.cam.orbit(dx, dy),
+        }
+        app.viewport.orbit_from = Some(OrbitFrom { dx, dy, last: app.cam, ..from });
+        return;
+    }
+    // A rolled view (facing a sketch on a tilted plane rolls it to square the sketch's axes)
+    // stands upright again as the pointer moves: the upright orbit turns about the world's up
+    // axis, and kept rolled (upside down, say) the model turned against the pointer and never
+    // stood up again. Each step turns the way it goes on screen through the roll the view has,
+    // and takes the roll a step nearer upright at a steady rate, so short strokes add up as one
+    // long drag does.
+    let roll = (app.cam.roll + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+    let (sin, cos) = roll.sin_cos();
+    let unroll = (dx.hypot(dy) * std::f64::consts::PI / UNROLL_TRAVEL).min(roll.abs());
+    let (dx, dy) = (from.dx + dx * cos + dy * sin, from.dy + dy * cos - dx * sin);
     app.cam = from.start;
-    match pivot {
-        Some(p) => app.cam.orbit_about(dx, dy, p),
-        None => app.cam.orbit(dx, dy),
+    let keep = pivot.map(|p| (p, app.cam.frame_coords(p)));
+    app.cam.orbit(dx, dy);
+    app.cam.roll = roll - roll.signum() * unroll;
+    if let Some((p, coords)) = keep {
+        app.cam.place(p, coords);
     }
     app.viewport.orbit_from = Some(OrbitFrom { dx, dy, last: app.cam, ..from });
 }
+
+/// How far (points) the pointer goes in an upright orbit while an upside-down view stands upright.
+const UNROLL_TRAVEL: f64 = 240.0;
 
 /// The point an orbit turns about, by Orbit around: the view's centre ([`view_middle`]), the world origin, or the
 /// model point under `at` when the turn began. `kept` is what the turn began with: its point and, for the view's
@@ -1577,8 +1696,8 @@ pub(crate) fn view_middle(app: &SolveApp, rect: Rect) -> Option<Vec3> {
     p.is_finite().then_some(p)
 }
 
-/// An orbit drag so far: the camera it began with, the pointer's total motion since, the pivot
-/// and the camera that produced.
+/// An orbit drag so far: the camera it began with, its total turn since (the pointer's motion,
+/// taken through the view's roll), the pivot and the camera that produced.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OrbitFrom {
     start: Camera,
@@ -1595,9 +1714,200 @@ pub(crate) fn orbit_about(app: &mut SolveApp, _rect: egui::Rect, dx: f64, dy: f6
     app.cam.place(pivot, coords);
 }
 
+/// Touch contacts owned by one camera view, adapted from the touch part of PR #2412.
+/// Contact ids include the device; a gesture cannot join fingers from different screens.
+#[derive(Default)]
+pub(crate) struct TouchNavigation {
+    contacts: Vec<(egui::TouchDeviceId, egui::TouchId, Pos2)>,
+    owned: bool,
+    origin: Option<Pos2>,
+    mode: Option<NavMode>,
+    multiple: bool,
+}
+
+#[derive(Default)]
+struct TouchMotion {
+    active: bool,
+    mode: Option<NavMode>,
+    delta: egui::Vec2,
+    zoom: f32,
+    centre: Option<Pos2>,
+}
+
+fn screen_point(point: Pos2) -> [f64; 2] {
+    [f64::from(point.x), f64::from(point.y)]
+}
+
+fn finite_screen_point(point: [f64; 2]) -> Option<Pos2> {
+    let narrowed = pos2(point[0] as f32, point[1] as f32);
+    (point.iter().all(|coordinate| coordinate.is_finite()) && narrowed.is_finite()).then_some(narrowed)
+}
+
+fn finite_screen_vector(vector: [f64; 2]) -> Option<egui::Vec2> {
+    let narrowed = vec2(vector[0] as f32, vector[1] as f32);
+    (vector.iter().all(|coordinate| coordinate.is_finite()) && narrowed.is_finite()).then_some(narrowed)
+}
+
+impl TouchNavigation {
+    fn frame(&mut self, ui: &egui::Ui, rect: Rect, excluded: &[Rect], can_start: bool, enabled: bool, orbit: bool) -> TouchMotion {
+        if !enabled || !ui.input(|i| i.focused) {
+            *self = Self::default();
+            return TouchMotion::default();
+        }
+        let before = self.contacts.clone();
+        let old_mode = self.mode;
+        let was_owned = self.owned;
+        let visible = |p: Pos2| {
+            p.is_finite()
+                && rect.contains(p)
+                && !excluded.iter().any(|r| r.contains(p))
+                && ui.ctx().layer_id_at(p).is_none_or(|layer| layer == ui.layer_id())
+        };
+        // Hit-testing also reads the context, so release its input lock first.
+        let events = ui.input(|i| i.events.clone());
+        for event in &events {
+            let egui::Event::Touch { device_id, id, phase, pos, .. } = event else { continue };
+            match phase {
+                egui::TouchPhase::Start => {
+                    if self.contacts.is_empty() {
+                        self.owned = can_start && visible(*pos);
+                        self.origin = Some(*pos);
+                        self.mode = None;
+                        self.multiple = false;
+                    }
+                    if !visible(*pos) {
+                        self.owned = false;
+                    }
+                    if !pos.is_finite() || self.contacts.len() >= 16 {
+                        self.owned = false;
+                    } else if !self.contacts.iter().any(|(d, t, _)| d == device_id && t == id) {
+                        self.contacts.push((*device_id, *id, *pos));
+                    }
+                }
+                egui::TouchPhase::Move => {
+                    if let Some((_, _, old)) = self.contacts.iter_mut().find(|(d, t, _)| d == device_id && t == id) {
+                        if pos.is_finite() {
+                            *old = *pos;
+                        } else {
+                            *self = Self::default();
+                            return TouchMotion::default();
+                        }
+                    }
+                }
+                egui::TouchPhase::End | egui::TouchPhase::Cancel => {
+                    self.contacts.retain(|(d, t, _)| d != device_id || t != id);
+                    if *phase == egui::TouchPhase::Cancel {
+                        self.owned = false;
+                    }
+                }
+            }
+        }
+        if self.contacts.is_empty() {
+            *self = Self::default();
+            // Suppress a drag's release, but a stationary finger still clicks/selects.
+            return TouchMotion { active: was_owned, mode: old_mode, ..Default::default() };
+        }
+        let same_device = self.contacts.first().is_some_and(|(device, _, _)| self.contacts.iter().all(|(d, _, _)| d == device));
+        if !same_device {
+            self.owned = false;
+        }
+        if !self.owned {
+            return TouchMotion::default();
+        }
+        let current_points: Vec<_> = self.contacts.iter().map(|(_, _, point)| screen_point(*point)).collect();
+        let current_summary = match point_set_summary(&current_points) {
+            Ok(summary) => summary,
+            Err(_) => {
+                *self = Self::default();
+                return TouchMotion::default();
+            }
+        };
+        let Some(current) = finite_screen_point(current_summary.centroid) else {
+            *self = Self::default();
+            return TouchMotion::default();
+        };
+        if self.contacts.len() >= 2 {
+            self.multiple = true;
+            self.mode = Some(NavMode::Pan);
+        } else if !self.multiple
+            && let Some(origin) = self.origin
+        {
+            let distance =
+                point_distance([f64::from(origin.x), f64::from(origin.y), 0.0], [current_summary.centroid[0], current_summary.centroid[1], 0.0]);
+            match distance {
+                Ok(distance) if distance.value > 6.0 => {
+                    self.mode = Some(if orbit { NavMode::Orbit } else { NavMode::Pan });
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    *self = Self::default();
+                    return TouchMotion::default();
+                }
+            }
+        }
+        let mut out = TouchMotion { active: true, mode: self.mode, zoom: 1.0, centre: Some(current), ..Default::default() };
+        // Fingers that start on a panel cannot take the view. An owned gesture pauses over a
+        // panel or outside the view; returning never applies the distance travelled outside it.
+        let stable = before.len() == self.contacts.len() && before.iter().zip(&self.contacts).all(|((d, t, _), (nd, nt, _))| (d, t) == (nd, nt));
+        if !ui.is_enabled() || !stable || !self.contacts.iter().all(|(_, _, p)| visible(*p)) || !before.iter().all(|(_, _, p)| visible(*p)) {
+            return out;
+        }
+        if self.multiple && self.contacts.len() == 1 {
+            return out;
+        }
+        let needs_prior = out.mode.is_some() || self.contacts.len() >= 2;
+        let prior_summary = if needs_prior {
+            let prior_points: Vec<_> = before.iter().map(|(_, _, point)| screen_point(*point)).collect();
+            match point_set_summary(&prior_points) {
+                Ok(summary) => Some(summary),
+                Err(_) => {
+                    *self = Self::default();
+                    return TouchMotion::default();
+                }
+            }
+        } else {
+            None
+        };
+        if out.mode.is_some() {
+            let Some(prior) = prior_summary else {
+                *self = Self::default();
+                return TouchMotion::default();
+            };
+            match point_displacement(prior.centroid, current_summary.centroid).ok().and_then(finite_screen_vector) {
+                Some(delta) => out.delta = delta,
+                None => {
+                    *self = Self::default();
+                    return TouchMotion::default();
+                }
+            }
+        }
+        if self.contacts.len() >= 2 {
+            let Some(old) = prior_summary else {
+                *self = Self::default();
+                return TouchMotion::default();
+            };
+            let old = old.mean_distance;
+            let new = current_summary.mean_distance;
+            if old > 1.0 && new > 1.0 {
+                let zoom = (new / old).clamp(0.05, 20.0) as f32;
+                if !zoom.is_finite() {
+                    *self = Self::default();
+                    return TouchMotion::default();
+                }
+                out.zoom = zoom;
+            }
+        }
+        out
+    }
+}
+
 fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
     if !app.preferences.free_orbit {
         app.cam.orbit(dx, dy);
+    } else if app.preferences.free_orbit_upright && app.preferences.upright_orbit_unrolls {
+        // The same preference as the upright orbit's: the pointer is read through the view's
+        // roll, so a view rolled on its side still follows it. Free orbit keeps the roll.
+        app.cam.orbit_unlimited_through_roll(dx, dy);
     } else if app.preferences.free_orbit_upright {
         app.cam.orbit_unlimited(dx, dy);
     } else {
@@ -1704,6 +2014,63 @@ mod tests {
         input.events = vec![event(egui::TouchPhase::End, egui::MouseWheelSource::Trackpad)];
         super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, crate::prefs::TrackpadScroll::ShiftOrbits, None);
         assert!(!gesture && !bracketed, "the End closes the gesture and its bracket");
+    }
+
+    /// #16460: a gesture's `End` closes it even when a widget took the frame's wheel or Ctrl
+    /// is held by then; otherwise the view stays navigating and nothing can be picked.
+    #[test]
+    fn a_trackpad_gesture_ends_after_a_claimed_wheel_or_with_ctrl_held() {
+        let options = egui::InputOptions::default();
+        let event = |phase, modifiers| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(8.0, 12.0),
+            modifiers,
+            phase,
+        };
+        for (end_mods, claimed) in [(egui::Modifiers::NONE, true), (egui::Modifiers { ctrl: true, command: true, ..Default::default() }, false)] {
+            let mut gesture = false;
+            let mut bracketed = false;
+            let mut coast = super::TrackpadCoast::default();
+            let ctx = egui::Context::default();
+            let mut input = egui::InputState::default();
+            input.events = vec![event(egui::TouchPhase::Start, egui::Modifiers::NONE)];
+            super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, crate::prefs::TrackpadScroll::ShiftOrbits, None);
+            assert!(gesture && bracketed);
+            let raw = egui::RawInput {
+                events: vec![event(egui::TouchPhase::Move, end_mods), event(egui::TouchPhase::End, end_mods)],
+                ..Default::default()
+            };
+            let mut events = Vec::new();
+            let _ = ctx.run_ui(raw, |ui| {
+                if claimed {
+                    super::claim_wheel(ui.ctx());
+                }
+                events = ui.input(|i| i.events.clone());
+            });
+            if claimed {
+                assert!(
+                    events
+                        .iter()
+                        .all(|e| matches!(e, egui::Event::MouseWheel { delta, phase: egui::TouchPhase::End, .. } if *delta == egui::Vec2::ZERO)),
+                    "{events:?}"
+                );
+            }
+            let mut input = egui::InputState::default();
+            input.events = events;
+            let raw = super::immediate_wheel(
+                &input,
+                options,
+                600.0,
+                &mut gesture,
+                &mut bracketed,
+                &mut coast,
+                crate::prefs::TrackpadScroll::ShiftOrbits,
+                None,
+            );
+            assert!(!gesture && !bracketed, "the End closes the gesture (claimed: {claimed})");
+            assert_eq!(raw.pan, egui::Vec2::ZERO, "a claimed wheel moves nothing");
+        }
     }
 
     #[test]
@@ -1857,6 +2224,140 @@ mod tests {
         }
     }
 
+    /// Free orbit with the upright turn on a rolled view (#12458): upright, upside down or on its
+    /// side, the near side of the model goes the way the pointer does, and the roll is kept.
+    #[test]
+    fn free_orbit_upright_follows_the_pointer_on_a_rolled_view() {
+        use super::*;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        for roll in [0.0, std::f64::consts::PI, std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2, 0.7, -2.3] {
+            for (dx, dy) in [(6.0, 0.0), (-6.0, 0.0), (0.0, 6.0), (0.0, -6.0), (4.0, 3.0)] {
+                let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+                app.preferences.orbit_around = OrbitAround::ViewCentre;
+                app.preferences.free_orbit = true;
+                app.preferences.free_orbit_upright = true;
+                app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
+                let near = app.cam.target + app.cam.back() * 10.0;
+                orbit(&mut app, rect, dx, dy, None);
+                // Screen right is the camera's right, screen down is against its up.
+                let moved = app.cam.frame_coords(near);
+                let (mx, my) = (moved.x, -moved.y);
+                let along = (mx * dx + my * dy) / (mx.hypot(my) * dx.hypot(dy));
+                // A turn about the up axis moves the near side less than a tilt does (by the cosine of
+                // the elevation), so a slanted drag is followed closely, not exactly.
+                assert!(along > 0.95, "roll {roll}, drag ({dx}, {dy}): the near side went ({mx}, {my})");
+                let kept = (app.cam.roll - roll + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+                assert!(kept.abs() < 1e-6, "roll {roll} became {}", app.cam.roll);
+            }
+        }
+        // Off, free orbit's upright turn is the one before, rolled or not.
+        for roll in [0.0, std::f64::consts::FRAC_PI_2, 0.7] {
+            let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+            app.preferences.orbit_around = OrbitAround::ViewCentre;
+            app.preferences.free_orbit = true;
+            app.preferences.free_orbit_upright = true;
+            app.preferences.upright_orbit_unrolls = false;
+            app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
+            let mut expected = app.cam;
+            expected.orbit_unlimited(5.0, -3.0);
+            orbit(&mut app, rect, 5.0, -3.0, None);
+            assert_eq!((app.cam.yaw, app.cam.pitch, app.cam.roll), (expected.yaw, expected.pitch, expected.roll), "roll {roll}");
+        }
+    }
+
+    /// The upright orbit on a rolled view (#12458): the model turns the way the pointer goes on
+    /// screen, the roll eases to zero within 240 points of travel in one drag or many strokes, an
+    /// unrolled view orbits as before, and a Look At sketch view that comes out upside down
+    /// stands upright and can then be turned to look from above.
+    #[test]
+    fn upright_orbit_from_a_rolled_view_turns_with_the_pointer_and_stands_up() {
+        use super::*;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        // Where a point in front of the view centre goes on screen for a short drag right (on the
+        // view's axis, so the roll easing off does not move it).
+        let first_step = |roll: f64| {
+            let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+            app.preferences.orbit_around = OrbitAround::ViewCentre;
+            app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
+            let p = app.cam.target + app.cam.back() * 10.0;
+            let before = app.cam.to_screen(p, 800.0, 600.0, 100.0);
+            orbit(&mut app, rect, 4.0, 0.0, None);
+            let after = app.cam.to_screen(p, 800.0, 600.0, 100.0);
+            match (before, after) {
+                (Some(b), Some(a)) => (a.0 - b.0, a.1 - b.1),
+                _ => panic!("point left the screen"),
+            }
+        };
+        let (upright, rolled) = (first_step(0.0), first_step(std::f64::consts::PI));
+        let dot = (upright.0 * rolled.0 + upright.1 * rolled.1) / (upright.0.hypot(upright.1) * rolled.0.hypot(rolled.1));
+        assert!(dot > 0.99, "a rolled view turns against the pointer: {upright:?} vs {rolled:?}");
+        // One long drag, or many short strokes (each a new drag), stand it up within 240 points.
+        for strokes in [false, true] {
+            for roll in [std::f64::consts::PI, -2.0, 0.9] {
+                let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+                app.preferences.orbit_around = OrbitAround::ViewCentre;
+                app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
+                for _ in 0..16 {
+                    if strokes {
+                        app.viewport.orbit_from = None;
+                    }
+                    orbit(&mut app, rect, 15.0, 0.0, None);
+                }
+                assert!(app.cam.roll.abs() < 1e-9, "roll {roll} stays {} (strokes {strokes})", app.cam.roll);
+                assert!(app.cam.up_dir().z > 0.0);
+            }
+        }
+        // An unrolled view orbits exactly as before.
+        let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+        app.preferences.orbit_around = OrbitAround::ViewCentre;
+        app.cam = Camera { yaw: 0.4, pitch: 0.5, ..Default::default() };
+        let mut expected = app.cam;
+        expected.orbit(30.0, -20.0);
+        orbit(&mut app, rect, 10.0, -5.0, None);
+        orbit(&mut app, rect, 20.0, -15.0, None);
+        assert!(app.cam.back().dist(expected.back()) < 1e-9);
+        assert_eq!(app.cam.roll, 0.0);
+        // Look At a sketch on XY turned -130° about X comes out upside down (#12458): a drag up
+        // and a little sideways stands it upright, and dragging down then looks from above.
+        let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+        app.preferences.orbit_around = OrbitAround::ViewCentre;
+        let (sin, cos) = (-130f64).to_radians().sin_cos();
+        let (x, y) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, cos, sin));
+        app.cam = crate::dialogs::square_sketch_axes(app.cam.looking_from(x.cross(y)), x, y);
+        assert!(app.cam.roll.abs() > 3.0, "the sketch view is not upside down: roll {}", app.cam.roll);
+        for (dx, dy, steps) in [(4.0, -16.0, 16), (2.0, 16.0, 10), (0.0, 16.0, 20)] {
+            for _ in 0..steps {
+                orbit(&mut app, rect, dx, dy, None);
+            }
+        }
+        assert!(app.cam.roll.abs() < 1e-9, "the sketch view stays rolled: {}", app.cam.roll);
+        assert!(app.cam.up_dir().z > 0.0 && app.cam.pitch > 0.5, "not looking from above: pitch {}", app.cam.pitch);
+        // Off, the upright orbit is the one before: a rolled view keeps its roll and turns about
+        // the world's up axis, about the view centre, the origin or the point under the cursor
+        // alike, in orthographic and perspective.
+        let cursor = Vec3::new(5.0, -1.0, 2.0);
+        for fov in [0.0, 0.6] {
+            for around in [OrbitAround::ViewCentre, OrbitAround::Origin, OrbitAround::Cursor] {
+                let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+                assert!(app.preferences.upright_orbit_unrolls, "standing a rolled view up is the default");
+                app.preferences.upright_orbit_unrolls = false;
+                app.preferences.orbit_around = around;
+                app.viewport.orbit_pivot = Some(cursor);
+                app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), yaw: 0.4, pitch: 0.5, roll: std::f64::consts::PI, fov, ..Default::default() };
+                let mut expected = app.cam;
+                match around {
+                    OrbitAround::ViewCentre => expected.orbit(30.0, -20.0),
+                    OrbitAround::Origin => expected.orbit_about(30.0, -20.0, Vec3::ZERO),
+                    OrbitAround::Cursor => expected.orbit_about(30.0, -20.0, cursor),
+                }
+                orbit(&mut app, rect, 10.0, -5.0, None);
+                orbit(&mut app, rect, 20.0, -15.0, None);
+                assert_eq!(app.cam, expected, "the old upright orbit changed ({around:?}, fov {fov})");
+                assert_eq!(app.cam.roll, std::f64::consts::PI);
+            }
+        }
+    }
+
     #[test]
     fn clamped_drag_stays_reversible_and_restarts_after_free_orbit() {
         use super::*;
@@ -1864,7 +2365,8 @@ mod tests {
         for fov in [0.0, 0.6] {
             let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
             app.preferences.orbit_around = OrbitAround::Origin;
-            app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), pitch: 1.4, roll: 0.7, fov, ..Default::default() };
+            // Unrolled: a rolled view stands upright as the drag goes, so it does not come back rolled.
+            app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), pitch: 1.4, fov, ..Default::default() };
             let start = app.cam;
             for (dx, dy) in [(120.0, 400.0), (90.0, -200.0), (-210.0, -200.0)] {
                 orbit(&mut app, rect, dx, dy, None);
@@ -1874,12 +2376,14 @@ mod tests {
             app.preferences.free_orbit = true;
             orbit(&mut app, rect, 0.0, 80.0, None);
             assert!((app.cam.back().dot(start.back()) - 0.64_f64.cos()).abs() < 1e-9);
+            // Free orbit left the view rolled: the upright drag that follows turns the way the
+            // pointer goes on screen, through that roll.
             let mut next = app.cam;
-            next.orbit_about(10.0, 20.0, Vec3::ZERO);
+            let (sin, cos) = app.cam.roll.sin_cos();
+            next.orbit_about(10.0 * cos + 20.0 * sin, 20.0 * cos - 10.0 * sin, Vec3::ZERO);
             app.preferences.free_orbit = false;
             orbit(&mut app, rect, 10.0, 20.0, None);
             assert!(app.cam.back().dist(next.back()) < 1e-9);
-            assert!(app.cam.target.dist(next.target) < 1e-9);
         }
     }
 
@@ -3087,6 +3591,8 @@ mod tests {
         use super::*;
         use crate::space_mouse::{BridgeMotion, DeviceMotion, Motion};
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        // The eye stops at the model only in perspective: an orthographic zoom keeps the depth, so its eye
+        // never approaches the model (#16601). The held point stays under the press in both.
         let outside = |cam: &Camera| {
             let e = cam.eye();
             e.x.abs() > 20.0 - 1e-6 || e.y.abs() > 20.0 - 1e-6 || e.z.abs() > 20.0 - 1e-6
@@ -3109,7 +3615,12 @@ mod tests {
                     }
                     device(&mut h.app, rect, NavCaps::MODEL);
                 }
-                assert_eq!(outside(&h.app.cam), stop_at_model, "stop={stop_at_model} cursor={to_cursor} cap={cap}: eye {:?}", h.app.cam.eye());
+                assert_eq!(
+                    outside(&h.app.cam),
+                    stop_at_model && h.app.perspective_view(),
+                    "stop={stop_at_model} cursor={to_cursor} cap={cap}: eye {:?}",
+                    h.app.cam.eye()
+                );
                 if !stop_at_model {
                     assert_eq!(h.app.cam.target, Camera::default().target, "legacy zoom keeps the target fixed");
                 }
@@ -3136,7 +3647,12 @@ mod tests {
             for _ in 0..12 {
                 h.call("ui.drag", json!({"x0": at.x, "y0": at.y, "x1": at.x, "y1": at.y - 160.0, "steps": 40}));
             }
-            assert_eq!(outside(&h.app.cam), stop_at_model, "drag stop={stop_at_model} cursor={to_cursor}: eye {:?}", h.app.cam.eye());
+            assert_eq!(
+                outside(&h.app.cam),
+                stop_at_model && h.app.perspective_view(),
+                "drag stop={stop_at_model} cursor={to_cursor}: eye {:?}",
+                h.app.cam.eye()
+            );
             if !stop_at_model {
                 assert_eq!(h.app.cam.target, Camera::default().target, "legacy drag-zoom keeps the target fixed");
             }
@@ -3268,6 +3784,531 @@ mod tests {
         super::device(&mut app, page, super::NavCaps::MODEL);
         assert_eq!(turn(&app.cam), turn(&square_on));
     }
+
+    fn finger(id: u64, phase: egui::TouchPhase, x: f32, y: f32) -> egui::Event {
+        egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(id), phase, pos: egui::pos2(x, y), force: None }
+    }
+
+    fn pointer(x: f32, y: f32, pressed: Option<bool>) -> Vec<egui::Event> {
+        let pos = egui::pos2(x, y);
+        let mut events = vec![egui::Event::PointerMoved(pos)];
+        if let Some(pressed) = pressed {
+            events.push(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        }
+        events
+    }
+
+    fn touchscreen_frame(app: &mut crate::SolveApp, ctx: &egui::Context, events: Vec<egui::Event>, time: &mut f64, orbit: bool) {
+        let rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+        touchscreen_frame_in_rect(app, ctx, events, time, orbit, rect);
+    }
+
+    fn touchscreen_frame_in_rect(
+        app: &mut crate::SolveApp,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        time: &mut f64,
+        orbit: bool,
+        input_rect: egui::Rect,
+    ) -> bool {
+        *time += 1.0 / 60.0;
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
+            time: Some(*time),
+            focused: true,
+            events,
+            ..Default::default()
+        };
+        let mut inside = false;
+        let mut out = ctx.run_ui(raw, |ui| {
+            app.viewport.rect = Some(input_rect);
+            let response = ui.interact(input_rect, ui.scope_id().with("touchscreen-test"), egui::Sense::click_and_drag());
+            inside = super::handle(app, ui, input_rect, &response, super::NavCaps { orbit, pick: true }).inside;
+        });
+        out.textures_delta.clear();
+        inside
+    }
+
+    fn touch_motion_frame(
+        touch: &mut super::TouchNavigation,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        time: &mut f64,
+        rect: egui::Rect,
+    ) -> super::TouchMotion {
+        *time += 1.0 / 60.0;
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
+            time: Some(*time),
+            focused: true,
+            events,
+            ..Default::default()
+        };
+        let mut motion = super::TouchMotion::default();
+        let mut out = ctx.run_ui(raw, |ui| {
+            motion = touch.frame(ui, rect, &[], true, true, false);
+        });
+        out.textures_delta.clear();
+        motion
+    }
+
+    fn assert_unstable_motion(motion: &super::TouchMotion, mode: Option<super::NavMode>, centre: egui::Pos2) {
+        assert!(motion.active);
+        assert_eq!(motion.mode, mode);
+        assert_eq!(motion.centre, Some(centre));
+        assert_eq!(motion.delta, egui::Vec2::ZERO);
+        assert_eq!(motion.zoom, 1.0);
+    }
+
+    #[test]
+    fn touchscreen_release_uses_full_input_bounds_for_framed_camera() {
+        use egui::TouchPhase::{End, Move, Start};
+        let input_rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+        for (release_x, expected_inside) in [(150.0, true), (750.0, false)] {
+            let mut app = crate::SolveApp::new(Default::default(), Default::default());
+            let ctx = crate::fonts::test_context();
+            let mut time = 0.0;
+            let bounds = input_rect;
+            touchscreen_frame_in_rect(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false, bounds);
+            let mut events = pointer(300.0, 300.0, Some(true));
+            events.push(finger(1, Start, 300.0, 300.0));
+            touchscreen_frame_in_rect(&mut app, &ctx, events, &mut time, false, bounds);
+            let mut events = pointer(340.0, 320.0, None);
+            events.push(finger(1, Move, 340.0, 320.0));
+            touchscreen_frame_in_rect(&mut app, &ctx, events, &mut time, false, bounds);
+            let mut events = pointer(release_x, 320.0, Some(false));
+            events.extend([finger(1, End, release_x, 320.0), egui::Event::PointerGone]);
+            let inside = touchscreen_frame_in_rect(&mut app, &ctx, events, &mut time, false, bounds);
+            assert_eq!(inside, expected_inside, "release uses the input surface, not the framed camera image");
+            assert!(app.viewport.touch.contacts.is_empty());
+        }
+    }
+
+    #[test]
+    fn touchscreen_second_finger_can_pan_in_letterbox_but_not_outside_input() {
+        use egui::TouchPhase::{Move, Start};
+        let input_rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+        for (second_x, expected_owned) in [(150.0, true), (50.0, false)] {
+            let mut app = crate::SolveApp::new(Default::default(), Default::default());
+            let ctx = crate::fonts::test_context();
+            let mut time = 0.0;
+            let bounds = input_rect;
+            touchscreen_frame_in_rect(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false, bounds);
+            let mut events = pointer(300.0, 300.0, Some(true));
+            events.push(finger(1, Start, 300.0, 300.0));
+            touchscreen_frame_in_rect(&mut app, &ctx, events, &mut time, false, bounds);
+            touchscreen_frame_in_rect(&mut app, &ctx, vec![finger(2, Start, second_x, 300.0)], &mut time, false, bounds);
+            assert_eq!(app.viewport.touch.owned, expected_owned);
+            let before = app.cam;
+            let mut events = pointer(320.0, 310.0, None);
+            events.extend([finger(1, Move, 320.0, 310.0), finger(2, Move, second_x + 20.0, 310.0)]);
+            touchscreen_frame_in_rect(&mut app, &ctx, events, &mut time, false, bounds);
+            assert_eq!(app.cam.target != before.target, expected_owned, "letterbox remains a camera navigation surface");
+            assert_eq!((app.cam.yaw, app.cam.pitch, app.cam.distance), (before.yaw, before.pitch, before.distance));
+        }
+    }
+
+    #[test]
+    fn touchscreen_one_finger_orbits_and_preference_off_preserves_mouse_drag() {
+        use egui::TouchPhase::{End, Move, Start};
+        for enabled in [true, false] {
+            let mut app = crate::SolveApp::new(Default::default(), Default::default());
+            app.preferences.touchscreen_navigation = enabled;
+            let ctx = crate::fonts::test_context();
+            let mut time = 0.0;
+            touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, true);
+            let before = app.cam;
+            let mut events = pointer(300.0, 300.0, Some(true));
+            events.push(finger(1, Start, 300.0, 300.0));
+            touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+            let mut events = pointer(360.0, 320.0, None);
+            events.push(finger(1, Move, 360.0, 320.0));
+            touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+            assert_eq!(app.cam != before, enabled, "preference controls touch navigation");
+            let end = app.cam;
+            let mut events = pointer(360.0, 320.0, Some(false));
+            events.extend([finger(1, End, 360.0, 320.0), egui::Event::PointerGone]);
+            touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+            assert_eq!(app.cam, end, "release does not add another move");
+            assert!(app.viewport.touch.contacts.is_empty());
+        }
+    }
+
+    #[test]
+    fn touchscreen_six_point_threshold_uses_the_kernel_distance() {
+        use egui::TouchPhase::{Move, Start};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false);
+        let before = app.cam;
+        let mut events = pointer(300.0, 300.0, Some(true));
+        events.push(finger(1, Start, 300.0, 300.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, false);
+        let mut events = pointer(306.0, 300.0, None);
+        events.push(finger(1, Move, 306.0, 300.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, false);
+        assert_eq!(app.cam, before, "six points does not cross the strict threshold");
+        let mut events = pointer(307.0, 300.0, None);
+        events.push(finger(1, Move, 307.0, 300.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, false);
+        assert_ne!(app.cam.target, before.target, "more than six points starts panning");
+    }
+
+    #[test]
+    fn touchscreen_three_contact_pinch_uses_mean_radius_for_nonuniform_motion() {
+        use egui::TouchPhase::{Move, Start};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.preferences.zoom_to_cursor = false;
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false);
+        let before = app.cam;
+        let mut events = pointer(300.0, 300.0, Some(true));
+        events.extend([finger(1, Start, 300.0, 300.0), finger(2, Start, 306.0, 300.0), finger(3, Start, 300.0, 306.0)]);
+        touchscreen_frame(&mut app, &ctx, events, &mut time, false);
+        assert_eq!(app.cam, before, "the contact-start frame is unstable and only establishes state");
+
+        let mut events = pointer(300.0, 300.0, None);
+        events.extend([finger(1, Move, 300.0, 300.0), finger(2, Move, 306.0, 300.0), finger(3, Move, 300.0, 312.0)]);
+        touchscreen_frame(&mut app, &ctx, events, &mut time, false);
+
+        let mean_radius_ratio = (5.0_f64.sqrt() + 2.0 * 2.0_f64.sqrt() + 17.0_f64.sqrt()) / (2.0_f64.sqrt() + 2.0 * 5.0_f64.sqrt());
+        let narrowed_zoom = mean_radius_ratio as f32;
+        let expected_distance = before.distance / f64::from(narrowed_zoom);
+        assert!(
+            (app.cam.distance - expected_distance).abs() <= 2.0 * f64::EPSILON * expected_distance.abs().max(1.0),
+            "mean-radius ratio {mean_radius_ratio}, narrowed once to {narrowed_zoom}: {} vs {expected_distance}",
+            app.cam.distance,
+        );
+        assert_ne!(app.cam.target, before.target, "centroid displacement also pans");
+        assert_ne!(mean_radius_ratio, 2.5_f64.sqrt(), "RMS gives a different zoom ratio");
+    }
+
+    #[test]
+    fn touchscreen_geometry_narrowing_rejects_non_finite_f32_results() {
+        assert_eq!(super::finite_screen_point([3.0, 4.0]), Some(egui::pos2(3.0, 4.0)));
+        assert_eq!(super::finite_screen_vector([3.0, 4.0]), Some(egui::vec2(3.0, 4.0)));
+        assert!(super::finite_screen_point([f64::MAX, 0.0]).is_none());
+        assert!(super::finite_screen_vector([0.0, f64::MAX]).is_none());
+    }
+
+    #[test]
+    fn touchscreen_unstable_start_add_and_lift_preserve_partial_motion() {
+        use egui::TouchPhase::{End, Start};
+        let mut touch = super::TouchNavigation::default();
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        let rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+
+        let start = touch_motion_frame(&mut touch, &ctx, vec![finger(1, Start, 300.0, 300.0)], &mut time, rect);
+        assert_unstable_motion(&start, None, egui::pos2(300.0, 300.0));
+
+        let add = touch_motion_frame(&mut touch, &ctx, vec![finger(2, Start, 306.0, 300.0)], &mut time, rect);
+        assert_unstable_motion(&add, Some(super::NavMode::Pan), egui::pos2(303.0, 300.0));
+
+        let lift = touch_motion_frame(&mut touch, &ctx, vec![finger(2, End, 306.0, 300.0)], &mut time, rect);
+        assert_unstable_motion(&lift, Some(super::NavMode::Pan), egui::pos2(300.0, 300.0));
+    }
+
+    #[test]
+    fn touchscreen_stable_nonuniform_motion_reports_exact_centroid_delta() {
+        use egui::TouchPhase::{Move, Start};
+        let mut touch = super::TouchNavigation::default();
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        let rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+        let start = touch_motion_frame(
+            &mut touch,
+            &ctx,
+            vec![finger(1, Start, 300.0, 300.0), finger(2, Start, 306.0, 300.0), finger(3, Start, 300.0, 306.0)],
+            &mut time,
+            rect,
+        );
+        assert_unstable_motion(&start, Some(super::NavMode::Pan), egui::pos2(302.0, 302.0));
+        let motion = touch_motion_frame(
+            &mut touch,
+            &ctx,
+            vec![finger(1, Move, 300.0, 300.0), finger(2, Move, 306.0, 300.0), finger(3, Move, 300.0, 312.0)],
+            &mut time,
+            rect,
+        );
+        assert_eq!(motion.delta, egui::vec2(0.0, 2.0));
+        assert_eq!(motion.centre, Some(egui::pos2(302.0, 304.0)));
+        let expected = (5.0_f64.sqrt() + 2.0 * 2.0_f64.sqrt() + 17.0_f64.sqrt()) / (2.0_f64.sqrt() + 2.0 * 5.0_f64.sqrt());
+        assert_eq!(motion.zoom, expected as f32);
+    }
+
+    #[test]
+    fn touchscreen_non_finite_event_and_f32_narrowing_cancel_owned_gesture() {
+        use egui::TouchPhase::{Move, Start};
+        let ctx = crate::fonts::test_context();
+        let rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+        let mut time = 0.0;
+        let mut touch = super::TouchNavigation::default();
+        let start = touch_motion_frame(&mut touch, &ctx, vec![finger(1, Start, 300.0, 300.0)], &mut time, rect);
+        assert!(start.active);
+        let invalid = touch_motion_frame(&mut touch, &ctx, vec![finger(1, Move, f32::NAN, 300.0)], &mut time, rect);
+        assert!(!invalid.active);
+        assert!(touch.contacts.is_empty());
+        assert!(!touch.owned);
+        let resumed = touch_motion_frame(&mut touch, &ctx, vec![finger(1, Move, 320.0, 300.0)], &mut time, rect);
+        assert!(!resumed.active, "a malformed contact cannot resume without a new Start");
+        assert!(touch.contacts.is_empty());
+        assert!(!touch.owned);
+
+        let limit = f32::MAX;
+        let huge_rect = egui::Rect::from_min_max(egui::pos2(-limit, -limit), egui::pos2(limit, limit));
+        let mut touch = super::TouchNavigation::default();
+        let start = touch_motion_frame(&mut touch, &ctx, vec![finger(2, Start, -limit, 0.0)], &mut time, huge_rect);
+        assert!(start.active);
+        let overflow = touch_motion_frame(&mut touch, &ctx, vec![finger(2, Move, limit, 0.0)], &mut time, huge_rect);
+        assert!(!overflow.active, "an f64 displacement that overflows f32 cancels safely");
+        assert!(touch.contacts.is_empty());
+        assert!(!touch.owned);
+    }
+
+    #[test]
+    fn touchscreen_pinch_zoom_stays_within_documented_clamps() {
+        use egui::TouchPhase::{Move, Start};
+        let ctx = crate::fonts::test_context();
+        let rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(20_000.0, 10_000.0));
+        for (old_first, old_second, new_first, new_second, expected) in [(100.0, 200.0, 100.0, 10_200.0, 20.0), (100.0, 200.0, 100.0, 104.0, 0.05)] {
+            let mut time = 0.0;
+            let mut touch = super::TouchNavigation::default();
+            touch_motion_frame(&mut touch, &ctx, vec![finger(1, Start, old_first, 200.0), finger(2, Start, old_second, 200.0)], &mut time, rect);
+            let motion =
+                touch_motion_frame(&mut touch, &ctx, vec![finger(1, Move, new_first, 200.0), finger(2, Move, new_second, 200.0)], &mut time, rect);
+            assert_eq!(motion.zoom, expected);
+        }
+    }
+
+    #[test]
+    fn touchscreen_mean_radius_matches_legacy_f32_with_rounding_tolerance() {
+        let points = [egui::pos2(300.0, 300.0), egui::pos2(306.0, 300.0), egui::pos2(300.0, 306.0)];
+        let legacy_centre = points.iter().fold(egui::Vec2::ZERO, |sum, point| sum + point.to_vec2()) / points.len() as f32;
+        let legacy_mean = points.iter().map(|point| point.distance(legacy_centre.to_pos2())).sum::<f32>() / points.len() as f32;
+        let kernel_points: Vec<_> = points.iter().map(|point| super::screen_point(*point)).collect();
+        let kernel_mean = solidcore_ops::point_set_summary(&kernel_points).unwrap().mean_distance;
+        assert!(
+            (f64::from(legacy_mean) - kernel_mean).abs() <= f64::from(f32::EPSILON) * kernel_mean.max(1.0),
+            "legacy f32 {legacy_mean} vs f64 query {kernel_mean}"
+        );
+    }
+
+    #[test]
+    fn touchscreen_two_fingers_pan_and_pinch_without_orbit_or_double_zoom() {
+        use egui::TouchPhase::{End, Move, Start};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.preferences.zoom_to_cursor = false;
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, true);
+        let before = app.cam;
+        let mut events = pointer(300.0, 300.0, Some(true));
+        events.extend([finger(1, Start, 300.0, 300.0), finger(2, Start, 400.0, 300.0)]);
+        touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+        let mut events = pointer(320.0, 310.0, None);
+        events.extend([finger(1, Move, 320.0, 310.0), finger(2, Move, 420.0, 310.0)]);
+        touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+        assert_ne!(app.cam.target, before.target);
+        assert_eq!((app.cam.yaw, app.cam.pitch, app.cam.distance), (before.yaw, before.pitch, before.distance));
+        let panned = app.cam;
+        let mut events = pointer(270.0, 310.0, None);
+        events.extend([finger(1, Move, 270.0, 310.0), finger(2, Move, 470.0, 310.0), egui::Event::Zoom(2.0)]);
+        touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+        assert!((app.cam.distance - panned.distance / 2.0).abs() < 1e-6, "one pinch, not two: {:?}", app.cam);
+        let pinched = app.cam;
+        touchscreen_frame(&mut app, &ctx, vec![finger(2, End, 470.0, 310.0)], &mut time, true);
+        let mut events = pointer(320.0, 350.0, None);
+        events.push(finger(1, Move, 320.0, 350.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+        assert_eq!(app.cam, pinched, "remaining finger cannot become an accidental orbit");
+    }
+
+    #[test]
+    fn touchscreen_pinch_respects_reverse_zoom() {
+        use egui::TouchPhase::{Move, Start};
+        for reverse in [false, true] {
+            let mut app = crate::SolveApp::new(Default::default(), Default::default());
+            app.preferences.zoom_to_cursor = false;
+            app.preferences.zoom_reverse = reverse;
+            let ctx = crate::fonts::test_context();
+            let mut time = 0.0;
+            touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, true);
+            let before = app.cam;
+            let mut events = pointer(300.0, 300.0, Some(true));
+            events.extend([finger(1, Start, 300.0, 300.0), finger(2, Start, 400.0, 300.0)]);
+            touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+            let mut events = pointer(300.0, 300.0, None);
+            events.extend([finger(1, Move, 250.0, 300.0), finger(2, Move, 450.0, 300.0), egui::Event::Zoom(2.0)]);
+            touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+            let expected = if reverse { before.distance * 2.0 } else { before.distance / 2.0 };
+            assert!((app.cam.distance - expected).abs() < 1e-6, "reverse={reverse}: {} vs {expected}", app.cam.distance);
+        }
+    }
+
+    #[test]
+    fn touchscreen_outside_gesture_does_not_capture_on_entering_the_view() {
+        use egui::TouchPhase::{Move, Start};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        touchscreen_frame(&mut app, &ctx, pointer(50.0, 300.0, None), &mut time, true);
+        let before = app.cam;
+        let mut events = pointer(50.0, 300.0, Some(true));
+        events.push(finger(1, Start, 50.0, 300.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+        let mut events = pointer(350.0, 300.0, None);
+        events.push(finger(1, Move, 350.0, 300.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+        assert_eq!(app.cam, before);
+    }
+
+    #[test]
+    fn touchscreen_cancel_clears_contacts_and_flat_views_pan() {
+        use egui::TouchPhase::{Cancel, Move, Start};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false);
+        let before = app.cam;
+        let mut events = pointer(300.0, 300.0, Some(true));
+        events.push(finger(1, Start, 300.0, 300.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, false);
+        let mut events = pointer(350.0, 330.0, None);
+        events.push(finger(1, Move, 350.0, 330.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, false);
+        assert_ne!(app.cam.target, before.target);
+        assert_eq!((app.cam.yaw, app.cam.pitch), (before.yaw, before.pitch));
+        let mut events = pointer(350.0, 330.0, Some(false));
+        events.extend([finger(1, Cancel, 350.0, 330.0), egui::Event::PointerGone]);
+        touchscreen_frame(&mut app, &ctx, events, &mut time, false);
+        assert!(app.viewport.touch.contacts.is_empty());
+        assert!(!app.viewport.touch.owned);
+    }
+
+    #[test]
+    fn touchscreen_preference_defaults_on_and_survives_roundtrip() {
+        use serde_json::json;
+        let prefs: crate::prefs::Prefs = serde_json::from_value(json!({})).unwrap();
+        assert!(prefs.touchscreen_navigation);
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        crate::prefs::control(&mut app, &json!({"open":"Navigation", "touchscreen_navigation":false})).unwrap();
+        crate::prefs::control(&mut app, &json!({"button":"apply"})).unwrap();
+        let mut other = crate::SolveApp::new(Default::default(), Default::default());
+        other.load_prefs(&app.prefs());
+        assert!(!other.preferences.touchscreen_navigation);
+        crate::prefs::control(&mut app, &json!({"open":"Navigation", "button":"defaults"})).unwrap();
+        assert!(app.preferences.touchscreen_navigation);
+        crate::prefs::control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert!(!app.preferences.touchscreen_navigation);
+    }
+
+    #[test]
+    fn touchscreen_tool_cancels_an_existing_gesture() {
+        use egui::TouchPhase::{Move, Start};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, true);
+        let mut events = pointer(300.0, 300.0, Some(true));
+        events.push(finger(1, Start, 300.0, 300.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+        assert!(app.viewport.touch.owned);
+        let mut events = pointer(330.0, 310.0, None);
+        events.push(finger(1, Move, 330.0, 310.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+        assert_eq!(app.viewport.primary_nav, Some(super::NavMode::Orbit));
+        app.tool = crate::tools::Tool::for_command("sketch.line");
+        assert!(app.tool.is_some());
+        let before = app.cam;
+        let mut events = pointer(350.0, 330.0, None);
+        events.push(finger(1, Move, 350.0, 330.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+        assert_eq!(app.cam, before);
+        assert!(app.viewport.touch.contacts.is_empty());
+        app.tool = None;
+        let mut events = pointer(380.0, 350.0, None);
+        events.push(finger(1, Move, 380.0, 350.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+        assert_eq!(app.cam, before, "a cancelled gesture cannot resume without a new press");
+    }
+
+    #[test]
+    fn touchscreen_second_finger_on_axes_cannot_join_the_camera_gesture() {
+        use egui::TouchPhase::{Move, Start};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, true);
+        let before = app.cam;
+        let mut events = pointer(300.0, 300.0, Some(true));
+        events.push(finger(1, Start, 300.0, 300.0));
+        touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+        let axes = super::axis_rect(&app, app.viewport.rect.unwrap()).center();
+        touchscreen_frame(&mut app, &ctx, vec![finger(2, Start, axes.x, axes.y)], &mut time, true);
+        assert!(!app.viewport.touch.owned);
+        let mut events = pointer(350.0, 330.0, None);
+        events.extend([finger(1, Move, 350.0, 330.0), finger(2, Move, 450.0, 330.0)]);
+        touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+        assert_eq!(app.cam, before);
+    }
+
+    #[test]
+    fn touchscreen_tap_selects_and_drag_navigates_through_the_real_viewport() {
+        use egui::TouchPhase::{End, Move, Start};
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":80,"width":50,"height":20})).unwrap();
+        h.app.fit_view();
+        h.frames(2);
+        let at = h.app.viewport.rect.unwrap().center();
+        h.frame_with(pointer(at.x, at.y, None));
+        let before = h.app.cam;
+        let mut events = pointer(at.x, at.y, Some(true));
+        events.push(finger(1, Start, at.x, at.y));
+        h.frame_with(events);
+        let mut events = pointer(at.x, at.y, Some(false));
+        events.extend([finger(1, End, at.x, at.y), egui::Event::PointerGone]);
+        h.frame_with(events);
+        assert!(!h.app.session.selection.is_empty(), "a stationary touch selects even when its pointer disappears");
+        assert_eq!(h.app.cam, before);
+        h.app.session.selection.clear();
+        h.frames(2);
+        h.step(&json!({"shot":"touch-before"})).unwrap();
+        h.frame_with(pointer(at.x, at.y, None));
+        let mut events = pointer(at.x, at.y, Some(true));
+        events.push(finger(1, Start, at.x, at.y));
+        h.frame_with(events);
+        let to = at + egui::vec2(100.0, 50.0);
+        let mut events = pointer(to.x, to.y, None);
+        events.push(finger(1, Move, to.x, to.y));
+        h.frame_with(events);
+        assert_ne!(h.app.cam, before);
+        let mut events = pointer(to.x, to.y, Some(false));
+        events.extend([finger(1, End, to.x, to.y), egui::Event::PointerGone]);
+        h.frame_with(events);
+        assert!(h.app.session.selection.is_empty(), "orbiting must not select on release");
+        h.step(&json!({"shot":"touch-orbit"})).unwrap();
+        let orbited = h.app.cam;
+        h.frame_with(pointer(at.x, at.y, None));
+        let mut events = pointer(at.x, at.y, Some(true));
+        events.extend([finger(1, Start, at.x, at.y), finger(2, Start, at.x + 100.0, at.y)]);
+        h.frame_with(events);
+        let mut events = pointer(at.x + 40.0, at.y + 30.0, None);
+        events.extend([finger(1, Move, at.x + 40.0, at.y + 30.0), finger(2, Move, at.x + 140.0, at.y + 30.0)]);
+        h.frame_with(events);
+        assert_ne!(h.app.cam.target, orbited.target);
+        assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (orbited.yaw, orbited.pitch));
+        h.step(&json!({"shot":"touch-pan"})).unwrap();
+        let panned = h.app.cam;
+        let mut events = pointer(at.x + 10.0, at.y + 30.0, None);
+        events.extend([finger(1, Move, at.x + 10.0, at.y + 30.0), finger(2, Move, at.x + 170.0, at.y + 30.0)]);
+        h.frame_with(events);
+        assert!(h.app.cam.distance < panned.distance);
+        h.step(&json!({"shot":"touch-pinch"})).unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -3311,6 +4352,140 @@ mod view_key_tests {
             }
         }
         assert!(crate::keymap::RESERVED.contains(&crate::keymap::key_name(egui::Key::Num8, egui::Modifiers::COMMAND).as_str()));
+    }
+
+    /// #17931: with the Browser holding the keyboard (its last click was on a row) the plain arrows
+    /// do not turn the view, so the tree can take them; a click in the view hands them back, and
+    /// the `browser_arrow_keys` preference turns this off.
+    #[test]
+    fn arrows_leave_the_view_alone_while_the_browser_has_focus() {
+        let mut h = Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "base": [30, 0, 0]})).unwrap();
+        h.step(&json!({"call": "ui.view", "params": {"view": "front"}})).unwrap();
+        h.frames(3);
+        assert!(h.app.preferences.browser_arrow_keys, "on by default");
+        assert!(!h.app.tree.content.browser_focused(), "nothing is focused yet");
+        let (yaw, _) = turned(&mut h, json!({"key": "ArrowLeft"}));
+        assert!(yaw.abs() > 0.1, "the view turns before the Browser has focus: {yaw}");
+        h.step(&json!({"click": {"handle": "row:Body1"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.tree.content.browser_focused(), "a click on a row gives the Browser the keyboard");
+        let (yaw, pitch) = turned(&mut h, json!({"key": "ArrowLeft"}));
+        assert!(yaw.abs() < 1e-9 && pitch.abs() < 1e-9, "the view does not turn: {yaw} {pitch}");
+        for _ in 0..2 {
+            h.step(&json!({"key": "ArrowDown"})).unwrap();
+            h.frames(2);
+        }
+        let selected = format!("{:?}", h.app.session.selection);
+        assert!(selected.contains("Body2"), "Down moves the selection through the rows: {selected}");
+        let (_, pitch) = turned(&mut h, json!({"key": "ArrowUp"}));
+        assert!(pitch.abs() < 1e-9, "nor does Up: {pitch}");
+        h.app.preferences.browser_arrow_keys = false;
+        let (yaw, _) = turned(&mut h, json!({"key": "ArrowLeft"}));
+        assert!(yaw.abs() > 0.1, "with the preference off the arrows turn the view again: {yaw}");
+        h.app.preferences.browser_arrow_keys = true;
+        h.step(&json!({"click": {"world": [5, 5, 10]}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.tree.content.browser_focused(), "a click in the view takes the keyboard back");
+        let (yaw, _) = turned(&mut h, json!({"key": "ArrowLeft"}));
+        assert!(yaw.abs() > 0.1, "and the arrows turn the view: {yaw}");
+    }
+
+    /// #16601: in an orthographic view, zooming to the cursor and orbiting around it never move the target along
+    /// the view direction, and a pick still finds the model when the target has been placed far along it.
+    #[test]
+    fn orthographic_navigation_keeps_the_depth_and_picks_still_hit() {
+        use super::*;
+        let mut h = crate::scenario::Harness::new();
+        h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
+        h.settle();
+        h.app.cam = Camera::default();
+        let rect = h.app.viewport.rect.expect("the viewport");
+        let back = h.app.cam.back();
+        let depth0 = h.app.cam.target.dot(back);
+        let anchors = [Vec3::new(20.0, 20.0, 20.0), Vec3::new(-20.0, -20.0, -20.0), Vec3::new(20.0, -20.0, 0.0)];
+        for i in 0..400 {
+            let a = anchors[i % anchors.len()];
+            h.app.cam.zoom_at(if i % 2 == 0 { 0.8 } else { 1.0 / 0.8 }, Some(a));
+            h.app.cam.orbit_about(3.0, -1.0, a);
+            let back = h.app.cam.back();
+            assert!(h.app.cam.target.dot(back).abs() < 1e3, "step {i}: the target drifted to {:?}", h.app.cam.target);
+        }
+        // A pure zoom keeps the target's depth exactly.
+        h.app.cam = Camera::default();
+        for i in 0..50 {
+            h.app.cam.zoom_at(0.9, Some(anchors[i % anchors.len()]));
+        }
+        assert!((h.app.cam.target.dot(back) - depth0).abs() < 1e-6);
+        // The target (and so the camera plane) deep inside or in front of the model still picks it.
+        for shift in [0.0, 100.0, 5000.0, -5000.0, 2e8, -2e8] {
+            h.app.cam = Camera::default();
+            h.app.cam.target -= h.app.cam.back() * shift;
+            let proj = projection(&h.app, rect);
+            assert!(proj.cam.fov <= 0.0, "shift {shift}: the pick must use the orthographic ray");
+            let hits = pick_cached(&mut h.app, &proj, rect.center());
+            assert!(hits.iter().any(|hit| matches!(hit, Hit::Face { .. })), "shift {shift}: no pick");
+        }
+    }
+
+    /// #16628: in perspective, zooming in never collapses the eye onto the target, and the target stays
+    /// near the model, for a run of wheel steps at the centre and for a seeded mix of orbit, scroll and pinch.
+    #[test]
+    fn perspective_zoom_in_keeps_a_minimum_distance_and_the_model_in_view() {
+        use super::*;
+        let mut h = crate::scenario::Harness::new();
+        h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
+        h.app.ui.perspective = true;
+        h.app.preferences.zoom_to_cursor = true;
+        h.app.preferences.zoom_stop_at_model = false;
+        h.settle();
+        let rect = h.app.viewport.rect.expect("the viewport");
+        let min = crate::viewport::min_zoom_distance(&h.app);
+        let inside = |app: &SolveApp| app.cam.target.dist(Vec3::ZERO) < 60.0 + 3.0 * app.cam.distance.max(0.0);
+        let centre = rect.center();
+        h.app.cam = Camera::default();
+        for i in 0..35 {
+            h.call("ui.scroll", json!({"x": centre.x, "y": centre.y, "delta": 120.0}));
+            h.settle();
+            let (d, t) = (h.app.cam.distance, h.app.cam.target);
+            assert!(d >= min - 1e-9, "step {i}: distance {d} under the bound {min}");
+            assert!(t.dist(Vec3::ZERO) < 60.0, "step {i}: the target drifted to {t:?}");
+        }
+        assert!(h.app.cam.distance < 100.0, "the wheel zoomed in: {}", h.app.cam.distance);
+        // A seeded mix of orbit, scroll and pinch keeps both.
+        let mut seed = 0x2545_F491_4F6C_DD1D_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        h.app.cam = Camera::default();
+        for i in 0..200 {
+            let at = pos2(rect.left() + 40.0 + next() as f32 * (rect.width() - 80.0), rect.top() + 40.0 + next() as f32 * (rect.height() - 80.0));
+            match (next() * 3.0) as u32 {
+                0 => {
+                    h.call("ui.drag", json!({"x0": at.x, "y0": at.y, "x1": at.x + 60.0 * (next() as f32 - 0.5), "y1": at.y + 60.0 * (next() as f32 - 0.5), "steps": 4, "button": "middle"}));
+                }
+                1 => {
+                    h.call("ui.scroll", json!({"x": at.x, "y": at.y, "delta": 120.0 * (1.0 + 3.0 * next())}));
+                }
+                _ => {
+                    let f = 1.0 + 0.5 * next();
+                    h.app.cam.zoom_at(1.0 / f, Some(h.app.cam.target));
+                    hold_perspective_distance(&mut h.app);
+                }
+            }
+            h.settle();
+            let (d, t) = (h.app.cam.distance, h.app.cam.target);
+            assert!(d >= min - 1e-9, "step {i}: distance {d} under the bound {min}");
+            assert!(t.is_finite() && inside(&h.app), "step {i}: the target drifted to {t:?}");
+            let proj = projection(&h.app, rect);
+            let on_screen = proj.to_screen(Vec3::ZERO);
+            assert!(on_screen.is_some() || d < 1.0 || h.app.cam.target.dist(Vec3::ZERO) < 40.0, "step {i}: the model left the frustum");
+        }
     }
 
     /// #717: PageUp/PageDown and +/− zoom the view; the keys are reserved like the arrows, OS
@@ -3472,7 +4647,7 @@ mod view_key_tests {
         assert!((turn(before, h.app.cam.yaw).abs() - 30f64.to_radians()).abs() < 1e-6);
     }
 
-    /// Ctrl+1…7 run Front … Isometric View by default, turning the view as the view cube's faces
+    /// Ctrl+1…7 run Front … Isometric View by default, turning the view as the navigator's faces
     /// do; the keys are ordinary shortcuts, so one can be moved to another command and back.
     #[test]
     fn ctrl_digits_turn_to_the_standard_views_and_can_be_rebound() {
@@ -3503,9 +4678,9 @@ mod view_key_tests {
             assert!(looks_from(&mut h, digit, view), "Ctrl+{digit} turns to {view:?}: {:?}", h.app.cam.back());
         }
         // Top moves to Ctrl+T; Ctrl+5 then does nothing, Ctrl+T turns to the top.
-        crate::keymap::bind(&mut h.app, "view.top", "Ctrl+T", false).unwrap();
+        crate::keymap::bind(&mut h.app, "view.top", "Ctrl+J", false).unwrap();
         assert!(!looks_from(&mut h, "5", StandardView::Top), "Ctrl+5 no longer turns to the top");
-        assert!(looks_from(&mut h, "T", StandardView::Top), "Ctrl+T does");
+        assert!(looks_from(&mut h, "J", StandardView::Top), "Ctrl+J does");
     }
 
     /// #1886: Ctrl+8 looks straight at the sketch; pressed again while the view faces it, it

@@ -1,0 +1,393 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b5": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 12.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                0.8,
+                0.0,
+                -12.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                -12.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                6.0,
+                0.2725204522718143,
+                -12.0
+              ],
+              "start": [
+                0.8,
+                0.0,
+                -12.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                6.0,
+                8.0,
+                -12.0
+              ],
+              "start": [
+                6.0,
+                0.2725204522718143,
+                -12.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                8.0,
+                -12.0
+              ],
+              "start": [
+                6.0,
+                8.0,
+                -12.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                -12.0
+              ],
+              "start": [
+                0.0,
+                8.0,
+                -12.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 40.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                20.0,
+                0.0,
+                -20.0
+              ],
+              "start": [
+                -20.0,
+                0.0,
+                -20.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.0,
+                20.0,
+                -20.0
+              ],
+              "start": [
+                20.0,
+                0.0,
+                -20.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -20.0,
+                20.0,
+                -20.0
+              ],
+              "start": [
+                20.0,
+                20.0,
+                -20.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -20.0,
+                0.0,
+                -20.0
+              ],
+              "start": [
+                -20.0,
+                20.0,
+                -20.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b10",
+        "b11"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b17"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  6.0,
+                  9.727479547728185,
+                  0.2725204522718143
+                ],
+                [
+                  0.8,
+                  10.0,
+                  0.0
+                ]
+              ],
+              "index": 12
+            }
+          ],
+          "points": [
+            [
+              3.4,
+              9.863739773864094,
+              0.13626022613590716
+            ]
+          ],
+          "tolerance": 0.7095906474769821
+        },
+        "kind": "round",
+        "sizes": [
+          2.6
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "15437-fillet-round-ends-at-crease-beside-drafted-side",
+  "expected": {
+    "bbox": {
+      "max": [
+        6,
+        10.041926223426433,
+        8
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "Block: the section x 0..6, z from the bottom (flat to x = 0.8, then rising at 3 deg) to 8, extruded along y and cut by the side plane y = 10 - (x - 0.8) tan 3 deg. V0 = 8 (10 (0.8) + tan3 0.8^2/2) + [80 w - (8 tan3 + 10 tan3) w^2/2 + tan3^2 w^3/3] with w = 5.2: 467.508936903. The round ends on the plane through the crease vertex (0.8, 10, 0) that holds the crease (along y) and is otherwise square to the edge, the plane through the vertex and the rail's crossing with the crease (the rail on the bottom reaches its face's end there first). It removes a straight prism of the corner's spandrel between that plane and the end face x = 6: for a corner of angle phi between the faces, with d = R / tan(phi/2) and half-arc a = (pi - phi)/2, the spandrel's area is d R - a R^2 and its centroid lies on the bisector at the kite's moment less the sector's over that area; the volume is that area times the length of the centroid's line between the two planes: 7.560028058. V = 467.508936903 - 7.560028058 = 459.948908845 mm3.",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#15437",
+      "tangency-labs/solidcraft#15212"
+    ],
+    "tolerance": {
+      "rel": 1e-9
+    },
+    "volume_mm3": 459.948909,
+    "what": "a round R2.6 on the long piece of a block's bottom side edge, ending at the 3 deg crease where the bottom changes plane, the side face beside it drafted 3 deg in plan; the short piece across the crease left sharp (an End at a smooth vertex beside a drafted face)"
+  },
+  "expressible": true,
+  "gallery_note": "the round ends at the crease vertex, its cap the plane through the vertex that holds the crease (the bottom's rail reaches its face's end there first), turned from square to the edge by the drafted side",
+  "operation_expressible": true,
+  "records": "15437-fillet-round-ends-at-crease-beside-drafted-side.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b17"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#15437",
+    "tangency-labs/solidcraft#15212"
+  ],
+  "ungraded": [],
+  "what": "a round R2.6 on the long piece of a block's bottom side edge, ending at the 3 deg crease where the bottom changes plane, the side face beside it drafted 3 deg in plan; the short piece across the crease left sharp (an End at a smooth vertex beside a drafted face)",
+  "why_not": []
+}

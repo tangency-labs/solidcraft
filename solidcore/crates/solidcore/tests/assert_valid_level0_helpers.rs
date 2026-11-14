@@ -210,6 +210,45 @@ fn a_uv_trim_curve_turning_along_a_pole_is_a_dog_leg() {
     assert!(!has_dog_leg_near_pole(&k, &b, eu).unwrap().has_dog_leg);
 }
 
+/// A repeated control point has no angle; it is skipped and the scan goes on to the
+/// turn after it (the fork stopped the whole scan there and showed no dog leg).
+#[test]
+fn a_repeated_control_point_does_not_hide_a_later_dog_leg() {
+    let mut k = Kernel::default();
+    let mut b = create_sphere(&mut k, Point3::ZERO, 5.0).unwrap();
+    let (eu, holder) = b
+        .edgeuses()
+        .ids()
+        .find_map(|eu| match eu1::uv_trim_curve(&b, eu).unwrap() {
+            (Some(_), Some(h)) => Some((eu, h)),
+            _ => None,
+        })
+        .expect("a sphere edge use with a UV trim curve");
+    let f = eu1::face(&b, eu).unwrap().unwrap();
+    let surface = b.face(f).unwrap().surface.clone().unwrap();
+    let tol = b.face(f).unwrap().tolerance;
+    let sing = surface
+        .get_singularities_of_face(&k, tol, false, false)
+        .unwrap()
+        .singular;
+    assert_ne!(
+        sing & (SS_VMIN | SS_VMAX),
+        0,
+        "the sphere's poles are V sides"
+    );
+    let d = surface.natural_uv_domain_with_nurb(&k).unwrap();
+    let (u0, u1, v0, v1) = (d.u_min(), d.u_max(), d.v_min(), d.v_max());
+    let (um, vm) = ((u0 + u1) / 2.0, (v0 + v1) / 2.0);
+    let lu = (u1 - u0) / 10.0;
+    let vp = if sing & SS_VMIN != 0 { v0 } else { v1 };
+    // down to the pole, a repeated point there, along the pole in U, back up
+    let pts = [[um, vm], [um, vp], [um, vp], [um + lu, vp], [um + lu, vm]];
+    b.edgeuse_mut(holder).unwrap().uv_trim_curve = Some(Curve::from(polyline(&pts)));
+    let dog = has_dog_leg_near_pole(&k, &b, eu).unwrap();
+    assert!(dog.has_dog_leg);
+    assert_eq!(dog.index, Some(3));
+}
+
 #[test]
 fn check_pointers_fails_on_a_broken_mate_link() {
     let mut k = Kernel::default();

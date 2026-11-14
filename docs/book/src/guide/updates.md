@@ -90,6 +90,8 @@ SolidCraft compares the answer with its own version on your computer.
 - Turning off **Check for updates automatically** stops the checks; only **Check now** asks.
 - Setting the environment variable `SOLIDCRAFT_UPDATE_CHECK=0` turns all checks off, for
   example on managed machines.
+- On Windows an organization can turn the checks off, or keep them on, for everyone with a
+  policy: see [Managing SolidCraft in an organization](managed-deployment.md).
 
 Builds you compile yourself, the Flatpak and the browser app never check, and Preferences shows
 no check controls for them. The browser app updates itself: reload the page to get the latest

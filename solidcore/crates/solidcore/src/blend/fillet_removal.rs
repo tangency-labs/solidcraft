@@ -64,13 +64,28 @@
 //!   continued) instead of a fitted intersection of its faces. A curved side edge, a
 //!   corner of more than three edges, or a face other than a plane whose new corner lies
 //!   outside its surface's natural domain fails the removal before the B-rep changes.
+//!   The intersection that finds the new edge takes each tangent plane continued over
+//!   the domain it searches (its analytic domain grown), since the intersector keeps
+//!   to a surface's natural domain and a plane made at its face's size would stop the
+//!   trace at the old corner (#17414).
 //!   The fork installs the run-on curve with `SetCurve` and then sets its owner; the
 //!   port names it by the edit's identity first, which `SetCurve` then records (the same
 //!   owner).
+//! - **Failures.** Where upstream returns `SM_ERR` because the face and its neighbours are
+//!   not a fillet it removes, or because the removal would continue a face or an edge past
+//!   its geometry, the port refuses with a typed cause
+//!   ([`crate::error::blend::BlendFailure::RemovalRefused`], classes 130 and 131). Every
+//!   other failure is a [`crate::error::blend::BlendFailure::StageFailed`], a defect: an
+//!   `NER` keeps its `SM_ERR_NULL_POINTER` status, and a call whose status upstream turns
+//!   into `SM_ERR` is kept as the cause. The statuses are upstream's.
 //! - No recursion.
 
+use crate::curve::curve::p6::DroppedPoint;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::blend::{BlendFailure, RemovalRefusal as R};
+use crate::error::{
+    ignore_status, ignored, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER,
+};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -100,29 +115,84 @@ pub mod ring;
 
 const OP: &str = "blend::fillet_removal";
 
-fn sm_err() -> SolidError {
-    SolidError::blend_failed(OP, "the fillet could not be removed")
+/// `SM_ERR` where a stage of the removal failed with no reason the kernel names: a
+/// [`BlendFailure::StageFailed`], a defect.
+#[track_caller]
+fn stage_failed() -> SolidError {
+    SolidError::blend(OP, BlendFailure::StageFailed)
+}
+
+/// `SM_ERR` where the removal refuses the face, for `reason`: a
+/// [`BlendFailure::RemovalRefused`], a refusal no size decides.
+#[track_caller]
+fn refused(reason: R) -> SolidError {
+    SolidError::blend(OP, BlendFailure::RemovalRefused(reason))
+}
+
+/// A stage of the removal failed, keeping `cause`, the error of the call it made (upstream
+/// `SER(SM_ERR)` of the call's status).
+#[track_caller]
+fn stage_failed_after(cause: SolidError) -> SolidError {
+    Failure::new(OP, BlendFailure::StageFailed)
+        .caused_by(cause)
+        .into_error()
 }
 
 fn null(what: &'static str) -> SolidError {
     SolidError::invalid_input(OP, what)
 }
 
-/// `NER(p)`: a `NULL` pointer is `SM_ERR_NULL_POINTER`.
+/// The corner dropped onto the side edge's run-on line (exact only, WR-606): the drop when it
+/// converged within `tol`; [`R::CornerOffSideLine`] when it converged farther away; a stage
+/// failure when the drop stopped or failed, which proves nothing about the line (#15034
+/// rule 5; a failed call is kept as the cause). Unported and cancelled calls pass on.
+#[track_caller]
+fn run_on_drop(drop: Result<DroppedPoint>, tol: f64) -> Result<DroppedPoint> {
+    match drop {
+        Ok(d) if d.success && d.distance <= tol => Ok(d),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(e) => Err(stage_failed_after(e)),
+        Ok(d) if !d.success => Err(stage_failed()),
+        Ok(_) => Err(refused(R::CornerOffSideLine)),
+    }
+}
+
+/// A curved side edge that does not reach the new corner (exact only, WR-606):
+/// [`R::SideEdgeNotStraight`] when the drop onto it converged (`decided`), so that it stops
+/// short is proved; a stage failure when the drop stopped or failed (#15034 rule 5), keeping
+/// the failed drop's error (`drop_err`) as its cause.
+#[track_caller]
+fn curved_side_edge(decided: bool, drop_err: Option<SolidError>) -> SolidError {
+    if decided {
+        refused(R::SideEdgeNotStraight)
+    } else if let Some(e) = drop_err {
+        stage_failed_after(e)
+    } else {
+        stage_failed()
+    }
+}
+
+/// `NER(p)`: a `NULL` pointer is `SM_ERR_NULL_POINTER`, an object the removal holds or
+/// looks up that is not there: a [`BlendFailure::StageFailed`] with that status.
+#[track_caller]
 fn ner<T>(v: Option<T>) -> Result<T> {
-    v.ok_or_else(|| SolidError::blend_missing(OP, "an object the removal needs"))
+    match v {
+        Some(v) => Ok(v),
+        None => Err(Failure::new(OP, BlendFailure::StageFailed)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()),
+    }
 }
 
 /// A status upstream turns into `SER(SM_ERR)` whatever it was: any failure but an
-/// unported callee becomes `SM_ERR`.
+/// unported callee becomes a stage failure that keeps the call's error as its cause.
+#[track_caller]
 fn or_sm_err<T>(r: Result<T>) -> Result<T> {
-    r.map_err(|e| {
-        if e.is_unported_or_cancelled() {
-            e
-        } else {
-            sm_err()
-        }
-    })
+    match r {
+        Ok(v) => Ok(v),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(e) => Err(stage_failed_after(e)),
+    }
 }
 
 /// One corner of the fillet face (`SmFilletCornerInfo`): its vertex, the vertex's UV
@@ -333,7 +403,7 @@ impl FilletRemoval {
                     }
                     if !inside && !srf.is_kind_of(Plane::TYPE)? {
                         self.not_exact = true;
-                        return Err(sm_err());
+                        return Err(refused(R::FaceGrowsPastDomain));
                     }
                 }
             }
@@ -383,7 +453,7 @@ impl FilletRemoval {
         // Assumption: GetEdges() returns Edges ordered around the Loop.
         let edges = crate::topology::face::p4::edges(b, self.face_to_delete, None, false, None)?;
         let [e0, e1, e2, e3] = edges.as_slice() else {
-            return Err(sm_err());
+            return Err(refused(R::NotFourEdges));
         };
         let (e0, e1, e2, e3) = (*e0, *e1, *e2, *e3);
 
@@ -393,32 +463,32 @@ impl FilletRemoval {
 
         if tangent(b, e0)? {
             if tangent(b, e1)? {
-                return Err(sm_err());
+                return Err(refused(R::AdjacentEdgesTangent));
             }
             if !tangent(b, e2)? {
-                return Err(sm_err());
+                return Err(refused(R::OppositeEdgeNotTangent));
             }
             if tangent(b, e3)? {
-                return Err(sm_err());
+                return Err(refused(R::AdjacentEdgesTangent));
             }
 
             self.tan_edges = [Some(e0), Some(e2)];
             self.end_edges = [Some(e1), Some(e3)];
         } else if tangent(b, e1)? {
             if tangent(b, e0)? {
-                return Err(sm_err());
+                return Err(refused(R::AdjacentEdgesTangent));
             }
             if tangent(b, e2)? {
-                return Err(sm_err());
+                return Err(refused(R::AdjacentEdgesTangent));
             }
             if !tangent(b, e3)? {
-                return Err(sm_err());
+                return Err(refused(R::OppositeEdgeNotTangent));
             }
 
             self.tan_edges = [Some(e1), Some(e3)];
             self.end_edges = [Some(e0), Some(e2)];
         } else {
-            return Err(sm_err());
+            return Err(refused(R::NoTangentEdge));
         }
 
         // Get the four corner vertices.
@@ -430,13 +500,13 @@ impl FilletRemoval {
         for (i, (tan, end)) in tan_verts.iter_mut().zip(end_verts.iter_mut()).enumerate() {
             let verts = edge::vertices(b, self.tan_edge(i)?, None)?;
             let [v0, v1] = verts.as_slice() else {
-                return Err(sm_err());
+                return Err(refused(R::EdgeWithoutTwoVertices));
             };
             *tan = [*v0, *v1];
 
             let verts = edge::vertices(b, self.end_edge(i)?, None)?;
             let [v0, v1] = verts.as_slice() else {
-                return Err(sm_err());
+                return Err(refused(R::EdgeWithoutTwoVertices));
             };
             *end = [*v0, *v1];
         }
@@ -449,7 +519,7 @@ impl FilletRemoval {
                 } else if ev1 == tv0 || ev1 == tv1 {
                     ev1
                 } else {
-                    return Err(sm_err());
+                    return Err(stage_failed());
                 };
                 self.corner_mut(which_end, which_side)?.vertex = found;
             }
@@ -467,14 +537,14 @@ impl FilletRemoval {
         };
         let other_face = |faces: &[FaceId]| -> Result<FaceId> {
             let [f0, f1] = faces else {
-                return Err(sm_err());
+                return Err(refused(R::EdgeNotBetweenTwoFaces));
             };
             if *f0 == fil_face {
                 Ok(*f1)
             } else if *f1 == fil_face {
                 Ok(*f0)
             } else {
-                Err(sm_err())
+                Err(stage_failed())
             }
         };
         for which_end in 0..2 {
@@ -484,7 +554,7 @@ impl FilletRemoval {
                 *slot = Some(tan_face);
             }
             if !is_b_spline(b, tan_face)? {
-                return Err(sm_err());
+                return Err(refused(R::TangentFaceNotBSpline));
             }
 
             let faces = edge::faces(b, self.end_edge(which_end)?, None)?;
@@ -493,7 +563,7 @@ impl FilletRemoval {
                 *slot = Some(end_face);
             }
             if !is_b_spline(b, end_face)? {
-                return Err(sm_err());
+                return Err(refused(R::EndFaceNotBSpline));
             }
         } // end for loop on two ends of fillet
 
@@ -543,7 +613,7 @@ impl FilletRemoval {
                         if side_vtx == Some(vtx) {
                             high_end = true;
                         } else {
-                            return Err(sm_err()); // If this happens it's our own fault.
+                            return Err(stage_failed()); // If this happens it's our own fault.
                         }
                     }
                 }
@@ -610,7 +680,8 @@ impl FilletRemoval {
         ) {
             Ok(Some(sol)) => sol,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Ok(None) | Err(_) => return Err(sm_err()),
+            Ok(None) => return Err(stage_failed()),
+            Err(e) => return Err(stage_failed_after(e)),
         };
 
         // Store the new vtx position and the three surface uv's.
@@ -637,7 +708,7 @@ impl FilletRemoval {
         let dist11 = vtx_pt_tan0.distance(vtx_pt_tan1);
         let tol = self.tol_3d;
         if dist00 > tol || dist01 > tol || dist11 > tol {
-            return Err(sm_err());
+            return Err(stage_failed());
         }
 
         let new_vtx_pt = (vtx_pt_end + vtx_pt_tan0 + vtx_pt_tan1) / 3.0;
@@ -668,6 +739,8 @@ impl FilletRemoval {
         let mut crv_param = 0.0;
         let mut success = false;
         let mut stat_ok = false;
+        // the side-edge drop's error, kept as the cause of an exact-only stage failure
+        let mut drop_err = None;
 
         let new_vtx_pt = *self
             .new_vtx_pts
@@ -697,7 +770,7 @@ impl FilletRemoval {
                     crv_dist = d.distance;
                 }
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => {}
+                Err(e) => drop_err = Some(e),
             }
         }
 
@@ -707,12 +780,14 @@ impl FilletRemoval {
         if self.exact_only && !(stat_ok && success && crv_dist <= tol) {
             // a corner of more than three edges keeps its end edge, on a fitted intersection
             let Some(side) = side_edge else {
-                return Err(sm_err());
+                return Err(refused(R::CornerNeedsFittedIntersection));
             };
             let side_curve = ner(edge::curve(b, side)?)?.clone();
             if bspline_part(&side_curve).is_none() || !side_curve.is_linear(k, tol, false)?.linear {
-                self.not_exact = true;
-                return Err(sm_err());
+                let decided = stat_ok && success;
+                // (an undecided drop proves no inexactness)
+                self.not_exact = decided;
+                return Err(curved_side_edge(decided, drop_err));
             }
             let curve_ivl = side_curve.natural_interval();
             let end = if high_end {
@@ -728,7 +803,7 @@ impl FilletRemoval {
             let speed = d1.length();
             // (`!(dSpeed > SM_EFF_ZERO)`: a NaN speed fails too)
             if speed.is_nan() || speed <= EFF_ZERO {
-                return Err(sm_err());
+                return Err(stage_failed());
             }
             let reach = (p0.distance(new_vtx_pt) + 10.0 * tol) / speed;
             let far = if high_end { end + reach } else { end - reach };
@@ -749,17 +824,11 @@ impl FilletRemoval {
                 SolverOperation::Minimize,
             );
             self.corner_mut(which_end, which_side)?.new_side_curve = Some(longer);
-            match drop {
-                Ok(d) if d.success && d.distance <= tol => {
-                    stat_ok = true;
-                    success = d.success;
-                    crv_param = d.parameter;
-                    crv_dist = d.distance;
-                }
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                // the corner is off the side edge's line
-                _ => return Err(sm_err()),
-            }
+            let d = run_on_drop(drop, tol)?;
+            stat_ok = true;
+            success = d.success;
+            crv_param = d.parameter;
+            crv_dist = d.distance;
         }
 
         if stat_ok && success && crv_dist <= tol {
@@ -876,7 +945,7 @@ impl FilletRemoval {
                 None,
             ))?;
             let Some(int_crv_3d) = int.curve_3d else {
-                return Err(sm_err());
+                return Err(stage_failed());
             };
 
             // Save the curves in the kit.
@@ -919,14 +988,20 @@ impl FilletRemoval {
             sv
         };
 
-        let tan0 = out_of_bounds_copy(b, self.tan_face(0)?)?;
-        let tan1 = out_of_bounds_copy(b, self.tan_face(1)?)?;
+        let mut tan0 = out_of_bounds_copy(b, self.tan_face(0)?)?;
+        let mut tan1 = out_of_bounds_copy(b, self.tan_face(1)?)?;
         let mut uv_domain1 = tan0.natural_uv_domain_with_nurb(k)?;
         let mut uv_domain2 = tan1.natural_uv_domain_with_nurb(k)?;
 
         // Also expand the domains, for srf/srf/srf intersect.
         uv_domain1.expand_relative(2.0);
         uv_domain2.expand_relative(2.0);
+        // Not upstream (WR-606, exact only): planes continued over them, so the trace
+        // reaches the new corners past the faces' edges.
+        if self.exact_only {
+            continue_plane(&mut tan0, &uv_domain1);
+            continue_plane(&mut tan1, &uv_domain2);
+        }
 
         let int = or_sm_err(tan0.point_based_surface_intersect(
             k,
@@ -941,7 +1016,7 @@ impl FilletRemoval {
             None,
         ))?;
         let Some(int_crv_3d) = int.curve_3d else {
-            return Err(sm_err());
+            return Err(stage_failed());
         };
 
         self.new_edge_curve_3d = Some(int_crv_3d);
@@ -1258,7 +1333,7 @@ impl FilletRemoval {
             SolverOperation::Minimize,
         ))?;
         if !drop.success || drop.distance > tol {
-            return Err(sm_err());
+            return Err(stage_failed());
         }
         let (t0, t1) = if high_end {
             (drop.parameter, fixed)
@@ -1501,6 +1576,20 @@ fn out_of_bounds_copy(b: &Brep, f: FaceId) -> Result<Surface> {
     Ok(s)
 }
 
+/// Not upstream (WR-606, exact only): the evaluation copy `s` of a face's surface, when it
+/// is a plane, continued over `domain` (its analytic domain grown to it). The surface
+/// intersector works within each surface's natural domain, and a plane's is the face's
+/// own extent where the face was made at that size (an extruded profile's side): a new
+/// corner past the face's edge, where the removed fillet stood, lies outside it, and the
+/// trace from it stops there, a curve of no length. A plane continued is the same plane
+/// with the same parameters, as the exact-only check of [`FilletRemoval::remove_face`]
+/// already takes it; any other surface keeps its domain.
+fn continue_plane(s: &mut Surface, domain: &Extent2d) {
+    if let SurfaceKind::Plane(p) = s.kind_mut() {
+        p.update_analytical_domain(domain);
+    }
+}
+
 /// `pVertex->SetPoint(p)` through the kernel's callbacks.
 fn set_vertex_point(k: &mut Kernel, b: &mut Brep, v: VertexId, p: Point3) -> Result<()> {
     with_kernel_callbacks(k, b, |_k, b, env| {
@@ -1620,7 +1709,7 @@ pub fn move_vtx_and_edge_to_adjacent_face(
     // Start with the edge use oriented in the direction (vtx_to_move -> edge_to_move),
     // i.e., whose vertex use corresponds to vtx_to_move.
     let Some(mut eu_to_move) = edge::edgeuse_of_face(b, edge_to_move, Some(from_face))? else {
-        return Err(sm_err());
+        return Err(stage_failed());
     };
     let eu_vertex = |b: &Brep, eu: EdgeuseId| -> Result<Option<VertexId>> {
         let vu = ner(eu1::vertexuse(b, eu)?)?;
@@ -1755,7 +1844,7 @@ pub fn set_trim_curve(
         }
     }
     // should never arrive there
-    Err(sm_err())
+    Err(stage_failed())
 }
 
 /// `SmBrep::GlueEdges(pSurvivingEdge, eRelativeOrientation, dEdgeGap, pEdgeToDelete)`
@@ -1780,7 +1869,7 @@ pub fn glue_edges(
 ) -> Result<()> {
     // Make sure we have both lamina edges.
     if !eu1::edge_is_lamina(b, to_delete)? {
-        return Err(sm_err());
+        return Err(stage_failed());
     }
 
     let this = Some(NotifyArg::Object(brep_p2::brep_ref(b)));
@@ -1879,7 +1968,7 @@ pub fn delete_fillet_face(
 ) -> Result<()> {
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(sm_err());
+        return Err(stage_failed());
     }
     let tol_3d = match tol_3d {
         Some(t) => t,
@@ -1947,10 +2036,103 @@ mod tests {
         b.set_editing_enabled(false);
         let face = crate::topology::brep::p1::faces(&b, None).unwrap()[0];
         let error = delete_fillet_face(&mut k, &mut b, face, None).unwrap_err();
-        assert_eq!(error, sm_err());
+        assert_eq!(error, stage_failed());
         assert!(error.blend_failure().is_some());
         assert_eq!(error.sm_status(), Some(crate::error::SM_ERR));
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(crate::topology::brep::p1::faces(&b, None).unwrap().len(), 6);
+    }
+
+    /// #15019: a box's face is no fillet (no edge of it is tangent): the removal refuses it
+    /// with a typed cause, a refusal no size decides, under the same `SM_ERR` status.
+    #[test]
+    fn removing_a_box_face_is_refused_as_no_fillet() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        b.set_editing_enabled(true);
+        let face = crate::topology::brep::p1::faces(&b, None).unwrap()[0];
+        let error = delete_fillet_face(&mut k, &mut b, face, None).unwrap_err();
+        assert_eq!(
+            error.blend_failure(),
+            Some(&BlendFailure::RemovalRefused(R::NoTangentEdge))
+        );
+        assert_eq!(error.kind(), crate::error::ErrorKind::NotARemovableFillet);
+        assert!(error.is_refusal() && !error.is_defect() && !error.sized());
+        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(crate::topology::brep::p1::faces(&b, None).unwrap().len(), 6);
+    }
+
+    /// A missing object is a stage failure built on purpose, a defect, with the
+    /// `SM_ERR_NULL_POINTER` status of upstream's `NER`; a failed call keeps its error as the
+    /// cause, and an unported or cancelled call passes on as it is.
+    #[test]
+    fn missing_objects_and_failed_calls_are_stage_failures() {
+        let before = line!();
+        let missing = ner::<()>(None).unwrap_err();
+        assert!((before..line!()).contains(&missing.failure().unwrap().origin().line()));
+        assert_eq!(missing.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert_eq!(missing.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert!(missing.is_defect() && !missing.is_refusal());
+        let call = SolidError::invalid_input("blend::call", "no such face");
+        let failed = or_sm_err::<()>(Err(call.clone())).unwrap_err();
+        assert_eq!(failed.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert_eq!(failed.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(failed.cause(), Some(&call));
+        assert!(failed.is_defect() && !failed.is_refusal());
+        let unported = SolidError::unported("SmX::Y", "unit");
+        assert_eq!(or_sm_err::<()>(Err(unported.clone())), Err(unported));
+    }
+
+    /// The side edge's run-on drop refuses only when it converged farther than `tol` from
+    /// the corner: a drop that stopped, or failed, proves nothing about the line and is a
+    /// stage failure (#15034 rule 5).
+    #[test]
+    fn the_run_on_drop_refuses_only_a_converged_drop() {
+        let tol = 1e-6;
+        let drop = |success, distance| DroppedPoint {
+            success,
+            parameter: 0.5,
+            distance,
+        };
+        assert_eq!(run_on_drop(Ok(drop(true, 0.0)), tol), Ok(drop(true, 0.0)));
+        let off = run_on_drop(Ok(drop(true, 0.1)), tol).unwrap_err();
+        assert_eq!(
+            off.blend_failure(),
+            Some(&BlendFailure::RemovalRefused(R::CornerOffSideLine))
+        );
+        assert!(off.is_refusal());
+        for d in [drop(false, 0.0), drop(false, 0.1)] {
+            let stopped = run_on_drop(Ok(d), tol).unwrap_err();
+            assert_eq!(stopped.blend_failure(), Some(&BlendFailure::StageFailed));
+            assert!(stopped.is_defect() && !stopped.is_refusal());
+        }
+        let call = SolidError::invalid_input("blend::call", "no such curve");
+        let failed = run_on_drop(Err(call.clone()), tol).unwrap_err();
+        assert_eq!(failed.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert_eq!(failed.cause(), Some(&call));
+        // a curved side edge is refused only when the drop onto it converged
+        assert_eq!(
+            curved_side_edge(true, None).blend_failure(),
+            Some(&BlendFailure::RemovalRefused(R::SideEdgeNotStraight))
+        );
+        let stopped = curved_side_edge(false, None);
+        assert_eq!(stopped.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert_eq!(stopped.cause(), None);
+    }
+
+    /// A drop onto a curved side edge that failed with an error (exact only) is a stage
+    /// failure that keeps the drop's error as its cause, so the chain reaches the call that
+    /// failed; a drop that only stopped has no cause to keep.
+    #[test]
+    fn a_failed_drop_onto_a_curved_side_edge_is_kept_as_the_cause() {
+        let call = SolidError::invalid_input("curve::drop_point", "no such curve");
+        let failed = curved_side_edge(false, Some(call.clone()));
+        assert_eq!(failed.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert!(failed.is_defect() && !failed.is_refusal());
+        assert_eq!(failed.cause(), Some(&call));
+        assert_eq!(failed.root_cause(), &call);
+        assert_eq!(curved_side_edge(false, None).cause(), None);
     }
 }
