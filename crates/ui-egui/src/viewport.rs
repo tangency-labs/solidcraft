@@ -4586,6 +4586,9 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     // Two themes may share a light/dark base while drawing different geometry colours.
     crate::theme_files::color_key(&Tokens::base()).hash(&mut h);
     app.preview.effective_replaced().hash(&mut h);
+    for (name, m) in &app.preview.outlines {
+        (name, std::sync::Arc::as_ptr(m)).hash(&mut h);
+    }
     app.preview.rolled_back.hash(&mut h);
     app.viewport.refused_ring.hash(&mut h);
     // Where a Move dialog has moved its bodies; while its triad is dragged, only that it is.
@@ -5201,8 +5204,10 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 }
             }
             Sel::Body { name } => {
+                // As a face: lit over a live preview, the old body fought with it in slivers.
                 if let Some(b) = by_name.get(name)
                     && app.body_visible(name)
+                    && !replaced(name)
                 {
                     if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
                         for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {
@@ -5342,11 +5347,30 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             selected_faces.entry(body.as_str()).or_default().insert(*index);
         }
     }
-    for b in st.bodies.iter().filter(|b| app.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)) {
+    for b in st.bodies.iter().filter(|b| app.body_visible(&b.name)) {
+        // A body the preview stands in for is not lit, its old faces fighting with the preview,
+        // but outlined by what the preview draws for it where it says (a combine's result, or a
+        // tool it ghosts).
+        let stood_in = app.preview.effective_replaced().contains(&b.name);
+        let stand_ins: Vec<&std::sync::Arc<solidcraft_engine::geom::Mesh>> =
+            if stood_in { app.preview.outlines.iter().filter(|(name, _)| *name == b.name).map(|(_, m)| m).collect() } else { Vec::new() };
+        if stood_in && stand_ins.is_empty() {
+            continue;
+        }
         let whole = hovered_whole.contains(b.name.as_str());
         let faces: Vec<usize> =
             if whole { (0..b.body.face_count()).collect() } else { hovered_faces.get(b.name.as_str()).cloned().unwrap_or_default() };
         if faces.is_empty() {
+            continue;
+        }
+        if stood_in {
+            for m in stand_ins {
+                for (ei, e) in m.edges.iter().enumerate() {
+                    if m.edge_pickable(ei) {
+                        edge_lines(&mut feedback, e, hover_edge, 1.5, &[]);
+                    }
+                }
+            }
             continue;
         }
         let m = if outlines { shown(b) } else { drawn_mesh(app, b) };
@@ -11950,6 +11974,47 @@ mod tests {
             app.session.selection = selected;
             assert_eq!(build_highlight(&app).merged().tris.len(), expected, "whole-body feedback must neither omit nor duplicate selected faces");
         }
+    }
+
+    /// A selected body a live preview stands in for (a Combine's target and tools, picked whole)
+    /// is not lit: lit over the preview, its old triangles fought with the result's and showed
+    /// through in slivers. Its selected faces were already left out the same way.
+    #[test]
+    fn a_selected_body_a_preview_stands_in_for_is_not_lit() {
+        let mut app = cylinder_app();
+        let name = app.session.world_state().unwrap().bodies[0].name.clone();
+        app.session.selection = vec![Sel::Body { name: name.clone() }];
+        let lit = |app: &crate::SolveApp| {
+            let h = build_highlight(app);
+            h.selected_planned.len() + h.selected_blocks.len() + h.merged().tris.len()
+        };
+        assert!(lit(&app) > 0, "selected, it is lit");
+        app.preview.replaced = vec![name];
+        assert_eq!(lit(&app), 0, "under a preview, the preview shows it");
+    }
+
+    /// Hovered, a body a preview stands in for is outlined by what the preview draws for it (a
+    /// Combine's result for its target, a ghosted tool's own shape), its faces left to the
+    /// preview; one with no outline is not lit at all.
+    #[test]
+    fn a_hovered_stand_in_is_outlined_not_filled() {
+        let mut app = cylinder_app();
+        let body = app.session.world_state().unwrap().bodies[0].clone();
+        let name = body.name.clone();
+        app.viewport.hover_bodies = vec![name.clone()];
+        app.preview.replaced = vec![name.clone()];
+        let lit = |app: &crate::SolveApp| {
+            let h = build_highlight(app);
+            let filled = h.hover_planned.len() + h.hover_blocks.len();
+            let m = h.merged();
+            (filled + m.tris.len(), m.lines.len() + m.overlay.len() + m.hidden.len())
+        };
+        let (stood_in_fill, stood_in_lines) = lit(&app);
+        assert_eq!(stood_in_fill, 0, "stood in for, it is not lit");
+        app.preview.outlines = vec![(name, body.mesh())];
+        let (fill, lines) = lit(&app);
+        assert_eq!(fill, 0, "its faces are left to the preview");
+        assert!(lines > stood_in_lines, "outlined by the shape the preview draws");
     }
 
     /// Every body selected (Select All on an assembly) looks each body up by name in a map, not

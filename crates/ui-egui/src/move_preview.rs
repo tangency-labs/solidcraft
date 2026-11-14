@@ -169,6 +169,7 @@ impl MovePreview {
             placed: None,
             tapered: Vec::new(),
             replaced: if copy { Vec::new() } else { bodies },
+            outlines: Vec::new(),
             error: None,
             bounds,
         }))
