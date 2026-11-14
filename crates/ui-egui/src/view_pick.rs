@@ -88,7 +88,7 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
         let h = f("height").unwrap_or(DEFAULT_MODEL_H).clamp(16.0, 8192.0);
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(w as f32, h as f32));
         let cam = app.cam;
-        (crate::viewport::Proj { cam, vp: cam.view_proj(w / h, crate::viewport::scene_radius(app)), rect }, 1.0)
+        (crate::viewport::Proj { cam, vp: cam.view_proj(w / h, crate::viewport::scene_radius(app)), rect, bounds: None }, 1.0)
     };
 
     let mut inputs: Vec<Input> = Vec::new();

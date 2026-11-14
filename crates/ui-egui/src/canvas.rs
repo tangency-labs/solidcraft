@@ -2221,7 +2221,7 @@ mod tests {
         for n in [Vec3::X, Vec3::Y, Vec3::Z] {
             for dir in crate::viewport::orbit_directions() {
                 let cam = solidcraft_viewport::Camera::default().looking_from(dir);
-                let proj = Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
+                let proj = Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect, bounds: None };
                 let h = cam.half_height() * 0.25;
                 let (Some(q), Some(c), Some(side)) =
                     (offset_plane_quad(&proj, Vec3::ZERO, n, h), proj.to_screen(Vec3::ZERO), proj.to_screen(cam.basis().0 * h))

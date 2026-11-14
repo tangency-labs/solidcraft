@@ -570,7 +570,7 @@ mod tests {
         let mut worst = 0.0f32;
         for dir in crate::viewport::orbit_directions() {
             let cam = solidcraft_viewport::Camera::default().looking_from(dir);
-            let proj = Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
+            let proj = Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect, bounds: None };
             let l = mm_per_px(&proj, t.center).unwrap() * LEN_PX;
             let sh = shapes(&proj, &t, l).unwrap();
             for (_, q) in &sh.planes {
