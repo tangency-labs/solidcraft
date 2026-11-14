@@ -1216,3 +1216,109 @@ fn a_round_in_the_sliver_below_the_cutoff_builds_its_end_cap() {
         assert_b27_rails_on_faces(&input, &made, r, 4e-5);
     }
 }
+
+
+/// [`arm_boss_and_foot_round`]'s body before its corner round: the arm and the 20 tall boss,
+/// the boss's foot on the arm's top rounded 5, built with the corpus's fix set. The foot round
+/// runs on past the arm's side x = -36 at the foot edge's end (-36, -90, 5): the side's plane
+/// cuts it off, so the side carries a lobe above the top z = 5, between the tangent edge
+/// x = -36, y = -90 (up to z = 10) and the plane-torus edge from W = (-36, -90 + sqrt 205, 5)
+/// up to (-36, -90, 10). The top's edge on the side runs from C's top (-36, -65, 5) to W, and
+/// W's edge between the top and the foot round (the contact circle, radius 23 about B) leaves W
+/// back towards y = -65.
+fn arm_boss_foot_only() -> Body {
+    fixes();
+    let boss = solidcore_ops::make_cylinder([-54.0, -90.0, 0.0], 18.0, 20.0).unwrap();
+    let b = boolean(arm_and_boss(), boss, BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let foot = edge_at(&b, [-54.0, -72.0, 5.0]);
+    blend(&b, Blend::Round, &[foot], &[5.0], &[], Corners::Filled).unwrap();
+    b
+}
+
+/// The arm's inner corner C = (-36, -65) rounded `r4` alone on [`arm_boss_foot_only`] (test9's
+/// Fillet4 with its Fillet3 present), with the corpus's fix set (`corpus`) or none: built,
+/// valid at the full check, its rails the lines along z through the ball's contacts
+/// (-36 + r4, -65) on y = -65 and (-36, -65 - r4) on the side x = -36, and its volume the
+/// input's plus the round's section r4^2 (1 - pi / 4) times the arm's height 5 (the notch it
+/// fills is empty up to z = 5 and the round removes nothing). Past r4 = 25 - sqrt 205 (10.68)
+/// the side's rail reaches z = 5 past W, inside the side's lobe under the foot round: its end
+/// cap on z = 5 then has an edge on the side's plane from the rail's end to W, which is
+/// checked too.
+fn assert_corner_round_under_foot_round_builds(r4: f64, corpus: bool) {
+    use solidcore::query::api_queries::edge_closest_point;
+    let b = arm_boss_foot_only();
+    let before = b.volume(1e-9).unwrap();
+    let e = edge_at(&b, [-36.0, -65.0, 2.5]);
+    if !corpus {
+        session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+    }
+    let result = blend(&b, Blend::Round, &[e], &[r4], &[], Corners::Filled);
+    fixes();
+    result.unwrap_or_else(|err| panic!("r4 {r4} corpus {corpus}: {err:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "r4 {r4} corpus {corpus}: {report}");
+    let (k, brep) = common::kernel_copy(&b);
+    let on_edge = |p: [f64; 3]| {
+        let q = solidcore::Vec3::new(p[0], p[1], p[2]);
+        brep.edge_list().iter().any(|&e| {
+            edge_closest_point(&k, &brep, e, q)
+                .unwrap()
+                .closest
+                .distance
+                < 1e-7
+        })
+    };
+    for (x, y) in [(-36.0 + r4, -65.0), (-36.0, -65.0 - r4)] {
+        for z in [0.5, 2.5, 4.5] {
+            assert!(
+                on_edge([x, y, z]),
+                "r4 {r4} corpus {corpus}: no rail through ({x}, {y}, {z})"
+            );
+        }
+    }
+    let w = top_end_on_side();
+    if -65.0 - r4 < w {
+        let y = (-65.0 - r4 + w) / 2.0;
+        assert!(
+            on_edge([-36.0, y, 5.0]),
+            "r4 {r4} corpus {corpus}: no cap edge through (-36, {y}, 5)"
+        );
+    }
+    let after = b.volume(1e-9).unwrap();
+    let expected = before + 5.0 * r4 * r4 * (1.0 - PI / 4.0);
+    assert!(
+        (after - expected).abs() < 1e-6,
+        "r4 {r4} corpus {corpus}: volume {after}, expected {expected}"
+    );
+}
+
+/// #15767's band with the foot round (test9's Fillet4 alone, with Fillet3 present): past
+/// r4 = 25 - sqrt 205 (10.68) the round's rail on the side x = -36 meets the top's plane z = 5
+/// past the top's edge on the side, which ends at W where the foot round's contact circle
+/// turns back from it, so the rail ends inside the side's lobe under the foot round. Before,
+/// with the corpus's fixes the end corner failed (status 1001), and without them it was
+/// refused, naming 10.68. Up to r4 = 25, where the rail reaches the side's tangent edge into
+/// the boss.
+#[test]
+fn a_corner_round_whose_rail_ends_past_the_top_under_the_foot_round_builds() {
+    for r4 in [10.8, 12.0, 15.0, 20.0, 24.0] {
+        assert!(-65.0 - r4 < top_end_on_side());
+        for corpus in [true, false] {
+            assert_corner_round_under_foot_round_builds(r4, corpus);
+        }
+    }
+}
+
+/// Controls: below r4 = 25 - sqrt 205 (10.68) the rail on the side meets z = 5 on the top's
+/// edge, short of W, and the round builds as before, with the same closed forms.
+#[test]
+fn a_corner_round_whose_rail_ends_on_the_top_s_edge_builds() {
+    for r4 in [8.0, 10.0, 10.6] {
+        assert!(-65.0 - r4 > top_end_on_side());
+        for corpus in [true, false] {
+            assert_corner_round_under_foot_round_builds(r4, corpus);
+        }
+    }
+}
