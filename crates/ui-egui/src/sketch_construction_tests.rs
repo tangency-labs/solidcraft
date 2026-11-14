@@ -412,35 +412,28 @@ fn the_angle_tool_takes_a_length_beside_its_angle() {
     assert!((d.len() - 12.0).abs() < 1e-6 && (d.angle().to_degrees() - 30.0).abs() < 1e-6, "{d:?}");
 }
 
-fn click_switch(h: &mut Harness, which: &str) {
-    let at = crate::scenario::handle_at(&format!("construction_switch:{which}")).expect("the Construction/Normal switch");
+/// Click one of the Sketch Palette's Line Type icons: normal, construction, centerline, infinite.
+fn click_line_type(h: &mut Harness, which: &str) {
+    let at = crate::scenario::handle_at(which).expect("the palette's Line Type icon");
     h.call("ui.click", json!({"x": at.x, "y": at.y}));
     h.settle();
 }
 
-/// The Construction/Normal switch is greyed out while the line is infinite; with a length, Normal
-/// makes the segment a normal sketch line. The Sketch Palette's line type is left alone (#10258).
-#[test]
-fn the_normal_switch_needs_a_length_and_draws_a_normal_line() {
-    let mut h = sketch();
-    crate::sketch_palette::set_mode(&mut h.app, 1);
-    let sid = h.app.session.active_sketch.unwrap();
-    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
-    steps(&mut h, "sketch.construction_line.horizontal", &[]);
-    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
-    h.settle();
-    click_switch(&mut h, "normal");
-    assert!(!h.app.tool.as_ref().unwrap().normal, "an infinite line stays construction");
+fn shown_line_type(h: &Harness) -> u8 {
+    crate::sketch_construction::shown_line_type(h.app.tool.as_ref().unwrap())
+}
 
+/// Bring the pointer back over the sketch and type one digit, which goes to the Length box.
+fn type_length(h: &mut Harness, d: char) {
     h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
     h.settle();
-    digit(&mut h, '8');
+    digit(h, d);
     h.frames(2);
-    click_switch(&mut h, "normal");
-    assert!(h.app.tool.as_ref().unwrap().normal, "with a length the switch works");
-    assert!(h.app.tool.as_ref().unwrap().pts.is_empty(), "a click on the switch places no point");
-    assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "8");
+}
 
+/// Place a horizontal construction line with the typed length: one click for where it is, one
+/// for the side it runs to.
+fn place_with_length(h: &mut Harness) {
     h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
     h.settle();
     h.frames(30);
@@ -450,6 +443,198 @@ fn the_normal_switch_needs_a_length_and_draws_a_normal_line() {
     h.settle();
     h.step(&json!({"click":{"sketch":[6,5]}})).unwrap();
     h.settle();
+}
+
+/// While a construction line tool runs, the Sketch Palette's Line Type icons are its line type
+/// (#15066): they sit in the palette, so they stay put while the pointer moves, which the
+/// Construction/Normal switch beside the Length box did not. Infinite is lit at the start. Normal
+/// and Centerline draw a segment of that type at the typed length. Infinite clears the length.
+/// The palette's drawing line type (X) is left alone (#10258).
+#[test]
+fn the_palette_line_type_icons_set_the_construction_line_type() {
+    let mut h = sketch();
+    crate::sketch_palette::set_mode(&mut h.app, 1);
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    assert_eq!(shown_line_type(&h), 3, "without a length the line is infinite");
+    let icon = || crate::scenario::handle_at("normal").expect("the Normal icon");
+    let palette =
+        crate::scenario::rect_of("sketch_palette:outer").or_else(|| crate::scenario::rect_of("sketch_palette:options")).expect("the Sketch Palette");
+    let at = icon();
+    assert!(palette.contains(at), "the icon is in the palette: {at:?} {palette:?}");
+    h.step(&json!({"move":{"sketch":[-30,25]}})).unwrap();
+    h.settle();
+    assert_eq!(icon(), at, "the icon stays put while the pointer moves");
+
+    click_line_type(&mut h, "normal");
+    assert_eq!(shown_line_type(&h), 0);
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty(), "a click on the icon places no point");
+    type_length(&mut h, '8');
+    assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "8");
+    assert_eq!(shown_line_type(&h), 0, "with a length Normal stays lit");
+    place_with_length(&mut h);
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(!curve.construction && !curve.infinite && !curve.centerline, "{curve:?}");
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    assert!((sk.point(a).unwrap().dist(sk.point(b).unwrap()) - 8.0).abs() < 1e-6);
+    assert_eq!(crate::sketch_palette::mode(&h.app), 1, "the palette's line type is untouched");
+
+    // Centerline, the same way.
+    click_line_type(&mut h, "centerline");
+    type_length(&mut h, '5');
+    place_with_length(&mut h);
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 2, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(curve.centerline && !curve.construction && !curve.infinite, "{curve:?}");
+
+    // Infinite clears a typed length: one click draws an infinite construction line.
+    type_length(&mut h, '7');
+    click_line_type(&mut h, "infinite");
+    assert!(crate::sketch_construction::typed_length(h.app.tool.as_ref().unwrap()).is_none(), "Infinite clears the length");
+    assert_eq!(shown_line_type(&h), 3);
+    h.step(&json!({"move":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 3, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(curve.construction && curve.infinite, "{curve:?}");
+}
+
+/// A line type other than Infinite always draws a segment, as the Line tool does: with no length
+/// typed, the first click starts it and the second ends it where the pointer is (#15066).
+#[test]
+fn a_chosen_line_type_without_a_length_draws_a_segment_to_the_pointer() {
+    let mut h = sketch();
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    click_line_type(&mut h, "normal");
+    h.step(&json!({"move":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.sketch(sid).unwrap().curves.len(), before, "the first click only starts the segment");
+    h.step(&json!({"move":{"sketch":[17,13]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"sketch":[17,13]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(!curve.construction && !curve.infinite && !curve.centerline, "{curve:?}");
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    let (a, b) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+    assert!((a.dist(b) - 12.0).abs() < 1e-6 && (a.y - b.y).abs() < 1e-9, "a horizontal segment to the pointer: {a:?} {b:?}");
+}
+
+/// Infinite chosen after a segment's first click drops that start: the next click places the
+/// infinite line, rather than one through the abandoned start.
+#[test]
+fn infinite_chosen_after_a_segment_start_places_the_line_at_the_next_click() {
+    let mut h = sketch();
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    click_line_type(&mut h, "normal");
+    h.step(&json!({"move":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 1, "the segment started");
+    click_line_type(&mut h, "infinite");
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty(), "Infinite drops the start");
+    h.step(&json!({"move":{"sketch":[17,13]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"sketch":[17,13]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(curve.infinite && curve.construction, "{curve:?}");
+    let CurveKind::Line { a, .. } = curve.kind else { panic!("a line") };
+    assert!((sk.point(a).unwrap().y - 13.0).abs() < 1e-6, "through the click, not the old start");
+}
+
+/// An angle segment with its Angle typed and no length: the Length box shows the length the click
+/// draws, and the click draws it. The click puts the end on the typed angle at the pointer's
+/// distance, so the box measures that end rather than the raw pointer.
+#[test]
+fn a_typed_angle_without_a_length_draws_the_segment_its_length_box_shows() {
+    let mut h = sketch();
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.angle", &[[5., 10.]]);
+    let mut tool = h.app.tool.take().unwrap();
+    tool.line_type = 0;
+    tool.dims = crate::sketch_dims::boxes_for(tool.cmd, 1);
+    let angle = tool.dims.iter_mut().find(|b| b.label == "Angle").unwrap();
+    angle.locked = true;
+    angle.value = "30 deg".into();
+    // 5 from the start, off the typed angle.
+    let pointer = (solidcore_record::Vec2::new(8., 14.), None);
+    let shown = super::pointer_segment_length(&h.app, &tool, &pointer).expect("a length to show");
+    assert!((shown - 5.0).abs() < 1e-6, "the Length box shows the length drawn: {shown}");
+    super::place_point(&mut h.app, &mut tool, pointer);
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "the click draws the segment: {:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(!curve.construction && !curve.infinite, "{curve:?}");
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    let d = sk.point(b).unwrap() - sk.point(a).unwrap();
+    assert!((d.len() - 5.0).abs() < 1e-6 && (d.angle().to_degrees() - 30.0).abs() < 1e-6, "{d:?}");
+}
+
+fn click_switch(h: &mut Harness, which: &str) {
+    let at = crate::scenario::handle_at(&format!("construction_switch:{which}")).expect("the Construction/Normal switch");
+    h.call("ui.click", json!({"x": at.x, "y": at.y}));
+    h.settle();
+}
+
+/// With the `construction_line_classic` preference the tools work as before #15066: the
+/// Construction/Normal switch under the Length box is greyed out while the line is infinite, and
+/// with a length Normal makes the segment a normal sketch line. The Sketch Palette's Line Type
+/// icons leave the tool alone and its line type is untouched (#10258).
+#[test]
+fn the_classic_preference_keeps_the_construction_normal_switch() {
+    let mut h = sketch();
+    h.app.preferences.construction_line_classic = true;
+    crate::sketch_palette::set_mode(&mut h.app, 1);
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    click_switch(&mut h, "normal");
+    assert_eq!(h.app.tool.as_ref().unwrap().line_type, 3, "an infinite line stays construction");
+
+    // The palette's icons pick the drawing line type, not the tool's.
+    click_line_type(&mut h, "centerline");
+    assert_eq!(h.app.tool.as_ref().unwrap().line_type, 3, "the palette leaves the tool alone");
+    assert_eq!(crate::sketch_palette::mode(&h.app), 2);
+    crate::sketch_palette::set_mode(&mut h.app, 1);
+
+    type_length(&mut h, '8');
+    click_switch(&mut h, "normal");
+    assert_eq!(h.app.tool.as_ref().unwrap().line_type, 0, "with a length the switch works");
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty(), "a click on the switch places no point");
+    assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "8");
+
+    place_with_length(&mut h);
     let sk = h.app.session.doc.sketch(sid).unwrap();
     assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
     let curve = sk.curves.last().unwrap();
