@@ -1788,6 +1788,14 @@ mod tests {
             crate::dialogs::fillet_plain_error("the fillet is larger than the faces beside its edges allow", true),
             Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr("ui.fillet_error_too_large").to_string()))
         );
+        // One that no smaller radius builds either is not told to try a smaller radius: the kernel
+        // tried them down to its least.
+        let none = "not supported yet: the fillet is larger than the faces beside its edges allow; no smaller radius builds either \
+                    (down to 0.001 mm: the operation failed: not supported yet: the fillet is larger than the faces beside its edges allow)";
+        assert_eq!(
+            crate::dialogs::fillet_plain_error(none, false),
+            Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr("ui.fillet_error_no_radius").to_string()))
+        );
     }
 
     #[test]
