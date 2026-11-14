@@ -640,7 +640,9 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         h.call("ui.selectOther", json!({"close":true}));
     }
 
-    // Search every command by its full label so results beyond the first page are painted.
+    // Search every command by its full label so results beyond the first page are painted. With
+    // the preference on, search lists script-only commands too, so their icons are painted (#9734).
+    h.app.preferences.search_lists_script_commands = true;
     for command in solidcraft_engine::command_specs() {
         solidcraft_ui_egui::shortcut_box::open(&mut h.app, None);
         h.app.sbox.text = command.label.to_owned();
@@ -648,6 +650,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         collect(&mut h, command.id, &mut requested);
         escape(&mut h);
     }
+    h.app.preferences.search_lists_script_commands = false;
     // Every registered command is also started through its interactive entry point. Some
     // require geometry or an active sketch; the second pass supplies sketch context.
     for sketching in [false, true] {
