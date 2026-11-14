@@ -54,6 +54,10 @@ pub struct PartsInsertParams {
     /// out of the face; with `point`, its +Z against `direction` (default false).
     #[serde(default)]
     pub flip: Option<bool>,
+    /// With `at`: seat each part at the other end of its hole, head on the face the hole comes
+    /// out of (default false). Refused for a pick that is not on a through hole.
+    #[serde(default)]
+    pub other_side: Option<bool>,
 }
 
 /// Resolve bore picks before placing custom hardware. Each pick names its world body.
