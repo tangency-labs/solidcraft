@@ -94,12 +94,12 @@ use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{max2, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
-use crate::nurbs::math::NOW;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
+use crate::nurbs::math::NOW;
 use crate::surface::surface::p2::{drop_vectors, TsectCurveType, B_SPLINE_SURFACE_TYPE};
 use crate::surface::surface::p5::{SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
 use crate::surface::surface::{Surface, SurfaceKind};
@@ -2501,7 +2501,11 @@ mod tests {
         assert!(!chain_rule_well_conditioned(Vec3::ZERO, x, 1.0));
         assert!(!chain_rule_well_conditioned(Vec3::ZERO, Vec3::ZERO, 1.0));
         assert!(!chain_rule_well_conditioned(x, x, 1.0));
-        assert!(!chain_rule_well_conditioned(Vec3::new(f64::NAN, 0.0, 0.0), x, 1.0));
+        assert!(!chain_rule_well_conditioned(
+            Vec3::new(f64::NAN, 0.0, 0.0),
+            x,
+            1.0
+        ));
         assert!(!chain_rule_well_conditioned(x, t, f64::NAN));
     }
 
