@@ -106,8 +106,9 @@ fn a_round_of_radius_5_along_the_shoulder_is_one_face_tangent_to_both_sheets() {
 }
 
 #[test]
-#[ignore = "the curvature-continuous round's certificate along the 6.4 m run takes about 5 \
-            minutes optimised; run with --ignored under the goldens profile"]
+#[ignore = "the curvature-continuous round's certificate and seam check along the 4 m run take \
+            about 85 s of CPU optimised (300 s before the kept run, the cut at once and the faster \
+            tangency check); run with --ignored under the goldens profile"]
 fn a_curvature_continuous_round_along_the_shoulder_is_curvature_continuous_with_both_sheets() {
     let (deck, side) = deck_and_side();
     let f = fillet_sheets(&deck, &side, &how(Section::Curvature(30.0))).unwrap();
