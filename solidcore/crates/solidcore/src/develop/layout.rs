@@ -1,19 +1,25 @@
 //! Laying a sheet's panels out flat through its bends and seams.
+//!
+//! Not upstream (SolidCraft's sheet development, moved into the kernel, docs/layers.md §1).
+//!
+//! Deviations: none (no upstream counterpart). No recursion: the pieces are laid out by a
+//! breadth-first walk over the joints, each joint followed once, and every subdivision
+//! ([`roots`], [`span_crossings`]) runs on an explicit stack with a budget.
 
-use solidcraft_geom::prelude::*;
 use std::collections::VecDeque;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
-use solidcraft_geom::Aabb2;
-
-use crate::chart::{Flatten, arc_as_conics};
-use crate::fold::Wrap;
-use crate::{Anchor, Bend, Corner, CornerRelief, Joint, JointKind, Lap, Panel, Relief, Rigid2, Rip, Sheet, Surface, Tail};
-
-/// The most panels and joints one development takes: a work limit, never a truncation.
-const MAX_PANELS: usize = 10_000;
-const MAX_JOINTS: usize = 20_000;
+use super::chart::{arc_as_conics, Flatten};
+use super::fold::Wrap;
+use super::plane::{Box2, Planar, X, Y};
+use super::seg::{area, ccw, polygon, SegMeasure};
+use super::{
+    Anchor, Bend, Corner, CornerRelief, Datum, Development, EdgeFrom, FlatPanel, Joint, JointKind,
+    JointRefusal, Lap, Mismatch, Panel, PanelRefusal, Refusal, Relief, Rigid2, Rip, RuleRefusal,
+    Sheet, Surface, Tail, Trim, Zone,
+};
+use crate::math::{Vec2, Vec3};
+use crate::prism::profile::{Loop2, Region2, Seg2};
 
 /// How far from a unit vector an anchor's direction may be.
 const UNIT_TOL: f64 = 1e-9;
@@ -34,99 +40,6 @@ const TEAR_TOL: f64 = 1e-3;
 const MAX_TEAR_SPANS: usize = 16;
 const TEAR_SAMPLES: usize = 64;
 
-/// A sheet laid out flat.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Development {
-    /// Where each panel's neutral chart lies in the flat frame (a planar panel's neutral chart
-    /// is its chart).
-    pub placements: Vec<Option<Rigid2>>,
-    /// Each panel with material, in the flat frame.
-    pub panels: Vec<Option<FlatPanel>>,
-    /// The pieces of the flat pattern: the panels that bends and seams hold together. The pieces
-    /// with an anchored panel come first and lie where their anchors put them; the others are
-    /// laid beside them, left to right (see [`develop`]).
-    pub pieces: Vec<Vec<usize>>,
-    /// Each bend's zone in the flat frame.
-    pub zones: Vec<Zone>,
-    /// What to take out of each panel before the pieces are joined: its material between its
-    /// tangent line and a bend's anchor, along the zone and, where its tail is trimmed, beyond
-    /// it. A rip's cut is no trim: it is in its panels' outlines (see [`FlatPanel`]).
-    pub trims: Vec<Trim>,
-    /// Bends and seams that close a loop, where the layout reached both panels another way.
-    pub loops: Vec<Mismatch>,
-    /// What is cut from the flat, from every piece it reaches: the corners' reliefs, then the
-    /// sheet's cuts.
-    pub cuts: Vec<Region2>,
-    /// The bend ends a panel runs on past where the bend's relief has no width to cut: the
-    /// bend's joint, the panel, and where along the joint the end lies.
-    pub unrelieved: Vec<(usize, usize, f64)>,
-}
-
-/// A panel laid flat, its rips' cuts taken off. For each loop of its region, `origins` gives what
-/// each segment is in the sheet (see [`EdgeFrom`]).
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct FlatPanel {
-    pub region: Region2,
-    pub origins: Vec<Vec<EdgeFrom>>,
-}
-
-/// What an edge of a flat panel is in its sheet.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EdgeFrom {
-    /// Segment `k` of the same loop of the panel's own region, or what a rip left of it.
-    Own(usize),
-    /// The panel's new edge along joint `j`'s rip, with what joins it to the edges beside it.
-    Rip(usize),
-}
-
-/// A bend's zone in the flat frame: its region, its edge on the `a` panel's side (`near`) and on
-/// the `b` panel's side (`far`), each from the end at the anchors' origin to the other, and the
-/// panels on those sides. Its ends join `near[k]` to `far[k]`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Zone {
-    pub joint: usize,
-    pub region: Region2,
-    pub near: [Vec2; 2],
-    pub far: [Vec2; 2],
-    pub panels: [usize; 2],
-}
-
-/// What a joint takes from a panel: the region to cut, and the line along which the panel's
-/// material ends once it is cut (its tangent line at a bend, its cut edge at a rip).
-#[derive(Clone, Debug, PartialEq)]
-pub struct Trim {
-    pub panel: usize,
-    pub joint: usize,
-    pub region: Region2,
-    pub line: [Vec2; 2],
-}
-
-/// How far a joint that closes a loop is from fitting: laid out through the rest of the loop,
-/// its second panel lands `distance` (mm) and `angle` (radians) from where the joint itself
-/// would put it. A ring of bends and seams never fits; it needs a rip.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Mismatch {
-    pub joint: usize,
-    pub distance: f64,
-    pub angle: f64,
-}
-
-#[derive(Clone, Debug, PartialEq, thiserror::Error)]
-pub enum DevelopError {
-    #[error("the sheet has no panel {0}")]
-    NoPanel(usize),
-    #[error("panel {0}: {1}")]
-    Panel(usize, &'static str),
-    #[error("joint {0}: {1}")]
-    Joint(usize, &'static str),
-    #[error("the sheet exceeds the development's work limit")]
-    TooLarge,
-    #[error("the sheet's rule: {0}")]
-    Rule(&'static str),
-    #[error("the fold takes a place in space for each of the flat's {0} pieces")]
-    Roots(usize),
-}
-
 /// A joint's frame in the flat: where its `a` anchor lies, the joint's direction, and the
 /// direction from the `a` panel toward the `b` panel.
 struct JointFrame {
@@ -138,18 +51,31 @@ struct JointFrame {
 impl JointFrame {
     fn from_a(joint: &Joint, a: &Rigid2) -> Option<JointFrame> {
         let along = a.vector(joint.a.dir).normalized()?;
-        Some(JointFrame { origin: a.point(joint.a.origin), along, toward_b: right_of(along) })
+        Some(JointFrame {
+            origin: a.point(joint.a.origin),
+            along,
+            toward_b: right_of(along),
+        })
     }
 
     /// The frame seen from the `b` panel, whose anchor lies `offset` from the `a` one.
     fn from_b(joint: &Joint, b: &Rigid2, offset: f64) -> Option<JointFrame> {
         let along = b.vector(joint.b.dir).normalized()?;
         let toward_b = right_of(along);
-        Some(JointFrame { origin: b.point(joint.b.origin) - toward_b * offset, along, toward_b })
+        Some(JointFrame {
+            origin: b.point(joint.b.origin) - toward_b * offset,
+            along,
+            toward_b,
+        })
     }
 
     fn place_b(&self, joint: &Joint, offset: f64) -> Option<Rigid2> {
-        Rigid2::onto(joint.b.origin, joint.b.dir, self.origin + self.toward_b * offset, self.along)
+        Rigid2::onto(
+            joint.b.origin,
+            joint.b.dir,
+            self.origin + self.toward_b * offset,
+            self.along,
+        )
     }
 
     fn place_a(&self, joint: &Joint) -> Option<Rigid2> {
@@ -172,7 +98,9 @@ fn right_of(v: Vec2) -> Vec2 {
 /// line to its anchor; for a seam, nothing. A rip is not followed.
 fn anchor_offset(kind: &JointKind, sheet: &Sheet) -> Option<f64> {
     match kind {
-        JointKind::Bend(bend) => Some(bend.allowance(sheet.thickness, sheet.k_factor) - 2.0 * bend.setback(sheet.thickness)),
+        JointKind::Bend(bend) => Some(
+            bend.allowance(sheet.thickness, sheet.k_factor) - 2.0 * bend.setback(sheet.thickness),
+        ),
         JointKind::Seam => Some(0.0),
         JointKind::Rip(_) => None,
     }
@@ -191,13 +119,13 @@ fn anchor_offset(kind: &JointKind, sheet: &Sheet) -> Option<f64> {
 /// all, the first such piece keeps the flat frame. Nothing depends on the panels' order. A joint
 /// that closes a loop is laid out once, through the rest of the loop, and reported in
 /// [`Development::loops`].
-pub fn develop(sheet: &Sheet, anchors: &[(usize, Rigid2)]) -> Result<Development, DevelopError> {
-    if sheet.panels.len() > MAX_PANELS || sheet.joints.len() > MAX_JOINTS {
-        return Err(DevelopError::TooLarge);
+pub fn develop(sheet: &Sheet, anchors: &[(usize, Rigid2)]) -> Result<Development, Refusal> {
+    if sheet.panels.len() > super::MAX_PANELS || sheet.joints.len() > super::MAX_JOINTS {
+        return Err(Refusal::TooLarge);
     }
     check_rule(sheet)?;
     if let Some(&(i, _)) = anchors.iter().find(|(i, _)| *i >= sheet.panels.len()) {
-        return Err(DevelopError::NoPanel(i));
+        return Err(Refusal::NoPanel(i));
     }
     for (j, joint) in sheet.joints.iter().enumerate() {
         check_joint(sheet, j, joint)?;
@@ -208,25 +136,37 @@ pub fn develop(sheet: &Sheet, anchors: &[(usize, Rigid2)]) -> Result<Development
         .panels
         .iter()
         .enumerate()
-        .map(|(i, p)| Flatten::of(&p.surface, sheet).map_err(|e| DevelopError::Panel(i, e)))
+        .map(|(i, p)| {
+            Flatten::of(&p.surface, sheet).map_err(|why| Refusal::Panel { panel: i, why })
+        })
         .collect::<Result<_, _>>()?;
     let mut neutral = Sheet {
         thickness: sheet.thickness,
         k_factor: sheet.k_factor,
-        panels: Vec::with_capacity(sheet.panels.len()),
-        joints: Vec::with_capacity(sheet.joints.len()),
+        panels: Vec::new(),
+        joints: Vec::new(),
         corners: sheet.corners.clone(),
         cuts: sheet.cuts.clone(),
     };
-    let mut origins = Vec::with_capacity(sheet.panels.len());
+    let mut origins = Vec::new();
     for (i, (panel, map)) in sheet.panels.iter().zip(&maps).enumerate() {
-        let (region, from) = map.region(&panel.region).map_err(|e| DevelopError::Panel(i, e))?;
-        neutral.panels.push(Panel { name: panel.name.clone(), surface: Surface::Plane, region });
-        origins.push(from.into_iter().map(|l| l.into_iter().map(EdgeFrom::Own).collect::<Vec<_>>()).collect::<Vec<_>>());
+        let (region, from) = map
+            .region(&panel.region)
+            .map_err(|why| Refusal::Panel { panel: i, why })?;
+        neutral.panels.push(Panel {
+            name: panel.name.clone(),
+            surface: Surface::Plane,
+            region,
+        });
+        origins.push(
+            from.into_iter()
+                .map(|l| l.into_iter().map(EdgeFrom::Own).collect::<Vec<_>>())
+                .collect::<Vec<_>>(),
+        );
     }
     // What each rip takes off its panels, worked out on their own surfaces and carried into their
     // neutral charts.
-    let mut bands: Vec<[Option<RipBand>; 2]> = Vec::with_capacity(sheet.joints.len());
+    let mut bands: Vec<[Option<RipBand>; 2]> = Vec::new();
     for (j, joint) in sheet.joints.iter().enumerate() {
         bands.push(match &joint.kind {
             JointKind::Rip(rip) => rip_bands(sheet, &maps, j, joint, rip)?,
@@ -234,12 +174,23 @@ pub fn develop(sheet: &Sheet, anchors: &[(usize, Rigid2)]) -> Result<Development
         });
     }
     for (j, joint) in sheet.joints.iter().enumerate() {
-        let moved = |a: &Anchor| -> Result<Anchor, DevelopError> {
-            let map = maps.get(a.panel).ok_or(DevelopError::NoPanel(a.panel))?;
-            let dir = map.dir(a.origin, a.dir).ok_or(DevelopError::Joint(j, "an anchor has no direction"))?;
-            Ok(Anchor { panel: a.panel, origin: map.point(a.origin), dir })
+        let moved = |a: &Anchor| -> Result<Anchor, Refusal> {
+            let map = maps.get(a.panel).ok_or(Refusal::NoPanel(a.panel))?;
+            let dir = map.dir(a.origin, a.dir).ok_or(Refusal::Joint {
+                joint: j,
+                why: JointRefusal::NoDirection,
+            })?;
+            Ok(Anchor {
+                panel: a.panel,
+                origin: map.point(a.origin),
+                dir,
+            })
         };
-        neutral.joints.push(Joint { a: moved(&joint.a)?, b: moved(&joint.b)?, kind: joint.kind.clone() });
+        neutral.joints.push(Joint {
+            a: moved(&joint.a)?,
+            b: moved(&joint.b)?,
+            kind: joint.kind.clone(),
+        });
     }
     let sheet = &neutral;
 
@@ -247,7 +198,7 @@ pub fn develop(sheet: &Sheet, anchors: &[(usize, Rigid2)]) -> Result<Development
     for (j, joint) in sheet.joints.iter().enumerate() {
         if anchor_offset(&joint.kind, sheet).is_some() {
             for p in [joint.a.panel, joint.b.panel] {
-                touching.get_mut(p).ok_or(DevelopError::NoPanel(p))?.push(j);
+                touching.get_mut(p).ok_or(Refusal::NoPanel(p))?.push(j);
             }
         }
     }
@@ -255,26 +206,60 @@ pub fn develop(sheet: &Sheet, anchors: &[(usize, Rigid2)]) -> Result<Development
     let mut followed = vec![false; sheet.joints.len()];
     let mut pieces = Vec::new();
     // The anchored pieces, each from its anchored panel with the most material.
-    let anchored = |placements: &[Option<Rigid2>]| most_material(sheet, anchors.iter().map(|a| a.0).filter(|i| unplaced(placements, *i)));
+    let anchored = |placements: &[Option<Rigid2>]| {
+        most_material(
+            sheet,
+            anchors
+                .iter()
+                .map(|a| a.0)
+                .filter(|i| unplaced(placements, *i)),
+        )
+    };
     while let Some(start) = anchored(&placements) {
-        if let (Some(p), Some(&(_, at))) = (placements.get_mut(start), anchors.iter().find(|a| a.0 == start)) {
+        if let (Some(p), Some(&(_, at))) = (
+            placements.get_mut(start),
+            anchors.iter().find(|a| a.0 == start),
+        ) {
             *p = Some(at);
         }
-        pieces.push(lay_out(sheet, start, &touching, &mut placements, &mut followed)?);
+        pieces.push(lay_out(
+            sheet,
+            start,
+            &touching,
+            &mut placements,
+            &mut followed,
+        )?);
     }
     let held = pieces.len().max(1);
     // Then the rest, each from its panel with the most material.
-    while let Some(start) = most_material(sheet, (0..sheet.panels.len()).filter(|i| unplaced(&placements, *i))) {
+    while let Some(start) = most_material(
+        sheet,
+        (0..sheet.panels.len()).filter(|i| unplaced(&placements, *i)),
+    ) {
         if let Some(p) = placements.get_mut(start) {
             *p = Some(Rigid2::IDENTITY);
         }
-        pieces.push(lay_out(sheet, start, &touching, &mut placements, &mut followed)?);
+        pieces.push(lay_out(
+            sheet,
+            start,
+            &touching,
+            &mut placements,
+            &mut followed,
+        )?);
     }
     // The pieces no anchor holds beside those it does, left to right, with their lowest edges
     // level.
     let gap = (10.0 * sheet.thickness).max(5.0);
-    let bounds: Vec<Option<Aabb2>> = pieces.iter().map(|piece| piece_bounds(sheet, piece, &placements)).collect();
-    let fixed = bounds.iter().take(held).flatten().cloned().reduce(|a, b| a.union(&b));
+    let bounds: Vec<Option<Box2>> = pieces
+        .iter()
+        .map(|piece| piece_bounds(sheet, piece, &placements))
+        .collect();
+    let fixed = bounds
+        .iter()
+        .take(held)
+        .flatten()
+        .copied()
+        .reduce(|a, b| a.union(&b));
     if let Some(first) = fixed {
         let mut x = first.max.x + gap;
         for (piece, b) in pieces.iter().zip(&bounds).skip(held) {
@@ -289,30 +274,46 @@ pub fn develop(sheet: &Sheet, anchors: &[(usize, Rigid2)]) -> Result<Development
         }
     }
 
-    let mut out = Development { pieces, ..Development::default() };
+    let mut out = Development {
+        pieces,
+        ..Development::default()
+    };
     out.panels = sheet
         .panels
         .iter()
         .zip(&placements)
         .zip(origins)
         .map(|((panel, place), origins)| match place {
-            Some(place) if !panel.region.outer.segs.is_empty() => Some(FlatPanel { region: place.region(&panel.region), origins }),
+            Some(place) if !panel.region.outer.segs.is_empty() => Some(FlatPanel {
+                region: place.region(&panel.region),
+                origins,
+            }),
             _ => None,
         })
         .collect();
     out.placements = placements;
     let mut sides: Vec<Vec<RipSide>> = (0..sheet.panels.len()).map(|_| Vec::new()).collect();
     for (j, joint) in sheet.joints.iter().enumerate() {
-        let (Some(a), Some(b)) = (out.placements.get(joint.a.panel).copied().flatten(), out.placements.get(joint.b.panel).copied().flatten()) else {
+        let (Some(a), Some(b)) = (
+            out.placements.get(joint.a.panel).copied().flatten(),
+            out.placements.get(joint.b.panel).copied().flatten(),
+        ) else {
             continue;
         };
-        let frame = JointFrame::from_a(joint, &a).ok_or(DevelopError::Joint(j, "an anchor has no direction"))?;
-        if let Some(offset) = anchor_offset(&joint.kind, sheet)
-            && !followed.get(j).copied().unwrap_or(false)
-            && let Some(fits) = frame.place_b(joint, offset)
-        {
+        let frame = JointFrame::from_a(joint, &a).ok_or(Refusal::Joint {
+            joint: j,
+            why: JointRefusal::NoDirection,
+        })?;
+        let closes = anchor_offset(&joint.kind, sheet)
+            .filter(|_| !followed.get(j).copied().unwrap_or(false))
+            .and_then(|offset| frame.place_b(joint, offset));
+        if let Some(fits) = closes {
             let distance = b.point(joint.b.origin).dist(fits.point(joint.b.origin));
-            out.loops.push(Mismatch { joint: j, distance, angle: fits.inverse().then(&b).angle().abs() });
+            out.loops.push(Mismatch {
+                joint: j,
+                distance,
+                angle: fits.inverse().then(&b).angle().abs(),
+            });
         }
         match &joint.kind {
             JointKind::Bend(bend) => add_zone(&mut out, sheet, j, joint, bend, &frame, (&a, &b))?,
@@ -321,12 +322,21 @@ pub fn develop(sheet: &Sheet, anchors: &[(usize, Rigid2)]) -> Result<Development
                 let Some(bands) = bands.get(j) else { continue };
                 // Each panel's loops run with its material on the left: the `a` panel's along
                 // the rip, the `b` panel's against it.
-                for ((band, place), (panel, along)) in bands.iter().zip([&a, &b]).zip([(joint.a.panel, true), (joint.b.panel, false)]) {
+                for ((band, place), (panel, along)) in bands
+                    .iter()
+                    .zip([&a, &b])
+                    .zip([(joint.a.panel, true), (joint.b.panel, false)])
+                {
                     let Some(band) = band else { continue };
                     let cut: Vec<Seg2> = band.inner.iter().map(|s| place.seg(s)).collect();
                     let ends = band.ends.map(|p| place.point(p));
                     let side = if along {
-                        RipSide { joint: j, ends, middle: place.point(band.middle), cut }
+                        RipSide {
+                            joint: j,
+                            ends,
+                            middle: place.point(band.middle),
+                            cut,
+                        }
                     } else {
                         RipSide {
                             joint: j,
@@ -335,26 +345,36 @@ pub fn develop(sheet: &Sheet, anchors: &[(usize, Rigid2)]) -> Result<Development
                             cut: cut.iter().rev().map(Seg2::reversed).collect(),
                         }
                     };
-                    sides.get_mut(panel).ok_or(DevelopError::NoPanel(panel))?.push(side);
+                    sides
+                        .get_mut(panel)
+                        .ok_or(Refusal::NoPanel(panel))?
+                        .push(side);
                 }
             }
         }
     }
     for (flat, sides) in out.panels.iter_mut().zip(&sides) {
-        if let Some(flat) = flat
-            && !sides.is_empty()
-        {
-            *flat = cut_by_rips(flat, sides)?;
+        if let Some(flat) = flat {
+            if !sides.is_empty() {
+                *flat = cut_by_rips(flat, sides)?;
+            }
         }
     }
-    out.cuts = sheet.corners.iter().filter_map(|c| corner_cut(&out, c)).collect();
+    out.cuts = sheet
+        .corners
+        .iter()
+        .filter_map(|c| corner_cut(&out, c))
+        .collect();
     for cut in &sheet.cuts {
         let place = out
             .placements
             .get(cut.panel)
             .copied()
             .flatten()
-            .ok_or(DevelopError::Panel(cut.panel, "a cut lies on a panel the flat has no place for"))?;
+            .ok_or(Refusal::Panel {
+                panel: cut.panel,
+                why: PanelRefusal::CutUnplaced,
+            })?;
         out.cuts.push(place.region(&cut.region));
     }
     Ok(out)
@@ -371,7 +391,11 @@ fn unplaced(placements: &[Option<Rigid2>], i: usize) -> bool {
 fn most_material(sheet: &Sheet, among: impl Iterator<Item = usize>) -> Option<usize> {
     among
         .filter_map(|i| Some((i, sheet.panels.get(i)?)))
-        .min_by(|(_, a), (_, b)| b.region.area().total_cmp(&a.region.area()).then_with(|| a.name.cmp(&b.name)))
+        .min_by(|(_, a), (_, b)| {
+            area(&b.region)
+                .total_cmp(&area(&a.region))
+                .then_with(|| a.name.cmp(&b.name))
+        })
         .map(|(i, _)| i)
 }
 
@@ -384,23 +408,38 @@ fn lay_out(
     touching: &[Vec<usize>],
     placements: &mut [Option<Rigid2>],
     followed: &mut [bool],
-) -> Result<Vec<usize>, DevelopError> {
+) -> Result<Vec<usize>, Refusal> {
     let mut piece = vec![start];
     let mut queue = VecDeque::from([start]);
     while let Some(panel) = queue.pop_front() {
-        let Some(at) = placements.get(panel).copied().flatten() else { continue };
+        let Some(at) = placements.get(panel).copied().flatten() else {
+            continue;
+        };
         for &j in touching.get(panel).map(Vec::as_slice).unwrap_or_default() {
-            let (Some(joint), Some(false)) = (sheet.joints.get(j), followed.get(j).copied()) else { continue };
-            let Some(offset) = anchor_offset(&joint.kind, sheet) else { continue };
+            let (Some(joint), Some(false)) = (sheet.joints.get(j), followed.get(j).copied()) else {
+                continue;
+            };
+            let Some(offset) = anchor_offset(&joint.kind, sheet) else {
+                continue;
+            };
             let (other, placed) = if joint.a.panel == panel {
-                (joint.b.panel, JointFrame::from_a(joint, &at).and_then(|f| f.place_b(joint, offset)))
+                (
+                    joint.b.panel,
+                    JointFrame::from_a(joint, &at).and_then(|f| f.place_b(joint, offset)),
+                )
             } else {
-                (joint.a.panel, JointFrame::from_b(joint, &at, offset).and_then(|f| f.place_a(joint)))
+                (
+                    joint.a.panel,
+                    JointFrame::from_b(joint, &at, offset).and_then(|f| f.place_a(joint)),
+                )
             };
             if placements.get(other).copied().flatten().is_some() {
                 continue;
             }
-            let placed = placed.ok_or(DevelopError::Joint(j, "an anchor has no direction"))?;
+            let placed = placed.ok_or(Refusal::Joint {
+                joint: j,
+                why: JointRefusal::NoDirection,
+            })?;
             if let Some(slot) = placements.get_mut(other) {
                 *slot = Some(placed);
             }
@@ -415,10 +454,12 @@ fn lay_out(
 }
 
 /// The flat bounding box of a piece's material.
-fn piece_bounds(sheet: &Sheet, piece: &[usize], placements: &[Option<Rigid2>]) -> Option<Aabb2> {
-    let mut b: Option<Aabb2> = None;
+fn piece_bounds(sheet: &Sheet, piece: &[usize], placements: &[Option<Rigid2>]) -> Option<Box2> {
+    let mut b: Option<Box2> = None;
     for &p in piece {
-        let (Some(panel), Some(Some(place))) = (sheet.panels.get(p), placements.get(p)) else { continue };
+        let (Some(panel), Some(Some(place))) = (sheet.panels.get(p), placements.get(p)) else {
+            continue;
+        };
         if panel.region.outer.segs.is_empty() {
             continue;
         }
@@ -437,11 +478,25 @@ fn piece_bounds(sheet: &Sheet, piece: &[usize], placements: &[Option<Rigid2>]) -
 pub(crate) fn extremes(s: &Seg2, ways: &[Vec2]) -> Vec<Vec2> {
     match *s {
         Seg2::Line { a, b } => vec![a, b],
-        Seg2::Arc { center, radius, start, sweep } => {
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => {
             let mut pts = vec![s.start(), s.end()];
             // Any way of some length, however small: along one of none, the ends answer.
-            for w in ways.iter().filter(|w| w.len() > 0.0).map(|w| *w / w.len()) {
-                pts.extend([w, -w].into_iter().filter(|d| on_arc(*d, start, sweep)).map(|d| center + d * radius));
+            for w in ways
+                .iter()
+                .filter(|w| w.len() > 0.0)
+                .map(|w| w.over(w.len()))
+            {
+                pts.extend(
+                    [w, -w]
+                        .into_iter()
+                        .filter(|d| on_arc(*d, start, sweep))
+                        .map(|d| center + d * radius),
+                );
             }
             pts
         }
@@ -467,7 +522,12 @@ fn on_arc(d: Vec2, start: f64, sweep: f64) -> bool {
 fn square_to(s: &Seg2, way: Vec2) -> Vec<f64> {
     // The size of the terms the coefficients are worked from, for their rounding.
     let size = |pts: &[Vec2]| 2.0 * way.len() * pts.iter().map(|p| p.len()).fold(0.0, f64::max);
-    let steps = |pts: &[Vec2]| -> Vec<f64> { pts.iter().zip(pts.iter().skip(1)).map(|(p, q)| (*q - *p).dot(way)).collect() };
+    let steps = |pts: &[Vec2]| -> Vec<f64> {
+        pts.iter()
+            .zip(pts.iter().skip(1))
+            .map(|(p, q)| (*q - *p).dot(way))
+            .collect()
+    };
     match *s {
         Seg2::Line { .. } | Seg2::Arc { .. } => Vec::new(),
         Seg2::Cubic { p0, p1, p2, p3 } => {
@@ -487,7 +547,10 @@ fn square_to(s: &Seg2, way: Vec2) -> Vec<f64> {
             let (e1, e2) = (2.0 * (w - 1.0), 2.0 * (1.0 - w));
             // N′D − ND′ = n₁ + 2 n₂ t + (n₂ e₁ − n₁ e₂) t², on the Bernstein basis.
             let (c0, c1, c2) = (n1, 2.0 * n2, n2 * e1 - n1 * e2);
-            roots(&[c0, c0 + 0.5 * c1, c0 + c1 + c2], 16.0 * (1.0 + w.abs()).powi(2) * size([a, apex, b].as_slice()))
+            roots(
+                &[c0, c0 + 0.5 * c1, c0 + c1 + c2],
+                16.0 * (1.0 + w.abs()).powi(2) * size([a, apex, b].as_slice()),
+            )
         }
     }
 }
@@ -497,73 +560,138 @@ fn square_to(s: &Seg2, way: Vec2) -> Vec<f64> {
 /// and each of its circle's four points center ± radius along x and along y that lies within its
 /// sweep); a sure box that holds it where it has any other curve, whose control points' box it
 /// takes. Empty for a loop of no segments.
-pub(crate) fn loop_box(l: &Loop2) -> Aabb2 {
-    l.segs.iter().flat_map(|s| extremes(s, &[Vec2::X, Vec2::Y])).collect()
+pub(crate) fn loop_box(l: &Loop2) -> Box2 {
+    l.segs.iter().flat_map(|s| extremes(s, &[X, Y])).collect()
 }
 
 /// The sheet's thickness and K-factor are a rule's, bounded as the rule's own check bounds them:
 /// a thickness of more than 0, and a K-factor from 0 to 1 that keeps the neutral surface within
 /// the thickness. Anything else (a NaN, a negative thickness) would lay every zone out NaN or
 /// wrongly wide, and place every panel past it nowhere.
-pub(crate) fn check_rule(sheet: &Sheet) -> Result<(), DevelopError> {
+pub(crate) fn check_rule(sheet: &Sheet) -> Result<(), Refusal> {
     if !(sheet.thickness > 0.0 && sheet.thickness.is_finite()) {
-        return Err(DevelopError::Rule("the thickness must be more than 0"));
+        return Err(Refusal::Rule(RuleRefusal::Thickness));
     }
     if !(0.0..=1.0).contains(&sheet.k_factor) {
-        return Err(DevelopError::Rule("the K-factor must be between 0 and 1"));
+        return Err(Refusal::Rule(RuleRefusal::KFactor));
     }
     Ok(())
 }
 
-fn check_joint(sheet: &Sheet, j: usize, joint: &Joint) -> Result<(), DevelopError> {
+fn check_joint(sheet: &Sheet, j: usize, joint: &Joint) -> Result<(), Refusal> {
     for anchor in [&joint.a, &joint.b] {
         if anchor.panel >= sheet.panels.len() {
-            return Err(DevelopError::NoPanel(anchor.panel));
+            return Err(Refusal::NoPanel(anchor.panel));
         }
         if !anchor.origin.is_finite() || !((anchor.dir.len() - 1.0).abs() <= UNIT_TOL) {
-            return Err(DevelopError::Joint(j, "an anchor's direction is not a unit vector"));
+            return Err(Refusal::Joint {
+                joint: j,
+                why: JointRefusal::NotUnit,
+            });
         }
     }
     // A rip may part a panel from itself: a tube cut open along its own seam.
     if joint.a.panel == joint.b.panel && !matches!(joint.kind, JointKind::Rip(_)) {
-        return Err(DevelopError::Joint(j, "both anchors are on one panel"));
+        return Err(Refusal::Joint {
+            joint: j,
+            why: JointRefusal::OnePanel,
+        });
     }
     match &joint.kind {
         JointKind::Bend(bend) => {
-            if !(bend.angle > 0.0 && bend.angle <= PI) || !(bend.radius >= 0.0) || !bend.radius.is_finite() {
-                return Err(DevelopError::Joint(j, "a bend turns more than 0 and at most a half turn, round a radius of 0 or more"));
+            if !(bend.angle > 0.0
+                && bend.angle <= PI
+                && bend.radius >= 0.0
+                && bend.radius.is_finite())
+            {
+                return Err(Refusal::Joint {
+                    joint: j,
+                    why: JointRefusal::BendRange,
+                });
             }
-            if bend.datum == crate::Datum::Sharp && !(bend.setback(sheet.thickness).is_finite() && bend.angle < PI) {
-                return Err(DevelopError::Joint(j, "a half turn has no virtual sharp: anchor it at its tangent lines"));
+            if bend.datum == Datum::Sharp
+                && !(bend.setback(sheet.thickness).is_finite() && bend.angle < PI)
+            {
+                return Err(Refusal::Joint {
+                    joint: j,
+                    why: JointRefusal::HalfTurnSharp,
+                });
             }
             let (near, far) = (bend.ends.near, bend.ends.far);
             if ![near.0, near.1, far.0, far.1].iter().all(|v| v.is_finite()) {
-                return Err(DevelopError::Joint(j, "the zone's ends are not numbers"));
+                return Err(Refusal::Joint {
+                    joint: j,
+                    why: JointRefusal::ZoneEnds,
+                });
             }
-            let flat = |a: &Anchor| sheet.panels.get(a.panel).is_some_and(|p| p.surface == Surface::Plane);
+            let flat = |a: &Anchor| {
+                sheet
+                    .panels
+                    .get(a.panel)
+                    .is_some_and(|p| p.surface == Surface::Plane)
+            };
             if !(flat(&joint.a) && flat(&joint.b)) {
-                return Err(DevelopError::Joint(j, "not supported yet: a bend on the edge of a roll"));
+                return Err(Refusal::Joint {
+                    joint: j,
+                    why: JointRefusal::BendOnRoll,
+                });
             }
         }
         JointKind::Seam => {}
         JointKind::Rip(rip) => {
             let n = rip.turns.len();
             if n < 2 || rip.edges.0.len() != n || rip.edges.1.len() != n {
-                return Err(DevelopError::Joint(j, "a rip's edge has two or more points on each panel, and a turn at each"));
+                return Err(Refusal::Joint {
+                    joint: j,
+                    why: JointRefusal::RipPoints,
+                });
             }
-            let finite = |s: &Seg2| s.start().is_finite() && s.end().is_finite();
-            if !rip.edges.0.iter().chain(&rip.edges.1).all(|p| p.is_finite())
+            // Every number of each curve: its ends, an arc's radius and angles, a Bezier's or
+            // conic's inner control points and weight.
+            let finite = |s: &Seg2| match *s {
+                Seg2::Line { a, b } => a.is_finite() && b.is_finite(),
+                Seg2::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep,
+                } => {
+                    center.is_finite()
+                        && radius.is_finite()
+                        && start.is_finite()
+                        && sweep.is_finite()
+                }
+                Seg2::Cubic { p0, p1, p2, p3 } => {
+                    p0.is_finite() && p1.is_finite() && p2.is_finite() && p3.is_finite()
+                }
+                Seg2::Conic { a, apex, b, w } => {
+                    a.is_finite() && apex.is_finite() && b.is_finite() && w.is_finite()
+                }
+                Seg2::Bezier { n, p } => p.iter().take(usize::from(n) + 1).all(|q| q.is_finite()),
+            };
+            if !rip
+                .edges
+                .0
+                .iter()
+                .chain(&rip.edges.1)
+                .all(|p| p.is_finite())
                 || !rip.turns.iter().all(|t| t.is_finite())
                 || !rip.curves.0.iter().chain(&rip.curves.1).all(finite)
             {
-                return Err(DevelopError::Joint(j, "a rip's edge is not numbers"));
+                return Err(Refusal::Joint {
+                    joint: j,
+                    why: JointRefusal::RipNotFinite,
+                });
             }
             let fine = match rip.lap {
                 Lap::Miter { gap } => gap >= 0.0 && gap.is_finite(),
                 Lap::Cut(a, b) => a >= 0.0 && b >= 0.0 && a.is_finite() && b.is_finite(),
             };
             if !fine {
-                return Err(DevelopError::Joint(j, "a rip cuts 0 or more from each side"));
+                return Err(Refusal::Joint {
+                    joint: j,
+                    why: JointRefusal::RipLap,
+                });
             }
         }
     }
@@ -585,36 +713,76 @@ struct RipBand {
 /// square to the edge is found with the panel's surface metric, so every kind of surface, and
 /// every course the edge takes on it, is one computation. Where the cut is the same all along
 /// and the edge is known exactly as lines and arcs in a plane, it is moved exactly.
-fn rip_bands(sheet: &Sheet, maps: &[Flatten], j: usize, joint: &Joint, rip: &Rip) -> Result<[Option<RipBand>; 2], DevelopError> {
-    let cuts: Vec<(f64, f64)> = rip.turns.iter().map(|turn| rip.lap.cuts(*turn, sheet.thickness)).collect();
-    let off = || DevelopError::Joint(j, "a rip's edge leaves its panel's surface");
+fn rip_bands(
+    sheet: &Sheet,
+    maps: &[Flatten],
+    j: usize,
+    joint: &Joint,
+    rip: &Rip,
+) -> Result<[Option<RipBand>; 2], Refusal> {
+    let cuts: Vec<(f64, f64)> = rip
+        .turns
+        .iter()
+        .map(|turn| rip.lap.cuts(*turn, sheet.thickness))
+        .collect();
+    let off = || Refusal::Joint {
+        joint: j,
+        why: JointRefusal::RipOffSurface,
+    };
     let mut out = [None, None];
     // The `a` panel's material lies on the left of the edge's way, the `b` panel's on the right.
-    for (slot, (panel, edge, side)) in out.iter_mut().zip([(joint.a.panel, &rip.edges.0, 1.0), (joint.b.panel, &rip.edges.1, -1.0)]) {
-        let depth: Vec<f64> = cuts.iter().map(|c| if side > 0.0 { c.0 } else { c.1 }).collect();
+    for (slot, (panel, edge, side)) in out.iter_mut().zip([
+        (joint.a.panel, &rip.edges.0, 1.0),
+        (joint.b.panel, &rip.edges.1, -1.0),
+    ]) {
+        let depth: Vec<f64> = cuts
+            .iter()
+            .map(|c| if side > 0.0 { c.0 } else { c.1 })
+            .collect();
         if !depth.iter().any(|d| *d > 0.0) {
             continue;
         }
-        let (Some(surface), Some(map)) = (sheet.panels.get(panel).map(|p| &p.surface), maps.get(panel)) else {
-            return Err(DevelopError::NoPanel(panel));
+        let (Some(surface), Some(map)) =
+            (sheet.panels.get(panel).map(|p| &p.surface), maps.get(panel))
+        else {
+            return Err(Refusal::NoPanel(panel));
         };
-        let (Some(first), Some(last)) = (edge.first(), edge.last()) else { return Err(off()) };
-        let middle = if edge.len() == 2 { first.lerp(*last, 0.5) } else { edge.get(edge.len() / 2).copied().unwrap_or(*first) };
+        let (Some(first), Some(last)) = (edge.first(), edge.last()) else {
+            return Err(off());
+        };
+        let middle = if edge.len() == 2 {
+            first.lerp(*last, 0.5)
+        } else {
+            edge.get(edge.len() / 2).copied().unwrap_or(*first)
+        };
         let (ends, middle) = ([map.point(*first), map.point(*last)], map.point(middle));
         // A plane's chart is its neutral chart.
-        let curve = if side > 0.0 { &rip.curves.0 } else { &rip.curves.1 };
-        let even = depth.first().filter(|d0| depth.iter().all(|d| (*d - **d0).abs() <= RIP_TOL));
-        if let (Surface::Plane, Some(d)) = (surface, even)
-            && let Some(inner) = moved(curve, side * d)
-        {
-            *slot = Some(RipBand { inner, ends, middle });
+        let curve = if side > 0.0 {
+            &rip.curves.0
+        } else {
+            &rip.curves.1
+        };
+        let even = depth
+            .first()
+            .filter(|d0| depth.iter().all(|d| (*d - **d0).abs() <= RIP_TOL));
+        let exact = match (surface, even) {
+            (Surface::Plane, Some(d)) => moved(curve, side * d),
+            _ => None,
+        };
+        if let Some(inner) = exact {
+            *slot = Some(RipBand {
+                inner,
+                ends,
+                middle,
+            });
             continue;
         }
-        let mut inner = Vec::with_capacity(edge.len());
+        let mut inner = Vec::new();
         for (k, (q, d)) in edge.iter().zip(&depth).enumerate() {
             let way = edge_way(edge, k).ok_or_else(off)?;
-            let [e, f, g] = crate::fold::metric(surface, *q);
-            let dot = |x: Vec2, y: Vec2| x.x * y.x * e + (x.x * y.y + x.y * y.x) * f + x.y * y.y * g;
+            let [e, f, g] = super::fold::metric(surface, *q);
+            let dot =
+                |x: Vec2, y: Vec2| x.x * y.x * e + (x.x * y.y + x.y * y.x) * f + x.y * y.y * g;
             // Square to the edge on the surface, toward the panel's material, a unit long there.
             let across = Vec2::new(-way.y, way.x) * side;
             let square = across - way * (dot(across, way) / dot(way, way));
@@ -624,7 +792,11 @@ fn rip_bands(sheet: &Sheet, maps: &[Flatten], j: usize, joint: &Joint, rip: &Rip
             }
             inner.push(map.point(*q + square * (*d / length)));
         }
-        *slot = Some(RipBand { inner: curve_through(&inner), ends, middle });
+        *slot = Some(RipBand {
+            inner: curve_through(&inner),
+            ends,
+            middle,
+        });
     }
     Ok(out)
 }
@@ -639,17 +811,32 @@ fn moved(curve: &[Seg2], d: f64) -> Option<Vec<Seg2>> {
             Seg2::Line { a, b } => {
                 let u = (b - a).normalized()?;
                 let left = Vec2::new(-u.y, u.x) * d;
-                Some(Seg2::Line { a: a + left, b: b + left })
+                Some(Seg2::Line {
+                    a: a + left,
+                    b: b + left,
+                })
             }
             // Turning counter-clockwise, the left is toward the center.
-            Seg2::Arc { center, radius, start, sweep } => {
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => {
                 let radius = radius - d * sweep.signum();
-                (radius > 0.0).then_some(Seg2::Arc { center, radius, start, sweep })
+                (radius > 0.0).then_some(Seg2::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep,
+                })
             }
             _ => None,
         })
         .collect::<Option<_>>()?;
-    let whole = out.windows(2).all(|w| matches!(w, [p, q] if p.end().dist(q.start()) <= RIP_TOL));
+    let whole = out
+        .windows(2)
+        .all(|w| matches!(w, [p, q] if p.end().dist(q.start()) <= RIP_TOL));
     (whole && !out.is_empty()).then_some(out)
 }
 
@@ -689,14 +876,21 @@ struct Straight {
 
 impl Straight {
     fn of(side: &RipSide) -> Option<Straight> {
-        let [Seg2::Line { a, b }] = side.cut.as_slice() else { return None };
+        let [Seg2::Line { a, b }] = side.cut.as_slice() else {
+            return None;
+        };
         let [start, end] = side.ends;
         let way = (end - start).normalized()?;
         // Its middle on the line through its ends.
         if (side.middle - start).cross(way).abs() > ON_OUTLINE {
             return None;
         }
-        Some(Straight { start, way, length: start.dist(end), cut: [*a, *b] })
+        Some(Straight {
+            start,
+            way,
+            length: start.dist(end),
+            cut: [*a, *b],
+        })
     }
 
     /// Whether `p` lies on the edge's line, within [`ON_OUTLINE`].
@@ -735,7 +929,18 @@ fn stretches_along(l: &Loop2, line: &Straight) -> Vec<(f64, f64, Seg2)> {
         }
     }
     let at = |s: f64| line.cut[0] + (line.cut[1] - line.cut[0]) * (s / line.length);
-    runs.into_iter().map(|(from, to, lo, hi)| (from, to, Seg2::Line { a: at(lo), b: at(hi) })).collect()
+    runs.into_iter()
+        .map(|(from, to, lo, hi)| {
+            (
+                from,
+                to,
+                Seg2::Line {
+                    a: at(lo),
+                    b: at(hi),
+                },
+            )
+        })
+        .collect()
 }
 
 /// A stretch of a loop's new outline, each edge with what it is.
@@ -743,6 +948,10 @@ type Stretch = Vec<(Seg2, EdgeFrom)>;
 
 /// How near (mm) a rip's ends lie to its panel's outline, and two edges' ends that meet.
 const ON_OUTLINE: f64 = 1e-6;
+
+/// A stretch of a loop a rip cuts back: from and to (as places on the loop), the rip's joint and
+/// its new edge there.
+type CutBack = (f64, f64, usize, Vec<Seg2>);
 /// How near (mm) the middle of a rip's edge, drawn by its points, lies to the outline's curve.
 const MIDDLE_TOL: f64 = 1e-3;
 /// A number worked from terms of some size is zero to rounding within this much of zero,
@@ -774,16 +983,24 @@ const CROSSING_LIMIT: f64 = 50.0;
 /// edge is, never by cutting pieces away, and every edge of it says what it is. Where a cut took
 /// part of a straight rip's edge out to the rip's line (its lap is never material), the outline
 /// runs along the edge in stretches, and each is cut back on its own (see [`stretches_along`]).
-fn cut_by_rips(flat: &FlatPanel, sides: &[RipSide]) -> Result<FlatPanel, DevelopError> {
-    let loops: Vec<&Loop2> = std::iter::once(&flat.region.outer).chain(&flat.region.holes).collect();
+fn cut_by_rips(flat: &FlatPanel, sides: &[RipSide]) -> Result<FlatPanel, Refusal> {
+    let loops: Vec<&Loop2> = std::iter::once(&flat.region.outer)
+        .chain(&flat.region.holes)
+        .collect();
     let far = flat.region.outer.segs.iter().map(Seg2::length).sum::<f64>() + 1.0;
     // Each loop's stretches to cut back: from and to (as places on the loop), the rip's joint and
     // its new edge there.
-    let mut on: Vec<Vec<(f64, f64, usize, Vec<Seg2>)>> = vec![Vec::new(); loops.len()];
+    let mut on: Vec<Vec<CutBack>> = vec![Vec::new(); loops.len()];
     for side in sides {
-        let lost = || DevelopError::Joint(side.joint, "a rip's edge is not on its panel's outline");
+        let lost = || Refusal::Joint {
+            joint: side.joint,
+            why: JointRefusal::RipOffOutline,
+        };
         let found = loops.iter().enumerate().find_map(|(li, l)| {
-            let (s, e) = (place_on(&l.segs, side.ends[0], ON_OUTLINE)?, place_on(&l.segs, side.ends[1], ON_OUTLINE)?);
+            let (s, e) = (
+                place_on(&l.segs, side.ends[0], ON_OUTLINE)?,
+                place_on(&l.segs, side.ends[1], ON_OUTLINE)?,
+            );
             Some((li, s, e, place_on(&l.segs, side.middle, MIDDLE_TOL)?))
         });
         let straight = Straight::of(side);
@@ -791,26 +1008,38 @@ fn cut_by_rips(flat: &FlatPanel, sides: &[RipSide]) -> Result<FlatPanel, Develop
             // The stretch from its start to its end the way the loop runs holds its middle.
             let n = loops.get(li).map_or(1.0, |l| l.segs.len() as f64);
             if (m - s).rem_euclid(n) > (e - s).rem_euclid(n) && (e - s).rem_euclid(n) > 0.0 {
-                return Err(DevelopError::Joint(side.joint, "a rip's edge runs against its panel's outline"));
+                return Err(Refusal::Joint {
+                    joint: side.joint,
+                    why: JointRefusal::RipAgainstOutline,
+                });
             }
             // The whole edge, and nothing else, as it was drawn; a straight edge a cut took part
             // of is read by its stretches (below).
-            let along = |g: &Seg2, line: &Straight| matches!(g, Seg2::Line { .. }) && line.on(g.start()) && line.on(g.end());
+            let along = |g: &Seg2, line: &Straight| {
+                matches!(g, Seg2::Line { .. }) && line.on(g.start()) && line.on(g.end())
+            };
             let whole = match (&straight, loops.get(li)) {
                 (Some(line), Some(l)) => portion(&l.segs, s, e).iter().all(|(g, _)| along(g, line)),
                 _ => true,
             };
             if whole {
-                on.get_mut(li).ok_or_else(lost)?.push((s, e, side.joint, side.cut.clone()));
+                on.get_mut(li)
+                    .ok_or_else(lost)?
+                    .push((s, e, side.joint, side.cut.clone()));
                 continue;
             }
         }
-        let Some(line) = straight else { return Err(lost()) };
+        let Some(line) = straight else {
+            return Err(lost());
+        };
         let mut any = false;
         for (li, l) in loops.iter().enumerate() {
             let runs = stretches_along(l, &line);
             any |= !runs.is_empty();
-            on.get_mut(li).ok_or_else(lost)?.extend(runs.into_iter().map(|(s, e, cut)| (s, e, side.joint, vec![cut])));
+            on.get_mut(li).ok_or_else(lost)?.extend(
+                runs.into_iter()
+                    .map(|(s, e, cut)| (s, e, side.joint, vec![cut])),
+            );
         }
         if !any {
             return Err(lost());
@@ -818,26 +1047,37 @@ fn cut_by_rips(flat: &FlatPanel, sides: &[RipSide]) -> Result<FlatPanel, Develop
     }
     let mut out = flat.clone();
     for (li, rips) in on.iter_mut().enumerate() {
-        let (Some(lp), Some(from)) = (loops.get(li), flat.origins.get(li)) else { continue };
+        let (Some(lp), Some(from)) = (loops.get(li), flat.origins.get(li)) else {
+            continue;
+        };
         if rips.is_empty() {
             continue;
         }
         rips.sort_by(|x, y| x.0.total_cmp(&y.0));
-        let mut stretches: Vec<Stretch> = Vec::with_capacity(2 * rips.len());
+        let mut stretches: Vec<Stretch> = Vec::new();
         for (i, (_, e, joint, cut)) in rips.iter().enumerate() {
             stretches.push(cut.iter().map(|c| (*c, EdgeFrom::Rip(*joint))).collect());
-            let next = rips.get((i + 1) % rips.len()).map_or(*e, |r| r.0);
+            let next = rips
+                .get((i + 1).checked_rem(rips.len()).unwrap_or(0))
+                .map_or(*e, |r| r.0);
             let rest = portion(&lp.segs, *e, next);
-            stretches.push(rest.into_iter().map(|(seg, k)| (seg, from.get(k).copied().unwrap_or(EdgeFrom::Own(k)))).collect());
+            stretches.push(
+                rest.into_iter()
+                    .map(|(seg, k)| (seg, from.get(k).copied().unwrap_or(EdgeFrom::Own(k))))
+                    .collect(),
+            );
         }
         stretches.retain(|s| !s.is_empty());
         let count = stretches.len();
         for i in 0..count {
-            let next = (i + 1) % count;
+            let next = (i + 1).checked_rem(count).unwrap_or(0);
             if next == i {
                 continue;
             }
-            let mut b = stretches.get_mut(next).map(std::mem::take).unwrap_or_default();
+            let mut b = stretches
+                .get_mut(next)
+                .map(std::mem::take)
+                .unwrap_or_default();
             if let Some(a) = stretches.get_mut(i) {
                 join(a, &mut b, far, count == 2);
             }
@@ -848,18 +1088,28 @@ fn cut_by_rips(flat: &FlatPanel, sides: &[RipSide]) -> Result<FlatPanel, Develop
         // An edge the joins trimmed to a hair (a rip's new edge meeting a step its own cut was
         // drawn for) goes, the lines beside it closed up on each other.
         let hair = RIP_TOL * 10.0;
-        let mut edges: Stretch = stretches.into_iter().flatten().filter(|(s, _)| s.length() > hair).collect();
+        let mut edges: Stretch = stretches
+            .into_iter()
+            .flatten()
+            .filter(|(s, _)| s.length() > hair)
+            .collect();
         let count = edges.len();
         for i in 0..count {
-            let Some(end) = edges.get(i).map(|e| e.0.end()) else { continue };
-            if let Some((Seg2::Line { a, .. }, _)) = edges.get_mut((i + 1) % count)
-                && a.dist(end) <= hair
+            let Some(end) = edges.get(i).map(|e| e.0.end()) else {
+                continue;
+            };
+            if let Some((Seg2::Line { a, .. }, _)) =
+                edges.get_mut((i + 1).checked_rem(count).unwrap_or(0))
             {
-                *a = end;
+                if a.dist(end) <= hair {
+                    *a = end;
+                }
             }
         }
         edges.retain(|(s, _)| s.length() > hair);
-        let new = Loop2 { segs: edges.iter().map(|e| e.0).collect() };
+        let new = Loop2 {
+            segs: edges.iter().map(|e| e.0).collect(),
+        };
         if li == 0 {
             out.region.outer = new;
         } else if let Some(h) = out.region.holes.get_mut(li - 1) {
@@ -891,7 +1141,13 @@ fn place_on(segs: &[Seg2], p: Vec2, tol: f64) -> Option<f64> {
 fn portion(segs: &[Seg2], from: f64, to: f64) -> Vec<(Seg2, usize)> {
     let n = segs.len();
     let total = n as f64;
-    let snap = |x: f64| if (x - x.round()).abs() < 1e-9 { x.round() } else { x };
+    let snap = |x: f64| {
+        if (x - x.round()).abs() < 1e-9 {
+            x.round()
+        } else {
+            x
+        }
+    };
     let (from, mut to) = (snap(from).rem_euclid(total), snap(to).rem_euclid(total));
     if (to - from).abs() < 1e-9 {
         return Vec::new();
@@ -904,7 +1160,7 @@ fn portion(segs: &[Seg2], from: f64, to: f64) -> Vec<(Seg2, usize)> {
     while to - x > 1e-9 {
         let k = x.floor();
         let end = (k + 1.0).min(to);
-        let i = (k as usize) % n.max(1);
+        let i = (k as usize).checked_rem(n).unwrap_or(0);
         if let Some(s) = segs.get(i) {
             let piece = part(s, x - k, end - k);
             if piece.length() > 0.0 {
@@ -919,15 +1175,25 @@ fn portion(segs: &[Seg2], from: f64, to: f64) -> Vec<(Seg2, usize)> {
 /// The part of `s` from parameter `t0` to `t1`.
 fn part(s: &Seg2, t0: f64, t1: f64) -> Seg2 {
     let right = if t0 > 0.0 { s.split_at(t0).1 } else { *s };
-    let t = if t0 < 1.0 { (t1 - t0) / (1.0 - t0) } else { 1.0 };
-    if t >= 1.0 { right } else { right.split_at(t.max(0.0)).0 }
+    let t = if t0 < 1.0 {
+        (t1 - t0) / (1.0 - t0)
+    } else {
+        1.0
+    };
+    if t >= 1.0 {
+        right
+    } else {
+        right.split_at(t.max(0.0)).0
+    }
 }
 
 /// Joins the stretch `a` to the stretch `b` after it (see [`cut_by_rips`]). An edge the join adds
 /// is the rip's that made the corner: `a`'s where both are rips' and it carries `a` on. `twice`
 /// where `b` runs on round the loop to `a` again, so that the two are joined at both their ends.
 fn join(a: &mut Stretch, b: &mut Stretch, far: f64, twice: bool) {
-    let (Some(&(last, from_a)), Some(&(first, from_b))) = (a.last(), b.first()) else { return };
+    let (Some(&(last, from_a)), Some(&(first, from_b))) = (a.last(), b.first()) else {
+        return;
+    };
     let (pa, pb) = (last.end(), first.start());
     if pa.dist(pb) <= ON_OUTLINE {
         return;
@@ -936,7 +1202,10 @@ fn join(a: &mut Stretch, b: &mut Stretch, far: f64, twice: bool) {
     let gap = pa.dist(pb);
     // The crossing nearest the corner within `limit` gaps of it, and not where either stretch
     // meets the stretch on its far side.
-    let (a_far, b_far) = (a.first().map_or(pa, |e| e.0.start()), b.last().map_or(pb, |e| e.0.end()));
+    let (a_far, b_far) = (
+        a.first().map_or(pa, |e| e.0.start()),
+        b.last().map_or(pb, |e| e.0.end()),
+    );
     let nearest = |found: Vec<(usize, f64, usize, f64, Vec2)>, limit: f64| {
         found
             .into_iter()
@@ -950,26 +1219,55 @@ fn join(a: &mut Stretch, b: &mut Stretch, far: f64, twice: bool) {
     // rip's new edge that starts outside its panel (where the panel's edge crosses the rip's lap
     // short of the rip's end, as the top of a wall that reaches a little past a slanted rip does)
     // crosses the stretch after it near its start.
-    let here = |c: &(usize, f64, usize, f64, Vec2)| !twice || c.4.dist(pa) + c.4.dist(pb) <= c.4.dist(a_far) + c.4.dist(b_far);
-    if let Some((ia, u, ib, v, _)) = nearest(crossings(&segs(a), &segs(b)).into_iter().filter(here).collect(), CROSSING_LIMIT) {
+    let here = |c: &(usize, f64, usize, f64, Vec2)| {
+        !twice || c.4.dist(pa) + c.4.dist(pb) <= c.4.dist(a_far) + c.4.dist(b_far)
+    };
+    if let Some((ia, u, ib, v, _)) = nearest(
+        crossings(&segs(a), &segs(b))
+            .into_iter()
+            .filter(here)
+            .collect(),
+        CROSSING_LIMIT,
+    ) {
         trim_end(a, ia, u);
         trim_start(b, ib, v);
         return;
     }
-    let (Some(ta), Some(tb)) = (last.end_tangent().normalized(), first.start_tangent().normalized()) else {
+    let (Some(ta), Some(tb)) = (
+        last.end_tangent().normalized(),
+        first.start_tangent().normalized(),
+    ) else {
         a.push((Seg2::Line { a: pa, b: pb }, made(from_a, from_b)));
         return;
     };
     // `a` carried on to `b`'s first edge.
-    if let Some((_, _, _, v, x)) = nearest(crossings(&[Seg2::Line { a: pa, b: pa + ta * far }], &[first]), MITER_LIMIT) {
+    if let Some((_, _, _, v, x)) = nearest(
+        crossings(
+            &[Seg2::Line {
+                a: pa,
+                b: pa + ta * far,
+            }],
+            &[first],
+        ),
+        MITER_LIMIT,
+    ) {
         a.push((Seg2::Line { a: pa, b: x }, made(from_a, from_b)));
         trim_start(b, 0, v);
         return;
     }
     // `b` carried back to `a`'s last edge.
-    if let Some((_, u, _, _, x)) = nearest(crossings(&[last], &[Seg2::Line { a: pb - tb * far, b: pb }]), MITER_LIMIT) {
+    if let Some((_, u, _, _, x)) = nearest(
+        crossings(
+            &[last],
+            &[Seg2::Line {
+                a: pb - tb * far,
+                b: pb,
+            }],
+        ),
+        MITER_LIMIT,
+    ) {
         trim_end(a, a.len() - 1, u);
-        b.insert(0, (Seg2::Line { a: x, b: pb }, made(from_b, from_a)));
+        push_front(b, (Seg2::Line { a: x, b: pb }, made(from_b, from_a)));
         return;
     }
     // Both carried on, to where they meet; else a step across.
@@ -979,7 +1277,7 @@ fn join(a: &mut Stretch, b: &mut Stretch, far: f64, twice: bool) {
         if u > 0.0 && v > 0.0 && u <= MITER_LIMIT * gap && v <= MITER_LIMIT * gap {
             let x = pa + ta * u;
             a.push((Seg2::Line { a: pa, b: x }, made(from_a, from_b)));
-            b.insert(0, (Seg2::Line { a: x, b: pb }, made(from_b, from_a)));
+            push_front(b, (Seg2::Line { a: x, b: pb }, made(from_b, from_a)));
             return;
         }
     }
@@ -999,13 +1297,20 @@ fn trim_end(a: &mut Stretch, ia: usize, u: f64) {
 
 /// `b` starting at parameter `v` of its edge `ib`.
 fn trim_start(b: &mut Stretch, ib: usize, v: f64) {
-    b.drain(..ib.min(b.len()));
+    *b = b.iter().skip(ib).copied().collect();
     if let Some(first) = b.first_mut() {
         first.0 = part(&first.0, v, 1.0);
         if first.0.length() <= ON_OUTLINE * 1e-3 {
-            b.remove(0);
+            *b = b.iter().skip(1).copied().collect();
         }
     }
+}
+
+/// `b` with `edge` put before its first edge.
+fn push_front(b: &mut Stretch, edge: (Seg2, EdgeFrom)) {
+    let mut out = vec![edge];
+    out.append(b);
+    *b = out;
 }
 
 /// Where the edges of `a` cross those of `b`: each crossing's edge and parameter on either, and
@@ -1060,12 +1365,24 @@ fn meetings(sa: &Seg2, sb: &Seg2) -> Vec<(f64, f64)> {
             let (s, r) = ((q0 - p0).cross(d2) / den, (q0 - p0).cross(d1) / den);
             on(s).zip(on(r)).into_iter().collect()
         }
-        (Seg2::Line { a, b }, _) => line_meetings(a, b, sb).into_iter().filter_map(|(r, v)| Some((on(r)?, v))).collect(),
-        (_, Seg2::Line { a, b }) => line_meetings(a, b, sa).into_iter().filter_map(|(r, u)| Some((u, on(r)?))).collect(),
+        (Seg2::Line { a, b }, _) => line_meetings(a, b, sb)
+            .into_iter()
+            .filter_map(|(r, v)| Some((on(r)?, v)))
+            .collect(),
+        (_, Seg2::Line { a, b }) => line_meetings(a, b, sa)
+            .into_iter()
+            .filter_map(|(r, u)| Some((u, on(r)?)))
+            .collect(),
         _ => {
             let (ka, kb) = (spans(sa), spans(sb));
             let size = |h: &[f64; 3]| (h[0] / h[2]).abs().max((h[1] / h[2]).abs());
-            let scale = ka.iter().chain(&kb).flatten().filter(|h| h[2] > 0.0).map(size).fold(1.0, f64::max);
+            let scale = ka
+                .iter()
+                .chain(&kb)
+                .flatten()
+                .filter(|h| h[2] > 0.0)
+                .map(size)
+                .fold(1.0, f64::max);
             let mut out = Vec::new();
             for (i, ca) in ka.iter().enumerate() {
                 for (k, cb) in kb.iter().enumerate() {
@@ -1092,8 +1409,14 @@ fn line_meetings(a: Vec2, b: Vec2, s: &Seg2) -> Vec<(f64, f64)> {
     let mut out = Vec::new();
     for (k, c) in spans(s).iter().enumerate() {
         // Each control point's distance from the line times its weight and the line's length.
-        let g: Vec<f64> = c.iter().map(|h| d.cross(Vec2::new(h[0] - a.x * h[2], h[1] - a.y * h[2]))).collect();
-        let size = d.len() * c.iter().map(|h| h[0].abs() + h[1].abs() + (a.x.abs() + a.y.abs()) * h[2].abs()).fold(0.0, f64::max);
+        let g: Vec<f64> = c
+            .iter()
+            .map(|h| d.cross(Vec2::new(h[0] - a.x * h[2], h[1] - a.y * h[2])))
+            .collect();
+        let size = d.len()
+            * c.iter()
+                .map(|h| h[0].abs() + h[1].abs() + (a.x.abs() + a.y.abs()) * h[2].abs())
+                .fold(0.0, f64::max);
         for x in roots(&g, size) {
             if let Some(p) = span_point(c, x) {
                 out.push(((p - a).dot(d) / len2, seg_param(s, k, x, p)));
@@ -1110,10 +1433,24 @@ fn spans(s: &Seg2) -> Vec<Vec<[f64; 3]>> {
     let h = |p: Vec2, w: f64| [p.x * w, p.y * w, w];
     match *s {
         Seg2::Line { a, b } => vec![vec![h(a, 1.0), h(b, 1.0)]],
-        Seg2::Arc { center, radius, start, sweep } => arc_as_conics(center, radius, start, sweep).iter().flat_map(spans).collect(),
-        Seg2::Cubic { p0, p1, p2, p3 } => vec![vec![h(p0, 1.0), h(p1, 1.0), h(p2, 1.0), h(p3, 1.0)]],
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => arc_as_conics(center, radius, start, sweep)
+            .iter()
+            .flat_map(spans)
+            .collect(),
+        Seg2::Cubic { p0, p1, p2, p3 } => {
+            vec![vec![h(p0, 1.0), h(p1, 1.0), h(p2, 1.0), h(p3, 1.0)]]
+        }
         Seg2::Conic { a, apex, b, w } => vec![vec![h(a, 1.0), h(apex, w), h(b, 1.0)]],
-        Seg2::Bezier { n, p } => vec![p.iter().take(usize::from(n) + 1).map(|q| h(*q, 1.0)).collect()],
+        Seg2::Bezier { n, p } => vec![p
+            .iter()
+            .take(usize::from(n) + 1)
+            .map(|q| h(*q, 1.0))
+            .collect()],
     }
 }
 
@@ -1122,7 +1459,12 @@ fn spans(s: &Seg2) -> Vec<Vec<[f64; 3]>> {
 /// piece of at most a quarter turn.
 fn seg_param(s: &Seg2, k: usize, x: f64, at: Vec2) -> f64 {
     match *s {
-        Seg2::Arc { center, start, sweep, .. } => {
+        Seg2::Arc {
+            center,
+            start,
+            sweep,
+            ..
+        } => {
             let n = (sweep.abs() / FRAC_PI_2).ceil().clamp(1.0, 8.0);
             let step = sweep / n;
             let turn = (at - center).angle() - (start + step * k as f64);
@@ -1141,7 +1483,11 @@ fn span_point(c: &[[f64; 3]], x: f64) -> Option<Vec2> {
 
 /// The homogeneous point `x` of the way from `p` to `q`.
 fn toward(p: [f64; 3], q: [f64; 3], x: f64) -> [f64; 3] {
-    [p[0] + (q[0] - p[0]) * x, p[1] + (q[1] - p[1]) * x, p[2] + (q[2] - p[2]) * x]
+    [
+        p[0] + (q[0] - p[0]) * x,
+        p[1] + (q[1] - p[1]) * x,
+        p[2] + (q[2] - p[2]) * x,
+    ]
 }
 
 /// A Bézier's control points (or a Bernstein polynomial's coefficients) split by de Casteljau,
@@ -1150,11 +1496,15 @@ fn toward(p: [f64; 3], q: [f64; 3], x: f64) -> [f64; 3] {
 /// other.
 fn split<T: Copy>(c: &[T], lerp: impl Fn(T, T) -> T) -> (Vec<T>, Vec<T>) {
     let mut q = c.to_vec();
-    let (mut before, mut after) = (Vec::with_capacity(c.len()), Vec::with_capacity(c.len()));
+    let (mut before, mut after) = (Vec::new(), Vec::new());
     while let (Some(&first), Some(&last)) = (q.first(), q.last()) {
         before.push(first);
         after.push(last);
-        q = q.iter().zip(q.iter().skip(1)).map(|(p, r)| lerp(*p, *r)).collect();
+        q = q
+            .iter()
+            .zip(q.iter().skip(1))
+            .map(|(p, r)| lerp(*p, *r))
+            .collect();
     }
     after.reverse();
     (before, after)
@@ -1176,7 +1526,9 @@ fn roots(b: &[f64], size: f64) -> Vec<f64> {
     let mut todo = vec![(b.to_vec(), 0.0, 1.0, 0u32)];
     let mut halved = 0usize;
     while let Some((c, lo, hi, depth)) = todo.pop() {
-        let (Some(&first), Some(&last)) = (c.first(), c.last()) else { continue };
+        let (Some(&first), Some(&last)) = (c.first(), c.last()) else {
+            continue;
+        };
         if !c.iter().all(|x| x.is_finite()) {
             continue;
         }
@@ -1224,7 +1576,9 @@ fn bisect(c: &[f64]) -> f64 {
         if !(lo < mid && mid < hi) {
             break;
         }
-        let Some(&f) = split(c, |p, q| p + (q - p) * mid).0.last() else { break };
+        let Some(&f) = split(c, |p, q| p + (q - p) * mid).0.last() else {
+            break;
+        };
         if f == 0.0 {
             return mid;
         }
@@ -1248,18 +1602,27 @@ fn bisect(c: &[f64]) -> f64 {
 fn span_crossings(a: &[[f64; 3]], b: &[[f64; 3]], scale: f64) -> Vec<(f64, f64)> {
     let fine = CROSSING_FINE * scale;
     let margin = ROUNDING * scale;
-    let points = |c: &[[f64; 3]]| c.iter().map(|h| (h[2] > 0.0).then(|| Vec2::new(h[0] / h[2], h[1] / h[2]))).collect::<Option<Vec<Vec2>>>();
+    let points = |c: &[[f64; 3]]| {
+        c.iter()
+            .map(|h| (h[2] > 0.0).then(|| Vec2::new(h[0] / h[2], h[1] / h[2])))
+            .collect::<Option<Vec<Vec2>>>()
+    };
     let mid = |r: [f64; 2]| 0.5 * (r[0] + r[1]);
     let half = |p: [f64; 3], q: [f64; 3]| toward(p, q, 0.5);
     let mut out = Vec::new();
     let mut todo = vec![(a.to_vec(), [0.0, 1.0], b.to_vec(), [0.0, 1.0])];
     let mut looked = 0usize;
     while let Some((pa, ra, pb, rb)) = todo.pop() {
-        let (Some(qa), Some(qb)) = (points(&pa), points(&pb)) else { continue };
+        let (Some(qa), Some(qb)) = (points(&pa), points(&pb)) else {
+            continue;
+        };
         if apart(&qa, &qb, margin) || apart(&qb, &qa, margin) {
             continue;
         }
-        let (sa, sb) = (qa.iter().copied().collect::<Aabb2>().diagonal(), qb.iter().copied().collect::<Aabb2>().diagonal());
+        let (sa, sb) = (
+            qa.iter().copied().collect::<Box2>().diagonal(),
+            qb.iter().copied().collect::<Box2>().diagonal(),
+        );
         looked += 1;
         if (sa <= fine && sb <= fine) || looked > CROSSING_PAIRS {
             out.push((mid(ra), mid(rb)));
@@ -1283,21 +1646,38 @@ fn span_crossings(a: &[[f64; 3]], b: &[[f64; 3]], scale: f64) -> Vec<(f64, f64)>
 /// the band the points of `qa` take up across the chord of `qa` (from its first point to its
 /// last), on one side. `margin` (mm) allows for the rounding of the points.
 fn apart(qa: &[Vec2], qb: &[Vec2], margin: f64) -> bool {
-    let (Some(&s), Some(&e)) = (qa.first(), qa.last()) else { return true };
-    if !qa.iter().copied().collect::<Aabb2>().inflated(margin).meets(&qb.iter().copied().collect::<Aabb2>()) {
+    let (Some(&s), Some(&e)) = (qa.first(), qa.last()) else {
+        return true;
+    };
+    if !qa
+        .iter()
+        .copied()
+        .collect::<Box2>()
+        .inflated(margin)
+        .meets(&qb.iter().copied().collect::<Box2>())
+    {
         return true;
     }
-    let Some(across) = (e - s).normalized().map(|d| d.perp()) else { return false };
+    let Some(across) = (e - s).normalized().map(Planar::perp) else {
+        return false;
+    };
     let side = |p: &Vec2| (*p - s).dot(across);
-    let (lo, hi) = qa.iter().map(side).fold((0.0f64, 0.0f64), |(lo, hi), x| (lo.min(x), hi.max(x)));
+    let (lo, hi) = qa
+        .iter()
+        .map(side)
+        .fold((0.0f64, 0.0f64), |(lo, hi), x| (lo.min(x), hi.max(x)));
     qb.iter().all(|p| side(p) > hi + margin) || qb.iter().all(|p| side(p) < lo - margin)
 }
 
 /// A curve through `points` in order: a line where they lie on one, else a clamped cubic spline
 /// through every one of them, joined with no change of curvature.
 pub fn curve_through(points: &[Vec2]) -> Vec<Seg2> {
-    let (Some(&a), Some(&b)) = (points.first(), points.last()) else { return Vec::new() };
-    let Some(d) = (b - a).normalized() else { return Vec::new() };
+    let (Some(&a), Some(&b)) = (points.first(), points.last()) else {
+        return Vec::new();
+    };
+    let Some(d) = (b - a).normalized() else {
+        return Vec::new();
+    };
     if points.iter().all(|p| (*p - a).cross(d).abs() <= RIP_TOL) {
         return vec![Seg2::Line { a, b }];
     }
@@ -1306,7 +1686,10 @@ pub fn curve_through(points: &[Vec2]) -> Vec<Seg2> {
     // Two points have no third from either end.
     let back = |k: usize| n.checked_sub(k).and_then(|i| points.get(i));
     let (start, end) = match (points.get(1), points.get(2), back(2), back(3)) {
-        (Some(p1), Some(p2), Some(q1), Some(q2)) if n > 2 => ((*p1 * 4.0 - a * 3.0 - *p2) * 0.5, (b * 3.0 - *q1 * 4.0 + *q2) * 0.5),
+        (Some(p1), Some(p2), Some(q1), Some(q2)) if n > 2 => (
+            (*p1 * 4.0 - a * 3.0 - *p2) * 0.5,
+            (b * 3.0 - *q1 * 4.0 + *q2) * 0.5,
+        ),
         _ => (b - a, b - a),
     };
     let rates = clamped_rates(points, 1.0, start, end);
@@ -1314,7 +1697,12 @@ pub fn curve_through(points: &[Vec2]) -> Vec<Seg2> {
         .windows(2)
         .zip(rates.windows(2))
         .filter_map(|(p, m)| match (p, m) {
-            ([p0, p1], [m0, m1]) => Some(Seg2::Cubic { p0: *p0, p1: *p0 + *m0 * (1.0 / 3.0), p2: *p1 - *m1 * (1.0 / 3.0), p3: *p1 }),
+            ([p0, p1], [m0, m1]) => Some(Seg2::Cubic {
+                p0: *p0,
+                p1: *p0 + *m0 * (1.0 / 3.0),
+                p2: *p1 - *m1 * (1.0 / 3.0),
+                p3: *p1,
+            }),
             _ => None,
         })
         .collect()
@@ -1329,7 +1717,7 @@ fn add_zone(
     bend: &Bend,
     frame: &JointFrame,
     placed: (&Rigid2, &Rigid2),
-) -> Result<(), DevelopError> {
+) -> Result<(), Refusal> {
     let width = bend.allowance(sheet.thickness, sheet.k_factor);
     let setback = bend.setback(sheet.thickness);
     // Across the joint, from the `a` anchor: the `a` panel's tangent line, then the zone, then
@@ -1337,23 +1725,44 @@ fn add_zone(
     let (near_line, far_line) = (-setback, width - setback);
     let (near, far) = (bend.ends.near, bend.ends.far);
     if width > 0.0 && (near.1 > near.0 || far.1 > far.0) {
-        let (n0, n1, f0, f1) = (frame.at(near.0, near_line), frame.at(near.1, near_line), frame.at(far.0, far_line), frame.at(far.1, far_line));
+        let (n0, n1, f0, f1) = (
+            frame.at(near.0, near_line),
+            frame.at(near.1, near_line),
+            frame.at(far.0, far_line),
+            frame.at(far.1, far_line),
+        );
         // Each end straight across, or torn along the curve it follows; the loop runs along the
         // `a` side, up the end, back along the `b` side and down the start. A torn end that no
         // spline of the most spans keeps within its tolerance of its curve is refused, never laid
         // out off the curve.
-        let stray = || DevelopError::Joint(j, "a torn end of the zone strays further from the curve it follows than its tolerance");
+        let stray = || Refusal::Joint {
+            joint: j,
+            why: JointRefusal::TornEnd,
+        };
         let end = |relief: &Relief, (from, to): (f64, f64)| match *relief {
-            Relief::Tear { normal, offset } => torn(sheet, bend, frame, (normal, offset), (from, to)).ok_or_else(stray),
-            _ => Ok(vec![Seg2::Line { a: frame.at(from, near_line), b: frame.at(to, far_line) }]),
+            Relief::Tear { normal, offset } => {
+                torn(sheet, bend, frame, (normal, offset), (from, to)).ok_or_else(stray)
+            }
+            _ => Ok(vec![Seg2::Line {
+                a: frame.at(from, near_line),
+                b: frame.at(to, far_line),
+            }]),
         };
         let mut segs = vec![Seg2::Line { a: n0, b: n1 }];
         segs.extend(end(&bend.relief.1, (near.1, far.1))?);
         segs.push(Seg2::Line { a: f1, b: f0 });
-        segs.extend(end(&bend.relief.0, (near.0, far.0))?.iter().rev().map(Seg2::reversed));
+        segs.extend(
+            end(&bend.relief.0, (near.0, far.0))?
+                .iter()
+                .rev()
+                .map(Seg2::reversed),
+        );
         out.zones.push(Zone {
             joint: j,
-            region: Region2 { outer: Loop2 { segs }.ccw(), holes: Vec::new() },
+            region: Region2 {
+                outer: ccw(Loop2 { segs }),
+                holes: Vec::new(),
+            },
             near: [n0, n1],
             far: [f0, f1],
             panels: [joint.a.panel, joint.b.panel],
@@ -1362,13 +1771,31 @@ fn add_zone(
     // A panel's band runs from its tangent line across its anchor, and a thickness past it so
     // that an edge lying on the anchor leaves no sliver.
     let depth = setback + sheet.thickness.max(REACH_TOL);
-    let bands = [(joint.a.panel, placed.0, near, near_line, depth, bend.tails.0), (joint.b.panel, placed.1, far, far_line, -depth, bend.tails.1)];
+    let bands = [
+        (
+            joint.a.panel,
+            placed.0,
+            near,
+            near_line,
+            depth,
+            bend.tails.0,
+        ),
+        (joint.b.panel, placed.1, far, far_line, -depth, bend.tails.1),
+    ];
     // Where each end of the zone lies across the joint: on the line from its end on the `a`
     // panel's tangent line to its end on the `b` panel's, carried on across both bands (an end
     // that follows a slanted outline is slanted).
     let end_at = |e: usize, across: f64| {
-        let (n, f) = if e == 0 { (near.0, far.0) } else { (near.1, far.1) };
-        if far_line - near_line > 1e-12 { n + (f - n) * (across - near_line) / (far_line - near_line) } else { n }
+        let (n, f) = if e == 0 {
+            (near.0, far.0)
+        } else {
+            (near.1, far.1)
+        };
+        if far_line - near_line > 1e-12 {
+            n + (f - n) * (across - near_line) / (far_line - near_line)
+        } else {
+            n
+        }
     };
     let relieved = |r: &Relief| matches!(r, Relief::Notch | Relief::Tear { .. });
     for (panel, place, (u0, u1), line, depth, tail) in bands {
@@ -1378,13 +1805,25 @@ fn add_zone(
         // on the panel's own edge would be a rounding away from it, for the planar booleans to
         // trip on.
         let reach = panel_reach(sheet, panel)?;
-        let extent = if tail == Tail::Keep { band_extent(sheet, panel, place, frame, line, depth)? } else { None };
+        let extent = if tail == Tail::Keep {
+            band_extent(sheet, panel, place, frame, line, depth)?
+        } else {
+            None
+        };
         let (s0, s1) = match (tail, extent) {
             (Tail::Trim, _) => (u0.min(u1) - reach, u0.max(u1) + reach),
             (Tail::Keep, None) => continue,
             (Tail::Keep, Some((lo, hi))) => (
-                if lo >= u0 - EDGE_TOL || relieved(&bend.relief.0) { u0 - reach } else { u0 },
-                if hi <= u1 + EDGE_TOL || relieved(&bend.relief.1) { u1 + reach } else { u1 },
+                if lo >= u0 - EDGE_TOL || relieved(&bend.relief.0) {
+                    u0 - reach
+                } else {
+                    u0
+                },
+                if hi <= u1 + EDGE_TOL || relieved(&bend.relief.1) {
+                    u1 + reach
+                } else {
+                    u1
+                },
             ),
         };
         if s1 > s0 {
@@ -1396,8 +1835,16 @@ fn add_zone(
                 frame.at(end_at(1, line + depth) + e1, line + depth),
                 frame.at(end_at(0, line + depth) + e0, line + depth),
             ];
-            let region = Region2 { outer: Loop2::polygon(&corners).ccw(), holes: Vec::new() };
-            out.trims.push(Trim { panel, joint: j, region, line: [corners[0], corners[1]] });
+            let region = Region2 {
+                outer: ccw(polygon(&corners)),
+                holes: Vec::new(),
+            };
+            out.trims.push(Trim {
+                panel,
+                joint: j,
+                region,
+                line: [corners[0], corners[1]],
+            });
         }
         // A bend relief where the panel runs on past an end: a slot past the end, from inside
         // the panel's tangent line out through the band, and on beside the zone and the other
@@ -1409,13 +1856,30 @@ fn add_zone(
         }
         // Only what runs on inside the band takes a relief: an edge lying along the panel's
         // tangent line runs on beside the zone, not into it.
-        let inner = band_extent(sheet, panel, place, frame, line + depth.signum() * 2.0 * EDGE_TOL, depth - depth.signum() * 2.0 * EDGE_TOL)?;
+        let inner = band_extent(
+            sheet,
+            panel,
+            place,
+            frame,
+            line + depth.signum() * 2.0 * EDGE_TOL,
+            depth - depth.signum() * 2.0 * EDGE_TOL,
+        )?;
         let Some((lo, hi)) = inner else { continue };
-        let (other, beyond) = if depth > 0.0 { (joint.b.panel, far_line) } else { (joint.a.panel, near_line) };
+        let (other, beyond) = if depth > 0.0 {
+            (joint.b.panel, far_line)
+        } else {
+            (joint.a.panel, near_line)
+        };
         let across = panel_across(sheet, other, if depth > 0.0 { &joint.b } else { &joint.a })?;
         for (relief, u, out_dir) in [(bend.relief.0, u0, -1.0), (bend.relief.1, u1, 1.0)] {
-            let Relief::Slot { width: w, depth: d } = relief else { continue };
-            let runs_on = if out_dir < 0.0 { lo < u - w - EDGE_TOL } else { hi > u + w + EDGE_TOL };
+            let Relief::Slot { width: w, depth: d } = relief else {
+                continue;
+            };
+            let runs_on = if out_dir < 0.0 {
+                lo < u - w - EDGE_TOL
+            } else {
+                hi > u + w + EDGE_TOL
+            };
             if !runs_on {
                 continue;
             }
@@ -1423,14 +1887,35 @@ fn add_zone(
                 out.unrelieved.push((j, panel, u));
                 continue;
             }
-            let (s0, s1) = if out_dir < 0.0 { (u - w, u) } else { (u, u + w) };
+            let (s0, s1) = if out_dir < 0.0 {
+                (u - w, u)
+            } else {
+                (u, u + w)
+            };
             // The other panel's anchor lies its setback back across the zone from its tangent line.
             let past = beyond + depth.signum() * (across - setback + w);
-            let l1 = if depth > 0.0 { (line + depth).max(past) } else { (line + depth).min(past) };
+            let l1 = if depth > 0.0 {
+                (line + depth).max(past)
+            } else {
+                (line + depth).min(past)
+            };
             let (l0, l1) = (line - depth.signum() * d.max(0.0), l1);
-            let corners = [frame.at(s0, l0), frame.at(s1, l0), frame.at(s1, l1), frame.at(s0, l1)];
-            let region = Region2 { outer: Loop2::polygon(&corners).ccw(), holes: Vec::new() };
-            out.trims.push(Trim { panel, joint: j, region, line: [corners[0], corners[1]] });
+            let corners = [
+                frame.at(s0, l0),
+                frame.at(s1, l0),
+                frame.at(s1, l1),
+                frame.at(s0, l1),
+            ];
+            let region = Region2 {
+                outer: ccw(polygon(&corners)),
+                holes: Vec::new(),
+            };
+            out.trims.push(Trim {
+                panel,
+                joint: j,
+                region,
+                line: [corners[0], corners[1]],
+            });
         }
     }
     Ok(())
@@ -1441,11 +1926,20 @@ fn add_zone(
 /// at each turn round the bend, the length along the joint where the bend's metal, through its
 /// whole thickness, keeps off the tear's plane by as much as the ends give in proportion. `None`
 /// where no spline of at most [`MAX_TEAR_SPANS`] spans keeps within [`TEAR_TOL`] of it.
-fn torn(sheet: &Sheet, bend: &Bend, frame: &JointFrame, (normal, offset): (Vec3, f64), (from, to): (f64, f64)) -> Option<Vec<Seg2>> {
+fn torn(
+    sheet: &Sheet,
+    bend: &Bend,
+    frame: &JointFrame,
+    (normal, offset): (Vec3, f64),
+    (from, to): (f64, f64),
+) -> Option<Vec<Seg2>> {
     let (t, theta) = (sheet.thickness, bend.angle);
     let wrap = Wrap::of(bend, t, sheet.k_factor);
     let neutral = bend.radius + sheet.k_factor * t;
-    let straight = vec![Seg2::Line { a: frame.at(from, -bend.setback(t)), b: frame.at(to, theta * neutral - bend.setback(t)) }];
+    let straight = vec![Seg2::Line {
+        a: frame.at(from, -bend.setback(t)),
+        b: frame.at(to, theta * neutral - bend.setback(t)),
+    }];
     // Along the joint, the distance off the plane changes alike at every depth.
     if !(normal.x.abs() > 1e-9 && neutral > 0.0 && theta > 0.0) {
         return Some(straight);
@@ -1461,11 +1955,19 @@ fn torn(sheet: &Sheet, bend: &Bend, frame: &JointFrame, (normal, offset): (Vec3,
     };
     let deep = |phi: f64| {
         let [sheet, deep] = need(phi);
-        if normal.x > 0.0 { deep > sheet } else { deep < sheet }
+        if normal.x > 0.0 {
+            deep > sheet
+        } else {
+            deep < sheet
+        }
     };
     let at = |phi: f64| -> Vec2 {
         let [sheet, deep] = need(phi);
-        let along = if normal.x > 0.0 { sheet.max(deep) } else { sheet.min(deep) };
+        let along = if normal.x > 0.0 {
+            sheet.max(deep)
+        } else {
+            sheet.min(deep)
+        };
         frame.at(along, phi * neutral - bend.setback(t))
     };
     // The curve is smooth but where the face that keeps the metal off changes: there it turns a
@@ -1503,7 +2005,8 @@ fn torn(sheet: &Sheet, bend: &Bend, frame: &JointFrame, (normal, offset): (Vec3,
 /// where no number of spans up to [`MAX_TEAR_SPANS`] does, or the curve is not numbers: a point
 /// whose distance from the curve is not a number keeps within nothing.
 fn spline(at: &dyn Fn(f64) -> Vec2, a: f64, b: f64) -> Option<Vec<Seg2>> {
-    let rate = |x: f64, h: f64| (at(x) * -3.0 + at(x + h) * 4.0 - at(x + 2.0 * h)) * (1.0 / (2.0 * h));
+    let rate =
+        |x: f64, h: f64| (at(x) * -3.0 + at(x + h) * 4.0 - at(x + 2.0 * h)) * (1.0 / (2.0 * h));
     let step = (b - a) * 1e-5;
     let (start, end) = (rate(a, step), rate(b, -step));
     for spans in 1..=MAX_TEAR_SPANS {
@@ -1514,14 +2017,20 @@ fn spline(at: &dyn Fn(f64) -> Vec2, a: f64, b: f64) -> Option<Vec<Seg2>> {
             .windows(2)
             .zip(rates.windows(2))
             .filter_map(|(p, m)| match (p, m) {
-                ([p0, p1], [m0, m1]) => Some(Seg2::Cubic { p0: *p0, p1: *p0 + *m0 * (h / 3.0), p2: *p1 - *m1 * (h / 3.0), p3: *p1 }),
+                ([p0, p1], [m0, m1]) => Some(Seg2::Cubic {
+                    p0: *p0,
+                    p1: *p0 + *m0 * (h / 3.0),
+                    p2: *p1 - *m1 * (h / 3.0),
+                    p3: *p1,
+                }),
                 _ => None,
             })
             .collect();
         let strays = (0..=TEAR_SAMPLES).any(|k| {
             let x = k as f64 / TEAR_SAMPLES as f64 * spans as f64;
             let i = (x.floor() as usize).min(spans - 1);
-            segs.get(i).is_some_and(|seg| !(seg.point_at(x - i as f64).dist(at(a + h * x)) <= TEAR_TOL))
+            segs.get(i)
+                .is_some_and(|seg| !(seg.point_at(x - i as f64).dist(at(a + h * x)) <= TEAR_TOL))
         });
         if !strays {
             return Some(segs);
@@ -1542,22 +2051,37 @@ fn clamped_rates(points: &[Vec2], h: f64, start: Vec2, end: Vec2) -> Vec<Vec2> {
     if n < 2 {
         return m;
     }
-    // Forward sweep over the inner rates 1 ..= n - 1, then back.
+    // Forward sweep over the inner rates 1 ..= n - 1, then back. Every index below is within
+    // 0 ..= n, the lengths of `m`, `diag` and `rhs` (`points` has n + 1).
     let (mut diag, mut rhs) = (vec![4.0; n + 1], vec![Vec2::ZERO; n + 1]);
+    let at = |v: &[Vec2], i: usize| v.get(i).copied().unwrap_or(Vec2::ZERO);
     for i in 1..n {
-        rhs[i] = (points[i + 1] - points[i - 1]) * (3.0 / h);
+        if let Some(r) = rhs.get_mut(i) {
+            *r = (at(points, i + 1) - at(points, i - 1)) * (3.0 / h);
+        }
     }
-    rhs[1] -= start;
-    rhs[n - 1] -= end;
+    if let Some(r) = rhs.get_mut(1) {
+        *r -= start;
+    }
+    if let Some(r) = rhs.get_mut(n - 1) {
+        *r -= end;
+    }
     for i in 2..n {
-        let f = 1.0 / diag[i - 1];
-        diag[i] -= f;
-        let carried = rhs[i - 1] * f;
-        rhs[i] -= carried;
+        let f = 1.0 / diag.get(i - 1).copied().unwrap_or(1.0);
+        if let Some(d) = diag.get_mut(i) {
+            *d -= f;
+        }
+        let carried = at(&rhs, i - 1) * f;
+        if let Some(r) = rhs.get_mut(i) {
+            *r -= carried;
+        }
     }
     for i in (1..n).rev() {
-        let next = if i + 1 < n { m[i + 1] } else { Vec2::ZERO };
-        m[i] = (rhs[i] - next) * (1.0 / diag[i]);
+        let next = if i + 1 < n { at(&m, i + 1) } else { Vec2::ZERO };
+        let value = (at(&rhs, i) - next) * (1.0 / diag.get(i).copied().unwrap_or(1.0));
+        if let Some(slot) = m.get_mut(i) {
+            *slot = value;
+        }
     }
     m
 }
@@ -1586,13 +2110,36 @@ fn corner_cut(dev: &Development, corner: &Corner) -> Option<Region2> {
         CornerRelief::Notch | CornerRelief::Tear => return None,
     };
     let outer = if round {
-        Loop2 { segs: vec![Seg2::Arc { center: c, radius: r, start: 0.0, sweep: PI }, Seg2::Arc { center: c, radius: r, start: PI, sweep: PI }] }
+        Loop2 {
+            segs: vec![
+                Seg2::Arc {
+                    center: c,
+                    radius: r,
+                    start: 0.0,
+                    sweep: PI,
+                },
+                Seg2::Arc {
+                    center: c,
+                    radius: r,
+                    start: PI,
+                    sweep: PI,
+                },
+            ],
+        }
     } else {
         // Its sides run along the two bends, each `r` from the center.
         let k = r / cross.abs();
-        Loop2::polygon(&[c + (u + w) * k, c + (w - u) * k, c - (u + w) * k, c + (u - w) * k])
+        polygon(&[
+            c + (u + w) * k,
+            c + (w - u) * k,
+            c - (u + w) * k,
+            c + (u - w) * k,
+        ])
     };
-    Some(Region2 { outer: outer.ccw(), holes: Vec::new() })
+    Some(Region2 {
+        outer: ccw(outer),
+        holes: Vec::new(),
+    })
 }
 
 /// Where along a bend a panel's outline lies inside the band from `line` to `line + depth`
@@ -1603,9 +2150,23 @@ fn corner_cut(dev: &Development, corner: &Corner) -> Option<Region2> {
 /// band: an arc's within its sweep (see [`extremes`]), any other curve's where its way runs
 /// square to the bend (see [`square_to`]). A line's and an arc's crossings are found in closed
 /// form, any other curve's by [`crossings`].
-fn band_extent(sheet: &Sheet, panel: usize, place: &Rigid2, frame: &JointFrame, line: f64, depth: f64) -> Result<Option<(f64, f64)>, DevelopError> {
-    let region = &sheet.panels.get(panel).ok_or(DevelopError::NoPanel(panel))?.region;
-    let (lo, hi) = (line.min(line + depth) - EDGE_TOL, line.max(line + depth) + EDGE_TOL);
+fn band_extent(
+    sheet: &Sheet,
+    panel: usize,
+    place: &Rigid2,
+    frame: &JointFrame,
+    line: f64,
+    depth: f64,
+) -> Result<Option<(f64, f64)>, Refusal> {
+    let region = &sheet
+        .panels
+        .get(panel)
+        .ok_or(Refusal::NoPanel(panel))?
+        .region;
+    let (lo, hi) = (
+        line.min(line + depth) - EDGE_TOL,
+        line.max(line + depth) + EDGE_TOL,
+    );
     // A point of the flat's length along the bend and its place across it.
     let uv = |q: Vec2| {
         let p = q - frame.origin;
@@ -1619,7 +2180,14 @@ fn band_extent(sheet: &Sheet, panel: usize, place: &Rigid2, frame: &JointFrame, 
         // the bend (its control points lie off it).
         let points = match s {
             Seg2::Line { .. } | Seg2::Arc { .. } => extremes(&s, &[frame.along]),
-            _ => std::iter::once(s.start()).chain(square_to(&s, frame.along).into_iter().map(|t| s.point_at(t))).chain([s.end()]).collect(),
+            _ => std::iter::once(s.start())
+                .chain(
+                    square_to(&s, frame.along)
+                        .into_iter()
+                        .map(|t| s.point_at(t)),
+                )
+                .chain([s.end()])
+                .collect(),
         };
         for (u, v) in points.into_iter().map(uv) {
             if (lo..=hi).contains(&v) {
@@ -1631,14 +2199,25 @@ fn band_extent(sheet: &Sheet, panel: usize, place: &Rigid2, frame: &JointFrame, 
             Seg2::Line { a, b } => {
                 // The line clipped to the band.
                 let ((u_a, v_a), (u_b, v_b)) = (uv(a), uv(b));
-                let at = |v: f64| if (v_b - v_a).abs() > 1e-15 { u_a + (u_b - u_a) * (v - v_a) / (v_b - v_a) } else { u_a };
+                let at = |v: f64| {
+                    if (v_b - v_a).abs() > 1e-15 {
+                        u_a + (u_b - u_a) * (v - v_a) / (v_b - v_a)
+                    } else {
+                        u_a
+                    }
+                };
                 let (t0, t1) = (v_a.min(v_b).max(lo), v_a.max(v_b).min(hi));
                 if t0 <= t1 {
                     take(at(t0));
                     take(at(t1));
                 }
             }
-            Seg2::Arc { center, radius, start, sweep } => {
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => {
                 // The circle meets the line `level` across the bend `half` either way along it
                 // from the center's foot there.
                 let (u_c, v_c) = uv(center);
@@ -1649,7 +2228,11 @@ fn band_extent(sheet: &Sheet, panel: usize, place: &Rigid2, frame: &JointFrame, 
                     }
                     let half = (radius * radius - off * off).sqrt();
                     for k in [-1.0, 1.0] {
-                        if on_arc(frame.toward_b * off + frame.along * (half * k), start, sweep) {
+                        if on_arc(
+                            frame.toward_b * off + frame.along * (half * k),
+                            start,
+                            sweep,
+                        ) {
                             take(u_c + half * k);
                         }
                     }
@@ -1658,11 +2241,14 @@ fn band_extent(sheet: &Sheet, panel: usize, place: &Rigid2, frame: &JointFrame, 
             _ => {
                 // A line along the bend at each of the band's lines, far enough past the curve
                 // by a box that holds it (see [`extremes`]).
-                let b: Aabb2 = extremes(&s, &[Vec2::X, Vec2::Y]).into_iter().collect();
+                let b: Box2 = extremes(&s, &[X, Y]).into_iter().collect();
                 let far = (b.min - frame.origin).len() + b.size().len() + 1.0;
                 for level in [lo, hi] {
                     let o = frame.origin + frame.toward_b * level;
-                    let across = [Seg2::Line { a: o - frame.along * far, b: o + frame.along * far }];
+                    let across = [Seg2::Line {
+                        a: o - frame.along * far,
+                        b: o + frame.along * far,
+                    }];
                     for c in crossings(&across, std::slice::from_ref(&s)) {
                         take(uv(c.4).0);
                     }
@@ -1675,21 +2261,32 @@ fn band_extent(sheet: &Sheet, panel: usize, place: &Rigid2, frame: &JointFrame, 
 
 /// How far panel `panel`'s region reaches across a joint from its anchor `at` there: what a bend
 /// relief beside it runs on past. A curved panel's is not measured yet (none).
-fn panel_across(sheet: &Sheet, panel: usize, at: &Anchor) -> Result<f64, DevelopError> {
-    let p = sheet.panels.get(panel).ok_or(DevelopError::NoPanel(panel))?;
+fn panel_across(sheet: &Sheet, panel: usize, at: &Anchor) -> Result<f64, Refusal> {
+    let p = sheet.panels.get(panel).ok_or(Refusal::NoPanel(panel))?;
     if p.surface != Surface::Plane || p.region.outer.segs.is_empty() {
         return Ok(0.0);
     }
     // Across the joint is square to the anchor: the outline's points furthest that way and
     // against it (see [`extremes`]).
-    let pts = p.region.outer.segs.iter().flat_map(|s| extremes(s, &[at.dir.perp()]));
-    Ok(pts.map(|q| (q - at.origin).cross(at.dir).abs()).fold(0.0, f64::max))
+    let pts = p
+        .region
+        .outer
+        .segs
+        .iter()
+        .flat_map(|s| extremes(s, &[at.dir.perp()]));
+    Ok(pts
+        .map(|q| (q - at.origin).cross(at.dir).abs())
+        .fold(0.0, f64::max))
 }
 
 /// How far a panel's material reaches: the diagonal of its region's bounding box, which bounds
 /// how far along a joint a trimmed tail must go.
-fn panel_reach(sheet: &Sheet, panel: usize) -> Result<f64, DevelopError> {
-    let region = &sheet.panels.get(panel).ok_or(DevelopError::NoPanel(panel))?.region;
+fn panel_reach(sheet: &Sheet, panel: usize) -> Result<f64, Refusal> {
+    let region = &sheet
+        .panels
+        .get(panel)
+        .ok_or(Refusal::NoPanel(panel))?
+        .region;
     if region.outer.segs.is_empty() {
         return Ok(0.0);
     }
@@ -1700,11 +2297,11 @@ fn panel_reach(sheet: &Sheet, panel: usize) -> Result<f64, DevelopError> {
 mod tests {
     use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-    use solidcore_record::{Loop2, Region2, Seg2, Vec2};
-    use solidcraft_geom::prelude::*;
-
-    use super::{JointFrame, band_extent, crossings};
-    use crate::{Panel, Rigid2, Sheet};
+    use super::{band_extent, crossings, JointFrame};
+    use crate::develop::plane::{Planar, X};
+    use crate::develop::{Panel, Rigid2, Sheet};
+    use crate::math::Vec2;
+    use crate::prism::profile::{Loop2, Region2, Seg2};
 
     /// Where a panel's outline lies inside a band across a bend is read off its own curves. The
     /// bend runs along x from the origin, the other panel toward −y, so a band from `line` to
@@ -1718,18 +2315,53 @@ mod tests {
     #[test]
     fn a_bands_extent_is_read_off_the_outlines_curves() {
         let segs = vec![
-            Seg2::Line { a: Vec2::ZERO, b: Vec2::new(93.0, 0.0) },
-            Seg2::Arc { center: Vec2::new(93.0, 3.0), radius: 3.0, start: -FRAC_PI_2, sweep: PI },
-            Seg2::Line { a: Vec2::new(93.0, 6.0), b: Vec2::new(93.0, 60.0) },
-            Seg2::Line { a: Vec2::new(93.0, 60.0), b: Vec2::new(0.0, 60.0) },
-            Seg2::Line { a: Vec2::new(0.0, 60.0), b: Vec2::ZERO },
+            Seg2::Line {
+                a: Vec2::ZERO,
+                b: Vec2::new(93.0, 0.0),
+            },
+            Seg2::Arc {
+                center: Vec2::new(93.0, 3.0),
+                radius: 3.0,
+                start: -FRAC_PI_2,
+                sweep: PI,
+            },
+            Seg2::Line {
+                a: Vec2::new(93.0, 6.0),
+                b: Vec2::new(93.0, 60.0),
+            },
+            Seg2::Line {
+                a: Vec2::new(93.0, 60.0),
+                b: Vec2::new(0.0, 60.0),
+            },
+            Seg2::Line {
+                a: Vec2::new(0.0, 60.0),
+                b: Vec2::ZERO,
+            },
         ];
-        let region = Region2 { outer: Loop2 { segs }, holes: Vec::new() };
-        let sheet = Sheet { panels: vec![Panel { region, ..Panel::default() }], ..Sheet::default() };
-        let frame = JointFrame { origin: Vec2::ZERO, along: Vec2::X, toward_b: Vec2::new(0.0, -1.0) };
-        let near = |a: &Option<(f64, f64)>, b: (f64, f64)| a.is_some_and(|a| (a.0 - b.0).abs() < 1e-12 && (a.1 - b.1).abs() < 1e-12);
+        let region = Region2 {
+            outer: Loop2 { segs },
+            holes: Vec::new(),
+        };
+        let sheet = Sheet {
+            panels: vec![Panel {
+                region,
+                ..Panel::default()
+            }],
+            ..Sheet::default()
+        };
+        let frame = JointFrame {
+            origin: Vec2::ZERO,
+            along: X,
+            toward_b: Vec2::new(0.0, -1.0),
+        };
+        let near = |a: &Option<(f64, f64)>, b: (f64, f64)| {
+            a.is_some_and(|a| (a.0 - b.0).abs() < 1e-12 && (a.1 - b.1).abs() < 1e-12)
+        };
         let whole = band_extent(&sheet, 0, &Rigid2::IDENTITY, &frame, -4.0, 6.0);
-        assert!(whole.as_ref().is_ok_and(|e| near(e, (0.0, 96.0))), "{whole:?}");
+        assert!(
+            whole.as_ref().is_ok_and(|e| near(e, (0.0, 96.0))),
+            "{whole:?}"
+        );
         let top = band_extent(&sheet, 0, &Rigid2::IDENTITY, &frame, -6.0, 1.0);
         let reach = 93.0 + (9.0 - (2.0 - 1e-6f64).powi(2)).sqrt();
         assert!(top.as_ref().is_ok_and(|e| near(e, (0.0, reach))), "{top:?}");
@@ -1746,21 +2378,59 @@ mod tests {
     #[test]
     fn a_bands_extent_holds_a_curves_furthest_point_between_its_ends() {
         let segs = vec![
-            Seg2::Line { a: Vec2::ZERO, b: Vec2::new(93.0, 0.0) },
-            Seg2::Cubic { p0: Vec2::new(93.0, 0.0), p1: Vec2::new(97.0, 2.0), p2: Vec2::new(97.0, 4.0), p3: Vec2::new(93.0, 6.0) },
-            Seg2::Line { a: Vec2::new(93.0, 6.0), b: Vec2::new(93.0, 60.0) },
-            Seg2::Line { a: Vec2::new(93.0, 60.0), b: Vec2::new(0.0, 60.0) },
-            Seg2::Line { a: Vec2::new(0.0, 60.0), b: Vec2::ZERO },
+            Seg2::Line {
+                a: Vec2::ZERO,
+                b: Vec2::new(93.0, 0.0),
+            },
+            Seg2::Cubic {
+                p0: Vec2::new(93.0, 0.0),
+                p1: Vec2::new(97.0, 2.0),
+                p2: Vec2::new(97.0, 4.0),
+                p3: Vec2::new(93.0, 6.0),
+            },
+            Seg2::Line {
+                a: Vec2::new(93.0, 6.0),
+                b: Vec2::new(93.0, 60.0),
+            },
+            Seg2::Line {
+                a: Vec2::new(93.0, 60.0),
+                b: Vec2::new(0.0, 60.0),
+            },
+            Seg2::Line {
+                a: Vec2::new(0.0, 60.0),
+                b: Vec2::ZERO,
+            },
         ];
-        let region = Region2 { outer: Loop2 { segs }, holes: Vec::new() };
-        let sheet = Sheet { panels: vec![Panel { region, ..Panel::default() }], ..Sheet::default() };
-        let frame = JointFrame { origin: Vec2::ZERO, along: Vec2::X, toward_b: Vec2::new(0.0, -1.0) };
-        let near = |a: &Option<(f64, f64)>, b: (f64, f64), tol: f64| a.is_some_and(|a| (a.0 - b.0).abs() < tol && (a.1 - b.1).abs() < tol);
+        let region = Region2 {
+            outer: Loop2 { segs },
+            holes: Vec::new(),
+        };
+        let sheet = Sheet {
+            panels: vec![Panel {
+                region,
+                ..Panel::default()
+            }],
+            ..Sheet::default()
+        };
+        let frame = JointFrame {
+            origin: Vec2::ZERO,
+            along: X,
+            toward_b: Vec2::new(0.0, -1.0),
+        };
+        let near = |a: &Option<(f64, f64)>, b: (f64, f64), tol: f64| {
+            a.is_some_and(|a| (a.0 - b.0).abs() < tol && (a.1 - b.1).abs() < tol)
+        };
         let whole = band_extent(&sheet, 0, &Rigid2::IDENTITY, &frame, -4.0, 6.0);
-        assert!(whole.as_ref().is_ok_and(|e| near(e, (0.0, 96.0), 1e-12)), "{whole:?}");
+        assert!(
+            whole.as_ref().is_ok_and(|e| near(e, (0.0, 96.0), 1e-12)),
+            "{whole:?}"
+        );
         let top = band_extent(&sheet, 0, &Rigid2::IDENTITY, &frame, -6.0, 1.0);
         let reach = 93.0 + (5.0 + 4e-6 - 1e-12) / 3.0;
-        assert!(top.as_ref().is_ok_and(|e| near(e, (0.0, reach), 1e-9)), "{top:?}");
+        assert!(
+            top.as_ref().is_ok_and(|e| near(e, (0.0, reach), 1e-9)),
+            "{top:?}"
+        );
     }
 
     /// Two crossings inside one sixteenth of a curve are both found. The parabola from
@@ -1772,16 +2442,32 @@ mod tests {
     /// evenly along it, so the same parameter) is a curve, and meets it at both too.
     #[test]
     fn two_crossings_in_one_sixteenth_of_a_curve_are_both_found() {
-        let dip = Seg2::Conic { a: Vec2::new(0.0, 0.0008), apex: Vec2::new(0.5, -0.0292), b: Vec2::new(1.0, 0.9408), w: 1.0 };
-        let line = Seg2::Line { a: Vec2::new(-1.0, 0.0), b: Vec2::new(2.0, 0.0) };
-        let straight = Seg2::Cubic { p0: Vec2::new(-1.0, 0.0), p1: Vec2::ZERO, p2: Vec2::new(1.0, 0.0), p3: Vec2::new(2.0, 0.0) };
+        let dip = Seg2::Conic {
+            a: Vec2::new(0.0, 0.0008),
+            apex: Vec2::new(0.5, -0.0292),
+            b: Vec2::new(1.0, 0.9408),
+            w: 1.0,
+        };
+        let line = Seg2::Line {
+            a: Vec2::new(-1.0, 0.0),
+            b: Vec2::new(2.0, 0.0),
+        };
+        let straight = Seg2::Cubic {
+            p0: Vec2::new(-1.0, 0.0),
+            p1: Vec2::ZERO,
+            p2: Vec2::new(1.0, 0.0),
+            p3: Vec2::new(2.0, 0.0),
+        };
         for across in [line, straight] {
             let mut found = crossings(&[across], &[dip]);
             found.sort_by(|p, q| p.4.x.total_cmp(&q.4.x));
             assert_eq!(found.len(), 2, "{across:?}: {found:?}");
             for (c, x) in found.iter().zip([0.02, 0.04]) {
                 assert!(c.4.dist(Vec2::new(x, 0.0)) < 1e-12, "{across:?}: {found:?}");
-                assert!((c.1 - (x + 1.0) / 3.0).abs() < 1e-12 && (c.3 - x).abs() < 1e-12, "{across:?}: {found:?}");
+                assert!(
+                    (c.1 - (x + 1.0) / 3.0).abs() < 1e-12 && (c.3 - x).abs() < 1e-12,
+                    "{across:?}: {found:?}"
+                );
             }
         }
     }
@@ -1791,14 +2477,30 @@ mod tests {
     /// and 240° round the second, a third and two thirds of the way.
     #[test]
     fn two_circles_cross_where_they_should_on_each() {
-        let a = Seg2::Arc { center: Vec2::ZERO, radius: 1.0, start: 0.0, sweep: TAU };
-        let b = Seg2::Arc { center: Vec2::new(1.0, 0.0), radius: 1.0, start: 0.0, sweep: TAU };
+        let a = Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: 1.0,
+            start: 0.0,
+            sweep: TAU,
+        };
+        let b = Seg2::Arc {
+            center: Vec2::new(1.0, 0.0),
+            radius: 1.0,
+            start: 0.0,
+            sweep: TAU,
+        };
         let mut found = crossings(&[a], &[b]);
         found.sort_by(|p, q| q.4.y.total_cmp(&p.4.y));
         let h = 3f64.sqrt() / 2.0;
         assert_eq!(found.len(), 2, "{found:?}");
-        for (c, (u, v, x)) in found.iter().zip([(1.0 / 6.0, 1.0 / 3.0, Vec2::new(0.5, h)), (5.0 / 6.0, 2.0 / 3.0, Vec2::new(0.5, -h))]) {
-            assert!((c.1 - u).abs() < 1e-12 && (c.3 - v).abs() < 1e-12 && c.4.dist(x) < 1e-12, "{found:?}");
+        for (c, (u, v, x)) in found.iter().zip([
+            (1.0 / 6.0, 1.0 / 3.0, Vec2::new(0.5, h)),
+            (5.0 / 6.0, 2.0 / 3.0, Vec2::new(0.5, -h)),
+        ]) {
+            assert!(
+                (c.1 - u).abs() < 1e-12 && (c.3 - v).abs() < 1e-12 && c.4.dist(x) < 1e-12,
+                "{found:?}"
+            );
         }
     }
 }

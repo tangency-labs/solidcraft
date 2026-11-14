@@ -27,6 +27,7 @@ pub mod pcurve;
 #[rustfmt::skip]
 pub mod plan;
 pub mod pole;
+pub mod query;
 pub mod sphere;
 pub mod spline;
 pub mod surface;

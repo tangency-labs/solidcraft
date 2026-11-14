@@ -45,6 +45,7 @@
 //! (neither is developable), a bend on the edge of a roll, and a shell's face that meets the
 //! sheet at a sharp edge but is not a plane (it is left out).
 
+use solidcraft_develop::prelude::*;
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 

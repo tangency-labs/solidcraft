@@ -22,6 +22,7 @@
 //! rounded or chamfered face edge, a recess, a cut that stops inside a bend), walls that reach the
 //! sheet's outline, and walls whose shapes in the flat overlap.
 
+use solidcraft_develop::prelude::*;
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 use std::f64::consts::{PI, TAU};

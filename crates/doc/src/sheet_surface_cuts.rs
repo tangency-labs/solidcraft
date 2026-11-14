@@ -37,6 +37,7 @@
 //! chart: each piece folds and lies flat where the panel does. A cut that leaves the sheet in
 //! several pieces says nothing of it: every piece is as much the sheet as any other.
 
+use solidcraft_develop::prelude::*;
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};

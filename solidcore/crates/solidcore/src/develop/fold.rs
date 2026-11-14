@@ -6,14 +6,22 @@
 //! from `x` toward `y` where the material is inward and toward `-y` where it is outward, so that
 //! `u x v` points to the material either way. A bend's metal is the ring sector round its axis
 //! between its inside and outside radii, and its flat zone wraps onto it by its neutral arc.
+//!
+//! Not upstream (SolidCraft's sheet development, moved into the kernel, docs/layers.md §1).
+//!
+//! Deviations: none (no upstream counterpart). No recursion: the panels are reached by a
+//! breadth-first walk over the joints, each joint followed once.
 
-use solidcraft_geom::prelude::*;
 use std::collections::VecDeque;
 
-use solidcore_record::{Vec2, Vec3};
-
-use crate::chart::Flatten;
-use crate::{Anchor, Bend, DevelopError, Development, JointKind, Mismatch, Rigid2, Rigid3, Sheet, Surface};
+use super::chart::Flatten;
+use super::plane::Planar;
+use super::{
+    Anchor, Bend, Development, JointKind, JointRefusal, Mismatch, Refusal, Rigid2, Rigid3, Sheet,
+    Surface,
+};
+use crate::eval::vec::VecExt;
+use crate::math::{Vec2, Vec3};
 
 /// A developed sheet folded.
 #[derive(Clone, Debug, PartialEq)]
@@ -64,7 +72,11 @@ impl Wrap {
         let toward = bend.toward_material;
         Wrap {
             sign: if toward { 1.0 } else { -1.0 },
-            sheet: if toward { bend.radius + thickness } else { bend.radius },
+            sheet: if toward {
+                bend.radius + thickness
+            } else {
+                bend.radius
+            },
             setback: bend.setback(thickness),
             neutral: bend.radius + k_factor * thickness,
         }
@@ -75,7 +87,11 @@ impl Wrap {
     /// on the material's side where the bend turns toward it.
     pub(crate) fn at(&self, along: f64, phi: f64, depth: f64) -> Vec3 {
         let rho = self.sheet - self.sign * depth;
-        Vec3::new(along, self.sign * (self.sheet - rho * phi.cos()), rho * phi.sin() - self.setback)
+        Vec3::new(
+            along,
+            self.sign * (self.sheet - rho * phi.cos()),
+            rho * phi.sin() - self.setback,
+        )
     }
 }
 
@@ -98,7 +114,14 @@ impl Bent {
         let (o, d) = self.flat;
         let q = p - o;
         let across = q.dot(Vec2::new(d.y, -d.x)) + self.wrap.setback;
-        (q.dot(d), if self.wrap.neutral > 0.0 { across / self.wrap.neutral } else { 0.0 })
+        (
+            q.dot(d),
+            if self.wrap.neutral > 0.0 {
+                across / self.wrap.neutral
+            } else {
+                0.0
+            },
+        )
     }
 
     /// Where a point of space lies in the bend: the point of the flat zone whose fiber runs
@@ -117,7 +140,9 @@ impl Bent {
         let phi = s.atan2(c);
         let (o, d) = self.flat;
         let flat = o + d * q.x + Vec2::new(d.y, -d.x) * (phi * w.neutral - w.setback);
-        let deeper = self.frame.vector(Vec3::new(0.0, phi.cos(), -w.sign * phi.sin()));
+        let deeper = self
+            .frame
+            .vector(Vec3::new(0.0, phi.cos(), -w.sign * phi.sin()));
         Some((flat, (w.sheet - rho) * w.sign, deeper))
     }
 
@@ -125,7 +150,11 @@ impl Bent {
     /// (right-handed) from the `a` panel to the `b` one.
     pub fn axis(&self) -> (Vec3, Vec3) {
         let w = &self.wrap;
-        (self.frame.point(Vec3::new(0.0, w.sign * w.sheet, -w.setback)), self.frame.x * -w.sign)
+        (
+            self.frame
+                .point(Vec3::new(0.0, w.sign * w.sheet, -w.setback)),
+            self.frame.x * -w.sign,
+        )
     }
 
     /// How far the bend turns, in radians.
@@ -163,17 +192,31 @@ impl Fold {
         let q = match self.surfaces.get(i)? {
             Surface::Cylinder { .. } | Surface::Cone { .. } => {
                 let middle = self.middle.get(i).copied().unwrap_or(0.0);
-                Vec2::new(q.x, q.y + ((middle - q.y) / std::f64::consts::TAU).round() * std::f64::consts::TAU)
+                Vec2::new(
+                    q.x,
+                    q.y + ((middle - q.y) / std::f64::consts::TAU).round() * std::f64::consts::TAU,
+                )
             }
             Surface::Plane => q,
         };
-        Some(self.unplace.get(i).copied().flatten()?.inverse().point(self.maps.get(i)?.point(q)))
+        Some(
+            self.unplace
+                .get(i)
+                .copied()
+                .flatten()?
+                .inverse()
+                .point(self.maps.get(i)?.point(q)),
+        )
     }
 
     /// The parameters of panel `i`'s surface at a point of its flat material.
     pub fn param(&self, i: usize, p: Vec2) -> Option<Vec2> {
         let neutral = self.unplace.get(i).copied().flatten()?.point(p);
-        self.maps.get(i)?.param(neutral, self.middle.get(i).copied().unwrap_or(0.0))
+        Some(
+            self.maps
+                .get(i)?
+                .param(neutral, self.middle.get(i).copied().unwrap_or(0.0)),
+        )
     }
 
     /// The surface panel `i` lies on.
@@ -186,10 +229,13 @@ impl Fold {
     pub fn axis(&self, i: usize) -> Option<(Vec3, Vec3)> {
         let place = self.places.get(i).copied().flatten()?;
         match *self.surfaces.get(i)? {
-            Surface::Cylinder { material_inward, .. } | Surface::Cone { material_inward, .. } => {
-                Some((place.shift, place.z * turn_sign(material_inward)))
+            Surface::Cylinder {
+                material_inward, ..
             }
-            _ => None,
+            | Surface::Cone {
+                material_inward, ..
+            } => Some((place.shift, place.z * turn_sign(material_inward))),
+            Surface::Plane => None,
         }
     }
 }
@@ -197,26 +243,28 @@ impl Fold {
 /// Folds a developed sheet. `roots` says where the first panel of each of the development's
 /// pieces lies in space; every other panel goes where the bends and seams that join it to that
 /// one put it. A rip holds nothing: a piece goes where its root puts it.
-pub fn fold(sheet: &Sheet, dev: &Development, roots: &[Rigid3]) -> Result<Fold, DevelopError> {
-    crate::develop::check_rule(sheet)?;
+pub fn fold(sheet: &Sheet, dev: &Development, roots: &[Rigid3]) -> Result<Fold, Refusal> {
+    super::layout::check_rule(sheet)?;
     if roots.len() != dev.pieces.len() {
-        return Err(DevelopError::Roots(dev.pieces.len()));
+        return Err(Refusal::Roots(dev.pieces.len()));
     }
     let (t, k) = (sheet.thickness, sheet.k_factor);
-    let mut maps = Vec::with_capacity(sheet.panels.len());
-    let mut middle = Vec::with_capacity(sheet.panels.len());
+    let mut maps = Vec::new();
+    let mut middle = Vec::new();
     for (i, panel) in sheet.panels.iter().enumerate() {
-        maps.push(Flatten::of(&panel.surface, sheet).map_err(|e| DevelopError::Panel(i, e))?);
+        maps.push(
+            Flatten::of(&panel.surface, sheet).map_err(|why| Refusal::Panel { panel: i, why })?,
+        );
         middle.push(if panel.region.outer.segs.is_empty() {
             0.0
         } else {
-            let b = crate::develop::loop_box(&panel.region.outer);
+            let b = super::layout::loop_box(&panel.region.outer);
             (b.min.y + b.max.y) / 2.0
         });
     }
     // Each joint's anchors as frames in their panels' frames, and where the joint puts the `b`
     // anchor's frame in the `a` one's.
-    let mut held: Vec<Option<(Rigid3, Rigid3, Rigid3)>> = Vec::with_capacity(sheet.joints.len());
+    let mut held: Vec<Option<(Rigid3, Rigid3, Rigid3)>> = Vec::new();
     for (j, joint) in sheet.joints.iter().enumerate() {
         let across = match &joint.kind {
             JointKind::Rip(_) => None,
@@ -226,38 +274,63 @@ pub fn fold(sheet: &Sheet, dev: &Development, roots: &[Rigid3]) -> Result<Fold, 
         held.push(match across {
             None => None,
             Some(across) => {
-                let frame = |a: &Anchor| sheet.panels.get(a.panel).and_then(|p| anchor_frame(&p.surface, a));
+                let frame = |a: &Anchor| {
+                    sheet
+                        .panels
+                        .get(a.panel)
+                        .and_then(|p| anchor_frame(&p.surface, a))
+                };
                 let (Some(fa), Some(fb)) = (frame(&joint.a), frame(&joint.b)) else {
-                    return Err(DevelopError::Joint(j, "an anchor has no frame on its panel"));
+                    return Err(Refusal::Joint {
+                        joint: j,
+                        why: JointRefusal::NoFrame,
+                    });
                 };
                 Some((fa, fb, across))
             }
         });
     }
     // Where a joint puts one panel from the other: the `b` panel from the `a` one, or back.
-    let carry = |(fa, fb, across): &(Rigid3, Rigid3, Rigid3), from_a: bool, at: &Rigid3| -> Rigid3 {
-        if from_a { fb.inverse().then(across).then(fa).then(at) } else { fa.inverse().then(&across.inverse()).then(fb).then(at) }
-    };
+    let carry =
+        |(fa, fb, across): &(Rigid3, Rigid3, Rigid3), from_a: bool, at: &Rigid3| -> Rigid3 {
+            if from_a {
+                fb.inverse().then(across).then(fa).then(at)
+            } else {
+                fa.inverse().then(&across.inverse()).then(fb).then(at)
+            }
+        };
 
     let mut touching: Vec<Vec<usize>> = vec![Vec::new(); sheet.panels.len()];
     for (j, joint) in sheet.joints.iter().enumerate() {
         if held.get(j).is_some_and(Option::is_some) {
             for p in [joint.a.panel, joint.b.panel] {
-                touching.get_mut(p).ok_or(DevelopError::NoPanel(p))?.push(j);
+                touching.get_mut(p).ok_or(Refusal::NoPanel(p))?.push(j);
             }
         }
     }
     let mut places: Vec<Option<Rigid3>> = vec![None; sheet.panels.len()];
     let mut followed = vec![false; sheet.joints.len()];
     for (piece, root) in dev.pieces.iter().zip(roots) {
-        let Some(&start) = piece.first() else { continue };
-        *places.get_mut(start).ok_or(DevelopError::NoPanel(start))? = Some(*root);
+        let Some(&start) = piece.first() else {
+            continue;
+        };
+        *places.get_mut(start).ok_or(Refusal::NoPanel(start))? = Some(*root);
         let mut queue = VecDeque::from([start]);
         while let Some(panel) = queue.pop_front() {
-            let Some(at) = places.get(panel).copied().flatten() else { continue };
+            let Some(at) = places.get(panel).copied().flatten() else {
+                continue;
+            };
             for &j in touching.get(panel).map(Vec::as_slice).unwrap_or_default() {
-                let (Some(joint), Some(Some(h)), Some(false)) = (sheet.joints.get(j), held.get(j), followed.get(j).copied()) else { continue };
-                let other = if joint.a.panel == panel { joint.b.panel } else { joint.a.panel };
+                let (Some(joint), Some(Some(h)), Some(false)) =
+                    (sheet.joints.get(j), held.get(j), followed.get(j).copied())
+                else {
+                    continue;
+                };
+                let other = if joint.a.panel == panel {
+                    joint.b.panel
+                } else {
+                    joint.a.panel
+                };
                 if places.get(other).copied().flatten().is_some() {
                     continue;
                 }
@@ -273,20 +346,36 @@ pub fn fold(sheet: &Sheet, dev: &Development, roots: &[Rigid3]) -> Result<Fold, 
     }
 
     let mut loops = Vec::new();
-    let mut bends = Vec::with_capacity(sheet.joints.len());
+    let mut bends = Vec::new();
     for (j, joint) in sheet.joints.iter().enumerate() {
-        let (a, b) = (places.get(joint.a.panel).copied().flatten(), places.get(joint.b.panel).copied().flatten());
-        if let (Some(a), Some(b), Some(Some(h)), Some(false)) = (a, b, held.get(j), followed.get(j).copied()) {
+        let (a, b) = (
+            places.get(joint.a.panel).copied().flatten(),
+            places.get(joint.b.panel).copied().flatten(),
+        );
+        if let (Some(a), Some(b), Some(Some(h)), Some(false)) =
+            (a, b, held.get(j), followed.get(j).copied())
+        {
             let fits = carry(h, true, &a);
             let at = h.1.shift;
-            loops.push(Mismatch { joint: j, distance: b.point(at).dist(fits.point(at)), angle: b.angle_to(&fits) });
+            loops.push(Mismatch {
+                joint: j,
+                distance: b.point(at).dist(fits.point(at)),
+                angle: b.angle_to(&fits),
+            });
         }
         bends.push(match (&joint.kind, a, held.get(j)) {
             (JointKind::Bend(bend), Some(a), Some(Some((fa, ..)))) => {
                 // Bends join planar panels only, whose neutral charts are their charts.
                 let flat = dev.placements.get(joint.a.panel).copied().flatten();
-                let flat = flat.and_then(|f| Some((f.point(joint.a.origin), f.vector(joint.a.dir).normalized()?)));
-                flat.map(|flat| Bent { frame: fa.then(&a), wrap: Wrap::of(bend, t, k), angle: bend.angle, flat })
+                let flat = flat.and_then(|f| {
+                    Some((f.point(joint.a.origin), f.vector(joint.a.dir).normalized()?))
+                });
+                flat.map(|flat| Bent {
+                    frame: fa.then(&a),
+                    wrap: Wrap::of(bend, t, k),
+                    angle: bend.angle,
+                    flat,
+                })
             }
             _ => None,
         });
@@ -297,7 +386,11 @@ pub fn fold(sheet: &Sheet, dev: &Development, roots: &[Rigid3]) -> Result<Fold, 
         loops,
         surfaces: sheet.panels.iter().map(|p| p.surface.clone()).collect(),
         maps,
-        unplace: dev.placements.iter().map(|p| p.map(|p| p.inverse())).collect(),
+        unplace: dev
+            .placements
+            .iter()
+            .map(|p| p.map(|p| p.inverse()))
+            .collect(),
         middle,
     })
 }
@@ -310,7 +403,12 @@ fn bent_across(bend: &Bend, thickness: f64, k_factor: f64) -> Rigid3 {
     let (sin, cos) = bend.angle.sin_cos();
     let on = Vec3::new(0.0, w.sign * sin, cos);
     let up = Vec3::new(0.0, cos, -w.sign * sin);
-    Rigid3 { x: Vec3::X, y: up, z: on, shift: w.at(0.0, bend.angle, 0.0) - on * w.setback }
+    Rigid3 {
+        x: Vec3::X,
+        y: up,
+        z: on,
+        shift: w.at(0.0, bend.angle, 0.0) - on * w.setback,
+    }
 }
 
 /// An anchor's frame in its panel's frame: at its origin, `x` along it, `y` toward the
@@ -323,21 +421,33 @@ fn anchor_frame(surface: &Surface, a: &Anchor) -> Option<Rigid3> {
 
 /// Which way a roll's angle turns round the axis of its frame.
 fn turn_sign(material_inward: bool) -> f64 {
-    if material_inward { 1.0 } else { -1.0 }
+    if material_inward {
+        1.0
+    } else {
+        -1.0
+    }
 }
 
 /// The point of a surface at the parameters `q`, `depth` into the material, in the surface's
-/// frame, and the unit normal toward the material there.
+/// frame, and the unit normal toward the material there. Every surface a panel can lie on has
+/// one; the `Option` keeps the callers' `?` chains and their tests as they were.
+#[allow(clippy::unnecessary_wraps)]
 fn embed(surface: &Surface, q: Vec2, depth: f64) -> Option<(Vec3, Vec3)> {
     match *surface {
         Surface::Plane => Some((Vec3::new(q.x, q.y, depth), Vec3::Z)),
-        Surface::Cylinder { radius, material_inward } => {
+        Surface::Cylinder {
+            radius,
+            material_inward,
+        } => {
             let s = turn_sign(material_inward);
             let out = Vec3::new(q.y.cos(), s * q.y.sin(), 0.0);
             let normal = out * -s;
             Some((out * radius + Vec3::Z * q.x + normal * depth, normal))
         }
-        Surface::Cone { half_angle, material_inward } => {
+        Surface::Cone {
+            half_angle,
+            material_inward,
+        } => {
             let s = turn_sign(material_inward);
             let (sa, ca) = half_angle.sin_cos();
             let out = Vec3::new(q.y.cos(), s * q.y.sin(), 0.0);
@@ -368,15 +478,22 @@ pub(crate) fn metric(surface: &Surface, q: Vec2) -> [f64; 3] {
 fn tangent(surface: &Surface, q: Vec2, dir: Vec2) -> Option<Vec3> {
     let along = match *surface {
         Surface::Plane => Vec3::new(dir.x, dir.y, 0.0),
-        Surface::Cylinder { radius, material_inward } => {
+        Surface::Cylinder {
+            radius,
+            material_inward,
+        } => {
             let s = turn_sign(material_inward);
             Vec3::Z * dir.x + Vec3::new(-q.y.sin(), s * q.y.cos(), 0.0) * (radius * dir.y)
         }
-        Surface::Cone { half_angle, material_inward } => {
+        Surface::Cone {
+            half_angle,
+            material_inward,
+        } => {
             let s = turn_sign(material_inward);
             let (sa, ca) = half_angle.sin_cos();
             let out = Vec3::new(q.y.cos(), s * q.y.sin(), 0.0);
-            (out * sa + Vec3::Z * ca) * dir.x + Vec3::new(-q.y.sin(), s * q.y.cos(), 0.0) * (q.x * sa * dir.y)
+            (out * sa + Vec3::Z * ca) * dir.x
+                + Vec3::new(-q.y.sin(), s * q.y.cos(), 0.0) * (q.x * sa * dir.y)
         }
     };
     along.normalized()
@@ -384,12 +501,13 @@ fn tangent(surface: &Surface, q: Vec2, dir: Vec2) -> Option<Vec3> {
 
 #[cfg(test)]
 mod tests {
-    use solidcore_record::Vec2;
-    use solidcraft_geom::prelude::*;
     use std::f64::consts::{FRAC_PI_6, PI};
 
     use super::{embed, metric, tangent};
-    use crate::Surface;
+    use crate::develop::plane::{X, Y};
+    use crate::develop::Surface;
+    use crate::eval::vec::VecExt;
+    use crate::math::Vec2;
 
     /// A surface's first fundamental form is its closed form, and its own points bear it out: a
     /// parameter line along `u` runs √E per unit, the two ways are square (F = 0), and a line
@@ -402,8 +520,14 @@ mod tests {
     /// axis: [1, 0, 25] at (10, 1.2).
     #[test]
     fn a_surfaces_metric_is_its_closed_form() {
-        let cylinder = Surface::Cylinder { radius: 40.0, material_inward: true };
-        let cone = Surface::Cone { half_angle: FRAC_PI_6, material_inward: false };
+        let cylinder = Surface::Cylinder {
+            radius: 40.0,
+            material_inward: true,
+        };
+        let cone = Surface::Cone {
+            half_angle: FRAC_PI_6,
+            material_inward: false,
+        };
         let cases = [
             (Surface::Plane, Vec2::new(3.0, -7.0), [1.0, 0.0, 1.0]),
             (cylinder.clone(), Vec2::new(5.0, 1.2), [1.0, 0.0, 1600.0]),
@@ -412,9 +536,18 @@ mod tests {
         ];
         for (surface, q, want) in &cases {
             let got = metric(surface, *q);
-            assert!(got.iter().zip(want).all(|(g, w)| (g - w).abs() < 1e-9), "{surface:?} at {q:?}: {got:?} vs {want:?}");
-            let (Some(su), Some(sv)) = (tangent(surface, *q, Vec2::X), tangent(surface, *q, Vec2::Y)) else { panic!("{surface:?}") };
-            assert!(su.dot(sv).abs() < 1e-12, "{surface:?} at {q:?}: {}", su.dot(sv));
+            assert!(
+                got.iter().zip(want).all(|(g, w)| (g - w).abs() < 1e-9),
+                "{surface:?} at {q:?}: {got:?} vs {want:?}"
+            );
+            let (Some(su), Some(sv)) = (tangent(surface, *q, X), tangent(surface, *q, Y)) else {
+                panic!("{surface:?}")
+            };
+            assert!(
+                su.dot(sv).abs() < 1e-12,
+                "{surface:?} at {q:?}: {}",
+                su.dot(sv)
+            );
         }
         let apart = |s: &Surface, a: Vec2, b: Vec2| match (embed(s, a, 0.0), embed(s, b, 0.0)) {
             (Some((p, _)), Some((q, _))) => p.dist(q),

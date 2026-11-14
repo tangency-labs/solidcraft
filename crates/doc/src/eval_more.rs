@@ -6,6 +6,7 @@ use crate::EmbossFace;
 use crate::apply_point;
 use crate::sheet;
 use solidcore_record::{Loop2, Seg2};
+use solidcraft_develop::prelude::*;
 use solidcraft_geom::{Aabb3, Ring};
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {

@@ -4894,10 +4894,8 @@ dependencies = [
 name = "solidcraft-develop"
 version = "0.40.1"
 dependencies = [
- "serde",
  "solidcore-ops",
  "solidcore-record",
- "solidcraft-geom",
  "thiserror 2.0.21",
 ]
 

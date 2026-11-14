@@ -4,6 +4,7 @@
 //! every feature's faces (#7990, see `lineage::sheet_lineage`).
 
 use solidcore_record::{Loop2, Seg2, Vec2};
+use solidcraft_develop::prelude::*;
 use solidcraft_geom::prelude::*;
 
 use solidcore_record::Region2;

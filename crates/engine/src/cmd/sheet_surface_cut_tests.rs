@@ -4,6 +4,7 @@
 //! face on the sheet's surface; a cut through a pocket takes it with the material; what the
 //! sheet can't keep is refused, and the sheet stays as it was.
 
+use solidcraft_develop::prelude::*;
 use std::f64::consts::{PI, SQRT_2};
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
