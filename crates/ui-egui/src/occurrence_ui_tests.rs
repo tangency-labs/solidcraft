@@ -23,6 +23,52 @@ fn new_component_has_its_own_origin_folder() {
     assert!(!h.app.tree.expanded.contains("origin"), "opening the component origin must not open the design origin");
 }
 
+/// #15658: a part's Origin is off by default, yet hovering its rows in the Browser shows each
+/// item where the part is placed, and only while hovered: the folder's eye, the saved visibility
+/// and the pick lists stay as they were. With the preference off, an axis or point row sets no
+/// hover.
+#[test]
+fn hovering_a_parts_hidden_origin_rows_shows_them_where_the_part_is() {
+    use crate::viewport::HoveredOrigin;
+    use solidcore_record::Vec3;
+    use solidcraft_engine::geom::prelude::*;
+    let mut h = Harness::new();
+    let created = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+    let occurrence = created["occurrence"].as_u64().unwrap();
+    h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[60,40,0]})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":format!("fold:occurrence:{occurrence}")}})).unwrap();
+    h.step(&json!({"click":{"handle":format!("fold:o:{occurrence}/origin")}})).unwrap();
+    let shown = h.app.session.visibility.shown_component_origins.clone();
+    assert!(crate::viewport::construction_points(&h.app).is_empty(), "the part's Origin is off");
+    let at = Vec3::new(60., 40., 0.);
+    for item in ["O", "X", "XY"] {
+        let key = solidcraft_engine::origins::key(&[occurrence], item);
+        let row = crate::scenario::handle_at(&format!("row:{key}")).expect("the origin row");
+        h.call("ui.move", json!({"x": row.x, "y": row.y}));
+        assert_eq!(h.app.viewport.hover_plane.as_deref(), Some(key.as_str()), "{item}: its row is hovered");
+        let (name, shown_item) = crate::viewport::hovered_hidden_origin(&h.app).expect("drawn for the hover");
+        assert_eq!(name, key);
+        match (item, shown_item) {
+            ("O", HoveredOrigin::Point(p)) => assert!(p.dist(at) < 1e-9, "{p:?}"),
+            ("X", HoveredOrigin::Axis { origin, dir, .. }) => assert!(origin.dist(at) < 1e-9 && dir.dot(Vec3::X) > 0.999, "{origin:?} {dir:?}"),
+            ("XY", HoveredOrigin::Plane(q)) => assert!(q[0].dist(at) < 1e-9 && q.iter().all(|c| c.z.abs() < 1e-9), "{q:?}"),
+            (item, other) => panic!("{item}: {other:?}"),
+        }
+        assert_eq!(h.app.session.visibility.shown_component_origins, shown, "{item}: the folder stays off");
+        assert!(crate::viewport::construction_quads(&h.app).iter().all(|(n, _, _)| !n.contains("/origin/")), "{item}: not pickable");
+    }
+    // The pointer off the Browser: nothing is drawn for the part's Origin.
+    h.call("ui.move", json!({"x": 900.0, "y": 400.0}));
+    assert_eq!(crate::viewport::hovered_hidden_origin(&h.app), None);
+    // Preference off: an axis row under the pointer sets no hover, as before.
+    h.app.preferences.browser_hover_shows_origin = false;
+    let key = solidcraft_engine::origins::key(&[occurrence], "X");
+    let row = crate::scenario::handle_at(&format!("row:{key}")).expect("the X row");
+    h.call("ui.move", json!({"x": row.x, "y": row.y}));
+    assert_eq!(h.app.viewport.hover_plane, None);
+}
+
 /// A sketch started on a shown component origin plane follows the component: after an
 /// occurrence.move the sketch's plane sits where the placement moved, with the axes it was
 /// drawn with (#7313).
