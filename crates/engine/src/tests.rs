@@ -5449,6 +5449,9 @@ fn an_older_pattern_of_several_bodies_opens_with_the_names_it_was_saved_with() {
     if let Some(pending) = file["format_pending"].as_array_mut() {
         pending.retain(|change| change != "pattern-names-by-source");
     }
+    // 0.42.0 folded the change into format 56, so a build before it wrote 55.
+    file["format"] = serde_json::Value::String(solidcraft_doc::format::format_string(55));
+    file.as_object_mut().unwrap().remove("format_pending");
     let pattern = file["features"].as_array_mut().unwrap().iter_mut().find(|f| f["name"] == "Pat").unwrap();
     pattern["body_names"] = json!(["Base (2)", "Base (3)", "Base (4)", "Post (2)", "Post (3)", "Post (4)"]);
     let doc = solidcraft_doc::Document::from_json(&file.to_string()).unwrap();
