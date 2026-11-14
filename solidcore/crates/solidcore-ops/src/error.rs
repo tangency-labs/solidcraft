@@ -56,7 +56,8 @@ pub enum Error {
     /// A blend's edges meet at a vertex of a kind no blend corner handles yet.
     CornerUnsupported,
     /// The kernel does not set back corner `corner` (an index into the call's corners): it sets
-    /// back a corner only where every edge meeting it is blended, all convex or all concave.
+    /// back a corner only where every edge meeting it is blended, all convex or all concave, or
+    /// of mixed convexity with curvature-continuous rounds between planes.
     CornerRefused {
         /// The corner's index among the call's corners.
         corner: usize,
@@ -178,6 +179,14 @@ pub enum Error {
     TooFar {
         /// The longest distance that works.
         largest: Option<f64>,
+    },
+    /// An offset whose distance from its curve, measured at stations along it, strays from the
+    /// distance asked by more than the tolerance: the tolerance and the worst found.
+    OffsetPastTolerance {
+        /// The tolerance asked.
+        tolerance: f64,
+        /// The largest difference found between a station's distance and the distance asked.
+        worst: f64,
     },
     /// A loft guided by rails whose guided edges were asked within `asked` of their rails: at
     /// the most wires asked, `wires`, the bound the kernel proved was still `reached`
@@ -574,6 +583,10 @@ impl std::fmt::Display for Error {
             } => write!(
                 f,
                 "the loft's guided edges were asked within {asked} of their rails; at {wires} wires the bound proved is {reached}"
+            ),
+            Error::OffsetPastTolerance { tolerance, worst } => write!(
+                f,
+                "the offset strays up to {worst} from the distance asked, past the tolerance {tolerance}"
             ),
             Error::WallsTouch => write!(f, "the offset's walls meet"),
             Error::DefinitionNotCertified { face, eps } => {

@@ -94,6 +94,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::tol::scaled_zero2;
 use crate::geom::vector2d::Point2;
+use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
 use crate::math::EFF_ZERO_PARAM;
 use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -281,7 +282,7 @@ impl Surface {
     /// `at`'s side (the same side coordinate as `dom`'s) rather than `dom`'s: where earlier
     /// sides grew the box, `at` is the face's own extent along the side, so the distance is
     /// met at the face, not where the surface has grown ([`Surface::extended_sides`]).
-    pub(super) fn extended_by_distance_at(
+    pub fn extended_by_distance_at(
         &self,
         k: &Kernel,
         dom: &Extent2d,
@@ -519,12 +520,19 @@ fn widened(
         .and_then(|i| sides.get(i))
         .copied()
         .ok_or_else(op_err)?;
-    let across = grown.length_across_side(k, &on, to, REL)?;
-    // the widened's length across is the distance, by its closed form: checked as any
-    // extension's is
+    // Keep the existing stored-net resolution allowance unchanged. Use the general
+    // integrator where it certifies the distance; where its position-sized resolution
+    // cannot, the analytic's local chord/arc can, at the same construction.
+    let mut across = grown.length_across_side(k, &on, to, REL)?;
     if !matches!(says(Some(&across), 0.0, distance), Says::Met) {
-        return Err(not_exact(None));
+        let mut local = analytic::widened_across(k, (s, dom, side), (&grown, &on, to))?;
+        local.resolution = across.resolution;
+        if !matches!(says(Some(&local), 0.0, distance), Says::Met) {
+            return Err(not_exact(None));
+        }
+        across = local;
     }
+    // the widened's length across is the distance, checked as any extension's is
     Ok(Extended {
         surface: grown,
         source: 0.0,
@@ -1300,6 +1308,12 @@ impl Local {
     /// moves it at most `(sqrt 3 err + |S| err_w) / w_min` (a polynomial net's weights are
     /// exactly 1: `sqrt 3 err`, whatever the part's position).
     fn bound(&self) -> f64 {
+        self.bound_about(Vec3::ZERO)
+    }
+
+    /// [`Self::bound`] with the points measured from `origin`: the same homogeneous
+    /// rounding, sized on the local coordinates rather than where the part sits.
+    fn bound_about(&self, origin: Vec3) -> f64 {
         if let Some(b) = self.frame {
             return b;
         }
@@ -1310,7 +1324,12 @@ impl Local {
         for x in self.rows.iter().flatten() {
             let w = if self.rational { x[3] } else { 1.0 };
             wmin = wmin.min(w);
-            pmax = pmax.max((x[0].abs() + x[1].abs() + x[2].abs()) / w.abs());
+            pmax = pmax.max(
+                ((x[0] - origin.x * w).abs()
+                    + (x[1] - origin.y * w).abs()
+                    + (x[2] - origin.z * w).abs())
+                    / w.abs(),
+            );
         }
         let err_w = if self.rational { self.err_w } else { 0.0 };
         // the rounding of this bound itself, a few ulps
@@ -2134,6 +2153,8 @@ fn keeps(net: &Net, out: &Net, side: BoxSide) -> Result<bool> {
 mod analytic;
 mod ball;
 mod blend;
+mod local_iso;
+mod measure;
 mod sides;
 pub use sides::{ExtendedSides, SideExtension};
 

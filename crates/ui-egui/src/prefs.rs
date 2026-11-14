@@ -32,6 +32,7 @@ mod mouse3d;
 mod navbar;
 mod navigation;
 mod panel_layout;
+mod security;
 mod sketch;
 mod theme_picker;
 mod tools;
@@ -365,20 +366,34 @@ pub fn choose_nav_preset(prefs: &mut Prefs, preset: &NavPreset) {
     }
 }
 /// Stable control-channel names; presentation labels may be shorter.
-pub const PAGES: &[&str] =
-    &["General", "Appearance", "Layout", "Graphics", "Design", "Sketch", "Tools", "Navigation", "3D mouse", "Shortcuts", "Assistant", "Plugins"];
+pub const PAGES: &[&str] = &[
+    "General",
+    "Appearance",
+    "Layout",
+    "Graphics",
+    "Design",
+    "Security",
+    "Sketch",
+    "Tools",
+    "Navigation",
+    "3D mouse",
+    "Shortcuts",
+    "Assistant",
+    "Plugins",
+];
 pub const PAGE_GENERAL: usize = 0;
 pub const PAGE_APPEARANCE: usize = 1;
 pub const PAGE_LAYOUT: usize = 2;
 pub const PAGE_GRAPHICS: usize = 3;
 pub const PAGE_DESIGN: usize = 4;
-pub const PAGE_SKETCH: usize = 5;
-pub const PAGE_TOOLS: usize = 6;
-pub const PAGE_NAVIGATION: usize = 7;
-pub const PAGE_MOUSE3D: usize = 8;
-pub const PAGE_SHORTCUTS: usize = 9;
-pub const PAGE_ASSISTANT: usize = 10;
-pub const PAGE_PLUGINS: usize = 11;
+pub const PAGE_SECURITY: usize = 5;
+pub const PAGE_SKETCH: usize = 6;
+pub const PAGE_TOOLS: usize = 7;
+pub const PAGE_NAVIGATION: usize = 8;
+pub const PAGE_MOUSE3D: usize = 9;
+pub const PAGE_SHORTCUTS: usize = 10;
+pub const PAGE_ASSISTANT: usize = 11;
+pub const PAGE_PLUGINS: usize = 12;
 /// What Preferences accepts for `parameter_list_rows`: `parameters.complete` answers at most 200.
 pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
 const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
@@ -426,6 +441,15 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
         scroll: true,
         draw: page_draw::<PAGE_DESIGN>,
         defaults: page_defaults::<PAGE_DESIGN>,
+    }),
+    prefs_window::Page::Host(prefs_window::HostPage {
+        icon: ui_kit::Icon::Kit("shield"),
+        label: "prefs.security",
+        group: Some("prefs.structure.work"),
+        handle: "prefs:page:Security",
+        scroll: true,
+        draw: page_draw::<PAGE_SECURITY>,
+        defaults: page_defaults::<PAGE_SECURITY>,
     }),
     prefs_window::Page::Host(prefs_window::HostPage {
         icon: ui_kit::Icon::Kit("prefs_sketch"),
@@ -1052,6 +1076,15 @@ preference_settings! {
     /// A right-click in the view with a dialog open confirms its input: on to the next one, then OK.
     /// Off: it does nothing there, as before (#6159).
     right_click_confirms: bool = false, PAGE_GENERAL => check("Right-click confirms dialog inputs", "With a dialog open, a right-click in the view goes on to its next empty input, and on the last one runs OK");
+    /// Sign every saved design with a GnuPG key. The key may be on a smartcard, where it stays.
+    sign_saved_designs: bool = false, PAGE_SECURITY => check_id_help("prefs.security.sign_saved", "prefs.security.sign_saved_help");
+    /// The GnuPG key to sign with: a fingerprint or user id. Empty: GnuPG's default signing key.
+    signing_key: String = String::new(), PAGE_SECURITY;
+    /// Fingerprints of signing keys the user trusts, separated by commas or spaces. Only a
+    /// signature from one of these is shown as verified; the user ids in a file are not proof.
+    trusted_signing_keys: String = String::new(), PAGE_SECURITY;
+    /// Verify a design's signature when it opens. Off: opening reads no payload twice.
+    verify_opened_designs: bool = false, PAGE_SECURITY => check_id_help("prefs.security.verify_opened", "prefs.security.verify_opened_help");
     /// With a dialog open, typing the first letter of a button's label presses it: O for OK,
     /// C for Cancel (#9841). Off by default: typing does nothing to the buttons, as before.
     /// A letter that fits two buttons does nothing, and a focused text field keeps the keystroke.
@@ -1519,6 +1552,10 @@ preference_settings! {
     hole_group: bool = false, PAGE_TOOLS => check_id("prefs.design_tools.hole_group");
     /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
     hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
+    /// The X, Y and Z origin axes run through the origin to the edges of the view, both ways, so
+    /// they stay in sight as references wherever the view is (#11123). Off by default: short axes
+    /// from the origin, solid then dashed, as before.
+    origin_axes_across_view: bool = false, PAGE_DESIGN => check_id("prefs.origin_axes_across_view");
     /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit, and the Box,
     /// Cylinder, Cone, Sphere, Torus and Coil): a marker that drags it across the model and, where
     /// it can turn in the face, a ring that turns it. Off by default: a Rest, Boss or Snap Fit is
@@ -1858,6 +1895,37 @@ pub struct PrefsWindow {
     pub(crate) follow: crate::theme_files::Follow,
     /// Where the theme Import tile was drawn last frame: a file dropped there is a theme (#8226).
     import_tile: Option<egui::Rect>,
+    /// The GnuPG keys listed for the signing-key field, once the user asks for them.
+    pub(crate) signing_keys: SigningKeys,
+    /// The worker listing GnuPG keys, while one runs.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) signing_keys_rx: Option<std::sync::mpsc::Receiver<Result<Vec<SigningKey>, SigningKeysError>>>,
+}
+
+/// A GnuPG secret key offered for the signing-key preference.
+#[derive(Clone, Debug)]
+pub(crate) struct SigningKey {
+    pub fingerprint: String,
+    pub user_id: String,
+    pub on_card: bool,
+}
+
+/// The signing-key list's state: asking GnuPG runs a subprocess, so it happens on a worker.
+#[derive(Clone, Default)]
+pub(crate) enum SigningKeys {
+    #[default]
+    Idle,
+    Loading,
+    Ready(Result<Vec<SigningKey>, SigningKeysError>),
+}
+
+/// Why listing GnuPG keys failed. The page turns these into sentences in the user's language.
+#[derive(Clone, Debug)]
+pub(crate) enum SigningKeysError {
+    /// GnuPG is not installed here.
+    Missing,
+    /// GnuPG was found but could not list its keys.
+    Message(String),
 }
 
 /// Following a theme file needs the file system: the desktop app only (#7573).
@@ -3090,6 +3158,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
             space_mouse_section(app, ui);
         }
         PAGE_DESIGN => design::show(app, ui),
+        PAGE_SECURITY => security::show(app, ui),
         PAGE_NAVIGATION => navigation::show(app, ui, t),
         PAGE_GRAPHICS => graphics::show(app, ui),
         PAGE_SKETCH => sketch::show(app, ui),
@@ -6795,6 +6864,10 @@ mod tests {
             ("sketch_cursor_coordinates", json!(false), PAGE_SKETCH),
             ("msaa", json!(8), PAGE_GRAPHICS),
             ("single_surface_analysis", json!(false), PAGE_GRAPHICS),
+            ("sign_saved_designs", json!(true), PAGE_SECURITY),
+            ("signing_key", json!("0123456789ABCDEF0123456789ABCDEF01234567"), PAGE_SECURITY),
+            ("trusted_signing_keys", json!("0123456789ABCDEF0123456789ABCDEF01234567"), PAGE_SECURITY),
+            ("verify_opened_designs", json!(true), PAGE_SECURITY),
         ];
         let defaults = serde_json::to_value(Prefs::default()).unwrap();
         for (field, value, owner) in fields {
@@ -6847,6 +6920,7 @@ mod tests {
                 "Layout",
                 "Graphics",
                 "Design",
+                "Security",
                 "Sketch",
                 "Tools",
                 "Navigation",
@@ -6859,7 +6933,10 @@ mod tests {
         assert_eq!(WINDOW_PAGES.len(), PAGES.len());
         let groups: Vec<_> =
             WINDOW_PAGES.iter().map(host_page).enumerate().filter_map(|(i, p)| p.group.map(|g| (i, solidcraft_ui_text::tr(g)))).collect();
-        assert_eq!(groups, [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]);
+        assert_eq!(
+            groups,
+            [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_SECURITY, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]
+        );
         let mut fields = std::collections::BTreeSet::new();
         for (field, page) in FIELD_PAGES {
             assert!(fields.insert(field), "duplicate home for {field}");

@@ -896,6 +896,21 @@ impl Curve {
         &self.kind
     }
 
+    /// Not upstream: points whose convex hull holds this curve over `interval`, each with
+    /// the error bound of its coordinates: a line's two ends
+    /// ([`Line::segment_over`](crate::curve::line::Line::segment_over)), a B-spline's
+    /// control points of the knot spans that meet `interval`
+    /// ([`BSplineCurve::hull_points_over`]). `None` for the other kinds, whose evaluation
+    /// is not their control polygon's, and when no hull is certain.
+    #[must_use]
+    pub(crate) fn hull_points_over(&self, interval: &Extent1d) -> Option<Vec<(Point3, f64)>> {
+        match &self.kind {
+            CurveKind::Line(l) => l.segment_over(interval).map(Vec::from),
+            CurveKind::BSpline(b) => b.hull_points_over(interval),
+            _ => None,
+        }
+    }
+
     /// The B-spline (base) of the kinds derived from `SmBSplineCurve` (`SM_CAST_PTR`):
     /// the B-spline, line, ellipse or circle, hyperbola and parabola; `None` for the
     /// others.
@@ -2038,9 +2053,10 @@ impl Curve {
     /// `CreateMirrorCurve` (base: `SM_ERR`): a copy mirrored about the XY plane of
     /// `mirror_plane`.
     ///
-    /// Every `SmBSplineCurve`-derived kind (line, ellipse and circle, parabola,
-    /// hyperbola) inherits the B-spline override: the result is a plain B-spline curve
-    /// over the NURB the kind makes first (on a copy here). A curve on a surface and a
+    /// A line gives a line ([`Line::create_mirror_curve`], not upstream, #15862). Every
+    /// other `SmBSplineCurve`-derived kind (ellipse and circle, parabola, hyperbola)
+    /// inherits the B-spline override: the result is a plain B-spline curve over the
+    /// NURB the kind makes first (on a copy here). A curve on a surface and a
     /// curve in a volume mirror what they wrap.
     ///
     /// # Errors
@@ -2050,15 +2066,8 @@ impl Curve {
     pub fn create_mirror_curve(&self, k: &Kernel, mirror_plane: &Axis2Placement) -> Result<Self> {
         match &self.kind {
             CurveKind::BSpline(c) => c.create_mirror_curve(mirror_plane),
-            CurveKind::Line(c) => {
-                if c.base().gw_nurb().is_some() {
-                    c.base().create_mirror_curve(mirror_plane)
-                } else {
-                    let mut n = c.copy();
-                    n.make_nurb()?;
-                    n.base().create_mirror_curve(mirror_plane)
-                }
-            }
+            // (not upstream, #15862: a line stays a line, see `Line::create_mirror_curve`)
+            CurveKind::Line(c) => return c.create_mirror_curve(mirror_plane).map(Self::from),
             CurveKind::Ellipse(c) => {
                 if c.base().gw_nurb().is_some() {
                     c.base().create_mirror_curve(mirror_plane)

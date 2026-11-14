@@ -120,6 +120,7 @@ pub mod save_mesh;
 pub mod section;
 pub mod select;
 pub mod selection;
+pub mod settings;
 pub mod sheet;
 pub mod silhouette;
 pub mod sketch;

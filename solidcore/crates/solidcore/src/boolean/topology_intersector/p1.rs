@@ -178,7 +178,7 @@ pub const MAX_FACE_LIST: usize = 1 << 16;
 
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::error::boolean::BooleanStage;
+use crate::error::boolean::{BooleanStage, PlacedEntity, RelateSide};
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -1649,18 +1649,23 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let oth = self.other_mate(brep_topo);
         let brp = self.brep_mate(other_topo);
 
+        // #16098: the refusal places the entity, its mate and the one asked for by their points
         if oth.is_some() && oth != other_topo {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean_relate_conflict(
                 OP_RELATE,
-                BooleanStage::Relate,
-                "another entity is already related to the other one",
+                RelateSide::Brep,
+                Self::place(brep, brep_topo),
+                Self::place(brep, oth),
+                Self::place(brep, other_topo),
             ));
         }
         if brp.is_some() && brp != brep_topo {
-            return Err(SolidError::boolean_stage_failed(
+            return Err(SolidError::boolean_relate_conflict(
                 OP_RELATE,
-                BooleanStage::Relate,
-                "another entity is already related to the other one",
+                RelateSide::Other,
+                Self::place(brep, other_topo),
+                Self::place(brep, brp),
+                Self::place(brep, brep_topo),
             ));
         }
 
@@ -1700,6 +1705,29 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let o_to_b = self.o_to_b.as_mut().ok_or(dangling("no mate maps"))?;
         o_to_b.insert(other_topo, brep_topo);
         Ok(())
+    }
+
+    /// Where `object` is, for a refused [`Self::relate`]: a vertex's point, an edge's end
+    /// points. It only reads; a kind without points or a walk that fails leaves it unplaced.
+    fn place(brep: &impl IntersectorBrep<O>, object: Option<O>) -> PlacedEntity {
+        let Some(o) = object else {
+            return PlacedEntity::Unplaced;
+        };
+        let point = |v: Option<O>| v.and_then(|v| brep.vertex_point(v).ok());
+        match o.class_kind() {
+            ClassObjectKind::Vertex => {
+                point(Some(o)).map_or(PlacedEntity::Unplaced, PlacedEntity::Vertex)
+            }
+            ClassObjectKind::Edge => {
+                let start = brep.edge_start_vertex(o).ok().flatten();
+                let end = start.and_then(|s| brep.edge_other_vertex(o, Some(s)).ok().flatten());
+                match (point(start), point(end)) {
+                    (Some(a), Some(b)) => PlacedEntity::Edge(a, b),
+                    _ => PlacedEntity::Unplaced,
+                }
+            }
+            _ => PlacedEntity::Unplaced,
+        }
     }
 
     /// The two `SetTolerance` lines of `Relate`: each object gets the other's

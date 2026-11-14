@@ -1109,6 +1109,7 @@ impl FilletCorner {
                     SrfSrfOptions {
                         skip_two_pnts_intersection: false,
                         ref_point: None,
+                        closed_by_start_direction: false,
                     },
                 )?;
 

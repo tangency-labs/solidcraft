@@ -1576,6 +1576,7 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
                 orient_profile_perpendicular_to_path: false,
                 move_to_profile: false,
                 profile_at_path_start: false,
+                up: None,
             };
             sweeps::create_curve_sweep(k, &refs, Some(&path), None, None, Some(&options))
                 .map_err(|e| solid(&e))?
@@ -1758,7 +1759,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "delete_vertex_joins_seam_iso_curve" => &mut k.fixes.delete_vertex_joins_seam_iso_curve,
         "cover_refuses_folded_continuation" => &mut k.fixes.cover_refuses_folded_continuation,
         "cover_wraps_across_closed_seam" => &mut k.fixes.cover_wraps_across_closed_seam,
-        "fillet_refuse_non_manifold_result" => &mut k.fixes.fillet_refuse_non_manifold_result,
         "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
         "boolean_new_face_closure_both_sides" => &mut k.fixes.boolean_new_face_closure_both_sides,
         "loops_go_on_round_the_vertex" => &mut k.fixes.loops_go_on_round_the_vertex,
@@ -2500,10 +2500,8 @@ mod tests {
         let mut k = Kernel::default();
         enable_fix(&mut k, "imprint_extends_edge_to_proto_vertex").unwrap();
         enable_fix(&mut k, "cover_refuses_folded_continuation").unwrap();
-        enable_fix(&mut k, "fillet_refuse_non_manifold_result").unwrap();
         assert!(k.fixes.imprint_extends_edge_to_proto_vertex);
         assert!(k.fixes.cover_refuses_folded_continuation);
-        assert!(k.fixes.fillet_refuse_non_manifold_result);
         assert!(enable_fix(&mut k, "no_such_fix").is_err());
     }
 

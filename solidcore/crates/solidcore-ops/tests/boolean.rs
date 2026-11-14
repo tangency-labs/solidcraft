@@ -968,3 +968,157 @@ fn a_ball_with_its_poles_on_a_plane_or_a_cone_is_cut() {
     ));
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// The half roll less the r 6 ball about (0, 50 + δ, 20), its poles δ off the roll's outside:
+/// 1e-6 inside it and 1e-6 outside, within the tolerance the trace refines with, in the four
+/// frames of the walls' cylinders that failed above. The line where the ball crosses the wall
+/// passes the poles δ from them, and the trace takes each pole as a point of it (within that
+/// tolerance) and ends two curves there. `StepBackFromSingularity` took the pole point's
+/// singular parameter 1 % of the last span back from the pole, where the curve's direction
+/// seen from the pole is set by the pole's offset (an angle of about δ over the distance), not
+/// by the curve: every span into the pole failed the span test by about 100 δ, the steps
+/// shrank to the tolerance, and the pole points got singular parameters a quarter turn off
+/// (0.73 for 0.5) and UV tangents of 3e5, refused as not a solid. Each frame is one valid
+/// solid of V = 3920π less the ball between radii 48 and 50 at that distance ([`ball_inside`]).
+#[test]
+fn a_ball_with_its_poles_within_tolerance_of_a_rolls_face_is_cut() {
+    all_fixes();
+    let mut failed = Vec::new();
+    for delta in [-1e-6, 1e-6] {
+        let d = 50.0 + delta;
+        let want = 3920.0 * PI - (ball_inside(|_| 50.0, d) - ball_inside(|_| 48.0, d));
+        for frame in [2, 5, 8, 14] {
+            let what = format!("δ {delta:e}, frame {frame}");
+            failed.extend(cut_is_valid_solid(
+                half_roll(frame),
+                ball([0.0, d, 20.0], 0.0),
+                want,
+                &what,
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The same cut with the poles 1e-4 inside and outside the roll's outside, past the
+/// tolerance: each of the four frames is one valid solid of the closed-form volume, as it
+/// was before the trace placed its points at poles.
+#[test]
+fn a_ball_with_its_poles_past_tolerance_of_a_rolls_face_is_cut() {
+    all_fixes();
+    let mut failed = Vec::new();
+    for delta in [-1e-4, 1e-4] {
+        let d = 50.0 + delta;
+        let want = 3920.0 * PI - (ball_inside(|_| 50.0, d) - ball_inside(|_| 48.0, d));
+        for frame in [2, 5, 8, 14] {
+            let what = format!("δ {delta:e}, frame {frame}");
+            failed.extend(cut_is_valid_solid(
+                half_roll(frame),
+                ball([0.0, d, 20.0], 0.0),
+                want,
+                &what,
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A box read from its record and mirrored across x = 0 into one of two openings cut into the
+/// side of a loft through two closed cubic splines, 0.2 mm clear of the loft on every side
+/// (#15862). The mirror keeps each of the box's straight edges a line: before, each became the
+/// degree 1 B-spline of the whole line, its control points some 1.8e7 mm out, and the loft
+/// minus the box was nothing, the loft and the box intersected in the whole loft, and their union
+/// was refused (1001). The loft is SolidCraft's, as its record (`data/`).
+#[test]
+fn a_box_mirrored_into_an_opening_of_a_spline_loft_stays_clear_of_it() {
+    all_fixes();
+    let record: Record = serde_json::from_str(include_str!(
+        "data/issue_15862_spline_loft_with_openings.record.json"
+    ))
+    .unwrap();
+    let loft = || Body::from_record(&record, true).unwrap().0;
+    let lofted = volume(&loft());
+    // the box as SolidCraft makes it: its rectangle extruded, read back from its record
+    let mirrored = || {
+        let corners = [[-24.8, 12.0], [-10.2, 12.0], [-10.2, 25.0], [-24.8, 25.0]];
+        let rectangle: Vec<Curve> = (0..4)
+            .map(|i| {
+                let ([x0, y0], [x1, y1]) = (corners[i], corners[(i + 1) % 4]);
+                Curve::Line {
+                    start: [x0, y0, 16.2],
+                    end: [x1, y1, 16.2],
+                }
+            })
+            .collect();
+        let made = extrude(
+            &rectangle,
+            [0.0, 0.0, 1.0],
+            7.6,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        let b = Body::from_record(&made.to_record().unwrap().0, true)
+            .unwrap()
+            .0;
+        b.transform(&[
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ])
+        .unwrap();
+        b
+    };
+    let boxed = 14.6 * 13.0 * 7.6;
+    let cut = boolean(loft(), mirrored(), BooleanOp::Subtract).unwrap();
+    assert!(cut.is_some(), "the loft minus the box is nothing");
+    let cut = cut.unwrap();
+    let report = cut.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(cut.solid_count().unwrap(), 1);
+    assert_eq!(cut.counts().unwrap(), [13, 27, 18]);
+    assert!(
+        near(volume(&cut), lofted),
+        "{}, the loft {lofted}",
+        volume(&cut)
+    );
+
+    for (a, b) in [(loft(), mirrored()), (mirrored(), loft())] {
+        let common = boolean(a, b, BooleanOp::Intersect).unwrap();
+        assert!(
+            common.is_none(),
+            "the loft and the box share {:?} mm3",
+            common.map(|c| volume(&c))
+        );
+    }
+
+    let u = boolean(loft(), mirrored(), BooleanOp::Union);
+    assert!(
+        matches!(u, Ok(Some(_))),
+        "{:?}",
+        u.as_ref().map(Option::is_some)
+    );
+    let u = u.unwrap().unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 2);
+    assert_eq!(u.counts().unwrap(), [19, 39, 26]);
+    assert!(
+        near(volume(&u), lofted + boxed),
+        "{}, the loft and the box {}",
+        volume(&u),
+        lofted + boxed
+    );
+
+    let (mirrored_record, _) = mirrored().to_record().unwrap();
+    for e in &mirrored_record.edges {
+        assert!(
+            matches!(e.curve, solidcore_record::brep::Curve::Line { .. }),
+            "{:?}",
+            e.curve
+        );
+    }
+    assert!(near(volume(&mirrored()), boxed), "{}", volume(&mirrored()));
+}

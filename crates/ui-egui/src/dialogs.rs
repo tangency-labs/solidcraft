@@ -194,8 +194,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 taper_present: bool,
                 /// Optional distance beyond the selected end object.
                 to_offset: String,
-                /// Start offset from the profile plane (empty: start on the profile plane).
+                /// Offset from the selected start (empty: no offset).
                 start: String,
+                /// Keep Offset selected while its expression is being edited.
+                offset_start: bool,
                 /// Extent type All (through everything) instead of a distance.
                 all: bool,
                 /// Thin Extrude: a wall along the picked curves (or profiles' outlines).
@@ -957,6 +959,7 @@ impl Dialog {
                     taper_present: false,
                     to_offset: String::new(),
                     start: String::new(),
+                    offset_start: false,
                     all: false,
                     thin: false,
                     wall: length_default(s, "2"),
@@ -1300,6 +1303,13 @@ impl Dialog {
                 // Fillets and chamfers take an edge with its tangent chain, as a pick does.
                 let picked = match (&d.kind, sel) {
                     (Kind::Fillet { chain, .. }, _) => fillet_edges(s, sel, *chain),
+                    // One item per edge: a click selects all the pieces of an edge a seam splits,
+                    // the clicked one first, and Measure takes that one.
+                    (Kind::Measure { .. }, _)
+                        if crate::viewport::grouped_selection(s, sel).iter().any(|x| inp.items.iter().any(|y| selection::same_item(x, y))) =>
+                    {
+                        Vec::new()
+                    }
                     (Kind::Measure { .. }, _) => vec![crate::viewport::measurement_selection(s, sel)],
                     _ if inp.multi => crate::viewport::grouped_selection(s, sel),
                     _ => vec![sel.clone()],
@@ -4615,9 +4625,11 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
     let Some(last) = app.remembered_commands.iter().find(|entry| same_command(&entry.kind, &dialog.kind)) else { return };
     let mut next = last.kind.clone();
     match (&mut next, &dialog.kind) {
-        (Kind::Extrude { smart, to_offset, .. }, Kind::Extrude { smart: fresh, to_offset: fresh_offset, .. }) => {
+        (Kind::Extrude { smart, to_offset, start, offset_start, .. }, Kind::Extrude { smart: fresh, to_offset: fresh_offset, .. }) => {
             *smart = fresh.clone();
             *to_offset = fresh_offset.clone();
+            // From Object picks are not recalled; keep their retained offset visible.
+            *offset_start |= !start.is_empty();
         }
         (Kind::Revolve { axis, .. }, Kind::Revolve { axis: fresh, .. }) => *axis = fresh.clone(),
         (Kind::PathPlane { sketch, .. }, Kind::PathPlane { sketch: fresh, .. }) => *sketch = *fresh,
@@ -7331,6 +7343,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 taper_present: extent.taper.is_some(),
                 to_offset: extent.to_offset.as_deref().map(str::to_string).unwrap_or_default(),
                 start: extent.start_offset.as_deref().map(str::to_string).unwrap_or_default(),
+                offset_start: extent.start_offset.is_some(),
                 all: extent.through_all,
                 thin: thin.is_some(),
                 wall: thin.as_ref().map_or_else(|| length_default(s, "2"), |t| t.thickness.to_string()),
@@ -8422,6 +8435,7 @@ mod refused_ok_tests {
                 added: [2; 4],
                 new_body: [3; 4],
                 removed: [4; 4],
+                mirrored: [6; 4],
                 edge: [5; 4],
                 ghost: false,
                 tint_new: true,

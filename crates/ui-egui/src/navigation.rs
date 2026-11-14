@@ -483,6 +483,7 @@ pub(crate) fn modifier_motion(
     let previous = app.viewport.modifier_nav;
     if previous.map(|(m, _)| m) != next.map(|(m, _)| m) {
         app.viewport.orbit_pivot = None;
+        app.viewport.orbit_pivot_at = None;
         app.viewport.orbit_from = None;
         app.viewport.orbit_free = None;
     }
@@ -983,18 +984,9 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         if delta != egui::Vec2::ZERO {
             let mut params = json!({"motion":if mode == NavMode::Pan {"pan"} else {"orbit"},"delta":[delta.x,delta.y]});
             if mode == NavMode::Orbit {
-                let pivot = match app.preferences.orbit_around {
-                    crate::prefs::OrbitAround::ViewCentre => view_middle_pivot(app, rect),
-                    crate::prefs::OrbitAround::Origin => Some(Vec3::ZERO),
-                    crate::prefs::OrbitAround::Cursor => Some(match app.viewport.orbit_pivot {
-                        Some(pivot) => pivot,
-                        None => {
-                            let pivot = crate::prefs::pivot_under(app, &projection(app, rect), hover.unwrap_or(rect.center()) - delta);
-                            app.viewport.orbit_pivot = Some(pivot);
-                            pivot
-                        }
-                    }),
-                };
+                let at = hover.unwrap_or(rect.center()) - delta;
+                let (pivot, kept) = orbit_pivot(app, rect, (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at), at);
+                (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at) = kept;
                 if let Some(pivot) = pivot {
                     params["pivot"] = json!(pivot);
                 }
@@ -1044,6 +1036,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     }
     if !dragging && motion.is_none() && !(trackpad_orbit && app.viewport.trackpad_gesture) {
         app.viewport.orbit_pivot = None;
+        app.viewport.orbit_pivot_at = None;
         app.viewport.orbit_from = None;
         app.viewport.cursor_wrap = None;
     }
@@ -1065,7 +1058,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         if pressed || key || dragging || motion.is_some() || !caps.orbit {
             app.viewport.spin = false;
         } else {
-            let pivot = spin_pivot(app, rect);
+            let (pivot, kept) = orbit_pivot(app, rect, (app.viewport.spin_pivot, app.viewport.spin_pivot_at), rect.center());
+            (app.viewport.spin_pivot, app.viewport.spin_pivot_at) = kept;
             let dx = f64::from(dt.min(0.1)) * 30.0;
             match pivot {
                 Some(p) => orbit_about(app, rect, dx, 0.0, p),
@@ -1076,6 +1070,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     }
     if !app.viewport.spin {
         app.viewport.spin_pivot = None;
+        app.viewport.spin_pivot_at = None;
     }
     if !app.cam.is_valid() {
         app.viewport.orbit_free = None;
@@ -1451,20 +1446,8 @@ pub(crate) fn middle_double_click(app: &mut SolveApp, ui: &egui::Ui, inside: boo
 /// point. The cursor pivot is chosen once, when the drag begins; the view-centre pivot too, while
 /// it stays under the middle of the view (see [`kept_view_middle`]).
 pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Option<Pos2>) {
-    let pivot = match app.preferences.orbit_around {
-        OrbitAround::ViewCentre => view_middle_pivot(app, rect),
-        OrbitAround::Origin => Some(Vec3::ZERO),
-        OrbitAround::Cursor => Some(match app.viewport.orbit_pivot {
-            Some(p) => p,
-            None => {
-                let proj = crate::viewport::projection(app, rect);
-                let at = press.unwrap_or(rect.center());
-                let p = pivot_under(app, &proj, at);
-                app.viewport.orbit_pivot = Some(p);
-                p
-            }
-        }),
-    };
+    let (pivot, kept) = orbit_pivot(app, rect, (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at), press.unwrap_or(rect.center()));
+    (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at) = kept;
     if app.preferences.free_orbit {
         app.viewport.orbit_from = None;
         match pivot {
@@ -1490,44 +1473,45 @@ pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Opti
     app.viewport.orbit_from = Some(OrbitFrom { dx, dy, last: app.cam, ..from });
 }
 
-/// What continuous orbit turns about, by Orbit around: the view's centre ([`view_middle`]), the
-/// world origin, or around the cursor the model point in the middle of the view (else the middle
-/// of the bodies in view), chosen once when the spin starts. Turning about the view's centre instead let the
-/// model swing out of view once earlier cursor orbits had left that centre off the model (#1044).
-fn spin_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
+/// The point an orbit turns about, by Orbit around: the view's centre ([`view_middle`]), the world origin, or the
+/// model point under `at` when the turn began. `kept` is what the turn began with: its point and, for the view's
+/// centre, the screen point that was chosen under; the second value returned is to be kept for its next step. One
+/// function for the drag orbit and continuous orbit (which starts at the middle of the view), so both turn about
+/// the same point.
+fn orbit_pivot(app: &SolveApp, rect: Rect, kept: KeptPivot, at: Pos2) -> (Option<Vec3>, KeptPivot) {
     match app.preferences.orbit_around {
         OrbitAround::ViewCentre => {
-            app.viewport.spin_pivot = kept_view_middle(app, rect, app.viewport.spin_pivot);
-            app.viewport.spin_pivot
+            let (p, chosen_at) = kept_view_middle(app, rect, kept.1.map(|s| (kept.0, s)));
+            (p, (p, chosen_at))
         }
-        OrbitAround::Origin => Some(Vec3::ZERO),
-        OrbitAround::Cursor => Some(match app.viewport.spin_pivot {
-            Some(p) => p,
-            None => {
-                let p = pivot_under(app, &projection(app, rect), rect.center());
-                app.viewport.spin_pivot = Some(p);
-                p
-            }
-        }),
+        OrbitAround::Origin => (Some(Vec3::ZERO), kept),
+        OrbitAround::Cursor => {
+            let p = kept.0.unwrap_or_else(|| pivot_under(app, &projection(app, rect), at));
+            (Some(p), (Some(p), None))
+        }
     }
 }
 
-/// The orbit pivot around the view's centre for the drag under way (see [`kept_view_middle`]).
-fn view_middle_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
-    app.viewport.orbit_pivot = kept_view_middle(app, rect, app.viewport.orbit_pivot);
-    app.viewport.orbit_pivot
-}
+/// What an orbit keeps from one step to the next: its pivot, and where on screen a view-centre pivot (or, while
+/// that is `None`, the camera's target) was when it was chosen.
+type KeptPivot = (Option<Vec3>, Option<Pos2>);
 
-/// [`view_middle`] for an orbit under way: the point it began with while that point is still under
-/// the free view's middle (turning about it keeps it there), else the point under it now, as after
-/// a pan or a zoom in the same gesture.
-fn kept_view_middle(app: &SolveApp, rect: Rect, kept: Option<Vec3>) -> Option<Vec3> {
-    let middle = home_centre(app);
-    let proj = || projection(app, rect);
-    match kept.zip(middle) {
-        Some((p, m)) if proj().to_screen(p).is_some_and(|s| s.distance(m) < 0.5) => Some(p),
-        _ => view_middle(app, rect),
+/// [`view_middle`] for an orbit under way, with the screen point it was chosen under: the choice it
+/// began with (a point, or `None` for the camera's target) while that point is still where it was on
+/// screen (turning about it keeps it there), else the choice for the view now, as after a pan or a
+/// zoom in the same gesture. The free view's middle itself is no test: Home's framing point moves as
+/// the model's outline turns, most near the top view, and choosing again there swung the model aside
+/// (#16091).
+fn kept_view_middle(app: &SolveApp, rect: Rect, kept: Option<(Option<Vec3>, Pos2)>) -> (Option<Vec3>, Option<Pos2>) {
+    let proj = projection(app, rect);
+    let screen = |p: Option<Vec3>| proj.to_screen(p.unwrap_or(app.cam.target)).filter(|s| s.is_finite());
+    if let Some((p, at)) = kept
+        && screen(p).is_some_and(|s| s.distance(at) < 0.5)
+    {
+        return (p, Some(at));
     }
+    let p = view_middle(app, rect);
+    (p, screen(p))
 }
 
 /// The screen point Home and Fit centre the model on, through the one function they use

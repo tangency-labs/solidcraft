@@ -172,6 +172,7 @@ pub struct WorkCounters {
     target_record_seedings: Cell<u64>,
     classification_snapshots: Cell<u64>,
     orient_boxes: Cell<u64>,
+    ball_certified_roots: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -287,6 +288,15 @@ impl WorkCounters {
         self.orient_boxes.get()
     }
 
+    /// Ball corners whose centre a certified root proves
+    /// (`blend::blend_corner::ball`'s `ball_certified_root`, `sm_BallCertifiedRoot`): a corner
+    /// of three equal rounds with fewer than two planes among its faces, whose centre has no
+    /// closed form. Not the fork's (a test's witness that a body reaches the solve, #15140).
+    #[must_use]
+    pub fn ball_certified_roots(&self) -> u64 {
+        self.ball_certified_roots.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -302,6 +312,7 @@ impl WorkCounters {
         self.target_record_seedings.set(0);
         self.classification_snapshots.set(0);
         self.orient_boxes.set(0);
+        self.ball_certified_roots.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -378,6 +389,12 @@ impl WorkCounters {
     pub(crate) fn add_orient_box(&self) {
         self.orient_boxes
             .set(self.orient_boxes.get().saturating_add(1));
+    }
+
+    /// Counts one ball corner's certified root.
+    pub(crate) fn add_ball_certified_root(&self) {
+        self.ball_certified_roots
+            .set(self.ball_certified_roots.get().saturating_add(1));
     }
 }
 
@@ -476,8 +493,6 @@ pub struct UpstreamFixes {
     pub fillet_refuse_face_consuming_blends: bool,
     /// `create_fillet_brep` refuses blends whose bands on a face they share overlap away from any corner that trims them (a rail of one inside the band between the other's filleted edge and its rail: both vertical edges of a box end rounded past half its width), with `FilletErrorType::NoRoom`, where upstream builds a body that is not closed (WR-542; the fork's tangency-labs/smlib@c0d74ee, `BandsClearOtherRails`). A rail is sampled only between its end vertices, where the corners have placed them: the rails are not trimmed yet and run on past their corners' mitres, so a run-on crossing another blend's band refused a valid round (WR-649, #1984; the fork's tangency-labs/smlib@d548305).
     pub fillet_refuse_overlapping_bands: bool,
-    /// `DoFillet` refuses a filleted target that is not a closed manifold solid (an edge that is not `SmEdge::IsManifold`) with `SM_FILERR_BAD_MERGE`, where upstream returns success (WR-212, #422); the public wrappers (`fillet_edges`, `fillet_edges_per_edge`, `variable_radius_fillet`) then put the caller's body back as it was before the call.
-    pub fillet_refuse_non_manifold_result: bool,
     /// The vertex overload of `SmFilletErrorInfo::NoteError` records the vertex, its location, the fillet status, the error code and the comment, as the edge overload does, and `CreateFilletCorners` notes a vertex no corner type handles as `SM_FILERR_CORNER_UNSUPPORTED` with "Corner case not implemented" (WR-513, #1469; tangency-labs/smlib@a73cf5e). The pinned overload records nothing, so the failure reached the caller as the generic 1001 with no reason. Off by default (pinned behaviour). Diagnostics only: the pending vertex entry and the operation's result are unchanged, so this does not make an unsupported corner succeed. The whole-operation wrappers (e.g. `fillet_edges`) drop their session and return only the later failure; the retained note is readable through [`crate::blend::fillet_executive::session::FilletSession::error_info`]. The C API's `SMLIB_ERR_CORNER_UNSUPPORTED` (-1111) is not mapped here.
     pub fillet_vertex_error_diagnostics: bool,
     /// The fillet solver tries the corner ball's patch after the torus when a round's centre line collapses to a point (WR-420, #416).
@@ -1049,7 +1064,7 @@ pub struct UpstreamFixes {
     /// accepts the exponent); binary files are lossless either way. Off by default
     /// (pinned behaviour: the same bytes as the C++ writer).
     pub ascii_doubles_round_trip: bool,
-    /// A round whose filleted edge runs on tangentially at a vertex into an edge of its own convexity that its rail on that face runs alongside and never meets (an R2 corner arc of a plate's outline between straight sides, picked alone) ends at its section through the vertex: the round is cut there by the plane normal to the filleted edge, and the region between the round, its faces and the end sections is subtracted from the body, a flat end face (the section's corner) left on each such end. With `fillet_nx1_end_rib_global_merge` the end rib was deleted for the global merge, which cannot cut a round lying along the continued edge, and `DoFilleting` left an open body (`fillet_edges` refused it as not closed with `fillet_refuse_non_manifold_result`); pinned SMLib fails the corner (`SM_FILERR_VERTEX_PROBLEM`, 1001). Only a single round whose both ends are such ends is built; any other combination is refused with `FilletErrorType::NoRoom` (WR-674, #2176; own design, not in the fork, whose `CalcCornerEdgeGeom` takes the global merge as WR-303 does).
+    /// A round whose filleted edge runs on tangentially at a vertex into an edge of its own convexity that its rail on that face runs alongside and never meets (an R2 corner arc of a plate's outline between straight sides, picked alone) ends at its section through the vertex: the round is cut there by the plane normal to the filleted edge, and the region between the round, its faces and the end sections is subtracted from the body, a flat end face (the section's corner) left on each such end. With `fillet_nx1_end_rib_global_merge` the end rib was deleted for the global merge, which cannot cut a round lying along the continued edge, and `DoFilleting` left an open body (`fillet_edges` refused it as not closed); pinned SMLib fails the corner (`SM_FILERR_VERTEX_PROBLEM`, 1001). Only a single round whose both ends are such ends is built; any other combination is refused with `FilletErrorType::NoRoom` (WR-674, #2176; own design, not in the fork, whose `CalcCornerEdgeGeom` takes the global merge as WR-303 does).
     pub fillet_round_ends_at_tangent_continuation: bool,
     /// Constant and variable-radius rounds between NURBS faces are built as their definition, a [`crate::surface::procedural_blend::ProceduralBlend`] (the fork's `SmProceduralBlend`): the two faces the ball rolls on, its radius or radius law, the section's order and thumbweight rule and the leader, which evaluate exactly; its net, the certified B-spline approximation within the certificate's bound (the radius law in the certificate), is what the surface cache and tessellation use (`SmBlendNetScope`), the cache's node boxes grown by the net's bound. With it the file reader reads a definition (`SmProceduralBlend_TYPE`, `SURF_BASE_TYPE + 41`); without it that type is refused as the pinned reader refuses it (WR-698, #2273; the fork's tangency-labs/smlib@014f66f to 729f893, smlib#79 step 7, merged at 5e8c9c1).
     ///
@@ -1654,9 +1669,10 @@ mod tests {
                 w.wall_body_copies(),
                 w.proto_edge_intersections(),
                 w.loop_walks(),
+                w.ball_certified_roots(),
             )
         };
-        assert_eq!(counts(w), (0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0));
         w.add_face_pair();
         w.add_face_pair();
         w.add_loop_classified();
@@ -1665,11 +1681,12 @@ mod tests {
         w.add_loop_walk();
         w.add_loop_walk();
         w.add_loop_walk();
-        assert_eq!(counts(w), (2, 1, 1, 1, 3));
+        w.add_ball_certified_root();
+        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1));
         // each kernel counts its own work
         assert_eq!(Kernel::default().work_counters.face_pairs(), 0);
         w.reset();
-        assert_eq!(counts(w), (0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0));
     }
 
     #[test]

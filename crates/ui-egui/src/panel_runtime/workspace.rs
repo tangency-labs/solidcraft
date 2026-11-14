@@ -846,8 +846,6 @@ impl WorkspacePanelHost {
         if frame.layout.revision != runtime.layout().inspect().revision {
             frame.reply = super::runtime::normalize_native_reply(runtime.layout().inspect(), &self.native_capabilities);
         }
-        frame.layout =
-            resolve_frame_layout(runtime, frame.layout.render_domain, frame.layout.capacity, &frame.layout.chrome_obstacles, &self.options)?;
         let scope = runtime_scope(runtime);
         let window = runtime.environment().window.clone();
         let locale = solidcraft_ui_text::Locale::for_language(solidcraft_ui_text::language());
@@ -866,6 +864,32 @@ impl WorkspacePanelHost {
                 header_icons.insert((instance.id.clone(), action.id.clone()), action.icon.clone());
             }
         }
+        let t = solidcraft_theme::Tokens::get();
+        let heading_font = ui_kit::type_face::semibold(t.font_heading);
+        self.options.geometry.header_title_widths = ui.fonts_mut(|fonts| {
+            metadata
+                .iter()
+                .map(|(instance, presentation)| {
+                    let text = fonts.layout_no_wrap(presentation.title.clone(), heading_font.clone(), t.form_ink).size().x;
+                    let title = text.ceil() + 2.0 * t.space_12 + t.space_10 + t.space_8;
+                    (instance.clone(), title)
+                })
+                .collect()
+        });
+        self.options.geometry.tab_title_widths = ui.fonts_mut(|fonts| {
+            let regular = egui::FontId::proportional(t.font_button);
+            let active = ui_kit::type_face::semibold(t.font_button);
+            metadata
+                .iter()
+                .map(|(instance, presentation)| {
+                    let mut width = |font| fonts.layout_no_wrap(presentation.title.clone(), font, t.app_bar_text).size().x;
+                    let width = width(regular.clone()).max(width(active.clone())).ceil() + 2.0 * t.space_8 + t.space_2;
+                    (instance.clone(), width.min(MAX_LOGICAL))
+                })
+                .collect()
+        });
+        frame.layout =
+            resolve_frame_layout(runtime, frame.layout.render_domain, frame.layout.capacity, &frame.layout.chrome_obstacles, &self.options)?;
         let requested = self.focus_request.clone().or_else(|| {
             let focused = runtime.layout().interaction().focused.clone();
             (focused != self.observed_focus).then_some(focused).flatten()
@@ -965,6 +989,14 @@ impl WorkspacePanelHost {
             move_source: (!self.live_drag).then_some(self.interaction.move_source()).flatten(),
             drag_cards: capture_drag.then_some(&mut drag_cards),
             drag_layout,
+            tab_drop: self
+                .live_drag
+                .then(|| {
+                    let preview = frame.preview.as_ref().filter(|preview| preview.rejection.is_none())?;
+                    let Destination::JoinTab { section, index } = preview.destination.as_ref()? else { return None };
+                    Some((section, self.interaction.move_source()?, *index))
+                })
+                .flatten(),
             open_menu: self.menu.as_ref(),
             controls: &mut frame.controls,
             metadata: &metadata,
@@ -1555,9 +1587,6 @@ impl WorkspacePanelHost {
                 let destination = egui_rect(preview.bounds);
                 let bounds = preview_bounds.unwrap_or(destination);
                 ui_kit::panel_host_preview(ui, bounds, true, None, 1.0);
-                if let Some(marker) = preview.tab_marker {
-                    ui_kit::panel_host_tab_insertion(ui, egui_rect(marker).translate(bounds.min - destination.min), 1.0);
-                }
             }
         }
         if (!self.live_drag || landing.is_none())
@@ -2300,6 +2329,7 @@ struct WorkspaceContentHost<'a> {
     move_source: Option<&'a InstanceId>,
     drag_cards: Option<&'a mut Vec<CardPaint>>,
     drag_layout: Option<&'a HostLayout>,
+    tab_drop: Option<(&'a SectionId, &'a InstanceId, usize)>,
     open_menu: Option<&'a HostMenu>,
     controls: &'a mut Vec<HostFrameControl>,
     metadata: &'a BTreeMap<InstanceId, PanelPresentation>,
@@ -2374,6 +2404,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
             })
         });
         let paint_section = projected.unwrap_or(section);
+        let tab_drop = self.tab_drop.filter(|(receiver, _, _)| *receiver == &section.section && paint_section.tab_strip.is_some());
         let paint_bounds = egui_rect(paint_section.outer);
         let chrome_offset = paint_bounds.min - committed_bounds.min;
         let paint_context = projected.filter(|target| target.outer != section.outer || target.body != section.body).map(|target| PanelContext {
@@ -2390,7 +2421,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
             paint_bounds,
             section.peek || section.zone == Zone::Floating,
             appearance.fill,
-            matches!(appearance.contrast, ContrastOutcome::RetainReadableFallback { .. }).then(|| style.palette(appearance)),
+            matches!(appearance.contrast, Some(ContrastOutcome::RetainReadableFallback { .. })).then(|| style.palette(appearance)),
             |ui, content_clip| {
                 if (section.peek || section.zone == Zone::Floating) && (!ui.is_visible() || ui.is_sizing_pass()) {
                     self.unpainted.push((ui.layer_id(), section.outer, ui.is_sizing_pass()));
@@ -2411,6 +2442,11 @@ impl PanelHost for WorkspaceContentHost<'_> {
                     );
                     tablist.set_clip_rect(ui.clip_rect());
                 }
+                if let Some((_, dragged, index)) = tab_drop {
+                    let order =
+                        self.layout.source_state.layout.section(&section.section).ok().map(|section| section.tabs.as_slice()).unwrap_or_default();
+                    paint_drop_tabs(ui, paint_section, dragged, index, order, self.metadata, self.layout.direction);
+                }
                 for control in self.controls.iter() {
                     let HostControlTarget::Pointer(target) = &control.target else {
                         continue;
@@ -2428,25 +2464,46 @@ impl PanelHost for WorkspaceContentHost<'_> {
                     if !belongs {
                         continue;
                     }
+                    if tab_drop.is_some() && matches!(target, HostPointerTarget::Tab { .. } | HostPointerTarget::TabOverflow { .. }) {
+                        continue;
+                    }
                     let data = pointer_instance(target).and_then(|instance| self.metadata.get(instance));
                     let label = &control.accessible_name;
+                    let bounds = match target {
+                        HostPointerTarget::Header { .. } if tab_drop.is_some() => {
+                            let Some(bounds) = paint_section.title else { continue };
+                            egui_rect(bounds)
+                        }
+                        HostPointerTarget::HeaderAction { action, .. } if projected.is_some() => {
+                            let Some((_, bounds)) = paint_section.actions.iter().find(|(id, _)| id == action) else { continue };
+                            egui_rect(*bounds)
+                        }
+                        _ => egui_rect(control.bounds).translate(chrome_offset),
+                    };
                     let mut tab_ui;
                     let target_ui = if matches!(target, HostPointerTarget::Tab { .. }) {
-                        tab_ui = ui.new_child(
-                            egui::UiBuilder::new()
-                                .id_salt(control.id)
-                                .max_rect(egui_rect(control.bounds).translate(chrome_offset))
-                                .accessibility_parent(surface_id.with("tablist")),
-                        );
+                        tab_ui = ui
+                            .new_child(egui::UiBuilder::new().id_salt(control.id).max_rect(bounds).accessibility_parent(surface_id.with("tablist")));
                         &mut tab_ui
                     } else {
                         &mut *ui
                     };
-                    let response = if matches!(target, HostPointerTarget::Collapse { .. }) {
+                    let response = if let HostPointerTarget::Tab { instance } = target {
+                        ui_kit::panel_tab(
+                            target_ui,
+                            control.id,
+                            bounds,
+                            label,
+                            *instance == section.instance,
+                            control.enabled,
+                            self.layout.direction == Direction::Rtl,
+                            if self.move_source == Some(instance) { 0.5 } else { 1.0 },
+                        )
+                    } else if matches!(target, HostPointerTarget::Collapse { .. }) {
                         ui_kit::panel_host_disclosure(
                             target_ui,
                             control.id,
-                            egui_rect(control.bounds).translate(chrome_offset),
+                            bounds,
                             label,
                             control.enabled,
                             section.collapsed,
@@ -2456,13 +2513,11 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         ui_kit::panel_host_control_label_opacity(
                             target_ui,
                             control.id,
-                            egui_rect(control.bounds).translate(chrome_offset),
+                            bounds,
                             HostChrome {
                                 label,
-                                icon: if matches!(target, HostPointerTarget::Menu { .. }) {
+                                icon: if matches!(target, HostPointerTarget::Menu { .. } | HostPointerTarget::TabOverflow { .. }) {
                                     Some("dots")
-                                } else if matches!(target, HostPointerTarget::TabOverflow { .. }) {
-                                    Some("chevron")
                                 } else if matches!(target, HostPointerTarget::Close { .. }) {
                                     Some("close")
                                 } else if let HostPointerTarget::HeaderAction { instance, action } = target {
@@ -2482,7 +2537,8 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                 enabled: control.enabled,
                                 drag: matches!(target, HostPointerTarget::Header { .. } | HostPointerTarget::Tab { .. }),
                                 title: matches!(target, HostPointerTarget::Header { .. }),
-                                grip_only: matches!(target, HostPointerTarget::Header { .. }) && section.tabs.len() + section.hidden_tabs.len() > 1,
+                                grip_only: matches!(target, HostPointerTarget::Header { .. })
+                                    && (tab_drop.is_some() || section.tabs.len() + section.hidden_tabs.len() > 1),
                                 rtl: self.layout.direction == Direction::Rtl,
                             },
                             if matches!(target, HostPointerTarget::Header { instance } | HostPointerTarget::Tab { instance }
@@ -2593,9 +2649,17 @@ impl PanelHost for WorkspaceContentHost<'_> {
                 let t = solidcraft_theme::Tokens::get();
                 // The title and its controls share the card background. One
                 // kit separator spans the header, rather than per-control tiles.
-                if !section.collapsed && !section.inline {
+                if !section.inline {
                     let header = egui_rect(paint_section.header);
-                    t.secondary_hline(ui.painter(), header.x_range(), header.bottom(), t.dialog_rule);
+                    if !section.collapsed {
+                        t.secondary_hline(ui.painter(), header.x_range(), header.bottom(), t.dialog_rule);
+                    }
+                    if paint_section.action_bar.is_none() && !paint_section.actions.is_empty() {
+                        let menu = egui_rect(paint_section.menu);
+                        let x = if self.layout.direction == Direction::Rtl { menu.right() } else { menu.left() };
+                        let inset = t.space_8.min(header.height() / 2.0);
+                        t.secondary_vline(ui.painter(), x, egui::emath::Rangef::new(header.top() + inset, header.bottom() - inset), t.dialog_rule);
+                    }
                 }
                 // Content scrolls only where it chooses. Each slot is an isolated
                 // bounded child, so malicious/minimum-size content cannot enlarge
@@ -2869,9 +2933,56 @@ impl PanelLocalServices for SlotFocusServices<'_> {
     }
 }
 
+/// Preview the tab headings without registering a second set of controls.
+fn paint_drop_tabs(
+    ui: &egui::Ui,
+    section: &HostSection,
+    dragged: &InstanceId,
+    index: usize,
+    order: &[InstanceId],
+    metadata: &BTreeMap<InstanceId, PanelPresentation>,
+    direction: Direction,
+) {
+    let Some(strip) = section.tab_strip else { return };
+    let t = solidcraft_theme::Tokens::get();
+    let rtl = direction == Direction::Rtl;
+    let mut cells: Vec<_> = section.tabs.iter().map(|tab| (&tab.instance, egui_rect(tab.bounds))).collect();
+    let mut overflow = section.tab_overflow.map(egui_rect);
+    if !cells.iter().any(|(id, _)| *id == dragged) {
+        // Give the incoming tab a visible cell during the preview even when
+        // the committed tab strip will place it in overflow.
+        let preceding: Vec<_> = order.iter().filter(|id| *id != dragged).take(index).collect();
+        let at = cells.iter().take_while(|(id, _)| preceding.contains(id)).count();
+        let mut row = egui_rect(strip);
+        if let Some(button) = overflow.filter(|button| button.width() < row.width()) {
+            if rtl {
+                row.min.x = button.right();
+            } else {
+                row.max.x = button.left();
+            }
+        } else {
+            overflow = None;
+        }
+        cells.insert(at, (dragged, row));
+        let width = row.width() / cells.len() as f32;
+        for (i, (_, bounds)) in cells.iter_mut().enumerate() {
+            let x = if rtl { row.right() - width * (i + 1) as f32 } else { row.left() + width * i as f32 };
+            *bounds = egui::Rect::from_min_size(egui::pos2(x, row.top()), egui::vec2(width, row.height()));
+        }
+    }
+    if let Some(bounds) = overflow {
+        let size = (bounds.width().min(bounds.height()).min(t.control_height) - 2.0 * t.form_icon_inset).max(0.0);
+        ui_kit::icons::paint_ink(ui.painter(), egui::Rect::from_center_size(bounds.center(), egui::vec2(size, size)), "dots", t.form_ink);
+    }
+    for (id, bounds) in cells {
+        let Some(presentation) = metadata.get(id) else { continue };
+        ui_kit::paint_panel_tab(ui, bounds, &presentation.title, *id == section.instance, false, id == dragged, rtl, 1.0);
+    }
+}
+
 fn content_header_bounds(section: &HostSection) -> Option<LogicalRect> {
     let body = section.body?;
-    let y = section.header.origin.y + section.header.size.height;
+    let y = super::layout::bottom(section.action_bar.unwrap_or(section.header));
     let height = body.origin.y - y;
     if height <= 0.0 {
         return None;

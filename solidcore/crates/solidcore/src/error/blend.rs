@@ -849,32 +849,16 @@ mod tests {
                 None => SolidError::blend("blend::feature_executive", failure),
             }
         };
-        let non_manifold = |entity| {
-            let failure = BlendFailure::Failed("the result is not a closed manifold solid");
-            match entity {
-                Some(at) => {
-                    SolidError::blend_at("blend::fillet_executive::session::finish", failure, at)
-                }
-                None => SolidError::blend("blend::fillet_executive::session::finish", failure),
-            }
-        };
         for entity in [None, Some(edge)] {
-            for e in [open_base(entity), non_manifold(entity)] {
-                let filled = e.clone().or_at(at_edge.or(Site::point(point)));
-                assert_eq!(filled.entity(), e.entity());
-                assert_eq!(filled.upstream_status(), e.upstream_status());
-                assert_eq!(filled.kind(), e.kind());
-                assert_eq!(
-                    crate::blend::feature_executive::is_open_base_refusal(&filled),
-                    crate::blend::feature_executive::is_open_base_refusal(&e)
-                );
-                assert_eq!(
-                    crate::blend::fillet_executive::session::finish::is_non_manifold_refusal(
-                        &filled
-                    ),
-                    crate::blend::fillet_executive::session::finish::is_non_manifold_refusal(&e)
-                );
-            }
+            let e = open_base(entity);
+            let filled = e.clone().or_at(at_edge.or(Site::point(point)));
+            assert_eq!(filled.entity(), e.entity());
+            assert_eq!(filled.upstream_status(), e.upstream_status());
+            assert_eq!(filled.kind(), e.kind());
+            assert_eq!(
+                crate::blend::feature_executive::is_open_base_refusal(&filled),
+                crate::blend::feature_executive::is_open_base_refusal(&e)
+            );
         }
         assert!(crate::blend::feature_executive::is_open_base_refusal(
             &open_base(Some(edge))
@@ -891,10 +875,7 @@ mod tests {
     /// none.
     #[test]
     fn the_blend_routines_build_no_bare_statuses() {
-        const WAITING: &[(&str, usize)] = &[
-            ("blend/fillet_executive/session/finish.rs", 2),
-            ("blend/fillet_section/recertify.rs", 14),
-        ];
+        const WAITING: &[(&str, usize)] = &[("blend/fillet_section/recertify.rs", 14)];
         let found = super::super::query::tests::bare_statuses_in("blend", 100);
         let waiting: Vec<(String, usize)> = WAITING
             .iter()
@@ -907,6 +888,90 @@ mod tests {
         assert!(
             WAITING.windows(2).all(|w| w[0].0 < w[1].0),
             "WAITING is sorted by path, one file per line"
+        );
+    }
+
+    /// What builds a phrase cause in source: the helpers, and each phrase cause by name. A
+    /// new cause is placed here (the match has no wildcard), so the ratchet below counts
+    /// every phrase cause there is.
+    fn phrase_needle(cause: &BlendFailure) -> Option<&'static str> {
+        match cause {
+            BlendFailure::NoRoom(_)
+            | BlendFailure::StationDidNotConverge { .. }
+            | BlendFailure::TrimLoopOpen
+            | BlendFailure::TrimLoopDoesNotSeparate
+            | BlendFailure::StageFailed => None,
+            BlendFailure::Failed(_) => Some("BlendFailure::Failed("),
+            BlendFailure::Missing(_) => Some("BlendFailure::Missing("),
+            BlendFailure::InvalidValue(_) => Some("BlendFailure::InvalidValue("),
+            BlendFailure::Inconsistent(_) => Some("BlendFailure::Inconsistent("),
+            BlendFailure::BadIntersections(_) => Some("BlendFailure::BadIntersections("),
+            BlendFailure::NotConverged(_) => Some("BlendFailure::NotConverged("),
+            BlendFailure::OutsideDomain(_) => Some("BlendFailure::OutsideDomain("),
+            BlendFailure::NotWithinTolerance(_) => Some("BlendFailure::NotWithinTolerance("),
+            BlendFailure::PassedOn { .. } => Some("BlendFailure::PassedOn {"),
+        }
+    }
+
+    /// The blend sites not yet converted to a typed cause: the library code of the blend
+    /// routines builds exactly this many phrase causes (read by the scanner the bare-status
+    /// ratchet uses). A phrase cause is neither a defect nor a refusal, so this is the set of
+    /// blend failures nobody has classed yet, and it may only shrink: a change that converts
+    /// sites lowers the pin to the new count, and a new site builds a typed cause.
+    #[test]
+    fn the_phrase_cause_sites_only_go_down() {
+        const PHRASE_CAUSE_SITES: usize = 1406;
+        use crate::blend::fillet_executive::NoRoomReason as R;
+        let causes = [
+            BlendFailure::NoRoom(R::BallDoesNotFit),
+            BlendFailure::StationDidNotConverge {
+                s: 0.0,
+                residual: 0.0,
+                tolerance: 0.0,
+                step: 0.0,
+                iterations: 0,
+            },
+            BlendFailure::TrimLoopOpen,
+            BlendFailure::TrimLoopDoesNotSeparate,
+            BlendFailure::StageFailed,
+            BlendFailure::Failed("x"),
+            BlendFailure::Missing("x"),
+            BlendFailure::InvalidValue("x"),
+            BlendFailure::Inconsistent("x"),
+            BlendFailure::BadIntersections("x"),
+            BlendFailure::NotConverged("x"),
+            BlendFailure::OutsideDomain("x"),
+            BlendFailure::NotWithinTolerance("x"),
+            BlendFailure::PassedOn {
+                what: "x",
+                status: SM_ERR,
+            },
+        ];
+        let mut needles = vec![
+            "SolidError::blend_failed(",
+            "SolidError::blend_missing(",
+            "SolidError::blend_invalid_value(",
+        ];
+        for cause in &causes {
+            let needle = phrase_needle(cause);
+            assert_eq!(needle.is_some(), cause.is_phrase(), "{cause:?}");
+            needles.extend(needle);
+        }
+        let per_file: Vec<(String, usize)> = super::super::bare_scan::library_files("blend", 100)
+            .into_iter()
+            .filter_map(|(relative, text)| {
+                let code = super::super::bare_scan::library_code(&text);
+                let n: usize = needles.iter().map(|n| code.matches(n).count()).sum();
+                (n > 0).then_some((relative, n))
+            })
+            .collect();
+        let found: usize = per_file.iter().map(|(_, n)| n).sum();
+        assert_eq!(
+            found, PHRASE_CAUSE_SITES,
+            "the blend routines build {found} phrase causes, pinned at {PHRASE_CAUSE_SITES}: \
+             the number may only go down. Converting sites to a typed cause lowers the pin to \
+             the new count; a new site builds a typed cause, not a phrase. Per file: \
+             {per_file:?}"
         );
     }
 }

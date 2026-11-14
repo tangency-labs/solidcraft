@@ -19,6 +19,8 @@ pub mod crash;
 pub mod easyprint;
 pub mod frames;
 pub mod fuzz;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod gpg;
 pub mod licences;
 mod mesh_lines;
 pub mod occurrences;
@@ -512,6 +514,14 @@ pub struct Session {
     /// Opened read-only (`doc.open {read_only}`, the "open elsewhere" notice): saving to its own
     /// file is refused; Save As to another file is how its changes are kept.
     pub read_only: bool,
+    /// The provenance records the open file carries; a signed save appends one to them.
+    pub provenance_chain: Option<solidcraft_io::ProvenanceChain>,
+    /// The last provenance verification of this design, when one was asked for.
+    pub provenance: Option<solidcraft_io::ProvenanceReport>,
+    /// Set only by the app's own Save, after the user chose the key in Preferences: a script,
+    /// agent or control-channel caller cannot make the engine sign with a keyring key on its own.
+    /// Not saved and not copied by [`Session::scratch`].
+    pub signing_allowed: bool,
     /// Whether the design's name is one its user chose for it (`file.new {name}`) rather than
     /// one it borrowed — from a file's name, a sample's name, or a file that stored another
     /// design's name. A borrowed name follows Save As to the new file's name (#4907); a name
@@ -861,6 +871,9 @@ impl Session {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             disk: None,
             read_only: false,
+            provenance_chain: None,
+            provenance: None,
+            signing_allowed: false,
             user_named: false,
             open_preview: None,
             log: Vec::new(),
@@ -1482,6 +1495,15 @@ impl Session {
             reserve.extend(
                 made.iter().filter(|n| solidcraft_doc::is_counted_body_name(n) && !self.doc.reserved_body_names.contains(**n)).map(|n| n.to_string()),
             );
+            // A pattern of several bodies stores its names source by source, so after its count
+            // changes they are stored again as the copies have them now (#12114). Filled in
+            // slot by slot, a name of the old count would stay in a later source's place. One
+            // saved before then reads its names in order; stored as its copies have them, they
+            // mean the same copies read source by source.
+            if f.pins_every_body_name() && (f.pattern_names_in_order || made.len() != f.body_names.len()) {
+                pins.push((f.id, made.iter().map(|n| n.to_string()).collect()));
+                continue;
+            }
             // Nothing to pin when every slot the bodies take already holds a name.
             if made.len() <= f.body_names.len() && f.body_names.iter().take(made.len()).all(|slot| !slot.trim().is_empty()) {
                 continue;
@@ -1508,6 +1530,8 @@ impl Session {
         for (id, names) in pins {
             if let Some(f) = doc.feature_mut(id) {
                 f.body_names = names;
+                // Stored as the copies have them now: read source by source from here on (#12114).
+                f.pattern_names_in_order = false;
             }
         }
         doc.reserved_body_names.extend(reserve);
@@ -2032,6 +2056,9 @@ impl Session {
             uid: self.uid,
             disk: self.disk,
             read_only: self.read_only,
+            provenance_chain: self.provenance_chain.clone(),
+            provenance: self.provenance.clone(),
+            signing_allowed: false,
             user_named: self.user_named,
             open_preview: None,
             saved: self.saved.clone(),

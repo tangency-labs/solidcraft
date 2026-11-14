@@ -33,6 +33,13 @@ solidcraft --control 7878 &
 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
 
+Picking geometry with `execute` `view.pick` requires a connection to the running SolidCraft
+app. It is unavailable with `--headless` or when automatic discovery starts a headless session.
+`frame: "model"` chooses the pixels of a rendered model image; it does not enable headless MCP
+picking. The app handles this command outside the engine registry, so `list_commands` and
+`describe_command` do not include it, even when connected. See `ui.pick` in the
+[control protocol](control-protocol.md) for pixel and ray parameters.
+
 ### The app listens when turned on
 
 The desktop app opens its control channel on `127.0.0.1:27878` (or the next free port when that
@@ -519,7 +526,10 @@ changed body even when no body name was added or removed. Sketch replies keep ne
 IDs under `created` and omit only identical top-level `points`, `curves`,
 `constraints` and `dimensions` lists. When a sketch command creates more points than
 its new curves have ends (the poles of an offset's splines), `created.points` becomes
-`created.point_count`: refer to those curves by their ids. Other fields and errors are unchanged;
+`created.point_count`: refer to those curves by their ids. A `sketch.move_points` reply gives
+`moved_count` and `reached` (true when every point reached its target) instead of the `moved`
+list, and lists only the moves that missed under `not_reached` (`point`, `to`, `at`).
+Other fields and errors are unchanged;
 inspection commands still return their complete results. Compaction uses the
 engine's reply directly, without an additional design-inspection request.
 

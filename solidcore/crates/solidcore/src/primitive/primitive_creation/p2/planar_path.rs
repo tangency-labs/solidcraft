@@ -157,6 +157,7 @@ fn sweep_profiles_along_path(
         orient_profile_perpendicular_to_path: false,
         move_to_profile: false,
         profile_at_path_start: false,
+        up: None,
     };
     let region = a.infinite_region(brep)?;
     let mut primitive = PrimitiveCreation::new(Some(region), 0, false);

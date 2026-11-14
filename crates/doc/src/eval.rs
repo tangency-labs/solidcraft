@@ -280,6 +280,15 @@ impl ModelBody {
         out
     }
 
+    /// The display edges that are one edge to the user with display edge `edge`, sorted, `edge`
+    /// among them: the pieces a seam of a curved surface splits it into, as a sphere's seam
+    /// ending on a slot's rim splits that rim's arc in two ([`kernel::whole_edge`], decided from
+    /// the exact record). The kernel names them by the record's edge indices, which are the
+    /// display edges'. Just `edge` for a mesh body, a seam or an edge the body does not have.
+    pub fn whole_edge(&self, edge: usize) -> Vec<usize> {
+        kernel::whole_edge(&self.body, edge)
+    }
+
     /// The display plan of this body at the viewport's display quality
     /// ([`crate::display_quality::current`]; at Normal, the same tolerance and angle as
     /// [`ModelBody::mesh`]), made once per level; `None` when the body has no plan (a mesh body,
@@ -1770,11 +1779,6 @@ fn replayed_sources<'a>(doc: &'a Document, features: &[crate::FeatureId]) -> Vec
     out
 }
 
-/// A construction plane, axis or point.
-fn is_construction(f: &Feature) -> bool {
-    matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
-}
-
 /// Every string in `v` (names of planes, axes, bodies and features among them).
 fn json_strings<'a>(v: &'a serde_json::Value, out: &mut std::collections::BTreeSet<&'a str>) {
     match v {
@@ -1793,7 +1797,7 @@ fn json_strings<'a>(v: &'a serde_json::Value, out: &mut std::collections::BTreeS
 /// definition that is a construction's name may take one too many, never one too few: the
 /// other construction geometry no longer goes into every feature's key.
 fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: Option<&ModelState>) -> u64 {
-    if !doc.features.iter().any(is_construction) {
+    if !doc.features.iter().any(|f| f.kind.is_construction()) {
         return 0;
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -1813,7 +1817,7 @@ fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
         if steps > 4096 {
             named = true;
             "too deep".hash(&mut h);
-            for c in doc.features.iter().filter(|c| is_construction(c)) {
+            for c in doc.features.iter().filter(|c| c.kind.is_construction()) {
                 fingerprint(doc, 0, c, vals, false, &ImportDigests::default()).hash(&mut h);
             }
             break;
@@ -1832,7 +1836,8 @@ fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
                 ids.insert(id.0);
             }
         });
-        for c in doc.features.iter().filter(|c| is_construction(c) && c.id != g.id && (ids.contains(&c.id) || names.contains(c.name.as_str()))) {
+        for c in doc.features.iter().filter(|c| c.kind.is_construction() && c.id != g.id && (ids.contains(&c.id) || names.contains(c.name.as_str())))
+        {
             if !seen.insert(c.id) {
                 continue;
             }
@@ -4034,12 +4039,30 @@ pub(crate) fn new_name(state: &mut ModelState, f: &Feature, k: usize) -> String 
     }
 }
 
-/// The k-th body of a body pattern: its stored name, else a copy of `source`. Once `body.rename`
-/// has stored this feature's names, a copy beyond them (the count was raised) is numbered after
-/// the highest stored `source (n)`, so it never takes a number freed by a rename (#372).
-/// Features without stored names keep the first free `source (n)`.
-fn pattern_copy_name(state: &ModelState, f: &Feature, k: usize, source: &str) -> String {
-    if f.body_names.get(k).is_some_and(|name| !name.trim().is_empty()) {
+/// Where in a body Pattern's `body_names` the name of copy `k` of source `s` is kept, for a
+/// pattern of `sources` bodies with `copies` copies each. The names are kept source by source,
+/// and the session keeps one name for every copy of a pattern of several bodies
+/// (`Session::pin_body_names`), so the stored names split evenly into the copies each source had
+/// when they were stored. When the count changes, a copy keeps the name stored for its own source
+/// and number, and a new copy has none (#12114). Names that don't split evenly (stored before
+/// every copy was named), and names of a design saved before then (`in_order`, see
+/// `Feature::pattern_names_in_order`), are read in the order the copies are made.
+fn pattern_name_slot(stored: usize, sources: usize, copies: usize, s: usize, k: usize, in_order: bool) -> Option<usize> {
+    if !in_order && sources > 1 && stored > 0 && stored.is_multiple_of(sources) {
+        let per = stored / sources;
+        return (k < per).then(|| s.saturating_mul(per).saturating_add(k));
+    }
+    s.checked_mul(copies)?.checked_add(k)
+}
+
+/// A copy of a body pattern at `slot` of its stored names: its stored name, else a copy of
+/// `source`. Once `body.rename` has stored this feature's names, a copy beyond them (the count
+/// was raised) is numbered after the highest stored `source (n)`, so it never takes a number
+/// freed by a rename (#372). Features without stored names keep the first free `source (n)`.
+fn pattern_copy_name(state: &ModelState, f: &Feature, slot: Option<usize>, source: &str) -> String {
+    if let Some(k) = slot
+        && f.body_names.get(k).is_some_and(|name| !name.trim().is_empty())
+    {
         return copy_body_name(state, f, k, source);
     }
     let base = if source.trim().is_empty() { "Body" } else { source.trim() };
@@ -4713,6 +4736,7 @@ fn apply_traced_with(
                             *mb = mb.remade(b);
                         }
                     }
+                    None if op == Operation::Cut && !more::tools_may_cover(&target.body, tools) => return Err(more::failed_cut(&target.name)),
                     None => remove.push(ti),
                 }
             }
@@ -7428,24 +7452,22 @@ fn feature_tools_with_constructor(
             if !(r > 1e-6) {
                 return Err(DocError::Invalid("pipe diameter must be positive".into()));
             }
+            let region = pipe_region(vals, r, wall)?;
+            // Its faces are named as a sweep's caps and a cylinder's wall are (#14897).
+            let tool = |body: Body| crate::lineage::pipe_tool(body, region.outer.segs.len());
             if let Some(along) = path_points(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
                 let pts = along.points();
                 let (Some(a), Some(b)) = (pts.first().copied(), pts.get(1).copied()) else { return Err(DocError::Invalid("empty path".into())) };
                 let t = (b - a).normalized().ok_or_else(|| DocError::Invalid("path direction".into()))?;
                 let plane = Plane::from_normal(a, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
-                return Ok(unnamed(vec![kernel::sweep_point_path_with(
-                    &plane,
-                    &pipe_region(vals, r, wall)?,
-                    &along,
-                    &kernel::SweepControl::default(),
-                )?]));
+                return Ok(vec![tool(kernel::sweep_point_path_with(&plane, &region, &along, &kernel::SweepControl::default())?)]);
             }
             let segs = path_segments(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?;
             let first = segs.first().ok_or_else(|| DocError::Invalid("empty path".into()))?;
             let start = first.start();
             let (t, _) = first.tangents().ok_or_else(|| DocError::Invalid("path direction".into()))?;
             let plane = Plane::from_normal(start, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
-            Ok(unnamed(vec![kernel::sweep(&plane, &pipe_region(vals, r, wall)?, &segs)?]))
+            Ok(vec![tool(kernel::sweep(&plane, &region, &segs)?)])
         }
         FeatureKind::Box { corner, length, width, height, centred, .. } => {
             let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
@@ -9844,8 +9866,7 @@ fn eval_feature(
             }
             // Bodies: each copy is a new body named after its source.
             let here = doc.component_transform(f.component);
-            let mut output = 0;
-            for n in bodies {
+            for (s, n) in bodies.iter().enumerate() {
                 let mb = st.body(n).cloned().ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
                 // A body of another component is held in that component's frame, the pattern's
                 // transforms in this feature's: each copy is moved as the pattern moves it in the
@@ -9865,7 +9886,8 @@ fn eval_feature(
                         None => *m,
                     };
                     let copy = moved_copy(&mb, kernel::transform_matrix(&mb.body, local)?, k + 1);
-                    let name = pattern_copy_name(st, f, output, &mb.name);
+                    let slot = pattern_name_slot(f.body_names.len(), bodies.len(), mats.len(), s, k, f.pattern_names_in_order);
+                    let name = pattern_copy_name(st, f, slot, &mb.name);
                     copy_sheet(st, &mb.name, &name, &local);
                     let mut body = ModelBody::traced_new(name, copy, f.id);
                     if owner.is_some() {
@@ -9874,7 +9896,6 @@ fn eval_feature(
                         body.transferred = true;
                     }
                     st.bodies.push(body);
-                    output += 1;
                 }
             }
             Ok(())

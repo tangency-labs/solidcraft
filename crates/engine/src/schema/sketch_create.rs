@@ -229,6 +229,77 @@ pub struct SplineReverseResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Add a point to a fit point spline, where the curve passes nearest to it, between its
+/// neighbours; or make it the spline's new first or last point with `end`. The curve still runs
+/// through the new point and all its old ones, and the constraints on those stay. Refused for a
+/// control point spline, and for an `end` joined to other geometry.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = insert_point_required)]
+pub struct SplineInsertPointParams {
+    /// The spline's curve id.
+    #[serde(deserialize_with = "spline_id")]
+    pub curve: String,
+    // Optional in the type and required in the schema (`insert_point_required`): the handler's
+    // message for a missing `at` is the one it gives for a point it cannot read, so it is the one
+    // a caller should hear.
+    /// Where the curve is to run through the new point: `[x, y]` or `{x, y}` in mm. Without `end`,
+    /// the nearest place along the curve; with it, the new end's place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PointXY")]
+    pub at: Option<PointXY>,
+    /// `start` or `end`: `at` becomes the spline's new first or last point instead, and the curve
+    /// runs on to it.
+    #[serde(default, deserialize_with = "spline_end", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "spline_end_schema")]
+    pub end: Option<SplineEnd>,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+}
+
+/// `at` is required in the schema, though the type leaves it to the handler (#16085).
+fn insert_point_required(schema: &mut Schema) {
+    require(schema, "at");
+}
+
+/// Which end of the spline `at` becomes the new point of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplineEnd {
+    /// The new first point.
+    Start,
+    /// The new last point.
+    End,
+}
+
+/// `end` as the handler reads it: `null` is as left out, and anything that is not `start` or
+/// `end` is refused with its message.
+fn spline_end<'de, D: Deserializer<'de>>(d: D) -> Result<Option<SplineEnd>, D::Error> {
+    nullable(d, |v| match v.as_str() {
+        Some("start") => Ok(SplineEnd::Start),
+        Some("end") => Ok(SplineEnd::End),
+        _ => refuse("`end` must be start or end"),
+    })
+}
+
+fn spline_end_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"enum": ["start", "end"]})
+}
+
+/// What `sketch.spline.insert_point` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SplineInsertPointResult {
+    /// The new point's id.
+    pub point: String,
+    /// The spline's curve id (unchanged).
+    pub curve: String,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 // ---------------------------------------------------------------------------------------------
 // The creation commands of `cmd/sketch_create.rs` (#12550)
 

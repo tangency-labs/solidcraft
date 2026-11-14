@@ -9,7 +9,7 @@
 //! corner (`SM_FILERR_VERTEX_PROBLEM`, 1001); with `fillet_nx1_end_rib_global_merge` (WR-303) the
 //! end rib is deleted for the global merge, which cannot end a round lying along the
 //! continued edge, and `DoFilleting` leaves an open body (non-manifold, nothing removed),
-//! which `fillet_edges` refuses with `fillet_refuse_non_manifold_result`.
+//! which `fillet_edges` refuses: the plate was a solid and the result is none.
 //!
 //! With `fillet_round_ends_at_tangent_continuation` (WR-674) the round ends at its section
 //! through each vertex: the removed region is the round's section (1 - pi/4) r^2 about the

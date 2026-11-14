@@ -861,6 +861,27 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | assets/fonts/craft-ui-kr/OFL.txt | Adobe / Google Inc. (Noto CJK); SolidCraft header | Accompanying OFL for CraftUI-KR.otf | SIL OFL 1.1 |
 | `assets/locales/pending/names-from-file.json` | SolidCraft contributors | Original label for the names-from-file preference | MIT OR Apache-2.0 |
 | `assets/locales/pending/snap-points.json` | SolidCraft contributors | Original snap point labels and messages | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/constrain.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/locales/pending/dxf-zero-point.json | SolidCraft contributors | Original DXF export zero-point dialog strings and translations | MIT OR Apache-2.0 |
+| crates/doc/src/frame_sizes.rs | SolidCraft contributors | Standard steel section dimensions and areas (facts from published standards: BS 4-1:1993 taper flange channels, BS 4-1:2005 parallel flange channels, BS EN 10056-1 equal angles, BS EN 10210-2 hot-finished SHS, RHS and CHS), typed from the openly published tables at https://www.roymech.org/Useful_Tables/Sections/chan_dim.html and https://www.roymech.org/Useful_Tables/Sections/chanA_dimprop.html (taper flange channels) and https://www.steelforlifebluebook.co.uk (the other families); no CAD product's library used | MIT OR Apache-2.0 |
+| assets/locales/pending/frame-standard-sizes.json | SolidCraft contributors | Original frame standard-size labels and translations | MIT OR Apache-2.0 |
+| crates/io/src/native_cad/fixtures/bracket.FCStd | SolidCraft contributors | original test part (a padded sketch, a pocketed hole and filleted edges) saved by FreeCAD 26.3 from conda-forge run as an external program (`make_bracket_fcstd.py` beside it); no third-party geometry | MIT OR Apache-2.0 |
+| crates/io/src/native_cad/fixtures/knob.FCStd | SolidCraft contributors | original test part (a revolved sketch, a groove and a chamfer in a placed body) saved by FreeCAD 26.3 from conda-forge run as an external program (`make_knob_fcstd.py` beside it); no third-party geometry | MIT OR Apache-2.0 |
+| crates/io/src/native_cad/fixtures/plate.FCStd | SolidCraft contributors | original test part (a padded sketch with holes, a mirrored slot, polar and linear patterns, a binder and fillets) saved from FreeCAD 26.3's window (offscreen) from conda-forge run as an external program (`make_plate_fcstd.py` beside it); no third-party geometry | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/flat/panel_dock_bottom.svg | SolidCraft contributors | original flat panel menu icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/panel_dock_left.svg | SolidCraft contributors | original flat panel menu icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/panel_dock_right.svg | SolidCraft contributors | original flat panel menu icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/panel_float.svg | SolidCraft contributors | original flat panel menu icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/panel_popout.svg | SolidCraft contributors | original flat panel menu icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| `crates/craft-plugin-wasm/src/fixture.wat` | SolidCraft contributors | Original command-component test fixture adapted for an app-independent test host | MIT OR Apache-2.0 |
+| `crates/craft-plugin/wit/plugin.wit` | SolidCraft contributors; command-world proposal by SychPL | [PR #4980, revision 1054995](https://github.com/tangency-labs/solidcraft/pull/4980) (adapted command world; generic host additions by SolidCraft contributors) | MIT OR Apache-2.0 |
+| `crates/engine/src/plugin/fixture.wat` | SolidCraft contributors | Original command-component test fixture; encoded with wasm-tools | MIT OR Apache-2.0 |
+| `crates/ui-egui/src/plugin_fixture.wat` | SolidCraft contributors | Original no-op command-component test fixture; encoded with wasm-tools | MIT OR Apache-2.0 |
+| `assets/locales/pending/plugin-resource-limits.json` | SolidCraft contributors | Original plugin UI messages and translations | MIT OR Apache-2.0 |
+| `assets/locales/pending/plugin-runtime.json` | SolidCraft contributors | Original plugin UI messages and translations | MIT OR Apache-2.0 |
+| `assets/locales/pending/plugin-shared-host.json` | SolidCraft contributors | Original plugin UI messages and translations | MIT OR Apache-2.0 |
+| tests/step-regressions/cylinder_spline_rims.step | SolidCraft contributors | written entity by entity from formulas (a cylinder whose rims are splines of two half circles); import regression fixture | MIT OR Apache-2.0 |
+| tests/step-regressions/tiny_rounds_coarse_tolerance.step | SolidCraft contributors | written entity by entity from formulas (a 0.05 mm quarter round, corner ball and quarter torus in a file of 0.1 mm uncertainty); import regression fixture | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 

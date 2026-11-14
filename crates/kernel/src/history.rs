@@ -19,7 +19,7 @@ pub use solidcore_record::brep::history::{Change, EdgeOrigin, EdgeProv, FaceOrig
 
 use crate::body::{Body, FaceSource};
 use crate::{KernelError, Result};
-use solidcore_record::brep::{Brep, part::Part};
+use solidcore_record::brep::{Brep, Edge, part::Part};
 
 impl From<solidcore_record::brep::history::Failed> for KernelError {
     fn from(e: solidcore_record::brep::history::Failed) -> KernelError {
@@ -88,19 +88,18 @@ impl BodyHistory for History {
 /// The faces each edge separates, in the record's edge order: each face it bounds, once, in the
 /// order of the edge's uses.
 pub(crate) fn edge_faces(record: &Brep) -> Vec<Vec<usize>> {
-    record
-        .edges
-        .iter()
-        .map(|e| {
-            let mut faces: Vec<usize> = Vec::with_capacity(e.uses.len());
-            for u in &e.uses {
-                if !faces.contains(&(u.face as usize)) {
-                    faces.push(u.face as usize);
-                }
-            }
-            faces
-        })
-        .collect()
+    record.edges.iter().map(faces_of).collect()
+}
+
+/// The faces one edge separates: each face it bounds, once, in the order of its uses.
+pub(crate) fn faces_of(e: &Edge) -> Vec<usize> {
+    let mut faces: Vec<usize> = Vec::with_capacity(e.uses.len());
+    for u in &e.uses {
+        if !faces.contains(&(u.face as usize)) {
+            faces.push(u.face as usize);
+        }
+    }
+    faces
 }
 
 /// The history of a part cut from, or a compound joined of, records numbered one after another
