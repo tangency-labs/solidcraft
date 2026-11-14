@@ -13,12 +13,14 @@ use core::ops::{Add, Div, Mul, Sub};
 use std::collections::BTreeMap;
 
 use super::interval::Ivl;
-use super::series::{GnScalar, VSer};
+use super::series::{GnScalar, VSer, HERMITE};
 use crate::kernel::Kernel;
 use crate::surface::procedural_blend::count_area_sum;
 
-/// `SM_GN_TAY`: the order the series are truncated at.
-pub const TAY: usize = 4;
+/// `SM_GN_TAY`: the order the series are truncated at: the section's Hermite order
+/// ([`HERMITE`]; the fork's 4, with its cubic spans), whose derivative the certificate
+/// bounds.
+pub const TAY: usize = HERMITE;
 
 /// `SM_GN_AREA_N`: the composite Simpson rule's number of intervals.
 pub const AREA_N: i32 = 2048;

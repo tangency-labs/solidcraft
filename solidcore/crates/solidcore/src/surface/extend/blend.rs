@@ -41,11 +41,11 @@
 //! the stations at the end and at `s_new` solved, the span's Hermite rows
 //! ([`span_of_definition`], the construction's `NetForm::span`) certified against the
 //! definition ([`gn_certify_span`]'s bound), and joined after the source's net at
-//! multiplicity 3 (the construction's own joints), scaled to its weights. A side INSIDE the
+//! multiplicity 5 (the construction's own joints), scaled to its weights. A side INSIDE the
 //! spine (a piece of the blend cut across it) runs the definition's spans already there
 //! first: each span the extension crosses solved and certified the same way, the part of
-//! it past the side (or up to `s_new`) its Hermite rows' cubic Bezier cut there (blossoms),
-//! each part joined at multiplicity 3 and scaled to the row before it; then past the end
+//! it past the side (or up to `s_new`) its Hermite rows' quintic Bezier cut there (blossoms),
+//! each part joined at multiplicity 5 and scaled to the row before it; then past the end
 //! as above. The source's net is kept bit for bit; each part's first row is the row before
 //! it, so its bound against its span's rows is the joint's row difference
 //! ([`net_distance`]). The result's bound: `max(eps, the largest part's certificate +
@@ -62,11 +62,13 @@ use super::{keeps, op_err, solve, Continuity, Extended, Local, Made, H, OP, REL}
 use crate::blend::fillet_section::continuation::{
     growth, net_weights, section_degree, section_weight_range,
 };
+use crate::blend::fillet_section::form::{hermite_points_sided, HERMITE_DEGREE};
 use crate::blend::fillet_section::recertify::recertify_with_thumbweight;
 use crate::blend::fillet_section::recertify::{
     net_distance, precision_floor, span_of_definition, DefinitionSpan,
 };
-use crate::blend::fillet_section::section::{param, param_in, GN_THUMBWEIGHT_EQUAL_AREA};
+use crate::blend::fillet_section::section::{param, uv_jet, GN_THUMBWEIGHT_EQUAL_AREA};
+use crate::blend::fillet_section::series::HERMITE;
 use crate::blend::fillet_section::station::GnStation;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
@@ -242,10 +244,10 @@ fn along(
         .gw_nurb()
         .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
     let source = Local::of(source_net, side)?;
-    if source.p != 3 {
+    if source.p != HERMITE_DEGREE {
         return Err(SolidError::Unsupported {
             operation: OP,
-            reason: "a blend's net is cubic along its spine",
+            reason: "a blend's net is not of its Hermite spans' degree along its spine",
         });
     }
     let target = pb.bound();
@@ -397,29 +399,32 @@ struct Piece {
 }
 
 /// The knots after the source's joint for `pieces` from `end` by `e` in all: each part's
-/// end at multiplicity 3 (the construction's own joints), the last clamped (4), at exactly
-/// `end + e`.
+/// end at multiplicity [`HERMITE_DEGREE`] (the construction's own joints), the last
+/// clamped (one more), at exactly `end + e`.
 fn joints(end: f64, e: f64, pieces: &[Piece]) -> Vec<f64> {
     let mut knots = Vec::new();
     let mut at = end;
     let n = pieces.len();
     for (i, p) in pieces.iter().enumerate() {
         if i + 1 == n {
-            knots.extend([end + e; 4]);
+            knots.extend([end + e; HERMITE_DEGREE + 1]);
         } else {
             at += p.length;
-            knots.extend([at; 3]);
+            knots.extend([at; HERMITE_DEGREE]);
         }
     }
     knots
 }
 
-/// The cubic Bezier `p` over `[t0, t1]` of its parameter: its blossoms `B(t0^(3-i), t1^i)`.
-fn sub_bezier(p: [H; 4], t0: f64, t1: f64) -> [H; 4] {
-    let blossom = |u: [f64; 3]| -> H {
+/// The Bezier `p` of degree [`HERMITE_DEGREE`] over `[t0, t1]` of its parameter: its
+/// blossoms `B(t0^(d-i), t1^i)`.
+fn sub_bezier(p: [H; HERMITE], t0: f64, t1: f64) -> [H; HERMITE] {
+    let blossom = |i1: usize| -> H {
         let mut q = p;
-        for (level, &t) in u.iter().enumerate() {
-            for i in 0..3 - level {
+        for level in 0..HERMITE_DEGREE {
+            // the first `HERMITE_DEGREE - i1` arguments t0, the rest t1
+            let t = if level < HERMITE_DEGREE - i1 { t0 } else { t1 };
+            for i in 0..HERMITE_DEGREE - level {
                 if let (Some(&a), Some(&b)) = (q.get(i), q.get(i + 1)) {
                     if let Some(x) = q.get_mut(i) {
                         *x = super::lin(1.0 - t, a, t, b);
@@ -429,12 +434,7 @@ fn sub_bezier(p: [H; 4], t0: f64, t1: f64) -> [H; 4] {
         }
         q.first().copied().unwrap_or([f64::NAN; 4])
     };
-    [
-        blossom([t0, t0, t0]),
-        blossom([t0, t0, t1]),
-        blossom([t0, t1, t1]),
-        blossom([t1, t1, t1]),
-    ]
+    core::array::from_fn(blossom)
 }
 
 /// The extension's rows past the source's joint for `pieces` (outward), each part's rows
@@ -463,8 +463,8 @@ fn pieces_rows(
             ));
         }
         // the span's part at across index j, outward from the joint
-        let part = |j: usize| -> Result<[H; 4]> {
-            let mut c = [[0.0; 4]; 4];
+        let part = |j: usize| -> Result<[H; HERMITE]> {
+            let mut c = [[0.0; 4]; HERMITE];
             for (i, ci) in c.iter_mut().enumerate() {
                 let at = i
                     .checked_mul(ld)
@@ -608,46 +608,40 @@ fn continued_definition(pb: &ProceduralBlend, s_new: f64, up: bool) -> Result<Pr
 }
 
 /// The seeds as the feet's Hermite curves on the stations (as the construction makes
-/// them): each seed's new span's three points from the end span's stations `[lo, hi]` (in
-/// s), its own points before kept.
+/// them): each seed's new span's points past its joint from the end span's stations
+/// `[lo, hi]` (in s), its own points before kept (a seed of a lower degree raised to the
+/// spans' first).
 fn hermite_seeds(next: &mut ProceduralBlend, stations: &[GnStation], up: bool) -> Result<()> {
     let (Some(lo), Some(hi)) = (stations.first(), stations.get(1)) else {
         return Err(op_err());
     };
-    let h = hi.s - lo.s;
     for (f, sd) in next.def.seeds.iter_mut().enumerate() {
-        let v = |st: &GnStation| Vec3::new(param(st, 2 * f, 0, 0), param(st, 2 * f + 1, 0, 0), 0.0);
-        let d = |st: &GnStation| Vec3::new(param(st, 2 * f, 1, 0), param(st, 2 * f + 1, 1, 0), 0.0);
-        let d_in = |st: &GnStation| {
-            Vec3::new(
-                param_in(st, 2 * f, 1, 0),
-                param_in(st, 2 * f + 1, 1, 0),
-                0.0,
-            )
-        };
+        // the span's Bezier points, its first the seed's own joint point (kept)
+        let span = hermite_points_sided(&[lo.s, hi.s], &[uv_jet(lo, f), uv_jet(hi, f)]);
+        // a seed of a lower degree (one the definition was given, not the construction's)
+        // raised to the spans' degree first: the same curve, its joints Bezier joints still
+        let p = sd.degree()?;
+        if p > HERMITE_DEGREE {
+            return Err(SolidError::Unsupported {
+                operation: OP,
+                reason: "a seed's degree is past the Hermite spans'",
+            });
+        }
+        if p < HERMITE_DEGREE {
+            sd.degree_elevate(HERMITE_DEGREE)?;
+        }
         let mut cps: Vec<CPoint> = sd.control_points()?.to_vec();
         let len = cps.len();
-        // the span's inner points and its new end: the seed's own joint point kept
-        let new = if up {
-            [
-                v(lo) + d(lo) * (h / 3.0),
-                v(hi) - d_in(hi) * (h / 3.0),
-                v(hi),
-            ]
+        // the span's inner points and its new end
+        let (first, new) = if up {
+            (
+                len.checked_sub(HERMITE_DEGREE).ok_or_else(op_err)?,
+                span.get(1..).ok_or_else(op_err)?,
+            )
         } else {
-            [
-                v(lo),
-                v(lo) + d(lo) * (h / 3.0),
-                v(hi) - d_in(hi) * (h / 3.0),
-            ]
+            (0, span.get(..HERMITE_DEGREE).ok_or_else(op_err)?)
         };
-        let first = if up {
-            len.checked_sub(3).ok_or_else(op_err)?
-        } else {
-            0
-        };
-        let at = [first, first + 1, first + 2];
-        for (i, x) in at.into_iter().zip(new) {
+        for (i, x) in (first..first + HERMITE_DEGREE).zip(new) {
             let c = cps.get_mut(i).ok_or_else(op_err)?;
             *c = CPoint::new(x.x, x.y, c.z, c.w);
         }

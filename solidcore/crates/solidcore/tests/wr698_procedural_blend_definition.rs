@@ -17,6 +17,8 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
 use solidcore::blend::fillet_section::section::{GnSectionFsg, GN_THUMBWEIGHT_EQUAL_AREA};
+use solidcore::blend::fillet_section::series::MAX_S;
+use solidcore::blend::fillet_section::tay::TAY;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
 use solidcore::math::Point2;
@@ -405,10 +407,12 @@ fn hostile_records_are_refused() {
 fn partials_past_the_series_are_refused() {
     let k = kernel();
     let pb = blend(&k, false, 4, 0.0, false);
-    assert!(pb.evaluate_definition(&k, 0.5, 0.5, 8, 0).is_err());
+    // (the series hold MAX_S powers of sigma, the thumbweight's TAY: 7 and 4 with the fork's
+    // cubic spans, 9 and 6 with quintic ones)
+    assert!(pb.evaluate_definition(&k, 0.5, 0.5, MAX_S + 1, 0).is_err());
     assert!(pb.evaluate_definition(&k, 0.5, 0.5, 0, 65).is_err());
     let ea = blend(&k, false, 2, GN_THUMBWEIGHT_EQUAL_AREA, false);
-    assert!(ea.evaluate_definition(&k, 0.5, 0.5, 5, 0).is_err());
+    assert!(ea.evaluate_definition(&k, 0.5, 0.5, TAY + 1, 0).is_err());
     assert!(ea.evaluate_definition(&k, 0.5, 0.5, 4, 3).is_ok());
 }
 

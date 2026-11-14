@@ -1,18 +1,19 @@
 //! The G^n section's certificate: a proved bound on how far a Hermite span between two
 //! stations is from the section of the true jets, from rounded interval arithmetic (the
 //! feet over the span enclosed by Krawczyk's operator, their Taylor coefficients order by
-//! order, and the Hermite remainder `h^4 / 384 max |c''''|`).
+//! order, and the Hermite remainder `(h / 2)^m / m! max |c^(m)|`, m = [`HERMITE`] = 6).
 //!
 //! For the rational section the blend's distance from its definition (the section of the
 //! true jets `c_ik(s)` at every s) is at most `max_i sum_k |c_ik - C_ik|`, `C_ik` the jets'
-//! Hermite curves: f is in `[0, 1]` and `|u - 1| <= 1` in `T_i`. On a span of length h a
-//! cubic Hermite interpolant of a function's values and derivatives at both ends is off it
-//! by at most `h^4 / 384` times the largest fourth derivative. That bound comes from
+//! Hermite curves: f is in `[0, 1]` and `|u - 1| <= 1` in `T_i`. On a span of length h the
+//! quintic Hermite interpolant of a function's values and first and second derivatives at
+//! both ends is off it by `f^(6)(xi) / 6! (s - a)^3 (s - b)^3`, so by at most
+//! `(h / 2)^6 / 6! = h^6 / 46080` times the largest sixth derivative. That bound comes from
 //! rounded interval arithmetic: the feet over the span are enclosed by Krawczyk's operator,
 //! which proves a unique root of G in its box for every s in the span when it maps the box
 //! into its interior and the preconditioned Jacobian's norm is below one; the feet's Taylor
-//! coefficients, to order 4 in s and n in tau, are then enclosed order by order through the
-//! same preconditioned system.
+//! coefficients, to order `HERMITE + TAYLOR` in s and n in tau, are then enclosed order by
+//! order through the same preconditioned system.
 //!
 //! Fork: `source/SMLib/src/SmFilletSection.cpp` (tangency-labs/smlib@11ea2d9), the
 //! certificate (lines 825-1430); not in the pinned upstream.
@@ -41,6 +42,16 @@
 //! | `enclose_by_cells`, `enclose_over_cells`, `FaceCell` (private) | (not the fork's: the feet cell by cell across a knot line below `C^2`, #14284 follow-up) |
 //!
 //! Deviations:
+//! - **Quintic spans (not the fork's, whose spans are cubic: `h^4 / 384 max |c''''|`).** A
+//!   span interpolates its stations' values and first and second s-derivatives
+//!   ([`super::form::hermite_points_sided`]), so its remainder takes the sixth
+//!   s-derivatives ([`HERMITE`]), and at the same bound a span is several times as long
+//!   (its remainder falls as `h^6`, not `h^4`). Every term the fork takes of the fourth
+//!   derivative is taken here of the `HERMITE`-th, the same way (the jets', the uv curves',
+//!   the varying rows' and the arc's, each in its Taylor form at a piece's middle with the
+//!   remainder over the piece, and each least value at the middle); the names keep the
+//!   fork's (`gn_fourth_over`, [`Fourth`], `m4`, `uv4`, the `24 |H''''|` terms are
+//!   `HERMITE! |H^(HERMITE)|`).
 //! - **Out-params.** Every function returns its results. `sm_GnEnclose`'s `rbProved` FALSE
 //!   is `Ok(None)`; its optional `pX` and `pDS` are always returned (computing them changes
 //!   nothing else). `sm_CurveDerivsOver`'s `lPiece = -1` is `None`.
@@ -151,7 +162,7 @@
 use super::definition_box::{definition_partials_over_box, GnDefFace, GnDefs};
 use super::form::{binom, gn_form_normalized, GnSectionFormT};
 use super::interval::{cmax, cmin, round_down, round_up, Ivl};
-use super::series::{v_hull, GnScalar, Ser, Trunc, VSer, MAX_E, MAX_S, TAYLOR, V3, VZ};
+use super::series::{v_hull, GnScalar, Ser, Trunc, VSer, HERMITE, MAX_E, MAX_S, TAYLOR, V3, VZ};
 use super::station::{
     ders_basis, gn_evaluate, gn_evaluate_vn, gn_jacobian, gn_solve_station_counted, gn_top_jets,
     knot, smax, solve4, span, GnStation, GnSystem, Nurbs, Partials,
@@ -2212,22 +2223,47 @@ pub type Fourth = (
     [f64; 2],
 );
 
-/// The Taylor-form bound `sum_{j<M} (4+j)! |c[4+j](m)| (h/2)^j / j!` plus the remainder
-/// `(4+M)! |c[4+M](box)| (h/2)^M / M!`, `M = SM_GN_TAYLOR`, of one coefficient row.
+/// `HERMITE!`: the factor from a series' coefficient of order `HERMITE` to the derivative.
+const HERMITE_FACT: f64 = {
+    let mut f = 1.0_f64;
+    let mut i = 2;
+    while i <= HERMITE {
+        f *= i as f64;
+        i += 1;
+    }
+    f
+};
+
+/// The Hermite remainder's factor on a span of length h, `(h / 2)^HERMITE / HERMITE!`:
+/// the span's interpolant is off the function by at most this times its largest
+/// `HERMITE`-th derivative over the span. Rounded as the bounds that take it are (each is
+/// rounded up by `1e-12` relative at the end).
+fn hermite_factor(h: f64) -> f64 {
+    let half = 0.5 * h;
+    let mut p = 1.0_f64;
+    for _ in 0..HERMITE {
+        p *= half;
+    }
+    p / HERMITE_FACT
+}
+
+/// The Taylor-form bound `sum_{j<M} (m+j)! |c[m+j](mid)| (h/2)^j / j!` plus the remainder
+/// `(m+M)! |c[m+M](box)| (h/2)^M / M!`, `m = HERMITE`, `M = SM_GN_TAYLOR`, of one
+/// coefficient row: the largest `|c^(m)|` over a piece of length h.
 fn taylor_bound(mid: impl Fn(usize) -> f64, rem: f64, h: f64) -> f64 {
     let mut m = 0.0_f64;
-    let mut fact = 24.0_f64;
+    let mut fact = HERMITE_FACT;
     let mut pow = 1.0_f64;
     let mut jf = 1.0_f64;
     for j in 0..TAYLOR {
         if j > 0 {
-            fact *= (4 + j) as f64;
+            fact *= (HERMITE + j) as f64;
             pow *= 0.5 * h;
             jf *= j as f64;
         }
-        m += fact * mid(4 + j) * pow / jf;
+        m += fact * mid(HERMITE + j) * pow / jf;
     }
-    fact *= (4 + TAYLOR) as f64;
+    fact *= (HERMITE + TAYLOR) as f64;
     pow *= 0.5 * h;
     jf *= TAYLOR as f64;
     m += fact * rem * pow / jf;
@@ -2371,7 +2407,7 @@ fn piece_enclosures(
         r,
         side,
         n,
-        4 + TAYLOR + extra,
+        HERMITE + TAYLOR + extra,
         law,
         defs.as_deref_mut(),
     )?;
@@ -2415,7 +2451,7 @@ fn piece_enclosures(
         r,
         side,
         n,
-        4 + TAYLOR - 1 + extra,
+        HERMITE + TAYLOR - 1 + extra,
         law,
         defs,
     )?;
@@ -2453,7 +2489,7 @@ fn fourth_of(
             let (Some(x4), Some(x5)) = (e4.x.get(c), e5.x.get(c)) else {
                 return (UNPROVED_FOURTH, Some(series));
             };
-            let m = taylor_bound(|i| x4.at(i, 0).mag(), x5.at(4 + TAYLOR, 0).mag(), h);
+            let m = taylor_bound(|i| x4.at(i, 0).mag(), x5.at(HERMITE + TAYLOR, 0).mag(), h);
             sum += m * dsc;
             dmax = cmax(dmax, m);
         }
@@ -2473,8 +2509,8 @@ fn fourth_of(
             let Some(x4) = e4.x.get(c) else {
                 return (UNPROVED_FOURTH, Some(series));
             };
-            sum += 24.0 * x4.at(4, 0).mig() * dsc;
-            dlo = cmax(dlo, 24.0 * x4.at(4, 0).mig());
+            sum += HERMITE_FACT * x4.at(HERMITE, 0).mig() * dsc;
+            dlo = cmax(dlo, HERMITE_FACT * x4.at(HERMITE, 0).mig());
         }
         *uvl = sum;
         *uvk = dlo * dsl.iter().sum::<f64>();
@@ -2485,7 +2521,7 @@ fn fourth_of(
             for (s4, s5) in f4.a.iter().zip(&f5.a) {
                 // c^(4+j)(m) = (4+j)! F[4+j]: the Taylor polynomial's bound over
                 // |s - m| <= h/2, and the remainder
-                let m = taylor_bound(|i| s4.at(i, kk).mag(), s5.at(4 + TAYLOR, kk).mag(), h);
+                let m = taylor_bound(|i| s4.at(i, kk).mag(), s5.at(HERMITE + TAYLOR, kk).mag(), h);
                 sq += m * m;
             }
             *m4fk = crate::geom::vector3d::sqrt(sq);
@@ -2495,7 +2531,7 @@ fn fourth_of(
         for (kk, m4lfk) in m4lf.iter_mut().enumerate().take(n + 1) {
             let mut sq = 0.0_f64;
             for s4 in &f4.a {
-                let m = 24.0 * s4.at(4, kk).mig();
+                let m = HERMITE_FACT * s4.at(HERMITE, kk).mig();
                 sq += m * m;
             }
             *m4lfk = crate::geom::vector3d::sqrt(sq);
@@ -2591,7 +2627,7 @@ pub fn gn_row_terms_over(
     o: [f64; 3],
     rt: &mut GnRowTerms,
 ) -> bool {
-    const K: usize = 4 + TAYLOR;
+    const K: usize = HERMITE + TAYLOR;
     let n = vary.n;
     let [f0, f1] = f;
     let [fm0, fm1] = fm;
@@ -2696,8 +2732,8 @@ pub fn gn_row_terms_over(
             }
             sq += s4.mag() * s4.mag();
         }
-        let dx = 24.0 * crate::geom::vector3d::sqrt(sq);
-        let dy = 24.0 * wj.at(TAY).mag();
+        let dx = HERMITE_FACT * crate::geom::vector3d::sqrt(sq);
+        let dy = HERMITE_FACT * wj.at(TAY).mag();
         let dwlo = wj.at(0).lo;
         if !(dx.is_finite() && dy.is_finite() && dwlo > 0.0) {
             return false;
@@ -2928,8 +2964,8 @@ fn arc_terms_of<S: OverPiece>(
             let m = hq.at(TAY).over_piece().mag();
             sq += m * m;
         }
-        *tx = 24.0 * crate::geom::vector3d::sqrt(sq);
-        *ty = 24.0 * wj.at(TAY).over_piece().mag();
+        *tx = HERMITE_FACT * crate::geom::vector3d::sqrt(sq);
+        *ty = HERMITE_FACT * wj.at(TAY).over_piece().mag();
         *tw = wj.at(0).over_piece().lo;
     }
     t
@@ -2969,7 +3005,7 @@ pub fn centred_tm(mid: &[Ivl], top: Ivl, kk: usize, delta: f64) -> Tay<Tm> {
 }
 
 /// The order of the rails' and the centre's series over a piece (`K = 4 + SM_GN_TAYLOR`).
-const ARC_K: usize = 4 + TAYLOR;
+const ARC_K: usize = HERMITE + TAYLOR;
 
 /// A piece's series for the arc: the rails', the centre's, and (a varying ball) the centre's
 /// s-derivative.
@@ -3126,8 +3162,8 @@ fn arc_least_at(ps: &PieceSeries, o: [f64; 3], touch: bool) -> Option<[[f64; 3];
             sq += m * m;
         }
         if let (Some(x), Some(y), Some(ww)) = (xl.get_mut(j), yl.get_mut(j), wh.get_mut(j)) {
-            *x = 24.0 * crate::geom::vector3d::sqrt(sq);
-            *y = 24.0 * wj.at(TAY).mig();
+            *x = HERMITE_FACT * crate::geom::vector3d::sqrt(sq);
+            *y = HERMITE_FACT * wj.at(TAY).mig();
             *ww = wj.at(0).hi;
         }
     }
@@ -3604,7 +3640,7 @@ fn tight_rows(
 /// the terms `m4` and `uv`: the varying rows' and the arc's terms only raise the bound.
 fn jets_uv_bound(ctx: &LevelCtx, m4: &[[f64; MAX_E + 1]; 2], uv: &[f64; 2]) -> f64 {
     let h = ctx.h;
-    let k4 = h * h * h * h / 384.0;
+    let k4 = hermite_factor(h);
     let mut bound = 0.0_f64;
     for (m4f, &uvf) in m4.iter().zip(uv) {
         let mut sum = 0.0_f64;
@@ -3686,7 +3722,7 @@ fn gate(acc: &LevelAcc, ctx: &LevelCtx, lb: f64) -> f64 {
 fn piece_least(p: &CertifiedPiece, sc: &SpanCtx<'_, '_, '_>) -> f64 {
     let ctx = sc.level;
     let h = ctx.h;
-    let k4 = h * h * h * h / 384.0;
+    let k4 = hermite_factor(h);
     // the least values from the middle's point enclosure (the fourth terms' least parts)
     let from_e4 = p.inputs.as_deref().map(|inp| {
         let [s0, s1] = p.s;
@@ -4098,15 +4134,12 @@ fn close_level(
         for (m4f, &uvf) in m4.iter().zip(uv) {
             let mut sum = 0.0_f64;
             for &m4fk in m4f.iter().take(l_jets + 1) {
-                sum += h * h * h * h / 384.0 * m4fk;
+                sum += hermite_factor(h) * m4fk;
             }
             da = cmax(da, sum);
             bound = cmax(
                 bound,
-                cmax(
-                    if rows_vary { 0.0 } else { sum },
-                    h * h * h * h / 384.0 * uvf,
-                ),
+                cmax(if rows_vary { 0.0 } else { sum }, hermite_factor(h) * uvf),
             );
         }
         // the arc: no fixed section, every row's remainder (the varying rows' bound with
@@ -4115,7 +4148,7 @@ fn close_level(
             da = 0.0;
         }
         if rows_vary {
-            let kh = h * h * h * h / 384.0;
+            let kh = hermite_factor(h);
             for (j, wj) in bar.w.iter().enumerate() {
                 let (Some(&lj), Some(&yj), Some(&xj)) =
                     (rows.w_lo.get(j), rows.y.get(j), rows.x.get(j))
@@ -4186,7 +4219,7 @@ fn close_level(
     // target, it is each parameter's own (#2690), the form the certified bound takes: the
     // fork's is not under that bound, and stopped a re-certificate a level short of the
     // bound its construction proved on the span's halves (#15010)
-    let k4 = h * h * h * h / 384.0;
+    let k4 = hermite_factor(h);
     let uv_lo = match ctx.halving {
         Halving::Steers => &acc.uv4_lo_fork,
         Halving::Ignored => &acc.uv4_lo,
@@ -4212,14 +4245,15 @@ fn close_level(
 }
 
 /// `sm_GnCertifySpan`: the certified bound on the Hermite span between two stations, or
-/// infinity where the span is not proved. The Hermite remainder is `h^4 / 384` times the
-/// jets' largest fourth s-derivative over the span, bounded on its pieces
+/// infinity where the span is not proved. The Hermite remainder is `(h / 2)^m / m!`
+/// ([`hermite_factor`], `m = HERMITE`) times the jets' largest m-th s-derivative over the
+/// span, bounded on its pieces
 /// ([`gn_fourth_over`] on each): the span cut in `2^L` equal pieces, L raised (to 6 at
 /// most) until every piece is proved and, over the target, while that halves the bound, so
 /// that a long span's bound follows its derivatives, not the width of one enclosure over
 /// it. The feet's uv curves are Hermite interpolants of the same stations, and the face at
 /// a uv curve's point is off the face's true foot by at most `|S_u| |du| + |S_v| |dv|`,
-/// each uv error `h^4 / 384 |x''''|` of its own parameter: that bound counts too (an
+/// each uv error `(h / 2)^m / m! |x^(m)|` of its own parameter: that bound counts too (an
 /// edge's curve against its face).
 ///
 /// Every level's bound is at least the same sum with each term's least value at the
@@ -4315,7 +4349,7 @@ pub fn gn_certify_span_reusing(
 ) -> Result<f64> {
     crate::profile::profile_scope!(k, "blend::certificate::gn_certify_span");
     // the series' orders are checked once (the fork leaves them to its callers)
-    Trunc::new(4 + TAYLOR, n)?;
+    Trunc::new(HERMITE + TAYLOR, n)?;
     let mut bound_out = f64::INFINITY;
     let h = b.s - a.s;
     let mut last = f64::INFINITY;
@@ -4378,7 +4412,7 @@ pub fn gn_certify_span_reusing(
         r,
         side,
         n: l_jets,
-        order: 4 + TAYLOR + extra,
+        order: HERMITE + TAYLOR + extra,
         law,
         rows_vary,
         on: tm_faces,
@@ -4743,7 +4777,7 @@ mod tests {
 
     /// Two planes at a square corner, the ball of radius r on the edge along y (the
     /// station test's closed form): the feet (tau r, L s, 0) and (0, L s, tau r) are linear
-    /// in s and tau, so every fourth s-derivative is 0 and the span's bound is 0 to the
+    /// in s and tau, so every s-derivative of order HERMITE is 0 and the span's bound is 0 to the
     /// enclosures' rounding. Checked against that closed form: the enclosed series hold
     /// the exact coefficients (`du1/deps = r`, `dv1/ds = L`, the box holds the feet over
     /// the span), every `m4`, `uv4` is below 1e-9, and the certified bound is in
@@ -4775,7 +4809,7 @@ mod tests {
             rr,
             side,
             n,
-            4 + TAYLOR,
+            HERMITE + TAYLOR,
             None,
             None,
         )
@@ -4843,16 +4877,16 @@ mod tests {
     /// A cylinder of radius R about z standing on the plane z = 0, the ball of radius r
     /// outside it: the centre line L(s) is the circle of radius R + r at height r (a
     /// rational quadratic arc), and the feet are `F1 = (L_xy (R + tau r) / (R + r), 0)` on
-    /// the plane and `F2 = (L_xy R / (R + r), tau r)` on the cylinder. So the jets' fourth
-    /// s-derivatives are, exactly, `|c10''''| = |L''''|`, `|c11''''| = r / (R + r) |L''''|`,
-    /// `|c20''''| = R / (R + r) |L''''|` and 0 for the rest, and the plane's uv curve is
-    /// `L_xy` (`uv4 >= |L_x''''| + |L_y''''|`, the plane's partials of length 1). Checked
+    /// the plane and `F2 = (L_xy R / (R + r), tau r)` on the cylinder. So the jets' s-derivatives
+    /// of every order m are, exactly, `|c10^(m)| = |L^(m)|`, `|c11^(m)| = r / (R + r) |L^(m)|`,
+    /// `|c20^(m)| = R / (R + r) |L^(m)|` and 0 for the rest, and the plane's uv curve is
+    /// `L_xy` (`uv4 >= |L_x^(m)| + |L_y^(m)|`, m = HERMITE, the plane's partials of length 1). Checked
     /// against that closed form, with
-    /// L'''' from the leader's own evaluator: at the span's middle (one point, a tight
-    /// enclosure) `4! c[4][k]` of every jet and of the plane's (u, v) holds the closed
+    /// `L^(m)` from the leader's own evaluator: at the span's middle (one point, a tight
+    /// enclosure) `m! c[m][k]` of every jet and of the plane's (u, v) holds the closed
     /// form's value; over the span every `m4`, `uv4` is finite and at least the closed
     /// form's maximum (sampled at 201 points); the certified bound is finite, below the
-    /// target, at least `h^4 / 384` times the closed-form jets' sum, and level 0's (the
+    /// target, at least `(h / 2)^m / m!` times the closed-form jets' sum, and level 0's (the
     /// pieces' maximum). The span's bounds are sound but loose (`m4[0][0]` about 36 times
     /// the closed form at h = 0.02: the series enclosed over an interval of s widen order
     /// by order, and the Taylor form's remainder carries that). A span five times as long
@@ -4914,7 +4948,7 @@ mod tests {
         let side_c = if nrm.dot(out) > 0.0 { 1.0 } else { -1.0 };
         let (rr, side) = ([r, r], [1.0, side_c]);
         let n = 2;
-        let order = 4 + TAYLOR;
+        let order = HERMITE + TAYLOR;
         let solve = |s: f64, tr: Trunc| {
             let l = lpt(s);
             let (u, v) = nearest_uv(&nc, foot_c(s));
@@ -5036,12 +5070,19 @@ mod tests {
         assert!((fa - foot_c(sa)).length() < 1e-9);
         assert!((a.x[0].c[0][0] - lpt(sa).x).abs() < 1e-9);
 
-        // L'''' over the span, sampled
+        // L^(HERMITE) over the span, sampled
         let (mut l4, mut l4x, mut l4y) = (0.0_f64, 0.0_f64, 0.0_f64);
         for i in 0..=200 {
             let s = sa + (sb - sa) * f64::from(i) / 200.0;
-            let d = leader.evaluate(s, 4, true, false).unwrap();
-            let d4 = d[4];
+            let d = rational_derivs(&leader, s, HERMITE);
+            // (the evaluator's own, to its limit)
+            for (x, y) in d.iter().zip(leader.evaluate(s, 4, true, false).unwrap()) {
+                assert!(
+                    (*x - y).length() <= 1e-9 * (1.0 + y.length()),
+                    "{x:?} {y:?}"
+                );
+            }
+            let d4 = d[HERMITE];
             assert!(d4.z.abs() < 1e-9);
             l4 = l4.max(Vec3::new(d4.x, d4.y, 0.0).length());
             l4x = l4x.max(d4.x.abs());
@@ -5049,8 +5090,8 @@ mod tests {
         }
         assert!(l4 > 1.0, "{l4}");
         let n = 2;
-        // at the span's middle the jets' fourth derivatives are enclosed on one point: they
-        // hold the closed form's, `(4! c[4][k])`
+        // at the span's middle the jets' HERMITE-th derivatives are enclosed on one point:
+        // they hold the closed form's, `(HERMITE! c[HERMITE][k])`
         let sm = 0.5 * (sa + sb);
         let ms = st(sm);
         let em = gn_enclose(
@@ -5062,27 +5103,29 @@ mod tests {
             rr,
             side,
             n,
-            4 + TAYLOR - 1,
+            HERMITE + TAYLOR - 1,
             None,
             None,
         )
         .unwrap()
         .expect("proved at a point");
-        let dm = leader.evaluate(sm, 4, true, false).unwrap()[4];
+        let dm = rational_derivs(&leader, sm, HERMITE)[HERMITE];
         let holds = |i: Ivl, x: f64| {
-            let j = Ivl::from(24.0) * i;
+            let j = Ivl::from(HERMITE_FACT) * i;
             j.lo - 1e-9 <= x && x <= j.hi + 1e-9 && j.hi - j.lo < 1e-2
         };
         let (qp, qc) = (r / (big_r + r), big_r / (big_r + r));
         for (c, l) in [(0, dm.x), (1, dm.y), (2, 0.0)] {
-            assert!(holds(em.f[0].a[c].c[4][0], l), "c10 {c}");
-            assert!(holds(em.f[0].a[c].c[4][1], qp * l), "c11 {c}");
-            assert!(holds(em.f[1].a[c].c[4][0], qc * l), "c20 {c}");
-            assert!(holds(em.f[1].a[c].c[4][1], 0.0), "c21 {c}");
-            assert!(holds(em.f[0].a[c].c[4][2], 0.0) && holds(em.f[1].a[c].c[4][2], 0.0));
+            assert!(holds(em.f[0].a[c].c[HERMITE][0], l), "c10 {c}");
+            assert!(holds(em.f[0].a[c].c[HERMITE][1], qp * l), "c11 {c}");
+            assert!(holds(em.f[1].a[c].c[HERMITE][0], qc * l), "c20 {c}");
+            assert!(holds(em.f[1].a[c].c[HERMITE][1], 0.0), "c21 {c}");
+            assert!(
+                holds(em.f[0].a[c].c[HERMITE][2], 0.0) && holds(em.f[1].a[c].c[HERMITE][2], 0.0)
+            );
         }
         // the plane's (u, v) is the foot's (x, y)
-        assert!(holds(em.x[0].c[4][0], dm.x) && holds(em.x[1].c[4][0], dm.y));
+        assert!(holds(em.x[0].c[HERMITE][0], dm.x) && holds(em.x[1].c[HERMITE][0], dm.y));
         let (m4, uv4, ..) =
             gn_fourth_over(&k, [&np, &nc], &ln, faces, &leader, &a, &b, rr, side, n).unwrap();
         let want = [
@@ -5118,14 +5161,14 @@ mod tests {
             None,
         )
         .unwrap();
-        let jets = h * h * h * h / 384.0 * (want[0][0] + want[0][1]);
+        let jets = hermite_factor(h) * (want[0][0] + want[0][1]);
         assert!(bound.is_finite() && bound < target, "{bound}");
         assert!(
-            bound >= jets && bound >= h * h * h * h / 384.0 * wuv,
+            bound >= jets && bound >= hermite_factor(h) * wuv,
             "{bound} {jets}"
         );
         // below the target at level 0: the bound is that level's, the pieces' maximum
-        let lvl0 = h * h * h * h / 384.0
+        let lvl0 = hermite_factor(h)
             * (m4[0][0] + m4[0][1] + m4[0][2])
                 .max(m4[1][0] + m4[1][1] + m4[1][2])
                 .max(uv4[0])
@@ -5137,10 +5180,8 @@ mod tests {
         let (lb, hl) = (st(0.5), 0.1);
         let mut l4l = 0.0_f64;
         for i in 0..=500 {
-            let d = leader
-                .evaluate(sa + hl * f64::from(i) / 500.0, 4, true, false)
-                .unwrap();
-            l4l = l4l.max(Vec3::new(d[4].x, d[4].y, 0.0).length());
+            let d = rational_derivs(&leader, sa + hl * f64::from(i) / 500.0, HERMITE);
+            l4l = l4l.max(Vec3::new(d[HERMITE].x, d[HERMITE].y, 0.0).length());
         }
         let one = gn_enclose(
             &k,
@@ -5151,7 +5192,7 @@ mod tests {
             rr,
             side,
             n,
-            4 + TAYLOR,
+            HERMITE + TAYLOR,
             None,
             None,
         )
@@ -5174,11 +5215,148 @@ mod tests {
             None,
         )
         .unwrap();
-        let jl = hl * hl * hl * hl / 384.0 * (1.0 + r / (big_r + r)) * l4l;
+        let jl = hermite_factor(hl) * (1.0 + r / (big_r + r)) * l4l;
         assert!(
             long.is_finite() && long < target && long >= jl,
             "{long} {jl}"
         );
+    }
+
+    /// A curve's derivatives `0..=m` at s from the left, past the curve evaluator's own
+    /// limit: a rational curve's from its homogeneous numerator A and weight W (polynomial,
+    /// their derivatives past the degree zero) by Leibniz's rule,
+    /// `C^(k) = (A^(k) - sum_{i=1..k} C(k, i) W^(i) C^(k-i)) / W`.
+    fn rational_derivs(c: &BSplineCurve, s: f64, m: usize) -> Vec<Vec3> {
+        let p = c.degree().unwrap();
+        let (knots, mult) = c.knots(None).unwrap();
+        let cps = c.control_points().unwrap();
+        let poly = |pts: Vec<Vec3>| {
+            let curve = BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: p,
+                control_points: &pts,
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &mult,
+                knots: &knots,
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap();
+            let mut d = curve.evaluate(s, p.min(m), true, false).unwrap();
+            d.resize(m + 1, Vec3::ZERO);
+            d
+        };
+        let weight = |x: &crate::nurbs::math::CPoint| {
+            if x.w == crate::nurbs::math::NOW {
+                1.0
+            } else {
+                x.w
+            }
+        };
+        // (a rational curve's control points are stored weighted)
+        let a = poly(cps.iter().map(|x| Vec3::new(x.x, x.y, x.z)).collect());
+        let w = poly(cps.iter().map(|x| Vec3::new(weight(x), 0.0, 0.0)).collect());
+        let mut out: Vec<Vec3> = Vec::new();
+        for kk in 0..=m {
+            let mut num = a[kk];
+            for i in 1..=kk {
+                num -= out[kk - i] * (binom(kk, i) * w[i].x);
+            }
+            out.push(num * (1.0 / w[0].x));
+        }
+        out
+    }
+
+    /// Quintic spans are longer at the same bound. On the cylinder and plane's ball (the
+    /// closed form of `cylinder_plane_span_bound_is_the_closed_form`), a span of 0.1 of the
+    /// leader: no cubic span's certificate could hold it to the target, since every level's
+    /// bound of a cubic certificate is at least `h^4 / 384` times its jets' fourth
+    /// derivatives at the span's middle (each piece's terms hold its points' values), and
+    /// for the first face's jets, `|c10''''| + |c11''''| = (1 + r / (R + r)) |L''''|`, that
+    /// is over the target; the quintic span is certified within it.
+    #[test]
+    fn a_quintic_span_holds_the_target_where_no_cubic_span_could() {
+        let k = Kernel::default();
+        let (big_r, r) = (3.0, 1.0);
+        let fp = plane(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let mut cyl = Cone::new_cylinder_bounded(
+            Vec3::new(0.0, 0.0, -2.0),
+            Vec3::X,
+            Vec3::Y,
+            big_r,
+            0.0,
+            360.0,
+            10.0,
+            false,
+            false,
+            false,
+        );
+        cyl.make_nurb(&k).unwrap();
+        let fc = Surface::from(cyl);
+        let frame = Axis2Placement::new(Vec3::new(0.0, 0.0, r), Vec3::X, Vec3::Y);
+        let leader = BSplineCurve::create_circle_segment(
+            3,
+            &frame,
+            big_r + r,
+            10.0,
+            80.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        let ln = NurbsCurve::of(&leader).unwrap();
+        let (np, nc) = (nurbs(&k, &fp), nurbs(&k, &fc));
+        let faces = [&fp, &fc];
+        let lpt = |s: f64| leader.evaluate_point(s).unwrap();
+        let foot_c = |s: f64| {
+            let l = lpt(s);
+            let q = big_r / (big_r + r);
+            Vec3::new(l.x * q, l.y * q, r)
+        };
+        let (cu, cv) = nearest_uv(&nc, foot_c(0.45));
+        let pc = nurbs_partials(
+            &nc,
+            span(&nc.u, nc.p, nc.nu, cu),
+            span(&nc.v, nc.q, nc.nv, cv),
+            cu,
+            cv,
+            1,
+        );
+        let nrm = vec3(pc.at(1, 0)).cross(vec3(pc.at(0, 1)));
+        let out = foot_c(0.45) - Vec3::new(0.0, 0.0, r);
+        let side_c = if nrm.dot(out) > 0.0 { 1.0 } else { -1.0 };
+        let (rr, side) = ([r, r], [1.0, side_c]);
+        let st = |s: f64| {
+            let l = lpt(s);
+            let (u, v) = nearest_uv(&nc, foot_c(s));
+            station(&k, faces, &leader, s, [l.x, l.y, u, v], rr, side)
+        };
+        let (sa, sb) = (0.4, 0.5);
+        let h = sb - sa;
+        let d4 = leader.evaluate(0.5 * (sa + sb), 4, true, false).unwrap()[4];
+        let l4 = Vec3::new(d4.x, d4.y, 0.0).length();
+        let cubic_floor = h * h * h * h / 384.0 * (1.0 + r / (big_r + r)) * l4;
+        let target = 4e-6;
+        let bound = gn_certify_span(
+            &k,
+            [&np, &nc],
+            &ln,
+            faces,
+            &leader,
+            &st(sa),
+            &st(sb),
+            rr,
+            side,
+            2,
+            target,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        eprintln!("quintic {bound:e}, cubic at least {cubic_floor:e}, target {target:e}");
+        assert!(cubic_floor > target, "{cubic_floor:e}");
+        assert!(bound <= target, "{bound:e} over {target:e}");
     }
 
     use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
@@ -5280,15 +5458,25 @@ mod tests {
             );
             cyl.make_nurb(k).unwrap();
             let fc = Surface::from(cyl);
-            let frame = Axis2Placement::new(Vec3::new(0.0, 0.0, r), Vec3::X, Vec3::Y);
-            let leader = BSplineCurve::create_circle_segment(
-                3,
-                &frame,
-                big_r + r,
-                10.0,
-                80.0,
-                NurbCircleParam::Quadratic,
-            )
+            // the leader: the centre circle's arc from 10 to 80 degrees as a polynomial cubic
+            // (its usual Bezier, within 3e-4 of the circle): the stations sampled against
+            // the terms take its s-derivatives to order HERMITE + 1, past what the curve
+            // evaluator gives a rational curve; its feet are the ball's all the same
+            let (rc, t0, t1) = (big_r + r, 10.0_f64.to_radians(), 80.0_f64.to_radians());
+            let kb = 4.0 / 3.0 * ((t1 - t0) / 4.0).tan() * rc;
+            let on = |t: f64| Vec3::new(rc * t.cos(), rc * t.sin(), r);
+            let tan = |t: f64| Vec3::new(-t.sin(), t.cos(), 0.0);
+            let leader = BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 3,
+                control_points: &[on(t0), on(t0) + tan(t0) * kb, on(t1) - tan(t1) * kb, on(t1)],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[4, 4],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
             .unwrap();
             let nc = nurbs(k, &fc);
             let lc = leader.clone();
@@ -5383,7 +5571,7 @@ mod tests {
         /// intervals, so the terms are the rows' values at s to their rounding.
         fn terms_at(&self, k: &Kernel, s: f64, o: [f64; 3]) -> ArcTerms {
             let touch = self.law.is_some();
-            let st = self.station(k, s, 4 + usize::from(touch));
+            let st = self.station(k, s, HERMITE + usize::from(touch));
             let series = |v: &VSer<f64>, q: usize, up: usize| {
                 let mut t = Tay::<Ivl>::zero();
                 for i in 0..=TAY {
@@ -5404,8 +5592,8 @@ mod tests {
     }
 
     /// The arc's row terms over a piece hold the rows sampled over it, on wide pieces
-    /// (fixed seed): at 101 stations solved in floating point, `24 |H_j''''|` and
-    /// `24 |W_j''''|` are at most the piece's terms, `W_j` at least its least weight and
+    /// (fixed seed): at 101 stations solved in floating point, `m! |H_j^(m)|` and
+    /// `m! |W_j^(m)|` (m = HERMITE) are at most the piece's terms, `W_j` at least its least weight and
     /// `|S - O|` within its `R`. Cases: wedges of two planes at random angles with random
     /// constant, linear and quadratic radius laws (a varying ball: the touch circle), and a
     /// ball rolled between a plane and a cylinder (curved rails); pieces up to 0.6 of the
@@ -5890,7 +6078,7 @@ mod tests {
     fn feet_taylor_models_hold_every_sampled_station_on_curved_faces() {
         let k = Kernel::default();
         let mut next = rng(0x5bd1_e995_a3c6_4f2b);
-        let order = 4 + TAYLOR;
+        let order = HERMITE + TAYLOR;
         let (mut judged, mut old_failed, mut cases) = (0, 0, 0);
         let mut ratios = Vec::new();
         for case in 0..24 {
