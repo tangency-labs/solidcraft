@@ -3253,8 +3253,8 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
 
 /// Selection input rows: label, "N selected" (or a hint) and a clear button; clicking a row
 /// makes it the active input.
-fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames) {
-    input_rows_range(d, ui, s, names, 0..d.inputs.len());
+fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames, kept: &mut crate::sketch_corner_rows::Kept) {
+    input_rows_range(d, ui, s, names, 0..d.inputs.len(), kept);
 }
 
 /// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
@@ -3307,7 +3307,26 @@ fn surrender_keyboard_focus(ui: &egui::Ui) {
     }
 }
 
-pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames, range: std::ops::Range<usize>) {
+/// Whether this frame is the first to see a click on this corner row's buttons: the later passes
+/// of a multi-pass frame all report the same click, and it must count once.
+fn first_click(ui: &egui::Ui, key: &str) -> bool {
+    let id = egui::Id::unique(("corner_click", key));
+    let frame = ui.ctx().cumulative_frame_nr();
+    if ui.ctx().data(|data| data.get_temp::<u64>(id)) == Some(frame) {
+        return false;
+    }
+    ui.ctx().data_mut(|data| data.insert_temp(id, frame));
+    true
+}
+
+pub(crate) fn input_rows_range(
+    d: &mut Dialog,
+    ui: &mut egui::Ui,
+    s: &Session,
+    names: crate::prefs::OriginPlaneNames,
+    range: std::ops::Range<usize>,
+    kept: &mut crate::sketch_corner_rows::Kept,
+) {
     // Edit Text shows its Path input among its own rows.
     if matches!(d.kind, Kind::Text(_)) {
         return;
@@ -3321,6 +3340,23 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let text_focus = crate::ui_kit::editor_has_focus(ui.ctx());
     let mut toggle_list: Option<usize> = None;
     let mut hovered: Option<(usize, Sel)> = None;
+    // The corner rows' own X and Flip state outlives the rows themselves: it is kept with the
+    // application, so a corner whose lines leave the list and come back is still the corner the
+    // user left. Another sketch starts with every corner cut.
+    let corner = matches!(d.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. }));
+    if corner {
+        let kept = kept.of(s.active_sketch);
+        for (key, value) in kept {
+            d.extra.insert(key.clone(), value.clone());
+        }
+    }
+    // The corner rows replace a bare list of picks: a row is one corner, made of the lines
+    // picked for it, and keeps its own X and Flip.
+    let corner_rows = match &d.kind {
+        Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { ctype, .. }) => Some((*ctype, crate::sketch_modify_ui::dialog_rows(s, d))),
+        _ => None,
+    };
+    let mut corner_changes: Vec<(String, crate::sketch_corner_rows::Change)> = Vec::new();
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
         let stored_reference = stored_input_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
@@ -3408,7 +3444,37 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 }
             });
         });
-        if inp.multi && d.listed == Some(i) && !inp.items.is_empty() {
+        // The corner rows are this input's picked items, so the arrow beside the field folds
+        // them away as it folds any input's list: a row shows only while the list is open, and
+        // the input never falls back to a bare list of the picked lines.
+        if let Some((ctype, rows)) = corner_rows.as_ref().filter(|_| i == 0 && d.listed == Some(i)) {
+            for (index, row) in rows.iter().enumerate() {
+                // The Flip and the X/V sit in columns measured from the row's right edge,
+                // so they line up down the list whatever each row is called.
+                let (toggle, flip) = crate::ui_kit::corner_row(
+                    ui,
+                    &format!("corner:{index}"),
+                    &format!("Corner {index}"),
+                    &row.label(),
+                    row.enabled,
+                    (*ctype > 0).then_some(row.flip),
+                );
+                // egui lays the window out more than once in a frame (a scroll bar
+                // appears, a field keeps its focus), and every pass sees the same
+                // click: count it once, or the cut turns off and straight back on.
+                // Only a click spends this frame's marker: a pass that draws the row without one
+                // leaves the next pass free to report it.
+                let first = !(toggle.clicked() || flip.is_some()) || first_click(ui, &row.key);
+                if let (Some(flip), true) = (flip, first) {
+                    corner_changes.push((row.key.clone(), crate::sketch_corner_rows::Change::Flip(flip)));
+                }
+                // The X is on an enabled row, so a click leaves it off (`Off(true)`); the
+                // V is on a row already off, and brings it back.
+                if toggle.clicked() && first {
+                    corner_changes.push((row.key.clone(), crate::sketch_corner_rows::Change::Off(row.enabled)));
+                }
+            }
+        } else if corner_rows.is_none() && inp.multi && d.listed == Some(i) && !inp.items.is_empty() {
             let rows = d.listed_items(s, i);
             egui::ScrollArea::vertical().id_salt(("picked_items", i)).max_height(t.control_height * 6.5).show(ui, |ui| {
                 for (index, item) in rows.into_iter().enumerate() {
@@ -3437,6 +3503,15 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     }
     if let Some((input, item)) = remove {
         d.remove_listed(s, input, &item);
+    }
+    for (key, change) in corner_changes {
+        match change {
+            crate::sketch_corner_rows::Change::Off(off) => crate::sketch_corner_rows::set_off(&mut d.extra, &key, off),
+            crate::sketch_corner_rows::Change::Flip(flip) => crate::sketch_corner_rows::set_flip(&mut d.extra, &key, flip),
+        }
+    }
+    if corner {
+        kept.remember(&d.extra);
     }
     if let Some(i) = activate {
         d.active = i;
@@ -4478,6 +4553,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         crate::operations::ended(app, "apply", crate::operations::Outcome::Cancelled);
     }
     if !keep || cancel {
+        // The window's corner rows' state belongs to it: a new Fillet or Chamfer starts with
+        // every corner cut again.
+        app.corner_kept = Default::default();
         app.session.feature_edit_sketch = None;
         crate::dialogs_motion::closed(app, &mut d, applied);
         if let Kind::Text(k) = &mut d.kind {
@@ -4755,6 +4833,7 @@ fn pick_first(input: &SelInput) -> String {
 
 /// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.
 pub fn cancel(app: &mut SolveApp) {
+    app.corner_kept = Default::default();
     app.session.feature_edit_sketch = None;
     if let Some(pending) = &mut app.pending_feature_edit {
         pending.cancel();

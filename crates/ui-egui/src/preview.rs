@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use serde_json::Value;
-use solidcore_record::Vec3;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::ModelState;
 use solidcraft_engine::doc::progress::Progress;
@@ -956,13 +956,55 @@ fn on_surface(index: &SurfaceIndex, [a, b, c]: [Vec3; 3]) -> bool {
 /// bounded, so a modeled thread's thousands of faces still cost little.
 const FACE_SAMPLES: usize = 24;
 
+/// A point's place, on a grid fine enough that only a moved point changes cell. The corner
+/// commands take points closer than a millionth of a millimetre as one place, and the preview
+/// compares where points are the same way.
+fn place(p: Vec2) -> (i64, i64) {
+    ((p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64)
+}
+
+/// A curve as the preview compares it: its kind and shape, with where its points are rather than
+/// what they are called or numbered. A corner cut drops the sharp corner point unless something
+/// measures it, which renames every later point; the curves themselves are unchanged, and are not
+/// drawn as changed.
+fn signature(sketch: &solidcraft_engine::sketch::Sketch, curve: &solidcraft_engine::sketch::Curve) -> (&'static str, Vec<(i64, i64)>, Vec<String>) {
+    use solidcraft_engine::sketch::CurveKind;
+    let kind = match curve.kind {
+        CurveKind::Line { .. } => "line",
+        CurveKind::Circle { .. } => "circle",
+        CurveKind::Arc { .. } => "arc",
+        CurveKind::Ellipse { .. } => "ellipse",
+        CurveKind::Spline { .. } => "spline",
+        CurveKind::Conic { .. } => "conic",
+    };
+    let points = curve.kind.point_ids().into_iter().map(|i| sketch.points.get(i).map_or((i64::MIN, i64::MIN), |p| place(p.pos))).collect();
+    let shape = match &curve.kind {
+        CurveKind::Circle { r, .. } => vec![r.to_bits().to_string()],
+        CurveKind::Ellipse { r, .. } => vec![r.to_bits().to_string()],
+        CurveKind::Conic { rho, .. } => vec![rho.to_bits().to_string()],
+        // A control spline's own knots and weights shape it as much as its points do (a projected
+        // free-form edge keeps its exact curve there), so a change to them is a change to paint.
+        CurveKind::Spline { control, degree, periodic, nurbs, .. } => vec![
+            control.to_string(),
+            degree.to_string(),
+            periodic.to_string(),
+            nurbs.as_ref().map(|n| format!("{:?}{:?}", n.knots, n.weights)).unwrap_or_default(),
+        ],
+        _ => Vec::new(),
+    };
+    (kind, points, shape)
+}
+
 /// What of `sketch` differs from `old`, the same sketch before a change: the curves whose shape
 /// or points moved and the points that moved (`None`: nothing did).
 pub(crate) fn sketch_changes(
     old: Option<&solidcraft_engine::doc::SolvedSketch>,
     sketch: &std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
 ) -> Option<SketchPreview> {
-    let old_curves = old.into_iter().flat_map(|s| s.sketch.curves.iter().map(|c| (c.id.as_str(), c))).collect::<std::collections::HashMap<_, _>>();
+    let old_curves = old
+        .into_iter()
+        .flat_map(|s| s.sketch.curves.iter().map(|c| (c.id.as_str(), signature(&s.sketch, c))))
+        .collect::<std::collections::HashMap<_, _>>();
     let old_points =
         old.into_iter().flat_map(|s| s.sketch.points.iter().map(|p| (p.id.as_str(), p.pos))).collect::<std::collections::HashMap<_, _>>();
     let indices = sketch
@@ -971,9 +1013,7 @@ pub(crate) fn sketch_changes(
         .iter()
         .enumerate()
         .filter_map(|(index, curve)| {
-            let unchanged = old_curves.get(curve.id.as_str()).is_some_and(|previous| {
-                previous.kind == curve.kind && curve.kind.point_ids().iter().all(|i| old.and_then(|s| s.sketch.point(*i)) == sketch.sketch.point(*i))
-            });
+            let unchanged = old_curves.get(curve.id.as_str()).is_some_and(|previous| *previous == signature(&sketch.sketch, curve));
             if unchanged { None } else { Some(index) }
         })
         .collect::<Vec<_>>();
@@ -1128,6 +1168,27 @@ pub fn point_triangle_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
     if inside { h.abs() } else { [(a, b), (b, c), (c, a)].iter().map(|(u, v)| p.dist_to_segment(*u, *v)).fold(f64::INFINITY, f64::min) }
 }
 
+/// The lines the corner window holds in its rows: the feature of the sketch being edited and the
+/// ids it picked. A picked line stays shown as selected even when the corner it makes is turned
+/// off, so the row's Remove takes the cut away and not the selection.
+fn corner_picks(app: &SolveApp) -> Option<(u64, Vec<String>)> {
+    let d = app.dialog.as_ref()?;
+    if !matches!(d.kind, crate::dialogs::Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. })) {
+        return None;
+    }
+    let sid = app.session.active_sketch?;
+    let state = app.session.world_state().ok()?;
+    let feature = state.sketch(sid)?.feature;
+    let ids = crate::selection::items(&d.inputs, 0)
+        .iter()
+        .filter_map(|item| match item {
+            solidcraft_engine::Sel::SketchCurve { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    Some((feature, ids))
+}
+
 /// The same computed sketch preview is drawn over both native GPU and CPU viewports.
 pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewport::Proj) {
     if app.preview.rolled_back {
@@ -1141,7 +1202,36 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
         return;
     }
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
-    let curves: usize = app.preview.sketches.iter().map(|preview| paint_sketch(preview, painter, proj, &mut budget)).sum();
+    let mut curves: usize = app.preview.sketches.iter().map(|preview| paint_sketch(preview, painter, proj, &mut budget)).sum();
+    // A line the corner window picked stays drawn as selected whether or not its corner is
+    // cut: turning a row off takes the cut away, not the selection. Painted from the model, so
+    // it shows even while no preview does (every row off draws nothing).
+    if let Some((feature, ids)) = corner_picks(app) {
+        let drawn: std::collections::HashSet<(u64, String)> = app
+            .preview
+            .sketches
+            .iter()
+            .flat_map(|preview| {
+                let sketch = &preview.sketch;
+                preview.curves.iter().filter_map(move |index| sketch.sketch.curves.get(*index).map(|curve| (sketch.feature, curve.id.clone())))
+            })
+            .collect();
+        if let Ok(state) = app.session.world_state()
+            && let Some(ss) = app.session.active_sketch.and_then(|sid| state.sketch(sid))
+            && ss.feature == feature
+        {
+            let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
+            for id in &ids {
+                if drawn.contains(&(feature, id.clone())) {
+                    continue;
+                }
+                if let Some(index) = ss.sketch.curve_index(id) {
+                    crate::tools::paint_curve(&ss.sketch, index, &ss.plane, painter, proj, stroke, &mut budget);
+                    curves += 1;
+                }
+            }
+        }
+    }
     crate::scenario::publish_count("sketch_preview_curves", curves as f64);
 }
 
@@ -1471,6 +1561,26 @@ mod tests {
             assert_eq!(preview.curves, vec![0, 1]);
             assert!(preview.points.is_empty());
         }
+        Ok(())
+    }
+
+    /// A corner cut drops the sharp corner point unless something measures it, which renumbers
+    /// every later point. The preview names its points instead of numbering them, so a curve the
+    /// command left alone is not drawn as changed (the whole sketch used to turn green).
+    #[test]
+    fn a_corner_cut_previews_only_the_curves_it_changes() -> Result<(), Box<dyn std::error::Error>> {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"}))?;
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [20, 30]}))?;
+        let before = s.model.state();
+        let mut cut = Session::new(solidcraft_engine::doc::Document::from_json(&s.doc.to_json())?);
+        cut.active_sketch = s.active_sketch;
+        cut.execute("sketch.fillet", &json!({"a": "l1", "b": "l2", "radius": 5}))?;
+        let after = cut.model.state();
+        let built = build(&before, &after, colors());
+        assert_eq!(built.sketches.len(), 1);
+        // The arc and the two lines it shortened, and nothing else.
+        assert_eq!(built.sketches[0].curves.len(), 3, "{:?}", built.sketches[0].curves);
         Ok(())
     }
 
@@ -1933,6 +2043,33 @@ mod tests {
         assert_ne!(pv.key, key, "a new key: the viewport takes the slot again");
         assert!(slot.lock().unwrap().as_ref().is_some_and(|s| s.xray.is_empty() && s.blocks.is_empty()));
         assert!(!pv.active && pv.replaced.is_empty());
+    }
+
+    #[test]
+    fn a_control_splines_knots_and_weights_are_part_of_its_signature() {
+        let sketch = |weights: Vec<f64>| -> solidcraft_engine::sketch::Sketch {
+            serde_json::from_value(json!({
+                "points": [
+                    {"id": "p1", "pos": [0.0, 0.0]},
+                    {"id": "p2", "pos": [10.0, 0.0]},
+                    {"id": "p3", "pos": [20.0, 10.0]},
+                ],
+                "curves": [{
+                    "id": "s1", "type": "spline", "pts": [0, 1, 2], "control": true, "degree": 2,
+                    "nurbs": {"knots": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0], "weights": weights},
+                }],
+                "constraints": [],
+                "counters": {"k": 0, "l": 1, "p": 3},
+            }))
+            .unwrap()
+        };
+        let uniform = sketch(Vec::new());
+        let weighted = sketch(vec![1.0, 2.0, 1.0]);
+        assert_ne!(
+            signature(&uniform, &uniform.curves[0]),
+            signature(&weighted, &weighted.curves[0]),
+            "weights that change the curve are a change to paint"
+        );
     }
 }
 
