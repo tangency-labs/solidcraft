@@ -19,11 +19,14 @@ Updates: WR-520
   point returned is within it of both sections. The circle/circle case decides from
   `(ra - rb)^2 <= D^2 <= (ra + rb)^2`, which is well conditioned, and takes the chord from
   `(ra - rb)(ra + rb)` and `(ra - along)(ra + along)` (radii 1e8 and 1e8 - 1 touched half a unit
-  off both).
+  off both). A tip's seam whose end tangents are parallel while its middle is off the chord fits
+  no conic and is refused (`SM_TCR_NOT_EXACT`), where it failed on the tangents' crossing (the
+  crescent of those circles, drafted 5 degrees over 1e-3).
 - **Rust port:** `primitive/primitive_creation/p2/taper_walls.rs` (`crossing`, `touch_bound`,
   `circles_may_meet`). Regression tests:
   `crates/solidcore/tests/fork_3ae7bfa_drafted_cone_wall.rs`
   (`a_horn_drafted_from_its_touching_tip_builds`: 5 faces, 9 edges, 6 vertices, the volume in
   closed form) and the unit tests `two_circles_touching_within_rounding_touch`,
   `two_large_circles_touching_inside_touch_where_they_do` and
-  `a_line_far_from_its_start_meets_a_circle_where_it_does`.
+  `a_line_far_from_its_start_meets_a_circle_where_it_does`, and
+  `a_large_crescent_drafted_from_its_touching_tip_is_refused`.

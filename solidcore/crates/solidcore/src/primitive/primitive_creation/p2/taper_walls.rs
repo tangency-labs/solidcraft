@@ -1192,8 +1192,11 @@ fn sharp_seam(
         seam.s = 0.5 * (p + seam.x);
         seam.weight = 1.0;
     } else {
-        // the shoulder where the end tangents cross, the weight from the halfway point
-        let (d0, d1) = line_line_closest_point(p, t0, seam.x, t1)?;
+        // the shoulder where the end tangents cross, the weight from the halfway point; end
+        // tangents that are parallel have none, and no conic through a middle off the chord
+        let Ok((d0, d1)) = line_line_closest_point(p, t0, seam.x, t1) else {
+            return refusal(TaperCornerRefusal::NotExact);
+        };
         let s0 = p + d0 * t0;
         let s1 = seam.x + d1 * t1;
         if s0.distance(s1) > EFF_ZERO_SQRT * scale || !(d0 > 0.0) || !(d1 < 0.0) {
