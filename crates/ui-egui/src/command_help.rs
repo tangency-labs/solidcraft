@@ -212,6 +212,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.fit_curves_to_section",
     "sketch.include_3d",
     "sketch.infinite",
+    "sketch.insert_airfoil",
     "sketch.insert_dxf",
     "sketch.insert_svg",
     "sketch.inspect",

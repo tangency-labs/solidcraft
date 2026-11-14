@@ -1,5 +1,5 @@
 //! Contracts and result types for the commands in `cmd/sketch_import.rs`: `sketch.insert_dxf`,
-//! `sketch.insert_svg`, `sketch.drawing_bounds` and `sketch.export_dxf`.
+//! `sketch.insert_svg`, `sketch.insert_airfoil`, `sketch.drawing_bounds` and `sketch.export_dxf`.
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether a file can be read or written, a sketch
@@ -22,7 +22,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use solidcraft_io::MAX_DRAWING_BYTES;
+use solidcraft_io::{AirfoilFormat, MAX_AIRFOIL_BYTES, MAX_DRAWING_BYTES};
 
 use super::check::{located, whole};
 use super::sketch_ends::SketchTarget;
@@ -342,6 +342,223 @@ impl<'de> Deserialize<'de> for DrawingSizeFrom {
             _ => Err(D::Error::custom("must be \"geometry\" or \"viewbox\"")),
         }
     }
+}
+
+/// The keys `sketch.insert_airfoil` reads. See [`InsertAirfoilParams`], which leaves `path`
+/// unread next to a `text`, as the handler does.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = airfoil_source_required)]
+pub struct InsertAirfoilKeys {
+    /// The file itself, as text. Wins over `path`. At most 1 MiB (`MAX_AIRFOIL_BYTES`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<AirfoilText>,
+    /// The file to read (not blank, fewer than 4096 UTF-8 bytes). Used when `text` is not given;
+    /// ignored when it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "path_schema")]
+    pub path: Option<DrawingPath>,
+    /// The chord in mm, above 0: the file's `x` from 0 to 1 becomes 0 to `chord`.
+    #[schemars(with = "PositiveMm")]
+    pub chord: PositiveMm,
+    /// Where along the chord the section is placed and turned, as a share of the chord: 0 is the
+    /// leading edge, 0.25 the quarter-chord point, 1 the trailing edge. Default: 0.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ChordShare")]
+    pub pivot: Option<ChordShare>,
+    /// The sketch point, in mm, [x, y], where the pivot goes. Default: [0, 0].
+    #[serde(default)]
+    pub at: Option<Point2>,
+    /// A turn in degrees about the pivot, counter-clockwise in the sketch. Default: 0.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "AngleDegrees")]
+    pub angle: Option<AngleDegrees>,
+    /// `true` mirrors the section across its chord line (the upper side goes to negative y),
+    /// before the turn. Default: false.
+    #[serde(default, deserialize_with = "airfoil_flip")]
+    pub flip: Option<bool>,
+    /// The distance in mm within which points of the file become one sketch point, 1e-9 to 10 (a
+    /// value outside is brought inside; one that is not above 0 reads as the default). Within it
+    /// the trailing edge counts as closed. Default: 0.0001.
+    #[serde(default)]
+    pub tolerance: Option<f64>,
+    /// The file's layout, when the content should not decide: "selig" or "lednicer", any case.
+    /// Default: told apart by the content.
+    #[serde(default)]
+    pub format: Option<AirfoilFormatParam>,
+    /// Read only when no sketch is being edited: the plane of the new sketch, as `sketch.create`
+    /// takes it. Default: XY. Ignored (and not checked) while a sketch is being edited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane: Option<Value>,
+    /// Read only when no sketch is being edited: the new sketch's name. Ignored (and not checked)
+    /// while a sketch is being edited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<Value>,
+    /// The sketch to insert into: its feature id or its name. Default: the one being edited (a
+    /// new one when none is).
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// Insert an airfoil coordinate file (`.dat`, Selig or Lednicer) into a sketch as one fit point
+/// spline through every point of the file, at the chord given, with a line across an open
+/// trailing edge: into the active sketch, or a new one when none is being edited. Give the file as
+/// `path` or as `text`. One undo step.
+#[derive(Debug)]
+pub struct InsertAirfoilParams(pub InsertAirfoilKeys);
+
+impl<'de> Deserialize<'de> for InsertAirfoilParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut value = Value::deserialize(d)?;
+        if let Some(keys) = value.as_object_mut()
+            && keys.get("text").is_some_and(Value::is_string)
+        {
+            keys.remove("path");
+        }
+        serde_path_to_error::deserialize(&value).map(InsertAirfoilParams).map_err(|e| D::Error::custom(located(&e)))
+    }
+}
+
+impl JsonSchema for InsertAirfoilParams {
+    fn schema_name() -> Cow<'static, str> {
+        "InsertAirfoilParams".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut schema = InsertAirfoilKeys::json_schema(generator);
+        schema.insert("description".into(), INSERT_AIRFOIL.into());
+        schema
+    }
+}
+
+const INSERT_AIRFOIL: &str = "Insert an airfoil coordinate file (.dat, Selig or Lednicer) into a sketch as one fit point spline through every point of the file, at the chord given, with a line across an open trailing edge: the active sketch, or a new one when none is being edited. Give the file as `path` or as `text`. One undo step.";
+
+/// The command needs `path` or `text`; the handler says so when both are left out. A `path` it
+/// reads (no `text`) is not blank and under 4096 bytes (`maxLength` counts characters, so 4095 is
+/// as close as the schema gets).
+fn airfoil_source_required(schema: &mut Schema) {
+    let read_path = serde_json::json!({"type": "string", "maxLength": 4095, "pattern": not_blank_pattern()});
+    schema.insert("anyOf".into(), serde_json::json!([{"required": ["text"]}, {"required": ["path"], "properties": {"path": read_path}}]));
+}
+
+/// An airfoil file's text, as the handler reads it: at most 1 MiB, or its refusal.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AirfoilText(pub String);
+
+impl<'de> Deserialize<'de> for AirfoilText {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(d)?;
+        if text.len() > MAX_AIRFOIL_BYTES {
+            return Err(D::Error::custom(whole("the airfoil file is too large")));
+        }
+        Ok(AirfoilText(text))
+    }
+}
+
+impl JsonSchema for AirfoilText {
+    fn schema_name() -> Cow<'static, str> {
+        "AirfoilText".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"type": "string"})
+    }
+}
+
+/// A share of the chord as `pivot` is read: a finite number (0 the leading edge, 1 the trailing
+/// edge; outside 0..1 is allowed).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChordShare(pub f64);
+
+impl<'de> Deserialize<'de> for ChordShare {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_f64()
+            .filter(|a| a.is_finite())
+            .map(ChordShare)
+            .ok_or_else(|| D::Error::custom("must be a number (a share of the chord)"))
+    }
+}
+
+impl JsonSchema for ChordShare {
+    fn schema_name() -> Cow<'static, str> {
+        "ChordShare".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "A share of the chord: 0 is the leading edge, 1 the trailing edge.", "type": "number"})
+    }
+}
+
+fn airfoil_flip<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    match Option::<Value>::deserialize(d)? {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(flip)) => Ok(Some(flip)),
+        Some(_) => Err(D::Error::custom(whole("`flip` must be true or false"))),
+    }
+}
+
+/// An airfoil file's layout as `format` is read: "selig" or "lednicer", in any case.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AirfoilFormatParam(pub AirfoilFormat);
+
+impl JsonSchema for AirfoilFormatParam {
+    fn schema_name() -> Cow<'static, str> {
+        "AirfoilFormat".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The file's layout: \"selig\" (one loop from the trailing edge) or \"lednicer\" (point counts, then each side from the leading edge), in any case.",
+            "type": "string"
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for AirfoilFormatParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_str()
+            .and_then(AirfoilFormat::parse)
+            .map(AirfoilFormatParam)
+            .ok_or_else(|| D::Error::custom("must be \"selig\" or \"lednicer\""))
+    }
+}
+
+/// What `sketch.insert_airfoil` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AirfoilInserted {
+    /// The sketch the section went into, by feature id.
+    pub sketch: u64,
+    /// The new sketch's id when no sketch was being edited and one was made; else null.
+    pub created_sketch: Option<u64>,
+    /// How many curves were added: the spline, and a line across an open trailing edge.
+    pub curves: usize,
+    /// The name line of the file (empty when it has none).
+    pub name: String,
+    /// The layout the file was read as: "selig" or "lednicer".
+    pub format: String,
+    /// How many points the file gave, a point written twice in a row counted once.
+    pub points: usize,
+    /// How many of those became one sketch point with the point before them (within
+    /// `tolerance`), so the spline passes near, not through, them.
+    pub merged: usize,
+    /// "closed" when the first and the last point are within `tolerance` of each other (the
+    /// spline ends where it starts, sharp), else "open" (a line across the gap closes the profile).
+    pub trailing_edge: String,
+    /// The distance in mm between the first and the last point, at the chord given.
+    pub te_gap: f64,
+    /// How far, at most, in mm a merged point (or the last point of a trailing edge closed within
+    /// `tolerance`) is from the spline point that stands for it, at the chord given: the kernel's
+    /// certified bound, 0 when no point was merged.
+    pub deviation: f64,
+    /// How far, at most, in mm the spline strays from the straight lines between the file's
+    /// points, at the chord given: the kernel's certified bound of how far the curve bows
+    /// between points, most at the nose.
+    pub bulge: f64,
+    /// The sketch's solve afterwards; null when it was not solved.
+    pub info: Option<SketchSolve>,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What `sketch.insert_dxf` and `sketch.insert_svg` return.

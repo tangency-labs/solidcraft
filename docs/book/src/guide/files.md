@@ -22,6 +22,7 @@ design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSO
 | 3MF with face tags | as 3MF | each triangle tagged with its B-rep face, exact coordinates |
 | URDF | | the assembly as a robot: links with meshes, mass and inertia, joints from the assembly's joints |
 | DXF, SVG | into a sketch | sketches and flat patterns as DXF |
+| Airfoil coordinates (`.dat`, Selig or Lednicer) | into a sketch, as one spline at the chord you set | |
 | PNG, JPEG | canvases and decals | |
 
 **File → Export GLB…** (`file.export` with a `.glb` path) writes one binary glTF file for web viewers,
@@ -213,6 +214,39 @@ their producer's coordinate-space marker without changing any saved points; deta
 retain world coordinates. A lost cross-component association refreshed by an older build may
 need an explicit relink or refresh when its source returns. Loading never guesses a numerical
 correction. Association records, coordinate arrays and placements are bounded and checked.
+
+## Airfoil coordinate files
+
+Wing sections are published as plain-text coordinate files (`.dat`): a name line, then `x y`
+pairs with the chord running from 0 to 1, in one of two layouts. **Selig** files hold one loop from
+the trailing edge over the upper side to the leading edge and back; **Lednicer** files give the two
+point counts, then the upper and the lower side, each from the leading edge. `sketch.insert_airfoil`
+reads either, told apart by the content (`format` overrides it), and draws the section into a
+sketch as one fit point spline through every point of the file, scaled to `chord` in millimetres.
+The spline is not closed round: the trailing edge stays sharp, and when the file leaves it open a
+straight line closes the gap, so the sketch has one profile to extrude or loft. `pivot` names the
+share of the chord that `at` places and `angle` turns about (0.25 for the quarter-chord line),
+`flip` mirrors the section across its chord line, and `tolerance` says how close two points must be
+to become one. Real files vary, and the reader takes what they do (CRLF, `#` comments, counts
+written as `61.0`, a leading edge written twice, an `x` a hair above 1); what it can't read it
+refuses with the file's name and line, and never reads a placeholder as 0.
+
+The reply says what came in: the name, the layout, the point count, whether the trailing edge is
+open or closed and its gap, how far at most a merged point is from the curve (0 unless points
+merged within the tolerance), and how far at most the spline bows from the straight lines between
+the file points, which shows an overshoot at the nose as a number. A sketch per section and a loft between them make a
+wing. `angle` turns counter-clockwise in the sketch plane, so on the planes below, whose sketch `y`
+points up (+Z), a positive angle lowers the leading edge: the usual washout at the tip.
+
+```json
+{"commands": [
+  {"command": "sketch.insert_airfoil", "params": {"path": "mh45.dat", "chord": 180, "pivot": 0.25, "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Root"}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "sketch.insert_airfoil", "params": {"path": "mh45.dat", "chord": 120, "pivot": 0.25, "angle": 2, "plane": {"origin": [0, 400, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Tip"}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.loft", "params": {"sections": [{"sketch": "Root"}, {"sketch": "Tip"}], "body_name": "Wing"}}
+]}
+```
 
 ## Large files
 
