@@ -286,8 +286,8 @@ pub struct FinishAutoConstrainParams {
     pub sketch: Option<SketchTarget>,
 }
 
-/// Make a dimension driven (it measures, and is no longer a parameter) or driving again (it gets
-/// a parameter holding its current value).
+/// Make a dimension driven (it measures; its parameter is read-only and reads what it measures) or
+/// driving again (its parameter takes its current value). The parameter keeps its name either way.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = driven_required)]
 pub struct ToggleDrivenParams {
@@ -445,7 +445,8 @@ pub struct Glyph {
     pub driven: bool,
     /// A dimension's value (mm, or radians for an angle); `null` for another constraint.
     pub value: Option<f64>,
-    /// The parameter a driving dimension takes its value from; `null` for none.
+    /// A dimension's parameter: a driving one takes its value from it, a driven one's is read-only
+    /// (what it measures); `null` for none.
     pub param: Option<String>,
     /// Where to draw the glyph, [x, y] in sketch coordinates; `null` when it has no place.
     pub at: Option<[f64; 2]>,

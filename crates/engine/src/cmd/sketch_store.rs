@@ -46,6 +46,8 @@ pub(super) fn read(doc: &Document, id: u64) -> Result<&Sketch> {
 /// Keep `sk` as sketch `id`.
 pub(super) fn write(doc: &mut Document, id: u64, sk: Sketch) -> Result<()> {
     *doc.sketch_mut(id)? = sk;
+    // Driven dimensions' parameters read what they measure now (#5582).
+    doc.sync_driven_params();
     Ok(())
 }
 

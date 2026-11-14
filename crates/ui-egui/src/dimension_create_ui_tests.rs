@@ -136,6 +136,34 @@ fn clicking_another_dimension_inserts_its_name_at_the_cursor() {
     assert_eq!(click_d1_and_apply(&mut h), "( d1) / 2");
 }
 
+/// #9913, #5582: clicking a driven (reference) dimension inserts its read-only name too, and the
+/// dimension being edited follows what the driven one measures.
+#[test]
+fn clicking_a_driven_dimension_inserts_its_read_only_name() {
+    let mut h = line([20., 0.]);
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":20,"text_at":[10,8]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,-10],[12,-10]],"infer":false})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities":["l2"],"value":12,"text_at":[6,-16]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,14],[25,14]],"infer":false})).unwrap();
+    let driven = h.app.run("sketch.dimension", json!({"entities":["l3.start","l3.end"],"driven":true,"text_at":[12,20]})).unwrap()["param"]
+        .as_str()
+        .expect("a driven dimension has a name")
+        .to_owned();
+    h.settle();
+    crate::dim_view::edit_param(&h.app, "d2");
+    h.frames(5);
+    type_value(&mut h, "10");
+    h.step(&json!({"click":{"dimension":driven}})).unwrap();
+    assert!(crate::dim_view::editing(), "a reference click keeps the editor open");
+    // The name goes in once the double-click window has passed.
+    h.frames(40);
+    h.step(&json!({"text":" / 5"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, format!("{driven} / 5"));
+    assert!((h.app.session.doc.eval("d2", solidcraft_engine::doc::expr::Kind::Length).unwrap() - 5.).abs() < 1e-6);
+    crate::dim_view::cancel();
+}
+
 #[test]
 fn clicking_another_dimension_replaces_the_selected_text() {
     let mut h = editing_d2("5 + 7");
@@ -880,13 +908,13 @@ fn an_over_constraining_dimension_is_placed_as_a_driven_one() {
     h.step(&json!({"click":{"world":[10,6,0]}})).unwrap();
     assert!(!crate::dim_view::editing(), "a driven dimension has no value to edit");
     assert_eq!(h.app.session.undo.len(), undo + 1);
-    assert_eq!(h.app.session.doc.params.len(), params, "a driven dimension adds no parameter");
+    assert_eq!(h.app.session.doc.params.len(), params + 1, "a driven dimension adds its read-only parameter (#5582)");
     let state = h.app.session.world_state().unwrap();
     let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!(solved.report.ok());
     let dims: Vec<_> = solved.sketch.constraints.iter().filter(|c| c.kind.is_dimension()).collect();
     assert_eq!(dims.len(), 2);
-    assert_eq!(dims.iter().filter(|c| c.driven && c.param.is_none()).count(), 1, "{dims:?}");
+    assert_eq!(dims.iter().filter(|c| c.driven && c.param.is_some()).count(), 1, "{dims:?}");
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc.to_json(), original);
 }
@@ -919,7 +947,7 @@ fn a_driven_dimension_nothing_fixes_any_more_takes_a_value() {
             .unwrap()
     };
     let id = dim(&h).id;
-    assert!(dim(&h).driven && dim(&h).param.is_none(), "{:?}", dim(&h));
+    assert!(dim(&h).driven && dim(&h).param.is_some(), "{:?}", dim(&h));
     let double_click = |h: &mut Harness| {
         h.frames(40);
         h.step(&json!({"click":{"dimension":id},"double":true})).unwrap();
@@ -937,7 +965,8 @@ fn a_driven_dimension_nothing_fixes_any_more_takes_a_value() {
     h.settle();
     let before = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
-    let name = h.app.session.doc.next_d_name();
+    // The name it has as a driven dimension (#5582).
+    let name = dim(&h).param.unwrap();
     let measured = dim(&h).kind.value().unwrap();
     double_click(&mut h);
     assert!(crate::dim_view::editing(), "{:?}", h.app.status);
