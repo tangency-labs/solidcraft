@@ -35,6 +35,11 @@
 //!   (`sm_FixBoundaryCurves` only ever sets its flag, so the caller ORs the result
 //!   into its own). On an error the partial outputs upstream may have written
 //!   (`rbSuccessfulIsoDrop` before a failed `CreateLineSegment`) are not returned.
+//! - **Boundary tangents.** Only exact boundary contacts flatten tangents; points
+//!   inside the domain retain their projected derivatives, even near a boundary.
+//! - **Seam continuation.** A projected point across the seam keeps the same
+//!   seam side when the starting tangent runs along it. The
+//!   correction must still meet the existing 3D approximation bound.
 //! - **Statuses.** `CheckSeamJump`'s `SM_ERR_OUTSIDE_OF_DOMAIN` is an
 //!   [`IntersectFailure::OutsideDomain`] (status [`SM_ERR_OUTSIDE_OF_DOMAIN`]);
 //!   `sm_PopStack` / `sm_StackLook` on a short stack are an
@@ -73,7 +78,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_point_distance;
 use crate::geom::point_set::PointContainment;
 use crate::geom::solution_array::{ObjectKind, SolutionArray, SolutionObject};
-use crate::geom::tol::{are_same, are_same_to_tol};
+use crate::geom::tol::are_same;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::surface_drop_curve::SurfaceDropCurve;
@@ -575,6 +580,9 @@ impl DropPt {
         }
 
         let start = self;
+        let along_seam = start.on_seam == Some(true)
+            && start.entering_domain == Some(false)
+            && start.leaving_domain == Some(false);
         let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
         let outside = || {
             SolidError::intersect(
@@ -606,8 +614,11 @@ impl DropPt {
             let numer = across_step_3d.dot(across_expected_step_3d);
             let denom = across_step_3d.dot(across_step_3d);
 
-            // when span jumps seam - snap back to domain
-            if numer < denom * -2.0 {
+            // Along the seam the perpendicular step vanishes, so the signed
+            // motion test cannot distinguish the two representations. Keep the
+            // starting side only when the existing 3D bound permits the move.
+            let crosses_seam = numer < denom * -2.0;
+            if along_seam || crosses_seam {
                 let mut snapped_uv = end.uv_pd[0];
                 snapped_uv.x = if end.uv_pd[0].x > u_domain.mid() {
                     u_domain.min()
@@ -617,7 +628,7 @@ impl DropPt {
                 let snapped_point = surface.evaluate_point(k, snapped_uv)?;
                 if snapped_point.distance(end_3d) <= approx_tol_3d {
                     end.uv_pd[0] = snapped_uv;
-                } else {
+                } else if crosses_seam {
                     return Err(outside());
                 }
             }
@@ -644,7 +655,8 @@ impl DropPt {
             let numer = across_step_3d.dot(across_expected_step_3d);
             let denom = across_step_3d.dot(across_step_3d);
 
-            if numer < denom * -2.0 {
+            let crosses_seam = numer < denom * -2.0;
+            if along_seam || crosses_seam {
                 let mut snapped_uv = end.uv_pd[0];
                 snapped_uv.y = if end.uv_pd[0].y > v_domain.mid() {
                     v_domain.min()
@@ -654,7 +666,7 @@ impl DropPt {
                 let snapped_point = surface.evaluate_point(k, snapped_uv)?;
                 if snapped_point.distance(end_3d) <= approx_tol_3d {
                     end.uv_pd[0] = snapped_uv;
-                } else {
+                } else if crosses_seam {
                     return Err(outside());
                 }
             }
@@ -663,17 +675,17 @@ impl DropPt {
         Ok(())
     }
 
-    /// When this drop point and `end` both lie on the same domain boundary (within
-    /// `uv_tol_x` / `uv_tol_y`) and the step runs mostly along it, zeroes the UV
+    /// When this drop point and `end` both lie exactly on the same domain boundary
+    /// and the step runs mostly along it, zeroes the UV
     /// tangent component across that boundary in both (`FixBoundaryTangents`).
-    /// Returns whether anything changed (`rbFixBTChange`). `approx_tol_3d` is not
-    /// used.
+    /// Returns whether anything changed (`rbFixBTChange`). The tolerance arguments
+    /// are retained for callers; nearness alone cannot justify flattening a tangent.
     pub fn fix_boundary_tangents(
         &mut self,
         uv_domain: &Extent2d,
         end: &mut Self,
-        uv_tol_x: f64,
-        uv_tol_y: f64,
+        _uv_tol_x: f64,
+        _uv_tol_y: f64,
         _approx_tol_3d: f64,
     ) -> bool {
         let mut changed = false;
@@ -684,40 +696,28 @@ impl DropPt {
         let max = uv_domain.max();
 
         // SpanStart and SpanEnd DropUVPts on UMin bdry - moving in V dir
-        if are_same_to_tol(start.uv_pd[0].x, min.x, uv_tol_x)
-            && are_same_to_tol(end.uv_pd[0].x, min.x, uv_tol_x)
-            && v_step > u_step
-        {
+        if start.uv_pd[0].x == min.x && end.uv_pd[0].x == min.x && v_step > u_step {
             start.uv_pd[1].x = 0.0;
             end.uv_pd[1].x = 0.0;
             changed = true;
         }
 
         // SpanStart and SpanEnd DropUVPts on UMax bdry - moving in V dir
-        if are_same_to_tol(start.uv_pd[0].x, max.x, uv_tol_x)
-            && are_same_to_tol(end.uv_pd[0].x, max.x, uv_tol_x)
-            && v_step > u_step
-        {
+        if start.uv_pd[0].x == max.x && end.uv_pd[0].x == max.x && v_step > u_step {
             start.uv_pd[1].x = 0.0;
             end.uv_pd[1].x = 0.0;
             changed = true;
         }
 
         // SpanStart and SpanEnd DropUVPts on VMin bdry - moving in U dir
-        if are_same_to_tol(start.uv_pd[0].y, min.y, uv_tol_y)
-            && are_same_to_tol(end.uv_pd[0].y, min.y, uv_tol_y)
-            && u_step > v_step
-        {
+        if start.uv_pd[0].y == min.y && end.uv_pd[0].y == min.y && u_step > v_step {
             start.uv_pd[1].y = 0.0;
             end.uv_pd[1].y = 0.0;
             changed = true;
         }
 
         // SpanStart and SpanEnd DropUVPts on VMax bdry - moving in U dir
-        if are_same_to_tol(start.uv_pd[0].y, max.y, uv_tol_y)
-            && are_same_to_tol(end.uv_pd[0].y, max.y, uv_tol_y)
-            && u_step > v_step
-        {
+        if start.uv_pd[0].y == max.y && end.uv_pd[0].y == max.y && u_step > v_step {
             start.uv_pd[1].y = 0.0;
             end.uv_pd[1].y = 0.0;
             changed = true;
@@ -775,8 +775,8 @@ pub fn stack_look(stack: &[f64]) -> Result<(f64, [Point2; 2])> {
 
 /// Keeps the piecewise cubic Bezier UV curve of `ctrl_poly` (knot points at every
 /// third point) inside `uv_domain` (`sm_FixBoundaryCurves`): knot points outside are
-/// snapped to the boundary; the neighbours of an interior knot point on a boundary
-/// (within `uv_tol_x` / `uv_tol_y`) move onto it; the inner neighbour of an end
+/// snapped to the boundary; the neighbours of an interior knot point exactly on a
+/// boundary move onto it; the inner neighbour of an end
 /// point on a boundary is clamped into the domain. Returns whether a boundary
 /// adjustment was made (`rbFixBCChange` is only ever set); fewer than four points
 /// change nothing.
@@ -840,12 +840,12 @@ pub fn fix_boundary_curves(
         // when interior KnotPoint is on boundary - move adjacent points to the bdry
         if ii > 0 && ii < num_spans {
             let (prev, next) = (this_pt - 1, this_pt + 1);
-            if knot.x < u0 + uv_tol_x || knot.x > u1 - uv_tol_x {
+            if knot.x == u0 || knot.x == u1 {
                 ctrl_poly.get_mut(prev).ok_or_else(bad)?.x = knot.x;
                 ctrl_poly.get_mut(next).ok_or_else(bad)?.x = knot.x;
                 changed = true;
             }
-            if knot.y < v0 + uv_tol_y || knot.y > v1 - uv_tol_y {
+            if knot.y == v0 || knot.y == v1 {
                 ctrl_poly.get_mut(prev).ok_or_else(bad)?.y = knot.y;
                 ctrl_poly.get_mut(next).ok_or_else(bad)?.y = knot.y;
                 changed = true;
@@ -1490,6 +1490,31 @@ mod tests {
     }
 
     #[test]
+    fn nearby_interior_points_keep_their_projected_tangents() {
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let mut start = DropPt::new(0.0, None);
+        let mut end = DropPt::new(1.0, None);
+        start.uv_pd = [Point2::new(0.2, 0.004), Vec2::new(1.0, -0.002)];
+        end.uv_pd = [Point2::new(0.8, 0.002), Vec2::new(1.0, -0.002)];
+        assert!(!start.fix_boundary_tangents(&domain, &mut end, 0.01, 0.01, 1e-3));
+        assert_eq!(start.uv_pd[1].y, -0.002);
+        assert_eq!(end.uv_pd[1].y, -0.002);
+
+        // A two-span straight line approaching the boundary, wholly inside it.
+        // The internal knot is within uv_tol of the boundary, but flattening its
+        // tangent would introduce curvature into this exact line.
+        let mut polygon: Vec<_> = (0..=6)
+            .map(|i| {
+                let t = f64::from(i) / 6.0;
+                Point3::new(0.2 + 0.6 * t, 0.004 - 0.002 * t, 0.0)
+            })
+            .collect();
+        let before = polygon.clone();
+        let _ = fix_boundary_curves(&mut polygon, &domain, 0.01, 0.01).unwrap();
+        assert_eq!(polygon, before);
+    }
+
+    #[test]
     fn fix_boundary_tangents_on_umin() {
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut a = DropPt::new(0.0, None);
@@ -1594,5 +1619,160 @@ mod tests {
             (b.x - 1.0).abs() < 1e-9 && (b.y - 0.3).abs() < 1e-9,
             "{b:?}"
         );
+    }
+
+    #[test]
+    fn motion_along_a_seam_keeps_one_parameter_side_in_both_directions() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let k = Kernel::default();
+        // A triangular tube: S(u, 0) == S(u, 3) == (1, 0, u).
+        // Its seam is straight, so motion along it has zero perpendicular step.
+        let ring = [(1.0, 0.0), (-0.5, 1.0), (-0.5, -1.0), (1.0, 0.0)];
+        let net: Vec<Vec<_>> = [0.0, 1.0]
+            .into_iter()
+            .map(|z| {
+                ring.iter()
+                    .map(|&(x, y)| CPoint::new(x, y, z, NOW))
+                    .collect()
+            })
+            .collect();
+        let open = vec![0.0, 0.0, 1.0, 1.0];
+        let closed = vec![0.0, 0.0, 1.0, 2.0, 3.0, 3.0];
+        for transpose in [false, true] {
+            let (points, u_knots, v_knots) = if transpose {
+                let transposed = (0..4)
+                    .map(|v| (0..2).map(|u| net[u][v]).collect())
+                    .collect();
+                (transposed, closed.clone(), open.clone())
+            } else {
+                (net.clone(), open.clone(), closed.clone())
+            };
+            let nurb =
+                crate::nurbs::srf_basic::Surface::new(points, 1, 1, u_knots, v_knots).unwrap();
+            let surface = Surface::from(BSplineSurface::from_nurb(nurb, false));
+            for (low, high) in [(0.0, 3.0), (3.0, 0.0)] {
+                let uv = |along, side| {
+                    if transpose {
+                        Point2::new(side, along)
+                    } else {
+                        Point2::new(along, side)
+                    }
+                };
+                let mut start = DropPt::new(0.0, None);
+                let mut end = DropPt::new(1.0, None);
+                start.uv_pd[0] = uv(0.2, low);
+                start.on_seam = Some(true);
+                start.entering_domain = Some(false);
+                start.leaving_domain = Some(false);
+                end.uv_pd[0] = uv(0.8, high);
+                let before = surface.evaluate_point(&k, end.uv_pd[0]).unwrap();
+                let direction = if transpose {
+                    SurfParamType::U
+                } else {
+                    SurfParamType::V
+                };
+                start
+                    .check_seam_jump(&k, &surface, direction, 1e-9, &mut end)
+                    .unwrap();
+                assert_eq!(end.uv_pd[0], uv(0.8, low));
+                let after = surface.evaluate_point(&k, end.uv_pd[0]).unwrap();
+                assert!(before.distance(after) < 1e-12);
+
+                // An approximated seam can project slightly inside the opposite
+                // boundary. The same 3D correction bound still governs its side.
+                let near_high = if high == 3.0 {
+                    high - 1e-8
+                } else {
+                    high + 1e-8
+                };
+                end.uv_pd[0] = uv(0.8, near_high);
+                start
+                    .check_seam_jump(&k, &surface, direction, 1e-6, &mut end)
+                    .unwrap();
+                assert_eq!(end.uv_pd[0], uv(0.8, low));
+
+                // A curve can leave tangentially and then enter the interior.
+                // An unbounded along-seam correction must leave this candidate
+                // available for the existing span-accuracy refinement.
+                let interior = if low == 0.0 { 2.0 } else { 1.0 };
+                end.uv_pd[0] = uv(0.8, interior);
+                start
+                    .check_seam_jump(&k, &surface, direction, 1e-9, &mut end)
+                    .unwrap();
+                assert_eq!(end.uv_pd[0], uv(0.8, interior));
+
+                // A full winding may have tangential ends on the seam. Snapping
+                // its ambiguous endpoint cannot make the flattened span pass:
+                // the source curve's interior still forces subdivision.
+                let tangent = if transpose {
+                    Vec2::new(0.0, 0.6)
+                } else {
+                    Vec2::new(0.6, 0.0)
+                };
+                let winding_uv = Curve::from(HermiteCurve::from_2d(
+                    uv(0.2, low),
+                    tangent,
+                    uv(0.8, high),
+                    tangent,
+                    2,
+                ));
+                let winding = Curve::from(
+                    crate::curve::crv_on_surf::CrvOnSurf::new(
+                        &k,
+                        winding_uv,
+                        surface.clone(),
+                        None,
+                        0,
+                    )
+                    .unwrap(),
+                );
+                start.uv_pd[1] = tangent;
+                end.uv_pd[0] = uv(0.8, high);
+                end.uv_pd[1] = tangent;
+                start
+                    .check_seam_jump(&k, &surface, direction, 1e-9, &mut end)
+                    .unwrap();
+                let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+                assert!(
+                    !start
+                        .test_span_accuracy(
+                            &k, &surface, &domain, &winding, &end, 1e-6, 1e-6, 1e-6, true,
+                        )
+                        .unwrap()
+                        .passes
+                );
+
+                // A transverse crossing can make a full turn between equal 3D
+                // endpoints. Retain its parameter winding.
+                start.entering_domain = Some(true);
+                end.uv_pd[0] = uv(0.2, high);
+                start
+                    .check_seam_jump(&k, &surface, direction, 1e-9, &mut end)
+                    .unwrap();
+                assert_eq!(end.uv_pd[0], uv(0.2, high));
+            }
+        }
+    }
+
+    #[test]
+    fn an_along_seam_hint_cannot_move_a_point_beyond_the_3d_bound() {
+        let k = Kernel::default();
+        let surface = plane();
+        let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let mut start = DropPt::new(0.0, None);
+        let mut end = DropPt::new(1.0, None);
+        start.uv_pd[0] = Point2::new(domain.mid().x, domain.min().y);
+        start.on_seam = Some(true);
+        start.entering_domain = Some(false);
+        start.leaving_domain = Some(false);
+        end.uv_pd[0] = Point2::new(domain.mid().x, domain.max().y);
+        let before = end.uv_pd[0];
+        // Even an incorrect closure hint cannot snap distinct 3D boundaries.
+        start
+            .check_seam_jump(&k, &surface, SurfParamType::V, 1e-9, &mut end)
+            .unwrap();
+        assert_eq!(end.uv_pd[0], before);
     }
 }

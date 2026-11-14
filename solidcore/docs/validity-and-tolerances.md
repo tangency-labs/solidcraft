@@ -203,6 +203,12 @@ before any gap is measured**, and its stored tolerance is that bound, raised to 
 where it is smaller (§5.1, invariant 5). A measured gap larger than the bound is evidence against
 the construction, not a quantity to cover (§8).
 
+Validity and repair have different purposes. The validity pass checks whether the stored local
+zones overlap, without changing their radii. The explicit `validate_and_update_tolerances` repair
+API retains its stricter residual-gap targets: half the vertex tolerance and the whole edge
+tolerance. A model can be valid while that API still reports gaps it would repair. A validate-only
+call to the repair API reports those repair targets; it does not run the body's validity predicates.
+
 The gaps themselves are measured, not enclosed. `calc_max_edge_face_gap`
 (`topology/edgeuse/p1.rs`) takes the largest of 20 samples of the distance from C to the face's
 surface (`GapFunction::crv_srf`, `heal/gap.rs`); a vertex/face gap is the distance from the vertex to
@@ -224,6 +230,18 @@ sphere or cone has poles where a whole parameter line is one point. The B-rep ma
 - **a pole is a vertex.** A pole inside a face must be marked by a vertex (Face 24), and a trim must
   not turn along the collapsed boundary near it (Edgeuse 20, `has_dog_leg_near_pole`);
 - **a trim never jumps** across a periodic boundary (Edgeuse 7, `assert_no_periodic_jump_of`).
+
+A vertex at a shared classification boundary ends a coincident seam interval when that
+interval is on either side of the boundary. The near-miss check applies its existing local
+vertex-zone rule from both sides; a separate edge beside the seam still counts as a near miss
+(`intersect/curve_class/p7.rs`).
+When dropping a curve along a seam, equivalent parameter endpoints stay on one side only when
+the existing 3D approximation bound permits that correction (`intersect/surface_drop_lib/p1.rs`).
+Subdivision retains the complete deferred drop point and rechecks its projection when the span's
+start changes. An unresolved parameter jump cannot use the inaccurate-short-span escape
+(`intersect/surface_drop_lib/p3.rs`).
+Boundary tangent adjustment preserves projected derivatives at interior points near a boundary;
+only exact boundary contacts justify flattening them.
 
 The healer's seam steps (§7.2) repair the same three: `fix_move_seam` turns a face's seam away from
 its boundary, `fix_split_edges_at_seam` splits boundary edges at interior poles and then at the U and
