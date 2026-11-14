@@ -280,8 +280,31 @@ pub(super) fn detailed_face(
     domain: Extent2d,
     notifications: &mut NotifyEnv<'_>,
 ) -> Result<FaceId> {
+    detailed_face_with_owners(
+        k,
+        b,
+        region,
+        boundary,
+        surface,
+        domain,
+        notifications,
+        &mut Vec::new(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn detailed_face_with_owners(
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: Option<RegionId>,
+    boundary: crate::topology::face::p2::FaceCurves,
+    surface: Surface,
+    domain: Extent2d,
+    notifications: &mut NotifyEnv<'_>,
+    owners: &mut Vec<Option<crate::topology::EdgeId>>,
+) -> Result<FaceId> {
     use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-    use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
+    use crate::topology::brep::p7::{make_face_with_curve_owners, FaceCurvesInput};
     let loops = boundary
         .curve_loops
         .into_iter()
@@ -304,7 +327,7 @@ pub(super) fn detailed_face(
         loop_points: boundary.loop_points,
     };
     let key_of = notifications.key_of;
-    make_face_with_curves(
+    make_face_with_curve_owners(
         k,
         b,
         region,
@@ -314,6 +337,7 @@ pub(super) fn detailed_face(
         OrientType::Same,
         None,
         &|face| key_of(crate::error::EntityRef::Face(face)),
+        owners,
         notifications,
     )?
     .face

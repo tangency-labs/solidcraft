@@ -16,7 +16,7 @@
 //! code. The closing `StitchFaces` runs on the caller's notification state, as
 //! upstream's glues notify A's own objects. No recursion.
 
-use super::primitives::{detailed_face, Boolean2d};
+use super::primitives::{detailed_face_with_owners, Boolean2d};
 use crate::boolean::merge::p4::{
     BooleanKernels, KernelManifoldIntersector, ManifoldIntersector, ManifoldKernelAdapter,
     ManifoldNotificationKeys,
@@ -100,6 +100,7 @@ pub(super) fn finish(
             attributes,
             context,
             key_of,
+            other_key_of,
             curve: &curve,
         };
         finish_with(k, a, b, first, operation, result, marks, session)
@@ -114,6 +115,7 @@ struct Session<'s, 'k, 'c> {
     attributes: &'s mut AttributeStore,
     context: &'s mut Option<&'c mut Context>,
     key_of: &'s dyn Fn(EntityRef) -> ObjectRef,
+    other_key_of: &'s dyn Fn(EntityRef) -> ObjectRef,
     /// The primary operand's edge curve identities (for the stitch's split curves).
     curve: &'s dyn Fn(EdgeId, i64) -> Result<ObjectRef>,
 }
@@ -160,6 +162,28 @@ fn finish_with(
         // get coincident edges, then coincident vertices
         let (edges, other_edges) = session.ti.common_edges(a, b)?;
         for (primary, other) in edges.iter().zip(&other_edges) {
+            let source_key = session.other_key_of;
+            let target = (session.key_of)(EntityRef::Edge(*primary));
+            let mut env = session.env();
+            env.key_of = source_key;
+            env.records.or_default(target.key);
+            edge::notify(
+                b,
+                *other,
+                &mut env,
+                crate::geom::object::NotifyOperation::Copy,
+                [Some(target), None, None],
+            )?;
+            let target_other = (session.other_key_of)(EntityRef::Edge(*other));
+            let mut env = session.env();
+            env.records.or_default(target_other.key);
+            edge::notify(
+                a,
+                *primary,
+                &mut env,
+                crate::geom::object::NotifyOperation::Copy,
+                [Some(target_other), None, None],
+            )?;
             marks_a.mark(k, Entity::Edge(*primary), mark_a);
             marks_b.mark(k, Entity::Edge(*other), mark_b);
         }
@@ -267,7 +291,9 @@ fn finish_with(
                     original.clone_for_evaluation()?
                 };
                 let domain = surface.natural_uv_domain_with_nurb(k)?;
-                covering = detailed_face(
+                let source_edges = boundary.edges.clone();
+                let mut owners = Vec::new();
+                covering = detailed_face_with_owners(
                     k,
                     a,
                     a.infinite_region(),
@@ -275,7 +301,26 @@ fn finish_with(
                     surface,
                     domain,
                     &mut session.env(),
+                    &mut owners,
                 )?;
+                for (source, target) in source_edges
+                    .into_iter()
+                    .zip(owners)
+                    .filter_map(|(source, target)| target.map(|target| (source, target)))
+                {
+                    let source_key = session.other_key_of;
+                    let target = (session.key_of)(EntityRef::Edge(target));
+                    let mut env = session.env();
+                    env.key_of = source_key;
+                    env.records.or_default(target.key);
+                    edge::notify(
+                        b,
+                        source,
+                        &mut env,
+                        crate::geom::object::NotifyOperation::Copy,
+                        [Some(target), None, None],
+                    )?;
+                }
             }
         }
         // sTI.DeleteFaces(sDelFaces), its status unchecked
