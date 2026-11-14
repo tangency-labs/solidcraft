@@ -1,26 +1,34 @@
 {
   "ar": {
-    "prefs.panel_layout.reset": "تعذّرت استعادة {count} من تخطيطات اللوحات المحفوظة فأُعيد ضبطها: {names}. بقية تخطيطاتك محفوظة."
+    "prefs.panel_layout.reset": "تعذّرت استعادة {count} من تخطيطات اللوحات المحفوظة فأُعيد ضبطها: {names}. بقية تخطيطاتك محفوظة.",
+    "prefs.panel_layout.reset_kept": "تعذّرت استعادة {count} من تخطيطات اللوحات المحفوظة فأُعيد ضبطها: {names}. تخطيطاتك المحفوظة تُركت كما كانت، ولن تُحفظ التغييرات التي تجريها في هذه الجلسة."
   },
   "de": {
-    "prefs.panel_layout.reset": "{count} gespeicherte Panel-Layouts konnten nicht wiederhergestellt werden und wurden zurückgesetzt: {names}. Ihre übrigen Layouts bleiben erhalten."
+    "prefs.panel_layout.reset": "{count} gespeicherte Panel-Layouts konnten nicht wiederhergestellt werden und wurden zurückgesetzt: {names}. Ihre übrigen Layouts bleiben erhalten.",
+    "prefs.panel_layout.reset_kept": "{count} gespeicherte Panel-Layouts konnten nicht wiederhergestellt werden und wurden zurückgesetzt: {names}. Ihre gespeicherten Layouts bleiben unverändert; Änderungen in dieser Sitzung werden nicht gespeichert."
   },
   "en": {
-    "prefs.panel_layout.reset": "{count} saved panel layouts could not be restored and were reset: {names}. The rest of your layouts are kept."
+    "prefs.panel_layout.reset": "{count} saved panel layouts could not be restored and were reset: {names}. The rest of your layouts are kept.",
+    "prefs.panel_layout.reset_kept": "{count} saved panel layouts could not be restored and were reset: {names}. Your saved layouts are left as they were; changes to layouts this session won't be saved."
   },
   "he": {
-    "prefs.panel_layout.reset": "לא ניתן היה לשחזר {count} פריסות לוחות שמורות והן אופסו: {names}. שאר הפריסות שלך נשמרו."
+    "prefs.panel_layout.reset": "לא ניתן היה לשחזר {count} פריסות לוחות שמורות והן אופסו: {names}. שאר הפריסות שלך נשמרו.",
+    "prefs.panel_layout.reset_kept": "לא ניתן היה לשחזר {count} פריסות לוחות שמורות והן אופסו: {names}. הפריסות השמורות שלך נשארו כפי שהיו; שינויים בפריסות בהפעלה הזו לא יישמרו."
   },
   "ja": {
-    "prefs.panel_layout.reset": "保存済みのパネルレイアウト {count} 件を復元できなかったため、リセットしました: {names}。その他のレイアウトはそのまま保持されます。"
+    "prefs.panel_layout.reset": "保存済みのパネルレイアウト {count} 件を復元できなかったため、リセットしました: {names}。その他のレイアウトはそのまま保持されます。",
+    "prefs.panel_layout.reset_kept": "保存済みのパネルレイアウト {count} 件を復元できなかったため、リセットしました: {names}。保存済みのレイアウトはそのまま残され、このセッションでのレイアウトの変更は保存されません。"
   },
   "ko": {
-    "prefs.panel_layout.reset": "저장된 패널 레이아웃 {count}개를 복원할 수 없어 초기화했습니다: {names}. 나머지 레이아웃은 그대로 유지됩니다."
+    "prefs.panel_layout.reset": "저장된 패널 레이아웃 {count}개를 복원할 수 없어 초기화했습니다: {names}. 나머지 레이아웃은 그대로 유지됩니다.",
+    "prefs.panel_layout.reset_kept": "저장된 패널 레이아웃 {count}개를 복원할 수 없어 초기화했습니다: {names}. 저장된 레이아웃은 그대로 유지되며, 이번 세션의 레이아웃 변경 사항은 저장되지 않습니다."
   },
   "vi": {
-    "prefs.panel_layout.reset": "Không thể khôi phục {count} bố cục bảng đã lưu nên đã đặt lại: {names}. Các bố cục còn lại của bạn vẫn được giữ."
+    "prefs.panel_layout.reset": "Không thể khôi phục {count} bố cục bảng đã lưu nên đã đặt lại: {names}. Các bố cục còn lại của bạn vẫn được giữ.",
+    "prefs.panel_layout.reset_kept": "Không thể khôi phục {count} bố cục bảng đã lưu nên đã đặt lại: {names}. Các bố cục đã lưu được giữ nguyên; thay đổi bố cục trong phiên này sẽ không được lưu."
   },
   "zh": {
-    "prefs.panel_layout.reset": "有 {count} 个已保存的面板布局无法恢复，已重置：{names}。其余布局均已保留。"
+    "prefs.panel_layout.reset": "有 {count} 个已保存的面板布局无法恢复，已重置：{names}。其余布局均已保留。",
+    "prefs.panel_layout.reset_kept": "有 {count} 个已保存的面板布局无法恢复，已重置：{names}。已保存的布局保持原样，本次会话中对布局的更改不会被保存。"
   }
 }

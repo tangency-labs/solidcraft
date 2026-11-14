@@ -147,27 +147,33 @@ impl AppPanelRuntime {
             Err(reason) => reason,
         };
         let mut reset = self.preferences.as_ref().map(|state| state.reset.clone()).unwrap_or_default();
+        let saved = record.value();
         let mut current = record;
         let mut changed = Vec::new();
         let mut originals = Vec::new();
+        let mut keep_saved = false;
         if !self.native.capabilities().native_windows
             && let Ok((redocked, names, kept)) = super::preferences::redock_native_record(&current, self.runtime.layout().registry())
             && !names.is_empty()
         {
             let (rejected, mut unread) = (current.rejected.clone(), current.unread.clone());
-            let (_, dropped) = super::preferences::merge_unread(&mut unread, kept.clone());
+            if super::preferences::merge_unread(&mut unread, kept.clone()).is_none() {
+                keep_saved = true;
+            }
             current = redocked;
             current.rejected = rejected;
             current.unread = unread;
             changed = names;
             originals = kept;
-            reset.extend((dropped > 0).then(|| format!("{dropped} older kept")));
         }
         if !changed.is_empty() {
             if self.restore_preference_record(session, current.clone()).is_ok() {
                 reset.extend(changed);
                 if let Some(state) = &mut self.preferences {
                     state.reset = reset;
+                    if keep_saved && state.preserve.is_none() {
+                        state.preserve = Some(saved);
+                    }
                 }
                 return Ok(());
             }
@@ -182,7 +188,9 @@ impl AppPanelRuntime {
             let raw = commands::RawRecord { bytes: stored.bytes().to_vec(), rejected: stored.rejected().map(<[u8]>::to_vec) };
             originals.push(super::preferences::UnreadEntry::from_raw("remembered", &selected.0, &raw));
         }
-        super::preferences::merge_unread(&mut current.unread, originals);
+        if super::preferences::merge_unread(&mut current.unread, originals).is_none() {
+            keep_saved = true;
+        }
         let prior_rejected = current.rejected.clone();
         if self.reset_pending_preferences(session, current).is_err() {
             return Err(first);
@@ -191,6 +199,9 @@ impl AppPanelRuntime {
         if let Some(state) = &mut self.preferences {
             state.rejected = prior_rejected;
             state.reset = reset;
+            if keep_saved && state.preserve.is_none() {
+                state.preserve = Some(saved);
+            }
         }
         Ok(())
     }

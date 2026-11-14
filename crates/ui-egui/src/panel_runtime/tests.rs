@@ -452,6 +452,28 @@ fn separate_repairs_on_two_starts_keep_both_unreadable_entries() {
 }
 
 #[test]
+fn over_the_cap_the_saved_record_is_left_byte_identical() {
+    use super::preferences::{MAX_REJECTED_RECORD_BYTES, UnreadEntry};
+    let mut app = remembered_preference_fixture();
+    app.run_panel_command("layout.save", &serde_json::json!({"name":"Break me"})).unwrap();
+    let mut value = preferences_value(&app).unwrap();
+    corrupt_saved_preset(&mut value, "Break me");
+    // Kept entries that leave no room for one more.
+    let mut kept: Vec<UnreadEntry> =
+        (0..3).map(|n| UnreadEntry::native(&WorkspaceId::new(format!("kept.{n}")).unwrap(), &vec![0_u8; 4_000_000])).collect();
+    let used: usize = kept.iter().map(UnreadEntry::size).sum();
+    let filler = UnreadEntry::native(&WorkspaceId::new("kept.fill").unwrap(), &[]);
+    let room = MAX_REJECTED_RECORD_BYTES - used - filler.size() - 16;
+    kept.push(UnreadEntry::native(&WorkspaceId::new("kept.fill").unwrap(), &vec![0_u8; room / 4 * 3]));
+    value["unread"] = serde_json::json!(kept);
+    let session = start_with_saved_layouts(&value);
+    assert!(user_preset_names(&session).is_empty(), "the repaired catalogue is used in memory");
+    assert!(session.status.as_ref().is_some_and(|status| status.0.contains("left as they were")));
+    let saved: serde_json::Value = serde_json::from_str(&session.prefs()).unwrap();
+    assert_eq!(saved["panel_layout"], value, "nothing was written over the stored record");
+}
+
+#[test]
 fn unreadable_selected_workspace_falls_back_to_its_default_and_keeps_the_rest() {
     let mut app = remembered_preference_fixture();
     app.run_panel_command("layout.save", &serde_json::json!({"name":"Keep me"})).unwrap();

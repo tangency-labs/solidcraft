@@ -11,7 +11,7 @@ use super::*;
 
 pub const PREFERENCES_KEY: &str = "panel_layout";
 const RECORD_VERSION: u32 = 1;
-const MAX_REJECTED_RECORD_BYTES: usize = 4 * commands::MAX_CATALOGUE_SNAPSHOT_BYTES + 4096;
+pub(super) const MAX_REJECTED_RECORD_BYTES: usize = 4 * commands::MAX_CATALOGUE_SNAPSHOT_BYTES + 4096;
 const MAX_RECORD_BYTES: usize = 2 * MAX_REJECTED_RECORD_BYTES;
 const MAX_PROFILE_LAYOUT_BYTES: usize = 256 * 1024;
 
@@ -62,33 +62,29 @@ impl UnreadEntry {
     pub(super) fn native(workspace: &WorkspaceId, bytes: &[u8]) -> Self {
         Self::new("native", &workspace.0, bytes, None)
     }
-    fn size(&self) -> usize {
+    pub(super) fn size(&self) -> usize {
         self.kind.len() + self.name.len() + self.record.len().div_ceil(3) * 4 + self.recovery.as_ref().map_or(0, String::len)
     }
 }
 
-/// Appends entries that are not already kept, newest last, and drops the oldest
-/// when the total would pass the cap. Returns the names of newly kept entries and
-/// how many entries could not be kept.
-pub(super) fn merge_unread(kept: &mut Vec<UnreadEntry>, incoming: Vec<UnreadEntry>) -> (Vec<String>, usize) {
+/// Appends entries that are not already kept, newest last. Returns the names of
+/// newly kept entries, or `None`, changing nothing, when keeping them would pass
+/// the size cap: nothing is ever dropped.
+pub(super) fn merge_unread(kept: &mut Vec<UnreadEntry>, incoming: Vec<UnreadEntry>) -> Option<Vec<String>> {
+    let mut next = kept.clone();
     let mut added = Vec::new();
     for entry in incoming {
-        if kept.contains(&entry) {
+        if next.contains(&entry) {
             continue;
         }
         added.push(entry.name.clone());
-        kept.push(entry);
+        next.push(entry);
     }
-    let mut dropped = 0;
-    while kept.iter().map(UnreadEntry::size).sum::<usize>() > MAX_REJECTED_RECORD_BYTES && !kept.is_empty() {
-        kept.remove(0);
-        dropped += 1;
+    if next.iter().map(UnreadEntry::size).sum::<usize>() > MAX_REJECTED_RECORD_BYTES {
+        return None;
     }
-    (added, dropped)
-}
-
-fn dropped_note(dropped: usize) -> Option<String> {
-    (dropped > 0).then(|| format!("{dropped} older kept"))
+    *kept = next;
+    Some(added)
 }
 
 mod catalogue_bytes {
@@ -124,6 +120,8 @@ pub(super) struct PreferenceSession {
     /// Entries reset at startup or first paint, for the precise notice.
     pub reset: Vec<String>,
     pub unread: Vec<UnreadEntry>,
+    /// The saved record to write back unchanged this session (kept entries over the cap).
+    pub preserve: Option<Value>,
 }
 
 pub(super) type PreferenceEnvironment = (LogicalRect, AllocationEnvironment, u64, RuntimeEnvironment, Vec<LogicalRect>, HostCapabilities);
@@ -308,10 +306,21 @@ impl PreferenceRecord {
     /// matching entry of `defaults` (or dropped, for a user preset) and named in
     /// the returned list; the rest is kept. Nothing is written until the next
     /// save. A record that is unreadable as a whole still fails.
-    pub(super) fn read_repairing(value: &Value, registry: &PanelRegistry, defaults: &commands::CatalogueState) -> PanelResult<(Self, Vec<String>)> {
+    /// The third value is the saved record to leave on disk unchanged for this
+    /// session, set when the entries that could not be restored do not fit the
+    /// record's size cap.
+    pub(super) fn read_repairing(
+        value: &Value,
+        registry: &PanelRegistry,
+        defaults: &commands::CatalogueState,
+    ) -> PanelResult<(Self, Vec<String>, Option<Value>)> {
         Self::read_with(value, registry, Some(defaults))
     }
-    fn read_with(value: &Value, registry: &PanelRegistry, defaults: Option<&commands::CatalogueState>) -> PanelResult<(Self, Vec<String>)> {
+    fn read_with(
+        value: &Value,
+        registry: &PanelRegistry,
+        defaults: Option<&commands::CatalogueState>,
+    ) -> PanelResult<(Self, Vec<String>, Option<Value>)> {
         bounded_record(value)?;
         if value.get("version").and_then(Value::as_u64) != Some(u64::from(RECORD_VERSION)) {
             return Err(error(Rule::Version, "unsupported application panel preferences"));
@@ -334,6 +343,7 @@ impl PreferenceRecord {
             }
         }
         let mut reset = Vec::new();
+        let mut preserve = None;
         let mut state = match defaults {
             Some(defaults) => {
                 let (state, skipped) = commands::CatalogueState::hydrate_lenient(&record.catalogue, registry, defaults)?;
@@ -346,9 +356,13 @@ impl PreferenceRecord {
                     }
                 }
                 if !entries.is_empty() {
-                    let (added, dropped) = merge_unread(&mut record.unread, entries);
-                    reset = added;
-                    reset.extend(dropped_note(dropped));
+                    match merge_unread(&mut record.unread, entries.clone()) {
+                        Some(added) => reset = added,
+                        None => {
+                            reset = entries.into_iter().map(|entry| entry.name).collect();
+                            preserve = Some(value.clone());
+                        }
+                    }
                 }
                 state
             }
@@ -367,7 +381,7 @@ impl PreferenceRecord {
         if defaults.is_some() && (!reset.is_empty() || !record.unread.is_empty()) {
             record.catalogue = state.export()?;
         }
-        Ok((record, reset))
+        Ok((record, reset, preserve))
     }
     pub(super) fn catalogue(&self, registry: &PanelRegistry) -> PanelResult<commands::CatalogueState> {
         commands::CatalogueState::hydrate(&self.catalogue, registry)
@@ -409,6 +423,9 @@ pub fn persistent_preferences_value(app: &crate::SolveApp) -> PanelResult<Option
 pub fn portable_preferences_value(app: &crate::SolveApp, value: Option<Value>) -> PanelResult<Option<Value>> {
     let Some(value) = value else { return Ok(None) };
     bounded_record(&value)?;
+    if let Some(saved) = app.panel_runtime.as_ref().and_then(|runtime| runtime.preferences.as_ref()).and_then(|state| state.preserve.clone()) {
+        return Ok(Some(saved));
+    }
     let empty = PanelRegistry::default();
     let registry = app.panel_runtime.as_ref().map_or(&empty, |runtime| runtime.runtime().layout().registry());
     let Ok(mut record) = PreferenceRecord::read(&value, registry) else { return Ok(Some(value)) };
@@ -485,24 +502,28 @@ pub(super) fn report_notice(app: &mut crate::SolveApp) {
     if !app.panel_layout_preferences.notice_reported {
         app.panel_layout_preferences.notice_reported = true;
         let reset = app.panel_runtime.as_ref().and_then(|runtime| runtime.preferences.as_ref()).map(|state| state.reset.clone()).unwrap_or_default();
+        let preserved = app.panel_runtime.as_ref().and_then(|runtime| runtime.preferences.as_ref()).is_some_and(|state| state.preserve.is_some());
         let text =
             if reset.is_empty() || app.panel_runtime.as_ref().and_then(|runtime| runtime.preferences.as_ref()).is_some_and(|state| state.failed) {
                 app.tr("prefs.panel_layout.recovery").to_string()
             } else {
-                reset_notice(&reset)
+                reset_notice(&reset, preserved)
             };
         app.set_status(text, true);
     }
 }
 
 /// Names what was reset, at most five, then a count of the rest.
-fn reset_notice(reset: &[String]) -> String {
+fn reset_notice(reset: &[String], preserved: bool) -> String {
     const SHOWN: usize = 5;
     let mut names = reset.iter().take(SHOWN).cloned().collect::<Vec<_>>().join(", ");
     if reset.len() > SHOWN {
         names.push_str(&format!(", +{}", reset.len() - SHOWN));
     }
-    solidcraft_ui_text::format("prefs.panel_layout.reset", &[("count", &reset.len().to_string()), ("names", &names)])
+    solidcraft_ui_text::format(
+        if preserved { "prefs.panel_layout.reset_kept" } else { "prefs.panel_layout.reset" },
+        &[("count", &reset.len().to_string()), ("names", &names)],
+    )
 }
 
 /// Opt in an already registered runtime. Production registrations supply their
@@ -562,10 +583,12 @@ pub(super) fn configure_preferences(
     let mut rejected = None;
     let mut reset = Vec::new();
     let mut unread = Vec::new();
+    let mut preserve = None;
     if let Some(raw) = &preferences.record {
         match PreferenceRecord::read_repairing(raw, registry, defaults.state()) {
-            Ok((record, names)) => {
+            Ok((record, names, keep)) => {
                 reset = names;
+                preserve = keep;
                 unread = record.unread.clone();
                 pending = Some(record);
             }
@@ -581,7 +604,7 @@ pub(super) fn configure_preferences(
     }
     integration.install_preference_catalogue(
         PreferenceCatalogue(defaults.state().clone()),
-        PreferenceSession { pending, initial, rejected, failed: false, legacy, failed_environment: None, reset, unread },
+        PreferenceSession { pending, initial, rejected, failed: false, legacy, failed_environment: None, reset, unread, preserve },
     )?;
     Ok(integration.preferences.as_ref().is_some_and(|state| state.rejected.is_some() || !state.reset.is_empty()))
 }
@@ -600,10 +623,11 @@ pub fn restore_preferences(app: &mut crate::SolveApp, value: Option<Value>) -> P
     if let Some(integration) = app.panel_runtime.as_mut().filter(|runtime| runtime.preferences.is_some()) {
         let record = match &value {
             Some(raw) => {
-                let (record, reset) =
+                let (record, reset, preserve) =
                     PreferenceRecord::read_repairing(raw, integration.runtime().layout().registry(), integration.preference_catalogue_state())?;
                 if let Some(state) = &mut integration.preferences {
                     state.reset = reset;
+                    state.preserve = preserve;
                 }
                 record
             }
