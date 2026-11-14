@@ -64,16 +64,17 @@ impl Rigid {
         [[r[0][0], r[1][0], r[2][0], 0.0], [r[0][1], r[1][1], r[2][1], 0.0], [r[0][2], r[1][2], r[2][2], 0.0], [t[0], t[1], t[2], 1.0]]
     }
 
-    fn frame(&self, f: &Frame) -> Frame {
-        Frame { origin: self.point(f.origin), x_axis: self.direction(f.x_axis), y_axis: self.direction(f.y_axis) }
+    fn frame(&self, f: &Frame) -> Option<Frame> {
+        let [x_axis, y_axis] = solidcore_ops::affine::orthonormal_axes(self.direction(f.x_axis), self.direction(f.y_axis)).ok()?;
+        Some(Frame { origin: self.point(f.origin), x_axis, y_axis })
     }
 
     /// The curve moved; `None` for one on a blend by its definition ([`moved`]).
     fn curve(&self, c: &Curve) -> Option<Curve> {
         Some(match c {
             Curve::Line { start, end } => Curve::Line { start: self.point(*start), end: self.point(*end) },
-            Curve::Circle { frame, radius } => Curve::Circle { frame: self.frame(frame), radius: *radius },
-            Curve::Ellipse { frame, radii } => Curve::Ellipse { frame: self.frame(frame), radii: *radii },
+            Curve::Circle { frame, radius } => Curve::Circle { frame: self.frame(frame)?, radius: *radius },
+            Curve::Ellipse { frame, radii } => Curve::Ellipse { frame: self.frame(frame)?, radii: *radii },
             Curve::Polyline { points } => Curve::Polyline { points: points.iter().map(|p| self.point(*p)).collect() },
             Curve::Spline { knots, points } => Curve::Spline { knots: knots.clone(), points: points.iter().map(|p| self.point(*p)).collect() },
             Curve::RationalSpline { knots, homogeneous } => {
@@ -92,19 +93,21 @@ impl Rigid {
     fn surface(&self, s: &Surface) -> Option<Surface> {
         Some(match s {
             Surface::Plane { origin, u_axis, v_axis } => {
-                Surface::Plane { origin: self.point(*origin), u_axis: self.direction(*u_axis), v_axis: self.direction(*v_axis) }
+                let [u_axis, v_axis] = solidcore_ops::affine::rigid_plane_axes(&self.matrix(), *u_axis, *v_axis).ok()?;
+                Surface::Plane { origin: self.point(*origin), u_axis, v_axis }
             }
             Surface::PlaneThrough { origin, u_point, v_point } => {
-                Surface::PlaneThrough { origin: self.point(*origin), u_point: self.point(*u_point), v_point: self.point(*v_point) }
+                let (origin, [u_axis, v_axis]) = solidcore_ops::affine::rigid_plane_through(&self.matrix(), *origin, *u_point, *v_point).ok()?;
+                Surface::Plane { origin, u_axis, v_axis }
             }
-            Surface::Cylinder { frame, radius } => Surface::Cylinder { frame: self.frame(frame), radius: *radius },
+            Surface::Cylinder { frame, radius } => Surface::Cylinder { frame: self.frame(frame)?, radius: *radius },
             Surface::Cone { frame, radius_at_origin, half_angle } => {
-                Surface::Cone { frame: self.frame(frame), radius_at_origin: *radius_at_origin, half_angle: *half_angle }
+                Surface::Cone { frame: self.frame(frame)?, radius_at_origin: *radius_at_origin, half_angle: *half_angle }
             }
-            Surface::Sphere { frame, radius } => Surface::Sphere { frame: self.frame(frame), radius: *radius },
+            Surface::Sphere { frame, radius } => Surface::Sphere { frame: self.frame(frame)?, radius: *radius },
             Surface::BallPatch { center, radius } => Surface::BallPatch { center: self.point(*center), radius: *radius },
             Surface::Torus { frame, major_radius, minor_radius, tube_start } => {
-                Surface::Torus { frame: self.frame(frame), major_radius: *major_radius, minor_radius: *minor_radius, tube_start: *tube_start }
+                Surface::Torus { frame: self.frame(frame)?, major_radius: *major_radius, minor_radius: *minor_radius, tube_start: *tube_start }
             }
             Surface::Spline { u_knots, v_knots, points } => Surface::Spline {
                 u_knots: u_knots.clone(),

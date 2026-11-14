@@ -1501,6 +1501,34 @@ mod tests {
         assert!(trim_count(&b) > 0, "the trims are made on the box itself");
     }
 
+    /// A ray that enters a 100 mm cube 0.001 mm from a vertical edge and leaves 0.001 mm from
+    /// the same edge: the entry point is not on the edge (it is 0.001 mm off it, far outside
+    /// the edge's tolerance), so the hit is a hit on the face it enters, and the ray start is
+    /// outside the cube. (The solve reports the nearest hit only here, so the hit is not moved
+    /// onto the edge whatever tolerance the move is held to; that is covered where a ray meets
+    /// two faces on an edge, `a_long_thin_elliptic_prism_faces_out_and_cuts_a_block`.)
+    #[test]
+    fn a_ray_entering_near_an_edge_hits_the_face() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 100.0, 100.0, 100.0)
+                .unwrap();
+        let query = BrepQuery::of_brep(&b);
+        let outside = b.infinite_region();
+        let start = Point3::new(-30.0, 30.001, 50.0);
+        let direction = Vec3::new(1.0, -1.0, 0.0).unitize().unwrap();
+        let hit = query
+            .ray_fire_live(&k, &mut b, start, direction, 1e-6)
+            .unwrap();
+        assert_eq!(hit.region, outside, "the ray starts outside the cube");
+        assert_eq!(
+            hit.intersection.point_class(),
+            PointClassType::Face,
+            "{:?}",
+            hit.intersection
+        );
+    }
+
     /// A query keeps the face caches its ray solves build (upstream keeps them on the
     /// surfaces): a face's cache is built once however many points it classifies, and
     /// the classifications equal those of a fresh query per point (#2494).

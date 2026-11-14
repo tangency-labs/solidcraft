@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 
-use super::{SelectClearParams, SelectClearResult, SelectItem, SelectSetParams, SelectSetResult, read_item};
+use super::{
+    SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem, SelectMode, SelectSetParams, SelectSetResult, read_item,
+};
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 use crate::{Sel, Session};
@@ -9,6 +11,62 @@ use crate::{Sel, Session};
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<SelectSetParams>(), &["add", "items"]);
     assert_keys(input_schema_for::<SelectClearParams>(), &[]);
+    assert_keys(input_schema_for::<SelectFilterParams>(), &["mode"]);
+}
+
+/// #16536: `select.filter` takes one of three words and answers it, and says so: the published
+/// schema requires `mode` and lists the words, the reply is the mode that was given, and the type
+/// reads a value exactly when the handler does.
+#[test]
+fn the_filter_answers_the_mode_it_was_given() {
+    let input = input_schema_for::<SelectFilterParams>().as_value().clone();
+    let described = Session::default().execute("engine.describe", &json!({"command": "select.filter"})).unwrap();
+    assert_eq!(described["input"]["required"], json!(["mode"]), "the handler refuses a call without it");
+    assert_eq!(described["input"]["additionalProperties"], false);
+    // The words are published as the mode's own schema, inline or through a `$ref`.
+    let mode = match described["input"]["properties"]["mode"].get("$ref").and_then(Value::as_str).and_then(|r| r.strip_prefix("#/$defs/")) {
+        Some(name) => &described["input"]["$defs"][name],
+        None => &described["input"]["properties"]["mode"],
+    };
+    let words: Vec<&str> = mode["oneOf"].as_array().into_iter().flatten().map(|one| one["const"].as_str().unwrap_or_default()).collect();
+    assert_eq!(words, ["body", "face", "component"], "{described}");
+    let spec = crate::find_command("select.filter").unwrap();
+    assert!(spec.contract.is_some() && spec.output.is_some() && !spec.undoable);
+    let typed = |p: &Value| serde_json::from_value::<SelectFilterParams>(p.clone()).is_ok();
+    for mode in ["body", "face", "component"] {
+        assert!(typed(&json!({"mode": mode})), "{mode}");
+    }
+    for p in [json!({"mode": "edge"}), json!({"mode": ""}), json!({"mode": 1}), json!({"mode": null})] {
+        assert!(!typed(&p), "{p}");
+    }
+    // A documented enum is published as `oneOf`/`const`, which `conforms` doesn't weigh, so the
+    // words are compared above; what the schema decides for itself are the keys around them.
+    for p in [json!({"mode": "body", "modes": "body"}), json!({})] {
+        assert!(!conforms(&input, &input, &p), "{p}");
+    }
+    // `mode` is required in the schema and left to the handler in the type, as the other commands
+    // whose handler refuses a missing key do.
+    assert!(typed(&json!({})));
+    assert!(!conforms(&input, &input, &json!({})));
+    assert_eq!(SelectMode::parse("component"), Some(SelectMode::Component));
+    assert_eq!(SelectMode::parse("edge"), None);
+
+    let schema = output_schema_for::<SelectFilterResult>().as_value().clone();
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    for mode in ["body", "face", "component"] {
+        let r = s.execute("select.filter", &json!({"mode": mode})).unwrap_or_else(|e| panic!("{mode}: {e}"));
+        assert_eq!(r, json!({"mode": mode}), "the reply is the JSON the command returned before the type");
+        assert!(conforms(&schema, &schema, &r), "{r} doesn't match {schema}");
+        assert_eq!(r.get("param_warnings"), None, "{r}");
+    }
+    assert!(!conforms(&schema, &schema, &json!({})), "the reply always names the mode");
+    // A key the command doesn't take is refused today: the handler's own reader denies unknown keys,
+    // so the refusal is its message at every level, and strict only gets there first.
+    for level in ParamCheck::ALL {
+        let mut strict = Session { param_check: level, ..Session::default() };
+        let said = strict.execute("select.filter", &json!({"mode": "body", "mode2": "body"})).err().map(|e| e.to_string());
+        assert!(said.as_deref().is_some_and(|e| e.contains("mode2")), "{level:?}: {said:?}");
+    }
 }
 
 /// Strict gives the handler's message for the items it refuses on their own.
@@ -31,6 +89,10 @@ fn strict_keeps_todays_errors() {
         ("select.set", json!({"items": [{"type": "face", "body": "Box1", "index": null, "point": [1, 2, 3]}]})),
         ("select.set", json!({"items": [{"type": "body", "name": "Missing"}]})),
         ("select.set", json!({"items": [{"type": "face", "body": "Missing", "point": [1, 2, 3]}]})),
+        ("select.filter", json!({})),
+        ("select.filter", json!({"mode": ""})),
+        ("select.filter", json!({"mode": "edge"})),
+        ("select.filter", json!({"mode": "Body"})),
     ]);
 }
 

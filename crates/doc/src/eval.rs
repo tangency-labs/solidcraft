@@ -280,6 +280,15 @@ impl ModelBody {
         out
     }
 
+    /// The display edges that are one edge to the user with display edge `edge`, sorted, `edge`
+    /// among them: the pieces a seam of a curved surface splits it into, as a sphere's seam
+    /// ending on a slot's rim splits that rim's arc in two ([`kernel::whole_edge`], decided from
+    /// the exact record). The kernel names them by the record's edge indices, which are the
+    /// display edges'. Just `edge` for a mesh body, a seam or an edge the body does not have.
+    pub fn whole_edge(&self, edge: usize) -> Vec<usize> {
+        kernel::whole_edge(&self.body, edge)
+    }
+
     /// The display plan of this body at the viewport's display quality
     /// ([`crate::display_quality::current`]; at Normal, the same tolerance and angle as
     /// [`ModelBody::mesh`]), made once per level; `None` when the body has no plan (a mesh body,
@@ -953,6 +962,7 @@ struct CachedEval<S> {
     warning: Option<String>,
     import_report: Option<Arc<kernel::ImportReport>>,
     repair: Option<Arc<kernel::RepairReport>>,
+    lost_projections: Option<Arc<Vec<crate::LostProjection>>>,
     ms: f64,
     state: S,
 }
@@ -1118,6 +1128,7 @@ impl<S> CachedEval<S> {
             warning: self.warning.clone(),
             import_report: self.import_report.clone(),
             repair: self.repair.clone(),
+            lost_projections: self.lost_projections.clone(),
             ms: self.ms,
             state,
         }
@@ -1304,6 +1315,10 @@ pub struct FeatureResult {
     /// What a Repair Part feature changed, face by face (the command's reply says it).
     #[serde(skip)]
     pub repair: Option<Arc<kernel::RepairReport>>,
+    /// A sketch that failed for projections kept by names that find nothing: which
+    /// ([`crate::DocError::LostProjections`]; `error` is their message).
+    #[serde(skip)]
+    pub lost_projections: Option<Arc<Vec<crate::LostProjection>>>,
     pub ms: f64,
     pub skipped: bool,
     /// Not evaluated on the document's current inputs: a feature at or after a sketch shown live
@@ -2916,13 +2931,10 @@ impl Model {
         self.results.iter().rev().find(|r| !r.skipped).map(|r| r.state.clone()).unwrap_or_else(|| self.empty.clone())
     }
 
-    /// Show the sketch `feature` while it is edited although it failed (#12085): a link whose
-    /// named face or edge is gone fails the sketch, so the evaluation keeps no sketch for it, and
-    /// its editor had nothing to show or repair. Here the sketch is built as it is evaluated, but
-    /// with such a link marked lost and kept where it was (no other face or edge is taken for
-    /// it), and added to the final state only: the sketch's result keeps its error and the
-    /// features after it still fail. `None`, a sketch that did not fail, or one that fails for
-    /// another reason too, shows nothing more. Returns whether a held sketch is shown.
+    /// Show the sketch `feature` while it is edited although it failed (#12085), as
+    /// [`Model::failed_sketch_shown`] builds it, in the final state only: the sketch's result
+    /// keeps its error and the features after it still fail. `None`, or a sketch that shows
+    /// nothing, shows nothing more. Returns whether a held sketch is shown.
     pub fn hold_failed_sketch(&mut self, doc: &Document, feature: Option<u64>) -> bool {
         let Some(id) = feature else {
             self.held = None;
@@ -2933,11 +2945,29 @@ impl Model {
             return true;
         }
         self.held = None;
-        if base.sketch(id).is_some() || !self.result(id).is_some_and(|r| r.error.is_some() && !r.skipped && !r.stale) {
+        if base.sketch(id).is_some() {
             return false;
         }
-        let Some(f) = doc.feature(id) else { return false };
-        let FeatureKind::Sketch { plane, sketch } = &f.kind else { return false };
+        let Some(solved) = self.failed_sketch_shown(doc, id) else { return false };
+        let mut shown = (*base).clone();
+        shown.sketches.retain(|s| s.feature != id);
+        shown.sketches.push(solved);
+        self.held = Some(HeldSketch { feature: id, base, shown: Arc::new(shown) });
+        true
+    }
+
+    /// The sketch `id` that failed because links lost their named face or edge (#12085): the
+    /// evaluation keeps no sketch for it, so it would show nothing to repair. Built here as it is
+    /// evaluated, on the model before it, but with each such link marked lost and kept where it
+    /// was (no other face or edge is taken for it). `None` for a sketch that did not fail that
+    /// way, or that fails for another reason too. For showing the sketch and telling that lost
+    /// projections are its only failure (Redefine Sketch Plane); no feature builds from it.
+    pub fn failed_sketch_shown(&self, doc: &Document, id: u64) -> Option<Arc<SolvedSketch>> {
+        if !self.result(id).is_some_and(|r| r.lost_projections.is_some() && !r.skipped && !r.stale) {
+            return None;
+        }
+        let f = doc.feature(id)?;
+        let FeatureKind::Sketch { plane, sketch } = &f.kind else { return None };
         let mut next = (*self.state_before(id)).clone();
         let vals = evaluation_values(doc).0;
         let mut warning = None;
@@ -2946,12 +2976,7 @@ impl Model {
             eval_sketch(doc, &vals, f, plane, sketch, &mut next, &mut warning, crate::project::LostNames::Mark)
                 .map_err(|e| kernel::KernelError::Failed(e.to_string()))
         });
-        let Some(solved) = built.ok().and_then(|()| next.sketches.iter().find(|s| s.feature == id).cloned()) else { return false };
-        let mut shown = (*base).clone();
-        shown.sketches.retain(|s| s.feature != id);
-        shown.sketches.push(solved);
-        self.held = Some(HeldSketch { feature: id, base, shown: Arc::new(shown) });
-        true
+        built.ok().and_then(|()| next.sketches.iter().find(|s| s.feature == id).cloned())
     }
 
     /// State just before the feature with this id (for editing a sketch in context).
@@ -3263,6 +3288,7 @@ impl Model {
                         warning: None,
                         import_report: None,
                         repair: None,
+                        lost_projections: None,
                         ms: 0.0,
                         skipped: true,
                         stale: false,
@@ -3297,6 +3323,7 @@ impl Model {
                         warning: None,
                         import_report: None,
                         repair: None,
+                        lost_projections: None,
                         ms: 0.0,
                         skipped: false,
                         stale: false,
@@ -3343,6 +3370,7 @@ impl Model {
                         warning: c.warning,
                         import_report: c.import_report,
                         repair: c.repair,
+                        lost_projections: c.lost_projections,
                         ms: c.ms,
                         skipped: false,
                         stale: false,
@@ -3401,6 +3429,7 @@ impl Model {
                 let mut warning = cached.as_ref().and_then(|c| c.warning.clone());
                 let mut import_report = cached.as_ref().and_then(|c| c.import_report.clone());
                 let mut repair = cached.as_ref().and_then(|c| c.repair.clone());
+                let mut lost_projections = cached.as_ref().and_then(|c| c.lost_projections.clone());
                 // Face references by name: move each face point onto its named face (on the body the
                 // feature names, when it names one and the face is there).
                 let renamed;
@@ -3444,7 +3473,12 @@ impl Model {
                         r.map_err(|e| match e {
                             // A panic the kernel caught stays one.
                             crate::DocError::Kernel(kernel::KernelError::Internal(m)) => kernel::KernelError::Internal(m),
-                            e => kernel::KernelError::Failed(e.in_feature(&f.name).to_string()),
+                            e => {
+                                if let crate::DocError::LostProjections { links, .. } = &e {
+                                    lost_projections = Some(Arc::new(links.clone()));
+                                }
+                                kernel::KernelError::Failed(e.in_feature(&f.name).to_string())
+                            }
                         })?;
                         // The checks the feature's steps left to its end: the bodies it keeps.
                         if !deferred {
@@ -3562,6 +3596,7 @@ impl Model {
                     }
                     Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
                 };
+                let lost_projections = lost_projections.filter(|_| error.is_some());
                 // A panic is no result to reuse: the kernel was replaced after it. Work its watcher
                 // stopped may have been cut short (a boolean that gave up): it is not kept either.
                 if !self.no_cache && !watched.cancelled() && !internal {
@@ -3570,6 +3605,7 @@ impl Model {
                         warning: warning.clone(),
                         import_report: import_report.clone(),
                         repair: repair.clone(),
+                        lost_projections: lost_projections.clone(),
                         ms,
                         state: state.clone(),
                     };
@@ -3595,6 +3631,7 @@ impl Model {
                     warning,
                     import_report,
                     repair,
+                    lost_projections,
                     ms,
                     skipped: false,
                     stale: false,
@@ -4259,6 +4296,19 @@ fn union_all(operands: &[&Traced]) -> Result<Traced> {
     Ok(Traced::step(kernel::union_all(&bodies)?, operands))
 }
 
+/// The union of `operands` when no two of them meet or touch: the bodies side by side as one body
+/// of several pieces, keeping their lineage, with no intersection work. They are apart when
+/// their exact boxes, each grown by twice its body's tolerance, do not meet
+/// ([`kernel::union_apart`]). `None` when that cannot be shown (two boxes meet, a mesh body, a
+/// box that cannot be measured): the caller runs the kernel's union.
+fn union_all_apart(operands: &[&Traced]) -> Option<Traced> {
+    let bodies: Vec<Body> = operands.iter().map(|t| t.body.clone()).collect();
+    let one = kernel::union_apart(&bodies).ok().flatten()?;
+    #[cfg(test)]
+    cost_tests::count(|c| c.joined_apart += 1);
+    Some(Traced::step(one, operands))
+}
+
 /// After a cut handled some sheet bodies as flat machining, apply it to the other targets.
 fn apply_beside_sheet_cut(
     doc: &Document,
@@ -4591,7 +4641,6 @@ fn apply_traced_with(
     targets: &[String],
     extra: &[String],
 ) -> Result<()> {
-    let tools = if op == Operation::Intersect { intersection_tool_union(tools)? } else { tools };
     // Participants: the feature's own targets, else its explicit participants, else the bodies
     // of its component (and what it made itself): other components are left alone.
     let targets: &[String] = if targets.is_empty() { &f.participants } else { targets };
@@ -4629,6 +4678,21 @@ fn apply_traced_with(
         }
         return Ok(());
     }
+    // #9867: a named surface body is no solid to cut or intersect; say how to get one.
+    if matches!(op, Operation::Cut | Operation::Intersect) && named {
+        for &i in &target_idx {
+            if let Some(b) = state.bodies.get(i).filter(|b| b.body.is_surface()) {
+                let verb = if op == Operation::Cut { "a cut" } else { "an intersect" };
+                return Err(DocError::Invalid(format!(
+                    "{} is a surface body, and {verb} needs a solid: cut it with Surface › Trim, or Thicken it first",
+                    b.name
+                )));
+            }
+        }
+    }
+    // An intersect's tools act as one body. Unioned after the refusals above, so a union that
+    // fails or runs out of time never hides them and is not paid for a refused feature.
+    let tools = if op == Operation::Intersect { intersection_tool_union(tools)? } else { tools };
     if matches!(op, Operation::Cut | Operation::Intersect) {
         // A cut that cannot reach a sheet leaves it as it is (#10226): a sheet whose box lies
         // clear of every tool's, in its own frame, needs no boolean to show it. An intersect
@@ -4796,7 +4860,18 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
         let into_keep = tool_frame(keep);
         let tools = tools.iter().map(|tool| tool_in(tool, into_keep)).collect::<Result<Vec<_>>>()?;
         let operands: Vec<&Traced> = std::iter::once(&base).chain(&tools).collect();
-        let acc = union_all(&operands)?;
+        // Bodies that are all apart need no intersection work: they are one body of several
+        // pieces as they stand (#3455: joining 64 separate pegs took the kernel's union 4.5 s).
+        let acc = match union_all_apart(&operands) {
+            Some(acc) => acc,
+            // The kernel's union pairs the tools with each other before the target. Fins whose
+            // ends meet only inside a hub then meet in slivers it cannot resolve (#15913); into
+            // the target one at a time, each tool's overlap with the others already lies inside.
+            None => match union_all(&operands) {
+                Ok(acc) => acc,
+                Err(e) => tools.iter().try_fold(base.clone(), |acc, tool| union(&acc, tool)).map_err(|_| e)?,
+            },
+        };
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
             *mb = mb.remade(acc);
         }
@@ -5030,8 +5105,9 @@ fn named_pieces_of(
     out
 }
 
-/// Distance that reaches through every target body from the sketch plane (either side).
-pub fn through_all_distance(st: &ModelState, plane: &Plane, targets: &[String]) -> Result<f64> {
+/// Distance that reaches through every target body from the plane `start` along the normal from
+/// the sketch plane (the From Object level plus any start offset), on either side.
+pub fn through_all_distance(st: &ModelState, plane: &Plane, start: f64, targets: &[String]) -> Result<f64> {
     let mut far: f64 = 0.0;
     let mut any = false;
     for b in st.bodies.iter().filter(|b| targets.is_empty() || targets.contains(&b.name)) {
@@ -5046,7 +5122,7 @@ pub fn through_all_distance(st: &ModelState, plane: &Plane, targets: &[String]) 
                 if i & 2 == 0 { bb.min.y } else { bb.max.y },
                 if i & 4 == 0 { bb.min.z } else { bb.max.z },
             );
-            far = far.max(plane.height(p).abs());
+            far = far.max((plane.height(p) - start).abs());
         }
     }
     if !any {
@@ -6946,6 +7022,9 @@ fn feature_tools_with_constructor(
                 Some(p) => height_at(&tst, object_face(&tst, from_name, p.0, Some(n)), &ss.plane, centre, p.0),
                 None => 0.0,
             };
+            // Whether the extrusion runs toward the To object: false when a To offset carries the
+            // end back across the start, so the tool never reaches the object's face.
+            let mut toward_to = true;
             let d = match extent.to {
                 Some(p) => {
                     let off = match &extent.to_offset {
@@ -6959,11 +7038,14 @@ fn feature_tools_with_constructor(
                     if (to - start).abs() < 1e-9 {
                         return Err(DocError::Invalid("the To object is where the extrude starts".into()));
                     }
+                    toward_to = (h - start) * (to - start) > 0.0;
                     to - start
                 }
                 None if extent.through_all => {
                     // The reach is a length; a negative saved distance keeps its side (#10415).
-                    let reach = through_all_distance(st, &ss.plane, &crate::plain(targets))?;
+                    // Measured from where the extrude starts, so an offset leaves no side short (#16556).
+                    let start = from + extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
+                    let reach = through_all_distance(st, &ss.plane, start, &crate::plain(targets))?;
                     if val(vals, &extent.distance, Kind::Length).is_ok_and(|saved| saved < 0.0) { -reach } else { reach }
                 }
                 None => val(vals, &extent.distance, Kind::Length)?,
@@ -7044,8 +7126,10 @@ fn feature_tools_with_constructor(
             // A negative distance flips the side.
             let (mut lo, mut hi) = if a <= b { (a, b) } else { (b, a) };
             // To a curved (or slanted) face: run right through the target body, then keep what
-            // lies before its surface (the tool less the body, the piece at the start).
-            let curved = curved_face(&tst, to_face, Some(n));
+            // lies before its surface (the tool less the body, the piece at the start). An end
+            // the offset carries back across the start, away from that face, never meets it: it
+            // ends at its level, as for a plane, instead of running out through the whole body.
+            let curved = curved_face(&tst, to_face, Some(n)).filter(|_| toward_to);
             // The tool is cut back to that surface below, which removes the part a To offset adds
             // past it: the offset would change nothing, so say so instead of cutting nothing (#12617).
             if curved.is_some()
@@ -8604,7 +8688,13 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
             continue;
         }
         let from = if k == 0 { placed.unwrap_or(*p) } else { *p };
-        match crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, from) {
+        // Only a thread may find a numbered piece of a round side again as its whole face (#16602).
+        let hit = if matches!(f.kind, FeatureKind::Thread { .. }) {
+            crate::name_lookup::locate_thread_face_on_body(&fst, f.kind.face_body(), n, from)
+        } else {
+            crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, from)
+        };
+        match hit {
             Some(hit) => {
                 if let Some(note) = hit.note(n) {
                     notes.push(note);

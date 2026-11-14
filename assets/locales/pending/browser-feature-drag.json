@@ -2,5 +2,33 @@
   "en": {
     "prefs.browser_feature_drag": "Drag Browser features to reorder history",
     "prefs.browser_feature_drag_note": "Drag rows in the Browser's Features folder to reorder within the active or rolled-back features, if dependencies allow it. Use History to move across the rollback marker. Off: reorder in History only. Sketches and bodies keep their Browser display ordering."
+  },
+  "ar": {
+    "prefs.browser_feature_drag": "اسحب ميزات المستعرض لإعادة ترتيب السجل",
+    "prefs.browser_feature_drag_note": "اسحب الصفوف في مجلد الميزات في المستعرض لإعادة ترتيب الميزات داخل مجموعة الميزات النشطة أو داخل مجموعة الميزات التي تم التراجع عنها، إذا سمحت التبعيات بذلك. استخدم السجل لنقل ميزة عبر علامة التراجع. عند الإيقاف: تقتصر إعادة الترتيب على السجل. تحتفظ الرسومات والأجسام بترتيب عرضها في المستعرض."
+  },
+  "de": {
+    "prefs.browser_feature_drag": "Browser-Features ziehen, um den Verlauf neu zu ordnen",
+    "prefs.browser_feature_drag_note": "Ziehe die Zeilen im Ordner „Features“ des Browsers, um Features innerhalb der aktiven Feature-Gruppe oder innerhalb der zurückgerollten Feature-Gruppe neu zu ordnen, sofern die Abhängigkeiten es erlauben. Verwende „Verlauf“, um ein Feature über die Rollback-Markierung zu verschieben. Aus: Nur im Verlauf neu ordnen. Skizzen und Körper behalten ihre Anzeigereihenfolge im Browser."
+  },
+  "he": {
+    "prefs.browser_feature_drag": "גרור את הפיצ'רים בעץ התכן כדי לסדר מחדש את ההיסטוריה",
+    "prefs.browser_feature_drag_note": "גרור שורות בתיקיית הפיצ'רים בעץ התכן כדי לסדר פיצ'רים בתוך קבוצת הפיצ'רים הפעילים או בתוך קבוצת הפיצ'רים שהוחזרו לאחור, אם יחסי התלות מאפשרים זאת. השתמש בהיסטוריה כדי להעביר פיצ'ר מעבר לסמן החזרה לאחור. כבוי: הסידור מחדש זמין בהיסטוריה בלבד. סקיצות וגופים שומרים על סדר התצוגה שלהם בעץ התכן."
+  },
+  "ja": {
+    "prefs.browser_feature_drag": "ブラウザーのフィーチャーをドラッグして履歴を並べ替え",
+    "prefs.browser_feature_drag_note": "ブラウザーの「Features」フォルダー内の行をドラッグすると、依存関係が許す場合に、アクティブなフィーチャーのグループ内またはロールバック済みフィーチャーのグループ内で並べ替えられます。ロールバックマーカーをまたいでフィーチャーを移動するには「履歴」を使います。オフの場合、並べ替えは「履歴」でのみ行えます。スケッチとボディのブラウザー表示順は変わりません。"
+  },
+  "ko": {
+    "prefs.browser_feature_drag": "브라우저 피처를 드래그하여 히스토리 순서 변경",
+    "prefs.browser_feature_drag_note": "브라우저의 Features 폴더에서 행을 드래그해 종속성이 허용하는 경우 활성 피처 그룹 안에서 또는 롤백된 피처 그룹 안에서 순서를 바꾸세요. 롤백 마커를 넘어 피처를 이동하려면 히스토리를 사용하세요. 끔: 히스토리에서만 순서를 바꿉니다. 스케치와 바디의 브라우저 표시 순서는 유지됩니다."
+  },
+  "vi": {
+    "prefs.browser_feature_drag": "Kéo các tính năng trong cây đối tượng để sắp xếp lại lịch sử",
+    "prefs.browser_feature_drag_note": "Kéo các hàng trong thư mục Features của cây đối tượng để sắp xếp lại các tính năng trong nhóm đang hoạt động hoặc trong nhóm đã hoàn tác, nếu quan hệ phụ thuộc cho phép. Dùng lịch sử để di chuyển một tính năng qua dấu mốc lùi. Khi tắt: chỉ sắp xếp lại trong lịch sử. Bản phác thảo và khối giữ nguyên thứ tự hiển thị trong cây đối tượng."
+  },
+  "zh": {
+    "prefs.browser_feature_drag": "拖动浏览器中的特征以重新排列历史记录",
+    "prefs.browser_feature_drag_note": "在浏览器的“Features”文件夹中拖动行，可在依赖关系允许时，在活动特征组内或已回退特征组内重新排列。要跨过回退标记移动特征，请使用“历史记录”。关闭时：只能在“历史记录”中重新排列。草图和实体保持其在浏览器中的显示顺序。"
   }
 }

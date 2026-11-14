@@ -2,8 +2,8 @@ use serde_json::{Value, json};
 
 use super::{
     BodyFeaturesParams, BodyListParams, CommandEntry, CommandsParams, DescribeParams, DocumentInspectParams, DocumentInspectResult,
-    MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams, MeasureResult, ModelBodyFeatures, ModelEdges,
-    ModelFaces, ModelThreads, ModelThreadsParams, SketchInspectParams, SketchInspected,
+    DocumentRevisionParams, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams, MeasureResult,
+    ModelBodyFeatures, ModelEdges, ModelFaces, ModelThreads, ModelThreadsParams, RevisionResult, SketchInspectParams, SketchInspected,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -105,6 +105,7 @@ fn inspect_schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<MaterialListParams>(), &[]);
     assert_keys(input_schema_for::<MaterialAssignParams>(), &["bodies", "material"]);
     assert_keys(input_schema_for::<SketchInspectParams>(), &["sketch"]);
+    assert_keys(input_schema_for::<DocumentRevisionParams>(), &[]);
 }
 
 #[test]
@@ -255,6 +256,7 @@ fn the_schemas_take_what_the_handlers_read() {
         ],
     );
     takes(input_schema_for::<CommandsParams>(), &[(json!({}), true), (json!({"x": 1}), false)]);
+    takes(input_schema_for::<DocumentRevisionParams>(), &[(json!({}), true), (json!({"x": 1}), false)]);
 }
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -419,6 +421,25 @@ fn document_inspect_gives_a_short_timeline_and_body_names_when_asked() {
     }
 }
 
+/// #16740: `document.revision` answers the design's id and the revision its contents were last
+/// seen under: the same pair while nothing changes, the same id and another number after an
+/// edit, and a reply that matches the published output schema in both cases.
+#[test]
+fn document_revision_replies_match_its_schema() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let first = run(&mut s, "document.revision", json!({}));
+    matches::<RevisionResult>("document.revision", &first, false);
+    assert!(first["document_id"].as_str().is_some_and(|id| !id.is_empty()), "{first}");
+    assert!(first["revision"].is_number(), "{first}");
+    let again = run(&mut s, "document.revision", json!({}));
+    assert_eq!(again, first, "the same design answers the same revision twice: {first} {again}");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let after = run(&mut s, "document.revision", json!({}));
+    matches::<RevisionResult>("document.revision", &after, false);
+    assert_eq!(after["document_id"], first["document_id"], "{first} {after}");
+    assert_ne!(after["revision"], first["revision"], "{first} {after}");
+}
+
 /// `inspect.measure` in each form: bodies (with sheet metal and a material), names only, one
 /// item and two, in Warn without warnings. Everything it ignores with `items` is ignored.
 #[test]
@@ -567,6 +588,7 @@ fn a_misspelt_key_is_reported_in_warn() {
         "inspect.measure" => output_schema_for::<MeasureResult>(),
         "material.assign" => output_schema_for::<MaterialAssignResult>(),
         "material.list" => output_schema_for::<MaterialListResult>(),
+        "document.revision" => output_schema_for::<RevisionResult>(),
         _ => output_schema_for::<SketchInspected>(),
     };
     for (id, p, suggestion) in [
@@ -576,6 +598,7 @@ fn a_misspelt_key_is_reported_in_warn() {
         ("inspect.measure", json!({"name_only": true}), "names_only"),
         ("material.assign", json!({"bodies": ["Block"], "materal": "Steel", "material": "Steel"}), "material"),
         ("material.list", json!({"materials": true}), ""),
+        ("document.revision", json!({"revison": 1}), ""),
         ("sketch.inspect", json!({"sketch": shapes, "sketchs": 1}), "sketch"),
     ] {
         let r = run(&mut s, id, p.clone());

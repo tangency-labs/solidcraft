@@ -8,10 +8,9 @@
 //! cube's solid shell moved into the first cube's solid region, so each region holds one
 //! shell of each cube (as after deleting a face that alone held two parts of a body
 //! together). Gluing the first cube's vertex (10, 0, 0) and the second's (20, 0, 0) joins
-//! the infinite region's pair only upstream: the vertex is then in three shells. With
-//! `UpstreamFixes::glue_vertices_joins_every_region` both pairs are joined: two shells,
-//! one per region. Two cubes left in their own solid regions share the infinite region
-//! only and glue the same with the flag on and off.
+//! the infinite region's pair only upstream: the vertex is then in three shells. Here both
+//! pairs are joined: two shells, one per region. Two cubes left in their own solid regions
+//! share the infinite region only: one pair, joined.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -73,9 +72,8 @@ fn two_cubes(k: &mut Kernel, share_solid_region: bool) -> (Brep, VertexId, Verte
 
 /// Glues the second cube's vertex onto the first's: the survivor's shells afterwards,
 /// and how many shells each region of the survivor holds.
-fn glue(fix: bool, share_solid_region: bool) -> (usize, Vec<usize>) {
+fn glue(share_solid_region: bool) -> (usize, Vec<usize>) {
     let mut k = Kernel::default();
-    k.fixes.glue_vertices_joins_every_region = fix;
     let (mut b, a, d) = two_cubes(&mut k, share_solid_region);
     // the premise: each vertex is in a solid shell and an infinite-region shell
     assert_eq!(vertex::shells(&b, a).unwrap().len(), 2);
@@ -102,24 +100,15 @@ fn glue(fix: bool, share_solid_region: bool) -> (usize, Vec<usize>) {
 }
 
 #[test]
-fn upstream_glue_leaves_one_regions_pair_apart() {
-    let (shells, per_region) = glue(false, true);
-    assert_eq!(shells, 3, "{per_region:?}");
-    assert!(per_region.contains(&2), "{per_region:?}");
-}
-
-#[test]
 fn glue_joins_the_pair_of_every_shared_region() {
-    let (shells, per_region) = glue(true, true);
+    let (shells, per_region) = glue(true);
     assert_eq!(shells, 2, "{per_region:?}");
     assert!(per_region.iter().all(|&n| n == 1), "{per_region:?}");
 }
 
 #[test]
-fn cubes_in_their_own_regions_glue_the_same_with_and_without_the_fix() {
-    // only the infinite region is shared: one pair, joined either way
-    let off = glue(false, false);
-    let on = glue(true, false);
-    assert_eq!(off, on);
-    assert_eq!(off.0, 3);
+fn cubes_in_their_own_regions_glue_their_one_shared_pair() {
+    // only the infinite region is shared: one pair, joined
+    let on = glue(false);
+    assert_eq!(on, (3, vec![1, 1, 1]));
 }

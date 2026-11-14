@@ -15,18 +15,21 @@
 //! ("Unimplemented Tangent Rollover Case", [`FilletSolver::process_full_roll_over`]). Here the
 //! full tangent rollover is decided before the trace, in the round's section, where it is exact
 //! ([`tangent_rollover_supports`]), and the solver rolls the ball on the face beyond from the
-//! start, as [`crate::blend::fillet_outline`] gives the solver its rim supports.
+//! start, as [`crate::blend::fillet_outline`] gives the solver its rim supports. A round that is
+//! not a lone one between planes along a straight edge (one of a chain, #15767) is decided from
+//! its ball's sections along its edge (the session's `roll_over_tangent_edges`).
 //!
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`tangent_rollover_supports`] | none (solidcore-native) |
 //! | [`rolled_edge_point`] | none (solidcore-native) |
+//! | `section_seeds`, `SectionSeed` (crate) | none (solidcore-native) |
 //!
 //! Deviations: none of upstream's; there is no recursion.
 //!
 //! [`FilletSolver::process_full_roll_over`]: crate::blend::fillet_solver::p1::FilletSolver::process_full_roll_over
 
-use crate::blend::fillet_solver::p1::test_manifold_tangent_rollover;
+use crate::blend::fillet_solver::p1::{test_manifold_tangent_rollover, FilletSolver};
 use crate::error::{Result, SolidError};
 use crate::geom::global_solver::SolverOperation;
 use crate::kernel::Kernel;
@@ -256,6 +259,79 @@ pub fn rolled_edge_point(
     Ok(best.map(|(p, _)| p))
 }
 
+/// A guess of a rolling ball's section: the point dropped onto a face's surface for it, and
+/// for a rail rolled over a smooth edge, the direction the ball rolls across that edge in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SectionSeed {
+    /// The point dropped onto the face's surface.
+    pub point: Point3,
+    /// For a rolled rail, the direction from the filleted edge's point to the rolled-over
+    /// edge's point: the side of a seam of the surface (a closed boss's, running up the
+    /// rolled-over edge) on which the face beyond lies, as the drop's
+    /// `DropPointOptions::tgt_seam_side`. `None` for every other rail, and where the two points
+    /// coincide within the body's tolerance (no direction: [`seam_side_hint`]).
+    pub seam_side: Option<Vec3>,
+    /// Whether `point` is the rolled-over edge's point of a rolled rail (with or without a
+    /// `seam_side`): the section is then solved on the surface extended past that edge.
+    pub rolled: bool,
+}
+
+/// The seam-side hint of a rolled rail's seed ([`SectionSeed::seam_side`]): the direction from
+/// the filleted edge's point `point` to the rolled-over edge's point `on`, `None` where the two
+/// lie within `tol` of each other (a zero or near-zero vector names no side), or the distance
+/// is not a number.
+fn seam_side_hint(on: Point3, point: Point3, tol: f64) -> Option<Vec3> {
+    let side = on - point;
+    (side.length() > tol).then_some(side)
+}
+
+/// Where a ball of radius 0 touches each of `solver`'s faces at the point `point` of its
+/// filleted edge, the guesses of the ball's section there: the edge point, or for a rail
+/// rolled over a smooth far edge of its face (`solver.rolled_faces`) the point of that edge
+/// nearest it ([`rolled_edge_point`]), on the face beyond. The edge point lies off the face
+/// beyond, and dropped on its surface it may land where the section solve finds the ball
+/// rolling on another sheet of that surface (the far side of a boss). The rolled-over edge's
+/// point may lie on the surface's seam (a boss whose seam runs up that edge), where it has two
+/// parameters: the one on the side the ball rolls onto is the guess
+/// ([`SectionSeed::seam_side`]).
+///
+/// # Errors
+///
+/// Those of the topology queries and of [`rolled_edge_point`].
+pub(crate) fn section_seeds(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &FilletSolver,
+    point: Point3,
+) -> Result<[SectionSeed; 2]> {
+    let mut seeds = [SectionSeed {
+        point,
+        seam_side: None,
+        rolled: false,
+    }; 2];
+    let tol = target.tolerance();
+    for (rail, seed) in seeds.iter_mut().enumerate() {
+        let Some(onto) = solver.rolled_faces.get(rail).copied().flatten() else {
+            continue;
+        };
+        let Some(own) = solver.edgeuse(rail)? else {
+            continue;
+        };
+        let Some(from) = crate::topology::edgeuse::p1::face(target, own)? else {
+            continue;
+        };
+        if let Some(p) = rolled_edge_point(k, target, from, onto, point, solver.tangency_tolerance)?
+        {
+            *seed = SectionSeed {
+                point: p,
+                seam_side: seam_side_hint(p, point, tol),
+                rolled: true,
+            };
+        }
+    }
+    Ok(seeds)
+}
+
 /// Whether the offset of `face`'s surface by `offset` (along its surface normal) folds across the
 /// direction square to `along` at the point of the face nearest `at`: `1 - kappa offset <= 0`, with
 /// `kappa` the surface's normal curvature in that direction (`II(t, t) / I(t, t)`). A ball of that
@@ -294,4 +370,140 @@ fn offset_folds(
     let b = (g11 * r2 - g12 * r1) / det;
     let kappa = (duu * (a * a) + duv * (2.0 * a * b) + dvv * (b * b)).dot(n);
     Ok(1.0 - kappa * offset <= 0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{seam_side_hint, section_seeds, SectionSeed};
+    use crate::blend::fillet_solver::p1::FilletSolver;
+    use crate::curve::curve::Curve;
+    use crate::kernel::Kernel;
+    use crate::math::{Point3, Vec3};
+    use crate::primitive::api_curves::create_line_segment;
+    use crate::sweep::api_brep::create_linear_sweep;
+    use crate::topology::{edge, Brep, EdgeId, FaceId};
+
+    /// The one edge of `b` from `p` to `q` (either way round).
+    fn edge_from_to(b: &Brep, p: Point3, q: Point3) -> EdgeId {
+        let at = |v: Option<crate::topology::VertexId>| b.vertex(v.unwrap()).unwrap().point;
+        let found: Vec<EdgeId> = b
+            .edge_list()
+            .iter()
+            .copied()
+            .filter(|&e| {
+                let (s, t) = (
+                    at(edge::start_vertex(b, e).unwrap()),
+                    at(edge::end_vertex(b, e).unwrap()),
+                );
+                (s.distance(p) < 1e-9 && t.distance(q) < 1e-9)
+                    || (s.distance(q) < 1e-9 && t.distance(p) < 1e-9)
+            })
+            .collect();
+        assert_eq!(found.len(), 1, "edges {p:?} to {q:?}: {found:?}");
+        found[0]
+    }
+
+    /// A rolled rail's seed where the filleted edge's point lies on the rolled-over edge, old to
+    /// new (#16354's zero seam hint). The prism 10 tall on the polygon (0, -20), (40, -20),
+    /// (40, 0.1), (20, 0), (0, 0): its side faces S (y = 0) and X (on to (40, 0.1)) meet along
+    /// the vertical edge T at (20, 0), smooth (a crease of atan(0.1 / 20) = 0.005 rad within
+    /// the solver's tangency tolerance 0.01). The round is on S's top edge from (0, 0, 10) to
+    /// T's top V = (20, 0, 10), its rail rolled from S onto X. At V itself and 0.5 tol short of
+    /// it along the edge (tol the body's tolerance), the rolled-over edge's nearest point is V,
+    /// within tol of the edge's point: the seed is V with no seam-side hint (before #16354 the
+    /// hint was the zero or near-zero vector `V - point`), still solved on the extended surface
+    /// (`rolled`). At (10, 0, 10) the hint is the direction to V, (10, 0, 0). The other rail is
+    /// does not roll; its seed is the edge's point, with no hint.
+    #[test]
+    fn a_rolled_seed_on_the_rolled_over_edge_has_no_seam_side_hint() {
+        let mut k = Kernel::default();
+        let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+        let poly = [
+            p(0.0, -20.0),
+            p(40.0, -20.0),
+            p(40.0, 0.1),
+            p(20.0, 0.0),
+            p(0.0, 0.0),
+        ];
+        let sides: Vec<Curve> = (0..poly.len())
+            .map(|i| Curve::from(create_line_segment(poly[i], poly[(i + 1) % poly.len()]).unwrap()))
+            .collect();
+        let refs: Vec<Option<&Curve>> = sides.iter().map(Some).collect();
+        let mut b =
+            create_linear_sweep(&mut k, &refs, Vec3::new(0.0, 0.0, 1.0), 10.0, true).unwrap();
+        let v = Point3::new(20.0, 0.0, 10.0);
+        let filleted = edge_from_to(&b, Point3::new(0.0, 0.0, 10.0), v);
+        let t = edge_from_to(&b, Point3::new(20.0, 0.0, 0.0), v);
+        let t_faces = edge::faces(&b, t, None).unwrap();
+        let s = *edge::faces(&b, filleted, None)
+            .unwrap()
+            .iter()
+            .find(|f| t_faces.contains(f))
+            .unwrap();
+        let x: FaceId = *t_faces.iter().find(|&&f| f != s).unwrap();
+        let on_s = edge::edgeuses(&b, filleted, None, None)
+            .unwrap()
+            .into_iter()
+            .find(|&eu| crate::topology::edgeuse::p1::face(&b, eu).unwrap() == Some(s))
+            .unwrap();
+        let mut solver = FilletSolver::new(1e-6, 0.1, 0.01);
+        solver.edgeuses = [Some(on_s), None];
+        solver.rolled_faces = [Some(x), None];
+        let tol = b.tolerance();
+        assert!(tol > 0.0);
+        let hint = Point3::new(10.0, 0.0, 10.0);
+        for (point, seam_side) in [
+            (v, None),
+            (v - Vec3::new(0.5 * tol, 0.0, 0.0), None),
+            (hint, Some(v - hint)),
+        ] {
+            let seeds = section_seeds(&k, &mut b, &solver, point).unwrap();
+            assert!(
+                seeds[0].point.distance(v) <= 1e-12,
+                "{point:?}: seed {:?}",
+                seeds[0].point
+            );
+            match (seeds[0].seam_side, seam_side) {
+                (None, None) => {}
+                (Some(got), Some(want)) => {
+                    assert!((got - want).length() <= 1e-12, "{point:?}: hint {got:?}");
+                }
+                (got, want) => panic!("{point:?}: hint {got:?}, want {want:?}"),
+            }
+            assert!(seeds[0].rolled, "{point:?}");
+            assert_eq!(
+                seeds[1],
+                SectionSeed {
+                    point,
+                    seam_side: None,
+                    rolled: false,
+                },
+                "{point:?}"
+            );
+        }
+    }
+
+    /// A rolled rail's seam-side hint is the direction to the rolled-over edge's point, and no
+    /// hint at all where that point is the filleted edge's own within the tolerance (the zero
+    /// vector the hint was before names no side of a seam), or the distance is not a number.
+    #[test]
+    fn a_seam_side_hint_is_never_a_zero_vector() {
+        let tol = 1e-6;
+        let point = Point3::new(1.0, 2.0, 3.0);
+        assert_eq!(
+            seam_side_hint(Point3::new(1.0, 2.5, 3.0), point, tol),
+            Some(Vec3::new(0.0, 0.5, 0.0))
+        );
+        assert_eq!(seam_side_hint(point, point, tol), None);
+        assert_eq!(
+            seam_side_hint(Point3::new(1.0, 2.0, 3.0 + 0.5 * tol), point, tol),
+            None
+        );
+        assert_eq!(
+            seam_side_hint(Point3::new(1.0, 2.0, 3.0 + 2.0 * tol), point, tol),
+            Some(Vec3::new(0.0, 0.0, 3.0 + 2.0 * tol - 3.0))
+        );
+        let nan = Point3::new(f64::NAN, 2.0, 3.0);
+        assert_eq!(seam_side_hint(nan, point, tol), None);
+    }
 }

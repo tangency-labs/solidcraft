@@ -203,7 +203,15 @@ mod tests {
     }
 
     fn entry(key: u64) -> CacheEntry {
-        let whole = CachedEval { error: None, warning: None, import_report: None, repair: None, ms: 0.0, state: Arc::new(ModelState::default()) };
+        let whole = CachedEval {
+            error: None,
+            warning: None,
+            import_report: None,
+            repair: None,
+            lost_projections: None,
+            ms: 0.0,
+            state: Arc::new(ModelState::default()),
+        };
         CacheEntry { key, whole, bytes: 1, change: None }
     }
 

@@ -141,6 +141,16 @@ impl LocaleNames for Locale {
         if let Some((feature, reference)) = solidcraft_engine::doc::reselect_parts(text) {
             return self.format("diagnostic.reselect_reference", &[("feature", &self.given_name(feature)), ("reference", reference)]);
         }
+        if let Some(lost) = solidcraft_engine::doc::lost_projection_parts(text) {
+            let feature = self.given_name(lost.feature);
+            let (count, more) = (lost.count.to_string(), lost.more.to_string());
+            let args = [("feature", feature.as_str()), ("count", &count), ("projections", lost.listed), ("projection", lost.listed), ("more", &more)];
+            return match (lost.count, lost.more) {
+                (1, _) => self.format("diagnostic.lost_projection", &args),
+                (_, 0) => self.format("diagnostic.lost_projections", &args),
+                _ => self.format("diagnostic.lost_projections_more", &args),
+            };
+        }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
             && let Some((component, detail)) = detail.split_once("'; the tool may overlap '")
@@ -193,6 +203,16 @@ fn offset_error_id<'a>(text: &'a str, middle: &str, end: &str) -> Option<&'a str
     (rest.contains(middle) && rest.ends_with(end)).then_some(id)
 }
 
+/// The id of the sketch point an engine error names: ``point `{id}` `` at the start, then the
+/// reason it cannot move.
+fn point_error_id<'a>(text: &'a str, reason: &str) -> Option<&'a str> {
+    let rest = text.strip_prefix("point `")?;
+    let (id, rest) = rest.split_once('`')?;
+    let rest = rest.strip_prefix(" is ")?;
+    let rest = rest.strip_suffix(" and cannot move")?;
+    (rest == reason).then_some(id)
+}
+
 /// Translate known engine error messages using i18n keys.
 /// If the error message is not recognized, returns it unchanged.
 pub fn tr_engine_error(error: &str) -> String {
@@ -225,6 +245,12 @@ pub fn tr_engine_error(error: &str) -> String {
     }
     if text == "a closed curve needs two crossings to trim" {
         return tr("sketch.error.closed_curve_two_crossings").to_string();
+    }
+    if let Some(id) = point_error_id(text, "projected") {
+        return format("sketch.error.point_is_projected", &[("id", id)]);
+    }
+    if let Some(id) = point_error_id(text, "fixed") {
+        return format("sketch.error.point_is_fixed", &[("id", id)]);
     }
     error.to_string()
 }
@@ -269,6 +295,20 @@ mod tests {
         let expected = format!("Mehrere Komponenten heißen `{name}`. Verwende eine numerische Komponenten-ID: 1, 3.");
         assert_eq!(super::tr_engine_error(&message), expected);
         assert_eq!(super::tr_engine_error(&format!("invalid parameters for `component.delete`: {message}")), expected);
+        assert_eq!(super::tr_engine_error("another error"), "another error");
+    }
+
+    /// #16164: the refusal to move a point the sketch holds fixed, or projects from a body, says
+    /// which of the two it is; the translation names the point as well.
+    #[test]
+    fn the_refusal_to_move_a_fixed_or_projected_point_is_translated() {
+        install();
+        let _scope = scope("de");
+        assert_eq!(
+            super::tr_engine_error("invalid parameters for `sketch.move`: point `p8` is projected and cannot move"),
+            "Der Punkt `p8` ist projiziert und kann nicht verschoben werden"
+        );
+        assert_eq!(super::tr_engine_error("point `origin` is fixed and cannot move"), "Der Punkt `origin` ist fest und kann nicht verschoben werden");
         assert_eq!(super::tr_engine_error("another error"), "another error");
     }
 
@@ -461,6 +501,44 @@ mod tests {
             assert_ne!(translated, message, "{language}");
             // Right-to-left text comes back in display order, so only what it holds is checked.
             assert!(translated.contains("Fillet {2}") && translated.contains("`F4:side:c1#1|F4:top`"), "{language}: {translated}");
+        }
+    }
+
+    #[test]
+    fn lost_projections_diagnostic_translates_with_the_sketch_and_projections_as_given() {
+        install();
+        let lost = |link: &str, body: &str, curve: &str| solidcraft_engine::doc::LostProjection {
+            link: link.into(),
+            what: format!("projected face of {body}"),
+            curves: vec![curve.into()],
+            points: Vec::new(),
+            name: "F2:side:l1".into(),
+        };
+        let lost_error = |n: usize| {
+            let links = [("j1", "Tray", "l1"), ("j2", "Cover", "l2"), ("j3", "Tray", "l3"), ("j4", "Tray", "l4")];
+            let links = links.into_iter().take(n).map(|(link, body, curve)| lost(link, body, curve)).collect();
+            solidcraft_engine::doc::DocError::LostProjections { feature: String::new(), links }
+        };
+        // One, three named, four with the last counted; under a plain name, one holding ": ", and in
+        // the error of a feature built from the sketch.
+        let wrapped = |n: usize| format!("sketch `A: b` failed: {}", lost_error(n).in_feature("A: b"));
+        let cases = [
+            (lost_error(1).in_feature("Outline {1}").to_string(), "Outline {1}", "projected face of Tray (curve l1)"),
+            (lost_error(3).in_feature("Outline {1}").to_string(), "Outline {1}", "projected face of Cover (curve l2)"),
+            (lost_error(4).in_feature("Outline {1}").to_string(), "Outline {1}", "projected face of Cover (curve l2)"),
+            (lost_error(4).in_feature("A: b").to_string(), "A: b", "projected face of Tray (curve l3)"),
+            (wrapped(1), "sketch `A: b` failed: A: b", "projected face of Tray (curve l1)"),
+            (wrapped(4), "sketch `A: b` failed: A: b", "projected face of Tray (curve l3)"),
+        ];
+        for (message, feature, shown) in cases {
+            assert!(!message.contains("F2:side:l1"), "{message}");
+            assert_eq!(Locale::for_language("en").diagnostic(&message), message);
+            for language in ["ar", "de", "he", "ja", "ko", "vi", "zh"] {
+                let translated = Locale::for_language(language).diagnostic(&message);
+                assert_ne!(translated, message, "{language}");
+                assert!(translated.contains(feature) && translated.contains(shown), "{language}: {translated}");
+                assert!(!translated.contains(" more"), "the count of the rest is translated too: {language}: {translated}");
+            }
         }
     }
 
@@ -1388,6 +1466,7 @@ mod tests {
         KitCall { name: "hint_row", args: &[1], id: false, trim: &[1] },
         KitCall { name: "text_row", args: &[1], id: false, trim: &[1] },
         KitCall { name: "choice_row", args: &[1, 4], id: false, trim: &[1] },
+        KitCall { name: "action_row", args: &[2], id: false, trim: &[] },
         KitCall { name: "section", args: &[2], id: false, trim: &[] },
         KitCall { name: "section_count", args: &[2], id: false, trim: &[] },
         // fields.rs
@@ -2066,7 +2145,7 @@ mod tests {
         "multiline_text_field, dropdown, cell_editor, bounded_cell_editor, search_field, menu_filter, placement_field, ",
         "library_cell, icon_button_at, icon_button_colored, footer, button, primary_button, ",
         "wide_primary_button, action_menu, compact_button, icon_label_button, command_menu_button, ",
-        "checkbox_grid, options, checkbox_row, toggle_icon, removable_header, bin_button, ",
+        "checkbox_grid, options, checkbox_row, action_row, toggle_icon, removable_header, bin_button, ",
         "Column, Menu, MenuItem, CommandSearch};"
     );
 
@@ -2118,6 +2197,7 @@ mod tests {
             ("checkbox_grid(ui, &mut [(\"checkbox_grid\", value)], 1)", &["checkbox_grid"]),
             ("options(ui, id, &mut [(\"options\", value)])", &["options"]),
             ("checkbox_row(ui, key, \"checkbox_row\", true)", &["checkbox_row"]),
+            ("action_row(ui, key, \"action_row\")", &["action_row"]),
             ("toggle_icon(ui, row, \"toggle_icon\", selected, icon)", &["toggle_icon"]),
             ("Column::new(\"Column::new\", 1.0)", &["Column::new"]),
             ("table.add_prompt(ui, \"add_prompt\", \"add_prompt tooltip\")", &["add_prompt", "add_prompt tooltip"]),

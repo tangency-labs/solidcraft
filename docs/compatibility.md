@@ -223,3 +223,17 @@ two such cases, and only where that point decides exactly one edge:
 Tests: `a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone`,
 `a_chamfer_saved_under_a_top_faces_old_neighbours_is_found_at_its_pick`,
 `a_chamfer_whose_old_name_and_pick_fit_two_edges_asks_again` (`crates/engine/src/face_name_tests.rs`).
+
+Numbered round faces (#16602): 0.30.1 split a cylinder's or cone's round side into numbered pieces
+(`F1:side#2`) and built a round tool's wall in several pieces (`F4:bore:side:1`, now
+`F4:bore:side:0`), so a thread saved then names a face that is whole now. A cosmetic or modelled
+thread finds the whole face when it is the only face of that stem, is a cylinder or cone, and the
+saved pick lies on it (exact geometry, not the mesh). A pick off the face, or a stem that still has
+several faces, asks to be picked again. The recovery applies to threads only: any other feature
+(a projection, a shell, a hole, a plane) saved under such a piece would take in material the old
+piece never covered, so it asks to be picked again, as does a flat numbered face unless its original
+construction feature made it. Tests:
+`a_thread_saved_under_a_numbered_side_piece_of_a_cylinder_is_found_at_its_pick`,
+`a_modelled_thread_saved_under_a_numbered_bore_wall_is_found_at_its_pick`,
+`a_shell_saved_under_a_numbered_side_piece_of_a_cylinder_still_asks_to_reselect`
+(`crates/engine/src/face_name_tests.rs`).

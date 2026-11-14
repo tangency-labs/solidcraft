@@ -6,8 +6,8 @@
 //!   inside-out sphere). Fork tangency-labs/smlib 9853e54 builds them with
 //!   `CreateCanonical(.., FALSE, FALSE, ..)`, never inside out.
 //! - Upstream's `SmTorus` constructor never sets `m_bInsideOut` and its copy
-//!   constructor resets it, so an inside-out torus fails Test #11 (WR-500); the opt-in
-//!   `fixes.torus_keeps_inside_out` keeps the flag.
+//!   constructor resets it, so an inside-out torus fails Test #11 (WR-500); the
+//!   constructor and the copy keep the flag.
 
 #![allow(
     clippy::unwrap_used,
@@ -48,50 +48,41 @@ fn flags(t: &Torus) -> (bool, bool) {
 
 #[test]
 fn issue_1490_inside_out_torus_keeps_its_flag() {
-    for fix in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.torus_keeps_inside_out = fix;
-        // as the rig runs: the recognised torus keeps the tested NURB (SetFromGwNurb,
-        // whose rebuild sets the flag)
-        k.fixes.found_torus_sphere_keep_tested_nurb = true;
-        let mut t = Torus::new(
-            &k,
-            Point3::new(0.0, 0.0, 0.0),
-            Vec3::new(1.0, 0.0, 0.0),
-            Vec3::new(0.0, 1.0, 0.0),
-            Extent2d::from_bounds(0.0, -90.0, 270.0, 90.0),
-            20.0,
-            4.0,
-            TorusOptions {
-                swap_uv: false,
-                inside_out: true,
-                circle_nurb: None,
-            },
-        )
+    let mut k = Kernel::default();
+    // as the rig runs: the recognised torus keeps the tested NURB (SetFromGwNurb,
+    // whose rebuild sets the flag)
+    k.fixes.found_torus_sphere_keep_tested_nurb = true;
+    let mut t = Torus::new(
+        &k,
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        Extent2d::from_bounds(0.0, -90.0, 270.0, 90.0),
+        20.0,
+        4.0,
+        TorusOptions {
+            swap_uv: false,
+            inside_out: true,
+            circle_nurb: None,
+        },
+    )
+    .unwrap();
+    t.make_nurb(&k).unwrap();
+    // made, copied, recognised from its NURB and the recognised torus's copy
+    let found = Torus::is_nurb_surface_torus(&k, t.base().base(), 1.0)
+        .unwrap()
         .unwrap();
-        t.make_nurb(&k).unwrap();
-        // made, copied, recognised from its NURB and the recognised torus's copy
-        let found = Torus::is_nurb_surface_torus(&k, t.base().base(), 1.0)
-            .unwrap()
-            .unwrap();
-        let (copy, found_copy) = (t.clone(), found.clone());
-        let cases = [
-            ("made", t),
-            ("copy", copy),
-            ("recognised", found),
-            ("recognised copy", found_copy),
-        ];
-        for (name, s) in cases {
-            // upstream: the constructor leaves the surface's flag FALSE, only the
-            // rebuild sets it, and copies reset it
-            let kept = fix || name == "recognised";
-            assert_eq!(flags(&s), (kept, true), "{name} fix {fix}");
-            assert_eq!(
-                test11_fails(&k, &Surface::from(s), &format!("{name} {fix}")),
-                !kept,
-                "{name} fix {fix}"
-            );
-        }
+    let (copy, found_copy) = (t.clone(), found.clone());
+    let cases = [
+        ("made", t),
+        ("copy", copy),
+        ("recognised", found),
+        ("recognised copy", found_copy),
+    ];
+    for (name, s) in cases {
+        // the surface's flag is its generator's, made, rebuilt or copied
+        assert_eq!(flags(&s), (true, true), "{name}");
+        assert!(!test11_fails(&k, &Surface::from(s), name), "{name}");
     }
 }
 

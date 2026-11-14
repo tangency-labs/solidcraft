@@ -104,6 +104,16 @@
 //!   samples), when another definition of its proto edge is
 //!   imprinted between two distinct vertices in each B-rep (`collapsed_beside_sibling`);
 //!   upstream makes a closed edge on that vertex.
+//! - **Not upstream: exactly placed definitions combine within their tolerances.**
+//!   `CanCombineVertexDefinitions` (`sdTolFactor`) and `CanCombineEdgeDefinitions` combine
+//!   two connected definitions within 5 times their summed tolerances. When both
+//!   definitions are exactly placed (`exactly_placed`: every source object a vertex, an edge
+//!   on a line or a face on a plane, and an edge definition's curve a line) the radius is
+//!   the sum itself ([`EXACT_TOL_FACTOR`]): their positions are exact to rounding, and two
+//!   of them farther apart are distinct points, so the larger radius deleted a real
+//!   crossing (a crossing 4.8e-5 from a vertex definition with 1e-5 tolerances, the
+//!   flange-corner case; a line 7.5e-5 from another, `wr_614`). Definitions an inexact
+//!   solve placed keep upstream's factor.
 //! - **Not upstream: ends fitted to proto vertices (WR-452, WR-453, #435, #410).**
 //!   [`ProtoTopologyManager::imprint_edge_definition`] first fits each end of the definition's
 //!   interval to its proto vertex where `imprint_ends`'s checks pass (the SMLib fork's
@@ -126,8 +136,8 @@
 //! - **Recursion.** None.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
-use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
+use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::error::EntityRef;
 use crate::error::{passed_on, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
@@ -148,12 +158,15 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::math::gamma;
 use crate::query::face::p2::proto_vertex_containment_radius;
 use crate::surface::surface::exact_pieces::{common_trim_interval, trim_unsnapped};
+use crate::surface::surface::p2::SurfaceKind;
 use crate::topology::brep::p5::{make_edge_in_face_in, EdgeInFace};
 use crate::topology::VertexId;
 
 mod imprint_ends;
 
-use super::p1::proto::{are_connected, can_imprint, find_position_from_pcs, topo_dimension};
+use super::p1::proto::{
+    are_connected, can_imprint, find_position_from_pcs, topo_dimension, ED_TOL_FACTOR,
+};
 use super::p1::{
     EdgeDefId, EdgeDefinition, ProtoEdgeId, ProtoGeometry, ProtoTopology, ProtoTopologyManager,
     ProtoVertex, ProtoVertexId, VertexDefId, VertexDefinition,
@@ -172,8 +185,18 @@ const OP_COMBINE_VD: &str =
     "topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions";
 
 /// `sdTolFactor` of `CanCombineVertexDefinitions`: the distance allowed between two
-/// combinable vertex definitions, in units of their summed tolerances.
+/// combinable vertex definitions, in units of their summed tolerances. Upstream's, kept
+/// for definitions an inexact solve placed (`exactly_placed`).
 const VD_TOL_FACTOR: f64 = 5.0;
+
+/// Not upstream: the distance allowed between two combinable definitions (vertex or edge)
+/// that are both exactly placed (`exactly_placed`), in units of their summed tolerances.
+/// Their positions are closed-form intersections of linear objects, exact to rounding, so
+/// two of them are one point (one curve) exactly when their tolerance balls (tubes) meet:
+/// farther apart than the sum of their tolerances they are distinct by the kernel's own
+/// identity radius, the intersection tolerance (`xsect_tol_3d_from_zones`), and combining
+/// them deletes a real crossing (`docs/validity-and-tolerances.md` §5.1).
+pub(crate) const EXACT_TOL_FACTOR: f64 = 1.0;
 
 /// The B-rep side of the proto topology: the members of the caller's edges, faces and
 /// vertices these functions read or write, and the store new curves go to.
@@ -561,6 +584,29 @@ fn speck_on_vertex(
 fn curve_of<O: Copy>(brep: &impl ProtoBrep<O>, o: Option<O>) -> Result<&Curve> {
     o.and_then(|o| brep.curve(o))
         .ok_or(dangling("curve handle is null or unknown"))
+}
+
+/// Not upstream: whether every point a definition takes from the topology object `o` is a
+/// closed-form intersection of linear objects, exact to rounding: `o` is a vertex, an edge
+/// on a line or a face on a plane.
+pub(crate) fn exactly_placed<O: ClassObject>(brep: &impl ProtoBrep<O>, o: Option<O>) -> bool {
+    let Some(o) = o else {
+        return false;
+    };
+    match o.class_kind() {
+        ClassObjectKind::Vertex => true,
+        ClassObjectKind::Edge => brep
+            .edge_curve(o)
+            .flatten()
+            .and_then(|c| brep.curve(c))
+            .is_some_and(|c| matches!(c.kind(), CurveKind::Line(_))),
+        ClassObjectKind::Face => brep
+            .face_surface(o)
+            .flatten()
+            .and_then(|s| brep.surface(s))
+            .is_some_and(|s| matches!(s.kind(), SurfaceKind::Plane(_))),
+        _ => false,
+    }
 }
 
 /// `pEdge->GetCurve()` dereferenced.
@@ -1285,8 +1331,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     jj += 1;
                     continue;
                 };
+                let factor = self.vertex_combine_factor(brep, vd1, vd2)?;
                 let delete_which = if pass {
-                    match self.can_combine_vertex_definitions(k, brep, vd1, vd2) {
+                    match self.can_combine_vertex_definitions_within(k, brep, vd1, vd2, factor) {
                         Ok(w) => w,
                         Err(e) => {
                             vds.retain(Option::is_some);
@@ -1295,7 +1342,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         }
                     }
                 } else {
-                    self.can_combine_vertex_definitions_ignored(k, brep, vd1, vd2)?
+                    self.can_combine_vertex_definitions_ignored(k, brep, vd1, vd2, factor)?
                 };
                 if delete_which == 1 {
                     self.delete_vertex_definition(vd1);
@@ -1339,8 +1386,59 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         topology: &impl ProtoTopology<O>,
         vd1: VertexDefId,
         vd2: VertexDefId,
+        factor: f64,
     ) -> Result<u64> {
-        Ok(ignore_soft(self.can_combine_vertex_definitions(k, topology, vd1, vd2))?.unwrap_or(0))
+        Ok(
+            ignore_soft(self.can_combine_vertex_definitions_within(k, topology, vd1, vd2, factor))?
+                .unwrap_or(0),
+        )
+    }
+
+    /// Not upstream: the combine radius of two vertex definitions in units of their summed
+    /// tolerances: [`EXACT_TOL_FACTOR`] when both are exactly placed (each source object a
+    /// vertex, an edge on a line or a face on a plane), upstream's `VD_TOL_FACTOR`
+    /// otherwise.
+    fn vertex_combine_factor(
+        &self,
+        brep: &impl ProtoBrep<O>,
+        vd1: VertexDefId,
+        vd2: VertexDefId,
+    ) -> Result<f64> {
+        let exact = |vd: VertexDefId| -> Result<bool> {
+            let d = self.vd_ref(vd)?;
+            Ok(exactly_placed(brep, d.src_topo(1)) && exactly_placed(brep, d.src_topo(2)))
+        };
+        Ok(if exact(vd1)? && exact(vd2)? {
+            EXACT_TOL_FACTOR
+        } else {
+            VD_TOL_FACTOR
+        })
+    }
+
+    /// Not upstream: the combine radius of two edge definitions of one proto edge in units
+    /// of their summed tolerances: [`EXACT_TOL_FACTOR`] when both are exactly placed (each
+    /// source object a vertex, an edge on a line or a face on a plane, and the 3D curve a
+    /// line), upstream's factor 5 otherwise.
+    fn edge_combine_factor(
+        &self,
+        brep: &impl ProtoBrep<O>,
+        ed1: EdgeDefId,
+        ed2: EdgeDefId,
+    ) -> Result<f64> {
+        let exact = |ed: EdgeDefId| -> Result<bool> {
+            let d = self.ed_ref(ed)?;
+            Ok(exactly_placed(brep, d.src_topo(1))
+                && exactly_placed(brep, d.src_topo(2))
+                && matches!(
+                    curve_of(brep, d.xsect_curve_3d())?.kind(),
+                    CurveKind::Line(_)
+                ))
+        };
+        Ok(if exact(ed1)? && exact(ed2)? {
+            EXACT_TOL_FACTOR
+        } else {
+            ED_TOL_FACTOR
+        })
     }
 
     /// Finds or creates a vertex definition of the classifications `pc1`, `pc2` at
@@ -1912,8 +2010,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 // statuses passed on with `ssi_proto_topology_statuses_pass_on`
                 // (fork bcc6f01)
                 let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+                let factor = self.edge_combine_factor(&*brep, ed1, ed2)?;
                 let delete_which = ignore_soft(passed_on(
-                    self.can_combine_edge_definitions(k, brep, ed1, ed2),
+                    self.can_combine_edge_definitions_within(k, brep, ed1, ed2, factor),
                     pass,
                 )?)?
                 .unwrap_or(0);
@@ -2971,6 +3070,20 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         vd1: VertexDefId,
         vd2: VertexDefId,
     ) -> Result<u64> {
+        self.can_combine_vertex_definitions_within(k, topology, vd1, vd2, VD_TOL_FACTOR)
+    }
+
+    /// [`ProtoTopologyManager::can_combine_vertex_definitions`] with the distance allowed
+    /// between the two definitions `factor` times their summed tolerances (upstream's 5,
+    /// or [`EXACT_TOL_FACTOR`] for exactly placed definitions).
+    fn can_combine_vertex_definitions_within(
+        &self,
+        k: &Kernel,
+        topology: &impl ProtoTopology<O>,
+        vd1: VertexDefId,
+        vd2: VertexDefId,
+        factor: f64,
+    ) -> Result<u64> {
         let v1 = self.vd_ref(vd1)?;
         let v2 = self.vd_ref(vd2)?;
         let null = || {
@@ -3007,7 +3120,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // Check distance: if they're too far apart, we can't combine them.
         let dist = v1.position().distance(v2.position());
         let mut tol = v1.tolerance(k) + v2.tolerance(k);
-        tol *= VD_TOL_FACTOR;
+        tol *= factor;
         if dist > tol {
             return Ok(0);
         }
