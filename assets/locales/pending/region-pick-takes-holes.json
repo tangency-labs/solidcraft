@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.region_pick_takes_holes": "A click inside a profile also picks the shapes inside it",
+    "prefs.region_pick_takes_holes_note": "For Transform, Move/Copy, Scale, Mirror and the sketch patterns. Off: a click between two nested rectangles picks the outer rectangle alone; click inside the inner rectangle to pick it too."
+  },
+  "ar": {
+    "prefs.region_pick_takes_holes": "النقر داخل مقطع يحدد أيضًا الأشكال الموجودة داخله",
+    "prefs.region_pick_takes_holes_note": "لأوامر التحويل والنقل/النسخ والتحجيم والانعكاس وأنماط الرسم. عند الإيقاف: النقر بين مستطيلين متداخلين يحدد المستطيل الخارجي وحده؛ انقر داخل المستطيل الداخلي لتحديده أيضًا."
+  },
+  "de": {
+    "prefs.region_pick_takes_holes": "Ein Klick in ein Profil wählt auch die Formen darin",
+    "prefs.region_pick_takes_holes_note": "Für Transformieren, Verschieben/Kopieren, Skalieren, Spiegeln und die Skizzenmuster. Aus: Ein Klick zwischen zwei verschachtelte Rechtecke wählt nur das äußere Rechteck; ein Klick in das innere Rechteck wählt es dazu."
+  },
+  "he": {
+    "prefs.region_pick_takes_holes": "לחיצה בתוך פרופיל בוחרת גם את הצורות שבתוכו",
+    "prefs.region_pick_takes_holes_note": "עבור טרנספורמציה, הזזה/העתקה, שינוי קנה מידה, שיקוף ותבניות השרטוט. כבוי: לחיצה בין שני מלבנים מקוננים בוחרת את המלבן החיצוני בלבד; לחצו בתוך המלבן הפנימי כדי לבחור גם אותו."
+  },
+  "ja": {
+    "prefs.region_pick_takes_holes": "プロファイル内のクリックで内側の形状も選択する",
+    "prefs.region_pick_takes_holes_note": "変換、移動/コピー、尺度、ミラー、スケッチパターンに適用されます。オフ: 入れ子になった2つの長方形の間をクリックすると外側の長方形だけを選択します。内側の長方形も選択するには、その内側をクリックします。"
+  },
+  "ko": {
+    "prefs.region_pick_takes_holes": "프로파일 안을 클릭하면 그 안의 도형도 선택",
+    "prefs.region_pick_takes_holes_note": "변환, 이동/복사, 축척, 미러 및 스케치 패턴에 적용됩니다. 끄면: 중첩된 두 직사각형 사이를 클릭하면 바깥 직사각형만 선택되며, 안쪽 직사각형도 선택하려면 그 안을 클릭합니다."
+  },
+  "vi": {
+    "prefs.region_pick_takes_holes": "Nhấp vào bên trong biên dạng cũng chọn các hình bên trong nó",
+    "prefs.region_pick_takes_holes_note": "Dùng cho Biến đổi, Di chuyển/Sao chép, Tỷ lệ, Đối xứng và các mẫu phác thảo. Tắt: nhấp giữa hai hình chữ nhật lồng nhau chỉ chọn hình chữ nhật bên ngoài; nhấp vào bên trong hình chữ nhật bên trong để chọn thêm nó."
+  },
+  "zh": {
+    "prefs.region_pick_takes_holes": "在轮廓内单击时也选择其中的形状",
+    "prefs.region_pick_takes_holes_note": "适用于变换、移动/复制、缩放、镜像和草图阵列。关闭时：在两个嵌套矩形之间单击只选择外侧矩形；在内侧矩形内单击可将其一并选择。"
+  }
+}

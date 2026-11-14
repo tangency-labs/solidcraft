@@ -104,6 +104,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch.center_arc",
             "prefs.sketch_construction_lines",
             "prefs.sketch_mirror_auto_line",
+            "prefs.region_pick_takes_holes",
             "prefs.sketch.ellipse_axes",
             "prefs.sketch.auto_dimensions",
             "prefs.sketch.auto_locate",
@@ -161,6 +162,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 );
                 check(ui, "sketch_construction_lines", "prefs.sketch_construction_lines", None, &mut app.preferences.sketch_construction_lines);
                 check(ui, "sketch_mirror_auto_line", "prefs.sketch_mirror_auto_line", None, &mut app.preferences.sketch_mirror_auto_line);
+                check(
+                    ui,
+                    "region_pick_takes_holes",
+                    "prefs.region_pick_takes_holes",
+                    Some("prefs.region_pick_takes_holes_note"),
+                    &mut app.preferences.region_pick_takes_holes,
+                );
                 check(ui, "ellipse_axes", "prefs.sketch.ellipse_axes", Some("prefs.sketch.ellipse_axes_note"), &mut app.preferences.ellipse_axes);
                 check(
                     ui,

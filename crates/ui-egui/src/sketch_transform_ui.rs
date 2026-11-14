@@ -90,7 +90,7 @@ fn picked_box(app: &SolveApp, d: &crate::dialogs::Dialog) -> Option<(Vec<Vec<Vec
     let mut lines: Vec<Vec<Vec2>> = Vec::new();
     let mut points: Vec<Vec2> = Vec::new();
     let mut drawn: Vec<usize> = Vec::new();
-    for id in crate::sketch_modify_ui::entity_ids(&app.session, &d.inputs, 0) {
+    for id in crate::sketch_modify_ui::entity_ids(app, &d.inputs, 0) {
         if let Some(i) = sk.curve_index(&id) {
             // An ellipse's axes go with it when OK applies (`sketch.transform`), so they are
             // drawn with it.

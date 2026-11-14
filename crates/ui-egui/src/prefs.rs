@@ -1730,6 +1730,11 @@ preference_settings! {
     sketch_construction_lines: bool = true, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+    /// A click inside a region for the Entities of Transform, Move/Copy, Scale, Mirror and the
+    /// sketch patterns also picks the curves of the region's holes (#8390). Off (the default):
+    /// it picks the region's outline, and a shape inside it is picked by a click inside that
+    /// shape (#14496).
+    region_pick_takes_holes: bool = false, PAGE_SKETCH;
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
