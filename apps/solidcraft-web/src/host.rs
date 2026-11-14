@@ -7,8 +7,9 @@
 //! without `?host=parent` nothing is installed.
 //!
 //! A design the host opens is brought in like one from the computer (a copy in the browser's own
-//! store, then opened), so the rest of the app is unchanged. A save in host mode is handed to the
-//! host instead of becoming a download: the host writes it back.
+//! store, then opened), so the rest of the app is unchanged. In host mode every design the app
+//! saves under its name is written back to the host (`files::flush`), and downloads become
+//! saves: the host writes the file.
 
 /// The app has loaded and can take a document (app → host).
 pub const READY: &str = "solidcraft:ready";
@@ -43,6 +44,7 @@ pub fn active() -> bool {
 
 #[cfg(target_arch = "wasm32")]
 pub fn install(host: bool, files: &std::rc::Rc<crate::files::Files>) -> Result<(), String> {
+    use wasm_bindgen::JsCast as _;
     let Some(window) = web_sys::window() else {
         return Ok(());
     };

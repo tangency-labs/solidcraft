@@ -376,6 +376,17 @@ pub fn flush(files: &Rc<Files>) {
                         files.say(format!("{name}: {e}"), true);
                     }
                 });
+                // The host keeps the user's files: a design the app saves under its name is
+                // written back to it too, so Save reaches the file the host opened (#16476).
+                // The autosave and the kept copies are the app's own business, not the host's.
+                if crate::host::active()
+                    && name != RECOVERY
+                    && name != RECOVERY_META
+                    && keep::parse_name(&name).is_none()
+                    && solidcraft_engine::io::is_design_path(&name)
+                {
+                    crate::host::save(&name, &bytes, false);
+                }
             }
             disk::WriteTo::Disk => disk::enqueue(files, &path, bytes),
             disk::WriteTo::Download => {
