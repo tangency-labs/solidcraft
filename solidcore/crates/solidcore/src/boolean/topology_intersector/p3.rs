@@ -741,30 +741,34 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 let start_both_vertices = crv_class1.at(ii)?.start.point_class()
                     == PointClassType::Vertex
                     && crv_class2.at(ii)?.start.point_class() == PointClassType::Vertex;
-                if start_both_vertices && !did_last_end {
+                if start_both_vertices {
+                    // the start is a record of its own: resolve it even when the previous
+                    // interval's end already squeezed and related this vertex pair
                     let v1 = Self::surviving_vertex(&squeezed, &mut crv_class1.at_mut(ii)?.start)?;
                     let v2 = Self::surviving_vertex(&squeezed, &mut crv_class2.at_mut(ii)?.start)?;
 
-                    // when both this and other Brep are present (the usual case): if
-                    // vertices have old mates - squeeze old and new mates
-                    if self.brep.is_some() && self.other.is_some() {
-                        squeeze_ok = succeeded(self.check_for_squeeze_vertices_into(
-                            k,
-                            brep,
-                            v1,
-                            v2,
-                            &mut squeezed,
-                        ))?;
-                    }
+                    if !did_last_end {
+                        // when both this and other Brep are present (the usual case): if
+                        // vertices have old mates - squeeze old and new mates
+                        if self.brep.is_some() && self.other.is_some() {
+                            squeeze_ok = succeeded(self.check_for_squeeze_vertices_into(
+                                k,
+                                brep,
+                                v1,
+                                v2,
+                                &mut squeezed,
+                            ))?;
+                        }
 
-                    // remember if any edges were deleted by squeeze
-                    if !squeezed.deleted_edges.is_empty() {
-                        out.topology_was_deleted = true;
-                    }
+                        // remember if any edges were deleted by squeeze
+                        if !squeezed.deleted_edges.is_empty() {
+                            out.topology_was_deleted = true;
+                        }
 
-                    // create the mate relationship between the two vertices
-                    if squeeze_ok {
-                        self.relate(k, brep, Some(v1), Some(v2))?;
+                        // create the mate relationship between the two vertices
+                        if squeeze_ok {
+                            self.relate(k, brep, Some(v1), Some(v2))?;
+                        }
                     }
                 }
 
