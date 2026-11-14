@@ -344,6 +344,7 @@ small error.
 | an imprint fails half way | both bodies are partly imprinted | the imprint's error is returned, not overwritten (`topology_intersector/p2.rs`) | |
 | union deletes a face between the outside and a solid | the solid merges into the infinite region | with `boolean_union_refuses_solid_leak`, refused with `SM_ERR` naming the face (`merge/p4.rs`) | on by default |
 | result not a solid | an open or inward body from solid operands | ops refuses with `Error::NotSolid` | |
+| a join of many bodies fails one pairwise union | a pair the level scheme cannot classify (`compute_point_parameters` finds no single nearest point on a face's surface, `union_all`) refuses the whole join | the union is retried on fresh copies one body at a time against the result so far; a body that keeps failing fails the join (`core/boolean.rs`, SolidCraft #16552) | a kernel fix for the classification itself |
 | result empty | no faces left | ops returns `None` (`boolean`) or `Error::Empty` (`union_all`, `imprint`) | |
 
 **Refusals.** The kernel refuses with `SolidError` statuses: `SM_ERR` (a failed classification, a
