@@ -210,7 +210,7 @@ fn name_curve_face<O: Copy + PartialEq>(
 /// by `pFace->CurveOnClassify(TRUE, sCurveClass)` (the remaining arguments default): the
 /// intervals and their interior point classes.
 ///
-/// The face is the B-rep face [`TopologyObjects::face_entity`] names; the classification
+/// The face is the B-rep face [`TopologyObjects::with_face_entity`] lends; the classification
 /// runs on that B-rep through [`qf2::curve_on_classify`], with the solver's curve as the
 /// classified curve ([`IntersectObject::Curve`] over a one-curve slice) and the face's
 /// topology as handles of the B-rep.
@@ -237,34 +237,38 @@ fn classified_curve_intervals<O: Copy>(
         ti: None,
     };
     let mut classification = CurveClassification::with_curve(kernel, &init)?;
-    let Some((b, f)) = objects.face_entity(face) else {
+    let classified = objects.with_face_entity(face, &mut |b, f| {
+        let classify_objects = IntersectObjects {
+            b,
+            other: b,
+            side: false,
+            curves_3d: core::slice::from_ref(curve),
+            uv1: &[],
+            uv2: &[],
+        };
+        qf2::curve_on_classify(
+            kernel,
+            b,
+            f,
+            &classify_objects,
+            true,
+            &mut classification,
+            false,
+            false,
+            true,
+        )
+        .map(|_| ())
+    });
+    let Some(classified) = classified else {
         // DISPATCH GAP: SmFace::CurveOnClassify is ported (`query::face::p2`), but this
         // adapter cannot resolve the face handle to its `Brep` and `FaceId`
-        // (`TopologyObjects::face_entity`).
+        // (`TopologyObjects::with_face_entity`).
         return Err(SolidError::unported(
             "SmFace::CurveOnClassify",
             "query.face_p2",
         ));
     };
-    let classify_objects = IntersectObjects {
-        b,
-        other: b,
-        side: false,
-        curves_3d: core::slice::from_ref(curve),
-        uv1: &[],
-        uv2: &[],
-    };
-    qf2::curve_on_classify(
-        kernel,
-        b,
-        f,
-        &classify_objects,
-        true,
-        &mut classification,
-        false,
-        false,
-        true,
-    )?;
+    classified?;
     Ok(classification
         .intervals()
         .iter()

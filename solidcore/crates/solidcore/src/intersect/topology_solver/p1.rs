@@ -304,6 +304,19 @@ pub trait TopologyObjects<O> {
         None
     }
 
+    /// Runs `f` on the B-rep and face record a face handle names, for the face members
+    /// that work on the B-rep (`SmFace::CurveOnClassify`). The default lends
+    /// [`TopologyObjects::face_entity`]'s pair; an adapter that holds its B-rep behind a
+    /// checked borrow lends it for the call. `None` is a handle the adapter cannot
+    /// resolve, as for `face_entity`.
+    fn with_face_entity(
+        &self,
+        face: O,
+        f: &mut dyn FnMut(&crate::topology::Brep, crate::topology::FaceId) -> Result<()>,
+    ) -> Option<Result<()>> {
+        self.face_entity(face).map(|(b, id)| f(b, id))
+    }
+
     /// `SmSurface::GetOwner`.
     fn surface_owner(&self, surface: O) -> Result<Option<O>>;
 

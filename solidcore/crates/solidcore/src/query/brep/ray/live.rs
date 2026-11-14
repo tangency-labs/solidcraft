@@ -499,6 +499,16 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
     fn face_tolerance(&self, face: CacheObject) -> Result<f64> {
         self.read(|b| b.face_tolerance(face))
     }
+    fn with_face_entity(
+        &self,
+        face: CacheObject,
+        f: &mut dyn FnMut(&Brep, FaceId) -> Result<()>,
+    ) -> Option<Result<()>> {
+        let CacheObject::Face(face) = face else {
+            return None;
+        };
+        Some(self.with_brep(|b| f(b, face)))
+    }
     fn surface_owner(&self, surface: CacheObject) -> Result<Option<CacheObject>> {
         self.read(|b| b.surface_owner(surface))
     }
