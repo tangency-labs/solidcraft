@@ -382,8 +382,15 @@ mod tests {
         for f in &l {
             assert_ne!(family_name(f), f.name, "{}", f.id);
         }
-        let unknown =
-            Family { id: "spring".into(), name: "Spring".into(), standard: String::new(), system: "metric".into(), sizes: vec![], lengths: None, threaded: false };
+        let unknown = Family {
+            id: "spring".into(),
+            name: "Spring".into(),
+            standard: String::new(),
+            system: "metric".into(),
+            sizes: vec![],
+            lengths: None,
+            threaded: false,
+        };
         assert_eq!(family_name(&unknown), "Spring");
     }
 

@@ -1310,7 +1310,9 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
             s.doc_mut().materials.insert(name, canonical.clone());
         }
     }
-    s.doc_mut().parts.insert(comp, solidcraft_doc::StandardPart { family: family.clone(), size: size.clone(), length: shape_len(&sh), thread: mode.saved() });
+    s.doc_mut()
+        .parts
+        .insert(comp, solidcraft_doc::StandardPart { family: family.clone(), size: size.clone(), length: shape_len(&sh), thread: mode.saved() });
     set_identity(s, comp, identity(&family, &size, &sh), None);
     run(s, "component.activate", json!({"component": active}))?;
     let mut out = InsertedPart {
@@ -1684,7 +1686,9 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
     let name = part_name(&part.family, &size, &sh);
     let was = shape(&part.family, &part.size, part.length).ok().map(|old| identity(&part.family, &part.size, &old));
     set_identity(s, comp, identity(&part.family, &size, &sh), was);
-    s.doc_mut().parts.insert(comp, solidcraft_doc::StandardPart { family: part.family.clone(), size: size.clone(), length: shape_len(&sh), thread: mode.saved() });
+    s.doc_mut()
+        .parts
+        .insert(comp, solidcraft_doc::StandardPart { family: part.family.clone(), size: size.clone(), length: shape_len(&sh), thread: mode.saved() });
     if let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == comp) {
         c.name = name.clone();
     }
