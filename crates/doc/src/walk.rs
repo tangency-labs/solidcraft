@@ -599,6 +599,27 @@ impl Walk for GeoRef {
     }
 }
 
+/// A frame member's pair of points (#15705): its ends walk as a construction point's
+/// references do, the construction points they name included, so a rename follows.
+impl Walk for crate::frame::MemberPair {
+    fn walk_refs<'a>(&'a self, f: &mut dyn FnMut(RefItem<'a>)) {
+        self.a.walk_feature_refs(f, 0);
+        self.b.walk_feature_refs(f, 0);
+    }
+    fn walk_refs_mut<'a>(&'a mut self, f: &mut dyn FnMut(RefItemMut<'a>)) {
+        self.a.walk_feature_refs_mut(f, 0);
+        self.b.walk_feature_refs_mut(f, 0);
+    }
+    fn walk_geometry<'a>(&'a self, f: &mut dyn FnMut(GeoItem<'a>)) {
+        f(Geo::Construct(&self.a));
+        f(Geo::Construct(&self.b));
+    }
+    fn walk_geometry_mut<'a>(&'a mut self, f: &mut dyn FnMut(GeoItemMut<'a>)) {
+        f(Geo::Construct(&mut self.a));
+        f(Geo::Construct(&mut self.b));
+    }
+}
+
 impl Walk for PointDef {
     fn walk_exprs<'a>(&'a self, f: &mut dyn FnMut(ExprItem<'a>)) {
         match self {

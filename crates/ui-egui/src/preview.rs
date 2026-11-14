@@ -54,6 +54,9 @@ pub struct Colors {
     /// red): the see-through cut and the ghost of the shape a feature replaces. Off: those fills
     /// are left out altogether, so they are fully transparent and only outlines are drawn.
     pub cut_tint: bool,
+    /// Whether bodies the preview creates are drawn see-through, in `new_body` and its alpha
+    /// (Ghost Frame Members: this Frame Member's own new members, #15705).
+    pub glass_new: bool,
 }
 
 impl Colors {
@@ -72,6 +75,7 @@ impl Colors {
             ghost: true,
             tint_new: true,
             cut_tint: true,
+            glass_new: false,
         }
     }
 
@@ -116,6 +120,8 @@ pub struct Built {
     /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
     /// how free the part is with the constraint it shows.
     pub placed: Option<serde_json::Value>,
+    /// The members of a previewed Frame Member (`dialogs_frame::centrelines`).
+    pub centrelines: Vec<crate::dialogs_frame::Centreline>,
 }
 
 type Job = Result<Built, String>;
@@ -177,6 +183,8 @@ pub struct PreviewState {
     /// The bodies and plane ([`mirror_key`]) the Mirror dialog last set its operation for: an
     /// operation picked by hand afterwards stays until they change.
     pub mirror_decided: Option<u64>,
+    /// The members of the previewed Frame Member, for Remove Tube in its dialog.
+    pub centrelines: Vec<crate::dialogs_frame::Centreline>,
     straight: crate::extrude_preview::StraightPreview,
     moving: crate::move_preview::MovePreview,
     /// PreviewReselect: Primary held - hide the preview and restore replaced bodies for picks.
@@ -213,6 +221,7 @@ impl PreviewState {
         self.tapered.clear();
         self.mirror_meets = None;
         self.mirror_decided = None;
+        self.centrelines.clear();
         self.sketches.clear();
         self.busy = false;
         self.rolled_back = false;
@@ -251,6 +260,7 @@ impl PreviewState {
                 self.placed = b.placed;
                 self.tapered = b.tapered;
                 self.mirror_meets = b.mirror_meets;
+                self.centrelines = b.centrelines;
                 self.set_scene(b.scene);
             }
             // The current inputs make no feature: the last good geometry would contradict
@@ -265,6 +275,7 @@ impl PreviewState {
                 self.tapered.clear();
                 self.mirror_meets = None;
                 self.mirror_decided = None;
+                self.centrelines.clear();
             }
         }
     }
@@ -420,6 +431,23 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
     Some(job_key(&setup, revision, colors))
 }
 
+/// The colours the open dialog's preview is drawn in.
+pub(crate) fn colors(app: &SolveApp) -> Colors {
+    let mut colors = Colors::for_tool(&Tokens::get(), &app.ui.tab, app.tool.is_some() || app.dialog.is_some());
+    if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { .. }))) {
+        colors.ghost = app.preferences.drive_joints_ghost;
+    }
+    colors.tint_new = app.preferences.preview_tint_new_faces;
+    colors.cut_tint = app.preferences.cut_preview_tint;
+    // Ghost Frame Members: this feature's new members see-through in the new-body tint, apart
+    // from the grey other frame members are drawn in (#15705).
+    if crate::viewport::frame_ghosting(app) {
+        colors.new_body[3] = crate::viewport::frame_ghost_alpha();
+        colors.glass_new = true;
+    }
+    colors
+}
+
 /// Keep the preview in step with the open dialog: start a computation when its inputs changed,
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
@@ -446,12 +474,7 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
             return;
         }
     };
-    let mut colors = Colors::for_tool(&Tokens::get(), &app.ui.tab, app.tool.is_some() || app.dialog.is_some());
-    if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { .. }))) {
-        colors.ghost = app.preferences.drive_joints_ghost;
-    }
-    colors.tint_new = app.preferences.preview_tint_new_faces;
-    colors.cut_tint = app.preferences.cut_preview_tint;
+    let colors = colors(app);
     let key = job_key(&cmds, app.session.revision, colors);
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();
@@ -579,6 +602,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let features = || p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64));
             b.applied = features().find_map(|id| p.after.fitted_range(id));
             b.tapered = features().find_map(|id| p.after.tapered(id)).map(<[_]>::to_vec).unwrap_or_default();
+            b.centrelines = crate::dialogs_frame::centrelines(&p);
             Ok(b)
         }
     }
@@ -733,6 +757,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         stopped: None,
         mirror_meets: None,
         placed: None,
+        centrelines: Vec::new(),
     }
 }
 
@@ -782,6 +807,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         stopped: None,
         mirror_meets: None,
         placed: None,
+        centrelines: Vec::new(),
     }
 }
 
@@ -874,6 +900,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             _ => Vec::new(),
         };
         let kept = if old.is_some() { body_color } else { new_body };
+        let glass = old.is_none() && c.glass_new;
         for (t, f) in am.triangles.iter().zip(&am.tri_face) {
             let new = new_face.get(*f as usize).copied().unwrap_or(false);
             let col = if new && c.tint_new { added_color } else { kept };
@@ -881,7 +908,11 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             for k in t {
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (am.positions.get(i), am.normals.get(i)) {
-                    sc.tri(p.to_f32(), n.to_f32(), col);
+                    if glass {
+                        sc.glass_tri(p.to_f32(), n.to_f32(), col);
+                    } else {
+                        sc.tri(p.to_f32(), n.to_f32(), col);
+                    }
                     if through {
                         sc.xray_tri(p.to_f32(), n.to_f32(), removed);
                     }
@@ -941,6 +972,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         stopped: None,
         mirror_meets: None,
         placed: None,
+        centrelines: Vec::new(),
     }
 }
 
@@ -1208,6 +1240,7 @@ mod tests {
             ghost: true,
             tint_new: true,
             cut_tint: true,
+            glass_new: false,
         }
     }
 
@@ -1260,6 +1293,7 @@ mod tests {
             stopped: None,
             mirror_meets: None,
             placed: None,
+            centrelines: Vec::new(),
         }
     }
 

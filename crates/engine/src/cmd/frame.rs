@@ -1,16 +1,18 @@
 //! Frames and weldments (#4003). `frame.member` lays structural members along the lines of a frame
-//! sketch, their cross-section a built-in profile, a standard size or a profile sketch.
-//! `frame.profile.list` lists the built-in profiles and the standard sizes,
-//! `frame.profile.properties` works out a profile's section, and `frame.profile.insert` draws one
-//! into a sketch.
+//! sketch and between pairs of points (#15705), their cross-section a built-in profile, a
+//! standard size or a profile sketch. `frame.profile.list` lists the built-in profiles and the
+//! standard sizes, `frame.profile.properties` works out a profile's section, and
+//! `frame.profile.insert` draws one into a sketch.
+//! `frame.remove_member` takes tubes out of a Frame Member (#15705).
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use solidcore_record::{Loop2, Seg2, Vec2};
+use solidcraft_doc::construct::{DatumItem, GeoRef};
 use solidcraft_doc::frame::sizes::{self, Family};
-use solidcraft_doc::frame::{self, Anchor, MemberProfile, Profile, ProfileSpec};
+use solidcraft_doc::frame::{self, Anchor, MemberPair, MemberProfile, Profile, ProfileSpec};
 use solidcraft_doc::{FeatureKind, SketchId};
 use solidcraft_sketch::Sketch;
 
@@ -20,8 +22,9 @@ use super::{CommandSpec, in_sketch, not_in_sketch};
 use crate::params::{bad, bool_, expr, num, str_, string_list, vec2};
 use crate::schema::features::FeatureResult;
 use crate::schema::frame::{
-    CreatedIds, FrameMemberParams, ProfileInsertParams, ProfileInsertResult, ProfileKindInfo, ProfileListParams, ProfileListResult, ProfileOut,
-    ProfilePropertiesParams, ProfilePropertiesResult, ProfileSection, SizeFamilyInfo,
+    CreatedIds, FrameMemberParams, MemberFeatureDeleted, ProfileInsertParams, ProfileInsertResult, ProfileKindInfo, ProfileListParams,
+    ProfileListResult, ProfileOut, ProfilePropertiesParams, ProfilePropertiesResult, ProfileSection, RemoveMemberParams, RemoveMemberResult,
+    SizeFamilyInfo, removed_members,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -34,6 +37,7 @@ const MEMBER_CONTRACT: TypedContract<FrameMemberParams> = TypedContract::new();
 const LIST_CONTRACT: TypedContract<ProfileListParams> = TypedContract::new();
 const PROPERTIES_CONTRACT: TypedContract<ProfilePropertiesParams> = TypedContract::new();
 const INSERT_CONTRACT: TypedContract<ProfileInsertParams> = TypedContract::new();
+const REMOVE_CONTRACT: TypedContract<RemoveMemberParams> = TypedContract::new();
 
 /// The profile parameter, as every frame command documents it.
 macro_rules! profile_doc {
@@ -50,9 +54,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&MEMBER_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(
-        "sketch: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); ",
+        "sketch?: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); pairs?: [{a, b}] (one straight member from point a to point b each, after the lines' members, found again whenever the design changes; a and b are point references: {vertex: [x,y,z]}, {sketch, point} (a 3D sketch node as `wire:index`), {construct_point: name}, a snap point or the origin, as saved ({type, …}) too; typed coordinates are not points here; each pair is named pair1, pair2… and a pair's id is never given again; Edit Feature gives back the pairs it keeps with their `id` and `next_pair`, and an `id` without `next_pair` is refused); give `sketch`, `pairs` or both; ",
         profile_doc!(),
-        " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); locate?: [x,y] (the profile point that sits on each line, in mm from the profile's own origin: a bar's or an angle's bottom-left corner, a channel's web back at mid-height, the centre of other profiles; takes precedence over `anchor` and keeps the member attached at that point when the profile size changes); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the size's name, `RSC 203x89`, the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line id: name} (names to keep, as Edit Feature keeps them). One body per line, from its start to its end; each member keeps its name when other lines are added or deleted. Returns the feature and the bodies it made"
+        " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); locate?: [x,y] (the profile point that sits on each line, in mm from the profile's own origin: a bar's or an angle's bottom-left corner, a channel's web back at mid-height, the centre of other profiles; takes precedence over `anchor` and keeps the member attached at that point when the profile size changes); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the size's name, `RSC 203x89`, the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line or pair id: name} (names to keep, as Edit Feature keeps them). One body per line or pair, from its start to its end; each member keeps its name when other lines or pairs are added or deleted. Returns the feature and the bodies it made"
     )),
     CommandSpec::new("frame.profile.list", "Profile Library", crate::checked!("frame.profile.list", list))
         .icon("library")
@@ -81,6 +85,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         "; at?: [x,y] (sketch mm, default the origin); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point placed on `at`: its origin, the default and a built-in profile's centre, its bounding box's centre, its centroid, or a corner or edge middle of its bounding box); angle?: radians, counter-clockwise; fixed?: bool (default true: the curves are locked, so solving the sketch keeps the shape); sketch?: id|name (default: the sketch being edited). Returns the section as frame.profile.properties does",
         created_doc!()
     )),
+    // Reached from menus and scripts: no ribbon button.
+    CommandSpec::new("frame.remove_member", "Remove Tube", crate::checked!("frame.remove_member", remove_member))
+        .icon("delete")
+        .enabled(not_in_sketch)
+        .contract(&REMOVE_CONTRACT)
+        .output(output_schema_for::<RemoveMemberResult>)
+        .params("members: [{feature: id|name, line: the tube's line or pair id}] (1…1000, all of one Frame Member). Takes those tubes out as one undo step: a pair goes from the feature's pairs, a sketch line from its lines (the line stays in its sketch; a feature on every line of its sketch lists the others from then on). Taking out the last tube deletes the Frame Member. Returns the edited feature as frame.member does, or {deleted: the feature's name}"),
 ];
 
 /// The `profile` parameter: its kind and each dimension as given, a number or an expression; or a
@@ -250,9 +261,101 @@ fn add_loop(sk: &mut Sketch, l: &Loop2, fixed: bool, cmd: &str) -> Result<()> {
     Ok(())
 }
 
+/// `pairs[i].{a|b}` is a point: a vertex, a sketch point (or 3D sketch node), a construction
+/// point, a snap point, the origin or a component's O. Typed coordinates are not.
+fn is_point(g: &GeoRef) -> bool {
+    match g {
+        GeoRef::Origin | GeoRef::Vertex { .. } | GeoRef::ConstructPoint { .. } | GeoRef::SketchPoint { .. } | GeoRef::Snap { .. } => true,
+        GeoRef::Datum { datum } => datum.item == DatumItem::O,
+        _ => false,
+    }
+}
+
+/// `pairs` and `next_pair`: each pair `{id?, a, b}`, its ends point references as `construct`
+/// reads them. A given id is kept when it is a `pair<N>` given once, below `next_pair` (Edit
+/// Feature gives back the pairs it keeps, and the feature's `next_pair`); without `next_pair`, a
+/// new Frame Member, ids are the command's to give. The others take `pair<next>` on from the
+/// highest, so no id is given twice. Returns the pairs and the next pair's number.
+fn member_pairs(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<MemberPair>, u32)> {
+    let given_next = match p.get("next_pair") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| bad(cmd, "`next_pair` must be a whole number (the number the next new pair's id takes)"))?,
+        ),
+    };
+    let list = match p.get("pairs") {
+        None | Some(Value::Null) => return Ok((Vec::new(), given_next.unwrap_or(0))),
+        Some(Value::Array(a)) if !a.is_empty() && a.len() <= frame::MAX_MEMBERS => a,
+        Some(_) => return Err(bad(cmd, format!("`pairs` must list one pair of points or more, at most {}: [{{a, b}}]", frame::MAX_MEMBERS))),
+    };
+    let mut read = Vec::with_capacity(list.len());
+    let mut taken = std::collections::BTreeSet::new();
+    for (i, v) in list.iter().enumerate() {
+        let o = v.as_object().ok_or_else(|| bad(cmd, format!("`pairs[{i}]` must be {{a, b}}: two point references")))?;
+        let id = match o.get("id") {
+            None | Some(Value::Null) => None,
+            Some(id) => {
+                let id = id.as_str().unwrap_or_default();
+                let Some(next) = given_next else {
+                    return Err(bad(cmd, format!("`pairs[{i}].id` `{id}`: ids are given by the command, not the caller")));
+                };
+                let n = frame::parse_pair_id(id).filter(|n| *n < next).ok_or_else(|| {
+                    bad(cmd, format!("`pairs[{i}].id` `{id}` is not one of the feature's pair ids (pair1, pair2… below `next_pair`)"))
+                })?;
+                if !taken.insert(n) {
+                    return Err(bad(cmd, format!("pair id `{id}` is given twice")));
+                }
+                Some(id.to_string())
+            }
+        };
+        let end = |key: &str| -> Result<GeoRef> {
+            let what = format!("pairs[{i}].{key}");
+            let g = super::construct::geo(s, o.get(key), cmd, &what)?;
+            if is_point(&g) {
+                Ok(g)
+            } else {
+                Err(bad(cmd, format!("`{what}` must be a point: a vertex, a sketch point, a construction point or a snap point")))
+            }
+        };
+        read.push((id, end("a")?, end("b")?));
+    }
+    let too_many = || bad(cmd, "pair ids have run out of numbers");
+    let past_highest = match taken.last() {
+        Some(n) => n.checked_add(1).ok_or_else(too_many)?,
+        None => 1,
+    };
+    let mut next = given_next.unwrap_or(0).max(past_highest);
+    let mut pairs = Vec::with_capacity(read.len());
+    for (id, a, b) in read {
+        let id = match id {
+            Some(id) => id,
+            None => {
+                let id = frame::pair_id(next);
+                next = next.checked_add(1).ok_or_else(too_many)?;
+                id
+            }
+        };
+        pairs.push(MemberPair { id, a, b });
+    }
+    Ok((pairs, next))
+}
+
 fn member(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "frame.member";
-    let path_sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
+    // A `sketch` that is there is read, `null` included, as before pairs.
+    let path_sketch = match p.get("sketch") {
+        None => None,
+        Some(v) => Some(sketch_id(s, Some(v), cmd, "sketch")?),
+    };
+    let (pairs, next_pair) = member_pairs(s, p, cmd)?;
+    if path_sketch.is_none() && pairs.is_empty() {
+        return Err(bad(cmd, "give `sketch` (the frame sketch, its lines), `pairs` (pairs of points), or both"));
+    }
+    if path_sketch.is_none() && !matches!(p.get("lines"), None | Some(Value::Null)) {
+        return Err(bad(cmd, "`lines` are the lines of `sketch`: give the sketch"));
+    }
     let lines = match p.get("lines") {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(a)) if !a.is_empty() && a.len() <= frame::MAX_MEMBERS && a.iter().all(Value::is_string) => {
@@ -285,7 +388,7 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         }
         (None, Some(v)) => {
             let id = sketch_id(s, Some(v), cmd, "profile_sketch")?;
-            if id == path_sketch {
+            if Some(id) == path_sketch {
                 return Err(bad(cmd, "the profile sketch must not be the frame sketch"));
             }
             let name = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| "Member".into());
@@ -337,7 +440,7 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let base = body_name.clone().unwrap_or(default_name);
     let mut kind = FeatureKind::FrameMember {
-        path_sketch: SketchId(path_sketch),
+        path_sketch: path_sketch.map(SketchId),
         lines,
         profile,
         anchor,
@@ -346,6 +449,8 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         mirror,
         body_name,
         names: BTreeMap::new(),
+        pairs,
+        next_pair,
     };
     // Each member's name is pinned to its line as the feature is made, so deleting or adding a
     // line later leaves the other members' names alone.
@@ -363,4 +468,65 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         o.remove("names");
     }
     add_feature(s, &p, kind)
+}
+
+fn remove_member(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "frame.remove_member";
+    let members = removed_members(p.get("members")).map_err(|e| bad(cmd, e))?;
+    let mut id = None;
+    for (feature, _) in &members {
+        let f = super::edit::feature_id(s, Some(feature), cmd)?;
+        if id.is_some_and(|id| id != f) {
+            return Err(bad(cmd, "`members` must all be tubes of one Frame Member"));
+        }
+        id = Some(f);
+    }
+    let f = id.and_then(|id| s.doc.feature(id)).cloned().ok_or_else(|| bad(cmd, "`members` must name a Frame Member"))?;
+    let mut kind = f.kind.clone();
+    let FeatureKind::FrameMember { path_sketch, lines, names, pairs, .. } = &mut kind else {
+        return Err(bad(cmd, format!("`{}` is not a Frame Member", f.name)));
+    };
+    // A copy names its tubes by position: each keeps the name it has now on its member, or every
+    // tube after the one taken out would take the name of the one before.
+    let pins = super::browser::member_pins(s, f.id).filter(|_| !f.body_names.is_empty());
+    let by_position = pins.is_some();
+    if let Some(pins) = pins {
+        *names = pins;
+    }
+    let gone: std::collections::BTreeSet<&str> = members.iter().map(|(_, line)| line.as_str()).collect();
+    let is_pair = |line: &str, pairs: &[MemberPair]| pairs.iter().any(|p| p.id == line);
+    // No `lines` means every line of the sketch: they are listed as they are now before one goes,
+    // with the rule evaluation uses.
+    if lines.is_empty() && path_sketch.is_some() && gone.iter().any(|line| !is_pair(line, pairs)) {
+        let mut every = frame::member_line_ids(&s.model.state_before(f.id), &f.kind).map_err(|e| bad(cmd, e.to_string()))?;
+        every.retain(|l| !is_pair(l, pairs));
+        *lines = every;
+    }
+    if let Some(line) = gone.iter().find(|line| !is_pair(line, pairs) && !lines.iter().any(|l| l == *line)) {
+        return Err(bad(cmd, format!("`{line}` is not a tube of {}", f.name)));
+    }
+    let had_lines = !lines.is_empty();
+    lines.retain(|l| !gone.contains(l.as_str()));
+    pairs.retain(|p| !gone.contains(p.id.as_str()));
+    names.retain(|l, _| !gone.contains(l.as_str()));
+    // `next_pair` stays: a removed pair's id is never given again.
+    if had_lines && lines.is_empty() {
+        // No lines left, which an empty `lines` with a sketch would read as every line.
+        *path_sketch = None;
+    }
+    if path_sketch.is_none() && pairs.is_empty() {
+        // A Frame Member can't be without members: its last tube takes it, as Delete would.
+        let delete = super::find_command("timeline.delete").ok_or_else(|| bad(cmd, "no command `timeline.delete`"))?;
+        delete.run_nested(s, &json!({ "feature": f.id }))?;
+        return frame_reply(cmd, RemoveMemberResult::Deleted(MemberFeatureDeleted { deleted: f.name, param_warnings: Vec::new() }));
+    }
+    let before = s.model.state();
+    if let Some(slot) = s.doc_mut().feature_mut(f.id) {
+        slot.kind = kind;
+        if by_position {
+            slot.body_names.clear();
+        }
+    }
+    s.refresh();
+    super::features::feature_reply(s, f.id, &before)
 }

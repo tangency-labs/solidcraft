@@ -225,7 +225,8 @@ fn face_candidates(
             continue;
         }
         let ghosted = crate::viewport::body_faded(app, b, active_bodies);
-        if ghosted && !include_ghosted {
+        // Ghost Frame Members lets clicks through a member's faces, as the mouse picker does.
+        if (ghosted && !include_ghosted) || crate::viewport::frame_ghosted(app, b) {
             continue;
         }
         if let Some((_, bb)) = bounds.get(i) {
@@ -416,6 +417,8 @@ fn near_edges(
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
             continue;
         }
+        // A frame member Ghost Frame Members draws see-through: its vertices, not its edges.
+        let frame_ghosted = crate::viewport::frame_ghosted(app, b);
         let mut body_slack = slack;
         if let Some((_, bb)) = bounds.get(i) {
             if crate::viewport::screen_box(proj, bb, edge_px).is_some_and(|r| !r.contains(pos)) {
@@ -444,6 +447,9 @@ fn near_edges(
                         }
                     }
                 }
+            }
+            if frame_ghosted {
+                continue;
             }
             let (Some(p0), Some(p1)) = (e.get(si).map(|p| at(*p)), e.get(si + 1).map(|p| at(*p))) else { continue };
             let (Some(a), Some(c)) = (proj.to_screen(p0), proj.to_screen(p1)) else { continue };

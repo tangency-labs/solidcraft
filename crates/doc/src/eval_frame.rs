@@ -1,5 +1,6 @@
-//! Frame members (#4003): one body per straight line of a frame sketch, its cross-section a
-//! profile laid square to the line (`frame::member_axes`) and run from one end to the other.
+//! Frame members (#4003): one body per straight line of a frame sketch, and per pair of points
+//! (#15705), its cross-section a profile laid square to the line (`frame::member_axes`) and run
+//! from one end to the other.
 
 use solidcraft_geom::prelude::*;
 use std::borrow::Cow;
@@ -12,7 +13,7 @@ use solidcraft_sketch::CurveKind;
 
 use super::{ModelBody, ModelState, SolvedSketch, new_name, path_in_frame, select_profiles, sketch_in_feature_frame, val};
 use crate::expr::{Kind, Value};
-use crate::frame::{self, MAX_MEMBERS, MemberProfile};
+use crate::frame::{self, MAX_MEMBERS, MemberPair, MemberProfile};
 use crate::{DocError, Document, Feature, FeatureKind, ProfileSel, Result};
 
 /// Most profiles a profile sketch may have for its material to be worked out.
@@ -68,14 +69,10 @@ struct Layout {
 }
 
 fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Layout> {
-    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, angle, mirror, .. } = &f.kind else {
+    let FeatureKind::FrameMember { profile, anchor, locate, angle, mirror, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
-    // The frame sketch in this feature's component frame: its plane, and its 3D lines.
-    let mapped =
-        if ps.sketch.wires.is_empty() { Cow::Owned(sketch_in_feature_frame(doc, ps, f.component)?) } else { path_in_frame(doc, ps, f.component)? };
-    let segments = member_lines(mapped.as_ref(), lines)?;
+    let segments = segments(doc, vals, f, st)?;
     let (mut regions, description, origin) = profile_regions(vals, st, profile)?;
     if *mirror {
         regions = regions.iter().map(frame::mirrored).collect();
@@ -100,6 +97,48 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
         None => 0.0,
     };
     Ok(Layout { segments, regions, description, at, turn })
+}
+
+/// Each member's line in the feature's component frame: (member id, start, end), the sketch's
+/// lines then the pairs'.
+fn segments(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Vec<(String, Vec3, Vec3)>> {
+    let FeatureKind::FrameMember { path_sketch, lines, pairs, .. } = &f.kind else {
+        return Err(DocError::Invalid("not a frame member feature".into()));
+    };
+    let mut segments = match path_sketch {
+        Some(path_sketch) => {
+            let ps =
+                st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
+            // The frame sketch in this feature's component frame: its plane, and its 3D lines.
+            let mapped = if ps.sketch.wires.is_empty() {
+                Cow::Owned(sketch_in_feature_frame(doc, ps, f.component)?)
+            } else {
+                path_in_frame(doc, ps, f.component)?
+            };
+            member_lines(mapped.as_ref(), lines)?
+        }
+        None => Vec::new(),
+    };
+    segments.extend(pair_lines(doc, vals, f, st, pairs)?);
+    let mut seen = HashSet::new();
+    if let Some((id, _, _)) = segments.iter().find(|(id, _, _)| !seen.insert(id.as_str())) {
+        return Err(DocError::Invalid(format!("member id `{id}` is used twice")));
+    }
+    if segments.is_empty() {
+        return Err(DocError::Invalid("the frame member has no members (give it a sketch or pairs of points)".into()));
+    }
+    if segments.len() > MAX_MEMBERS {
+        return Err(DocError::Invalid(format!("at most {MAX_MEMBERS} members in one feature")));
+    }
+    Ok(segments)
+}
+
+/// Each member's centreline where the view shows it: (member id, start, end), in the world.
+/// `st` is the model the feature was evaluated on (`Model::state_before`).
+pub fn member_segments(doc: &Document, st: &ModelState, f: &Feature) -> Result<Vec<(String, Vec3, Vec3)>> {
+    let m = doc.component_transform(f.component);
+    let place = |p: Vec3| crate::apply_point(&m, p);
+    Ok(segments(doc, &doc.evaluation_values(), f, st)?.into_iter().map(|(id, a, b)| (id, place(a), place(b))).collect())
 }
 
 /// The member of feature `f` on line `line`, as its body was made: the plane square to the line
@@ -151,13 +190,68 @@ pub fn member_names(st: &ModelState, lines: &[String], pinned: &BTreeMap<String,
     out.into_iter().map(|n| n.unwrap_or_else(|| base.to_string())).collect()
 }
 
-/// The ids of a `FrameMember` feature's lines in `st`, in the order its members are made.
+/// The ids of a `FrameMember` feature's lines in `st`, then its pairs', in the order its members
+/// are made.
 pub fn member_line_ids(st: &ModelState, kind: &FeatureKind) -> Result<Vec<String>> {
-    let FeatureKind::FrameMember { path_sketch, lines, .. } = kind else {
+    let FeatureKind::FrameMember { path_sketch, lines, pairs, .. } = kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch}")))?;
-    Ok(member_lines(ps, lines)?.into_iter().map(|(id, _, _)| id).collect())
+    let mut ids: Vec<String> = match path_sketch {
+        Some(path_sketch) => {
+            let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch}")))?;
+            member_lines(ps, lines)?.into_iter().map(|(id, _, _)| id).collect()
+        }
+        None => Vec::new(),
+    };
+    ids.extend(pairs.iter().map(|p| p.id.clone()));
+    Ok(ids)
+}
+
+/// The member (line or pair id) of Frame Member `f` whose body is `body`, if one is: by position
+/// when the feature names its bodies itself, else by its `names` entry.
+pub fn member_of_body(st: &ModelState, f: &Feature, body: &str) -> Result<Option<String>> {
+    let FeatureKind::FrameMember { names, .. } = &f.kind else { return Ok(None) };
+    let ids = member_line_ids(st, &f.kind)?;
+    Ok(if f.body_names.is_empty() {
+        ids.into_iter().find(|line| names.get(line).is_some_and(|name| name == body))
+    } else {
+        f.body_names.iter().position(|name| name == body).and_then(|i| ids.into_iter().nth(i))
+    })
+}
+
+/// Each pair's ends, found again as construction geometry finds its points: in this feature's
+/// component frame, where its lines are laid out, so both take the same "up". A pair whose point
+/// is gone, or whose ends now meet, fails the feature, naming the pair.
+fn pair_lines(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &ModelState,
+    pairs: &[MemberPair],
+) -> Result<Vec<(String, Vec3, Vec3)>> {
+    if pairs.is_empty() {
+        return Ok(Vec::new());
+    }
+    if pairs.len() > MAX_MEMBERS {
+        return Err(DocError::Invalid(format!("at most {MAX_MEMBERS} members in one feature")));
+    }
+    let cst = super::construction_state(doc, st, f.component)?;
+    let ctx = crate::construct::Ctx { doc, vals, st: &cst, depth: 0, component: f.component };
+    pairs
+        .iter()
+        .map(|p| {
+            let end = |g, which: &str| match crate::construct::point(&ctx, g) {
+                Ok(v) if v.is_finite() => Ok(v),
+                Ok(_) => Err(DocError::Invalid(format!("{}: its {which} point is not a finite point", p.id))),
+                Err(e) => Err(DocError::Invalid(format!("{}: its {which} point is gone ({e})", p.id))),
+            };
+            let (a, b) = (end(&p.a, "first")?, end(&p.b, "second")?);
+            if !(a.dist(b) > MIN_LENGTH) {
+                return Err(DocError::Invalid(format!("{}: its two points are in one place (it has no length)", p.id)));
+            }
+            Ok((p.id.clone(), a, b))
+        })
+        .collect()
 }
 
 /// The member lines of the frame sketch, each as (curve id, start, end) in its frame: the lines

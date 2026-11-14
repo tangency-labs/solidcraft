@@ -1105,3 +1105,530 @@ fn a_member_feature_mirrors_and_patterns_and_follows_its_lines() {
     run(&mut s, "parameters.change", json!({"name": "L", "expression": "760 mm"}));
     check(&mut s, 760.0);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Members between pairs of points (#15705)
+
+/// A 600 × 400 × 400 box `Box` (feature `Box`) from the rectangle `Base` on XY: its corners are
+/// the points the pairs join.
+fn box_frame(s: &mut Session) {
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [600, 400]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"distance": 400, "name": "Box", "body_name": "Box"}));
+}
+
+/// The upright at the box's corner (600, 0), as `pairs` takes it.
+fn upright() -> Value {
+    json!({"a": {"vertex": [600, 0, 0]}, "b": {"vertex": [600, 0, 400]}})
+}
+
+/// The rail along the box's top front edge, as `pairs` takes it.
+fn top_rail() -> Value {
+    json!({"a": {"vertex": [0, 0, 400]}, "b": {"vertex": [600, 0, 400]}})
+}
+
+/// The bounding boxes of the bodies other than the box, by name.
+fn member_boxes(s: &mut Session) -> std::collections::BTreeMap<String, ([f64; 3], [f64; 3])> {
+    boxes(s).into_iter().filter(|(name, _)| name != "Box").collect()
+}
+
+fn has_box(boxes: &std::collections::BTreeMap<String, ([f64; 3], [f64; 3])>, lo: [f64; 3], hi: [f64; 3]) -> bool {
+    boxes.values().any(|(l, h)| near3(*l, lo) && near3(*h, hi))
+}
+
+/// The kind of the feature `id` (as a command's reply gives it).
+fn member_kind(s: &Session, id: &Value) -> solidcraft_doc::FeatureKind {
+    s.doc.feature(id.as_u64().unwrap()).unwrap().kind.clone()
+}
+
+#[test]
+fn members_between_point_pairs() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let r = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail()]}));
+    let members = member_boxes(&mut s);
+    assert_eq!(members.len(), 2, "{members:?}");
+    // The upright: square to Z, the profile's x along world X.
+    assert!(has_box(&members, [580.0, -20.0, 0.0], [620.0, 20.0, 400.0]), "{members:?}");
+    // The rail along +X: the profile's x along +Y, its y up.
+    assert!(has_box(&members, [0.0, -20.0, 380.0], [600.0, 20.0, 420.0]), "{members:?}");
+    let solidcraft_doc::FeatureKind::FrameMember { path_sketch, pairs, next_pair, .. } = member_kind(&s, &r["feature"]) else { panic!() };
+    assert_eq!(path_sketch, None);
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair1", "pair2"]);
+    assert_eq!(next_pair, 3);
+}
+
+#[test]
+fn point_pairs_and_sketch_lines_in_one_frame_member() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let bottom = line_at_y(&s, "Base", 0.0);
+    let r = run(&mut s, "frame.member", json!({"sketch": "Base", "lines": [bottom], "profile": tube(), "pairs": [upright()]}));
+    let members = member_boxes(&mut s);
+    assert_eq!(members.len(), 2, "{members:?}");
+    assert!(has_box(&members, [0.0, -20.0, -20.0], [600.0, 20.0, 20.0]), "{members:?}");
+    assert!(has_box(&members, [580.0, -20.0, 0.0], [620.0, 20.0, 400.0]), "{members:?}");
+    let ids = solidcraft_doc::frame::member_line_ids(&s.model.state(), &member_kind(&s, &r["feature"])).unwrap();
+    assert_eq!(ids, [bottom, "pair1".to_string()]);
+}
+
+#[test]
+fn a_pair_member_follows_its_point() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright()]}));
+    run(&mut s, "timeline.edit", json!({"feature": "Box", "set": {"extent.distance": "500"}}));
+    let members = member_boxes(&mut s);
+    assert!(has_box(&members, [580.0, -20.0, 0.0], [620.0, 20.0, 500.0]), "the upright reaches the box's new top: {members:?}");
+}
+
+/// A pair on sketch points follows them when the sketch is edited.
+#[test]
+fn a_pair_member_follows_its_sketch_points() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut s, "sketch.point", json!({"point": [0, -100], "id": "m1"}));
+    run(&mut s, "sketch.point", json!({"point": [600, -100], "id": "m2"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let pair = json!({"a": {"sketch": "Marks", "point": "m1"}, "b": {"sketch": "Marks", "point": "m2"}});
+    run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [pair]}));
+    let members = member_boxes(&mut s);
+    assert!(has_box(&members, [0.0, -120.0, -20.0], [600.0, -80.0, 20.0]), "{members:?}");
+    run(&mut s, "sketch.edit", json!({"sketch": "Marks"}));
+    run(&mut s, "sketch.move_point", json!({"point": "m2", "to": [800, -100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let members = member_boxes(&mut s);
+    assert!(has_box(&members, [0.0, -120.0, -20.0], [800.0, -80.0, 20.0]), "{members:?}");
+}
+
+#[test]
+fn a_pair_member_keeps_its_name_when_another_pair_goes() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail()]}))["feature"].clone();
+    let solidcraft_doc::FeatureKind::FrameMember { names, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(names.keys().collect::<Vec<_>>(), ["pair1", "pair2"]);
+    let rail = member_boxes(&mut s).into_iter().find(|(_, (lo, _))| (lo[2] - 380.0).abs() < 1e-6).unwrap();
+    assert_eq!(names["pair2"], rail.0);
+    let mut kept = top_rail();
+    kept["id"] = json!("pair2");
+    let params = json!({"profile": tube(), "pairs": [kept], "next_pair": 3});
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": params}));
+    let after = member_boxes(&mut s);
+    assert_eq!(after.len(), 1, "{after:?}");
+    assert_eq!(after.get(&rail.0), Some(&rail.1), "the rail keeps its name and place: {after:?}");
+    let solidcraft_doc::FeatureKind::FrameMember { pairs, next_pair, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair2"]);
+    assert_eq!(next_pair, 3);
+}
+
+#[test]
+fn an_end_cap_closes_a_pair_member() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"profile": square_tube(), "pairs": [upright()], "body_name": "Post"}))["feature"].clone();
+    let top = face_pick(&s, "Post", [618.5, 0.0, 400.0], [0.0, 0.0, 1.0]);
+    let r = run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6}));
+    let cap = measured(&mut s, "Post End Cap");
+    assert!(near3(cap.2, [580.0, -20.0, 400.0]) && near3(cap.3, [620.0, 20.0, 406.0]), "{cap:?}");
+    let solidcraft_doc::FeatureKind::FrameEndCap { ends, .. } = member_kind(&s, &r["feature"]) else { panic!() };
+    assert_eq!(ends[0].member.line, "pair1");
+    assert_eq!(ends[0].member.feature.0, fid.as_u64().unwrap());
+}
+
+#[test]
+fn pairs_are_refused_when() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let same = json!({"a": {"vertex": [600, 0, 0]}, "b": {"vertex": [600, 0, 0]}});
+    let fixed = json!({"a": {"point": [0, 0, 0]}, "b": {"vertex": [600, 0, 400]}});
+    let edge = json!({"a": {"vertex": [600, 0, 0]}, "b": {"edge": [300, 0, 0]}});
+    let many: Vec<Value> = (0..=1000).map(|_| upright()).collect();
+    let with_id = |pair: Value, id: &str| {
+        let mut pair = pair;
+        pair["id"] = json!(id);
+        pair
+    };
+    for (p, why) in [
+        (json!({"profile": tube(), "pairs": [same]}), "no length"),
+        (json!({"profile": tube(), "pairs": [fixed]}), "`pairs[0].a` must be a point"),
+        (json!({"profile": tube(), "pairs": [upright(), edge]}), "`pairs[1].b` must be a point"),
+        (json!({"profile": tube(), "pairs": many}), "at most 1000"),
+        (json!({"profile": tube()}), "`sketch`"),
+        (json!({"profile": tube(), "pairs": []}), "`pairs`"),
+        (json!({"profile": tube(), "pairs": "pair1"}), "`pairs`"),
+        (json!({"profile": tube(), "pairs": [{"a": {"vertex": [600, 0, 0]}}]}), "`pairs[0].b`"),
+        (json!({"profile": tube(), "pairs": [with_id(upright(), "pair9")], "next_pair": 3}), "pair9"),
+        (json!({"profile": tube(), "pairs": [with_id(upright(), "pair1"), with_id(top_rail(), "pair1")], "next_pair": 3}), "pair1"),
+        (json!({"profile": tube(), "pairs": [with_id(upright(), "rail")]}), "rail"),
+        (json!({"profile": tube(), "pairs": [upright()], "next_pair": -1}), "`next_pair`"),
+    ] {
+        let err = s.execute("frame.member", &p).unwrap_err().to_string();
+        assert!(err.contains(why), "{why}: {err}");
+    }
+    assert!(member_boxes(&mut s).is_empty(), "nothing was made");
+}
+
+#[test]
+fn a_pair_whose_point_is_gone_fails_the_feature_naming_it() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut s, "sketch.point", json!({"point": [600, 0], "id": "m1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let on_mark = json!({"a": {"sketch": "Marks", "point": "m1"}, "b": {"vertex": [600, 0, 400]}});
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [on_mark, top_rail()]}))["feature"].as_u64().unwrap();
+    let before = member_boxes(&mut s);
+    assert_eq!(before.len(), 2, "{before:?}");
+    run(&mut s, "sketch.edit", json!({"sketch": "Marks"}));
+    run(&mut s, "sketch.delete", json!({"entities": ["m1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let failing = s.model.result(fid).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(failing.contains("pair1"), "{failing}");
+    assert!(member_boxes(&mut s).is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(member_boxes(&mut s), before);
+}
+
+#[test]
+fn a_pair_member_in_a_rotated_component_turns_like_a_line_member() {
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Tilted", "grounded": false}))["component"].as_u64().unwrap();
+    let o = s.doc.occurrence_of(c).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": o, "axis": [1, 0, 0], "angle": "30 deg", "capture": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let wire = run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [600, 0, 0]]}))["created"]["wires"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let bar = json!({"kind": "bar", "width": 60, "height": 10});
+    run(&mut s, "frame.member", json!({"sketch": "Path", "profile": bar, "body_name": "Line"}));
+    let pair = json!({"a": {"sketch": "Path", "point": format!("{wire}:0")}, "b": {"sketch": "Path", "point": format!("{wire}:1")}});
+    run(&mut s, "frame.member", json!({"profile": bar, "pairs": [pair], "body_name": "Pair"}));
+    let (line, pair) = (measured(&mut s, "Line"), measured(&mut s, "Pair"));
+    // Tilted 30° about X with its component: the bar's 60 mm width rises 30 mm out of the XY plane.
+    assert!(line.3[2] - line.2[2] > 30.0, "{line:?}");
+    assert!(near3(line.2, pair.2) && near3(line.3, pair.3), "{line:?} vs {pair:?}");
+}
+
+#[test]
+fn a_pasted_frame_member_with_pairs_lands_with_its_source() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail()]}))["feature"].clone();
+    let source: Vec<_> = member_boxes(&mut s).into_values().collect();
+    run(&mut s, "timeline.copy", json!({"features": [fid]}));
+    run(&mut s, "timeline.paste", json!({}));
+    let all: Vec<_> = member_boxes(&mut s).into_values().collect();
+    assert_eq!(all.len(), 4, "{all:?}");
+    for (lo, hi) in &source {
+        assert_eq!(all.iter().filter(|(l, h)| near3(*l, *lo) && near3(*h, *hi)).count(), 2, "{all:?}");
+    }
+}
+
+/// The stored `pairs` of a frame member, as JSON.
+fn stored_pairs(s: &Session, id: &Value) -> Value {
+    serde_json::to_value(&s.doc.feature(id.as_u64().unwrap()).unwrap().kind).unwrap()["pairs"].clone()
+}
+
+#[test]
+fn editing_a_frame_member_keeps_pair_ids_and_never_reuses_one() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail()]}))["feature"].clone();
+    let before = stored_pairs(&s, &fid);
+    let solidcraft_doc::FeatureKind::FrameMember { names, .. } = member_kind(&s, &fid) else { panic!() };
+    // timeline.edit: the feature is edited in place, so a removed pair's id stays spent.
+    run(&mut s, "timeline.edit", json!({"feature": fid, "set": {"pairs": [before[1].clone()]}}));
+    let solidcraft_doc::FeatureKind::FrameMember { pairs, next_pair, names: after, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair2"]);
+    assert_eq!(serde_json::to_value(&pairs[0]).unwrap(), before[1]);
+    assert_eq!(next_pair, 3);
+    assert_eq!(after["pair2"], names["pair2"]);
+    // timeline.redefine without `next_pair`: the same.
+    let kept = json!({"id": "pair2", "a": top_rail()["a"], "b": top_rail()["b"]});
+    let params = json!({"profile": tube(), "pairs": [kept, upright()]});
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": params}));
+    let solidcraft_doc::FeatureKind::FrameMember { pairs, next_pair, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair2", "pair3"]);
+    assert_eq!(next_pair, 4);
+    // Dropping the newest pair and adding another still never reuses `pair3`.
+    let params = json!({"profile": tube(), "pairs": [{"id": "pair2", "a": top_rail()["a"], "b": top_rail()["b"]}]});
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": params}));
+    let params = json!({"profile": tube(), "pairs": [{"id": "pair2", "a": top_rail()["a"], "b": top_rail()["b"]}, upright()]});
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": params}));
+    let solidcraft_doc::FeatureKind::FrameMember { pairs, next_pair, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair2", "pair4"]);
+    assert_eq!(next_pair, 5);
+}
+
+#[test]
+fn a_member_id_used_twice_is_refused() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rails"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 500]], "ids": ["pair1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e =
+        s.execute("frame.member", &json!({"sketch": "Rails", "lines": ["pair1"], "profile": tube(), "pairs": [upright()]})).unwrap_err().to_string();
+    assert!(e.contains("`pair1` is used twice"), "{e}");
+}
+
+/// The rail along the box's bottom front edge, as `pairs` takes it.
+fn bottom_rail() -> Value {
+    json!({"a": {"vertex": [0, 0, 0]}, "b": {"vertex": [600, 0, 0]}})
+}
+
+fn remove(s: &mut Session, members: Value) -> Value {
+    run(s, "frame.remove_member", json!({ "members": members }))
+}
+
+#[test]
+fn removing_a_pair_member_takes_out_its_pair() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    // The upright and the top rail share the corner (600, 0, 400).
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail()]}))["feature"].clone();
+    let solidcraft_doc::FeatureKind::FrameMember { names, .. } = member_kind(&s, &fid) else { panic!() };
+    let rail = member_boxes(&mut s).into_iter().find(|(name, _)| *name == names["pair2"]).unwrap();
+    let stored = stored_pairs(&s, &fid);
+    let r = remove(&mut s, json!([{"feature": fid, "line": "pair1"}]));
+    assert_eq!(r["feature"], fid, "{r}");
+    let solidcraft_doc::FeatureKind::FrameMember { pairs, names: after, next_pair, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair2"]);
+    assert_eq!(stored_pairs(&s, &fid), json!([stored[1]]), "pair2, the shared point with it, is as it was");
+    assert_eq!(after.keys().collect::<Vec<_>>(), ["pair2"]);
+    assert_eq!(after["pair2"], names["pair2"]);
+    assert_eq!(next_pair, 3, "a removed pair's id is never given again");
+    let members = member_boxes(&mut s);
+    assert_eq!(members.len(), 1, "{members:?}");
+    assert_eq!(members.get(&rail.0), Some(&rail.1), "the rail keeps its name and place: {members:?}");
+}
+
+#[test]
+fn removing_a_line_member_lists_the_other_lines() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube()}))["feature"].clone();
+    let before = boxes(&mut s);
+    let bottom = line_at_y(&s, "Frame", 0.0);
+    remove(&mut s, json!([{"feature": fid, "line": bottom}]));
+    let solidcraft_doc::FeatureKind::FrameMember { lines, names, path_sketch, .. } = member_kind(&s, &fid) else { panic!() };
+    let others: Vec<String> = sketch_lines(&s, "Frame").into_iter().map(|l| l.0).filter(|id| *id != bottom).collect();
+    assert_eq!(lines, others);
+    assert!(path_sketch.is_some());
+    assert!(!names.contains_key(&bottom), "{names:?}");
+    let after = boxes(&mut s);
+    assert_eq!(after.len(), 3, "{after:?}");
+    for (name, bb) in &after {
+        assert_eq!(before.get(name), Some(bb), "{name} moved or was renamed: {before:?} → {after:?}");
+    }
+    assert_eq!(sketch_lines(&s, "Frame").len(), 4, "the line stays in its sketch");
+}
+
+#[test]
+fn removing_the_last_member_deletes_the_frame_member() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let made = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright()]}));
+    let fid = made["feature"].clone();
+    let kind = member_kind(&s, &fid);
+    let undo_steps = s.undo.len();
+    let r = remove(&mut s, json!([{"feature": made["name"], "line": "pair1"}]));
+    assert_eq!(r["deleted"], made["name"], "{r}");
+    assert_eq!(s.undo.len(), undo_steps + 1, "one undo step");
+    assert!(s.doc.feature(fid.as_u64().unwrap()).is_none());
+    assert!(member_boxes(&mut s).is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(member_kind(&s, &fid), kind, "one undo step brings it back, its member and name too");
+    assert_eq!(member_boxes(&mut s).len(), 1);
+}
+
+#[test]
+fn removing_every_line_of_a_mixed_frame_member_keeps_its_pairs() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let bottom = line_at_y(&s, "Base", 0.0);
+    let fid = run(&mut s, "frame.member", json!({"sketch": "Base", "lines": [bottom], "profile": tube(), "pairs": [upright()]}))["feature"].clone();
+    remove(&mut s, json!([{"feature": fid, "line": bottom}]));
+    let solidcraft_doc::FeatureKind::FrameMember { lines, path_sketch, pairs, .. } = member_kind(&s, &fid) else { panic!() };
+    assert!(lines.is_empty() && path_sketch.is_none(), "no lines left, not every line: {lines:?} {path_sketch:?}");
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(member_boxes(&mut s).len(), 1);
+}
+
+#[test]
+fn undo_and_redo_of_remove_tube() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail()]}))["feature"].clone();
+    let before = member_kind(&s, &fid);
+    let undo_steps = s.undo.len();
+    remove(&mut s, json!([{"feature": fid, "line": "pair1"}]));
+    assert_eq!(s.undo.len(), undo_steps + 1, "one undo step");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(member_kind(&s, &fid), before, "both members, pair1's name back");
+    assert_eq!(member_boxes(&mut s).len(), 2);
+    run(&mut s, "edit.redo", json!({}));
+    let solidcraft_doc::FeatureKind::FrameMember { pairs, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(member_boxes(&mut s).len(), 1);
+}
+
+#[test]
+fn an_end_cap_on_a_removed_member_reports_a_broken_reference() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid =
+        run(&mut s, "frame.member", json!({"profile": square_tube(), "pairs": [upright(), bottom_rail()], "body_name": "Post"}))["feature"].clone();
+    let top = face_pick(&s, "Post", [618.5, 0.0, 400.0], [0.0, 0.0, 1.0]);
+    let cap = run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6}))["feature"].as_u64().unwrap();
+    remove(&mut s, json!([{"feature": fid, "line": "pair1"}]));
+    assert!(s.doc.feature(cap).is_some(), "the End Cap is not deleted");
+    let error = s.model.result(cap).and_then(|r| r.error.clone());
+    assert!(error.is_some(), "the End Cap shows its broken reference");
+}
+
+#[test]
+fn remove_member_refuses() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let a = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright()]}))["feature"].clone();
+    let b = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [top_rail()]}))["feature"].clone();
+    let doc = s.doc.clone();
+    let undo_steps = s.undo.len();
+    let many: Vec<Value> = (0..=1000).map(|_| json!({"feature": a, "line": "pair1"})).collect();
+    for (p, why) in [
+        (json!({"members": [{"feature": "Nowhere", "line": "pair1"}]}), "Nowhere"),
+        (json!({"members": [{"feature": "Box", "line": "pair1"}]}), "not a Frame Member"),
+        (json!({"members": [{"feature": a, "line": "pair9"}]}), "pair9"),
+        (json!({"members": [{"feature": a, "line": "pair1"}, {"feature": b, "line": "pair1"}]}), "one Frame Member"),
+        (json!({"members": []}), "`members`"),
+        (json!({}), "`members`"),
+        (json!({"members": many}), "1000"),
+        (json!({"members": [{"feature": a}]}), "`members[0]`"),
+    ] {
+        let err = s.execute("frame.remove_member", &p).unwrap_err().to_string();
+        assert!(err.contains(why), "{why}: {err}");
+    }
+    assert_eq!(serde_json::to_value(&*s.doc).unwrap(), serde_json::to_value(&*doc).unwrap(), "nothing changed");
+    assert_eq!(s.undo.len(), undo_steps);
+}
+
+/// The bounding boxes of the bodies feature `fid` made, by name.
+fn feature_boxes(s: &mut Session, fid: u64) -> std::collections::BTreeMap<String, ([f64; 3], [f64; 3])> {
+    let made: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == fid).map(|b| b.name.clone()).collect();
+    boxes(s).into_iter().filter(|(name, _)| made.contains(name)).collect()
+}
+
+/// A pasted Frame Member names its tubes by position: removing one, by Remove Tube or by Edit
+/// Feature, leaves every other tube its name, so what refers to them stays on them.
+#[test]
+fn removing_a_tube_from_a_pasted_frame_member_keeps_the_other_tubes_names() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail(), bottom_rail()]}))["feature"].clone();
+    run(&mut s, "timeline.copy", json!({"features": [fid]}));
+    let copy = run(&mut s, "timeline.paste", json!({}))["pasted"][0]["id"].as_u64().unwrap();
+    assert!(!s.doc.feature(copy).unwrap().body_names.is_empty(), "a copy names its bodies by position");
+    let before = feature_boxes(&mut s, copy);
+    assert_eq!(before.len(), 3, "{before:?}");
+    remove(&mut s, json!([{"feature": copy, "line": "pair1"}]));
+    let after = feature_boxes(&mut s, copy);
+    assert_eq!(after.len(), 2, "{after:?}");
+    for (name, bb) in &after {
+        assert_eq!(before.get(name), Some(bb), "{name} moved or was renamed: {before:?} → {after:?}");
+    }
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(feature_boxes(&mut s, copy), before);
+    // Edit Feature dropping the first pair: the same.
+    let kept = |pair: Value, id: &str| {
+        let mut pair = pair;
+        pair["id"] = json!(id);
+        pair
+    };
+    let params = json!({"profile": tube(), "pairs": [kept(top_rail(), "pair2"), kept(bottom_rail(), "pair3")]});
+    run(&mut s, "timeline.redefine", json!({"feature": copy, "command": "frame.member", "params": params}));
+    let after = feature_boxes(&mut s, copy);
+    assert_eq!(after.len(), 2, "{after:?}");
+    for (name, bb) in &after {
+        assert_eq!(before.get(name), Some(bb), "{name} moved or was renamed: {before:?} → {after:?}");
+    }
+}
+
+/// A removed pair's id is never given again: not by an Edit Feature that names a lower
+/// `next_pair`, not by a new Frame Member that names ids, and `timeline.edit` can't lower it.
+#[test]
+fn a_removed_pair_id_cannot_be_brought_back() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail()]}))["feature"].clone();
+    remove(&mut s, json!([{"feature": fid, "line": "pair1"}]));
+    let kept = json!({"id": "pair2", "a": top_rail()["a"], "b": top_rail()["b"]});
+    let params = json!({"profile": tube(), "pairs": [kept, upright()], "next_pair": 1});
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": params}));
+    let solidcraft_doc::FeatureKind::FrameMember { pairs, next_pair, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair2", "pair3"]);
+    assert_eq!(next_pair, 4);
+    let mut given = upright();
+    given["id"] = json!("pair1");
+    let e = s.execute("frame.member", &json!({"profile": tube(), "pairs": [given]})).unwrap_err().to_string();
+    assert!(e.contains("given by the command"), "{e}");
+    let doc = s.doc.clone();
+    let mut past = stored_pairs(&s, &fid)[1].clone();
+    past["id"] = json!("pair4");
+    for set in [json!({"next_pair": 2}), json!({"next_pair": 3}), json!({"pairs": [past]})] {
+        let e = s.execute("timeline.edit", &json!({"feature": fid, "set": set})).unwrap_err().to_string();
+        assert!(e.contains("next_pair"), "{set}: {e}");
+    }
+    // Nor by naming it: neither edit gives the removed `pair1` to another tube.
+    let mut revived = stored_pairs(&s, &fid)[1].clone();
+    revived["id"] = json!("pair1");
+    let e = s.execute("timeline.edit", &json!({"feature": fid, "set": {"pairs": [revived]}})).unwrap_err().to_string();
+    assert!(e.contains("`pair1` was removed"), "{e}");
+    let params = json!({"profile": tube(), "pairs": [{"id": "pair1", "a": upright()["a"], "b": upright()["b"]}]});
+    let e = s.execute("timeline.redefine", &json!({"feature": fid, "command": "frame.member", "params": params})).unwrap_err().to_string();
+    assert!(e.contains("`pair1` was removed"), "{e}");
+    assert_eq!(serde_json::to_value(&*s.doc).unwrap(), serde_json::to_value(&*doc).unwrap(), "nothing changed");
+}
+
+/// A pair on a vertex of a body in another component follows that component when its
+/// occurrence moves: the cached member is not served at its old place.
+#[test]
+fn a_pair_member_follows_a_vertex_in_a_moved_component() {
+    let mut s = Session::default();
+    let b = run(&mut s, "component.create", json!({"name": "B", "grounded": false}))["component"].as_u64().unwrap();
+    box_frame(&mut s);
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright()]}));
+    let members = member_boxes(&mut s);
+    assert!(has_box(&members, [580.0, -20.0, 0.0], [620.0, 20.0, 400.0]), "{members:?}");
+    let o = s.doc.occurrence_of(b).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": o, "translate": [0, 0, 100]}));
+    let members = member_boxes(&mut s);
+    assert!(has_box(&members, [580.0, -20.0, 100.0], [620.0, 20.0, 500.0]), "the upright moved with B: {members:?}");
+    let mut cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(member_boxes(&mut cold), members, "as a model built from scratch");
+}
+
+/// In a rotated component a pair between two body vertices comes out as the 3D sketch line
+/// member between the same points does, turned the same way.
+#[test]
+fn a_vertex_pair_in_a_rotated_component_turns_like_a_line_member() {
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Tilted", "grounded": false}))["component"].as_u64().unwrap();
+    box_frame(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 400], [600, 0, 400]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let bar = json!({"kind": "bar", "width": 60, "height": 10});
+    run(&mut s, "frame.member", json!({"sketch": "Path", "profile": bar, "body_name": "Line"}));
+    run(&mut s, "frame.member", json!({"profile": bar, "pairs": [top_rail()], "body_name": "Pair"}));
+    let o = s.doc.occurrence_of(c).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": o, "axis": [1, 0, 0], "angle": "30 deg"}));
+    let (line, pair) = (measured(&mut s, "Line"), measured(&mut s, "Pair"));
+    // Tilted 30° about X with its component: the bar's 60 mm width rises 30 mm out of the XY plane.
+    assert!(line.3[2] - line.2[2] > 30.0, "{line:?}");
+    assert!(near3(line.2, pair.2) && near3(line.3, pair.3), "{line:?} vs {pair:?}");
+}

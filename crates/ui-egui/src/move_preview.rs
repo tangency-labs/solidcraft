@@ -167,6 +167,7 @@ impl MovePreview {
             stopped: None,
             mirror_meets: None,
             placed: None,
+            centrelines: Vec::new(),
             tapered: Vec::new(),
             replaced: if copy { Vec::new() } else { bodies },
             error: None,

@@ -162,6 +162,7 @@ impl StraightPreview {
             stopped: None,
             mirror_meets: None,
             placed: None,
+            centrelines: Vec::new(),
             tapered: Vec::new(),
             replaced: Vec::new(),
             error: crate::preview::extrusion_target_error(&app.session, commands, &app.session.model.state()),

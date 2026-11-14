@@ -13,6 +13,7 @@ fn colors() -> Colors {
         ghost: true,
         tint_new: true,
         cut_tint: true,
+        glass_new: false,
     }
 }
 

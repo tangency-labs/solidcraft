@@ -396,6 +396,11 @@ pub struct Preview {
     pub after: Arc<ModelState>,
     /// What each command replied (as `execute` returns it).
     pub replies: Vec<Value>,
+    /// The document after the commands: for what a front end works out of a previewed feature
+    /// (Frame Member's centrelines).
+    pub doc: Arc<Document>,
+    /// The evaluation of `doc`, which gives each feature's state before it (`Model::state_before`).
+    pub model: Model,
 }
 
 /// Prepared world geometry depends on design/model identity and placement context, not
@@ -2359,13 +2364,15 @@ impl Session {
             before: self.model.state(),
             after: after.model.state(),
             replies,
+            doc: after.doc.clone(),
+            model: after.model,
         })
     }
 
     /// The same evaluated preview in occurrence coordinates, including uncaptured moves.
     pub fn preview_world(&self, commands: &[(String, Value)]) -> Result<Preview> {
         let (after, replies) = self.scratch().preview_in_place(commands, None)?;
-        Ok(Preview { before: self.world_state()?, after: after.world_state()?, replies })
+        Ok(Preview { before: self.world_state()?, after: after.world_state()?, replies, doc: after.doc.clone(), model: after.model })
     }
 
     /// World preview with each session's visibility applied, including new body placements.
@@ -2377,7 +2384,7 @@ impl Session {
             Ok(Arc::new(shown))
         };
         let (after, replies) = self.scratch().preview_in_place(commands, None)?;
-        Ok(Preview { before: visible(self)?, after: visible(&after)?, replies })
+        Ok(Preview { before: visible(self)?, after: visible(&after)?, replies, doc: after.doc.clone(), model: after.model })
     }
 
     /// Run `commands` on a [`Session::scratch`] copy that keeps the undo and redo stacks: what

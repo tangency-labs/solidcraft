@@ -348,7 +348,28 @@ impl crate::walk::Walk for ProfileSpec {
     }
 }
 
-pub use crate::eval::frame_member::{member_line_ids, member_names};
+pub use crate::eval::frame_member::{member_line_ids, member_names, member_of_body, member_segments};
+
+/// A frame member between two points (#15705): its id, which names the member as a line's id
+/// does (`names`, End Caps), and its two ends, found again on every evaluation so the member
+/// follows them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemberPair {
+    pub id: String,
+    pub a: crate::construct::GeoRef,
+    pub b: crate::construct::GeoRef,
+}
+
+/// The id of a feature's `n`-th pair: `pair<n>`.
+pub fn pair_id(n: u32) -> String {
+    format!("pair{n}")
+}
+
+/// The number of a pair id written as [`pair_id`] writes it (`pair3` → 3, never 0).
+pub fn parse_pair_id(id: &str) -> Option<u32> {
+    id.strip_prefix("pair")?.parse::<u32>().ok().filter(|n| *n > 0 && pair_id(*n) == id)
+}
 
 /// Where a frame member's cross-section comes from.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
