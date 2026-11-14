@@ -3322,7 +3322,6 @@ mod view_key_tests {
         h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
         h.settle();
         h.app.cam = Camera::default();
-        assert!(h.app.cam.fov <= 0.0);
         let rect = h.app.viewport.rect.expect("the viewport");
         let back = h.app.cam.back();
         let depth0 = h.app.cam.target.dot(back);
@@ -3341,10 +3340,11 @@ mod view_key_tests {
         }
         assert!((h.app.cam.target.dot(back) - depth0).abs() < 1e-6);
         // The target (and so the camera plane) deep inside or in front of the model still picks it.
-        for shift in [0.0, 100.0, 5000.0, -5000.0] {
+        for shift in [0.0, 100.0, 5000.0, -5000.0, 2e8, -2e8] {
             h.app.cam = Camera::default();
             h.app.cam.target = h.app.cam.target - h.app.cam.back() * shift;
             let proj = projection(&h.app, rect);
+            assert!(proj.cam.fov <= 0.0, "shift {shift}: the pick must use the orthographic ray");
             let hits = pick_cached(&mut h.app, &proj, rect.center());
             assert!(hits.iter().any(|hit| matches!(hit, Hit::Face { .. })), "shift {shift}: no pick");
         }

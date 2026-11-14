@@ -400,6 +400,8 @@ pub struct Proj {
     pub cam: Camera,
     pub vp: Mat4,
     pub rect: Rect,
+    /// The scene's box, when known: an orthographic pick ray starts in front of it (see [`Proj::ray`]).
+    pub bounds: Option<solidcraft_engine::geom::Aabb3>,
 }
 
 impl Proj {
@@ -420,14 +422,22 @@ impl Proj {
         if self.cam.fov > 0.0 {
             return (o, d);
         }
-        // Orthographic: start the ray far behind everything, so a target that has moved along the view
-        // direction can never leave visible geometry unpickable (#16601).
-        (o - d * ORTHO_RAY_BACKOFF, d)
+        // Orthographic: the ray starts behind the whole scene, however far the target has moved along the
+        // view direction, so visible geometry is always pickable (#16601). The start never moves forward.
+        let Some(b) = self.bounds.filter(|b| !b.is_empty() && b.min.is_finite() && b.max.is_finite()) else { return (o, d) };
+        let mut nearest = f64::INFINITY;
+        for i in 0..8 {
+            let corner = Vec3::new(
+                if i & 1 == 0 { b.min.x } else { b.max.x },
+                if i & 2 == 0 { b.min.y } else { b.max.y },
+                if i & 4 == 0 { b.min.z } else { b.max.z },
+            );
+            nearest = nearest.min((corner - o).dot(d));
+        }
+        let t = nearest - (b.diagonal() * 0.01 + 1.0);
+        if t.is_finite() && t < 0.0 { (o + d * t, d) } else { (o, d) }
     }
 }
-
-/// How far behind the camera plane an orthographic pick ray starts (the farthest camera distance is 1e7).
-const ORTHO_RAY_BACKOFF: f64 = 1e8;
 
 /// A projected 3D face (convex): an unfeathered triangle fan, outlined one edge at a time (no
 /// joins between the edges). Unlike `Shape::convex_polygon`, it stays inside its outline when
@@ -523,7 +533,8 @@ pub fn projection(app: &SolveApp, rect: Rect) -> Proj {
         cam.fov = app.view_fov();
     }
     let aspect = rect.width() as f64 / rect.height().max(1.0) as f64;
-    Proj { cam, vp: cam.view_proj_bounds(aspect, &solidcraft_engine::render::view_bounds(&scene_bounds(app))), rect }
+    let bounds = scene_bounds(app);
+    Proj { cam, vp: cam.view_proj_bounds(aspect, &solidcraft_engine::render::view_bounds(&bounds)), rect, bounds: Some(bounds) }
 }
 
 /// The far plane the picture's projection uses: the grid's fade ends before that plane cuts the
