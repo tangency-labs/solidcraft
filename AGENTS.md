@@ -1,19 +1,19 @@
 # SolidCraft: instructions for agents
 
-SolidCraft is a clean-room, pure-Rust parametric 3D CAD app (sketch solver, feature timeline, B-rep kernel, an egui UI that agents drive). This file is a router: the hard rules, then the skill to read for your task. Humans: CONTRIBUTING.md.
+SolidCraft is a clean-room, pure-Rust parametric 3D CAD app. This file is a router: the hard rules, then the skill to read for your task. Humans: CONTRIBUTING.md.
 
 ## Start here
 Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`.
 
 ## Hard rules (what enforces each)
-- No integrations with other platforms or services (someone's cloud, sync, hosting, WebDAV or Nextcloud, accounts, embedding the app in another product, host-page/postMessage file bridges, community servers) unless you asked the maintainer first and got a yes; they are reserved for the maintainer, and unasked PRs are closed. Established distribution and OS mechanisms are fine (Flatpak, Snap, winget, Homebrew, AUR, OS keyrings, file dialogs). The only official external host is the ArtCraft launcher, which just downloads our release binaries.
+- Integrations with other platforms or services need the maintainer's yes first: `skills/solidcraft-ground-rules/SKILL.md`.
 - Independent: never copy another product's code, icons, text or templates; never drive or take data from commercial CAD. `skills/solidcraft-ground-rules/SKILL.md`.
 - No GPL/LGPL/AGPL code, not even reading it (OpenCASCADE, FreeCAD, SolveSpace, CadQuery, LibreCAD, QCAD): `cargo xtask licences --check`.
 - Every asset is original or openly licensed with a row in ATTRIBUTION.md; read `assets/AGENTS.md` before icon work: `cargo xtask assets`, `cargo xtask icons`.
 - Never crash: no unwrap/expect/panic/unsafe in non-test code, errors are `Result`, input is hostile: clippy `-D warnings`, `hostile_params_never_panic`.
-- Model decisions (what an operation does, which bodies it touches, which face or edge a point or name means, depths, nearness) use exact geometry; a mesh is for display, export, previews and mesh bodies (`xtask/mesh-decisions.txt` only shrinks): `cargo xtask mesh-decisions`.
+- Model decisions (what an operation does, which bodies, faces or edges it means, depths, nearness) use exact geometry; a mesh is for display, export, previews and mesh bodies (`xtask/mesh-decisions.txt` only shrinks): `cargo xtask mesh-decisions`.
 - Everything is a command and programmatic calls never open dialogs: `skills/solidcraft-commands/SKILL.md`.
-- Layering; only `crates/kernel` uses truck; solidcore only via `solidcore-ops`/`-tess`/`-record` (`xtask/solidcore-seam.txt`): `cargo xtask layers`; see `docs/layers.md`.
+- Layering; only `crates/kernel` uses truck; solidcore only via `solidcore-ops`/`-tess`/`-record` (`xtask/solidcore-seam.txt`): `cargo xtask layers`.
 - One outer UI container, one camera path (`navigation::handle`), colours from theme tokens: `cargo xtask ui-containers`.
 - Application code is Rust only and builds for wasm: `cargo xtask wasm`, `cargo xtask web-offline-test`.
 - The product name is SolidCraft; the old name lives in `docs/compatibility.md`.
@@ -25,7 +25,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - A regression test goes in the area's existing test file, never a per-bug file (#3226).
 - Look at open PRs first, claim with a draft PR (lowest number wins), one topic per PR: `skills/solidcraft-contributing/SKILL.md`.
 - A PR's title and first sentence make sense to someone who never saw your chat or the issue: `skills/solidcraft-contributing/SKILL.md`.
-- Code, comments, commit messages and docs are in English; independent work runs in parallel, dependent work stays sequential: `skills/solidcraft-contributing/SKILL.md` ("Working as an agent").
+- Code, comments, commit messages and docs are in English; independent work runs in parallel, dependent work stays sequential: `skills/solidcraft-contributing/SKILL.md`.
 - Show observable changes with real screenshots or a recording, captured yourself.
 - Run `cargo xtask ci` before every commit. `cargo xtask skills` keeps this file and `skills/` honest.
 
