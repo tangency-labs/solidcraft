@@ -1000,6 +1000,68 @@ fn a_ball_with_its_poles_within_tolerance_of_a_rolls_face_is_cut() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// The half roll less the r 6 ball about (0, 50 - 1e-6, 20), its poles 1e-6 inside the roll's
+/// outside (within the tolerance the trace refines with), its seam turned 0.01, 0.02 and 0.03
+/// rad off the meridian the line runs into the poles along (#16637). The line passes each pole
+/// 1e-6 away and crosses the seam δ/sin(turn) from it, 1e-4 to 3.3e-5: farther than the summed
+/// tolerances (2e-5), within upstream's combine radius (1e-4). The crossing's vertex
+/// definition was combined into the pole's and deleted, the proto vertex stayed at the average
+/// of the two, and the curve that started at the crossing was continued past its start to that
+/// average, out of the ball's UV domain (`SmBrep` test 70); every frame was refused as not a
+/// solid. The merged vertex is now the pole, its tolerance the certified distance to the
+/// crossing it absorbed, and that curve's end is moved onto the pole inside the domain. Each
+/// frame is one valid solid of V = 3920π less the ball between radii 48 and 50 at that
+/// distance ([`ball_inside`]).
+#[test]
+fn a_ball_with_its_poles_within_tolerance_and_its_seam_turned_off_the_line_is_cut() {
+    all_fixes();
+    let d = 50.0 - 1e-6;
+    let want = 3920.0 * PI - (ball_inside(|_| 50.0, d) - ball_inside(|_| 48.0, d));
+    let mut failed = Vec::new();
+    for turn in [0.01, 0.02, 0.03] {
+        for frame in [2, 5, 8, 14] {
+            let what = format!("turned {turn}, frame {frame}");
+            failed.extend(cut_is_valid_solid(
+                half_roll(frame),
+                ball([0.0, d, 20.0], turn),
+                want,
+                &what,
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The controls of the cut above, valid before and after #16637: the seam turned ±1e-3 rad
+/// (the crossing 1e-3 from the pole, beyond the combine radius) and ±0.1 rad (1e-5, within
+/// the summed tolerances) with the poles 1e-6 inside the roll's outside, and every turn of the
+/// test above and these with the poles 1e-6 outside it. Each frame is one valid solid of the
+/// closed-form volume.
+#[test]
+fn a_ball_with_its_poles_within_tolerance_and_its_seam_turned_is_cut_in_the_controls() {
+    all_fixes();
+    let mut failed = Vec::new();
+    for (delta, turns) in [
+        (-1e-6, &[-1e-3, 1e-3, -0.1, 0.1][..]),
+        (1e-6, &[0.01, 0.02, 0.03, -1e-3, 1e-3, -0.1, 0.1][..]),
+    ] {
+        let d = 50.0 + delta;
+        let want = 3920.0 * PI - (ball_inside(|_| 50.0, d) - ball_inside(|_| 48.0, d));
+        for &turn in turns {
+            for frame in [2, 5, 8, 14] {
+                let what = format!("δ {delta:e}, turned {turn}, frame {frame}");
+                failed.extend(cut_is_valid_solid(
+                    half_roll(frame),
+                    ball([0.0, d, 20.0], turn),
+                    want,
+                    &what,
+                ));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
 /// The same cut with the poles 1e-4 inside and outside the roll's outside, past the
 /// tolerance: each of the four frames is one valid solid of the closed-form volume, as it
 /// was before the trace placed its points at poles.
