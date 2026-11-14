@@ -9117,18 +9117,7 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
 
 /// One point on each face of a body (a triangle centre, so it lies on the face).
 fn face_samples(b: &ModelBody) -> Vec<Vec3> {
-    let m = b.mesh();
-    let mut out: Vec<Option<Vec3>> = Vec::new();
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        let f = *f as usize;
-        if out.len() <= f {
-            out.resize(f + 1, None);
-        }
-        if let (Some(slot @ None), Some([a, bb, c])) = (out.get_mut(f), m.tri(t)) {
-            *slot = Some((a + bb + c) * (1.0 / 3.0));
-        }
-    }
-    out.into_iter().flatten().collect()
+    b.body.face_samples()
 }
 
 /// The picked faces and every face joined to them smoothly (across tangent edges).
