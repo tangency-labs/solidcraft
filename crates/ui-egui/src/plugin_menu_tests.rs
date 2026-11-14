@@ -138,7 +138,6 @@ fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
         description: String::new(),
         path: String::new(),
         approval: String::new(),
-        disabled: false,
         groups: BTreeSet::new(),
         entries,
     }
@@ -163,6 +162,74 @@ fn the_menu_lists_install_then_entries_with_a_submenu_for_several() {
     assert_eq!(label, "tools plugin");
     let labels: Vec<&str> = sub.iter().map(|r| if let FileRow::Item(i) = r { i.label.as_str() } else { "" }).collect();
     assert_eq!(labels, ["measure…", "tidy…"]);
+}
+
+/// Each plugin is its own thing: every command gets its own menu row (several under the plugin's
+/// name) and its own ribbon button, and a plugin turned off in Preferences shows in neither.
+#[test]
+fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plugin_is_hidden() {
+    use crate::app_bar::FileRow;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.plugin_menu.listed = vec![
+        listed("gears", vec![entry("spur", "edit", json!([]))]),
+        listed("tools", vec![entry("measure", "read", json!([])), entry("tidy", "edit", json!([{"kind":"ribbon","name":"Tidy up"}]))]),
+    ];
+    let buttons = ribbon_buttons(&app);
+    let ids: Vec<&str> = buttons.iter().map(|b| b.id.as_str()).collect();
+    assert_eq!(ids, ["plugin_entry:gears:spur", "plugin_entry:tools:measure", "plugin_entry:tools:tidy"]);
+    let labels: Vec<&str> = buttons.iter().map(|b| b.label.as_str()).collect();
+    assert_eq!(labels, ["gears plugin", "measure", "Tidy up"], "one command: the plugin's name; a ribbon slot names its button");
+    assert!(buttons.iter().all(|b| b.icon == "prefs_plugins"), "no manifest icon yet: the generic plugin icon");
+    assert!(app.plugin_menu.dialog.is_none(), "listing opens nothing");
+
+    let menu = rows(&app);
+    assert!(matches!(&menu[2], FileRow::Item(i) if i.id == "entry:0:0" && i.label == "gears plugin…"));
+    assert!(matches!(&menu[3], FileRow::Sub { label, rows } if label == "tools plugin" && rows.len() == 2));
+
+    // The ribbon button opens that one command's dialog, titled by it alone.
+    assert!(choose_ribbon(&mut app, "plugin_entry:tools:tidy"));
+    let dialog = app.plugin_menu.dialog.take().expect("its dialog");
+    assert_eq!((dialog.plugin.id.as_str(), dialog.entry.as_str(), dialog.label.as_str()), ("tools", "tidy", "tidy"));
+    assert!(!choose_ribbon(&mut app, "sketch.line"), "a command's id is not a plugin's");
+
+    app.preferences.disabled_plugins.insert("gears".into());
+    let ids: Vec<String> = ribbon_buttons(&app).into_iter().map(|b| b.id).collect();
+    assert_eq!(ids, ["plugin_entry:tools:measure", "plugin_entry:tools:tidy"], "off: no ribbon button");
+    let menu = rows(&app);
+    assert_eq!(menu.len(), 3, "off: no menu row");
+    assert!(matches!(&menu[2], FileRow::Sub { label, .. } if label == "tools plugin"));
+    choose_ribbon(&mut app, "plugin_entry:gears:spur");
+    choose(&mut app, "entry:0:0");
+    assert!(app.plugin_menu.dialog.is_none(), "a plugin turned off opens nothing");
+
+    app.preferences.disabled_plugins.insert("tools".into());
+    assert!(ribbon_buttons(&app).is_empty());
+    assert!(matches!(&rows(&app)[2], FileRow::Item(i) if i.label == app.tr("ui.plugin_menu_all_off") && !i.enabled));
+}
+
+#[test]
+fn plugin_dialog_titles_are_the_command_alone_and_plugin_text_has_no_long_dashes() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let mut gears = listed("gears", vec![entry("spur", "edit", json!([]))]);
+    gears.name = "Gears".into();
+    app.plugin_menu.listed = vec![gears];
+    open_entry(&mut app, 0, 0);
+    assert_eq!(app.plugin_menu.dialog.as_ref().map(|d| d.label.as_str()), Some("Gears"), "no \"- Plugins\" after it");
+    // Every plugin string the user can see, in English and in the sources that draw them.
+    let en: serde_json::Map<String, Value> = serde_json::from_str(include_str!("../../../assets/locales/en.json")).expect("en.json");
+    for (key, text) in en.iter().filter(|(k, _)| k.contains("plugin")) {
+        let text = text.as_str().unwrap_or_default();
+        assert!(!text.contains(['\u{2014}', '\u{2013}']), "{key}: {text}");
+    }
+    for (file, source) in [
+        ("plugin_menu.rs", include_str!("plugin_menu.rs")),
+        ("plugins.rs", include_str!("plugins.rs")),
+        ("plugin_install.rs", include_str!("plugin_install.rs")),
+    ] {
+        for line in source.lines().filter(|l| !l.trim_start().starts_with("//")) {
+            assert!(!line.contains(['\u{2014}', '\u{2013}']), "{file}: {line}");
+        }
+    }
 }
 
 /// A narrow app bar puts the same rows in the File menu, under `plugins:`, and they act the same.
