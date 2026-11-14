@@ -501,7 +501,8 @@ correct them freely and it won't put them back.
 
 - **PRs** get `area:*` from the paths they change (`crates/kernel` and `crates/geom` →
   `area:kernel`, `crates/ui-egui` and the apps → `area:ui`, `.github/`, `scripts/`, `docs/` →
-  `area:infra`, and so on).
+  `area:infra`, an engine command file → the area of its command family, and so on), when they
+  are opened and again when a draft is marked ready, since a claim opens with no files.
 - **Issues** get `bug` (in-app reports and the bug template), `enhancement` (feature requests),
   `priority:P1` for crashes, and an `area:*` from the title or the reported command. Until it has
   a priority, an issue carries `needs-triage`; setting a priority removes it.

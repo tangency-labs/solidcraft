@@ -12,15 +12,20 @@ const MAX_TOKENS = 10;
 const MAX_TEXT = 20000;
 
 // Changed paths of a PR → area. First match wins per file.
+// `crates/engine` spans every area: only its command files name one (see classifyPaths).
 const PATH_AREAS = [
   [/^crates\/sketch\//, 'area:sketch'],
-  [/^crates\/(kernel|geom)\//, 'area:kernel'],
+  [/^crates\/(kernel|geom|smlib)\//, 'area:kernel'],
   [/^solidcore\//, 'area:kernel'],
   [/^crates\/doc\//, 'area:doc'],
-  [/^crates\/io\//, 'area:io'],
-  [/^crates\/(render|gpu)\//, 'area:render'],
-  [/^(crates\/(ui-egui|space-mouse|threedx-client)|apps\/(solidcraft|solidcraft-web))\//, 'area:ui'],
-  [/^(\.github\/|xtask\/|scripts\/|tools\/|docs\/|packaging\/|[^/]+\.md$)/, 'area:infra'],
+  [/^crates\/dynamics\//, 'area:assemblies'],
+  [/^crates\/(io|format)\//, 'area:io'],
+  [/^(crates\/(render|gpu|viewport-gpu|look|color)|assets\/(render|materials|appearances))\//, 'area:render'],
+  [
+    /^(crates\/(ui-egui|ui-kit|ui-registry|ui-text|theme|display-units|viewport|viewport-egui|space-mouse|threedx-client|control|control-egui|mcp|mcp-server)|apps\/(solidcraft|solidcraft-web)|assets)\//,
+    'area:ui',
+  ],
+  [/^(\.github\/|xtask\/|scripts\/|tools\/|docs\/|packaging\/|apps\/solidcraft-cli\/|crates\/(derive|profile|testkit)\/|[^/]+\.md$)/, 'area:infra'],
 ];
 
 // Command id prefix (the in-app reports quote it) → area.
@@ -121,6 +126,12 @@ function classifyIssue(title, body) {
 function classifyPaths(paths) {
   const labels = new Set();
   for (const p of paths) {
+    // An engine command file is named after its command family: `cmd/file_import.rs` → `file`.
+    const family = /^crates\/engine\/src\/cmd\/([a-z]+)/.exec(p);
+    if (family && Object.hasOwn(COMMAND_AREAS, family[1])) {
+      labels.add(COMMAND_AREAS[family[1]]);
+      continue;
+    }
     for (const [re, area] of PATH_AREAS) {
       if (re.test(p)) {
         labels.add(area);

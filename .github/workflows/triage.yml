@@ -11,7 +11,8 @@ on:
   # pull_request_target so PRs from forks can be labelled. It runs the base branch's
   # scripts/triage and only lists the PR's changed paths; the PR's code is never checked out.
   pull_request_target:
-    types: [opened]
+    # ready_for_review too: a claim opens as an empty draft, so its paths are known only then.
+    types: [opened, ready_for_review]
   schedule:
     - cron: '41 5 * * *'
   workflow_dispatch:

@@ -78,8 +78,18 @@ test('classifyPaths maps changed files to areas', () => {
     triage.classifyPaths(['crates/kernel/src/a.rs', 'crates/geom/b.rs', 'crates/ui-egui/c.rs', 'README.md', 'Cargo.lock']),
     ['area:infra', 'area:kernel', 'area:ui'],
   );
-  assert.deepEqual(triage.classifyPaths(['crates/engine/src/cmd/x.rs']), []);
+  assert.deepEqual(triage.classifyPaths(['crates/engine/src/cmd/x.rs', 'crates/engine/src/lib.rs']), []);
   assert.deepEqual(triage.classifyPaths(['solidcore/crates/solidcore/src/lib.rs']), ['area:kernel']);
+  // An engine command file takes its command family's area.
+  assert.deepEqual(triage.classifyPaths(['crates/engine/src/cmd/file.rs', 'crates/engine/src/cmd/sketch_offset.rs']), ['area:io', 'area:sketch']);
+  // Crates beside the first few: the viewport, the UI kit and theme, the formats, the renderer's helpers.
+  assert.deepEqual(triage.classifyPaths(['crates/viewport/src/camera.rs', 'crates/ui-kit/src/panel.rs', 'assets/locales/pending/x.json']), ['area:ui']);
+  assert.deepEqual(triage.classifyPaths(['crates/format/src/a.rs', 'crates/look/src/b.rs', 'assets/materials/c.json']), ['area:io', 'area:render']);
+  assert.deepEqual(triage.classifyPaths(['crates/smlib/src/a.rs', 'crates/dynamics/src/b.rs', 'apps/solidcraft-cli/src/main.rs']), [
+    'area:assemblies',
+    'area:infra',
+    'area:kernel',
+  ]);
 });
 
 test('parseTriage', () => {
