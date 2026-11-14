@@ -79,14 +79,12 @@
 //!   (upstream copies a null NURB). With the opt-in
 //!   `Kernel::fixes.nurb_cylinder_inside_out_frame` (WR-496, #1463) an inside-out
 //!   NURB gets `IsNurbSurfaceCone`'s frame (top-knot circle, reversed Z).
-//! - **Iso arcs from control points.** Recognition and rebuilding make their
-//!   circles from the iso curves' control points (`iso_arc_exact`, The NURBS Book §7.3,
+//! - **Cylinder iso arcs from control points.** [`Cone::is_nurb_surface_cylinder`] makes its
+//!   end circles from the iso curves' control points (`iso_arc_exact`, The NURBS Book §7.3,
 //!   §7.5), not fitted through three samples as `IsArc` does: two fitted end circles of an
 //!   extruded arc put its axis off the extrusion's direction by more than rounding (1.4e-13
 //!   rad on a 94 mm r 40 wall), so the cylinder was off its own NURBS form and failed the
-//!   exact-class proof (`implicit::lies_on`). Fitted end centres also tilt a valid shallow
-//!   cylinder's axis past the cone recogniser's circle-plane angle bound (#16172). All these
-//!   degree-1-by-2 rational paths use the control-point construction.
+//!   exact-class proof (`implicit::lies_on`). The cone recogniser and the rebuild keep `IsArc`.
 //! - **Recursion.** None of these functions recurses.
 //! - **Debug code.** The `SM_DEBUG_CODE` checks and drawing are omitted.
 
@@ -123,7 +121,7 @@ const OP_TRIM: &str = "surface::cone::p2::ellipse_trim_intervals";
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
 const ANALYTIC_TOL_SCALE: f64 = 100.0;
 
-/// A circular iso curve recovered from its control points (or a cone's apex).
+/// A circular iso curve found by `IsArc` (or the apex of a cone with a vertex).
 #[derive(Debug, Clone, Copy)]
 struct IsoArc {
     /// `s*RefFrame`: origin at the centre, X towards the start point.
@@ -147,6 +145,23 @@ fn linear_iso_param(s: &BSplineSurface) -> SurfParamType {
     } else {
         SurfParamType::Neither
     }
+}
+
+/// `pIsoCrv->IsArc(5, dScaledZero, ..)` of a plain B-spline iso curve.
+fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<IsoArc>> {
+    let arc = crate::curve::curve::p5::is_arc_base(
+        k,
+        curve,
+        |c, tol| c.is_degenerate(k, tol, None),
+        5,
+        scaled_zero,
+    )?;
+    Ok(arc.map(|(frame, radius, start_ang, end_ang)| IsoArc {
+        frame,
+        radius,
+        start_ang,
+        end_ang,
+    }))
 }
 
 /// The circle a rational quadratic iso curve is, made from its control points (not
@@ -342,12 +357,12 @@ fn end_circles(
     let top_arc = if top_degenerate {
         None
     } else {
-        iso_arc_exact(k, &top_iso, scaled_zero)?
+        iso_arc(k, &top_iso, scaled_zero)?
     };
     let bot_arc = if bot_degenerate {
         None
     } else {
-        iso_arc_exact(k, &bot_iso, scaled_zero)?
+        iso_arc(k, &bot_iso, scaled_zero)?
     };
 
     //  2 Arcs                       = were good, continue
@@ -919,7 +934,7 @@ impl Cone {
         };
 
         // It must be circular.
-        let Some(mid) = iso_arc_exact(k, &mid_iso, scaled_zero)? else {
+        let Some(mid) = iso_arc(k, &mid_iso, scaled_zero)? else {
             return Ok(None);
         };
 
