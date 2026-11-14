@@ -198,3 +198,86 @@ fn a_sweep_path_edge_is_restored_on_the_body_it_was_picked_on() {
         other => panic!("the path was not restored as an edge: {other:?}"),
     }
 }
+
+/// A 40 x 20 x 10 block `B` whose four upright edges are rounded 4: its top outline is eight
+/// edges, each running on smoothly into the next. The display index of its top front edge.
+fn rounded_block(h: &mut Harness) -> (usize, Vec3) {
+    h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "B"})).unwrap();
+    h.app.run("solid.fillet", json!({"edges": [[0, 0, 5], [40, 0, 5], [0, 20, 5], [40, 20, 5]], "radius": 4, "tangent_chain": false})).unwrap();
+    let world = crate::open_meshing::session_world(&h.app.session);
+    let b = world.body("B").unwrap();
+    let at = Vec3::new(20.0, 0.0, 10.0);
+    // The straight top front edge: every point of it at y = 0, z = 10.
+    let index = b.mesh().edges.iter().position(|e| e.len() > 1 && e.iter().all(|p| p.y.abs() < 1e-6 && (p.z - 10.0).abs() < 1e-6)).unwrap();
+    (index, at)
+}
+
+/// The Sweep dialog's Path has a Tangent Chain switch: ticked, one pick of a body edge brings
+/// every edge that continues it smoothly (the block's whole rounded top outline); a listed
+/// row's remove button takes the whole chain out; unticked, the path is the picked edge again.
+#[test]
+fn sweep_path_tangent_chain_brings_the_smooth_outline() {
+    let mut h = Harness::new();
+    let (index, at) = rounded_block(&mut h);
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.sweep"}})).unwrap();
+    h.frames(3);
+    let top = |h: &Harness| -> Vec<Sel> { h.app.dialog.as_ref().unwrap().inputs[1].items.clone() };
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].chain, Some(false), "off by default");
+    h.app.dialog.as_mut().unwrap().active = 1;
+    let pick = Sel::Edge { body: "B".into(), index, point: at };
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, pick.clone());
+    h.frames(2);
+    assert_eq!(top(&h), vec![pick.clone()], "off: only the picked edge");
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    let chain = top(&h);
+    assert_eq!(chain.len(), 8, "{chain:?}");
+    assert!(chain.iter().all(|x| matches!(x, Sel::Edge { point, .. } if (point.z - 10.0).abs() < 1e-6)), "{chain:?}");
+    // Picking the same edge again takes the chain out, and again brings it back.
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, pick.clone());
+    h.frames(2);
+    assert!(top(&h).is_empty(), "{:?}", top(&h));
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, pick.clone());
+    h.frames(2);
+    assert_eq!(top(&h).len(), 8);
+    // A listed row of the chain (not the picked edge) takes the whole chain with it.
+    let other = top(&h)[3].clone();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.remove_listed(&h.app.session, 1, &other);
+    h.frames(2);
+    assert!(top(&h).is_empty(), "{:?}", top(&h));
+    // Unticked: back to the picked edges.
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, pick.clone());
+    h.frames(2);
+    assert_eq!(top(&h).len(), 8);
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert_eq!(top(&h), vec![pick]);
+}
+
+/// Every input that takes a chain of edges offers Tangent Chain, off: both Sweeps' Path, the
+/// Surface Loft's sections, Blend's two edge sets, Boundary's curves, Patch's boundary and
+/// Ruled's edges.
+#[test]
+fn edge_chain_inputs_offer_tangent_chain() {
+    let mut h = Harness::new();
+    rounded_block(&mut h);
+    for (command, labels) in [
+        ("solid.sweep", &["Path"][..]),
+        ("surface.sweep", &["Path"][..]),
+        ("surface.loft", &["Sections"][..]),
+        ("surface.blend", &["From edges", "To edges"][..]),
+        ("surface.boundary", &["Curves", "Cross curves"][..]),
+        ("surface.patch", &["Boundary"][..]),
+        ("surface.ruled", &["Edges"][..]),
+    ] {
+        h.step(&json!({"call":"ui.start","params":{"command":command}})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_ref().unwrap_or_else(|| panic!("{command}: no dialog"));
+        for inp in &d.inputs {
+            let want = if labels.contains(&inp.label) { Some(false) } else { None };
+            assert_eq!(inp.chain, want, "{command}: {}", inp.label);
+        }
+        h.app.dialog = None;
+    }
+}
