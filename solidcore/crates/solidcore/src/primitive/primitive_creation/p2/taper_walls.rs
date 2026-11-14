@@ -2014,6 +2014,27 @@ mod tests {
         assert_eq!(crossing(&a, &a, 1.0, n, b.start), None);
     }
 
+    /// Two circles touching inside each other, as the arcs of a crescent at its tip: these
+    /// centres and radii, as doubles, are exactly 63.6 = 591.6 - 528 apart, touching at
+    /// (113.92, 0); `h^2` comes out -2.3e-10. Moved apart by a micrometre, they do not meet.
+    #[test]
+    fn two_circles_touching_within_rounding_touch() {
+        let circle = |x: f64, r: f64| Wall {
+            arc: true,
+            center: Point3::new(x, 0.0, 0.0),
+            axis: Vec3::Z,
+            radius: r,
+            ..Wall::default()
+        };
+        let a = circle(-477.68, 591.6);
+        let b = circle(-414.08, 528.0);
+        let tip = Point3::new(113.92, 0.0, 0.0);
+        let x = crossing(&a, &b, 0.0, Vec3::Z, tip);
+        assert!(x.is_some_and(|x| x.distance(tip) < 1e-9), "{x:?}");
+        let c = circle(-414.081, 528.0);
+        assert_eq!(crossing(&a, &c, 0.0, Vec3::Z, tip), None);
+    }
+
     #[test]
     fn has_corner_empty_composite_does_not_panic() {
         let k = Kernel::default();
