@@ -7,6 +7,10 @@
     "cmd.sketch_export_svg": "حفظ بصيغة SVG",
     "ui.exportSvg": "تصدير SVG…"
   },
+  "es": {
+    "cmd.sketch_export_svg": "Guardar como SVG",
+    "ui.exportSvg": "Exportar SVG…"
+  },
   "he": {
     "cmd.sketch_export_svg": "שמירה כ־SVG",
     "ui.exportSvg": "ייצוא SVG…"
