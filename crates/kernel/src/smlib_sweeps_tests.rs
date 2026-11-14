@@ -521,4 +521,4 @@ fn an_extrusion_of_a_cubic_whose_control_points_fold_back_passes_the_check() {
     let mut want = vec![cap(false), cap(true), profile(0), profile(1), profile(2), profile(3)];
     want.sort();
     assert_eq!(origins(&b), want);
->}
+}
