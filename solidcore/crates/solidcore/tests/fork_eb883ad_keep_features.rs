@@ -290,16 +290,16 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
-    assert_pinned(
-        cylinder_boss,
-        8.0,
-        23528.165527753492,
-        23528.16549376938,
-        9,
-    );
+    assert_pinned(cylinder_boss, 8.0, 23528.165527753492, 23528.16549376938, 9);
     assert_pinned(cylinder_hole, 8.0, 23402.501835298488, 23402.50178777836, 9);
     assert_pinned(cylinder_boss, 1.9, 24031.84334806833, 24031.84334806833, 9);
-    assert_pinned(cylinder_hole, 1.9, 23906.179641369188, 23906.179641369188, 9);
+    assert_pinned(
+        cylinder_hole,
+        1.9,
+        23906.179641369188,
+        23906.179641369188,
+        9,
+    );
 }
 
 /// Planar walls: each crease is an exact section.

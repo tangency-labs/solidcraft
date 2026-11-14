@@ -343,7 +343,8 @@ fn close_loops(
                 edgeuses.push(trims.edgeuses.get(start + i).copied().flatten());
             }
             let next = lp
-                .get((i + 1) % n)
+                .get(i + 1)
+                .or_else(|| lp.first())
                 .ok_or_else(|| SolidError::mass_failed(OP, "the trim boundary's loop counts"))?;
             let end = c.evaluate_point(k, c.natural_interval().max())?;
             let first = next.evaluate_point(k, next.natural_interval().min())?;
@@ -1520,7 +1521,7 @@ fn gap_closure(
                             "the face's boundary has more trims than its loop",
                         ));
                     };
-                    for trim in gaps.drain(..) {
+                    for trim in core::mem::take(&mut gaps) {
                         closed.push(gap_side(trim, side.vertex));
                     }
                     closed.push(side);
@@ -1541,7 +1542,7 @@ fn gap_closure(
         }
         // gap lines after the last trim close the loop at its first side's vertex
         if let Some(first) = closed.first().map(|s: &ClosureSide| s.vertex) {
-            for trim in gaps.drain(..) {
+            for trim in core::mem::take(&mut gaps) {
                 closed.push(gap_side(trim, first));
             }
         }
