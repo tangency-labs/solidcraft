@@ -1048,12 +1048,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
     /// Not upstream (#16640): whether the definition `ed` is an edge-to-edge one whose ends
     /// are one vertex in each B-rep (`vertices`: start and end in B-rep 1, then B-rep 2)
-    /// although its curve ends farther apart than the definition's tolerance and both
-    /// vertices' tolerances. A closed edge, whose ends meet, is not one.
+    /// although its curve ends farther apart than a valid closed edge's can ([`ends_are_a_stretch`]).
     ///
     /// # Errors
     ///
-    /// Those of the curve evaluations.
+    /// Those of the curve evaluations; [`SolidError::InvalidInput`] for a non-finite
+    /// tolerance.
     fn is_unbounded_edge_stretch(
         &self,
         k: &Kernel,
@@ -1079,9 +1079,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let gap = d
             .end_position(k, brep, true)?
             .distance(d.end_position(k, brep, false)?);
-        let tol = max2(d.raw_tolerance(), max2(tol1, tol2));
-        // written so that a NaN gap or tolerance is not a stretch
-        Ok(gap > tol)
+        ends_are_a_stretch(gap, d.raw_tolerance(), [tol1, tol2])
     }
 
     /// The body of [`ProtoTopologyManager::imprint_edge_definition`]; `edited` is set
@@ -3209,6 +3207,27 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     }
 }
 
+/// Not upstream (#16640): whether a definition's two curve ends, `gap` apart, both mapped to
+/// one vertex of each B-rep (tolerances `vertex_tols`), are a stretch no vertex bounds rather than the
+/// ends of a closed edge. The validity contract (`validity-and-tolerances.md`, Edge 16 and
+/// 17) lets an edge end up to `edge_tol + vertex_tol` from its vertex, so a closed edge's
+/// ends may lie twice that far apart; only a gap beyond it is a stretch.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a non-finite or negative tolerance, or a NaN gap.
+fn ends_are_a_stretch(gap: f64, edge_tol: f64, vertex_tols: [f64; 2]) -> Result<bool> {
+    let usable = |t: f64| t.is_finite() && t >= 0.0;
+    if gap.is_nan() || !usable(edge_tol) || !vertex_tols.into_iter().all(usable) {
+        return Err(SolidError::invalid_input(
+            OP_IMPRINT_ED,
+            "a definition's end gap and tolerances must be finite and not negative",
+        ));
+    }
+    let vertex_tol = vertex_tols[0].max(vertex_tols[1]);
+    Ok(gap > 2.0 * (edge_tol + vertex_tol))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3217,6 +3236,33 @@ mod tests {
     use crate::surface::surface::Surface;
     use crate::surface::volume::Volume;
     use crate::topology::Brep;
+
+    /// #16640: the contract's `edge_tol + vertex_tol` at each end makes a closed edge's ends
+    /// up to twice that apart; only a gap beyond it is a stretch.
+    #[test]
+    fn end_gap_is_a_stretch_only_beyond_the_validity_contract() {
+        let (edge, vertex) = (1e-6, 4e-6);
+        let bound = 2.0 * (edge + vertex);
+        assert!(!ends_are_a_stretch(0.0, edge, [vertex, 1e-7]).unwrap());
+        assert!(!ends_are_a_stretch(bound * (1.0 - 1e-9), edge, [vertex, 1e-7]).unwrap());
+        assert!(ends_are_a_stretch(bound * (1.0 + 1e-9), edge, [1e-7, vertex]).unwrap());
+        assert!(ends_are_a_stretch(1.6e-3, edge, [vertex, vertex]).unwrap());
+    }
+
+    /// A non-finite tolerance or gap is an error, never ignored.
+    #[test]
+    fn end_gap_with_non_finite_data_is_an_error() {
+        for (gap, edge, vertex) in [
+            (1.0, f64::NAN, [1e-6, 1e-6]),
+            (1.0, 1e-6, [f64::NAN, 1e-6]),
+            (1.0, 1e-6, [1e-6, f64::NAN]),
+            (1.0, f64::INFINITY, [1e-6, 1e-6]),
+            (1.0, 1e-6, [1e-6, -1.0]),
+            (f64::NAN, 1e-6, [1e-6, 1e-6]),
+        ] {
+            assert!(ends_are_a_stretch(gap, edge, vertex).is_err());
+        }
+    }
 
     /// Pool handles: an index and a kind.
     #[derive(Debug, Clone, Copy, PartialEq)]
