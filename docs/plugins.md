@@ -92,7 +92,7 @@ The command surface exposes management without opening dialogs:
 
 | Command | Parameters | Result |
 |---|---|---|
-| `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?}}` | Package description and installation status, including declared `entry_points` |
+| `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?, input_folder?}}` | Package description and installation status, including declared `entry_points` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
 | `plugin.remove` | `{id}` | `{id, removed: true}` |
 
@@ -206,19 +206,25 @@ extensions it claims, lowercase without the dot:
   It has no `commands` import: an importer makes a design, it does not edit the open one.
 - **The result.** The design opens as a new design that is not saved anywhere yet, named after
   the file unless the design names itself. The call returns a loss report,
-  `{"summary": "...", "items": [{"severity": "info|degraded|dropped", "subject": "...", "message": "..."}], "details": {...}}`:
-  the app shows the summary and items in its Import report window; programs get it in the reply.
+  `{"summary": "...", "items": [{"severity": "info|degraded|dropped", "title": "...", "subject": "...", "message": "...", "code": "..."}], "details": {...}}`.
+  `title` names the kind of loss in the user's words, the same for every item of that kind
+  ("Parts of the file kept as they are"); `code` is the importer's stable code for it. Both may be empty.
+  The Import report window shows the summary, then one line per title with how many items it covers,
+  worst first, and folds every item with its code, subject and message under **Details**; programs
+  get the whole report in the reply.
   Nothing changes unless the whole import succeeds.
 - **Assemblies.** `source.read`, `source.size` and `source.resolve` with path `""` reach the file
   being imported. Any other path is relative to that file's folder (an assembly's parts) and needs
-  the `input_folder` permission, which the install review shows. Hidden names, links and paths
+  the `input_folder` permission. The install review shows it and Install approves it, stored with
+  the plugin's other grants for that exact package; a plugin copied in by hand, or one whose grant
+  is for another package, reads only the file itself. Hidden names, links and paths
   outside the folder are refused; an import reads at most 1 GiB and writes a design of at most 256 MiB.
 - **Failures.** A trap fails that one import ("Sample failed on bracket.smp: ...") and the next
   one gets a fresh instance. The compiled component stays in memory, so the next file opens
   without compiling again; nothing compiled is written to disk.
 - **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
-  `stack_kib` up to 64 MiB. Its memory and fuel still have to fit the user's ceilings in
-  Preferences › Plugins. Build it for `wasm32-unknown-unknown` and wrap it with
+  `stack_kib` up to 64 MiB. Its fuel has to fit the user's ceiling in Preferences › Plugins, and
+  its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with
   `wasm-tools component new`: the host links no WASI, so a component that imports any is refused.
 
 ## Plugin data in a design

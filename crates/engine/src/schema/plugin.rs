@@ -225,6 +225,10 @@ pub struct InstallApproval {
     /// `runtime.limits.memory_mib`. Omitted: the plugin runs under the app's ceiling.
     #[serde(default)]
     pub memory_mib: Option<usize>,
+    /// Let an importer read the other files in the folder of the file it opens; only when its
+    /// manifest asks for `input_folder`.
+    #[serde(default)]
+    pub input_folder: bool,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -246,6 +250,7 @@ impl From<InstallApproval> for crate::plugin::Grants {
                 .map(|f| craft_plugin::FileGrant { name: f.name, folder: f.path, read: f.read, write: f.write })
                 .collect(),
             memory_mib: approve.memory_mib,
+            input_folder: approve.input_folder,
         }
     }
 }

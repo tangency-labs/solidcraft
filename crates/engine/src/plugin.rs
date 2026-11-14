@@ -38,6 +38,10 @@ pub struct Grants {
     /// its manifest asks for, approved at install. Bound to `package_hash` like the rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_mib: Option<usize>,
+    /// An importer may read the other files in the folder of the file it opens (its manifest's
+    /// `input_folder`), approved at install.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub input_folder: bool,
 }
 
 /// Trusted host state, never loaded from a design or supplied by guest code.

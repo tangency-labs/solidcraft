@@ -615,6 +615,7 @@ mod native {
                         command_groups: BTreeSet::new(),
                         folders: s.plugin_state.file_grants.clone(),
                         memory_mib: None,
+                        input_folder: false,
                     },
                 );
                 let scope = solidcraft_io::vfs::PathScope::default().with_design_folder(&f.0);
@@ -1028,15 +1029,24 @@ mod importers {
     }
 
     #[test]
-    fn an_assembly_reads_the_files_beside_it_only_with_the_input_folder_permission() {
-        for input_folder in [false, true] {
-            let (mut s, root) = installed(&format!("folder-{input_folder}"), &[("smp", &["smp"], input_folder)]);
+    fn an_assembly_reads_the_files_beside_it_only_when_asked_and_granted_at_install() {
+        for (asked, granted) in [(false, false), (true, false), (true, true)] {
+            let (mut s, root) = installed(&format!("folder-{asked}-{granted}"), &[("smp", &["smp"], asked)]);
+            let package = read_package(&root.join("plugins/smp").to_string_lossy()).unwrap();
+            if granted {
+                s.plugin_state
+                    .grants
+                    .insert("smp".into(), Grants { package_hash: Some(package.approval.clone()), input_folder: true, ..Default::default() });
+            }
             put(&root, "part.bin", &design());
             let reply = s.execute("doc.open", &json!({"path": put(&root, "assembly.smp", b"S")}));
-            match input_folder {
-                false => assert!(reply.unwrap_err().to_string().contains("input_folder")),
+            match granted {
+                false => assert!(reply.unwrap_err().to_string().contains("input_folder"), "asked {asked}"),
                 true => assert_eq!(reply.unwrap()["bodies"], 1),
             }
+            // Approving the folder for an importer that doesn't ask for it is refused.
+            let approval = Grants { input_folder: true, ..Default::default() };
+            assert_eq!(validate_grants(&package.manifest, &approval).is_ok(), asked);
             std::fs::remove_dir_all(root).unwrap();
         }
     }

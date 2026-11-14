@@ -24,12 +24,16 @@ fn requested(manifest: &Manifest) -> Grants {
             .map(|g| FileGrant { name: g.name.clone(), folder: PathBuf::new(), read: g.read, write: g.write })
             .collect(),
         memory_mib: Some(rt.limits.memory_mib),
+        input_folder: rt.permissions.input_folder,
     })
 }
 pub fn validate_grants(manifest: &Manifest, grants: &Grants) -> Result<()> {
     let asked = requested(manifest);
     let deny = || HostError::PermissionDenied { permission: "approval contains an unrequested, duplicate, invalid or excessive grant".into() };
     if grants.command_groups.len() > 4 || grants.folders.len() > 32 || !grants.command_groups.is_subset(&asked.command_groups) {
+        return Err(deny().into());
+    }
+    if grants.input_folder && !asked.input_folder {
         return Err(deny().into());
     }
     // Memory is approved as the manifest asks for it: no more, and never past the Wasm32 limit.

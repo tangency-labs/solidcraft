@@ -126,13 +126,17 @@ pub fn import_file(session: &mut Session, importer: &Importer, path: &str, optio
         .into());
     }
     let runtime = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
-    session.plugin_limits.check(&runtime.limits)?;
+    host_limits_for(session, &package.manifest.id, &package.approval).check(&runtime.limits)?;
     if !options.is_object() {
         return Err(HostError::InvalidInput { field: "options".into(), reason: "the importer's options are an object".into() }.into());
     }
-    // The caller's file scope covers the file, and with input_folder, the folder it is in.
+    // The caller's file scope covers the file, and with input_folder, the folder it is in. The
+    // folder is read only when the manifest asks for it and the user approved it at install, for
+    // this exact package (the grant above).
     solidcraft_io::vfs::check(path).map_err(|e| HostError::PermissionDenied { permission: e.to_string() })?;
+    let granted = session.plugin_state.grants.get(&package.manifest.id).is_some_and(|grants| grants.input_folder);
     let input_folder = runtime.permissions.input_folder
+        && granted
         && Path::new(path).parent().is_some_and(|folder| solidcraft_io::vfs::check(&folder.to_string_lossy()).is_ok());
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
