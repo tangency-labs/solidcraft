@@ -5071,8 +5071,9 @@ fn named_pieces_of(
     out
 }
 
-/// Distance that reaches through every target body from the sketch plane (either side).
-pub fn through_all_distance(st: &ModelState, plane: &Plane, targets: &[String]) -> Result<f64> {
+/// Distance that reaches through every target body from the plane `start` along the normal from
+/// the sketch plane (the From Object level plus any start offset), on either side.
+pub fn through_all_distance(st: &ModelState, plane: &Plane, start: f64, targets: &[String]) -> Result<f64> {
     let mut far: f64 = 0.0;
     let mut any = false;
     for b in st.bodies.iter().filter(|b| targets.is_empty() || targets.contains(&b.name)) {
@@ -5087,7 +5088,7 @@ pub fn through_all_distance(st: &ModelState, plane: &Plane, targets: &[String]) 
                 if i & 2 == 0 { bb.min.y } else { bb.max.y },
                 if i & 4 == 0 { bb.min.z } else { bb.max.z },
             );
-            far = far.max(plane.height(p).abs());
+            far = far.max((plane.height(p) - start).abs());
         }
     }
     if !any {
@@ -7008,7 +7009,9 @@ fn feature_tools_with_constructor(
                 }
                 None if extent.through_all => {
                     // The reach is a length; a negative saved distance keeps its side (#10415).
-                    let reach = through_all_distance(st, &ss.plane, &crate::plain(targets))?;
+                    // Measured from where the extrude starts, so an offset leaves no side short (#16556).
+                    let start = from + extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
+                    let reach = through_all_distance(st, &ss.plane, start, &crate::plain(targets))?;
                     if val(vals, &extent.distance, Kind::Length).is_ok_and(|saved| saved < 0.0) { -reach } else { reach }
                 }
                 None => val(vals, &extent.distance, Kind::Length)?,
