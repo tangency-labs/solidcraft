@@ -2,44 +2,59 @@
 //!
 //! Every field of a B-rep is a [`Stamped`] value: reads go through `Deref`, and every
 //! mutable access (`DerefMut`: a `*_mut` accessor, an arena insert, a list push, a
-//! whole-value assignment through `*`) counts as a write. A value made by `new`,
-//! `default` or `clone` takes an origin no other value has, so two equal [`Stamp`]s
-//! name the same value with no mutable access between them. The B-rep check uses this
-//! to tell that a pass left the body as it found it
-//! ([`super::Brep::write_stamps`]).
+//! whole-value assignment through `*`) counts as a write. The fields of one B-rep
+//! value share an [`Origin`]: a fresh allocation made when the value is (`Default`, or
+//! the B-rep's copy), compared by address, as the B-rep's progress and removal tags are.
+//! A [`Stamp`] keeps its origin alive, so the address cannot be reused while a reading is
+//! held. Two equal stamps therefore name the same field of the same value with no
+//! mutable access between them, with no global state. The B-rep check uses this to tell
+//! that a pass left the body as it found it ([`super::Brep::write_stamps`]).
 //!
 //! A stamp is conservative: a mutable access that changes nothing still counts. Interior
 //! caches that geometry fills through `&self` are not writes; they never change a result.
 
-use core::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
-/// The next origin to hand out. 0 is never handed out.
-static ORIGINS: AtomicU64 = AtomicU64::new(1);
+/// The identity of one B-rep value, shared by its fields: an allocation of its own,
+/// compared by address.
+#[derive(Debug, Clone)]
+pub(crate) struct Origin(Arc<()>);
 
-fn fresh_origin() -> u64 {
-    ORIGINS.fetch_add(1, Ordering::Relaxed)
+impl Origin {
+    /// An origin no other live value has.
+    pub(crate) fn new() -> Self {
+        Self(Arc::new(()))
+    }
 }
 
+impl PartialEq for Origin {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for Origin {}
+
 /// Which value a [`Stamped`] is and how many mutable accesses it has had.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Stamp {
-    origin: u64,
+    origin: Origin,
     writes: u64,
 }
 
 /// A value that counts its mutable accesses (see the module docs).
 pub(crate) struct Stamped<T> {
     value: T,
-    origin: u64,
+    origin: Origin,
     writes: u64,
 }
 
 impl<T> Stamped<T> {
-    /// `value` under an origin of its own, with no writes yet.
-    pub(crate) fn new(value: T) -> Self {
+    /// `value` under `origin`, with no writes yet.
+    pub(crate) fn new(value: T, origin: &Origin) -> Self {
         Self {
             value,
-            origin: fresh_origin(),
+            origin: origin.clone(),
             writes: 0,
         }
     }
@@ -52,7 +67,7 @@ impl<T> Stamped<T> {
     /// The value's stamp now.
     pub(crate) fn stamp(&self) -> Stamp {
         Stamp {
-            origin: self.origin,
+            origin: self.origin.clone(),
             writes: self.writes,
         }
     }
@@ -72,19 +87,6 @@ impl<T> core::ops::DerefMut for Stamped<T> {
     }
 }
 
-impl<T: Clone> Clone for Stamped<T> {
-    /// A copy is another value: it takes its own origin.
-    fn clone(&self) -> Self {
-        Self::new(self.value.clone())
-    }
-}
-
-impl<T: Default> Default for Stamped<T> {
-    fn default() -> Self {
-        Self::new(T::default())
-    }
-}
-
 impl<T: core::fmt::Debug> core::fmt::Debug for Stamped<T> {
     /// The value alone, as without the stamp.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -98,7 +100,7 @@ mod tests {
 
     #[test]
     fn a_read_keeps_the_stamp_and_a_mutable_access_moves_it() {
-        let mut v = Stamped::new(vec![1, 2]);
+        let mut v = Stamped::new(vec![1, 2], &Origin::new());
         let before = v.stamp();
         assert_eq!(v.len(), 2);
         assert_eq!(v.stamp(), before);
@@ -111,26 +113,30 @@ mod tests {
     }
 
     #[test]
-    fn a_copy_or_a_new_value_never_shares_a_stamp() {
-        let v = Stamped::new(7_u32);
-        let copy = v.clone();
-        assert_eq!(*copy, 7);
-        assert_ne!(copy.stamp(), v.stamp());
-        let mut a = Stamped::new(0_u32);
-        let b = Stamped::new(0_u32);
-        assert_ne!(a.stamp(), b.stamp());
+    fn values_of_other_origins_never_share_a_stamp() {
+        let (one, other) = (Origin::new(), Origin::new());
+        assert_ne!(one, other);
+        assert_eq!(one, one.clone());
+        let mut a = Stamped::new(0_u32, &one);
+        let mut c = Stamped::new(0_u32, &other);
+        assert_ne!(a.stamp(), c.stamp());
         // a value put in place of another, even with as many writes, is told apart
-        let mut c = Stamped::new(0_u32);
         *a = 1;
         *c = 1;
         assert_ne!(a.stamp(), c.stamp());
         let a_stamp = a.stamp();
         core::mem::swap(&mut a, &mut c);
         assert_ne!(a.stamp(), a_stamp);
+        // a reading keeps its origin alive, so a later origin cannot take its address
+        drop((a, c, one));
+        assert_ne!(Stamped::new(1_u32, &Origin::new()).stamp(), a_stamp);
     }
 
     #[test]
     fn debug_shows_the_value_alone() {
-        assert_eq!(format!("{:?}", Stamped::new(vec![1])), "[1]");
+        assert_eq!(
+            format!("{:?}", Stamped::new(vec![1], &Origin::new())),
+            "[1]"
+        );
     }
 }

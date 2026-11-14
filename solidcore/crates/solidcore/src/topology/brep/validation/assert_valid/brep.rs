@@ -36,14 +36,6 @@ use crate::topology::{Brep, EdgeId, EdgeuseId, RegionId, VertexId, VertexuseId};
 
 const C: i64 = class::BREP;
 
-#[cfg(test)]
-thread_local! {
-    /// How many `ValidatePointers` passes `AssertValid` ran on this thread (for the tests of
-    /// the skip in `check_brep_with_keys`).
-    pub(in crate::topology::brep::validation) static POINTER_PASSES: core::cell::Cell<usize> =
-        const { core::cell::Cell::new(0) };
-}
-
 /// `SmBrep::AssertValid`; without `pointers` its `ValidatePointers` is taken as succeeding
 /// with no report (see `check_brep_with_keys`).
 pub(super) fn brep(
@@ -65,8 +57,6 @@ pub(super) fn brep(
 
     // Old style checks: ValidatePointers() and ValidateAndUpdateTolerances().
     let (status, exclusion_failed) = if pointers {
-        #[cfg(test)]
-        POINTER_PASSES.with(|n| n.set(n.get() + 1));
         super::validate_pointers_excluding(k, b, cx.rep.array.as_deref_mut(), 0, walk, cx.keys)?
     } else {
         (super::SUCCESS, false)

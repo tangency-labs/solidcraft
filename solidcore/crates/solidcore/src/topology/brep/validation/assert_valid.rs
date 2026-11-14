@@ -359,6 +359,17 @@ pub fn check_brep_scoped(
     level: CheckLevel,
     scope: ValidityScope,
 ) -> Result<BrepCheck> {
+    Ok(check_brep_counted(k, b, level, scope)?.0)
+}
+
+/// [`check_brep_scoped`], also saying how many `ValidatePointers` passes its `AssertValid` ran
+/// (0 when [`check_brep_with_keys`] skipped it, or when `AssertValid` did not run).
+fn check_brep_counted(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    scope: ValidityScope,
+) -> Result<(BrepCheck, usize)> {
     let naming = b.naming();
     if naming == NamingScheme::Unknown {
         return Err(SolidError::invalid_input(
@@ -370,7 +381,7 @@ pub fn check_brep_scoped(
     let recorded = b.geometry_owner_keys().clone();
     let keys =
         |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
-    check_brep_with_keys_scoped(k, b, level, &keys, scope)
+    check_with_keys_counted(k, b, level, &keys, scope)
 }
 
 /// The capi `smlib_brep_check(brep, level)`: [`validate_pointers`](super::validate_pointers) at `level` (its
@@ -410,6 +421,18 @@ pub fn check_brep_with_keys_scoped(
     keys: &dyn Fn(EntityRef) -> ObjectRef,
     scope: ValidityScope,
 ) -> Result<BrepCheck> {
+    Ok(check_with_keys_counted(k, b, level, keys, scope)?.0)
+}
+
+/// [`check_brep_with_keys_scoped`], also saying how many `ValidatePointers` passes its
+/// `AssertValid` ran (0 or 1).
+fn check_with_keys_counted(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    keys: &dyn Fn(EntityRef) -> ObjectRef,
+    scope: ValidityScope,
+) -> Result<(BrepCheck, usize)> {
     let mut pointer_reports = AssertArray::new();
     let before = b.write_stamps();
     let mut faces_whole = true;
@@ -443,12 +466,16 @@ pub fn check_brep_with_keys_scoped(
             pointers_repeat,
         )?)
     };
-    Ok(BrepCheck {
-        pointers_status,
-        pointer_reports,
-        assert_valid,
-        reports,
-    })
+    let passes = usize::from(assert_valid.is_some() && pointers_repeat);
+    Ok((
+        BrepCheck {
+            pointers_status,
+            pointer_reports,
+            assert_valid,
+            reports,
+        },
+        passes,
+    ))
 }
 
 /// `SmBrep::AssertValid(pAList, eTestLevel, eWalkTree)`: the B-rep checks (base
@@ -879,12 +906,7 @@ mod tests {
 
     /// `check_brep` of `b`, with how many `ValidatePointers` passes `AssertValid` ran.
     fn check_counting(k: &mut Kernel, b: &mut Brep) -> (BrepCheck, usize) {
-        let before = brep::POINTER_PASSES.with(core::cell::Cell::get);
-        let check = check_brep(k, b, CheckLevel::Level2).unwrap();
-        (
-            check,
-            brep::POINTER_PASSES.with(core::cell::Cell::get) - before,
-        )
+        check_brep_counted(k, b, CheckLevel::Level2, ValidityScope::Body).unwrap()
     }
 
     /// The whole check, as the reports and statuses print.
