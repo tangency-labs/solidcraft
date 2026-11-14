@@ -318,6 +318,7 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "DeepSeek", base_url: "https://api.deepseek.com" },
     ApiPreset { name: "Qwen", base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" },
     ApiPreset { name: "Cheaper Inference", base_url: "https://api.cheaperinference.com/v1" },
+    ApiPreset { name: "Standard Compute", base_url: "https://api.stdcmpt.com/v1" },
     ApiPreset { name: "OpenRouter", base_url: "https://openrouter.ai/api/v1" },
 ];
 
@@ -396,6 +397,7 @@ mod tests {
         assert!(key_safe_for("https://api.openai.com/v1"));
         assert!(key_safe_for("https://api.mammouth.ai/v1"));
         assert!(key_safe_for("https://api.cheaperinference.com/v1"));
+        assert!(key_safe_for("https://api.stdcmpt.com/v1"));
         assert!(key_safe_for("http://localhost:11434/v1"));
         assert!(key_safe_for("http://127.0.0.1:1234/v1"));
         assert!(key_safe_for("http://[::1]:8080/v1"));
@@ -511,6 +513,11 @@ mod tests {
             && p.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
             && key_safe_for(p.base_url)));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Cheaper Inference" && key_safe_for(p.base_url)));
+        assert!(
+            presets(Protocol::OpenAi)
+                .iter()
+                .any(|p| p.name == "Standard Compute" && p.base_url == "https://api.stdcmpt.com/v1" && key_safe_for(p.base_url))
+        );
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
         for name in ["DeepSeek", "Qwen"] {
             assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == name), "OpenAI-compatible preset for {name}");
