@@ -3395,7 +3395,10 @@ impl super::p1::LinearCrossSectionFsg {
     /// at the rails' start, or a constant-distance solver's chord between planes. The
     /// rails and uv curves become the stations' feet. `None` (built as before): a face
     /// that is not an offset of a NURBS surface (or is a blend by its definition), rails
-    /// or a centre line that turn at a knot, rails that meet at an end, a
+    /// or a centre line that turn at a knot, rails that meet at an end, a centre line or a
+    /// rail of no length (the offsets meet on an axis: a cylinder's rim chamfered by its
+    /// radius is a cone to its apex, whose centre line and rail on the top are one point,
+    /// and a section has no length to run along), a
     /// constant-distance solver on a face that is not a plane (its offsets vary along
     /// the edge), a solver of another kind, or rails that are not those feet.
     ///
@@ -3421,6 +3424,13 @@ impl super::p1::LinearCrossSectionFsg {
         use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
         use crate::surface::surface::SurfaceKind;
         let [rail1, rail2] = rails;
+        // a centre line or a rail of no length: the stations along it are one
+        if center_line.is_degenerate(k, approx_tol_3d, None)?
+            || rail1.is_degenerate(k, approx_tol_3d, None)?
+            || rail2.is_degenerate(k, approx_tol_3d, None)?
+        {
+            return Ok(None);
+        }
         let corners =
             fillet_curve_corners(center_line, rail1, rail2, corner_angle(ball.ang_tol_rad))?;
         if !corners.is_empty() {
