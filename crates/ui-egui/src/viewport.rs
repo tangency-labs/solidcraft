@@ -209,7 +209,9 @@ pub struct ViewportState {
     pub hover: Option<Hit>,
     /// The centre of the circle or arc of the sketch being edited whose edge was hovered last
     /// (sketch, point id): it is drawn, and it takes the pointer from further away
-    /// ([`WOKEN_CENTRE_PX`]), until another curve or point is hovered.
+    /// ([`WOKEN_CENTRE_PX`]), until another curve or point is hovered, until the pointer moves
+    /// past the circle's own size from the centre ([`WOKEN_CENTRE_FAR`]), or until a click on
+    /// empty space clears the selection (#16346).
     pub woken_centre: Option<(u64, String)>,
     /// The centre or midpoint most recently hovered for visual H/V tracking.
     pub(crate) tracking: crate::inference::Tracking,
@@ -5745,7 +5747,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !(hover_frozen && inside) {
         app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
     }
-    wake_centre(app, &hits);
+    wake_centre(app, &hits, hover, &proj);
 
     let keep = crate::tool_modifiers::keep_snap_points(crate::tool_modifiers::Held::new(
         ui.input(|i| i.modifiers),
@@ -6091,6 +6093,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         // the second click of a double-click, which has its own actions).
                         None if !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
                         None => {
+                            // Clicking empty space clears the selection, and the woken centre
+                            // sleeps with it (#16346): the cross in the ring must not outlive
+                            // the circle or arc it belongs to. A click on the centre itself
+                            // takes it, so it stays awake.
+                            if !add && !took_the_woken_centre(app, cand.as_ref()) {
+                                app.viewport.woken_centre = None;
+                            }
                             let sel = cand.and_then(|c| c.1);
                             select(app, sel.clone(), add, allow_toggle);
                             crate::select_other::note_click(app, p, if add { None } else { sel });
@@ -7553,11 +7562,17 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 /// against 8 for other sketch points.
 const WOKEN_CENTRE_PX: f32 = 16.0;
 
+/// How far (in the sketch's own units) the pointer may be from a woken centre and still keep it
+/// awake: a fifth more than the circle or arc's own radius, so the pointer can cross the whole
+/// circle to reach the other side of it, but not wander off and leave the cross behind (#16346).
+const WOKEN_CENTRE_FAR: f64 = 1.2;
+
 /// Hovering a circle's or an arc's edge in the sketch being edited wakes its centre: drawn, and
 /// picked from further away, so a line or a dimension is easily taken to it, and it stays awake
 /// while the pointer crosses the circle's inside to it. Hovering another curve or point (but
-/// that centre) puts it back to sleep, as does leaving the sketch.
-fn wake_centre(app: &mut SolveApp, hits: &[Hit]) {
+/// that centre) puts it back to sleep, as does leaving the sketch, taking the pointer past the
+/// circle's own size from the centre, and clicking empty space (#16346).
+fn wake_centre(app: &mut SolveApp, hits: &[Hit], pointer: Option<Pos2>, proj: &Proj) {
     let Some(active) = app.session.active_sketch else {
         app.viewport.woken_centre = None;
         return;
@@ -7579,11 +7594,63 @@ fn wake_centre(app: &mut SolveApp, hits: &[Hit]) {
         Some(Hit::SketchPoint { id, .. }) if app.viewport.woken_centre.as_ref().is_some_and(|(_, w)| w == id) => {}
         Some(_) => app.viewport.woken_centre = None,
         None => {
-            if app.viewport.woken_centre.as_ref().is_some_and(|(k, _)| *k != active) {
+            // The pointer left the circle: past its own size from the centre, the centre sleeps
+            // too (#16346). Inside that range it stays awake, so the pointer can still cross
+            // the circle to take the centre from the other side.
+            let asleep = match app.viewport.woken_centre.as_ref() {
+                None => true,
+                Some((sketch, id)) => {
+                    *sketch != active || pointer_in_sketch(&st, active, proj, pointer).is_some_and(|at| past_the_centre(&st, *sketch, id, at))
+                }
+            };
+            if asleep {
                 app.viewport.woken_centre = None;
             }
         }
     }
+}
+
+/// Did the click take the woken centre itself? A click on the cross in the ring takes it and
+/// leaves it awake; any other click puts it back to sleep (#16346): the highlight belongs to
+/// the pointer's hover, not to the selection.
+fn took_the_woken_centre(app: &SolveApp, cand: Option<&(Hit, Option<Sel>)>) -> bool {
+    let Some((sketch, id)) = &app.viewport.woken_centre else { return false };
+    match cand {
+        Some((Hit::SketchPoint { sketch: s, id: i, .. }, _)) => s == sketch && i == id,
+        _ => false,
+    }
+}
+
+/// Where the pointer meets the plane of the sketch `sketch`, in the sketch's own X and Y.
+fn pointer_in_sketch(st: &solidcraft_engine::doc::ModelState, sketch: u64, proj: &Proj, pointer: Option<Pos2>) -> Option<Vec2> {
+    let at = pointer?;
+    let ss = st.sketch(sketch)?;
+    let (origin, direction) = proj.ray(at);
+    crate::sketch_cursor_readout::plane_point(&ss.plane, origin, direction)
+}
+
+/// Is the pointer at `at` in the sketch farther from the woken centre `id` than the circle or
+/// arc that owns it? Its own radius is the measure: a fifth more than it is far enough for the
+/// pointer to have left the circle (#16346).
+fn past_the_centre(st: &solidcraft_engine::doc::ModelState, sketch: u64, id: &str, at: Vec2) -> bool {
+    let Some(ss) = st.sketch(sketch) else { return false };
+    let sk = &ss.sketch;
+    let Some(centre) = sk.resolve_point(id).and_then(|i| sk.point(i)) else { return false };
+    // The widest circle or arc centred on that point: one point may be the centre of several.
+    let radius = sk
+        .curves
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| match &c.kind {
+            CurveKind::Circle { c: centre, .. } | CurveKind::Arc { c: centre, .. } if sk.points.get(*centre).is_some_and(|p| p.id == id) => {
+                sk.radius(i)
+            }
+            _ => None,
+        })
+        .filter(|r| r.is_finite())
+        .max_by(f64::total_cmp);
+    let Some(radius) = radius else { return false };
+    at.dist(centre) > radius * WOKEN_CENTRE_FAR
 }
 
 /// A midpoint stays attached to its edge; hover and selection share the same marker.
