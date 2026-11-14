@@ -203,11 +203,17 @@ before any gap is measured**, and its stored tolerance is that bound, raised to 
 where it is smaller (§5.1, invariant 5). A measured gap larger than the bound is evidence against
 the construction, not a quantity to cover (§8).
 
-Validity and repair have different purposes. The validity pass checks whether the stored local
-zones overlap, without changing their radii. The explicit `validate_and_update_tolerances` repair
-API retains its stricter residual-gap targets: half the vertex tolerance and the whole edge
-tolerance. A model can be valid while that API still reports gaps it would repair. A validate-only
-call to the repair API reports those repair targets; it does not run the body's validity predicates.
+A body a stitch produced is checked under `ValidityScope::Stitched` (`check_brep_scoped`, used by the
+stitch's result check only). The rule for every body is unchanged: vertex/edge and vertex/face gaps within
+half the vertex tolerance, the edge/face gap within the edge tolerance. A stitch closes a gap by giving the
+glued entity the tolerance that covers it, so a gap may exceed those and still lie inside the two zones it
+spans. The scoped check takes such a gap, up to τ_v + τ_e (vertex/edge), τ_v + τ_f (vertex/face) or
+τ_e + τ_f (edge/face), only where the tolerance ball that covers it provably reaches no topology it does
+not bound: the vertex ball by the clearance proof of Test #82 (`vertex_ball_reaches`), the edge tube by
+boxes over pairs of curve and surface pieces against every face and edge not incident to the edge or its
+end vertices (`edge_tube_reaches`, `assert_valid`'s sibling `pointers.rs`). Boxes only, never samples;
+a box that cannot be had, a piece that cannot be split or a proof that runs out of boxes leaves the gap
+reported. The explicit `validate_and_update_tolerances` repair API is unaffected.
 
 The gaps themselves are measured, not enclosed. `calc_max_edge_face_gap`
 (`topology/edgeuse/p1.rs`) takes the largest of 20 samples of the distance from C to the face's
@@ -236,7 +242,7 @@ interval is on either side of the boundary. The near-miss check applies its exis
 vertex-zone rule from both sides; a separate edge beside the seam still counts as a near miss
 (`intersect/curve_class/p7.rs`).
 When dropping a curve along a seam, equivalent parameter endpoints stay on one side only when
-the existing 3D approximation bound permits that correction (`intersect/surface_drop_lib/p1.rs`).
+the two are the same 3D point (a crossing keeps the approximation bound) (`intersect/surface_drop_lib/p1.rs`).
 Subdivision drops a pending endpoint again only when the new span makes its seam branch
 ambiguous, and a failed redrop falls back to the saved endpoint
 (`intersect/surface_drop_lib/p3.rs`). Within a boundary's tolerance band, a trace whose tangent

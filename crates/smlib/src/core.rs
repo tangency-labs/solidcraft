@@ -55,7 +55,7 @@ mod trim_tests;
 
 pub(crate) use convert::{from_arrays, to_arrays};
 pub(crate) use measure::{
-    area, bounds, check, check_with, classify_point, classify_points, edge_face_distance, is_manifold_solid, mass_properties, solid_count,
+    area, bounds, check, check_scoped, check_with, classify_point, classify_points, edge_face_distance, is_manifold_solid, mass_properties, solid_count,
 };
 
 /// A solidcore body. Its own lock: solidcore's operations take `&mut Brep`, even to measure.

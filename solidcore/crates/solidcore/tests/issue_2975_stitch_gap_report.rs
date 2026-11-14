@@ -648,6 +648,17 @@ fn a_planar_conic_disc_in_a_holed_face_reports_its_gap() {
 /// `stitch_tol`. The edges carry the zone `edge_zone`, the faces 0.002 and the vertices 0.006.
 /// Returns the body and the number of edges the stitch sewed.
 fn lifted_sheets(k: &mut Kernel, gap: f64, stitch_tol: f64, edge_zone: f64) -> (Brep, usize) {
+    lifted_sheets_beside(k, gap, stitch_tol, edge_zone, None)
+}
+
+/// [`lifted_sheets`] with a third, separate unit square whose low corner is `beside`.
+fn lifted_sheets_beside(
+    k: &mut Kernel,
+    gap: f64,
+    stitch_tol: f64,
+    edge_zone: f64,
+    beside: Option<(f64, f64)>,
+) -> (Brep, usize) {
     use solidcore::geom::axis2_placement::Axis2Placement;
     use solidcore::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap, VertexFaceGap};
     use solidcore::topology::brep::p4::stitch_faces;
@@ -655,6 +666,9 @@ fn lifted_sheets(k: &mut Kernel, gap: f64, stitch_tol: f64, edge_zone: f64) -> (
     let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT).unwrap();
     add_square(k, &mut b, 0.0, 0.0);
     add_square(k, &mut b, 1.0, 0.0);
+    if let Some((x, y)) = beside {
+        add_square(k, &mut b, x, y);
+    }
     // A body tolerance of 1e-4 puts the size ratio limit (1000x) at 0.1, above every zone here.
     b.set_tolerance(1e-4);
     for f in b.face_list().to_vec() {
@@ -706,7 +720,7 @@ fn lifted_sheets(k: &mut Kernel, gap: f64, stitch_tol: f64, edge_zone: f64) -> (
     // `add_square` names each surface's owner by its arena identity, while `new_brep`
     // checks under the notification scheme: relabel so the check sees the owners.
     b.use_arena_naming().unwrap();
-    if sewed == 1 {
+    if sewed == 1 && beside.is_none() {
         assert_eq!(b.edge_list().len(), 7);
         assert_eq!(b.vertex_list().len(), 6);
     }
@@ -714,17 +728,21 @@ fn lifted_sheets(k: &mut Kernel, gap: f64, stitch_tol: f64, edge_zone: f64) -> (
 }
 
 /// A stitch tolerance of 0.01 sews gaps up to it, growing the sewn edge's zone to cover the gap
-/// (at most the gap plus the larger zone), and the body is then valid. A gap past the stitch
-/// tolerance and past the summed edge zones is not sewn, and the check reports it.
+/// (at most the gap plus the larger zone), and the stitched body is then valid under the stitch's
+/// scope. A gap past the stitch tolerance and past the summed edge zones is not sewn, and the
+/// check reports it.
 #[test]
 fn a_stitch_sews_a_gap_within_its_tolerance_and_leaves_a_larger_one() {
-    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::topology::brep::validation::{
+        check_brep, check_brep_scoped, CheckLevel, ValidityScope,
+    };
 
     let mut k = Kernel::default();
     for gap in [0.004, 0.008] {
         let (mut b, sewed) = lifted_sheets(&mut k, gap, 0.01, 0.005);
         assert_eq!(sewed, 1, "gap {gap}");
-        let report = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        let report =
+            check_brep_scoped(&mut k, &mut b, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
         assert!(report.is_valid(), "gap {gap}: {:?}", report.lines());
         let grown = b
             .edge_list()
@@ -746,19 +764,24 @@ fn a_stitch_sews_a_gap_within_its_tolerance_and_leaves_a_larger_one() {
 }
 
 /// A gap inside the sum of the incident local zones (here the 0.02 edge zone) is sewn without
-/// growing any zone, the body is valid, and the explicit repair API keeps its stricter targets.
+/// growing any zone. The rule for every body still refuses it (a vertex gap past half the vertex
+/// tolerance); the stitch's scope takes it where nothing else lies in the vertex's ball; and the
+/// explicit repair API keeps its stricter targets.
 #[test]
-fn a_gap_inside_the_summed_local_zones_is_sewn_without_growing_them() {
+fn a_gap_inside_the_summed_local_zones_is_taken_only_by_the_stitch_scope() {
     use solidcore::geom::assert_array::AssertArray;
     use solidcore::topology::brep::validation::{
-        check_brep, validate_and_update_tolerances, CheckLevel,
+        check_brep, check_brep_scoped, validate_and_update_tolerances, CheckLevel, ValidityScope,
     };
 
     let mut k = Kernel::default();
     k.fixes.validate_tolerances_fixes_reported_gaps = true;
-    let (mut b, sewed) = lifted_sheets(&mut k, 0.001, 1e-4, 0.02);
+    let (mut b, sewed) = lifted_sheets(&mut k, 0.004, 1e-4, 0.02);
     assert_eq!(sewed, 1);
-    let report = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    let body = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert!(!body.is_valid(), "the rule for every body is unchanged");
+    let report =
+        check_brep_scoped(&mut k, &mut b, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
     assert!(report.is_valid(), "{:?}", report.lines());
     assert_eq!(b.tolerance(), 1e-4);
     for &e in b.edge_list() {
@@ -770,5 +793,26 @@ fn a_gap_inside_the_summed_local_zones_is_sewn_without_growing_them() {
     // Checking validity must not silently repair the model.
     let mut repair = AssertArray::default();
     let gaps = validate_and_update_tolerances(&mut k, &mut b, true, Some(&mut repair), 2).unwrap();
-    assert!((gaps.max_vertex_edge_gap - 0.001).abs() < 1e-12);
+    assert!((gaps.max_vertex_edge_gap - 0.004).abs() < 1e-12);
+}
+
+/// The stitch's scope takes a gap past the rule for every body only where the tolerance ball that
+/// covers it reaches no topology it does not bound: a separate face 0.003 from a sewn vertex, inside
+/// its 0.006 ball, keeps the gap reported.
+#[test]
+fn the_stitch_scope_refuses_a_gap_whose_ball_reaches_other_topology() {
+    use solidcore::topology::brep::validation::{check_brep_scoped, CheckLevel, ValidityScope};
+
+    let mut k = Kernel::default();
+    let (mut clear, sewed) = lifted_sheets(&mut k, 0.004, 1e-4, 0.02);
+    assert_eq!(sewed, 1);
+    let alone =
+        check_brep_scoped(&mut k, &mut clear, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
+    assert!(alone.is_valid(), "{:?}", alone.lines());
+    // a third face whose corner lies 0.003 above the sewn corner (1, 1)
+    let (mut near, sewed) = lifted_sheets_beside(&mut k, 0.004, 1e-4, 0.02, Some((1.0, 1.003)));
+    assert_eq!(sewed, 1);
+    let report =
+        check_brep_scoped(&mut k, &mut near, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
+    assert!(!report.is_valid(), "the ball reaches the third face");
 }

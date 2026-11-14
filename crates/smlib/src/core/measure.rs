@@ -13,7 +13,7 @@ use solidcore::mass::integrator::properties::{MassPropertyBehavior, PropertyAttr
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::query::api_queries::{brep_bounding_box, brep_is_manifold_solid, brep_material_census, face_bounding_box};
 use solidcore::topology::brep::p1 as bl;
-use solidcore::topology::brep::validation::{CheckLevel as SolidcoreCheckLevel, check_brep};
+use solidcore::topology::brep::validation::{CheckLevel as SolidcoreCheckLevel, ValidityScope, check_brep_scoped};
 use solidcore::topology::face::p2::{PPF_AREA, PPF_AREA_FIRST_MOMENTS};
 use solidcore::topology::{FaceId, FaceuseId, NamingScheme};
 use solidcore::{Kernel, Point3, SolidError, Vec3};
@@ -321,6 +321,12 @@ pub(crate) fn check(body: &Body, level: CheckLevel) -> Result<CheckReport> {
 /// [`check`], stopped by the token over this thread's work when `stoppable` (a body the caller
 /// consumes: [`super::with_own_body`]).
 pub(crate) fn check_with(body: &Body, level: CheckLevel, stoppable: bool) -> Result<CheckReport> {
+    check_scoped(body, level, stoppable, ValidityScope::Body)
+}
+
+/// [`check_with`] holding the tolerance pass to `scope`: [`ValidityScope::Stitched`] for a body a
+/// stitch produced.
+pub(crate) fn check_scoped(body: &Body, level: CheckLevel, stoppable: bool, scope: ValidityScope) -> Result<CheckReport> {
     let lv = match level {
         CheckLevel::Basic => SolidcoreCheckLevel::Level0,
         CheckLevel::Geometry => SolidcoreCheckLevel::Level1,
@@ -331,7 +337,7 @@ pub(crate) fn check_with(body: &Body, level: CheckLevel, stoppable: bool) -> Res
         if naming == NamingScheme::Unknown {
             return Ok(Err(Refusal::Naming(naming)));
         }
-        match check_brep(k, b, lv) {
+        match check_brep_scoped(k, b, lv, scope) {
             Err(SolidError::Unported { upstream, unit }) => Ok(Err(Refusal::Unported(upstream, unit))),
             r => r.map(Ok),
         }

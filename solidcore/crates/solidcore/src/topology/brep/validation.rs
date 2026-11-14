@@ -29,8 +29,9 @@ pub(crate) mod spatial;
 mod wide_vertices;
 
 pub use assert_valid::{
-    assert_valid, check_brep, check_brep_with_keys, curve_assert_valid,
-    validate_and_update_tolerances, BrepCheck, CheckLevel, FailureClass, ToleranceGaps,
+    assert_valid, assert_valid_scoped, check_brep, check_brep_scoped, check_brep_with_keys,
+    check_brep_with_keys_scoped, curve_assert_valid, validate_and_update_tolerances, BrepCheck,
+    CheckLevel, FailureClass, ToleranceGaps, ValidityScope,
 };
 pub use coincidence::{contains_coincident_topology, CoincidenceResult};
 pub(crate) use pointers::validate_geometry;

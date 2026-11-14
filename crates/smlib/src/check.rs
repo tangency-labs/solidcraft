@@ -56,6 +56,14 @@ impl Brep {
         core::check(self.core(), level)
     }
 
+    /// [`Brep::check`] of a body a stitch produced: a gap past half a vertex's tolerance (or an
+    /// edge's own) is taken up to the sum of the two zones it spans where the tolerance ball
+    /// that covers it is proven to reach no topology it does not bound. Every other test is
+    /// [`Brep::check`]'s.
+    pub fn check_stitched(&self, level: CheckLevel) -> Result<CheckReport> {
+        core::check_scoped(self.core(), level, false, solidcore::topology::brep::validation::ValidityScope::Stitched)
+    }
+
     /// [`Brep::check`] of a body nobody else reads, which it takes: the token over this thread's
     /// work ([`crate::stop`]) stops it ([`crate::Error::Cancelled`]). A check left part way may
     /// leave the body's caches half-built, so it runs only on a body it consumes.

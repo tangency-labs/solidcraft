@@ -1310,6 +1310,229 @@ fn curve_clears(
     Ok(true)
 }
 
+/// Whether the ball of vertex `v` (its stored tolerance) may reach topology the vertex does not
+/// bound: the clearance half of Test #82 ([`check_vertex_clearance`]) run for this one vertex,
+/// whatever its tolerance. A proof by boxes decides it; a query that cannot be proven counts as
+/// reaching. Used by the stitch scope of the tolerance pass (`assert_valid::brep`).
+pub(super) fn vertex_ball_reaches(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
+    let mut r = Reports {
+        array: None,
+        level: 0,
+        failed: false,
+    };
+    check_vertex_clearance(k, b, &mut r, &[v])?;
+    Ok(r.failed)
+}
+
+/// How many pairs of boxes a tube clearance proof may ask for, per entity, before it gives up
+/// (and the tube counts as reaching).
+const TUBE_PAIRS: usize = 2048;
+
+/// A piece of an entity that a box can bound: a surface cell or a curve interval.
+#[derive(Clone, Copy)]
+enum Cell {
+    Surface(Extent2d),
+    Curve(Extent1d),
+}
+
+/// One entity a tube must clear: its geometry, the zone its box is grown by.
+enum Obstacle<'a> {
+    Face {
+        surface: &'a Surface,
+        domain: Extent2d,
+        zone: f64,
+    },
+    Edge {
+        curve: &'a Curve,
+        interval: Extent1d,
+        zone: f64,
+    },
+}
+
+impl Obstacle<'_> {
+    fn root(&self) -> Cell {
+        match self {
+            Self::Face { domain, .. } => Cell::Surface(*domain),
+            Self::Edge { interval, .. } => Cell::Curve(*interval),
+        }
+    }
+
+    /// A box bounding the entity over `cell`, grown by its zone; `None` proves nothing.
+    fn cell_box(&self, k: &Kernel, cell: &Cell) -> Result<Option<Extent3d>> {
+        let (found, zone) = match (self, cell) {
+            (Self::Face { surface, zone, .. }, Cell::Surface(c)) => (
+                exclusion_probe(surface.calculate_bounding_box(k, c, [true, false, false], true))?
+                    .and_then(|boxes| boxes.normal_box),
+                *zone,
+            ),
+            (Self::Edge { curve, zone, .. }, Cell::Curve(c)) => (
+                exclusion_probe(curve.certified_bounding_box(k, c))?.flatten(),
+                *zone,
+            ),
+            _ => (None, 0.0),
+        };
+        Ok(found.filter(Extent3d::is_defined).map(|mut found| {
+            found.expand_absolute(zone);
+            found
+        }))
+    }
+}
+
+/// The two halves of a cell (four quarters of a surface cell), or none when it cannot be split.
+fn split_cell(cell: &Cell) -> Vec<Cell> {
+    match cell {
+        Cell::Curve(c) => {
+            let (lo, hi) = (c.min(), c.max());
+            let mid = 0.5 * (lo + hi);
+            if lo.is_finite() && hi.is_finite() && lo < mid && mid < hi {
+                vec![
+                    Cell::Curve(Extent1d::from_min_max(lo, mid)),
+                    Cell::Curve(Extent1d::from_min_max(mid, hi)),
+                ]
+            } else {
+                Vec::new()
+            }
+        }
+        Cell::Surface(c) => {
+            let (lo, hi) = (c.min(), c.max());
+            let mid = Point2::new(0.5 * (lo.x + hi.x), 0.5 * (lo.y + hi.y));
+            let finite = [lo.x, lo.y, hi.x, hi.y, mid.x, mid.y]
+                .iter()
+                .all(|v| v.is_finite());
+            if finite && lo.x < mid.x && mid.x < hi.x && lo.y < mid.y && mid.y < hi.y {
+                let mut out = Vec::with_capacity(4);
+                for (u0, u1) in [(lo.x, mid.x), (mid.x, hi.x)] {
+                    for (v0, v1) in [(lo.y, mid.y), (mid.y, hi.y)] {
+                        out.push(Cell::Surface(Extent2d::from_bounds(u0, v0, u1, v1)));
+                    }
+                }
+                out
+            } else {
+                Vec::new()
+            }
+        }
+    }
+}
+
+/// Whether the tube of radius `radius` round the edge's curve stays clear of `obstacle`, proven
+/// by boxes over pairs of pieces (the curve's, the entity's, each split in turn where its box is
+/// the larger): a pair whose boxes, the entity's grown by its zone, are `radius` apart is clear.
+/// A box that cannot be had, a piece that cannot be split or too many pairs prove nothing: false.
+fn tube_clears(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    obstacle: &Obstacle<'_>,
+    radius: f64,
+) -> Result<bool> {
+    let tube = Obstacle::Edge {
+        curve,
+        interval: *interval,
+        zone: 0.0,
+    };
+    let mut pairs = vec![(tube.root(), obstacle.root())];
+    let mut asked = 0_usize;
+    while let Some((a, o)) = pairs.pop() {
+        k.check_cancelled("topology::brep::validation::tube_clearance")?;
+        if asked >= TUBE_PAIRS {
+            return Ok(false);
+        }
+        asked += 1;
+        let (Some(box_a), Some(box_o)) = (tube.cell_box(k, &a)?, obstacle.cell_box(k, &o)?) else {
+            return Ok(false);
+        };
+        if box_a.min_distance(&box_o) >= radius {
+            continue;
+        }
+        // split the piece with the larger box; when it cannot be split, the other one
+        let prefer_a = box_a.size().length() >= box_o.size().length();
+        let (halves_a, halves_o) = (split_cell(&a), split_cell(&o));
+        if prefer_a && !halves_a.is_empty() || halves_o.is_empty() && !halves_a.is_empty() {
+            pairs.extend(halves_a.into_iter().map(|h| (h, o)));
+        } else if !halves_o.is_empty() {
+            pairs.extend(halves_o.into_iter().map(|h| (a, h)));
+        } else {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Whether the tolerance tube of edge `e` (radius its stored tolerance) may reach an entity it
+/// does not bound, as the vertex ball is held to the same ([`vertex_ball_reaches`]): every face
+/// and edge that is not `e`, a face of `e`, or incident to an end vertex of `e` (which meet its
+/// ends legitimately) must be proven at least the tube's radius away, by boxes. A curve with no
+/// certified box, a missing surface or a proof that runs out of boxes counts as reaching.
+pub(super) fn edge_tube_reaches(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<bool> {
+    let data = b.edge(e)?;
+    let (radius, interval) = (data.tolerance, data.interval);
+    let Some(curve) = data.curve.clone() else {
+        return Ok(true);
+    };
+    let first = edge::vertex(b, e)?;
+    let last = edge::other_vertex(b, e, first)?;
+    let ends: Vec<VertexId> = [first, last].into_iter().flatten().collect();
+    let faces_of_e: BTreeSet<FaceId> = {
+        let mut faces = BTreeSet::new();
+        for eu in b.edge(e)?.edgeuses.clone() {
+            if let Some(f) = eu1::face(b, eu)? {
+                faces.insert(f);
+            }
+        }
+        faces
+    };
+    for f in b.face_list().to_vec() {
+        k.check_cancelled("topology::brep::validation::tube_clearance")?;
+        if faces_of_e.contains(&f) {
+            continue;
+        }
+        let incident = crate::topology::face::p4::vertices(b, f, None, false, None)?;
+        if ends.iter().any(|v| incident.contains(v)) {
+            continue;
+        }
+        let face = b.face(f)?;
+        let (domain, zone) = (face.uv_domain, tol::zone_tol3d(k, face.tolerance));
+        let Some(surface) = face.surface.as_ref() else {
+            return Ok(true);
+        };
+        let Some(surface) = exclusion_probe(surface.clone_for_evaluation())? else {
+            return Ok(true);
+        };
+        let obstacle = Obstacle::Face {
+            surface: &surface,
+            domain,
+            zone,
+        };
+        if !tube_clears(k, &curve, &interval, &obstacle, radius)? {
+            return Ok(true);
+        }
+    }
+    for other in b.edge_list().to_vec() {
+        k.check_cancelled("topology::brep::validation::tube_clearance")?;
+        if other == e {
+            continue;
+        }
+        let first = edge::vertex(b, other)?;
+        let last = edge::other_vertex(b, other, first)?;
+        if [first, last].into_iter().flatten().any(|v| ends.contains(&v)) {
+            continue;
+        }
+        let data = b.edge(other)?;
+        let Some(c) = data.curve.as_ref() else {
+            return Ok(true);
+        };
+        let obstacle = Obstacle::Edge {
+            curve: c,
+            interval: data.interval,
+            zone: tol::zone_tol3d(k, data.tolerance),
+        };
+        if !tube_clears(k, &curve, &interval, &obstacle, radius)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 enum FaceContact {
     Clear,
     Contact(f64),
