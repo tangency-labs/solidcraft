@@ -876,23 +876,25 @@ pub(crate) fn boolean_post_process_with_notifications(
     Ok(())
 }
 
-/// Not upstream (#3090): where `v` should stand when it lies more than the B-rep's
-/// intersection tolerance (`xsect_tol`) off one of its faces: the corner its faces define
+/// Not upstream (#3090, #16532): where `v` should stand when it lies more than the B-rep's
+/// intersection tolerance (`xsect_tol`) off one of its faces: the point that minimises the
+/// largest gap to its faces ([`min_max_gap_point`]; the corner its faces define
 /// ([`calc_corner_from_faces`](crate::topology::vertex::corner::calc_corner_from_faces): the
-/// midpoint of two parallel faces that part, else the faces' surface intersection), or `None`
-/// to leave the vertex where it is. Left alone: a vertex whose tolerance is not past
-/// `xsect_tol` (it cannot hold such a gap), one already within `xsect_tol` of its faces,
-/// one whose faces define no corner (not found: unchanged), and one whose corner
+/// midpoint of two parallel faces that part, else the faces' surface intersection) when every
+/// face holds it), or `None` to leave the vertex where it is. Left alone: a vertex whose
+/// tolerance is not past `xsect_tol` (it cannot hold such a gap), one already within `xsect_tol`
+/// of its faces, one whose faces define no corner (not found: unchanged), and one whose point
 ///
 /// - lies more than half the vertex's tolerance from it. The vertex's edge curves keep ending
 ///   at its old point (`vertex::set_point` moves the point only), so the move is their new
 ///   vertex/edge gap, and `docs/validity-and-tolerances.md` (the `SmBrep` list 2 invariants)
-///   asks vertex/edge and vertex/face gaps of at most half the vertex's tolerance. The move
-///   is measured here, `best_point.distance(old)`: `calc_corner_from_faces`'s `max_gap_3d` is
-///   that distance in all its branches but the parallel faces', where it is the residual.
+///   asks vertex/edge and vertex/face gaps of at most half the vertex's tolerance. For a corner
+///   the move is measured here, `best_point.distance(old)`: `calc_corner_from_faces`'s
+///   `max_gap_3d` is that distance in all its branches but the parallel faces', where it is the
+///   residual.
 /// - leaves a gap of `xsect_tol` or more to any of its faces, or of more than half the vertex's
 ///   tolerance to the end of any incident edge curve (both measured with the vertex put
-///   at the corner for the measurement only): a partial move would stay invalid.
+///   at the point for the measurement only): a partial move would stay invalid.
 ///
 /// # Errors
 /// Those of the vertex/face gap and corner calculations.
@@ -914,12 +916,82 @@ fn face_corner_to_move_to(
     if !at.found_point || moved.is_nan() || moved > tolerance / 2.0 {
         return Ok(None);
     }
-    brep.vertex_mut(v)?.point = at.best_point;
+    // one construction: the point that minimises the largest gap to the vertex's faces
+    let target = min_max_gap_point(k, brep, v, at.best_point)?;
+    if target.distance(old) > tolerance / 2.0 {
+        return Ok(None);
+    }
+    brep.vertex_mut(v)?.point = target;
     let cured = corner_cures_gaps(k, brep, v, tolerance / 2.0);
     brep.vertex_mut(v)?.point = old;
     let cured = cured?;
     reset_vertex_face_gaps(brep, v)?;
-    Ok(cured.then_some(at.best_point))
+    Ok(cured.then_some(target))
+}
+
+/// Not upstream (#16532): the point that minimises the largest gap to the faces of `v`, given
+/// `corner` where its faces meet. A face's gap is the distance to its nearest point, which on a
+/// face the corner lies beside (a round whose patch ends at its tangent line) is not the
+/// corner. With `p_f` the nearest point of each face to `corner`, the point is the centre of
+/// the smallest ball holding `corner` and every `p_f`, taken as the midpoint of the two
+/// farthest apart (exact when two points bound the ball, as for two faces; for more, the
+/// largest gap from it is at most half the diameter of the set). Faces that hold the corner
+/// give `corner` itself.
+///
+/// # Errors
+/// Those of the gap and surface evaluations.
+fn min_max_gap_point(k: &Kernel, brep: &mut Brep, v: VertexId, corner: Point3) -> Result<Point3> {
+    use crate::topology::vertexuse;
+    let old = brep.vertex(v)?.point;
+    brep.vertex_mut(v)?.point = corner;
+    let mut points = vec![corner];
+    let mut failed = None;
+    for vu in vertex::vertexuses(brep, v)? {
+        let gap = match vertexuse::vertex_face_gap(k, brep, vu, true) {
+            Ok(Some(g)) => g,
+            Ok(None) => continue,
+            Err(e) => {
+                failed = Some(e);
+                break;
+            }
+        };
+        let face = match gap.vertexuse {
+            Some(gvu) => vertexuse::faceuse(brep, gvu)?
+                .map(|fu| brep.faceuse(fu).map(|f| f.face))
+                .transpose()?
+                .flatten(),
+            None => None,
+        };
+        let Some(surface) = face
+            .and_then(|f| brep.face(f).ok())
+            .and_then(|f| f.surface.as_ref())
+        else {
+            continue;
+        };
+        match surface.evaluate_point(k, gap.face_uv) {
+            Ok(p) if p.x.is_finite() && p.y.is_finite() && p.z.is_finite() => points.push(p),
+            Ok(_) => {}
+            Err(e) => {
+                failed = Some(e);
+                break;
+            }
+        }
+    }
+    brep.vertex_mut(v)?.point = old;
+    reset_vertex_face_gaps(brep, v)?;
+    if let Some(e) = failed {
+        return Err(e);
+    }
+    let mut far = (corner, corner, 0.0_f64);
+    for (i, &a) in points.iter().enumerate() {
+        for &b in &points[i + 1..] {
+            let d = a.distance(b);
+            if d > far.2 {
+                far = (a, b, d);
+            }
+        }
+    }
+    Ok(0.5 * (far.0 + far.1))
 }
 
 /// With `v` at the point under test: every vertex/face gap is under the intersection tolerance

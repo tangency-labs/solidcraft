@@ -101,8 +101,11 @@ closes the gaps (`fix_gaps`); it repeats at most ten times. The classify and sel
 
 After the cleanup of step 5, `place_vertices_on_face_corners` (`merge/p1.rs`) moves a vertex that lies
 more than the intersection tolerance off one of its faces to the corner its faces define, only within
-half its tolerance and only when the corner leaves every face gap under the intersection tolerance
-(measured at the corner before the move); otherwise the vertex stays. It runs after the cleanup because
+half its tolerance and only when the point leaves every face gap under the intersection tolerance and
+every gap to an edge end within half its tolerance (measured at the point before the move). The point is
+the corner when every face holds it, and otherwise the one that minimises the largest gap to the faces
+(the midpoint of the corner and the nearest point of a face it lies beside, such as a round's patch ending at
+its tangent line); otherwise the vertex stays. It runs after the cleanup because
 the faces and edges the vertex keeps are final there.
 
 Ops never computes a geometric quantity here: `boolean` takes the operands, calls
