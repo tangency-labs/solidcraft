@@ -313,7 +313,24 @@ fn component(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<u64> {
 
 fn occurrence(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
     let kk = key(p.get("occurrence")).ok_or_else(|| bad(cmd, "`occurrence` must be an id or name"))?;
-    s.doc.occurrences.iter().find(|o| o.id.to_string() == kk || o.name == kk).map(|o| o.id).ok_or_else(|| bad(cmd, format!("no occurrence `{kk}`")))
+    if let Some(o) = s.doc.occurrences.iter().find(|o| o.id.to_string() == kk || o.name == kk) {
+        return Ok(o.id);
+    }
+    // A component name: its occurrence when it has exactly one (a name that is only digits is an id, never a component).
+    let component = match kk.parse::<u64>() {
+        Ok(_) => None,
+        Err(_) => s.doc.resolve_component(&kk).map_err(|error| bad(cmd, error.to_string()))?.filter(|c| *c != 0),
+    };
+    let Some(component) = component else { return Err(bad(cmd, format!("no occurrence `{kk}`"))) };
+    let of: Vec<_> = s.doc.occurrences.iter().filter(|o| o.component == component).collect();
+    match of.as_slice() {
+        [only] => Ok(only.id),
+        [] => Err(bad(cmd, format!("no occurrence `{kk}`: component `{kk}` is not placed anywhere"))),
+        many => {
+            let names = many.iter().map(|o| format!("`{}`", o.name)).collect::<Vec<_>>().join(", ");
+            Err(bad(cmd, format!("no occurrence `{kk}`: component `{kk}` has {names}; name one of them")))
+        }
+    }
 }
 
 fn translation(t: Vec3) -> Mat {
