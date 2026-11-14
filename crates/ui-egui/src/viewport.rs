@@ -5535,8 +5535,10 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 if !(outlines && has_pickable_outline(&m)) {
                     let lit = shown(b);
                     for &f in &patch {
-                        let c = if face_selected(f) { (t.sel_face.r(), t.sel_face.g(), t.sel_face.b()) } else { body_rgb(app, body) };
-                        face_tris(&mut feedback, &lit, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
+                        if !face_selected(f) {
+                            let c = body_rgb(app, body);
+                            face_tris(&mut feedback, &lit, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
+                        }
                     }
                 }
                 for (e, _) in m.edge_faces.iter().enumerate().filter(|(_, fs)| fs.iter().any(|f| patch.contains(&(*f as usize)))) {

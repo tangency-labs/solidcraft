@@ -4215,10 +4215,10 @@ fn hovering_a_picked_edge_keeps_it_lit_in_the_pick_colours() {
     }
 }
 
-/// Hovering a picked face redraws its boundary edges in hover colors and lifts its blue fill,
+/// Hovering a picked face redraws its boundary edges in hover colors,
 /// instead of drawing nothing, so the pointer resting on a picked face is clearly visible.
 #[test]
-fn hovering_a_picked_face_lifts_its_fill_and_draws_hover_edges() {
+fn hovering_a_picked_face_draws_hover_edges_and_preserves_selection_fill() {
     let mut h = crate::scenario::Harness::new();
     h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
     h.frames(2);
@@ -4228,8 +4228,7 @@ fn hovering_a_picked_face_lifts_its_fill_and_draws_hover_edges() {
     h.frames(2);
 
     let t = solidcraft_theme::Tokens::get();
-    let k = t.hover_face_lift;
-    let lifted_blue = [t.sel_face.r().saturating_add(k), t.sel_face.g().saturating_add(k), t.sel_face.b().saturating_add(k), 255];
+    let sel_blue = crate::viewport::c4(t.sel_face);
     let hover_edge = crate::viewport::c4(t.hover_edge);
 
     let mut drawn = |hover: Option<crate::viewport::Hit>| -> (Vec<[u8; 4]>, Vec<[u8; 4]>) {
@@ -4263,8 +4262,8 @@ fn hovering_a_picked_face_lifts_its_fill_and_draws_hover_edges() {
 
     assert!(hovered_lines.len() > picked_lines.len(), "hovering the picked face lights its perimeter edges");
     assert!(hovered_lines.contains(&hover_edge), "perimeter edges are drawn with hover_edge");
-    assert!(hovered_tris.contains(&lifted_blue), "hovered face tris contain the lifted blue fill");
-    assert!(!picked_tris.contains(&lifted_blue), "picked pass alone does not have the lifted blue");
+    assert_eq!(hovered_tris.len(), picked_tris.len(), "face fill triangles are not duplicated");
+    assert!(hovered_tris.contains(&sel_blue), "face retains its selection blue fill");
 }
 
 /// #3683: a body or feature row lights what the Browser and timeline rows light: the body, or
