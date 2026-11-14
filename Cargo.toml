@@ -198,6 +198,10 @@ debug = "line-tables-only"
 # Keep OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
 egui-wgpu = { path = "vendor/egui-wgpu" }
 
+# Direct3D 12's shader cache holds copies of the compiled bytecode, not FXC's blobs, whose
+# reference count is not thread-safe: pipelines built on several threads crashed at start (#8530).
+wgpu-hal = { path = "vendor/wgpu-hal" }
+
 # Deliver trackpad pinch and rotation gestures on Wayland (zwp_pointer_gestures_v1), which
 # winit 0.30 never binds and eframe 0.37 still requires winit 0.30.
 winit = { path = "vendor/winit" }

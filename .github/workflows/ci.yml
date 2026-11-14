@@ -197,13 +197,14 @@ jobs:
             packages=$(sed -n 's/^packages=//p' "$RUNNER_TEMP/ci-affected")
           }
           # Whether the NUL-separated paths in $1 (the diff $2) reach what the Windows D3D12 jobs
-          # exercise: the GPU crate and its shaders, the app and its startup, the viewport's wgpu
-          # glue, the vendored egui-wgpu and kernel, their scripts, or a lockfile change that moves
-          # the graphics stack (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
+          # exercise: the GPU crate and its shaders, the shared viewport GPU crate, the app and its
+          # startup, the viewport's wgpu glue, the vendored egui-wgpu, wgpu-hal and kernel, their
+          # scripts, or a lockfile change that moves the graphics stack (wgpu, naga, egui, winit,
+          # windows). Pull requests and merge groups share it.
           windows_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
-                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*|solidcore/*) windows=true ;;
+                crates/gpu/*|crates/viewport-gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*|vendor/wgpu-hal/*|solidcore/*) windows=true ;;
                 tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
               esac
             done < "$1"
@@ -1072,7 +1073,8 @@ jobs:
   # DXC, Vulkan and Metal: a shader it cannot compile once crashed the app at startup. Build the
   # GPU tessellation pipeline with FXC on the runner's WARP software adapter and compare its
   # results with the CPU, and draw headless pictures with the viewport's pipelines there
-  # (crates/gpu/tests/capture.rs).
+  # (crates/gpu/tests/capture.rs), and build the viewport's pipelines on several threads again
+  # and again (crates/viewport-gpu/src/concurrent.rs).
   windows-fxc:
     name: Windows D3D12 FXC shaders
     needs: changes
@@ -1100,6 +1102,9 @@ jobs:
       # pipelines at once, which the parallel tests do. Minidumps showed it in WARP itself, not
       # in SolidCraft or FXC; serial runs never hit it.
       - run: cargo test -p solidcraft-gpu --profile ci --locked -- --test-threads=1
+      # The viewport's pipelines built on several threads, where FXC's shared blobs crashed the
+      # app at startup (#8530).
+      - run: cargo test -p solidcraft-viewport-gpu --profile ci --locked --lib -- the_viewports_pipelines
 
   # The Windows app starts D3D12 first and only the backend it uses (a Vulkan driver crashed the
   # app at startup on Intel). Start the real app on the runner (its D3D12 adapter is WARP) with

@@ -952,6 +952,7 @@ copied into SolidCraft.
 
 | Directory | Source | Licence | Changes |
 |---|---|---|---|
+| vendor/wgpu-hal | wgpu-hal 30.0.1, https://github.com/gfx-rs/wgpu (gfx-rs developers) | MIT OR Apache-2.0 | Direct3D 12's shader cache keeps copies of the compiled bytecode, not the compiler's objects: a backport of gfx-rs/wgpu#10805 (vendor/README.md) |
 
 ## Vendored renderer compatibility fix
 
