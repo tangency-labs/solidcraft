@@ -77,8 +77,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_vertex_error_diagnostics = true;
     f.fillet_chamfer_cone_on_arc = true;
-    f.offset_excess_faces_after_merge = true;
-    f.offset_clip_right_side_out = true;
     f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
     f.proto_vertex_miss_is_false = true;
@@ -126,9 +124,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_cleanup_keeps_target_faces = true;
     f.fillet_nx1_tangent_side_edge = true;
     f.fillet_3x2_mixed_concave_side_edge = true;
-    f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
-    f.shell_empty_cavity_fails = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
     f.ssi_singular_start_inside_direction = true;
@@ -143,13 +139,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.torus_check_spindle_apex = true;
     f.local_operation_step_walls = true;
     f.edge_check_orders_tangent_faces = true;
-    f.thicken_planar_side_walls = true;
     f.fillet_knife_edge_rounds = true;
     f.revolution_round_offset_collapses = true;
     f.fillet_chamfer_cone_stored_as_cone = true;
-    f.offset_point_vertex_caps = true;
     f.proto_edge_splits_at_captured_vertices = true;
-    f.local_operation_closes_walls_to_nothing = true;
     f.imprint_reuses_coincident_face_edge = true;
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
@@ -189,7 +182,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_statuses_pass_on = true;
     f.fillet_corner_per_vertex_fan = true;
     f.fillet_rail_trim_at_near_knot = true;
-    f.offset_keep_cavity_regions = true;
     f.ellipse_step_interval_checks = true;
     f.corner_patch_face_side_twist = true;
     f.boolean_union_refuses_solid_leak = true;
@@ -207,7 +199,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_exact_round_classes = true;
     f.check_seam_crossing_unclosed = true;
     f.ascii_doubles_round_trip = true;
-    f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.volume_lift_third_derivative_terms = true;
     f.plane_reparameterize_moves_origin = true;

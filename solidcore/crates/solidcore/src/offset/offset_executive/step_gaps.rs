@@ -288,8 +288,7 @@ impl OffsetExecutive {
     /// end; those of the evaluations, solves, curve edits
     /// and the split; [`SolidError::InvalidInput`] for missing topology.
     ///
-    /// With `Kernel::fixes.local_operation_closes_walls_to_nothing` (fork ccbf77a) an edge
-    /// closed to a point is squeezed out instead, and once every gap is closed the faces
+    /// An edge closed to a point (fork ccbf77a) is squeezed out instead, and once every gap is closed the faces
     /// that closed to nothing with such edges are deleted (see `remove_closed_faces`).
     pub(super) fn close_loop_gaps(
         &mut self,
@@ -402,8 +401,7 @@ impl OffsetExecutive {
         Ok(())
     }
 
-    /// The end of the fork's `CloseLoopGaps` (ccbf77a, opt-in
-    /// `Kernel::fixes.local_operation_closes_walls_to_nothing`): the offset faces that
+    /// The end of the fork's `CloseLoopGaps` (ccbf77a, WR-566): the offset faces that
     /// closed to nothing as their edges closed to points (`IsDegenerate`: a step's wall
     /// whose low top moved onto the high top's plane, its edges along the tops now
     /// coinciding) are deleted, in the order they closed, with their pairs in the
@@ -528,26 +526,24 @@ impl OffsetExecutive {
                 };
                 let long_enough = keep.length() > EFF_ZERO * (1.0 + ivl.max_dimension());
                 if !long_enough {
-                    // (fork ccbf77a, opt-in) the vertex moved to the edge's other end, where
+                    // (fork ccbf77a, WR-566) the vertex moved to the edge's other end, where
                     // the edge's other vertex is: the edge closed to a point. That is sound
                     // only where a face closes to nothing with it, which `close_loop_gaps`
                     // checks once every gap is closed. The edge is squeezed out, its two
                     // vertices one, and noted with the original face across it.
-                    if kernel.fixes.local_operation_closes_walls_to_nothing
-                        && self.squeeze_closed_edge(
-                            kernel,
-                            original,
-                            b,
-                            f,
-                            u,
-                            e,
-                            at_start,
-                            vertex_point,
-                            tol,
-                            notifications,
-                            closed_edges,
-                        )?
-                    {
+                    if self.squeeze_closed_edge(
+                        kernel,
+                        original,
+                        b,
+                        f,
+                        u,
+                        e,
+                        at_start,
+                        vertex_point,
+                        tol,
+                        notifications,
+                        closed_edges,
+                    )? {
                         return Ok(());
                     }
                     // (fork 34318f4) elsewhere the vertex moved past the edge's end: the edge

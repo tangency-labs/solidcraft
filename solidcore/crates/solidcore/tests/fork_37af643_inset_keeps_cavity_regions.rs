@@ -1,5 +1,4 @@
-//! Fork tangency-labs/smlib@37af643 under `Kernel::fixes.offset_keep_cavity_regions`
-//! (WR-667): an inset keeps the regions that are cavity, not every finite region.
+//! Fork tangency-labs/smlib@37af643 (WR-667): an inset keeps the regions that are cavity, not every finite region.
 //!
 //! SolidCraft rig case shell/545's frame, rebuilt from the commit message: a 20 x 20 x 5
 //! block with a recess from the top ((5, 5)..(15, 15), z 3..5) and a square ring cut from
@@ -8,7 +7,7 @@
 //! edges, merged) open at the ring cut's outer wall x = 18: the floor is no thicker than
 //! the wall, its two faces' offsets cross, and the merge closes the region between them.
 //! Upstream's `MakeManifold` keeps every finite region ("we will need to select regions
-//! to keep"), so the result is no manifold solid. With the flag only the cavity is kept.
+//! to keep"), so the result is no manifold solid. Here only the cavity is kept.
 //!
 //! Closed form (sharp offsets, the open face's neighbours' walls ending at its plane):
 //! the cavity is z 0.5..2.5 over the core (7.5..12.5)^2 and the outer band
@@ -27,16 +26,13 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::boolean::api_brep::boolean_difference;
-use solidcore::error::offset::{OffsetFailure, Unsoundness};
-use solidcore::error::Reason;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::brep_is_manifold_solid;
-use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::{Brep, Kernel};
 
 /// The frame, the ring cut's top at `ring_top` (2.5: a 0.5 floor under the recess).
 fn frame(k: &mut Kernel, ring_top: f64) -> Brep {
@@ -95,81 +91,7 @@ fn shell(fixes: &UpstreamFixes, ring_top: f64) -> (bool, f64) {
 }
 
 fn keep_cavity() -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.offset_keep_cavity_regions = true;
-    f
-}
-
-/// With cavity selection off, the sliver between the crossing offsets leaves no
-/// manifold cavity. The shell refuses it with `OffsetFailure::Unsound` and retains
-/// the original frame.
-#[test]
-fn flag_off_refuses_the_sliver_and_retains_the_input() {
-    let mut k = Kernel::default();
-    let mut part = frame(&mut k, 2.5);
-    part.refresh_cached_topology();
-    let open = planar_faces_at(&k, &part, 0, 18.0);
-    assert_eq!(open.len(), 1);
-    let mut notifications = Notifications::new(&mut part);
-    let key = part.key();
-    let tolerance = part.tolerance();
-    let ids = (
-        part.face_list().to_vec(),
-        part.edge_list().to_vec(),
-        part.vertex_list().to_vec(),
-    );
-    let points: Vec<_> = part
-        .vertices()
-        .iter()
-        .map(|(id, v)| (id, v.point, v.tolerance))
-        .collect();
-    let outcome = OffsetExecutive::shell_brep(
-        &mut k,
-        part,
-        shell_options(),
-        &open,
-        &mut notifications.context(),
-    );
-    let error = outcome.result.as_ref().unwrap_err();
-    let SolidError::Failed(failure) = error else {
-        panic!("not a refusal: {error}");
-    };
-    assert_eq!(
-        failure.reason,
-        Reason::Offset(OffsetFailure::Unsound {
-            what: Unsoundness::NotManifoldSolid
-        })
-    );
-    assert!(!outcome.input_ownership_transferred());
-    let mut retained = outcome.retained_input.unwrap();
-    assert_eq!(retained.key(), key);
-    assert_eq!(retained.tolerance(), tolerance);
-    assert_eq!(
-        (
-            retained.face_list().to_vec(),
-            retained.edge_list().to_vec(),
-            retained.vertex_list().to_vec()
-        ),
-        ids
-    );
-    assert_eq!(
-        retained
-            .vertices()
-            .iter()
-            .map(|(id, v)| (id, v.point, v.tolerance))
-            .collect::<Vec<_>>(),
-        points
-    );
-    // Check the returned caches as-is, without refreshing away an inconsistency.
-    assert!(solidcore::topology::integrity::check(&retained).is_ok());
-    assert!(brep_is_manifold_solid(&retained).unwrap());
-    for level in [CheckLevel::Level0, CheckLevel::Level1, CheckLevel::Level2] {
-        let checked = check_brep(&mut k, &mut retained, level).unwrap();
-        assert!(checked.is_valid(), "{level:?}: {:?}", checked.lines());
-    }
-    let v = volume(&k, &mut retained).unwrap();
-    // Block 2000, less the recess 200 and square ring (256 - 36) * 2.5 = 550.
-    assert!((v - 1250.0).abs() <= 1e-9 * 1250.0, "{v}");
+    UpstreamFixes::default()
 }
 
 /// The flag: only the cavity is made manifold; the shell is the closed form.
@@ -186,7 +108,6 @@ fn flag_on_keeps_only_the_cavity() {
 fn flag_on_with_offset_fixes() {
     let mut fixes = keep_cavity();
     fixes.offset_resolve_crossing_loops = true;
-    fixes.offset_stitch_at_body_tolerance = true;
     fixes.offset_extended_edges_mated = true;
     let (manifold, v) = shell(&fixes, 2.5);
     assert!(manifold);
@@ -194,11 +115,9 @@ fn flag_on_with_offset_fixes() {
 }
 
 /// Control: a 1.0 floor (ring top at 2) has no crossing offsets, one finite region, and
-/// shells the same with the flag off and on.
+/// shells to a manifold solid.
 #[test]
 fn thicker_floor_is_unchanged() {
-    let off = shell(&UpstreamFixes::default(), 2.0);
     let on = shell(&keep_cavity(), 2.0);
-    assert!(off.0 && on.0);
-    assert_eq!(off.1.to_bits(), on.1.to_bits());
+    assert!(on.0);
 }
