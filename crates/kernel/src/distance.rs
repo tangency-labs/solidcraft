@@ -57,6 +57,14 @@ const MAX_ROUNDS: usize = 400;
 /// straight along the edge (see [`DistanceShape::on_face`]).
 const ALONG: f64 = 1e-3;
 
+fn tri_near(p: Vec3, a: Vec3, b: Vec3, c: Vec3, reach: f64) -> bool {
+    let reach2 = reach * reach;
+    if (a - p).len2() <= reach2 || (b - p).len2() <= reach2 || (c - p).len2() <= reach2 {
+        return true;
+    }
+    p.dist_to_segment(a, b) <= reach || p.dist_to_segment(b, c) <= reach || p.dist_to_segment(c, a) <= reach
+}
+
 impl<'a> DistanceShape<'a> {
     /// `mesh` is `body`'s mesh, within `chord` (mm) of its faces.
     pub fn new(body: &'a Body, mesh: &'a Mesh, chord: f64) -> DistanceShape<'a> {
@@ -141,7 +149,7 @@ impl<'a> DistanceShape<'a> {
             let sides: Vec<Vec3> = tris
                 .iter()
                 .filter_map(|&k| self.set.triangle(k))
-                .filter(|[a, b, c]| solidcraft_geom::compare::closest_on_triangle(at, *a, *b, *c).dist(at) <= reach)
+                .filter(|[a, b, c]| tri_near(at, *a, *b, *c, reach))
                 .map(|[a, b, c]| across((a + b + c) / 3.0))
                 .filter(|w| w.len() > tiny)
                 .collect();
