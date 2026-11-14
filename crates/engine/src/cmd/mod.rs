@@ -94,6 +94,7 @@ mod measure_shape;
 mod mesh;
 mod metadata;
 pub(crate) mod motion;
+mod motion_simulate;
 mod notes;
 mod parts;
 mod plugin;
@@ -384,6 +385,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(joints::constraint::COMMANDS.iter());
     v.extend(clearance::COMMANDS.iter());
     v.extend(motion::COMMANDS.iter());
+    v.extend(motion_simulate::COMMANDS.iter());
     v.extend(panels::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());

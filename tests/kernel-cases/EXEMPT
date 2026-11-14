@@ -127,6 +127,7 @@ motion.delete                     removes a motion study
 motion.export                     writes a study's results to a file
 motion.export_animation           writes an animation
 motion.list                       a listing of motion studies
+motion.simulate                   read-only sampled rigid-body motion; six analytical, unchanged-design and refusal cases in crates/engine/src/cmd/motion_simulate_tests.rs
 note.add                          notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
 note.delete                       notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
 note.list                         notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
