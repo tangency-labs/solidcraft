@@ -6,10 +6,10 @@ use serde_json::{Value, json};
 use super::{
     ActivateParams, ActivateResult, CapturePositionParams, CapturePositionResult, CopyParams, CopyResult, CreateParams, CreateResult, DeleteParams,
     DeleteResult, DragParams, DragResult, EditInPlaceParams, FinishEditParams, FromBodiesParams, FromBodiesResult, GroundParams, GroundResult,
-    ListParams, ListResult, MoveBodiesParams, MoveBodiesResult, MoveFeaturesParams, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult,
-    MoveSketchesToPartsParams, OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams, OccurrencePropertiesResult, PasteNewParams,
-    PasteNewResult, PropertiesParams, PropertiesResult, RenameParams, RenameResult, ReparentItemsParams, RevertPositionParams, RevertPositionResult,
-    UnlockParams, UnlockResult,
+    HistoryVisibilityParams, HistoryVisibilityResult, ListParams, ListResult, MoveBodiesParams, MoveBodiesResult, MoveFeaturesParams, MoveParams,
+    MoveResult, MoveSketchesParams, MoveSketchesResult, MoveSketchesToPartsParams, OccurrenceAlignParams, OccurrenceAlignResult,
+    OccurrencePropertiesParams, OccurrencePropertiesResult, PasteNewParams, PasteNewResult, PropertiesParams, PropertiesResult, RenameParams,
+    RenameResult, ReparentItemsParams, RevertPositionParams, RevertPositionResult, UnlockParams, UnlockResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -48,6 +48,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RenameParams>(), &["component", "name"]);
     assert_keys(input_schema_for::<DeleteParams>(), &["component"]);
     assert_keys(input_schema_for::<UnlockParams>(), &["component"]);
+    assert_keys(input_schema_for::<HistoryVisibilityParams>(), &["component"]);
     assert_keys(input_schema_for::<CapturePositionParams>(), &[]);
     assert_keys(input_schema_for::<RevertPositionParams>(), &["occurrences"]);
     assert_keys(input_schema_for::<GroundParams>(), &["grounded", "occurrence", "path"]);
@@ -131,6 +132,10 @@ fn strict_keeps_todays_errors() {
         ("component.unlock", json!({})),
         ("component.unlock", json!({"component": [0]})),
         ("component.unlock", json!({"component": 0})),
+        ("component.hide_history", json!({})),
+        ("component.hide_history", json!({"component": false})),
+        ("component.hide_history", json!({"component": [0]})),
+        ("component.show_history", json!({"component": "no such part"})),
     ]);
 }
 
@@ -213,6 +218,17 @@ fn the_schemas_take_what_the_handlers_read() {
     assert_eq!(rename.as_value()["$defs"]["ComponentName"]["pattern"], crate::schema::types::not_blank_pattern());
     takes(input_schema_for::<DeleteParams>(), &[(json!({"component": 2}), true), (json!({}), false)]);
     takes(input_schema_for::<UnlockParams>(), &[(json!({"component": "rig"}), true), (json!({}), false)]);
+    takes(
+        input_schema_for::<HistoryVisibilityParams>(),
+        &[
+            (json!({"component": "Arm"}), true),
+            (json!({"component": 4}), true),
+            (json!({}), false),
+            (json!({"component": null}), false),
+            (json!({"component": true}), false),
+            (json!({"hidden": true}), false),
+        ],
+    );
 }
 
 /// Keys the handlers read only in some cases are read only in those cases: `bodies` of
@@ -245,6 +261,8 @@ fn the_check_reads_keys_as_the_handlers_do() {
     assert_eq!(issues("component.properties", json!({"about": null})), none);
     assert_eq!(issues("component.properties", json!({"descendants": null})), ["`descendants` must be a boolean"]);
     assert_eq!(issues("component.properties", json!({"component": null})), ["`component` must be a component id or name"]);
+    assert_eq!(issues("component.hide_history", json!({"component": false})), ["`component` must be a component id or name"]);
+    assert_eq!(issues("component.show_history", json!({"component": null})), ["`component` must be a component id or name"]);
     assert_eq!(issues("component.rename", json!({"component": 0, "name": ""})), ["`name` must be 1…128 characters"]);
 }
 
@@ -252,6 +270,41 @@ fn matches(schema: schemars::Schema, id: &str, reply: &Value) {
     let schema = schema.as_value();
     assert!(conforms(schema, schema, reply), "{id}: {reply} doesn't match {schema}");
     assert!(reply.get("param_warnings").is_none(), "{id}: {reply}");
+}
+
+/// #16547: `component.hide_history` and `component.show_history` answer the component they changed
+/// and how its history sits now, in the JSON they returned before their types existed, and the
+/// published schema requires the one key they read.
+#[test]
+fn history_visibility_answers_the_component_and_the_flag() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let made = s.execute("component.create", &json!({"name": "Arm"})).unwrap();
+    let id = made["component"].as_u64().unwrap();
+    let schema = output_schema_for::<HistoryVisibilityResult>().as_value().clone();
+    let described = s.execute("engine.describe", &json!({"command": "component.hide_history"})).unwrap();
+    assert_eq!(described["input"]["required"], json!(["component"]), "the handler refuses a call without it");
+    assert_eq!(described["input"]["additionalProperties"], false);
+    let spec = crate::find_command("component.show_history").unwrap();
+    assert!(spec.contract.is_some() && spec.output.is_some() && spec.undoable, "both commands describe themselves and undo");
+
+    for (cmd, hidden) in [("component.hide_history", true), ("component.show_history", false), ("component.hide_history", true)] {
+        // Both the name and the id the command answered are calls the command takes.
+        for key in [json!("Arm"), json!(id)] {
+            let r = s.execute(cmd, &json!({"component": key})).unwrap_or_else(|e| panic!("{cmd} {key}: {e}"));
+            assert_eq!(r, json!({"component": id, "history_hidden": hidden}), "{cmd} changed the JSON it returned");
+            matches(output_schema_for::<HistoryVisibilityResult>(), cmd, &r);
+        }
+        assert_eq!(s.doc.components.iter().find(|c| c.id == id).unwrap().history_hidden, hidden);
+    }
+    // The design itself has no history to leave out, and a component that isn't there is refused.
+    for p in [json!({"component": 0}), json!({"component": "no such part"})] {
+        let said = s.execute("component.hide_history", &p).err().map(|e| e.to_string());
+        assert!(said.is_some(), "{p} should be refused");
+    }
+    // A key the command doesn't take is a warning, not a refusal, and the reply still matches.
+    let warned = s.execute("component.show_history", &json!({"component": id, "components": id})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(warned["param_warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("components")))), "{warned}");
+    assert!(conforms(&schema, &schema, &warned), "{warned} doesn't match {schema}");
 }
 
 /// A glTF file whose node `rig` holds a `Part` (one cube): imported, it is a component held

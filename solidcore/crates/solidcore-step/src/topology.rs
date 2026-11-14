@@ -28,8 +28,9 @@
 //! tolerance, and the solid's notes say how many and how far.
 //!
 //! Pcurves are the closed forms the 3D edges have on our surfaces ([`pcurve::exact_pcurves`]); a
-//! use with none gets its pcurve from the kernel ([`read_solids_with`], SMLib's own trims). The
-//! file's own PCURVE entities are not used.
+//! use with none gets its pcurve from the kernel ([`read_solids_with`], SMLib's own trims), except
+//! on a face that winds round its axis more than a turn, whose pcurves are its edges' own angle
+//! and height, followed round the axis (`wound`). The file's own PCURVE entities are not used.
 //!
 //! Input is hostile: every reference is checked, nesting and counts are capped, and the work of
 //! a whole file is bounded (shared shells count each time a solid uses them).
@@ -54,6 +55,7 @@ use crate::units;
 mod frames;
 mod seams;
 mod swept;
+mod wound;
 
 /// Tolerance (mm) when the file states no uncertainty.
 pub const DEFAULT_TOLERANCE: f64 = 1e-3;
@@ -346,7 +348,7 @@ fn read_solids_in(ex: &Exchange, trims: Option<&dyn Trims>) -> Solids {
             (Reader::new(ex, c.units), c)
         });
         let context = *context;
-        match read_with(ex, reader, item, context, &mut budget, trims, &HashSet::new()) {
+        match read_with(ex, reader, item, context, &mut budget, trims, &HashSet::new(), false) {
             Ok(mut s) => {
                 s.product = index.product.get(&item).cloned();
                 if s.name.is_empty()
@@ -366,14 +368,14 @@ fn read_solids_in(ex: &Exchange, trims: Option<&dyn Trims>) -> Solids {
 pub fn read_solid(ex: &Exchange, item: u64, context: units::Context) -> R<Solid> {
     let mut reader = Reader::new(ex, context.units);
     let mut budget = MAX_FILE_FACES;
-    read_with(ex, &mut reader, item, context, &mut budget, None, &HashSet::new())
+    read_with(ex, &mut reader, item, context, &mut budget, None, &HashSet::new(), false)
 }
 
 /// [`read_solid`], with `trims` making the pcurves of uses that have no closed form.
 pub fn read_solid_with(ex: &Exchange, item: u64, context: units::Context, trims: &dyn Trims) -> R<Solid> {
     let mut reader = Reader::new(ex, context.units);
     let mut budget = MAX_FILE_FACES;
-    read_with(ex, &mut reader, item, context, &mut budget, Some(trims), &HashSet::new())
+    read_with(ex, &mut reader, item, context, &mut budget, Some(trims), &HashSet::new(), false)
 }
 
 /// [`read_solid_with`] with the faces `left_out` (file face entities: the ADVANCED_FACE or
@@ -383,7 +385,16 @@ pub fn read_solid_with(ex: &Exchange, item: u64, context: units::Context, trims:
 pub fn read_solid_without(ex: &Exchange, item: u64, context: units::Context, trims: &dyn Trims, left_out: &HashSet<u64>) -> R<Solid> {
     let mut reader = Reader::new(ex, context.units);
     let mut budget = MAX_FILE_FACES;
-    read_with(ex, &mut reader, item, context, &mut budget, Some(trims), left_out)
+    read_with(ex, &mut reader, item, context, &mut budget, Some(trims), left_out, false)
+}
+
+/// [`read_solid_with`] as a surface model of open shells (`sheet`) with every face: what a solid
+/// whose shell the file leaves open (an edge only one face uses) comes to, its faces sharing the
+/// edges they do.
+pub fn read_solid_as_sheets(ex: &Exchange, item: u64, context: units::Context, trims: &dyn Trims) -> R<Solid> {
+    let mut reader = Reader::new(ex, context.units);
+    let mut budget = MAX_FILE_FACES;
+    read_with(ex, &mut reader, item, context, &mut budget, Some(trims), &HashSet::new(), true)
 }
 
 /// The file face a refusal of the reader names first (its "face #id"), if it names one.
@@ -408,6 +419,7 @@ fn read_with<'a>(
     budget: &mut usize,
     trims: Option<&dyn Trims>,
     left_out: &HashSet<u64>,
+    sheets: bool,
 ) -> R<Solid> {
     let e = entity(ex, item)?;
     let name = e.params().first().and_then(Param::as_str).unwrap_or("").to_string();
@@ -421,7 +433,7 @@ fn read_with<'a>(
         skipped |= any;
         shells.push(faces);
     }
-    b.finish(item, name, shells, if skipped { Kind::Open { voids: kind == Kind::Voids } } else { kind })
+    b.finish(item, name, shells, if skipped || sheets { Kind::Open { voids: kind == Kind::Voids } } else { kind })
 }
 
 /// A face of a solid read on its own ([`read_faces_with`]).
@@ -1216,6 +1228,10 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// Pcurves, outer loops, domains and the canonical order: the finished record.
     fn finish(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind) -> R<Solid> {
         let mut notes = Vec::new();
+        let twins = self.merge_twin_edges()?;
+        if twins > 0 {
+            notes.push(format!("{twins} edges the file writes twice (two edges on the same vertices and one curve, each used by one face) made one"));
+        }
         // A face bounded by a slit alone is the whole of its closed surface, closed by its seams
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
         // at its poles.
@@ -1572,6 +1588,58 @@ impl<'b, 'a> Builder<'b, 'a> {
         Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })
     }
 
+    /// Edges the file writes twice: two EDGE_CURVEs on the same two vertices and the same curve
+    /// record over the same interval (equal, not near), each used by one face of the solid. The
+    /// faces share one boundary, so they share one edge: the second is the first, run the way its vertices run against the first's. An edge used more than once, or one whose
+    /// twin is another curve, is left as the file has it. Returns how many.
+    fn merge_twin_edges(&mut self) -> R<usize> {
+        let mut uses: HashMap<u32, usize> = HashMap::new();
+        for face in &self.faces {
+            for l in &face.loops {
+                if let LoopB::Edges(es) = l {
+                    for (e, _) in es {
+                        *uses.entry(*e).or_default() += 1;
+                    }
+                }
+            }
+        }
+        let mut by_vertices: HashMap<(u32, u32), Vec<u32>> = HashMap::new();
+        for (&e, &n) in &uses {
+            let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+            let [a, b] = edge.vertices;
+            if n == 1 && a != b {
+                by_vertices.entry((a.min(b), a.max(b))).or_default().push(e);
+            }
+        }
+        let mut pairs: Vec<(u32, u32)> =
+            by_vertices.into_values().filter_map(|mut v| if let [a, b] = v.as_mut_slice() { Some((*a.min(b), *a.max(b))) } else { None }).collect();
+        pairs.sort_unstable();
+        // Each edge is in at most one pair, so no redirect meets another: all are applied in one pass.
+        let mut redirect: HashMap<u32, (u32, bool)> = HashMap::new();
+        for (a, b) in pairs {
+            let (ea, eb) = (self.edges.get(a as usize).ok_or("edge reference")?, self.edges.get(b as usize).ok_or("edge reference")?);
+            let against = ea.vertices[0] != eb.vertices[0];
+            // Only the same curve record over the same interval: the two edges then coincide
+            // exactly, and nothing is decided by how near two different curves come.
+            if ea.curve != eb.curve || ea.interval != eb.interval {
+                continue;
+            }
+            redirect.insert(b, (a, against));
+        }
+        for face in &mut self.faces {
+            for l in &mut face.loops {
+                if let LoopB::Edges(es) = l {
+                    for u in es.iter_mut() {
+                        if let Some(&(a, against)) = redirect.get(&u.0) {
+                            *u = (a, u.1 != against);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(redirect.len())
+    }
+
     /// Every edge of the shell's faces used at least twice among them.
     fn closed(&self, shell: &[(u32, bool)]) -> bool {
         let mut count: HashMap<u32, u32> = HashMap::new();
@@ -1650,7 +1718,18 @@ impl<'b, 'a> Builder<'b, 'a> {
                     None => self.face_extent(fi)?,
                 };
                 let extent = extent.ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
-                let (f, d) = crate::kernel::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?;
+                let turns = (extent[0][1] - extent[0][0]) / TAU;
+                let (f, d) = if crate::kernel::form::winds(extent) {
+                    if !matches!(label, BSurface::Cylinder { .. } | BSurface::Cone { .. }) {
+                        return Err(unsupported(format!(
+                            "a face that winds {turns:.1} turns about its axis on a surface that is not a cylinder or a cone"
+                        )));
+                    }
+                    crate::kernel::form::wound_surface(&label, extent, tol)
+                        .ok_or_else(|| unsupported(format!("a face that winds {turns:.1} turns about its axis, past the 64 a form takes")))?
+                } else {
+                    crate::kernel::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?
+                };
                 Some((f, d, extent))
             }
             None => None,
@@ -1660,14 +1739,20 @@ impl<'b, 'a> Builder<'b, 'a> {
             None => (None, None, None),
         };
         let surface = form.clone().unwrap_or_else(|| label.clone());
+        // A face that winds round its axis more than a turn is on a form that does not close:
+        // no analytic surface has it (SMLib's cylinder is one turn), so it is a spline face.
+        let wound = extent.is_some_and(crate::kernel::form::winds);
         // How far each edge lies off this surface, so its closed form is checked at that.
         self.measure_edges(&label, &edge_loops)?;
         // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
         let exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, tol, box_on_form).map_err(|e| e.to_string())?;
 
         // Without a kernel, a use with neither is refused below with why.
+        let missing = exact.iter().flatten().any(Option::is_none);
         let made = match self.trims {
-            Some(trims) if exact.iter().flatten().any(Option::is_none) => {
+            // A face that winds round its axis is on a form SMLib's trims hop sheets on.
+            _ if wound && missing => Some(self.wound_pcurves(&label, &edge_loops, &exact)?),
+            Some(trims) if missing => {
                 let domain = match box_on_form {
                     Some(d) => d,
                     None => natural_box(&surface).ok_or_else(|| unsupported("a face on an unbounded surface without closed-form pcurves"))?,
@@ -1678,6 +1763,15 @@ impl<'b, 'a> Builder<'b, 'a> {
         };
         let mut pcs =
             pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, tol, box_on_form).map_err(|e| e.to_string())?;
+        // Each loop's uses are moved by whole turns (four form parameters) to run on from one
+        // another, on the form that does not close.
+        if wound {
+            let range = match solidcore_ops::label::surface_natural(&surface).first() {
+                Some(Natural::Range(a, b)) => [*a, *b],
+                _ => return Err(unsupported("a face that winds round a surface that closes on itself")),
+            };
+            wound::unwind(&edge_loops, &mut pcs, range)?;
+        }
         // A form ends on a quarter line its face's boundary runs past by up to the tolerance: the
         // pcurves are put on its range, as the face's domain is ([`face_domain`]), and the edges'
         // tolerances cover the move.
@@ -1761,6 +1855,9 @@ impl<'b, 'a> Builder<'b, 'a> {
             (None, _) => 0,
         };
         face.outer = positions.get(outer).copied();
+        if wound {
+            face.surface = surface.clone();
+        }
         let can_turn = matches!(
             surface,
             BSurface::Plane { .. } | BSurface::Cylinder { .. } | BSurface::Cone { .. } | BSurface::Spline { .. } | BSurface::RationalSpline { .. }
@@ -1803,11 +1900,35 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
         }
         let domain = face_domain(&surface, &pcs)?;
-        Ok((pcs, domain, flip, form))
+        Ok((pcs, domain, flip, if wound { None } else { form }))
     }
 }
 
 impl Builder<'_, '_> {
+    /// The pcurve of every use of a face that winds round its axis: the closed form where `exact`
+    /// has one, else the edge's own ([`wound::pcurve`]).
+    fn wound_pcurves(&self, label: &BSurface, edge_loops: &[Vec<(u32, bool)>], exact: &[Vec<Option<Curve2>>]) -> R<Vec<Vec<Curve2>>> {
+        let mut out = Vec::new();
+        for (l, given) in edge_loops.iter().zip(exact) {
+            let mut pcs = Vec::new();
+            for (&(e, _), pc) in l.iter().zip(given) {
+                pcs.push(match pc {
+                    Some(c) => c.clone(),
+                    None => {
+                        let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                        let (curve, interval) = match &edge.form {
+                            Some((c, i)) => (c, *i),
+                            None => (&edge.curve, edge.interval),
+                        };
+                        wound::pcurve(label, curve, interval, self.tol)?
+                    }
+                });
+            }
+            out.push(pcs);
+        }
+        Ok(out)
+    }
+
     /// The face as a kernel takes it to make its missing pcurves: its edges and vertices
     /// numbered within it, each use with its closed-form pcurve where `exact` has one.
     fn trim_face<'s>(

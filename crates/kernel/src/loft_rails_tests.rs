@@ -285,3 +285,89 @@ fn section_normals_face_along_the_loft_and_turn_the_short_way() {
         assert!(n[0].dot(n[1]) > 0.0 && n[1].dot(z) > 0.0, "{n:?}");
     }
 }
+
+// The hull side from #16754 as sketch splines draw it: the natural cubic through the issue's
+// points with chord-length parameters, one cubic Bézier (its control points) per span. The keel's
+// are in its sketch's (x, z), the sheer's in its sketch's (x, y), the rails' in world (x, y, z).
+const KEEL: [[[f64; 2]; 4]; 2] = [
+    [[0.0, -160.0], [1627.7635723078342, -388.7205147027603], [3255.527144615669, -617.4410294055205], [4880.0, -600.0]],
+    [[4880.0, -600.0], [6589.094991330999, -581.6504314603769], [8294.5474956655, -290.82521573018846], [10000.0, 0.0]],
+];
+const SHEER: [[[f64; 2]; 4]; 2] = [
+    [[0.0, 40.0], [1645.285360344809, 727.5583753839488], [3290.5707206896172, 1415.1167507678974], [5000.0, 1650.0]],
+    [[5000.0, 1650.0], [6627.886455125052, 1873.6788994950143], [8313.943227562526, 1686.8394497475072], [10000.0, 1500.0]],
+];
+const STEM: [[[f64; 3]; 4]; 3] = [
+    [
+        [0.0, 40.0, 1200.0],
+        [0.0, 44.00238687713236, 828.3597964181283],
+        [0.0, 48.00477375426472, 456.7195928362564],
+        [0.0, 45.373332545769244, -62.868622627622926],
+    ],
+    [
+        [0.0, 45.373332545769244, -62.868622627622926],
+        [0.0, 45.17215275750797, -102.59234772267868],
+        [0.0, 44.93219852666387, -143.18082264512174],
+        [0.0, 17.293450399707694, -155.24526595568008],
+    ],
+    [
+        [0.0, 17.293450399707694, -155.24526595568008],
+        [0.0, 12.159265663775223, -157.48636169590935],
+        [0.0, 6.079632831887611, -158.74318084795468],
+        [0.0, 0.0, -160.0],
+    ],
+];
+const TRANSOM: [[[f64; 3]; 4]; 2] = [
+    [
+        [10000.0, 0.0, 0.0],
+        [10000.0, 582.4951876137216, 23.059939931657393],
+        [10000.0, 1164.990375227443, 46.11987986331485],
+        [10000.0, 1377.2647194380875, 394.8316231623623],
+    ],
+    [
+        [10000.0, 1377.2647194380875, 394.8316231623623],
+        [10000.0, 1497.936056877575, 593.0633623827879],
+        [10000.0, 1498.9680284387875, 896.5316811913939],
+        [10000.0, 1500.0, 1200.0],
+    ],
+];
+
+/// Cubic Béziers as a section's curves.
+fn cubics(pieces: &[[[f64; 2]; 4]]) -> Vec<Seg2> {
+    let v = |p: [f64; 2]| Vec2::new(p[0], p[1]);
+    pieces.iter().map(|[a, b, c, d]| Seg2::Cubic { p0: v(*a), p1: v(*b), p2: v(*c), p3: v(*d) }).collect()
+}
+
+/// Cubic Béziers joined end to end as a rail: the B-spline they make, as solidcore's tessellation
+/// samples a curve, every chord within a thousandth of a millimetre of it.
+fn cubic_rail(pieces: &[[[f64; 3]; 4]]) -> Vec<Vec3> {
+    let mut points: Vec<[f64; 3]> = pieces.first().map(|p| vec![p[0]]).unwrap_or_default();
+    let mut knots = vec![0.0; 4];
+    for (i, p) in pieces.iter().enumerate() {
+        points.extend_from_slice(&p[1..]);
+        knots.extend([(i + 1) as f64; 3]);
+    }
+    knots.push(pieces.len() as f64);
+    let curve = solidcore_record::brep::Curve::Spline { knots, points };
+    let tolerance = solidcore_tess::MeshTolerance::chord(1e-3);
+    solidcore_tess::curve_points(&curve, [0.0, pieces.len() as f64], tolerance).unwrap().into_iter().map(|[x, y, z]| Vec3::new(x, y, z)).collect()
+}
+
+/// A 10 m hull side (#16754): a keel and a sheer as sections, the stem and the transom as rails.
+/// The stem runs straight down from the sheer and then turns about 90° within some 120 mm into
+/// the forefoot. The loft's edges follow both rails all along, not only at its stations: every
+/// point of each rail is within 0.5 mm of the sheet, half the loft's tolerance (1e-4 of its size).
+/// With only even stations the stem strayed 2.7 mm from the sheet in the forefoot.
+#[test]
+fn a_hull_side_follows_a_stem_that_turns_tightly() {
+    let keel_plane = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::new(0.0, 0.0, 1.0) };
+    let sections = [(keel_plane, cubics(&KEEL)), (at(1200.0), cubics(&SHEER))];
+    let rails = [cubic_rail(&STEM), cubic_rail(&TRANSOM)];
+    for fit in [RailFit::Scale, RailFit::Stretch] {
+        let b = loft_sheet_with_rails(&sections, &rails, fit).unwrap();
+        for (name, r) in ["stem", "transom"].iter().zip(&rails) {
+            let (worst, p) = r.iter().map(|p| (off(&b, *p), *p)).fold((0.0, Vec3::ZERO), |a, b| if b.0 > a.0 { b } else { a });
+            assert!(worst < 0.5, "{fit:?}: the {name} is {worst:.3} mm off the loft at {p:?}");
+        }
+    }
+}

@@ -316,3 +316,37 @@ fn extrude_with_a_taper_of_zero_on_a_profile_with_a_hole_is_straight() {
     let zero = volume(Some("0 deg"));
     assert!((zero - plain).abs() < 1e-6 * plain, "taper 0 gives {zero}, none gives {plain}");
 }
+
+fn through_all_block() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-20, -20, -30], "length": 60, "width": 60, "height": 60, "body_name": "Blk"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+/// Through All is measured from where the extrude starts, so a start offset leaves no slab
+/// uncut on either side (#16556).
+#[test]
+fn through_all_cut_with_a_start_offset_goes_all_the_way() {
+    for direction in ["symmetric", "positive", "negative"] {
+        for offset in [5, -5, 0, 40, -40] {
+            let mut s = through_all_block();
+            run(
+                &mut s,
+                "solid.extrude",
+                json!({"sketch": "Sketch1", "through_all": true, "direction": direction, "start_offset": offset, "operation": "cut", "targets": ["Blk"]}),
+            );
+            let volume = body(&mut s, "Blk")["volume_mm3"].as_f64().unwrap();
+            // A one-sided cut only removes what lies on its side of the start.
+            let removed = 216000.0 - volume;
+            let expected = match direction {
+                "symmetric" => 24000.0,
+                "positive" => 400.0 * (30.0 - f64::from(offset)).clamp(0.0, 60.0),
+                _ => 400.0 * (f64::from(offset) + 30.0).clamp(0.0, 60.0),
+            };
+            assert!((removed - expected).abs() < 1e-3, "{direction} offset {offset}: removed {removed}, expected {expected}");
+        }
+    }
+}

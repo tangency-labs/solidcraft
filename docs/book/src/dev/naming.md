@@ -98,9 +98,13 @@ A sketch's link to a projected edge (`sketch.project {edge: [x, y, z]}`, and Int
 Include 3D Geometry of an edge) keeps the edge's name beside its point. The link is that edge
 wherever a change takes it; of an edge that was split it is the piece nearest the link's point,
 and the sketch says so. When no edge has the name any more the link is lost and keeps its last
-geometry, as it does for a face: it does not take whichever edge is nearest now. A link saved
-without a name, by a build that kept only the point, is found by the edge nearest its point, as
-it always was, and takes that edge's name when its sketch is next edited.
+geometry, as it does for a face: it does not take whichever edge is nearest now. The sketch then
+fails, naming every such link by its source and curves (`DocError::LostProjections`), never by
+the persistent name. `Model::failed_sketch_shown` builds it with those links marked lost, for
+its editor, Redefine Sketch Plane's check that they are its only failure and the viewport; no
+feature builds from it. A link saved without a name, by a build that kept only the point, is
+found by the edge nearest its point, as it always was, and takes that edge's name when its
+sketch is next edited.
 
 A command that takes a face as a point can be given a name `model.faces` lists instead
 (`face.delete`, `solid.shell`, `solid.draft`, `solid.offset_face`, `solid.split_face`, the `faces`

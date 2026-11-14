@@ -287,7 +287,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&FIX_CONTRACT)
         .output(output_schema_for::<FixResult>)
-        .params("entity: point or curve | entities: [points and curves]; fixed?: bool (default: fix them all unless all are fixed, then unfix)"),
+        .params("entity: point or curve | entities: [points and curves]; fixed?: bool (default: fix them all unless all are fixed, then unfix); unfixing a point placed by parameter expressions (`sketch.inspect` shows them as its `fixed_by`) frees it where they come to now, as plain numbers"),
     CommandSpec::new("sketch.constraint.midpoint", "MidPoint", crate::checked!("sketch.constraint.midpoint", c_midpoint))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_midpoint")
@@ -338,7 +338,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.move_points", "Move Sketch Points", move_points).icon("sketch_move").enabled(in_sketch).params(
         "moves: [{point: ref | near: [x,y], to: [x,y]}] (each point to its own target; `near`: the sketch point closest to it, \
          refused when none lies within `tolerance` or two are as close), tolerance?: mm (default 0.1); sketch? → moved: \
-         [{point, to, at, reached}] (`at`: where it ended up after the one solve; `reached`: whether that is `to`)",
+         [{point, to, at, reached}] (`at`: where it ended up after the one solve; `reached`: whether that is `to`); a point placed by parameter expressions is refused, naming them (unfix it with sketch.constraint.fix first)",
     ),
     CommandSpec::new("sketch.drag", "Drag Sketch Geometry", crate::checked!("sketch.drag", drag))
         .icon("sketch_move")
@@ -3275,7 +3275,7 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
     if refs.is_empty() {
         return Err(bad(cmd, "`entity` or `entities` must name sketch points or curves"));
     }
-    let (n, info) = edit(s, p, cmd, false, |sk, _| {
+    let (n, info) = edit(s, p, cmd, false, |sk, doc| {
         // Points and curves; a point is fixed by a Fix constraint, a curve by its flag (which
         // also holds its radius). Projected geometry is always fixed.
         let mut pts = Vec::new();
@@ -3290,16 +3290,35 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
         let all_fixed = pts.iter().all(|q| *q == 0 || sk.point_locked(*q)) && curves.iter().all(|c| sk.curve_locked(*c));
         let fix = want.unwrap_or(!all_fixed);
         let mut n = 0;
+        // A point placed by parameters is released where its expressions come to now, as plain
+        // numbers (#16554).
+        if !fix && pts.iter().any(|q| sk.points.get(*q).is_some_and(|x| x.exprs.is_some())) {
+            doc.apply_point_values(&doc.param_values().0, sk)?;
+        }
         for q in pts {
-            let own = sk.points.get(q).is_some_and(|x| x.fixed || x.link.is_some());
-            if q == 0 || own {
-                continue;
-            }
+            let Some(pt) = sk.points.get(q).filter(|pt| q != 0 && pt.link.is_none()) else { continue };
+            let own = pt.fixed;
             let has = sk.constraints.iter().any(|c| c.kind == ConstraintKind::Fix { p: q });
-            if fix && !has {
+            if fix && !own && !has {
                 add_c(sk, ConstraintKind::Fix { p: q })?;
                 n += 1;
-            } else if !fix && has {
+            } else if !fix && (own || has) {
+                // An equation curve's fit points are placed by its formulas at every solve.
+                if let Some(eq) =
+                    sk.equations.iter().find(|e| sk.curve_index(&e.curve).and_then(|ci| sk.curves.get(ci)).is_some_and(|c| c.kind.uses(q)))
+                {
+                    return Err(bad(
+                        cmd,
+                        format!(
+                            "point `{}` is placed by the equation of curve `{}`, so it cannot be released; edit or delete the equation curve",
+                            pt.id, eq.curve
+                        ),
+                    ));
+                }
+                if let Some(pt) = sk.points.get_mut(q) {
+                    pt.fixed = false;
+                    pt.exprs = None;
+                }
                 sk.constraints.retain(|c| c.kind != ConstraintKind::Fix { p: q });
                 n += 1;
             }
@@ -4324,6 +4343,22 @@ fn move_points(s: &mut Session, p: &Value) -> Result<Value> {
                 None => point_ref(sk, m.get("point"), cmd, "point")?,
             };
             picked.push((q, to));
+        }
+        // A point placed by parameters follows them, so it does not move (#16554).
+        for (q, _) in &picked {
+            if let Some(pt) = sk.points.get(*q)
+                && let Some(e) = pt.exprs.as_deref()
+            {
+                return Err(bad(
+                    cmd,
+                    format!(
+                        "point `{}` is placed by the expression {}, so it follows the parameters and does not move; release it with sketch.constraint.fix {{entity: \"{}\", fixed: false}} first",
+                        pt.id,
+                        e.describe(),
+                        pt.id
+                    ),
+                ));
+            }
         }
         let mut left = Left::Unsolved;
         for (q, to) in &picked {
