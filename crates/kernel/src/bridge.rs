@@ -85,6 +85,30 @@ pub fn chain(body: &Body, at: &[Vec3]) -> Result<Chain> {
     Ok(chain)
 }
 
+/// The edges of `body` a path, rail or boundary pick at points `at` stands for with its curve
+/// chain: the edges the points pick (each once, in order), then every edge that continues one of
+/// them within `angle` radians at a shared vertex, and so on, stopping at a branch
+/// (`solidcore_ops::tangent::curve_chain_ordered`). Unlike a blend's chain
+/// ([`crate::tangent_chain_edges`]) the faces play no part. The record's edge indices, which
+/// are the display's.
+pub fn curve_chain_edges(body: &Body, at: &[Vec3], angle: f64) -> Result<Vec<usize>> {
+    body.require_brep("an edge chain")?;
+    if at.is_empty() || at.len() > 10_000 || at.iter().any(|p| !p.is_finite()) {
+        return Err(KernelError::Invalid("pick 1 to 10000 points on edges".into()));
+    }
+    let mut picked: Vec<usize> = Vec::new();
+    for p in at {
+        let e = crate::surfaces::edge_near(body, *p).ok_or_else(|| KernelError::Invalid("no edge near a picked point".to_string()))?;
+        if !picked.contains(&e) {
+            picked.push(e);
+        }
+    }
+    let (ops, order) = body.ops_body().ok_or_else(|| KernelError::Failed("an edge chain: the body is no SMLib body".into()))?;
+    solidcore_ops::tangent::curve_chain_ordered(ops, order, &picked, angle)
+        .map(|chain| chain.members)
+        .map_err(|e| KernelError::Failed(format!("an edge chain: {e}")))
+}
+
 /// Whether a chain of `body`'s edges closes back on itself.
 pub fn chain_closes(body: &Body, chain: &Chain) -> bool {
     closes(body.record(), chain)
