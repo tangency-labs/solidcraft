@@ -24,6 +24,12 @@ pub enum InstallError {
     NotOnePlugin,
     #[error("the .zip has no {0}, which plugin.json names")]
     MissingModule(String),
+    /// The module is missing and the .zip holds Rust sources: most likely the "Source code"
+    /// archive that GitHub lists beside a release, not the plugin's own .zip (#16736).
+    #[error(
+        "the .zip has no {0}, which plugin.json names: it holds the plugin's source code. Install the plugin's own .zip from its release instead"
+    )]
+    SourceOnly(String),
     #[error("{0}")]
     Manifest(HostError),
     #[error("“{name}” {version} is already installed; confirm to replace it")]
@@ -81,7 +87,9 @@ pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
     if let Some(runtime) = &manifest.runtime
         && !files.iter().any(|f| f.path == runtime.module)
     {
-        return Err(InstallError::MissingModule(runtime.module.clone()));
+        let source = files.iter().any(|f| f.path == "Cargo.toml" || f.path.ends_with(".rs"));
+        let module = runtime.module.clone();
+        return Err(if source { InstallError::SourceOnly(module) } else { InstallError::MissingModule(module) });
     }
     Ok(Unpacked { manifest, files })
 }
