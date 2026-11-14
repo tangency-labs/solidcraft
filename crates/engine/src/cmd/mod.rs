@@ -123,6 +123,8 @@ pub(crate) use render::{
 };
 pub(crate) use render_ui::batch_request;
 mod render_ui;
+pub(crate) mod route;
+pub(crate) mod route_plan;
 #[cfg(test)]
 mod script_tests;
 mod sheet;
@@ -286,6 +288,8 @@ impl CommandSpec {
     /// undo step and the evaluation).
     pub(crate) fn run_nested(&self, s: &mut Session, p: &Value) -> Result<Value> {
         (self.enabled)(s).map_err(|why| crate::EngineError::Disabled(self.id.to_string(), why))?;
+        // The host's check runs before every command, the ones a command runs included.
+        s.check_command(self, p)?;
         let r = (self.run)(s, p);
         // A parameter error that did not name the command names it here (see `Session::execute`).
         match r {
@@ -378,6 +382,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(plastic::COMMANDS.iter());
     v.extend(frame::COMMANDS.iter());
     v.extend(frame_end_cap::COMMANDS.iter());
+    v.extend(route::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());
