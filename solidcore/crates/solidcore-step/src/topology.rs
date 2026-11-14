@@ -1680,7 +1680,7 @@ impl<'b, 'a> Builder<'b, 'a> {
     fn loops_extent(&self, fi: usize, only: Option<usize>) -> R<Option<[[f64; 2]; 2]>> {
         let face = self.faces.get(fi).ok_or("face reference")?;
         let vertex_tolerance = |v: u32| self.vertices.get(v as usize).map(|x| x.tolerance).ok_or("vertex reference");
-        let (mut boundary, mut reach) = (Vec::with_capacity(face.loops.len()), self.tol);
+        let (mut boundary, mut reach) = (Vec::new(), self.tol);
         for (li, l) in face.loops.iter().enumerate() {
             if only.is_some_and(|o| o != li) {
                 continue;
@@ -1692,7 +1692,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                     continue;
                 }
             };
-            let mut b = Vec::with_capacity(es.len());
+            let mut b = Vec::new();
             for &(e, forward) in es {
                 let edge = self.edges.get(e as usize).ok_or("edge reference")?;
                 let [v0, v1] = edge.vertices;
@@ -1961,13 +1961,18 @@ impl Builder<'_, '_> {
                 }
                 let Ok(ends) = wound::piece_ends(&label, &edge.curve, edge.interval, self.tol) else { continue };
                 let pieces = ends.len().saturating_sub(1);
-                let parts = wound::points_of(pieces).div_ceil(MAX_SPLINE_POINTS / 2);
+                let half = MAX_SPLINE_POINTS >> 1;
+                let parts = wound::points_of(pieces).saturating_add(half.saturating_sub(1)).checked_div(half).unwrap_or(0);
                 if parts < 2 {
                     continue;
                 }
                 // From the last cut back, so the edge keeps the part before each cut.
                 let [lo, hi] = edge.interval;
-                let cuts: Vec<f64> = (1..parts).rev().filter_map(|j| ends.get(pieces * j / parts).copied()).filter(|t| lo < *t && *t < hi).collect();
+                let cuts: Vec<f64> = (1..parts)
+                    .rev()
+                    .filter_map(|j| pieces.checked_mul(j).and_then(|n| n.checked_div(parts)).and_then(|i| ends.get(i)).copied())
+                    .filter(|t| lo < *t && *t < hi)
+                    .collect();
                 for t in cuts {
                     self.split_edge(e, t)?;
                     split += 1;

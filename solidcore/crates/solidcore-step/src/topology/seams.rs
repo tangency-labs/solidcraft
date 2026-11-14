@@ -1192,7 +1192,7 @@ impl Builder<'_, '_> {
         for (from, way) in [(la, 1i8), (lb, -1i8)] {
             let Some((_, uses)) = loops.iter().find(|(li, _)| *li == from) else { return Err("loop reference".into()) };
             for k in 0..uses.len().min(100) {
-                let before = uses.get((k + uses.len() - 1) % uses.len()).and_then(|u| u.pieces.last());
+                let before = uses.get(k.checked_sub(1).unwrap_or(uses.len().saturating_sub(1))).and_then(|u| u.pieces.last());
                 let after = uses.get(k).and_then(|u| u.pieces.first());
                 if before.is_some_and(|p| p.runs == Some(way)) && after.is_some_and(|p| p.runs == Some(way)) {
                     starts.push((from, k));
@@ -1208,7 +1208,7 @@ impl Builder<'_, '_> {
             let theta = frame.angle(pv);
             // Signed distance along the ruling from the vertex, towards the other loop.
             let along = |h: f64| up * (h - height(pv));
-            let before = (k + uses.len() - 1) % uses.len();
+            let before = k.checked_sub(1).unwrap_or(uses.len().saturating_sub(1));
             // The nearest crossing on the other loop (distance, edge, its point), and the nearest
             // reach of anything else along the ruling (from the vertex on, or straddling it).
             let mut nearest: Option<(f64, u32, Vec3, f64)> = None;
@@ -1256,10 +1256,8 @@ impl Builder<'_, '_> {
                             // A near miss (within the pad, no crossing between the ends) or a piece
                             // whose angle is not monotone: anywhere over its hull's heights.
                             Some((false, ..)) | None => {
-                                let [lo, hi] = piece.heights.map(along);
-                                let (lo, hi) = (lo.min(hi), lo.max(hi));
-                                if hi > -self.tol {
-                                    other = other.min(lo.max(0.0));
+                                if let Some(reach) = hull_reach(piece, along, self.tol) {
+                                    other = other.min(reach);
                                 }
                             }
                         }
@@ -1684,6 +1682,15 @@ impl Perpendicular {
             None => [0.0, TAU],
         }
     }
+}
+
+/// How near along the ruling (from the vertex, `along` the height's distance on it) a piece that
+/// the ruling may meet anywhere over its hull's heights comes: the hull's lowest point, none where
+/// the whole hull lies behind the vertex by more than `tol`.
+pub(super) fn hull_reach(piece: &Piece, along: impl Fn(f64) -> f64, tol: f64) -> Option<f64> {
+    let [lo, hi] = piece.heights.map(along);
+    let (lo, hi) = (lo.min(hi), lo.max(hi));
+    (hi > -tol).then_some(lo.max(0.0))
 }
 
 /// A use of a loop round a wound band ([`Builder::wound_band_seam`]): its edge and way, its

@@ -751,6 +751,35 @@ fn a_band_whose_vertices_line_up_across_a_hole_gets_its_seam_clear_of_it() {
     assert!(angle.abs() > east, "the seam at {angle} rad crosses the hole");
 }
 
+/// A piece of a thread's edge that comes within its pad of a ruling's angle without crossing it
+/// (a near miss) may meet the ruling anywhere over its hull's heights, not only at the end nearer
+/// in angle: here both ends are below the ruling's vertex and the middle rises 6 mm above it, so
+/// a seam up the ruling is blocked from the vertex on (#16930).
+#[test]
+fn a_near_miss_piece_blocks_a_seam_over_its_whole_height_range() {
+    let tol = 1e-3;
+    let frame = seams::Perpendicular::about(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+    // An arch on a cylinder of radius 10, 100 to 400 um short of the ruling at angle 0 (the pad
+    // reaches tol / r = 100 um): its ends at height -2, its middle's control points at 6.
+    let at = |angle: f64, z: f64| [10.0 * angle.cos(), 10.0 * angle.sin(), z];
+    let arch = BCurve::Spline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        points: vec![at(-4e-5, -2.0), at(-3e-5, 6.0), at(-2e-5, 6.0), at(-1e-5, -2.0)],
+    };
+    let pieces = frame.pieces(&arch, [0.0, 1.0], tol);
+    let [piece] = pieces.as_slice() else { panic!("{} pieces", pieces.len()) };
+    let blocked = seams::Blocked { arcs: vec![piece.blocked()] };
+    assert!(!blocked.clear(0.0), "the ruling passes within the piece's pad");
+    // From a vertex at height 0 up: the hull's lowest point is behind it, so the piece is on the
+    // seam from the vertex.
+    assert_eq!(seams::hull_reach(piece, |h| h, tol), Some(0.0));
+    // From a vertex at height -3 up: the whole hull is ahead, its lowest point 1 mm along.
+    assert_eq!(seams::hull_reach(piece, |h| h + 3.0, tol), Some(1.0));
+    // From a vertex at height 7: up, the hull is behind it; down, its lowest point is 1 mm along.
+    assert_eq!(seams::hull_reach(piece, |h| h - 7.0, tol), None);
+    assert_eq!(seams::hull_reach(piece, |h| 7.0 - h, tol), Some(1.0));
+}
+
 /// A seam's angle test (`seams::angular_sign`): a ruling's angular speed is 0, and rounding
 /// leaves its one coefficient a few 1e-17 either way; that is not one way. An arc's is.
 #[test]

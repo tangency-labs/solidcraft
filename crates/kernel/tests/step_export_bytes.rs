@@ -67,7 +67,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/kernel-cases/import/3730-void-oriented-shell-false/input.step", "e461e3732a479928"),
     ("tests/kernel-cases/import/3880-cylinder-seam-edge/input.step", "183935caa3bdda17"),
     ("tests/kernel-cases/import/3880-nurbs-hemisphere-dome/input.step", "c072f4d08cfefb04"),
-    ("tests/kernel-cases/import/3963-closed-spline-edge-vertex-past-start/input.step", "c0e524535a1b5a62"),
+    ("tests/kernel-cases/import/3963-closed-spline-edge-vertex-past-start/input.step", "3bc30242fa9c3a3f"),
     ("tests/kernel-cases/import/4005-cylinder-written-as-near-zero-cone/input.step", "6f13fdd4ff99c151"),
     ("tests/kernel-cases/import/4006-plane-written-as-cone-of-nearly-right-angle/input.step", "05c07f99a56d82c1"),
     ("tests/step-conformance/cone_point.step", "f8011a27d4b1fa9f"),
@@ -90,6 +90,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-regressions/cylinder_rim_off_its_wall.step", "e07c2fdbef7cc0c6"),
     ("tests/step-regressions/cylinder_spline_rims.step", "609aa9a609b95308"),
     ("tests/step-regressions/rod_doubled_edge.step", "8432fa140e74c146"),
+    ("tests/step-regressions/thread_crest_band.step", "30923bc03bcfd757"),
     ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "d2c476d6163c1863"),
     ("(assembly)", "45b6ef6cf64529e2"),
 ];
