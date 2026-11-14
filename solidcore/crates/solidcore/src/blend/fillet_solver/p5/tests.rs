@@ -639,8 +639,10 @@ fn failed_end_connection_retains_completed_mutations_and_stops_the_walk() {
     assert_eq!(fb.fillet_edge(r).unwrap().curve_class().unwrap().size(), 2);
 }
 
+/// A failed copy of the offset surface is the error returned (its status passed on, the
+/// fork's 66b02de), not ignored with its output kept.
 #[test]
-fn ignored_copy_status_does_not_discard_its_completed_output() {
+fn a_failed_copy_status_is_returned() {
     let mut f = Fixture::new([&[0.4, 1.0], &[1.0]], true);
     let id = f.geom;
     let mut script = Script {
@@ -649,13 +651,9 @@ fn ignored_copy_status_does_not_discard_its_completed_output() {
         fail: Some("copy_offset"),
         ..Script::default()
     };
-    f.context().process(id, &mut vec![], &mut script).unwrap();
     assert_eq!(
-        f.fb.geom(FilletGeomId(1)).unwrap().off_surfs[0]
-            .as_ref()
-            .unwrap()
-            .offset_distance(),
-        0.25
+        f.context().process(id, &mut vec![], &mut script),
+        Err(SolidError::sm_err("regression"))
     );
 }
 

@@ -444,7 +444,7 @@ impl ExecutiveAccess<Handle> for Access {
                 "orientation must see temporary attributes"
             );
         }
-        self.orient_error.clone().map_or(Ok(()), Err) // ordinary errors are ignored
+        self.orient_error.clone().map_or(Ok(()), Err)
     }
     fn calc_corner_vertices(
         &mut self,
@@ -885,12 +885,11 @@ fn piecewise_return_restores_both_temporary_flags_on_success_and_error() {
 }
 
 #[test]
-fn stitching_retries_exactly_five_times_doubles_tolerance_and_ignores_orientation_error() {
+fn stitching_retries_exactly_five_times_and_doubles_tolerance() {
     let mut executive = state();
     executive.options.trimming = true;
     let mut access = Access {
         stitch_lamina: 1,
-        orient_error: Some(failure()),
         ..Access::default()
     };
     let mut k = Kernel::default();
@@ -1135,10 +1134,8 @@ fn temporary_attributes_survive_orientation_and_are_cleaned_on_errors_or_deferra
             ..Access::default()
         };
         let result = executive.do_filleting(&mut Kernel::default(), &mut access, None);
-        assert_eq!(
-            result.is_err(),
-            error.as_ref().is_some_and(SolidError::is_unported)
-        );
+        // an orientation failure is passed on (fork 873c7c9), ordinary or not
+        assert_eq!(result.is_err(), error.is_some());
         assert_eq!(access.created_attributes, 1);
         assert!(access.attributes.is_empty());
         assert_eq!(access.events.last(), Some(&"delete_attr"));
@@ -1368,20 +1365,6 @@ fn fillet_body(body: Brep) -> (FilletExecutive<Handle>, Access, Result<()>) {
     k.fixes.fillet_refuse_non_manifold_result = true;
     let result = executive.do_fillet(&mut k, &mut access);
     (executive, access, result)
-}
-
-#[test]
-fn open_result_is_accepted_without_the_opt_in_check() {
-    // Upstream (the default): DoFillet returns success for an open target.
-    let mut executive = state();
-    let mut access = Access {
-        body: Some(tetrahedron(&[0, 1, 2]).0),
-        ..Access::default()
-    };
-    let mut k = Kernel::default();
-    executive.do_fillet(&mut k, &mut access).unwrap();
-    assert_eq!(executive.error.code, 0);
-    assert!(executive.error.edge.is_none());
 }
 
 #[test]

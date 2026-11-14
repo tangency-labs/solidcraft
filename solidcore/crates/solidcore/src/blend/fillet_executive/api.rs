@@ -1174,17 +1174,22 @@ mod tests {
         assert_eq!(shape(&body), before);
     }
 
+    /// A variable round from 0.5 to 30 along an edge of a 10 x 20 x 30 box, wider than the
+    /// faces it rolls on at its large end, builds a valid closed solid (the corrections' rounds
+    /// past their faces), where the uncorrected executive failed: 7 faces, the volume measured
+    /// (not a closed form) 5247.0485 mm³.
     #[test]
-    fn a_failed_variable_radius_fillet_keeps_its_error_and_a_current_body() {
+    fn a_variable_radius_round_wider_than_its_faces_builds_a_closed_solid() {
         let mut k = Kernel::default();
         let mut body = boxed(&mut k);
         let edge = p1::edges(&body, None).unwrap()[0];
-        let result = variable_radius_fillet(&mut k, &mut body, &[edge], 0.5, 30.0, 1, 1);
-        assert!(matches!(
-            result,
-            Err(ref e) if e.upstream_status() == Some(crate::error::SM_ERR)
-        ));
+        variable_radius_fillet(&mut k, &mut body, &[edge], 0.5, 30.0, 1, 1).unwrap();
         crate::topology::integrity::check(&body).unwrap();
-        assert_eq!(p1::faces(&body, None).unwrap().len(), 6);
+        assert_eq!(p1::faces(&body, None).unwrap().len(), 7);
+        let mut solid = crate::topology::brep::p3::brep_copy(&mut k, &body).unwrap();
+        assert!(crate::topology::brep::is_outward_solid(&mut k, &mut solid).unwrap());
+        let volume =
+            crate::mass::integrator::properties::brep_volume_default(&k, &mut solid, 1e-6).unwrap();
+        assert!((volume - 5247.0485).abs() < 1e-3, "{volume}");
     }
 }

@@ -3560,19 +3560,20 @@ mod tests_c5 {
         );
     }
 
+    /// A failed uv trim curve creation on the reversed trace is the error returned (its
+    /// status passed on), not the missing curve it leaves behind.
     #[test]
-    fn reversed_trace_ignores_a_failed_uv_trim_curve_creation() {
+    fn reversed_trace_returns_a_failed_uv_trim_curve_creation() {
         let mut f = Fixture::new();
         f.st.trace.reverse_tracing = true;
         f.fb.brep_mut()
             .edgeuse_mut(f.mates[0])
             .unwrap()
             .uv_trim_curve = None;
-        // the creation's status is ignored; NER(pUVCurve) then fails
         let e = f.run().unwrap_err();
         assert_eq!(
             e,
-            SolidError::blend_missing(OP, "the mate edge use's uv trim curve")
+            SolidError::topology_missing("topology::edgeuse::p3", "the edge use's face use")
         );
     }
 
@@ -4029,26 +4030,8 @@ mod tests_c6 {
         let err = run(&mut fs, &k, 1.0, &mut p, Some(&prev)).unwrap_err();
         assert_eq!(err.upstream_status(), Some(1001), "{err:?}");
         assert_eq!(p.curve_pv[1], Vec3::new(0.0, 1.0, 0.0));
-        // the tangent point latches the larger step
-        assert_eq!(k.fillet_point_step.get(), Some(1.0e-3));
-    }
-
-    #[test]
-    fn variable_radius_crossing_latches_small_step() {
-        let k = Kernel::default();
-        let (a, b) = (xy(0.0), xz());
-        let mut fs = Variable(solver(&k, &a, &b));
-        let mut p = TsectPnt::new();
-        // StepSolve rejects the test solver's Jacobian size
-        let err = run(&mut fs, &k, 1.0, &mut p, None).unwrap_err();
-        assert!(matches!(err, SolidError::InvalidInput { .. }), "{err:?}");
-        assert_eq!(k.fillet_point_step.get(), Some(1.0e-5));
-        // an already latched step is kept
-        let k2 = Kernel::default();
-        k2.fillet_point_step.set(Some(7.0e-4));
-        let mut p = TsectPnt::new();
-        let _ = run(&mut fs, &k2, 1.0, &mut p, None);
-        assert_eq!(k2.fillet_point_step.get(), Some(7.0e-4));
+        // the point's own step, not the kernel's latch: the latch stays unwritten
+        assert_eq!(k.fillet_point_step.get(), None);
     }
 
     /// `Variable` that records the finite-difference solves' first guesses

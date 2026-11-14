@@ -2155,16 +2155,6 @@ mod tests {
         }
     }
 
-    /// An edge without curve exits through `SER(SM_ERR)`, which the caller reads as
-    /// `TRUE`: no surface is made.
-    #[test]
-    fn analytic_corner_surface_reads_a_failing_status_as_true() {
-        let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, 3);
-        let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
-        assert!(r.unwrap());
-        assert!(c.surfaces.is_empty());
-    }
-
     #[test]
     fn analytic_corner_surface_skips_cubic_rail_rail_interpolation() {
         // (the first edge: an edge without curve before it would exit through SER)
@@ -2177,9 +2167,9 @@ mod tests {
         assert!(!r.unwrap());
     }
 
-    /// `SER(SM_ERR)` reads as `FALSE` with the opt-in fix (the caller then builds the
-    /// Coons patch); the default stays `TRUE` and the corner's state is unchanged
-    /// either way (WR-254).
+    /// `SER(SM_ERR)` (an edge without a curve) reads as `FALSE` with the fix, the default
+    /// (the caller then builds the Coons patch); without it `TRUE`, no surface made; the
+    /// corner's state is unchanged either way (WR-254).
     #[test]
     fn analytic_corner_surface_failure_is_false_with_the_fix() {
         let run = |fixed: bool| {
