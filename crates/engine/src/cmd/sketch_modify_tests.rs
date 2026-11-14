@@ -4389,43 +4389,27 @@ fn fillet_releases_an_offsets_corners_keeping_its_distance() {
         assert!(matches!(sk.curves[ai].kind, CurveKind::Arc { .. }), "{arc} is a trimmed arc");
         assert!((sk.radius(ai).unwrap() - 2.0).abs() < 1e-7);
     }
-    // The released lines still stand the offset's distance from their sources: the distance
-    // parameter and the source's size both move them.
-    let gap = |s: &Session, source: &str, output: &str| {
+    // The released lines still stand the offset's distance outside their sources, and the
+    // distance parameter moves them. The rectangle keeps its sides horizontal and vertical, so
+    // each output's signed outward offset is a coordinate difference: below the bottom (l1),
+    // right of the right side (l2), above the top (l3), left of the left side (l4).
+    let outward = |s: &Session, source: &str, output: &str, axis: fn(Vec2) -> f64, sign: f64| {
         let sk = sketch(s);
-        let (a, b) = match sk.shape(sk.curve_index(source).unwrap()).unwrap() {
-            solidcraft_sketch::Shape::Line { a, b } => (a, b),
-            other => panic!("{other:?}"),
-        };
-        let q = match sk.shape(sk.curve_index(output).unwrap()).unwrap() {
+        let start = |id: &str| match sk.shape(sk.curve_index(id).unwrap()).unwrap() {
             solidcraft_sketch::Shape::Line { a, .. } => a,
             other => panic!("{other:?}"),
         };
-        ((q - a).cross(b - a) / a.dist(b)).abs()
+        sign * (axis(start(output)) - axis(start(source)))
     };
-    for (source, output) in ["l1", "l2", "l3", "l4"].iter().zip(&out) {
-        assert!((gap(&s, source, output) - 2.0).abs() < 1e-7, "{source} → {output}");
-    }
-    run(&mut s, "parameters.change", json!({"name": distance, "expression": "3 mm"}));
-    for (source, output) in ["l1", "l2", "l3", "l4"].iter().zip(&out) {
-        assert!((gap(&s, source, output) - 3.0).abs() < 1e-7, "{source} → {output} after the distance changed");
-    }
-    // Each released line stays outside its source, on the side the offset was made.
-    let sk = sketch(&s);
-    let side = |source: &str, output: &str| {
-        let (a, b) = match sk.shape(sk.curve_index(source).unwrap()).unwrap() {
-            solidcraft_sketch::Shape::Line { a, b } => (a, b),
-            other => panic!("{other:?}"),
-        };
-        let mid = |sh: solidcraft_sketch::Shape| match sh {
-            solidcraft_sketch::Shape::Line { a, b } => (a + b) * 0.5,
-            other => panic!("{other:?}"),
-        };
-        (b - a).cross(mid(sk.shape(sk.curve_index(output).unwrap()).unwrap()) - mid(sk.shape(sk.curve_index(source).unwrap()).unwrap()))
-    };
-    let first = side("l1", &out[0]);
-    for (source, output) in ["l1", "l2", "l3", "l4"].iter().zip(&out) {
-        assert!(side(source, output) * first > 0.0, "{source} → {output} kept its side");
+    let sides: [(&str, fn(Vec2) -> f64, f64); 4] = [("l1", |p| p.y, -1.0), ("l2", |p| p.x, 1.0), ("l3", |p| p.y, 1.0), ("l4", |p| p.x, -1.0)];
+    for (expected, when) in [(2.0, "after the fillet"), (3.0, "after the distance changed")] {
+        if expected == 3.0 {
+            run(&mut s, "parameters.change", json!({"name": distance, "expression": "3 mm"}));
+        }
+        for ((source, axis, sign), output) in sides.iter().zip(&out) {
+            let d = outward(&s, source, output, *axis, *sign);
+            assert!((d - expected).abs() < 1e-7, "{source} → {output} {when}: {d} outward, {expected} expected");
+        }
     }
 
     // A chamfer releases an offset the same way.
