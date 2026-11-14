@@ -387,18 +387,22 @@ fn coincidence_bound(
 /// stand for no upstream status ([`crate::error::native_failure`]: a port invariant, a stale
 /// id, an unported call, cancellation).
 ///
-/// **A gluing that fails leaves the operand as given.** The glue is all or nothing: the
-/// operand is snapshotted ([`Brep::snapshot`]) before the first pair, and any other failure
-/// of `GlueEdgesGeneral` restores it exactly, so the merge then runs on the operand as main
-/// does (0 is returned). `GlueEdgesGeneral` can fail on a valid operand, both before its
+/// **A gluing that fails leaves the operand as given.** The glue is all or nothing
+/// ([`glue_all_or_none`]): the operand, `k.rng` and `k.upstream_ub_passed` are saved before
+/// the first pair, and any other failure of `GlueEdgesGeneral` restores them exactly, so the
+/// merge then runs as main does (0 is returned). `GlueEdgesGeneral` can fail on a valid operand, both before its
 /// first change to the topology (`b.remove_from_edge_list(del)`) and after it:
 /// - before: the notifications (`PreEdit`, `MergeInBrep`, each face's `PreEdit`), the
 ///   intervals and `curve_max_distance_between` of the same-geometry test (orientation
 ///   `Same`, equal intervals), the vertex reads and the shared-vertex precondition;
-/// - after: `edge_remove` and `add_oriented_eu_pair` of each moved use pair, the surviving
-///   edge's `set_tolerance`, `destroy` of the deleted edge, `merge_shells`, and
-///   `test_closure_split_region_attempt` / `test_closure_split_region_edge` (whose statuses
-///   pass on with `brep_edit_statuses_pass_on`).
+/// - after, for each moved use pair: the radial-sector search and its `InvalidInput` errors
+///   (an edge or mate without edge use, shell, radial or region), `set_uv_trim_curve`,
+///   `edge_remove` of the pair, the sector's mate and loop tests, `set_orientation`,
+///   `add_oriented_eu_pair`, a surviving wire's `edge_remove` and vertex-use unlinking, the
+///   surviving edge's `set_tolerance` and `destroy` of the deleted edge; then `merge_shells`,
+///   `test_closure_split_region_attempt` (whose status passes on with
+///   `brep_edit_statuses_pass_on`, and which may draw from `k.rng`), `is_spine` and
+///   `test_closure_split_region_edge`.
 ///
 /// A failure at an "after" site would leave the operand half glued, so a check up front
 /// cannot replace the snapshot. A snapshot the B-rep cannot take (a cleared surface owner,
@@ -406,7 +410,6 @@ fn coincidence_bound(
 fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
     use std::collections::BTreeMap;
 
-    use crate::topology::brep::p2::ArenaNotifyState;
     use crate::topology::brep::p7::glue_edges_general;
     use crate::topology::edge;
     use crate::topology::edgeuse::p1 as eu1;
@@ -480,27 +483,68 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
         Ok(coincidence_bound(cx, &dx.interval, cy, &dy.interval).is_some_and(|d| d <= tol))
     };
     let pairs = copy_pairs(&touches, &crowded, |x, y| coincide(b, x, y))?;
+    glue_all_or_none(
+        k,
+        b,
+        &pairs,
+        |k, b, &(surviving, to_delete, orientation), env| {
+            glue_edges_general(
+                k,
+                b,
+                Some(surviving),
+                orientation,
+                0.0,
+                true,
+                Some(to_delete),
+                None,
+                env,
+            )
+        },
+    )
+}
+
+/// One pair to glue: `(surviving, to_delete, orientation)`.
+type GluePair = (
+    EdgeId,
+    EdgeId,
+    crate::nurbs::b_spline_surface_n_lib::p2::OrientType,
+);
+
+/// Runs `glue` on every pair, all or nothing ([`glue_self_touching_edges`]'s errors): the
+/// operand, `k.rng` and `k.upstream_ub_passed` are saved first, and when a pair fails they
+/// are all put back exactly, so the merge then runs as on main. An ordinary failure
+/// ([`crate::error::native_failure`]) returns 0; a port defect or a cancellation is returned.
+/// No snapshot ([`Brep::snapshot`]) means nothing is glued. Returns the number of pairs
+/// glued.
+///
+/// # Errors
+///
+/// The failures of `glue` that stand for no upstream status; those of restoring the
+/// operand's attributes after a gluing that succeeded.
+fn glue_all_or_none(
+    k: &mut Kernel,
+    b: &mut Brep,
+    pairs: &[GluePair],
+    mut glue: impl FnMut(
+        &mut Kernel,
+        &mut Brep,
+        &GluePair,
+        &mut crate::topology::edge::NotifyEnv<'_>,
+    ) -> Result<()>,
+) -> Result<usize> {
+    use crate::topology::brep::p2::ArenaNotifyState;
+
     if pairs.is_empty() {
         return Ok(0);
     }
-    // all or nothing: a failed gluing puts the operand back as it came in
     let Ok(saved) = b.snapshot() else {
         return Ok(0);
     };
+    let (rng, ub) = (k.rng.clone(), k.upstream_ub_passed.clone());
     let mut state = ArenaNotifyState::with_attributes_of(b);
     let mut failure = None;
-    for &(surviving, to_delete, orientation) in &pairs {
-        if let Err(e) = glue_edges_general(
-            k,
-            b,
-            Some(surviving),
-            orientation,
-            0.0,
-            true,
-            Some(to_delete),
-            None,
-            &mut state.env(None),
-        ) {
+    for pair in pairs {
+        if let Err(e) = glue(k, b, pair, &mut state.env(None)) {
             failure = Some(e);
             break;
         }
@@ -509,6 +553,8 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
         // the snapshot holds the attributes too: the store moved out is dropped
         drop(state);
         b.restore(saved);
+        k.rng = rng;
+        k.upstream_ub_passed = ub;
         // a port defect or a cancellation goes on; an ordinary failure merges as given
         crate::error::native_failure::<()>(Err(e))?;
         return Ok(0);
@@ -958,6 +1004,112 @@ mod tests {
             p(z),
             3,
         )))
+    }
+
+    /// What [`glue_all_or_none`] must put back: the edge list and every edge's uses,
+    /// tolerance and interval, and the counts of faces and vertices.
+    fn fingerprint(b: &Brep) -> String {
+        let edges: Vec<String> = b
+            .edge_list()
+            .iter()
+            .map(|&e| {
+                let d = b.edge(e).unwrap();
+                format!("{e:?} {:?} {} {:?}", d.edgeuses, d.tolerance, d.interval)
+            })
+            .collect();
+        format!("{edges:?} {} {}", b.faces().len(), b.vertices().len())
+    }
+
+    fn unit_box(k: &mut Kernel) -> Brep {
+        crate::primitive::api_primitives::create_box(k, crate::math::Point3::ZERO, 1.0, 1.0, 1.0)
+            .unwrap()
+    }
+
+    /// A gluing whose second pair fails after the first changed the operand and drew from
+    /// the kernel's rng: the operand, the rng and the upstream-UB list are put back exactly.
+    /// An ordinary failure (`InvalidInput`) then lets the merge go on (0 glued); a failure
+    /// that stands for no upstream status (`NotFound`, a stale id) is returned.
+    #[test]
+    fn a_failed_gluing_restores_the_operand_and_the_rng() {
+        use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+        let stale = SolidError::NotFound {
+            operation: "test",
+            entity: crate::error::EntityRef::Edge(EdgeId::from_index(9999)),
+        };
+        for (failure, propagates) in [
+            (SolidError::invalid_input("test", "a broken link"), false),
+            (stale, true),
+        ] {
+            let mut k = Kernel::default();
+            let mut b = unit_box(&mut k);
+            let (before, rng, ub) = (fingerprint(&b), k.rng.clone(), k.upstream_ub_passed.clone());
+            let e = b.edge_list()[0];
+            let pairs = [(e, e, OrientType::Same), (e, e, OrientType::Same)];
+            let mut failure = Some(failure);
+            let mut first = true;
+            let r = glue_all_or_none(&mut k, &mut b, &pairs, |k, b, &(e, _, _), _| {
+                if first {
+                    first = false;
+                    b.edge_mut(e)?.tolerance = 7.0;
+                    let _ = k.rng.next_u64();
+                    k.note_upstream_ub("test");
+                    return Ok(());
+                }
+                Err(failure.take().unwrap())
+            });
+            assert_eq!(r.is_err(), propagates, "{r:?}");
+            if !propagates {
+                assert_eq!(r.unwrap(), 0);
+            }
+            assert_eq!(fingerprint(&b), before);
+            assert_eq!(k.rng, rng);
+            assert_eq!(k.upstream_ub_passed, ub);
+        }
+    }
+
+    /// The real `GlueEdgesGeneral` through [`glue_all_or_none`]: two box edges that do not
+    /// share both vertices fail its precondition (an ordinary failure: nothing glued, the
+    /// operand as given), and a stale edge id is returned as an error, the operand again as
+    /// given.
+    #[test]
+    fn glue_edges_general_failures_leave_the_operand_as_given() {
+        use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+        use crate::topology::brep::p7::glue_edges_general;
+        let mut k = Kernel::default();
+        let mut b = unit_box(&mut k);
+        let before = fingerprint(&b);
+        let list = b.edge_list().to_vec();
+        let (e0, far) = (
+            list[0],
+            *list
+                .iter()
+                .find(|&&f| {
+                    let ends = |x| {
+                        let s = crate::topology::edge::start_vertex(&b, x).unwrap();
+                        (s, crate::topology::edge::other_vertex(&b, x, s).unwrap())
+                    };
+                    let ((a, z), (c, d)) = (ends(list[0]), ends(f));
+                    a != c && a != d && z != c && z != d
+                })
+                .unwrap(),
+        );
+        let glue = |k: &mut Kernel,
+                    b: &mut Brep,
+                    &(s, d, o): &GluePair,
+                    env: &mut crate::topology::edge::NotifyEnv<'_>| {
+            glue_edges_general(k, b, Some(s), o, 0.0, true, Some(d), None, env)
+        };
+        let r = glue_all_or_none(&mut k, &mut b, &[(e0, far, OrientType::Same)], glue);
+        assert_eq!(r.unwrap(), 0);
+        assert_eq!(fingerprint(&b), before);
+        let r = glue_all_or_none(
+            &mut k,
+            &mut b,
+            &[(e0, EdgeId::from_index(9999), OrientType::Same)],
+            glue,
+        );
+        assert!(r.is_err(), "{r:?}");
+        assert_eq!(fingerprint(&b), before);
     }
 
     /// A [`TouchingEdge`] for [`copy_pairs`]: edge `e` between vertices 1 and 2 on `faces`
