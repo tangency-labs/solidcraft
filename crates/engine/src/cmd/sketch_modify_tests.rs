@@ -4372,6 +4372,9 @@ fn trim_extend_and_break_refuse_an_offsets_ends_until_its_association_is_broken(
 fn fillet_releases_an_offsets_corners_keeping_its_distance() {
     let mut s = new_sketch();
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    // Fully dimensioned (its first corner is on the origin), so each released line has a known place.
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "type": "length", "value": "40 mm"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "type": "length", "value": "30 mm"}));
     let offset = run(&mut s, "sketch.offset", json!({"curves": ["l1", "l2", "l3", "l4"], "distance": "2 mm", "side": [-5, -5]}));
     let out = ids(&offset["curves"]);
     assert_eq!(out, ["l5", "l6", "l7", "l8"]);
@@ -4389,26 +4392,25 @@ fn fillet_releases_an_offsets_corners_keeping_its_distance() {
         assert!(matches!(sk.curves[ai].kind, CurveKind::Arc { .. }), "{arc} is a trimmed arc");
         assert!((sk.radius(ai).unwrap() - 2.0).abs() < 1e-7);
     }
-    // The released lines still stand the offset's distance outside their sources, and the
-    // distance parameter moves them. The rectangle keeps its sides horizontal and vertical, so
-    // each output's signed outward offset is a coordinate difference: below the bottom (l1),
-    // right of the right side (l2), above the top (l3), left of the left side (l4).
-    let outward = |s: &Session, source: &str, output: &str, axis: fn(Vec2) -> f64, sign: f64| {
+    // The released lines still stand the offset's distance outside the 40 × 30 mm rectangle, and
+    // the distance parameter moves them: the bottom line (l5) below it, the right one (l6) right
+    // of it, the top one (l7) above it, the left one (l8) left of it. A line that flipped inside
+    // would sit at the mirrored coordinate.
+    let at = |s: &Session, output: &str| {
         let sk = sketch(s);
-        let start = |id: &str| match sk.shape(sk.curve_index(id).unwrap()).unwrap() {
+        match sk.shape(sk.curve_index(output).unwrap()).unwrap() {
             solidcraft_sketch::Shape::Line { a, .. } => a,
             other => panic!("{other:?}"),
-        };
-        sign * (axis(start(output)) - axis(start(source)))
+        }
     };
-    let sides: [(&str, fn(Vec2) -> f64, f64); 4] = [("l1", |p| p.y, -1.0), ("l2", |p| p.x, 1.0), ("l3", |p| p.y, 1.0), ("l4", |p| p.x, -1.0)];
-    for (expected, when) in [(2.0, "after the fillet"), (3.0, "after the distance changed")] {
-        if expected == 3.0 {
+    for (d, when) in [(2.0, "after the fillet"), (3.0, "after the distance changed")] {
+        if d == 3.0 {
             run(&mut s, "parameters.change", json!({"name": distance, "expression": "3 mm"}));
         }
-        for ((source, axis, sign), output) in sides.iter().zip(&out) {
-            let d = outward(&s, source, output, *axis, *sign);
-            assert!((d - expected).abs() < 1e-7, "{source} → {output} {when}: {d} outward, {expected} expected");
+        let expected: [(fn(Vec2) -> f64, f64); 4] = [(|p| p.y, -d), (|p| p.x, 40.0 + d), (|p| p.y, 30.0 + d), (|p| p.x, -d)];
+        for ((coordinate, value), output) in expected.iter().zip(&out) {
+            let p = at(&s, output);
+            assert!((coordinate(p) - value).abs() < 1e-7, "{output} {when}: at {p:?}, expected {value}");
         }
     }
 
