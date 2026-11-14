@@ -26,6 +26,20 @@ Updates: WR-588
   that is neither a line nor a B-spline, a weight that is not positive, a coordinate that is
   not finite) takes no cell as outside, as before. Under the same option,
   `Kernel::fixes.face_tight_box_searches_trim`.
+- **Second cause, a blend face's net (not the fork's gap, the port's):** the round's faces
+  are procedural blends (`fillet_round_as_definition`). The port gave the search knots only
+  for a surface with a B-spline box (`has_b_spline_box`), so a procedural blend's cells were
+  halved at their middles. A cell over one of its net's knots then never came within one
+  span, and the monotone test of a rational patch (rule 4) never decided it. Every cell
+  along the trim was divided to the limits, and the large cells left on the stack counted
+  with their greatest values. A cell with no solution also went straight to the loose box
+  of its net over the cell. The fork's `SmProceduralBlend` and `SmBallPatch` are
+  `SmBSplineSurface`s, so its `GetKnots` reads their nets' knots. The fix (`blend_net_slack`):
+  such a face is divided at its net's knots. Each cell is bounded by its net subpatch's
+  control-point hull, raised by the net's certified bound (`|B - S| <= bound`, 0 for a ball
+  patch), and skipped where that is no higher than the box so far (rule 1). A cell with no
+  solution goes on to rule 4 as a B-spline's does, and at the limits counts with that raised
+  hull. The cells are still solved on the face's own surface, not on the net.
 - **Tests:** `trim_cover_of_a_square_tells_cells_outside_the_face` and
   `search_passes_over_cells_outside_the_trim_and_keeps_the_peak` (`query/face/p3.rs`). The
   crowned face, trimmed to `[-10, 10]^2` in `[-20, 20]^2` and rising to 50 at the outer corner,

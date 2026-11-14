@@ -310,14 +310,14 @@ fn ring_segment(s: &mut Session, points: Value, centre: [f64; 2]) {
 }
 
 /// The one body's box from `inspect.measure`, checked against `min` and `max` to 0.05 mm (the
-/// MCP tools' `expect: {bbox}`), with the reply for the message.
-fn assert_box(s: &mut Session, min: [f64; 3], max: [f64; 3]) -> Value {
+/// MCP tools' `expect: {bbox}`), with `case` and the reply for the message.
+fn assert_box(s: &mut Session, case: &str, min: [f64; 3], max: [f64; 3]) -> Value {
     let b = run(s, "inspect.measure", json!({}))["bodies"][0].clone();
     for (i, (lo, hi)) in min.iter().zip(&max).enumerate() {
-        assert!(close(&b["bbox"]["min"][i], *lo, 0.05), "min {i}: want {lo}: {b}");
-        assert!(close(&b["bbox"]["max"][i], *hi, 0.05), "max {i}: want {hi}: {b}");
+        assert!(close(&b["bbox"]["min"][i], *lo, 0.05), "{case}: min {i}: want {lo}: {b}");
+        assert!(close(&b["bbox"]["max"][i], *hi, 0.05), "{case}: max {i}: want {hi}: {b}");
     }
-    assert_eq!(b["closed"], json!(true), "{b}");
+    assert_eq!(b["closed"], json!(true), "{case}: {b}");
     b
 }
 
@@ -334,13 +334,13 @@ fn a_round_on_a_ring_segments_torus_edge_keeps_the_bodys_box() {
         let mut s = Session::default();
         ring_segment(&mut s, json!([[37, 10], [20, 10], [20, 0], [40, 0], [40, 7]]), [37.0, 7.0]);
         let inner = (20.0_f64 * 20.0 - 10.0 * 10.0).sqrt();
-        let before = assert_box(&mut s, [-10.0, inner, 0.0], [10.0, 40.0, 10.0]);
+        let before = assert_box(&mut s, "before the round", [-10.0, inner, 0.0], [10.0, 40.0, 10.0]);
         run(
             &mut s,
             "solid.fillet",
             json!({"edges": [[-10, 37.801, 9.141]], "radius": radius, "body": "Part", "tangent_chain": false, "name": "Round"}),
         );
-        let after = assert_box(&mut s, [-10.0, inner, 0.0], [10.0, 40.0, 10.0]);
+        let after = assert_box(&mut s, &format!("round of radius {radius}"), [-10.0, inner, 0.0], [10.0, 40.0, 10.0]);
         let (v0, v1) = (before["volume_mm3"].as_f64().unwrap(), after["volume_mm3"].as_f64().unwrap());
         assert!(v1 < v0, "radius {radius}: the round removes material: {v0} -> {v1}");
     }
@@ -358,8 +358,8 @@ fn a_round_on_an_arc_walls_edges_keeps_the_bodys_box() {
     for (pick, max_y) in [([-10.0, 40.26, 3.171], 42.0), ([0.0, 42.0, 0.0], rounded)] {
         let mut s = Session::default();
         ring_segment(&mut s, json!([[40, 6], [20, 6], [20, 0], [42, 0]]), [32.0, 0.0]);
-        assert_box(&mut s, [-10.0, inner, 0.0], [10.0, 42.0, 6.0]);
+        assert_box(&mut s, "before the round", [-10.0, inner, 0.0], [10.0, 42.0, 6.0]);
         run(&mut s, "solid.fillet", json!({"edges": [pick], "radius": "1", "body": "Part", "tangent_chain": false, "name": "Round"}));
-        assert_box(&mut s, [-10.0, inner, 0.0], [10.0, max_y, 6.0]);
+        assert_box(&mut s, &format!("round on the edge at {pick:?}"), [-10.0, inner, 0.0], [10.0, max_y, 6.0]);
     }
 }

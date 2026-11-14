@@ -98,7 +98,12 @@
 //!   Not the fork's (#16394): a cell that no box of the face's UV trim curves meets
 //!   (`TrimCover`) and whose middle classifies outside the face is passed over unsolved
 //!   (`cell_outside_face`), so the cells of a surface run on past its face (a blend's) are
-//!   neither divided to the cell limit nor counted with their greatest values there.
+//!   neither divided to the cell limit nor counted with their greatest values there. A
+//!   blend face (procedural blend, ball patch) is divided at its net's knots, as the fork's
+//!   `IsKindOf(SmBSplineSurface)` reads them, and also bounded by its net's subpatch hull
+//!   raised by the net's certified bound (`blend_net_slack`), solved on its own surface;
+//!   the port had no knots for it, so a cell over a knot never came within one span and was
+//!   never monotone, and every cell along its trim was divided to the cell limit.
 //!   The step-off loops keep upstream's bounds (20 rounds in the sector
 //!   classification; its UV fallback doubles the step-off until it leaves the curve
 //!   interval, and stops after [`MAX_UV_STEP_OFF_ROUNDS`] rounds when the curve
@@ -1086,6 +1091,20 @@ fn patch_hull_max(patch: &BSplineSurface, dir: Vec3) -> Option<f64> {
     hull
 }
 
+/// How far from the face's surface the net of a blend surface lies (#16394), for a face
+/// [`face_directed_max`] does not solve on its subpatches but bounds and divides by its
+/// net: a procedural blend's certified bound (`|B - S| <= bound`, its net is no more than
+/// that from its definition), a ball patch's 0 (its net is the surface). `None` for any
+/// other kind (a B-spline's subpatch is its own surface, [`face_directed_max`]'s `by_patch`)
+/// and for a bound that is not finite and non-negative.
+fn blend_net_slack(surface: &Surface) -> Option<f64> {
+    match surface.kind() {
+        SurfaceKind::ProceduralBlend(pb) => Some(pb.bound()).filter(|b| b.is_finite() && *b >= 0.0),
+        SurfaceKind::BallPatch(_) => Some(0.0),
+        _ => None,
+    }
+}
+
 /// The face's B-spline surface over `cell` alone: its exact subpatch there
 /// ([`cell_patch`]), owned by the same face with the same zone tolerance, so a solve over
 /// the cell starts from the cell's own control net (the control-net guesses of the
@@ -1179,6 +1198,12 @@ fn unsolved_cell_top(
 /// with its greatest value, or unsolved with its own bound ([`unsolved_cell_top`]). The cells are an explicit stack (no recursion), taken last
 /// first, as the fork's. `cover` is the face's [`TrimCover`], `None` where rule 5 is not
 /// taken.
+///
+/// A blend face (a procedural blend or ball patch, #16394) is divided at its net's knots
+/// and bounded (1.), decided (4.) and, unsolved at the limits, bounded by its net's subpatch
+/// over the cell, the hull raised by the net's distance from the surface
+/// ([`blend_net_slack`]); its cells are solved on the face's own surface. A cell of it with
+/// no solution goes on to 4. as a B-spline's does, not straight to its loose box.
 fn face_directed_max(
     k: &Kernel,
     lb: &mut LazyBrep<'_>,
@@ -1242,8 +1267,12 @@ fn face_directed_max_with<'b>(
     solve: &mut CellSolve<'_, 'b>,
     outside: &mut CellOutside<'_, 'b>,
 ) -> Result<f64> {
-    // (`IsKindOf(SmBSplineSurface_TYPE)`: `GetKnots` through `GetOrCreateGwNurbPointer`)
-    let (knots_u, knots_v) = if has_b_spline_box(surface) {
+    // (#16394) a blend surface's net: its knots divide the cells and its subpatches bound
+    // and decide them as a B-spline's do, the face's own surface still solved
+    let net_slack = blend_net_slack(surface);
+    // (`IsKindOf(SmBSplineSurface_TYPE)`: `GetKnots` through `GetOrCreateGwNurbPointer`; the
+    // fork's `SmProceduralBlend` and `SmBallPatch` are `SmBSplineSurface`s, their nets' knots)
+    let (knots_u, knots_v) = if has_b_spline_box(surface) || net_slack.is_some() {
         (
             surface.knots_with_nurb(k, SurfParamType::U, None)?.0,
             surface.knots_with_nurb(k, SurfParamType::V, None)?.0,
@@ -1264,12 +1293,18 @@ fn face_directed_max_with<'b>(
     let mut divided = 0usize;
     while let Some((cell, depth)) = cells.pop() {
         // The cell's subpatch and the greatest `P . dir` of its control points, which no
-        // point of the cell exceeds (each is a convex combination of them).
-        let patch = if by_patch {
-            cell_patch(k, surface, &cell)?
-                .and_then(|patch| patch_hull_max(&patch, dir).map(|hull| (patch, hull)))
-        } else {
-            None
+        // point of the cell exceeds (each is a convex combination of them). A blend's: its
+        // net's, raised by how far the net may lie from the surface (#16394).
+        let patch = match (by_patch, net_slack) {
+            (true, _) => cell_patch(k, surface, &cell)?
+                .and_then(|patch| patch_hull_max(&patch, dir).map(|hull| (patch, hull))),
+            (false, Some(slack)) => cell_patch(k, surface, &cell)?.and_then(|patch| {
+                patch_hull_max(&patch, dir)
+                    .map(|hull| hull + slack)
+                    .filter(|top| top.is_finite())
+                    .map(|top| (patch, top))
+            }),
+            (false, None) => None,
         };
         // 1., from the control points: nothing in the cell is higher than `best`.
         if patch
@@ -1286,8 +1321,11 @@ fn face_directed_max_with<'b>(
         if outside(lb, &cell)? {
             continue;
         }
+        // (a blend is solved on its own surface, not on its net, which lies only within its
+        // bound of it)
         let sub = patch
             .as_ref()
+            .filter(|_| by_patch)
             .map(|(patch, _)| cell_sub_surface(surface, patch.clone()));
         let solve_on = sub.as_ref().unwrap_or(surface);
         let top = solve(lb, solve_on, &cell, dir)?;
