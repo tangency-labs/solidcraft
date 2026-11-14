@@ -255,3 +255,51 @@ fn partial_tori_round_trip_on_their_control_circles() {
         }
     }
 }
+
+#[test]
+fn horn_tori_round_trip_from_a_collapsed_boundary_sweep() {
+    let k = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let (x, y, z) = tilted();
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    for origin in [Vec3::ZERO, Vec3::new(600.0, -480.0, 640.0)] {
+        for sign in [-1.0, 1.0] {
+            for swap in [false, true] {
+                // The tube has centre radius 8 and radius 8. Its first point is
+                // on the axis, so the entire first sweep boundary is one point.
+                let rows: Vec<Vec<CPoint>> = [(1.0, 0.0, 1.0), (1.0, 1.0, w), (0.0, 1.0, 1.0)]
+                    .into_iter()
+                    .map(|(a, b, wu)| {
+                        [(0.0, 0.0, 1.0), (0.0, 8.0, w), (8.0, 8.0, 1.0)]
+                            .into_iter()
+                            .map(|(radius, height, wv)| {
+                                let p = origin + (x * a + y * b) * radius + z * (sign * height);
+                                let weight = wu * wv;
+                                CPoint::new(p.x * weight, p.y * weight, p.z * weight, weight)
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let net = if swap {
+                    (0..3)
+                        .map(|j| (0..3).map(|i| rows[i][j]).collect())
+                        .collect()
+                } else {
+                    rows
+                };
+                let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+                let nurb =
+                    solidcore::nurbs::srf_basic::Surface::new(net, 2, 2, knots.clone(), knots)
+                        .unwrap();
+                round_trips(
+                    &k,
+                    SupportKind::Torus,
+                    &BSplineSurface::from_nurb(nurb, true),
+                    origin.length() + 16.0,
+                );
+            }
+        }
+    }
+}

@@ -1830,12 +1830,12 @@ impl AnalyticSupport {
         }
     }
 
-    /// A torus's circles from the first quadratic control triangles, rather than a fit
+    /// A torus's circles from its quadratic boundary control triangles, rather than a fit
     /// through evaluated points. The sweep circle fixes the axis; the meridian circle
     /// fixes the tube centre and radius together (The NURBS Book, sections 7.3 and 7.5).
     fn torus_from_net(placement: Axis2Placement, net: &[Vec<Vec3>]) -> Option<Self> {
         let at = |i: usize, j: usize| net.get(i).and_then(|r| r.get(j)).copied();
-        let circle = |p0: Vec3, p1: Vec3, p2: Vec3| -> Option<(Vec3, f64, Vec3)> {
+        let circle = |p0: Vec3, p1: Vec3, p2: Vec3| -> Option<(Vec3, f64, Vec3, f64)> {
             let leg = p1 - p0;
             let chord = p2 - p0;
             let tangent = leg.unitize().ok()?;
@@ -1843,16 +1843,35 @@ impl AnalyticSupport {
             let normal = leg.cross(chord).unitize().ok()?;
             let radius = leg.length() * tangent.dot(across) / tangent.cross(across).length();
             let centre = p0 + normal.cross(tangent) * radius;
-            (radius.is_finite() && radius > 0.0).then_some((centre, radius, normal))
+            (radius.is_finite() && radius > 0.0).then_some((
+                centre,
+                radius,
+                normal,
+                leg.cross(chord).length(),
+            ))
         };
-        let a = circle(at(0, 0)?, at(1, 0)?, at(2, 0)?)?;
-        let b = circle(at(0, 0)?, at(0, 1)?, at(0, 2)?)?;
-        let (sweep, tube) =
-            if a.2.dot(placement.z_axis()).abs() >= b.2.dot(placement.z_axis()).abs() {
-                (a, b)
+        let boundary = |along_u: bool, fixed: usize| {
+            if along_u {
+                circle(at(0, fixed)?, at(1, fixed)?, at(2, fixed)?)
             } else {
-                (b, a)
-            };
+                circle(at(fixed, 0)?, at(fixed, 1)?, at(fixed, 2)?)
+            }
+        };
+        // Either boundary sweep can collapse on the axis. Use the boundary with
+        // the larger control triangle to recover each direction's plane robustly.
+        let strongest = |along_u| {
+            [0, 2]
+                .into_iter()
+                .filter_map(|fixed| boundary(along_u, fixed))
+                .max_by(|a, b| a.3.total_cmp(&b.3))
+        };
+        let a = strongest(true)?;
+        let b = strongest(false)?;
+        let sweep_along_u = a.2.dot(placement.z_axis()).abs() >= b.2.dot(placement.z_axis()).abs();
+        let sweep = if sweep_along_u { a } else { b };
+        // Keep the meridian at the start of the sweep: its centre defines the
+        // support's radial direction, including when its first point is on-axis.
+        let tube = boundary(!sweep_along_u, 0)?;
         let mut axis = sweep.2;
         if axis.dot(placement.z_axis()) < 0.0 {
             axis = -axis;
