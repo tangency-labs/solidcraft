@@ -64,6 +64,10 @@ pub struct CellGridSpec {
     pub anchor: Vec2,
     /// What happens to a cell the field's edge crosses.
     pub clip: Clip,
+    /// The least clearance from a cell's outline to every edge of the field (0: it may touch one),
+    /// with `Clip::Whole`.
+    #[serde(default)]
+    pub margin: f64,
 }
 
 /// How a cell's opening came about.
