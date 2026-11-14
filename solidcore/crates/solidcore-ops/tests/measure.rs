@@ -586,7 +586,7 @@ fn a_fired_ray_meets_the_exact_face_edge_or_nothing() {
         .unwrap();
     assert!(matches!(hit.entity, RayEntity::Face(_)), "{hit:?}");
     assert!(
-        near(20.0 - hit.distance, 3.0 + 3f64.sqrt(), 1e-9),
+        near(20.0 - hit.distance, 3.0 + 1.732_050_807_568_877_2, 1e-9),
         "{hit:?}"
     );
 }

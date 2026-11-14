@@ -768,6 +768,10 @@ impl Body {
         origin: [f64; 3],
         direction: [f64; 3],
     ) -> Result<Option<RayHit>> {
+        /// Where kernel entity `id` stands in the record's `list`.
+        fn at<T: PartialEq>(list: &[T], id: &T) -> Result<usize> {
+            list.iter().position(|x| x == id).ok_or(Error::Argument)
+        }
         let (o, d) = (point(origin)?, point(direction)?);
         let d = Vec3::new(d.x, d.y, d.z);
         let hit = with_body("fire_ray", self, |k, b| {
@@ -796,13 +800,10 @@ impl Body {
         let Some((entity, distance)) = hit else {
             return Ok(None);
         };
-        fn at<T: PartialEq>(list: &[T], id: T) -> Result<usize> {
-            list.iter().position(|x| *x == id).ok_or(Error::Argument)
-        }
         let entity = match entity {
-            EntityRef::Face(f) => RayEntity::Face(at(&order.faces, f)?),
-            EntityRef::Edge(e) => RayEntity::Edge(at(&order.edges, e)?),
-            EntityRef::Vertex(v) => RayEntity::Vertex(at(&order.vertices, v)?),
+            EntityRef::Face(f) => RayEntity::Face(at(&order.faces, &f)?),
+            EntityRef::Edge(e) => RayEntity::Edge(at(&order.edges, &e)?),
+            EntityRef::Vertex(v) => RayEntity::Vertex(at(&order.vertices, &v)?),
             _ => return Err(Error::Argument),
         };
         Ok(Some(RayHit { entity, distance }))
