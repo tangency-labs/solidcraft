@@ -13,7 +13,7 @@ use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
 use crate::design_tab_prefs::DesignTabPrefs;
-use crate::design_views::{DesignView, ViewKind, ViewSet};
+use solidcraft_views::{DesignView, ViewKind, ViewSet};
 use crate::ui_kit;
 
 /// Continue transient shot queues without adopting their document or view into the active tab.
@@ -1929,7 +1929,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             view_menu: &crate::design_view_ui::VIEW_MENU,
             view_right_row: crate::design_view_ui::VIEW_CLOSE_RIGHT,
             view_rename: view_edit.as_mut().zip(view_place).map(|(r, place)| {
-                (place, crate::app_bar::TabRename { text: &mut r.text, focused: &mut r.focused, max: crate::design_views::MAX_NAME })
+                (place, crate::app_bar::TabRename { text: &mut r.text, focused: &mut r.focused, max: solidcraft_views::MAX_NAME })
             }),
             plus_menu: &plus_menu,
             switcher_menu: &SWITCHER_MENU,
@@ -3721,12 +3721,12 @@ mod tests {
         h.frames(2);
         let sketch = h.app.session.active_sketch.unwrap();
         let active = h.app.docs.views.active().clone();
-        assert_eq!((active.kind, active.subject), (crate::design_views::ViewKind::Sketch, Some(sketch.to_string())));
+        assert_eq!((active.kind, active.subject), (solidcraft_views::ViewKind::Sketch, Some(sketch.to_string())));
         assert_eq!(h.app.docs.views.len(), before + 1);
         h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.docs.views.active().kind, crate::design_views::ViewKind::Model);
+        assert_eq!(h.app.docs.views.active().kind, solidcraft_views::ViewKind::Model);
         assert_eq!(h.app.docs.views.len(), before + 1, "the sketch's view stays");
         assert!(view_activate(&mut h.app, active.id));
         assert_eq!(h.app.session.active_sketch, Some(sketch), "showing it edits the sketch again");
