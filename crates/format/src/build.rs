@@ -77,11 +77,12 @@ fn family_lists(family: &Family, root: &Path, out: &mut String, mods: &mut Strin
     Ok(())
 }
 
-/// The `Part`s of the change files in `dir`, in file-name order, and a module for each.
+/// The `Part`s of the change files in `dir`, in name order, and a module for each. The names are
+/// sorted without `.rs`, so `x` comes before `x-y` (with it, `-` sorts before the `.`).
 fn parts(dir: &Path, prefix: &str, out: &mut String, mods: &mut String) -> Result<(), String> {
     let Ok(entries) = std::fs::read_dir(dir) else { return Ok(()) };
     let mut files: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "rs")).collect();
-    files.sort();
+    files.sort_by(|a, b| a.file_stem().cmp(&b.file_stem()));
     for path in files {
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
