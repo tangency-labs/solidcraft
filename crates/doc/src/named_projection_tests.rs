@@ -630,3 +630,52 @@ fn mesh_body_has_no_vertex_names() {
     );
     assert!(crate::naming::vertex_names(&mb).is_empty());
 }
+
+/// A chamfer or fillet on a round edge saved by 0.30.1, whose kernel split the cylinder's side
+/// into numbered pieces, names the edge `F2:side:c1#2|F2:top`; the side is one face now (#13499).
+/// The edge is found again, and chamfers like the one saved with the whole name; a pick off the
+/// edge is still lost.
+#[test]
+fn a_chamfer_on_an_edge_of_a_numbered_piece_of_a_round_face_is_found_again() {
+    let doc = |name: &str, at: [f64; 3]| Document {
+        features: serde_json::from_value(serde_json::json!([
+            {
+                "id": 1, "name": "Sketch1", "type": "sketch", "plane": {"name": "XY", "type": "origin"},
+                "sketch": {
+                    "points": [{"fixed": true, "id": "origin", "pos": [0., 0.]}, {"fixed": false, "id": "c1.center", "pos": [0., 0.]}],
+                    "curves": [{"c": 1, "construction": false, "id": "c1", "r": 10., "type": "circle"}],
+                    "constraints": [{"id": "k1", "p": 0, "q": 1, "type": "coincident"}],
+                    "counters": {"k": 1, "l": 0, "c": 1}
+                }
+            },
+            {
+                "id": 2, "name": "Extrude1", "type": "extrude", "body_names": ["Body1"],
+                "extent": {"convention": "total_distance", "direction": "positive", "distance": "5"},
+                "operation": "new_body", "profiles": {"loops": [["c1"]], "type": "curves"}, "sketch": 1
+            },
+            {
+                "id": 3, "name": "Chamfer1", "type": "chamfer", "distance": "1", "suppressed": false,
+                "edge_names": [name], "edges": [at]
+            }
+        ]))
+        .unwrap(),
+        ..Document::default()
+    };
+    let run = |doc: Document| {
+        let doc = crate::format::read(&doc.to_json()).unwrap();
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        model
+    };
+    let volume = |model: &crate::Model| model.state().body("Body1").map(|b| b.body.volume_at(1e-3)).unwrap().unwrap();
+    let whole = run(doc("F2:side:c1|F2:top", [10., 0., 5.]));
+    assert!(whole.result(3).unwrap().error.is_none(), "{:?}", whole.result(3));
+    for piece in ["F2:side:c1#1|F2:top", "F2:side:c1#2|F2:top"] {
+        let model = run(doc(piece, [10., 0., 5.]));
+        assert!(model.result(3).unwrap().error.is_none(), "{piece}: {:?}", model.result(3));
+        assert!((volume(&model) - volume(&whole)).abs() < 1e-6, "{piece}: the same chamfer as the whole name");
+    }
+    // A pick that is not on the edge is still lost.
+    let off = run(doc("F2:side:c1#2|F2:top", [10., 0., 2.]));
+    assert!(off.result(3).unwrap().error.is_some());
+}

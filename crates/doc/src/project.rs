@@ -976,7 +976,7 @@ fn lost(reference: &str) -> DocError {
 /// finds an edge.
 fn locate_named_edge(st: &ModelState, kind: LinkKind, body: &str, name: &str, at: Vec3) -> Option<(String, crate::naming::EdgeHit)> {
     let locate = |b: &crate::ModelBody| match kind {
-        LinkKind::Project => crate::name_lookup::locate_projected_edge(b, name, at),
+        LinkKind::Project => crate::name_lookup::locate_edge_numbered(b, name, at),
         _ => crate::naming::locate_edge(b, name, at),
     };
     let hit = |b: &crate::ModelBody| locate(b).ok().map(|hit| (b.name.clone(), hit));

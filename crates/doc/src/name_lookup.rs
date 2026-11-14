@@ -113,20 +113,20 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
     }
 }
 
-/// Find a saved Sketch Project edge in its body. Older designs can name the edge between
-/// numbered pieces of faces that now evaluate whole (`F4:side:l6#2|F4:side:l7#2`, now
-/// `F4:side:l6|F4:side:l7`). Recover it only when the faces it separates are whole, the saved
-/// point lies on it, and its name is exact. Other edge references still require the stored
-/// name as picked.
-pub(crate) fn locate_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
-    locate_edge(b, name, near).or_else(|miss| recover_numbered_projected_edge(b, name, near).ok_or(miss))
+/// [`locate_edge`], and for an edge of a design saved by 0.30.1, whose kernel split a round face
+/// into numbered pieces (`F2:side:c1#2|F2:top`, `F4:side:l6#2|F4:side:l7#2`), the edge between
+/// the faces that are whole now (`F2:side:c1|F2:top`): Sketch Project's edges (#13164) and
+/// chamfer and fillet edges (#13499). That is taken only where the saved pick still lies on the
+/// edge, its name is exact, and no other piece of either face is left to be the one picked.
+pub(crate) fn locate_edge_numbered(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
+    locate_edge(b, name, near).or_else(|miss| recover_numbered_edge(b, name, near).ok_or(miss))
 }
 
-fn recover_numbered_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+fn recover_numbered_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
     if b.body.is_mesh() || !near.is_finite() {
         return None;
     }
-    // Each face of the name without its piece number (`F4:side:l6#2` is `F4:side:l6`).
+    // Each face of the name without its piece number (`F2:side:c1#2` is `F2:side:c1`).
     let mut numbered = false;
     let whole: Vec<&str> = name
         .split('|')
