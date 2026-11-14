@@ -4268,6 +4268,19 @@ fn union_all(operands: &[&Traced]) -> Result<Traced> {
     Ok(Traced::step(kernel::union_all(&bodies)?, operands))
 }
 
+/// The union of `operands` when no two of them meet or touch: the bodies side by side as one body
+/// of several pieces, keeping their lineage, with no intersection work. They are apart when
+/// their exact boxes, each grown by twice its body's tolerance, do not meet
+/// ([`kernel::union_apart`]). `None` when that cannot be shown (two boxes meet, a mesh body, a
+/// box that cannot be measured): the caller runs the kernel's union.
+fn union_all_apart(operands: &[&Traced]) -> Option<Traced> {
+    let bodies: Vec<Body> = operands.iter().map(|t| t.body.clone()).collect();
+    let one = kernel::union_apart(&bodies).ok().flatten()?;
+    #[cfg(test)]
+    cost_tests::count(|c| c.joined_apart += 1);
+    Some(Traced::step(one, operands))
+}
+
 /// After a cut handled some sheet bodies as flat machining, apply it to the other targets.
 fn apply_beside_sheet_cut(
     doc: &Document,
@@ -4805,7 +4818,12 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
         let into_keep = tool_frame(keep);
         let tools = tools.iter().map(|tool| tool_in(tool, into_keep)).collect::<Result<Vec<_>>>()?;
         let operands: Vec<&Traced> = std::iter::once(&base).chain(&tools).collect();
-        let acc = union_all(&operands)?;
+        // Bodies that are all apart need no intersection work: they are one body of several
+        // pieces as they stand (#3455: joining 64 separate pegs took the kernel's union 4.5 s).
+        let acc = match union_all_apart(&operands) {
+            Some(acc) => acc,
+            None => union_all(&operands)?,
+        };
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
             *mb = mb.remade(acc);
         }
