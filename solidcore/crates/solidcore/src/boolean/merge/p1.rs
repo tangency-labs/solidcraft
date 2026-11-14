@@ -46,7 +46,9 @@
 //! `CleanupRelations::kept_edges`, and those whose faces are all in `kept_faces`, stay.
 //! With that keep (WR-602, the fork's tangency-labs/smlib@cac11ea, the default since its
 //! flag was retired): of those, an edge with one face on both sides (a slit) is checked
-//! all the same, and the kept-faces test needs two faces.
+//! all the same, and the kept-faces test needs two faces. Not the fork's (#15768): a face a
+//! merge makes of a kept face is kept, whichever of the two ids it keeps, and the fillet
+//! passes as kept edges only the input edges it left whole (`kept_edges`).
 //! Opt-in `Kernel::fixes.cover_wraps_across_closed_seam` (WR-599, the fork's
 //! tangency-labs/smlib@16bf1cb): after each face merge `boolean_post_process` runs
 //! `HasSeamProblem` on the merged face and `SplitAtSeam` when a seam is crossed or missing.
@@ -58,6 +60,9 @@
 //! Not upstream (#3090, WR-756): [`place_vertices_on_face_corners`] (after the boolean's
 //! cleanup, a vertex more than the intersection tolerance off one of its faces moves to the
 //! corner its faces define, within half its tolerance and only when that cures the gap).
+//! Not upstream (#15718): once `boolean_post_process` has deleted its topological
+//! vertices, each surviving edge on a line covers the certified gaps the join left
+//! (`topology::brep::p5::cover_joined_line_gaps`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -280,12 +285,9 @@ pub fn faces_coincide(
     ) else {
         return Err(SolidError::entity_missing(OP, "a face has no surface"));
     };
-    let tol = crate::topology::face::p2::tolerance(brep, face)?
-        .max(crate::topology::face::p2::tolerance(other, other_face)?);
-    // The two faces together: where the surfaces must agree.
-    let region = crate::query::face::p1::calculate_bounding_box(k, brep, face, false)?.union(
-        &crate::query::face::p1::calculate_bounding_box(k, other, other_face, false)?,
-    );
+    // The larger face tolerance, and the two faces together: where the surfaces must agree.
+    let (tol, region) =
+        crate::query::face::p1::surface_comparison_extent(k, brep, face, other, other_face)?;
     // Two quadrics of one kind part where the sector cannot see: decided from their
     // definitions. The sector decides the rest: two planes (their gap is what its step-off
     // measures), two different kinds (tangent, they can stay within the tolerance over a
@@ -530,7 +532,8 @@ pub struct CleanupRelations {
     pub mates: Relations,
     /// WR-459 (`Kernel::fixes.fillet_cleanup_keeps_target_faces`): the edges and faces
     /// the clean-up leaves alone (the fork's `m_sPostProcessKeptEdges`/`Faces`: a
-    /// fillet's target), and any edge between two kept faces. Empty otherwise.
+    /// fillet's target, the input edges it left whole), and any edge between two kept
+    /// faces, or faces merged from them. Empty otherwise.
     pub kept_edges: BTreeSet<EdgeId>,
     /// See [`CleanupRelations::kept_edges`].
     pub kept_faces: BTreeSet<FaceId>,
@@ -640,6 +643,9 @@ pub(crate) fn boolean_post_process_with_notifications(
         BTreeSet::new()
     };
     let mut left_inside_face: BTreeSet<EdgeId> = BTreeSet::new();
+    // WR-459: the input's faces, and each face a merge below makes of one of them: the
+    // merged face is that input face continued, whichever of the two ids it keeps.
+    let mut kept_faces = relations.kept_faces.clone();
     let mut next = 0;
     while let Some(&e) = edges.get(next) {
         next += 1;
@@ -657,9 +663,9 @@ pub(crate) fn boolean_post_process_with_notifications(
         if relations.kept_edges.contains(&e) && edge::faces(brep, e, None)?.len() != 1 {
             continue;
         }
-        if !relations.kept_faces.is_empty() {
+        if !kept_faces.is_empty() {
             let faces = edge::faces(brep, e, None)?;
-            if faces.len() >= 2 && faces.iter().all(|f| relations.kept_faces.contains(f)) {
+            if faces.len() >= 2 && faces.iter().all(|f| kept_faces.contains(f)) {
                 continue;
             }
         }
@@ -720,6 +726,9 @@ pub(crate) fn boolean_post_process_with_notifications(
         } else {
             f0
         };
+        if kept_faces.contains(&f0) || kept_faces.contains(&f1) {
+            kept_faces.insert(keep);
+        }
         // The native output starts as a default SmExtent2d and is written back
         // unconditionally, even if IsTopological left it untouched.
         let domain = topological.merged_face_domain.unwrap_or_default();
@@ -749,6 +758,9 @@ pub(crate) fn boolean_post_process_with_notifications(
             vertices.push(v);
         }
     }
+    // Not upstream (#15718): the edges that took over a deleted vertex's two edges, whose
+    // gaps are covered once every deletion is done (`cover_joined_line_gaps`).
+    let mut joined = Vec::new();
     for v in vertices {
         if !check_all_edges && relations.mates.vertices.other(v).is_none() {
             continue;
@@ -782,8 +794,8 @@ pub(crate) fn boolean_post_process_with_notifications(
                     brep.geometry_owner_key(EntityRef::Edge(e)),
                 ));
             }
-            ignore_failure(
-                crate::topology::brep::p5::delete_topological_vertex_with_notifications(
+            if let Some(survivor) = ignore_failure(
+                crate::topology::brep::p5::delete_topological_vertex_joining(
                     k,
                     brep,
                     editing,
@@ -791,7 +803,9 @@ pub(crate) fn boolean_post_process_with_notifications(
                     None,
                     notifications.as_deref_mut(),
                 ),
-            )?;
+            )? {
+                joined.push(survivor);
+            }
             for (e, owner, proven) in owners {
                 if !brep.edge_list().contains(&e) {
                     continue;
@@ -808,6 +822,9 @@ pub(crate) fn boolean_post_process_with_notifications(
                 }
             }
         }
+    }
+    for e in joined {
+        crate::topology::brep::p5::cover_joined_line_gaps(k, brep, e)?;
     }
     // Combine a wire shell with a faceuse shell when the B-rep has just those two
     // and they share a mated vertex.

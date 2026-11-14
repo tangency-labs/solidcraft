@@ -161,6 +161,7 @@ use super::tay::{
 };
 use super::taylor_model::Tm;
 use crate::error::{Result, SolidError};
+use crate::geom::krawczyk::{contraction, k_operator};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::surface::Surface;
@@ -806,10 +807,6 @@ pub struct Enclosure {
 
 fn ivl_at(x: &[Ivl; 4], i: usize) -> Ivl {
     x.get(i).copied().unwrap_or(IZ)
-}
-
-fn f_at(x: &[f64; 4], i: usize) -> f64 {
-    x.get(i).copied().unwrap_or(f64::NAN)
 }
 
 /// The system over the partials `p` (`sSys` with `apP` at `asP`).
@@ -1961,30 +1958,8 @@ fn enclose_over_cells(
         );
         let jm = jac.map(|row| row.map(Ivl::mid));
         y = gn_try!(inverse4(&jm), Inner::Unproved);
-        q = 0.0;
-        for (i, (yi, ci)) in y.iter().zip(cm.iter_mut()).enumerate() {
-            let mut row = 0.0_f64;
-            for (j, cij) in ci.iter_mut().enumerate() {
-                let mut c = Ivl::from(if i == j { 1.0 } else { 0.0 });
-                for (&yik, jk) in yi.iter().zip(&jac) {
-                    c = c - Ivl::from(yik) * jk.get(j).copied().unwrap_or(IZ);
-                }
-                *cij = c;
-                row = round_up(row + c.mag());
-            }
-            q = cmax(q, row);
-        }
-        let mut kk = [IZ; 4];
-        for (i, ((yi, ci), ki)) in y.iter().zip(&cm).zip(kk.iter_mut()).enumerate() {
-            let mut k = Ivl::from(f_at(&xm, i));
-            for (&yij, gj) in yi.iter().zip(&sg) {
-                k = k - Ivl::from(yij) * gj.at(0, 0);
-            }
-            for (j, &cij) in ci.iter().enumerate() {
-                k = k + cij * (ivl_at(&bx_, j) - Ivl::from(f_at(&xm, j)));
-            }
-            *ki = k;
-        }
+        (cm, q) = contraction(&y, &jac);
+        let kk = k_operator(&xm, &y, &sg.each_ref().map(|g| g.at(0, 0)), &cm, &bx_);
         let verdict = classify_k(&kk, &bx_);
         let inside = q < 1.0 && verdict == KVerdict::Inside;
         if inside {
@@ -2081,34 +2056,15 @@ fn enclose_over_cells(
         let Ok(yc) = inverse4(&jac.map(|row| row.map(Ivl::mid))) else {
             break;
         };
-        let mut cc = [[IZ; 4]; 4];
-        let mut qc = 0.0_f64;
-        for (i, (yi, ci)) in yc.iter().zip(cc.iter_mut()).enumerate() {
-            let mut row = 0.0_f64;
-            for (j, cij) in ci.iter_mut().enumerate() {
-                let mut c = Ivl::from(if i == j { 1.0 } else { 0.0 });
-                for (&yik, jk) in yi.iter().zip(&jac) {
-                    c = c - Ivl::from(yik) * jk.get(j).copied().unwrap_or(IZ);
-                }
-                *cij = c;
-                row = round_up(row + c.mag());
-            }
-            qc = cmax(qc, row);
-        }
+        let (cc, qc) = contraction(&yc, &jac);
         let contracts = qc < 1.0;
         if !contracts {
             break;
         }
         let mut next = bx_;
         let mut empty = false;
-        for (i, ((yi, ci), xi)) in yc.iter().zip(&cc).zip(next.iter_mut()).enumerate() {
-            let mut kv = Ivl::from(f_at(&xc, i));
-            for (&yij, gj) in yi.iter().zip(&sgc) {
-                kv = kv - Ivl::from(yij) * gj.at(0, 0);
-            }
-            for (j, &cij) in ci.iter().enumerate() {
-                kv = kv + cij * (ivl_at(&bx_, j) - Ivl::from(f_at(&xc, j)));
-            }
+        let kc = k_operator(&xc, &yc, &sgc.each_ref().map(|g| g.at(0, 0)), &cc, &bx_);
+        for (xi, kv) in next.iter_mut().zip(kc) {
             let lo = cmax(xi.lo, kv.lo);
             let hi = cmin(xi.hi, kv.hi);
             let holds = lo <= hi;

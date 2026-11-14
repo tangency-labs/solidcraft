@@ -228,7 +228,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SLOT_OVERALL_CONTRACT)
         .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
         .params(concat!("p0, p1: overall ends, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
-    CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
+    CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", crate::checked!("sketch.dimension", dimension))
         .at("SKETCH", "CREATE")
         .icon("dimension")
@@ -372,13 +372,13 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("sketch.chain", "Chain", crate::checked!("sketch.chain", chain_cmd)).icon("chain")
         .enabled(in_sketch)
-        .noundo()
+        .noundo().read_only()
         .contract(&CHAIN_CONTRACT)
         .output(output_schema_for::<ChainResult>)
         .params("curve: id: the curves joined to it end to end (what a double-click selects)"),
     CommandSpec::new("sketch.solve", "Solve Sketch", crate::checked!("sketch.solve", solve_cmd)).icon("compute")
         .enabled(in_sketch)
-        .noundo()
+        .noundo().read_only()
         .contract(&SOLVE_CONTRACT)
         .output(output_schema_for::<SolveResult>)
         .params("reports the solver status and degrees of freedom"),
@@ -1607,9 +1607,10 @@ fn rect_result(sk_out: (Vec<String>, Vec<String>), (sides, corners): (RectSides,
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-/// A rectangle corner: `[x, y]` of numbers, or with a coordinate typed as an expression (as a
-/// `sketch.line` point is): where it is now and the expressions that place it.
-fn corner_arg(doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str) -> Result<(Vec2, PointExprs)> {
+/// A rectangle corner (or an ellipse's centre and major end): `[x, y]` of numbers, or with a
+/// coordinate typed as an expression (as a `sketch.line` point is): where it is now and the
+/// expressions that place it.
+pub(super) fn corner_arg(doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str) -> Result<(Vec2, PointExprs)> {
     let v = p.get(k).ok_or_else(|| bad(cmd, format!("`{k}` must be a point [x, y]")))?;
     match expr_point(doc, v, cmd)? {
         Some((at, exprs)) => Ok((at, exprs.unwrap_or_default())),
@@ -1618,7 +1619,7 @@ fn corner_arg(doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str) -> 
 }
 
 /// Holds sketch point `i` where `exprs` place it, when it has any (see [`add_placed_point`]).
-fn place_point(sk: &mut Sketch, i: Option<&usize>, exprs: PointExprs) {
+pub(super) fn place_point(sk: &mut Sketch, i: Option<&usize>, exprs: PointExprs) {
     if exprs.x.is_none() && exprs.y.is_none() {
         return;
     }
@@ -1830,14 +1831,22 @@ fn circle_size(s: &Session, p: &Value, cmd: &str) -> Result<(f64, Option<(String
     if !p.get(key).is_some_and(Value::is_string) {
         return Ok((radius_arg(p, cmd)?, None));
     }
-    let e = s.doc.with_design_unit(req_expr(cmd, p, key)?.as_str(), Kind::Length);
-    let v = s.doc.eval(&e, Kind::Length).map_err(|e| bad(cmd, format!("{key}: {e}")))?;
+    let (v, e) = length_expr(s, p, key, cmd)?;
     let r = if key == "diameter" { v / 2.0 } else { v };
     if !(r > 1e-9 && r < 1e8) {
         return Err(bad(cmd, "radius must be positive"));
     }
+    Ok((r, e.map(|e| (e, key == "diameter"))))
+}
+
+/// A length `key` typed as an expression over the design's parameters: what it comes to, and
+/// the expression when it names a parameter (then a dimension driven by them). A bare number
+/// reads in the design's unit, and an expression naming no parameter is just the number.
+pub(super) fn length_expr(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<(f64, Option<String>)> {
+    let e = s.doc.with_design_unit(req_expr(cmd, p, key)?.as_str(), Kind::Length);
+    let v = s.doc.eval(&e, Kind::Length).map_err(|e| bad(cmd, format!("{key}: {e}")))?;
     let driven = !solidcraft_doc::expr::references(&e).is_empty();
-    Ok((r, driven.then_some((e, key == "diameter"))))
+    Ok((v, driven.then_some(e)))
 }
 
 fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2179,11 +2188,12 @@ fn slot_overall(s: &mut Session, p: &Value) -> Result<Value> {
 fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.point";
     let id = named_id(cmd, str_(p, "id"))?;
-    // A point snapped while drawing (`"mid:<line>"`, `"on:<curve>:x,y"`, a model vertex or edge):
-    // the snap makes it, held by its constraint, as it does for a line's end. Taken as bare
-    // coordinates it was free to move off the midpoint it was put on (#4691).
+    // A point snapped while drawing (`"mid:<line>"`, `"on:<curve>:x,y"`, `"x:<a>+<b>:x,y"`, a
+    // model vertex or edge): the snap makes it, held by its constraint, as it does for a line's
+    // end. Taken as bare coordinates it was free to move off the midpoint or crossing it was put
+    // on (#4691, #15387).
     let snapped = p.get("point").is_some_and(|v| {
-        v.as_str().is_some_and(|t| ["mid:", "on:", "vertex:"].iter().any(|k| t.starts_with(k)))
+        v.as_str().is_some_and(|t| ["mid:", "on:", "vertex:", "x:"].iter().any(|k| t.starts_with(k)))
             || v.get("vertex").is_some()
             || v.get("on_edge").is_some()
     });
@@ -2205,7 +2215,7 @@ fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(
                 cmd,
                 format!(
-                    "`point` {given} is not a snap it takes: \"mid:<line>\", \"on:<curve>:x,y\", \"vertex:x,y,z\", {{vertex: [x,y,z]}} or {{on_edge: [x,y,z]}}"
+                    "`point` {given} is not a snap it takes: \"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\", {{vertex: [x,y,z]}} or {{on_edge: [x,y,z]}}"
                 ),
             ));
         };

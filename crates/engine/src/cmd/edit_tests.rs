@@ -648,6 +648,56 @@ fn timeline_folders_are_command_backed_saved_undoable_and_follow_feature_ids() {
     assert!(s.doc.timeline_groups.is_empty());
 }
 
+/// #14884: deleting the last feature behind the rollback marker leaves the marker at the end of
+/// the history. Nothing is rolled back then, but the commands that move bodies, features and
+/// placements into a component still refused as if it were. While a feature is still behind the
+/// marker, they keep refusing.
+#[test]
+fn deleting_the_last_feature_behind_the_marker_lets_things_move_into_a_component() {
+    for command in ["component.from_bodies", "component.move_bodies", "component.move_features", "browser.reparent", "occurrence.reparent"] {
+        let mut s = Session::default();
+        let part = run(&mut s, "component.create", json!({"name": "Part"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let other = run(&mut s, "component.create", json!({"name": "Other"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0], "name": "BoxA"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "BoxB"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 50, 0], "operation": "new_body", "name": "BoxC"}));
+        run(&mut s, "timeline.rollback", json!({"position": 1}));
+        run(&mut s, "timeline.delete", json!({"feature": "BoxB"}));
+        assert_eq!(s.doc.marker, Some(s.doc.features.len() - 1), "{command}: BoxC is behind the marker");
+        let body = s.model.state().bodies.first().map(|b| b.name.clone()).expect("BoxA's body");
+        let params = match command {
+            "component.from_bodies" => json!({"bodies": [body]}),
+            "component.move_bodies" | "browser.reparent" => json!({"bodies": [body], "component": part["component"]}),
+            "component.move_features" => json!({"features": ["BoxA"], "component": part["component"]}),
+            _ => json!({"occurrence": part["occurrence"], "parent": other["component"]}),
+        };
+        let refused = s.execute(command, &params).unwrap_err().to_string();
+        assert!(refused.contains("finish timeline rollback"), "{command}: BoxC is still behind the marker: {refused}");
+        run(&mut s, "timeline.delete", json!({"feature": "BoxC"}));
+        assert_eq!(s.doc.marker, Some(s.doc.features.len()), "{command}: the marker stays at the end of the history");
+        let reply = run(&mut s, command, params);
+        assert!(!s.doc.marker.is_some_and(|m| m < s.doc.features.len()), "{command}: nothing is behind the marker afterwards");
+        let target = part["component"].as_u64();
+        match command {
+            "occurrence.reparent" => {
+                let moved = s.doc.occurrences.iter().find(|o| Some(o.id) == part["occurrence"].as_u64()).expect("Part's placement");
+                assert_eq!(Some(moved.parent), other["component"].as_u64(), "{command}: Part sits in Other now");
+            }
+            "component.move_features" => {
+                assert_eq!(s.doc.find_feature("BoxA").map(|f| f.component), target, "{command}: BoxA is in Part now");
+            }
+            _ => {
+                let expected = if command == "component.from_bodies" { reply["components"][0]["component"].as_u64() } else { target };
+                let moved = s.model.state().bodies.iter().find(|b| b.name == body).map(|b| s.doc.model_body_component(b));
+                assert_eq!(moved, expected, "{command}: the body is in the target component now");
+                assert_ne!(moved, Some(0), "{command}: the body left the root component");
+            }
+        }
+    }
+}
+
 /// #9373: editing a feature inside a timeline folder left the id of the edit's trial feature in
 /// the folder and gave that id out again, so every edit there added it once more, and a feature
 /// made later took it and was listed twice: the saved design then would not open. Edited, the

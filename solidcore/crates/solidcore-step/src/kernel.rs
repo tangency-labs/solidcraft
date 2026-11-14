@@ -25,6 +25,18 @@ impl CurveEval {
     }
 }
 
+/// A closed spline or polyline with its seam moved to `start`, exactly.
+pub(crate) fn restart_curve(curve: &Curve, start: f64) -> Result<Curve, Error> {
+    let curve = c::curve(curve).map_err(|e| e.to_string())?;
+    let restarted = k::pcurve::restart_curve(&curve, start).map_err(|e| match e {
+        solidcore::SolidError::InvalidInput { reason, .. }
+        | solidcore::SolidError::Unsupported { reason, .. }
+        | solidcore::SolidError::PortInvariant { reason, .. } => reason.to_string(),
+        other => other.to_string(),
+    })?;
+    c::record_curve(restarted).map_err(|e| e.to_string())
+}
+
 /// A surface record ready to evaluate.
 pub(crate) struct SurfaceEval(k::SurfaceEval);
 
@@ -48,10 +60,10 @@ impl SurfaceEval {
     pub(crate) fn project_with(&self, starts: &Starts, p: Vec3, near: Option<[f64; 2]>, accept: f64) -> Option<[f64; 2]> {
         self.0.project_with(starts, c::vec3(p), near, accept)
     }
-    /// Whether `uv` is at a pole along each direction, or within `reach` of one, by the
-    /// surface's speeds there ([`k::pcurve::pole_by_speed`]).
-    pub(crate) fn pole_within(&self, uv: [f64; 2], reach: f64) -> [bool; 2] {
-        k::pcurve::pole_by_speed(&self.0, &self.0.domain(), uv, reach)
+    /// Whether `uv` is at a pole along each direction, or within `reach` mm of one
+    /// ([`k::SurfaceEval::pole_within`]); refused where that cannot be decided.
+    pub(crate) fn pole_within(&self, uv: [f64; 2], reach: f64) -> Result<[bool; 2], String> {
+        self.0.pole_within(uv, reach).map_err(|e| e.to_string())
     }
 }
 

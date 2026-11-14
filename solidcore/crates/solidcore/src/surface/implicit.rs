@@ -68,6 +68,43 @@ pub enum Implicit {
     },
 }
 
+impl Implicit {
+    /// How far `x` is from this surface: the whole surface, not a bounded patch of it
+    /// (`offset_faces::on_target`).
+    #[must_use]
+    pub fn distance(&self, x: Vec3) -> f64 {
+        // the axial and radial parts of `x` about an axis through `o`
+        let about = |o: Vec3, axis: Vec3| {
+            let v = x - o;
+            let h = v.dot(axis);
+            (h, (v - axis * h).length())
+        };
+        match *self {
+            Self::Plane { origin, normal } => (x - origin).dot(normal).abs(),
+            Self::Cone {
+                origin,
+                axis,
+                radius,
+                tan_angle,
+            } => {
+                let (h, rho) = about(origin, axis);
+                (rho - (radius + tan_angle * h)).abs() / (1.0 + tan_angle * tan_angle).sqrt()
+            }
+            Self::Sphere { centre, radius } => ((x - centre).length() - radius).abs(),
+            Self::Torus {
+                centre,
+                axis,
+                major,
+                minor,
+            } => {
+                let (h, rho) = about(centre, axis);
+                let (a, b) = (rho - major, h);
+                ((a * a + b * b).sqrt() - minor).abs()
+            }
+        }
+    }
+}
+
 /// A polynomial in Bernstein form over a patch, degrees `(p, q)`, `c[i (q + 1) + j]`.
 #[derive(Debug, Clone, PartialEq)]
 struct BPoly {
@@ -1776,19 +1813,19 @@ impl AnalyticSupport {
 
     /// A cylinder's or cone's numbers read straight off its NURBS form's control structure
     /// (#15010): the form's circles are its rows across the generator, each a rational arc
-    /// whose on-curve control points (those of the end weight) lie on its circle, so each
-    /// row's centre is the circumcentre of three of them and its radius their distance from
-    /// it. The axis is a cylinder's columns' direction (its generators) through the first
-    /// row's centre, or the line through a cone's first and last rows' centres, the origin the
-    /// point of it nearest the recogniser's, the x axis the recogniser's made square to it, the
-    /// cone's angle the radii's change along it. No fitting and no long chains: the numbers are
-    /// the stored control points' to their rounding, where the recognisers' chained
-    /// computations tilt the axis by about 1e-13 (an ulp of the origin's size), which a form
-    /// far from the world origin turns into a parametrisation `build` refuses. The
-    /// recogniser's frame turn, sweep, generator range and swap are kept: they are
+    /// whose first quadratic segment gives its centre from the endpoint tangents and chord,
+    /// keeping its centre and radius consistent at the endpoint. The axis follows a cylinder's
+    /// columns (its generators), or a cone's circular row-plane normal, through the first
+    /// row's centre.
+    /// The origin is the point of it nearest the recogniser's; the x axis is the recogniser's
+    /// made square to it; the cone's angle is the radii's change along it. No fitting and no
+    /// long chains: the numbers are the stored control points' to their rounding, where the
+    /// recognisers' chained computations tilt the axis by about 1e-13 (an ulp of the origin's
+    /// size), which a form far from the world origin turns into a parametrisation `build`
+    /// refuses. The recogniser's frame turn, sweep, generator range and swap are kept: they are
     /// conventions, not numbers. A row collapsed to one point (a cone's apex) is the axis's
     /// point of radius 0. `None` where the form gives no such rows (fewer than two circles,
-    /// or three on-curve points in line).
+    /// or a degenerate first quadratic segment).
     fn revolved_from_rows(
         recognised: Self,
         cylinder: bool,
@@ -1824,9 +1861,11 @@ impl AnalyticSupport {
         };
         let along_v = spread(true) <= spread(false);
         let (rows, len) = if along_v { (nu, nv) } else { (nv, nu) };
-        // each row's circle from its first rational quadratic arc, control points p0, p1, p2:
-        // the tangents at p0 and p2 meet at p1, so the centre lies on the line from p1 through
-        // the chord's midpoint m, where |c - p1| |m - p1| = |p0 - p1|^2 (the right angle at p0)
+        // Each row's circle from its first rational quadratic arc, control points p0, p1,
+        // p2 (The NURBS Book, sections 7.3 and 7.5): the angle between its first tangent
+        // leg and chord is half the sweep, so r = |leg| cot(half sweep). Build the centre
+        // from p0 along the inward normal by r: the radius and centre then reproduce p0
+        // together, without a shallow arc's circumcentre rounding shifting it off its frame.
         let degree = form.degree(if along_v {
             crate::nurbs::b_spline_surface::SurfParamType::V
         } else {
@@ -1835,7 +1874,7 @@ impl AnalyticSupport {
         if degree != 2 || len < 3 {
             return None;
         }
-        let circle = |r: usize| -> Option<(Vec3, f64)> {
+        let circle = |r: usize| -> Option<(Vec3, f64, Vec3)> {
             let point = |c: usize| if along_v { at(r, c) } else { at(c, r) };
             let (p0, p1, p2) = (point(0)?, point(1)?, point(2)?);
             // a row collapsed to one point is a cone's apex: a point of the axis, of radius
@@ -1849,43 +1888,53 @@ impl AnalyticSupport {
                 .filter_map(point)
                 .all(|q| (q - p0).length() <= gamma(4) * size);
             if collapsed {
-                return Some((p0, 0.0));
+                return Some((p0, 0.0, Vec3::ZERO));
             }
-            let m = (p0 + p2) * 0.5;
-            let to_m = m - p1;
-            let mm = to_m.dot(to_m);
-            if mm.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
-                return None;
-            }
-            let side = p0 - p1;
-            let centre = p1 + to_m * (side.dot(side) / mm);
-            let radius = ((p0 - centre).length() + (p2 - centre).length()) * 0.5;
+            let leg = p1 - p0;
+            let chord = p2 - p0;
+            let normal = leg.cross(chord);
+            let unit = |v: Vec3| {
+                let length = v.length();
+                (length > 0.0 && length.is_finite()).then(|| v * (1.0 / length))
+            };
+            let tangent = unit(leg)?;
+            let across = unit(chord)?;
+            let inward = unit(normal)?.cross(tangent);
+            let radius = leg.length() * tangent.dot(across) / tangent.cross(across).length();
+            let centre = p0 + inward * radius;
             (centre.x.is_finite() && centre.y.is_finite() && centre.z.is_finite() && radius > 0.0)
-                .then_some((centre, radius))
+                .then_some((centre, radius, normal))
         };
-        let circles: Vec<(Vec3, f64)> = (0..rows).filter_map(circle).collect();
-        let (&(c0, r0), &(c1, r1)) = (circles.first()?, circles.last()?);
+        let circles: Vec<(Vec3, f64, Vec3)> = (0..rows).filter_map(circle).collect();
+        if circles.len() < 2 {
+            return None;
+        }
+        let (&(c0, r0, _), &(c1, r1, _)) = (circles.first()?, circles.last()?);
         let along = c1 - c0;
         // a cylinder's axis runs along its generators, which are the form's columns: each
         // column's first and last control points differ by the stored extrusion, exactly for
-        // an extruded circle. The rows' centres carry the rounding of a circumcentre, which a
-        // shallow arc amplifies by its radius over its sagitta: on a 20 mm arc of radius
-        // 77.6 mm the centres' line tilts by 1.3e-14, which `build` refuses. A cone's
-        // generators meet at its apex, so its axis is its centres' line.
-        let generator = if cylinder {
+        // an extruded circle. Deriving an axis from the circle centres can amplify their
+        // rounding: on a 20 mm arc of radius 77.6 mm the old centres' line tilted by
+        // 1.3e-14, which `build` refused. A cone's
+        // axis is normal to its circular rows. Use the largest control-polygon normal
+        // to avoid amplifying the centres' rounding by the rows' short separation.
+        let axis_vector = if cylinder {
             let point = |r: usize, c: usize| if along_v { at(r, c) } else { at(c, r) };
             let last = rows.checked_sub(1)?;
             (0..len).try_fold(Vec3::new(0.0, 0.0, 0.0), |g, c| {
                 Some(g + (point(last, c)? - point(0, c)?))
             })?
         } else {
-            along
+            circles
+                .iter()
+                .map(|&(_, _, normal)| normal)
+                .max_by(|a, b| a.length_squared().total_cmp(&b.length_squared()))?
         };
-        let length = generator.length();
+        let length = axis_vector.length();
         if length.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
             return None;
         }
-        let mut axis = generator * (1.0 / length);
+        let mut axis = axis_vector * (1.0 / length);
         if axis.dot(axis_r) < 0.0 {
             axis *= -1.0;
         }
@@ -1903,7 +1952,7 @@ impl AnalyticSupport {
         }
         if cylinder {
             #[allow(clippy::cast_precision_loss)] // a few rows
-            let radius = circles.iter().map(|(_, r)| r).sum::<f64>() / circles.len() as f64;
+            let radius = circles.iter().map(|(_, r, _)| r).sum::<f64>() / circles.len() as f64;
             return Some(Self::Cylinder { placement, radius });
         }
         // the radius changes by tan(angle) per unit along the axis

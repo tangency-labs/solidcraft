@@ -352,12 +352,14 @@ pub fn check(brep: &View<'_>) -> Result<()> {
                             })
                             .and_then(|v| brep.vertices.get(v as usize))
                             .map_or(0.0, |v| v.tolerance);
-                        let pole = super::pcurve::pole_by_speed(
-                            &surface,
-                            &surface.domain(),
-                            *start,
-                            reach,
-                        );
+                        let record = Record::Use {
+                            face,
+                            r#loop,
+                            position: index(position),
+                        };
+                        let pole = surface
+                            .pole_within(*start, reach)
+                            .map_err(|err| unevaluable(record, err))?;
                         for d in 0..2 {
                             let (Some(Some(p)), Some(false)) = (period.get(d), pole.get(d)) else {
                                 continue;
@@ -368,11 +370,6 @@ pub fn check(brep: &View<'_>) -> Result<()> {
                             let gap = (a - b).abs();
                             #[allow(clippy::neg_cmp_op_on_partial_ord)] // a NaN gap is a jump
                             if !(gap < 0.5 * p) {
-                                let record = Record::Use {
-                                    face,
-                                    r#loop,
-                                    position: index(position),
-                                };
                                 return Err(Mismatch {
                                     record,
                                     problem: Problem::Period { gap, period: *p },

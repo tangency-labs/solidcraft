@@ -232,6 +232,33 @@ impl Touching {
     }
 }
 
+/// What a cell grid does with its cells. Only `cut` is built so far.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CellGridMode {
+    /// Cut the cells out of the targets.
+    #[default]
+    Cut,
+}
+
+/// The smallest cell size and web of a cell grid, in mm.
+pub const CELL_GRID_MIN_SIZE: f64 = solidcore_ops::cell_grid::MIN_SIZE;
+
+/// The most sides of a polygon cell.
+pub const CELL_GRID_MAX_SIDES: u32 = solidcore_ops::cell_grid::MAX_SIDES;
+
+fn default_cell_shape() -> solidcore_record::cell_grid::CellShape {
+    solidcore_record::cell_grid::CellShape::Hexagon
+}
+
+fn default_cell_dot_grid() -> solidcore_record::cell_grid::DotGrid {
+    solidcore_record::cell_grid::DotGrid::Hexagonal
+}
+
+fn default_cell_clip() -> solidcore_record::cell_grid::Clip {
+    solidcore_record::cell_grid::Clip::Snap
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
@@ -1286,6 +1313,11 @@ pub enum FeatureKind {
         /// The profile point that sits on the line.
         #[serde(default, skip_serializing_if = "crate::frame::Anchor::is_origin")]
         anchor: crate::frame::Anchor,
+        /// The profile point that sits on each line, [x, y] from the profile's own origin
+        /// (`frame::Profile::origin`). Some: takes precedence over `anchor`; it stays on the line
+        /// when the profile's size changes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        locate: Option<[f64; 2]>,
         /// How far the profile turns about the line (see `frame::member_axes`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Rotation")]
@@ -1385,6 +1417,57 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Angle")]
         angle: Option<Expr>,
+    },
+    /// A cell grid (#14044): the cells of one shape that fill the closed profiles of a sketch (an
+    /// outer loop is the field, a loop inside it a keep-out), cut from the targets `depth` deep
+    /// (or through all) along the sketch normal. The cells are planned by solidcore
+    /// (`solidcore_ops::cell_grid`) and cut in one boolean.
+    CellGrid {
+        /// Feature id of the sketch.
+        sketch: SketchId,
+        /// Which of the sketch's profiles hold the field and its keep-outs.
+        #[walk(profiles_of = sketch)]
+        profiles: ProfileSel,
+        #[serde(default)]
+        mode: CellGridMode,
+        #[serde(default = "default_cell_shape")]
+        shape: solidcore_record::cell_grid::CellShape,
+        /// Sides of a polygon cell.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Sides")]
+        sides: Option<Expr>,
+        /// The centres' grid for circles and polygons.
+        #[serde(default = "default_cell_dot_grid")]
+        dot_grid: solidcore_record::cell_grid::DotGrid,
+        /// A cell's inscribed diameter.
+        #[walk(length = "Cell size")]
+        size: Expr,
+        /// The wall between neighbouring cells.
+        #[walk(length = "Web")]
+        web: Expr,
+        /// The grid's rotation about the anchor.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
+        /// A cell centre sits at this point, projected onto the sketch plane (default: the sketch's
+        /// origin).
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
+        #[walk(placement)]
+        anchor: Option<PointExpr>,
+        /// What happens to a cell the field's edge crosses.
+        #[serde(default = "default_cell_clip")]
+        clip: solidcore_record::cell_grid::Clip,
+        /// How deep the cells go. Unused with `through_all`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Depth")]
+        depth: Option<Expr>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        through_all: bool,
+        #[serde(default)]
+        direction: Direction,
+        /// Target body names (empty = the feature's participants, else all bodies of its component).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        targets: Vec<BodyName>,
     },
     /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
     /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
@@ -2054,6 +2137,10 @@ pub enum FeatureKind {
         translate: [Expr; 3],
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rotate_axis: Option<Dir>,
+        /// Rotation pivot in the body's authoring frame. Older moves turn about the origin.
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
+        #[walk(placement)]
+        origin: Option<PointExpr>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Angle")]
         angle: Option<Expr>,
@@ -2769,11 +2856,19 @@ mod opt_point_expr {
 }
 
 impl FeatureKind {
-    /// A sheet metal feature (its result depends on the sheet metal rules).
+    /// A plastic part feature: a boss, lip, snap fit or rest (its result depends on the plastic
+    /// rules).
     pub fn is_plastic(&self) -> bool {
         matches!(self, FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. })
     }
 
+    /// Construction geometry: a construction plane, axis or point (the browser's Construction
+    /// folder; every feature may read them by name).
+    pub fn is_construction(&self) -> bool {
+        matches!(self, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+    }
+
+    /// A sheet metal feature (its result depends on the sheet metal rules).
     pub fn is_sheet(&self) -> bool {
         matches!(
             self,
@@ -2847,6 +2942,7 @@ impl FeatureKind {
             FeatureKind::SheetUnfold { .. } => "RefoldFeature",
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetalFeature",
             FeatureKind::Coil { .. } => "CoilFeature",
+            FeatureKind::CellGrid { .. } => "CellGridFeature",
             FeatureKind::Rib { web: false, .. } => "RibFeature",
             FeatureKind::Rib { .. } => "WebFeature",
             FeatureKind::ReplaceFace { .. } => "ReplaceFaceFeature",
@@ -2917,6 +3013,7 @@ impl FeatureKind {
             FeatureKind::ReplaceFace { .. } => "replace_face",
             FeatureKind::Align { .. } => "align",
             FeatureKind::Coil { .. } => "coil",
+            FeatureKind::CellGrid { .. } => "cell_grid",
             FeatureKind::SheetBase { .. } => "sheet_base",
             FeatureKind::SheetContour { .. } => "sheet_contour",
             FeatureKind::SheetFlange { .. } => "sheet_flange",
@@ -3013,6 +3110,7 @@ impl FeatureKind {
             "UnfoldFeature" | "RefoldFeature" => "sheet_unfold",
             "ConvertToSheetMetalFeature" => "sheet_convert",
             "CoilFeature" => "coil",
+            "CellGridFeature" => "cell_grid",
             "RibFeature" | "WebFeature" => "rib",
             "ReplaceFaceFeature" => "replace_face",
             "AlignFeature" => "align",
@@ -3099,6 +3197,7 @@ impl FeatureKind {
             FeatureKind::SheetUnfold { .. } => "Refold",
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetal",
             FeatureKind::Coil { .. } => "Coil",
+            FeatureKind::CellGrid { .. } => "CellGrid",
             FeatureKind::Rib { web: false, .. } => "Rib",
             FeatureKind::Rib { .. } => "Web",
             FeatureKind::ReplaceFace { .. } => "ReplaceFace",
@@ -3172,6 +3271,13 @@ pub struct Feature {
     /// mean that numbering.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub kernel_piece_order: bool,
+    /// This body Pattern reads its stored `body_names` in the order it makes its copies, as builds
+    /// before #12114 read them, instead of by source and copy number. Set on the Patterns of
+    /// several bodies in designs saved before then, whose stored names mean that order. The
+    /// session stores such a Pattern's names again as its copies have them and clears it
+    /// (`Session::pin_body_names`), so later count changes keep each name with its source.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pattern_names_in_order: bool,
     /// Made by inserting a file (STEP, IGES or a mesh file) into the design: the feature built
     /// the component tree its component is the top of, and deleting it removes that tree
     /// ([`Document::remove_component_tree`]). Not set on other imported bodies, such as the
@@ -3216,6 +3322,35 @@ impl Feature {
                 stored.clone_from(name);
             }
         }
+    }
+
+    /// Whether the session keeps exactly the names of the bodies the feature makes now, none
+    /// more: a Pattern of several bodies reads its stored names source by source, so a name left
+    /// over from a higher count would move every later source's names to other copies (#12114).
+    pub fn pins_every_body_name(&self) -> bool {
+        matches!(&self.kind, FeatureKind::Pattern { bodies, .. } if bodies.len() > 1)
+    }
+
+    /// When a body Pattern's bodies change from `old`, move its stored names with their sources:
+    /// each source it still copies keeps its copies' names, and a new source's copies get new
+    /// names (#12114). Names still read in order (`pattern_names_in_order`) stay as they are, as
+    /// they did before then.
+    pub fn keep_pattern_names_with_sources(&mut self, old: &[BodyName]) {
+        let FeatureKind::Pattern { bodies, .. } = &self.kind else { return };
+        if self.pattern_names_in_order || old.is_empty() || bodies.as_slice() == old || !self.body_names.len().is_multiple_of(old.len()) {
+            return;
+        }
+        let per = self.body_names.len() / old.len();
+        let names: Vec<String> = bodies
+            .iter()
+            .flat_map(|b| {
+                let start = old.iter().position(|o| o == b).and_then(|j| j.checked_mul(per));
+                start
+                    .and_then(|start| self.body_names.get(start..start.saturating_add(per)))
+                    .map_or_else(|| vec![String::new(); per], <[String]>::to_vec)
+            })
+            .collect();
+        self.body_names = names;
     }
 }
 
@@ -3435,6 +3570,10 @@ pub struct Document {
     /// it saves.
     #[serde(default, skip_serializing_if = "Visibility::is_empty")]
     pub visibility: Visibility,
+    /// Plugin data, by `<plugin-id>/<path>`, base64: kept and saved back untouched, plugin or no
+    /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty", deserialize_with = "crate::plugin_data::deserialize")]
+    pub plugin_data: std::collections::BTreeMap<String, String>,
 }
 
 /// The browser's view of a design: items and folders hidden or shown, sketch profiles and
@@ -3730,6 +3869,7 @@ impl Document {
             named_views: Vec::new(),
             notes: Vec::new(),
             visibility: Visibility::default(),
+            plugin_data: Default::default(),
         }
     }
 
@@ -4297,6 +4437,7 @@ impl Document {
             participants: Vec::new(),
             shell_piece_order: false,
             kernel_piece_order: false,
+            pattern_names_in_order: false,
             inserted: false,
             link_faces: Vec::new(),
             touching: Touching::Separate,

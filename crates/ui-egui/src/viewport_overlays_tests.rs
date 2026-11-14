@@ -774,7 +774,11 @@ fn toast_stays_in_free_content_above_history_and_navigation() {
                     }
                     h.app.status = Some(("Viewport message".into(), crate::now_ms(), false));
                     h.frames(3);
-                    let layout = h.app.viewport.layout.as_ref().unwrap();
+                    let Some(layout) = h.app.viewport.layout.as_ref() else {
+                        assert_eq!((width, height), (1, 1), "only a window without a viewport skips notices");
+                        assert!(crate::scenario::rect_of("toast").is_none());
+                        continue;
+                    };
                     let content = crate::shell::content_rect(&h.app, layout.viewport);
                     let mut obstacles = crate::shell::covered_rects(&h.app);
                     obstacles.extend([layout.navigation, layout.axis_view]);
@@ -793,6 +797,7 @@ fn toast_stays_in_free_content_above_history_and_navigation() {
                     }
                 }
             }
+            h.call("ui.resize", json!({"width":900,"height":720}));
             h.app.status = Some(("Expired".into(), crate::now_ms() - 6001.0, true));
             h.frame();
             assert!(h.app.status.is_none());
@@ -1142,12 +1147,11 @@ fn bottom_readouts_clear_floating_history_on_the_first_frame() {
     h.frame();
     h.app.ui.layout = LayoutMode::Docked;
     h.frame();
-    let viewport = h.app.viewport.layout.as_ref().unwrap().viewport;
     let history = crate::scenario::rect_of("history:strip").unwrap();
     for name in ["analysis:legend", "viewport:frame_rate"] {
         let readout = crate::scenario::rect_of(name).unwrap();
         assert!(!readout.intersects(history));
-        assert!((readout.bottom() - (viewport.bottom() - 12.0)).abs() < 0.01);
+        assert!((readout.bottom() - (history.top() - solidcraft_theme::Tokens::get().space_8 - 12.0)).abs() < 0.01);
     }
 }
 
@@ -1173,7 +1177,7 @@ fn left_history_sidebar_leaves_bottom_readouts_at_the_bottom() {
     h.app.preferences.viewport_analysis_status = false;
     h.app.home.open = false;
     h.app.ui.layout = LayoutMode::Floating;
-    h.app.preferences.timeline_left = true;
+    h.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
     h.app.preferences.show_frame_rate = true;
     h.app.ui.show_timeline = true;
     h.app.run("inspect.draft", json!({})).unwrap();
@@ -1224,7 +1228,10 @@ fn frame_rate_readout_stays_beside_a_right_pane() {
             assert!(viewport.contains_rect(readout), "{mode:?}, {width}: {readout:?} outside {viewport:?}");
             assert!(readout.right() <= pane.left() - 12.0 + 0.01, "{mode:?}, {width}: {readout:?} under {pane:?}");
             if mode == LayoutMode::Floating {
-                assert!((readout.right() - (pane.left() - 12.0)).abs() < 0.01, "{width}: {readout:?} not just left of {pane:?}");
+                let frame = h.app.universal_panel_frame().unwrap();
+                let section = frame.layout.sections.iter().find(|section| section.instance.0 == "assistant").unwrap();
+                let card = crate::panel_runtime::egui_rect(section.outer);
+                assert!((readout.right() - (card.left() - 12.0)).abs() < 0.01, "{width}: {readout:?} not just left of {card:?}");
             }
             for covered in crate::shell::covered_rects(&h.app) {
                 assert!(!readout.intersects(covered), "{mode:?}, {width}: {readout:?} under {covered:?}");

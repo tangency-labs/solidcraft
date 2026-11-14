@@ -232,6 +232,9 @@ pub struct OffsetExecutive {
     /// edge uses ([`Self::keep_unmoved_edges`]).
     pub(super) kept_edges: BTreeSet<EdgeId>,
     pub(super) kept_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream: the uses of the original edges of a local operation where the two new
+    /// surfaces cross ([`super::reach::LocalReach::crossing`]), tangent in the input or not.
+    crossing_edgeuses: BTreeSet<EdgeuseId>,
     /// Not upstream (WR-346): the original faces of an inset whose offset collapses (a
     /// convex round thinner than the wall), mated across instead of offset
     /// (`m_sCollapsedFaces`; only with `Kernel::fixes.offset_collapsed_rounds_mated`).
@@ -297,6 +300,7 @@ impl OffsetExecutive {
             moved_faces: Vec::new(),
             kept_edges: BTreeSet::new(),
             kept_edgeuses: BTreeSet::new(),
+            crossing_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
             unmated_edgeuses: BTreeSet::new(),
             local_faces: Vec::new(),
@@ -459,6 +463,12 @@ impl OffsetExecutive {
         self.kept_edgeuses.contains(&edgeuse)
     }
 
+    /// Not upstream: whether the new surfaces of a local operation cross along the edge of
+    /// original edge use `edgeuse` ([`super::reach::LocalReach::crossing`]).
+    pub(super) fn crosses_at_edgeuse(&self, edgeuse: EdgeuseId) -> bool {
+        self.crossing_edgeuses.contains(&edgeuse)
+    }
+
     /// Sets `m_eOffsetOperation`.
     pub fn set_operation(&mut self, operation: OffsetOperation) {
         self.operation = operation;
@@ -615,6 +625,7 @@ impl OffsetExecutive {
         self.extension_reaches.clear();
         self.faceuse_extension_reaches.clear();
         self.edge_bounds.clear();
+        self.crossing_edgeuses.clear();
     }
 
     /// Records how far the surface of original face `face` must be extended for its
@@ -669,7 +680,7 @@ impl OffsetExecutive {
                     kept.push((*f, surface));
                 }
             }
-            super::reach::local_extension_reach(
+            let found = super::reach::local_extension_reach(
                 kernel,
                 original,
                 faceuse,
@@ -677,14 +688,18 @@ impl OffsetExecutive {
                 &kept,
                 self.tangency_tol_radians,
                 &mut self.edge_bounds,
-            )?
+            )?;
+            for &e in found.iter().flat_map(|r| &r.crossing) {
+                self.crossing_edgeuses
+                    .extend(edge::edgeuses(original, e, None, None)?);
+            }
             // A new edge must cross each neighbouring surface's boundary, not sit on it:
             // the mate and the intersection identify points within the body's tolerance,
             // so a crossing shorter than that is indistinguishable from touching the
             // boundary, and the extension reaches at least that far. With nothing moved
             // beside the face (a face given the plane through its own edges), this floor
             // is the only margin (the offset branch's is the offset's size).
-            .map_or(0.0, |r| (r.reach + r.shift).max(original.tolerance()))
+            found.map_or(0.0, |r| (r.reach + r.shift).max(original.tolerance()))
         };
         self.extension_reaches.insert(face, reach);
         let (primary, mate) = crate::topology::face::p2::faceuses(original, face)?;

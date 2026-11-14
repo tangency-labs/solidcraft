@@ -84,6 +84,10 @@ pub trait Host: Sized {
     /// Put the settings back (Cancel). An error keeps the window open with the snapshot, and the
     /// next close tries again.
     fn restore(&mut self, snapshot: &Self::Snapshot) -> Result<(), String>;
+    /// Validate and commit draft fields for OK or Apply. Failure keeps the window editable.
+    fn confirm(&mut self) -> Result<(), String> {
+        Ok(())
+    }
     /// What Apply does before the settings become the new snapshot, for a setting a running part
     /// of the host takes up only on Apply. An error keeps the old snapshot.
     fn apply(&mut self) -> Result<(), String> {
@@ -116,6 +120,7 @@ pub struct State<H> {
     snapshot: Option<H>,
     /// Why the last Cancel could not put the settings back; Apply waits until one succeeds.
     restore_error: Option<String>,
+    confirmation_error: Option<String>,
 }
 
 impl<H> State<H> {
@@ -130,7 +135,16 @@ impl<H> State<H> {
 
 impl<H> Default for State<H> {
     fn default() -> Self {
-        State { open: false, section: 0, filter: String::new(), search_from: None, reveal: None, snapshot: None, restore_error: None }
+        State {
+            open: false,
+            section: 0,
+            filter: String::new(),
+            search_from: None,
+            reveal: None,
+            snapshot: None,
+            restore_error: None,
+            confirmation_error: None,
+        }
     }
 }
 
@@ -177,8 +191,16 @@ pub fn apply_pending<S: Host>(host: &S) -> bool {
     host.window_ref().snapshot.as_ref().is_some_and(|snapshot| !host.matches(snapshot))
 }
 
-/// Do what `button` does, from the footer or from a command. Returns why [`Host::apply`] failed.
+/// Do what `button` does, from the footer or from a command. Returns a draft or Apply error.
 pub fn press<S: Host>(host: &mut S, pages: &[Page<S>], button: Button) -> Result<(), String> {
+    host.window().confirmation_error = None;
+    if matches!(button, Button::Ok | Button::Apply)
+        && host.window_ref().restore_error.is_none()
+        && let Err(reason) = host.confirm()
+    {
+        host.window().confirmation_error = Some(reason.clone());
+        return Err(reason);
+    }
     match button {
         Button::Ok => close(host, false),
         Button::Cancel => close(host, true),
@@ -215,6 +237,7 @@ pub fn close<S: Host>(host: &mut S, revert: bool) {
     }
     let window = host.window();
     window.restore_error = None;
+    window.confirmation_error = None;
     window.open = false;
     window.clear_search();
     host.closed();
@@ -304,6 +327,7 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
     // A failed Apply shows on the window like a failed restore: Apply waits and a close reverts.
     if let Some(button) = button
         && let Err(reason) = press(host, pages, button)
+        && host.window_ref().confirmation_error.is_none()
     {
         host.window().restore_error = Some(reason);
     }

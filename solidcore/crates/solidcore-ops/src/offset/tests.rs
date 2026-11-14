@@ -611,6 +611,87 @@ fn an_unnamed_offset_refusal_keeps_the_kernels_words() {
     );
 }
 
+/// `refusal` is what the offset operations give for a kernel error, with any face unnamed: the
+/// same routing as `status`, which agrees with it on every kind of error (an offset refusal is
+/// typed, in words from its fields; an error with no offset reason is the kernel's status).
+#[test]
+fn a_kernel_offset_refusal_is_typed_for_a_caller_without_an_order() {
+    use solidcore::error::offset::{LoopCrossing, OffsetFailure, Unsoundness};
+    use solidcore::error::Failure;
+    let face = solidcore::FaceId::from_index(4);
+    let failed = |o| Failure::new("offset::offset_executive::crossing_loops", o).into_error();
+    let crossing = LoopCrossing::ThreeAtOnePoint;
+    let e = super::refusal(&failed(OffsetFailure::LoopsCross {
+        face: Some(face),
+        crossing,
+    }));
+    assert_eq!(
+        e,
+        Some(Error::OffsetRefused {
+            face: None,
+            why: crate::OffsetRefusal::LoopsCross { crossing }
+        })
+    );
+    assert_eq!(
+        e.map(|e| e.to_string()).as_deref(),
+        Some("the offset is refused: its offset's loops cross in a way the offset cannot resolve: three loops cross at one point")
+    );
+    let what = Unsoundness::NotManifoldSolid;
+    assert_eq!(
+        super::refusal(&failed(OffsetFailure::Unsound { what })).map(|e| e.to_string()),
+        Some(format!("the offset is refused: {what}"))
+    );
+    assert_eq!(
+        what.to_string(),
+        "the body built is not a manifold solid, as its input was"
+    );
+    assert_eq!(
+        super::refusal(&failed(OffsetFailure::Folds {
+            face,
+            distance: 2.0,
+            largest: 1.0
+        })),
+        Some(Error::WallFolds { largest: Some(1.0) })
+    );
+    assert_eq!(super::refusal(&solidcore::SolidError::sm_err("x")), None);
+    // `status` and `refusal` agree: `status` is the refusal, else the kernel's status
+    let errors = [
+        failed(OffsetFailure::Failed("x")),
+        failed(OffsetFailure::InvalidValue("x")),
+        failed(OffsetFailure::Folds {
+            face,
+            distance: 2.0,
+            largest: 1.0,
+        }),
+        failed(OffsetFailure::NotCertified {
+            face,
+            distance: -1.0,
+        }),
+        failed(OffsetFailure::Collapses {
+            face,
+            distance: -2.0,
+            radius: 1.5,
+        }),
+        failed(OffsetFailure::LoopsCross {
+            face: Some(face),
+            crossing,
+        }),
+        failed(OffsetFailure::SeamOpened { face }),
+        failed(OffsetFailure::Unsound { what }),
+        failed(OffsetFailure::ExactCurveUncut),
+        solidcore::SolidError::sm_err("x"),
+        solidcore::SolidError::Upstream {
+            operation: "offset::x",
+            code: solidcore::error::SM_ERR_OFFSET_WALLS_TOUCH,
+            entity: None,
+        },
+    ];
+    for e in errors {
+        let expected = super::refusal(&e).unwrap_or_else(|| crate::error::status(e.clone()));
+        assert_eq!(super::status(e.clone(), &|_| None), expected, "{e:?}");
+    }
+}
+
 /// A face whose surface the kernel's room test cannot measure (an offset surface): the room
 /// test's answer maps to `Unsupported`, not to a room or `NoRoom`.
 #[test]
@@ -1048,14 +1129,12 @@ mod drafts {
         }
     }
 
-    /// brep-bench's `draft/cylinder-parted-both-ways` (#14783): a cylinder of radius 10 from
-    /// z = 0 to 20, its side split at z = 10, each half drafted 3 degrees away from the parting
-    /// line about z = 10 (the upper with pull +z, the lower with pull -z). The kernel does not
-    /// yet bound how far the ends must reach to meet the cones (#13722), so the draft is
-    /// refused before anything changes: with its reason and the face it names as a record
-    /// index, not the bare status 1001 it was.
+    /// A cylinder of radius 10, height 20, split at z = 10 and drafted 3 degrees
+    /// on each side away from that circle becomes two joined frusta. With
+    /// r = 10 - 10 tan(3 degrees), each has volume pi*10*(100 + 10r + r²)/3.
+    /// The coaxial positive-nappe surfaces meet only at their neutral circle.
     #[test]
-    fn a_cylinder_parted_both_ways_is_refused_saying_why_and_where() {
+    fn a_cylinder_parted_both_ways_is_closed_with_the_two_frusta_volume() {
         all_fixes();
         let c = make_cylinder([0.0; 3], 10.0, 20.0).unwrap();
         let o = order(&c);
@@ -1078,26 +1157,32 @@ mod drafts {
             assert_eq!(hits.len(), 1, "faces through {p:?}: {hits:?}");
             hits[0]
         };
-        // each half drafted in turn; the refusal names the face its call drafts
-        let mut refused = None;
-        for (at, pull) in [([10.0, 0.0, 15.0], Z), ([10.0, 0.0, 5.0], [0.0, 0.0, -1.0])] {
+        let small = 10.0 - 10.0 * TAN_THREE;
+        let frustum = PI * 10.0 * (100.0 + 10.0 * small + small * small) / 3.0;
+        for (step, (at, pull)) in [([10.0, 0.0, 15.0], Z), ([10.0, 0.0, 5.0], [0.0, 0.0, -1.0])]
+            .into_iter()
+            .enumerate()
+        {
             let o = order(&parted);
             let half = through(&parted, &o, at);
-            let r = draft(&parted, &o, &[half], [0.0, 0.0, 10.0], Z, pull, THREE);
-            println!("PARTED {at:?}: face {half} of {}: {r:?}", o.faces.len());
-            if let Err(e) = r {
-                refused = Some((e, half));
-                break;
-            }
+            draft(&parted, &o, &[half], [0.0, 0.0, 10.0], Z, pull, THREE).unwrap();
+            let expected = if step == 0 {
+                1000.0 * PI + frustum
+            } else {
+                2.0 * frustum
+            };
+            let measured = volume(&parted);
+            assert!(
+                rel(measured, expected) < 1e-9,
+                "step {step}: {measured} vs {expected}"
+            );
+            assert!(parted.is_manifold_solid().unwrap());
+            parted.check_solid().unwrap();
+            let report = parted.check(crate::CheckLevel::All).unwrap();
+            assert_eq!(report.failures, 0, "step {step}: {}", report.text);
+            println!(
+                "parted cylinder step={step}: measured={measured:.12}, expected={expected:.12}"
+            );
         }
-        let Some((Error::OffsetRefused { face, why }, half)) = refused else {
-            panic!("not refused with a reason: {refused:?}");
-        };
-        assert_eq!(why, crate::OffsetRefusal::ReachUncertified);
-        assert_eq!(
-            face,
-            Some(half),
-            "the refusal names the face its draft turns"
-        );
     }
 }

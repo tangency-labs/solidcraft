@@ -6,8 +6,8 @@
 //! The vase is a full turn of the profile (0, 0) - (15, 5) - (15, 30) - (0, 30) in the
 //! XY plane about the y axis: a conical bottom whose generator starts on the axis, a
 //! cylindrical wall and a flat top. The bottom's inward offset generator crosses the
-//! axis, so (with WR-343's `revolution_offset_axis_both_sides`) the offset surface is
-//! cut there and its domain no longer holds the face's. `BuildOffsetOfFaceuse` then
+//! axis, so the offset surface is cut there (WR-343) and its domain no longer holds the
+//! face's. `BuildOffsetOfFaceuse` then
 //! clips the face to the offset domain with a 2D boolean of planar faces made from the
 //! face's UV loops. Taken from the inset's opposite face use, upstream's loops run
 //! clockwise, the planar face is inside out, the intersection is empty and the bottom
@@ -70,10 +70,9 @@ fn vase(k: &mut Kernel, up: bool) -> Brep {
     create_rotational_sweep(k, &curves, origin, axis, 360.0, true).unwrap()
 }
 
-/// The vase shelled 2 inward, open at its top, with WR-342's `fixed` (WR-343 on).
+/// The vase shelled 2 inward, open at its top, with WR-342's `fixed`.
 fn shelled(up: bool, fixed: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.revolution_offset_axis_both_sides = true;
     k.fixes.offset_clip_right_side_out = fixed;
     let part = vase(&mut k, up);
     let open = planar_faces_at(&k, &part, 1, H);
@@ -111,7 +110,6 @@ fn wr_342_vase_shells_closed_with_the_fix() {
 fn wr_342_default_refuses_the_open_shell_and_retains_the_vase() {
     for up in [true, false] {
         let mut k = Kernel::default();
-        k.fixes.revolution_offset_axis_both_sides = true;
         let mut part = vase(&mut k, up);
         let open = planar_faces_at(&k, &part, 1, H);
         assert_eq!(open.len(), 1);

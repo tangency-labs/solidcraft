@@ -34,6 +34,7 @@ use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
+use solidcore::mass::enclosure::EnclosureStop;
 use solidcore::mass::enclosure::{
     enclose_volume, volume_sign, VolumeEnclosure, VolumeSign, CELL_BUDGET,
 };
@@ -105,25 +106,53 @@ fn a_thin_shell_below_the_estimates_error_decides_positive() {
             other => panic!("r {r} t {t}: {other:?}, volume {v}"),
         }
         // the solid test reads the same sign: on the estimate (-180.05 at r 1e4) it was false
-        // (r 1e4 is known failing on the loop check: `the_far_thin_shell_is_an_outward_solid`)
-        if r < 1e3 {
-            let mut b = quarter_shell(&mut k, r, t);
-            assert!(is_outward_solid(&mut k, &mut b).unwrap(), "r {r} t {t}");
-        }
+        let mut b = quarter_shell(&mut k, r, t);
+        assert!(is_outward_solid(&mut k, &mut b).unwrap(), "r {r} t {t}");
     }
 }
 
-/// The quarter shell at r 1e4, t 1e-3 is a solid facing out. Known failing since its
-/// faces are checked without UV trims made beforehand (#15040): two faces' loops' orientation
-/// comes out zero area (`compute_loop_orientation`, in UV and in 3D; #15107), so the check fails
-/// Loop Orientation on them. On main the same body failed the same way once its UV
-/// trims were made; before #15040 the check passed those faces unchecked.
+/// The quarter shell at r 1e4, t 1e-3 is a solid facing out. Its faces are checked with
+/// their UV trims made (#15040); two of its loops (area 15.7 against a box of 1e8) came
+/// out zero area while `compute_loop_orientation` compared a sampled polygon's area with
+/// its box's, and are oriented from their certified signed area (#15107).
 #[test]
-#[ignore = "known failing: two of the far thin shell's loops come out zero area in the loop check (#15040, #15107)"]
 fn the_far_thin_shell_is_an_outward_solid() {
     let mut k = Kernel::default();
     let mut b = quarter_shell(&mut k, 1e4, 1e-3);
     assert!(is_outward_solid(&mut k, &mut b).unwrap());
+}
+
+/// The far thin shell's loops are oriented by a decided sign, not by the absence of a
+/// zero-area report: every face's outer loop is `Same` on its UV trims, and run backwards
+/// it is `Opposite`, and the body check then fails Loop Orientation (a reversed loop near
+/// the shell is still caught).
+#[test]
+fn the_far_thin_shells_loops_reversed_are_caught() {
+    use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use solidcore::topology::face::p2::loops;
+    use solidcore::topology::face::p3::compute_loop_orientation;
+    use solidcore::topology::loopuse::flip_loop_orientation;
+    let mut k = Kernel::default();
+    let count = faces(&quarter_shell(&mut k, 1e4, 1e-3), None)
+        .unwrap()
+        .len();
+    assert_eq!(count, 6);
+    for i in 0..count {
+        let mut b = quarter_shell(&mut k, 1e4, 1e-3);
+        let f = faces(&b, None).unwrap()[i];
+        let l = loops(&b, f, false, None).unwrap()[0];
+        let o = compute_loop_orientation(&k, &mut b, f, l, None, false).unwrap();
+        assert_eq!(o, OrientType::Same, "face {i}");
+        flip_loop_orientation(&mut b, l).unwrap();
+        let o = compute_loop_orientation(&k, &mut b, f, l, None, false).unwrap();
+        assert_eq!(o, OrientType::Opposite, "face {i} reversed");
+        let c = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(
+            c.lines().iter().any(|l| l.contains("Loop Orientation")),
+            "face {i} reversed: {:?}",
+            c.lines()
+        );
+    }
 }
 
 #[test]
@@ -439,5 +468,51 @@ fn the_solid_test_names_the_test_a_body_fails() {
     assert_eq!(
         outward_solid_failure(&mut k, &mut thin).unwrap(),
         Some(SolidTest::VolumeUndecided)
+    );
+}
+
+/// #15173: an enclosure asked narrower than the part no cut narrows (the caps' and loops'
+/// rounding terms, and strips that settle) is still refined, and a tighter request is never
+/// answered wider. For the sphere of radius 2, asking 1e-11 returned the 8 starting cells,
+/// 3e4 wide, while asking 1e-10 returned 5.3e-10.
+#[test]
+fn a_width_below_the_floor_is_refined_not_given_up() {
+    let mut k = Kernel::default();
+    let v = 4.0 / 3.0 * PI * 8.0;
+    let mut last = f64::INFINITY;
+    for width in [1e-6, 1e-8, 1e-11] {
+        let mut b = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0).unwrap();
+        let e = enclose_volume(&k, &mut b, width).unwrap();
+        assert!(holds(&e, v), "{width}: {e:?} misses {v}");
+        assert!(e.width() <= last, "{width}: {e:?} wider than {last}");
+        // as narrow as asked, or it says why not
+        assert_eq!(
+            e.stop == EnclosureStop::Reached,
+            e.width() <= width,
+            "{width}: {e:?}"
+        );
+        last = e.width();
+    }
+    assert!(last <= 1e-9, "1e-11: {last}");
+}
+
+/// #15173: refining past where the rounding grows faster than the cells shrink does not
+/// widen the enclosure: the narrowest seen is kept. On a box, spending the whole budget took
+/// the width from 1.7e-10 (asked 1e-9) to 1.5e-9.
+#[test]
+fn spending_the_budget_never_widens_the_enclosure() {
+    let mut k = Kernel::default();
+    let boxed = |k: &mut Kernel| create_box(k, Point3::new(1.0, 2.0, 3.0), 4.0, 5.0, 6.0).unwrap();
+    let mut b = boxed(&mut k);
+    let asked = enclose_volume(&k, &mut b, 1e-9).unwrap();
+    let mut b = boxed(&mut k);
+    let spent = enclose_volume(&k, &mut b, f64::MIN_POSITIVE).unwrap();
+    assert!(holds(&asked, 120.0), "{asked:?}");
+    assert!(holds(&spent, 120.0), "{spent:?}");
+    assert_eq!(asked.stop, EnclosureStop::Reached, "{asked:?}");
+    assert_ne!(spent.stop, EnclosureStop::Reached, "{spent:?}");
+    assert!(
+        spent.width() <= asked.width(),
+        "{spent:?} wider than {asked:?}"
     );
 }

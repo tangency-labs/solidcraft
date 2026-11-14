@@ -10,8 +10,8 @@
 //! it: SMLib's check fails test 61 ("Bad Edge"), with an edge end 9.3e-5 from its vertex
 //! at a tolerance of 1e-5.
 //!
-//! The fork runs its imprint end fits too (WR-452/453/498, the port's
-//! `imprint_trims_edge_to_proto_vertex` and `imprint_extends_edge_to_proto_vertex`).
+//! The fork runs its imprint end fits too (WR-452/453/498: the port's end trim, always on,
+//! and `imprint_extends_edge_to_proto_vertex`).
 //! With them and `boolean_vertex_by_best_crossing` the join is sound (the fork's
 //! `sound()`: the level-2 check clean) and its volume lies between the ribbed slab's and
 //! the sum of the two (the fork's bound). Without the best crossing, test 61 fails.
@@ -135,7 +135,6 @@ fn grazing_join(fixes: &UpstreamFixes) -> (usize, f64, f64, f64, f64) {
 /// The fork's imprint end fits and, as `best` says, WR-410's best crossing.
 fn fixes(best: bool) -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
-    f.imprint_trims_edge_to_proto_vertex = true;
     f.imprint_extends_edge_to_proto_vertex = true;
     f.boolean_vertex_by_best_crossing = best;
     f

@@ -678,6 +678,68 @@ pub fn face_definition(k: &Kernel, surface: &Surface) -> Result<Option<FaceDefin
     ))))
 }
 
+/// The surface a face's definition makes on its net `net` (the face's surface as built from its
+/// record, a NURBS surface): the definition made from the record exactly ([`from_record`],
+/// [`exact_from_record`]) and the net certified against it again. `Ok(Err(eps))`, with the bound
+/// the definition states, where the net is not certified: the definition and its net disagree.
+///
+/// # Errors
+///
+/// `InvalidInput` for a net that is not a NURBS surface; those of the rebuilds; a cancel as it is.
+pub fn definition_surface(
+    k: &Kernel,
+    definition: &FaceDefinition,
+    net: &Surface,
+) -> Result<std::result::Result<Surface, f64>> {
+    let Some(form) = as_b_spline(k, net)? else {
+        return Err(SolidError::invalid_input(
+            OP_ADOPT,
+            "a blend face's net is not a NURBS surface",
+        ));
+    };
+    let net = surface_record(&form)?;
+    // (a cancel ends the operation; any other failure of the certificate refuses the net)
+    let certified = |r: Result<f64>, eps: f64| match r {
+        Ok(_) => Ok(Ok(())),
+        Err(e) if e.is_cancelled() => Err(e),
+        Err(_) => Ok(Err(eps)),
+    };
+    Ok(match definition {
+        FaceDefinition::Procedural(d) => {
+            let pb = from_record(
+                k,
+                &ProceduralBlendRecord {
+                    definition: (**d).clone(),
+                    net,
+                },
+            )?;
+            certified(pb.recertify(k), d.bound)?.map(|()| Surface::from(pb))
+        }
+        FaceDefinition::ExactRound(d) => {
+            let rec = ExactRoundRecord {
+                class: d.class,
+                supports: d.supports.clone(),
+                radius: d.radius,
+                order: d.order,
+                leader: d.leader.clone(),
+                inputs: d.inputs,
+                chamfer: d.chamfer,
+                leader_map: d.leader_map,
+                net: ExactNetRecord {
+                    kind: d.net_kind,
+                    form: net,
+                },
+            };
+            let made = exact_from_record(k, &rec)?;
+            let proved = match made.procedural_blend() {
+                Some(blend) => certified(blend.recertify(k), 0.0)?,
+                None => Ok(()),
+            };
+            proved.map(|()| made)
+        }
+    })
+}
+
 /// Give each face of `faces` its definition back: its net is the face's surface as it was
 /// built (a NURBS surface), the definition is made from the record exactly ([`from_record`],
 /// [`exact_from_record`]) and the net certified against it again, and the face's surface becomes
@@ -699,65 +761,18 @@ pub fn adopt_definitions(
 ) -> Result<()> {
     for (f, definition) in faces {
         let face = *f;
-        let net = {
+        let made = {
             let surface =
                 b.face(face)?.surface.as_ref().ok_or_else(|| {
                     SolidError::invalid_input(OP_ADOPT, "a face without a surface")
                 })?;
-            let Some(form) = as_b_spline(k, surface)? else {
-                return Err(SolidError::invalid_input(
-                    OP_ADOPT,
-                    "a blend face's net is not a NURBS surface",
-                ));
-            };
-            surface_record(&form)?
+            definition_surface(k, definition, surface)?
         };
-        let refused = |e: SolidError, eps: f64| {
-            // (a cancel ends the operation; it is no refusal of the face)
-            if e.is_cancelled() {
-                e
-            } else {
-                SolidError::DefinitionNotCertified {
-                    operation: OP_ADOPT,
-                    face: EntityRef::Face(face),
-                    eps,
-                }
-            }
-        };
-        let made = match definition {
-            FaceDefinition::Procedural(d) => {
-                let pb = from_record(
-                    k,
-                    &ProceduralBlendRecord {
-                        definition: (**d).clone(),
-                        net,
-                    },
-                )?;
-                pb.recertify(k).map_err(|e| refused(e, d.bound))?;
-                Surface::from(pb)
-            }
-            FaceDefinition::ExactRound(d) => {
-                let rec = ExactRoundRecord {
-                    class: d.class,
-                    supports: d.supports.clone(),
-                    radius: d.radius,
-                    order: d.order,
-                    leader: d.leader.clone(),
-                    inputs: d.inputs,
-                    chamfer: d.chamfer,
-                    leader_map: d.leader_map,
-                    net: ExactNetRecord {
-                        kind: d.net_kind,
-                        form: net,
-                    },
-                };
-                let made = exact_from_record(k, &rec)?;
-                if let Some(blend) = made.procedural_blend() {
-                    blend.recertify(k).map_err(|e| refused(e, 0.0))?;
-                }
-                made
-            }
-        };
+        let made = made.map_err(|eps| SolidError::DefinitionNotCertified {
+            operation: OP_ADOPT,
+            face: EntityRef::Face(face),
+            eps,
+        })?;
         crate::topology::face::p1::set_surface(
             k,
             b,
