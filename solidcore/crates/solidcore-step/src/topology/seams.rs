@@ -1148,9 +1148,10 @@ impl Builder<'_, '_> {
     /// crossings with every loop of the face are found on the Bézier pieces of their edges' NURBS
     /// forms, and the seam runs to the nearest, which must be on the other loop. The open segment
     /// between then meets no loop, so it lies in the face: the regions off the face beyond a loop
-    /// are bounded by that loop alone. A piece whose angle is not monotone may meet the ruling
-    /// anywhere over its hull's heights, and one within its pad of the ruling's angle meets it at
-    /// its nearer end; neither may lie on the seam. Vertices are tried in loop order, `la`'s first.
+    /// are bounded by that loop alone. A piece whose angle is not monotone, or one that comes within
+    /// its pad of the ruling's angle without crossing it between its ends, may meet the ruling
+    /// anywhere over its hull's heights, none of which may be on the seam. Vertices are tried in
+    /// loop order, `la`'s first.
     fn wound_band_seam(&mut self, fi: usize, la: usize, lb: usize, ax: &Axis, eval: &SurfaceEval, splits: &mut usize) -> R<()> {
         let frame = Perpendicular::new(ax);
         let height = |p: Vec3| (p - ax.origin).dot(ax.z);
@@ -1246,11 +1247,15 @@ impl Builder<'_, '_> {
                                     other = 0.0;
                                 }
                             }
-                            Some((_, p, _)) => {
+                            // Another loop's crossing, at its one point (a monotone piece under
+                            // half a turn meets the ruling once).
+                            Some((true, p, _)) => {
                                 let d = along(height(p));
                                 other = other.min(if d > -self.tol { d.max(0.0) } else { f64::INFINITY });
                             }
-                            None => {
+                            // A near miss (within the pad, no crossing between the ends) or a piece
+                            // whose angle is not monotone: anywhere over its hull's heights.
+                            Some((false, ..)) | None => {
                                 let [lo, hi] = piece.heights.map(along);
                                 let (lo, hi) = (lo.min(hi), lo.max(hi));
                                 if hi > -self.tol {
@@ -1693,8 +1698,8 @@ struct WoundUse {
 /// Where the ruling at angle `theta` meets a Bézier piece (parameters `on` of the NURBS form `c`)
 /// whose angle is monotone and spans under half a turn: `(true, point, parameter)` where the
 /// angle reaches `theta` between the piece's ends (bisected on the form), else `(false, end,
-/// parameter)` with the end whose angle is nearer, which the ruling passes within the piece's pad
-/// of.
+/// parameter)` with the end whose angle is nearer: the ruling passes within the piece's pad of
+/// it, somewhere over its hull's heights.
 fn ruling_crossing(frame: &Perpendicular, c: &CurveEval, [s, t]: [f64; 2], theta: f64) -> R<Option<(bool, Vec3, f64)>> {
     let off = |x: f64| -> Option<(f64, Vec3)> {
         let p = c.point(x)?;
