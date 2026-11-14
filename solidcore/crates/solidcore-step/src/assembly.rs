@@ -8,6 +8,8 @@
 //! kernel's [`Trims`] for the rest), outer loops and face sides checked against the pcurves,
 //! tolerances raised to the gaps the geometry has, regions, and the canonical order.
 //!
+//! `docs/import-assembly.md` (solidcore's docs) describes the stage as a whole.
+//!
 //! The STEP reader ([`crate::topology`]) is one such reader; it was where this was written, and
 //! its notes and refusals still name a face by its file entity (`face #id`). Any other reader
 //! gives each face an `origin` of its own to be named by.
@@ -57,28 +59,29 @@ pub(crate) const OPEN_DOMAIN_SPAN: f64 = 1e-3;
 /// record check measures it: with margin, as a vertex's.
 pub(crate) const EDGE_GAP_MARGIN: f64 = 1.5;
 
-/// A solid (or sheet) assembled from a file.
+/// A body (a solid or a sheet) assembled into a record ([`Assembly::finish`]).
 #[derive(Clone, Debug)]
 pub struct Solid {
-    /// The body item it was read from (for STEP: the MANIFOLD_SOLID_BREP, BREP_WITH_VOIDS or
-    /// SHELL_BASED_SURFACE_MODEL).
+    /// The reader's name for the body item the record was assembled from, as given to
+    /// [`Assembly::finish`] (the STEP reader gives the solid item's entity id).
     pub item: u64,
-    /// The item's own name, else its product's.
+    /// The body's name, as given to [`Assembly::finish`]; a reader may fill it in afterwards
+    /// (the STEP reader puts its product's name there when the item has none).
     pub name: String,
-    /// The name of the product whose shape holds the item, when the file says.
+    /// The name of the product that holds the body, when the reader knows it.
     pub product: Option<String>,
-    /// In the coordinates of the item's own representation (assembly placements not applied).
+    /// The record, in the coordinates its reader gave (no placement applied).
     pub brep: Brep,
-    /// The file's face entity (ADVANCED_FACE, FACE_SURFACE) of each of the record's faces, in
-    /// the record's face order.
+    /// Each record face's `origin` as given to [`Assembly::add_face`], in the record's face
+    /// order: how the reader names the face it came from.
     pub face_origin: Vec<u64>,
-    /// No closed shell: a surface model of open shells only.
+    /// No shell bounds a region: a body of open shells only.
     pub sheet: bool,
-    /// What was repaired or noted on the way (faces whose same_sense disagreed with their
-    /// loops, edges whose same_sense disagreed with their vertices, raised tolerances).
+    /// What was repaired or noted on the way: seams added, edges turned or merged, faces turned
+    /// over, tolerances raised, and what the reader noted itself.
     pub notes: Vec<String>,
-    /// The record faces turned over because their loops disagree with their same_sense (their
-    /// outer loop runs clockwise about the normal the file gives them), in increasing order.
+    /// The record faces turned over because their outer loop runs clockwise about the side the
+    /// reader gave them, in increasing order.
     pub turned: Vec<u32>,
 }
 
@@ -145,7 +148,7 @@ pub struct Assembly<'t> {
     pub(crate) vertices: Vec<Vertex>,
     pub(crate) edges: Vec<EdgeB>,
     pub(crate) faces: Vec<FaceB>,
-    /// Edges whose reader found them running against what the file said (noted).
+    /// Edges the reader found running against the direction its file gave them (noted).
     pub(crate) sense_mismatches: usize,
     /// Line edges whose vertices lie off their line, read as the segment between the vertices.
     pub(crate) lines_between_vertices: usize,
@@ -1508,7 +1511,9 @@ pub fn spline_curve(degree: usize, knots: Vec<f64>, points: &[[f64; 3]], weights
             points.iter().zip(w).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect()
         }
     };
+    finite_homogeneous(&homogeneous)?;
     let (knots, homogeneous) = clamped(degree, knots, homogeneous).map_err(|e| format!("an unclamped B-spline curve: {e}"))?;
+    finite_homogeneous(&homogeneous)?;
     Ok(match weights {
         None => BCurve::Spline { knots, points: homogeneous.iter().map(|h| [h[0], h[1], h[2]]).collect() },
         Some(_) => BCurve::RationalSpline { knots, homogeneous },
@@ -1549,13 +1554,24 @@ pub fn spline_surface(
     // Unclamped knots in either direction are clamped exactly, line by line: every row is a
     // spline in v on the v knots, every column one in u on the u knots, and inserting the same
     // knots into each gives the surface's.
+    finite_homogeneous(rows.iter().flatten())?;
     let (v_knots, rows) = clamped_lines(v_degree, v_knots, rows)?;
     let (u_knots, columns) = clamped_lines(u_degree, u_knots, transposed(&rows))?;
     let rows = transposed(&columns);
+    finite_homogeneous(rows.iter().flatten())?;
     Ok(match weights {
         None => BSurface::Spline { u_knots, v_knots, points: rows.iter().map(|r| r.iter().map(|h| [h[0], h[1], h[2]]).collect()).collect() },
         Some(_) => BSurface::RationalSpline { u_knots, v_knots, homogeneous: rows },
     })
+}
+
+/// Every homogeneous control point a finite number: finite coordinates times finite weights can
+/// still overflow (`f64::MAX` times 2), and so can clamping's knot insertion.
+fn finite_homogeneous<'a>(points: impl IntoIterator<Item = &'a [f64; 4]>) -> R<()> {
+    if points.into_iter().any(|h| h.iter().any(|x| !x.is_finite())) {
+        return Err("a B-spline whose weighted control points are not finite numbers".into());
+    }
+    Ok(())
 }
 
 /// Knots that do not decrease and leave the spline of `degree` over `count` points a domain of

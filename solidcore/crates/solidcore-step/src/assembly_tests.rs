@@ -146,3 +146,15 @@ fn malformed_splines_are_refused() {
     assert!(spline_surface([1, 1], [k(), k()], &bad, None).unwrap_err().contains("finite"));
     assert!(spline_surface([1, 1], [k(), k()], &grid, Some(&[vec![1.0, 1.0], vec![1.0, -1.0]])).unwrap_err().contains("weight"));
 }
+
+/// Finite coordinates and weights whose products overflow are refused, by both constructors.
+#[test]
+fn weighted_control_points_that_overflow_are_refused() {
+    let big = [[f64::MAX, 0.0, 0.0], [1.0, 0.0, 0.0]];
+    let e = spline_curve(1, vec![0.0, 0.0, 1.0, 1.0], &big, Some(&[2.0, 1.0])).unwrap_err();
+    assert!(e.contains("weighted control points"), "{e}");
+    let grid = vec![vec![[f64::MAX, 0.0, 0.0], [0.0, 1.0, 0.0]], vec![[1.0, 0.0, 0.0], [1.0, 1.0, 0.0]]];
+    let k = || vec![0.0, 0.0, 1.0, 1.0];
+    let e = spline_surface([1, 1], [k(), k()], &grid, Some(&[vec![2.0, 1.0], vec![1.0, 1.0]])).unwrap_err();
+    assert!(e.contains("weighted control points"), "{e}");
+}
