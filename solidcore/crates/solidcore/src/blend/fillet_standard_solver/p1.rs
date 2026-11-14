@@ -17,6 +17,7 @@
 //! | [`ConstantRadiusAssistedFs::jacobian_size`]              | `SmConstantRadiusFS::GetJacobianSize`                 |
 //! | [`ConstantRadiusAssistedFs::offset_radii_can_change`]    | `SmConstantRadiusFS::OffsetRadiiCanChange`            |
 //! | [`ConstantRadiusAssistedFs::fillet_radius`]              | `SmConstantRadiusFS::GetFilletRadius`                 |
+//! | [`ConstantRadiusAssistedFs::oriented_offsets`]           | none (#15906): `m_dFilletRadii[i]*m_dOrientations[i]` |
 //! | [`CONSTANT_RADIUS_FS_TYPE`], [`constant_radius_is_kind_of`] | `SmConstantRadiusFS::GetType`, `GetTypeString`, `IsKindOf` |
 //! | [`CONSTANT_RADIUS_ASSISTED_FS_TYPE`]                     | `SmConstantRadiusAssistedFS::GetType`, `GetTypeString` (`Drop` is the destructor) |
 //! | [`SurfaceSurfaceFs`]                                     | `SmSurfaceSurfaceFS` (members; `Drop` is the destructor) |
@@ -750,6 +751,20 @@ impl ConstantRadiusAssistedFs {
         self.set_offset_by_radius(0)?;
         self.set_offset_by_radius(1)?;
         Ok(offset_dist)
+    }
+
+    /// Not upstream (#15906): the offset distances
+    /// [`ConstantRadiusAssistedFs::setup_offset_values`] gives the two surfaces, each rail's
+    /// fillet radius times its orientation. They are the solver's fixed data, unlike the
+    /// offset surfaces' distances, which `SetSurfacesToZeroOffset` and the offset setups
+    /// overwrite.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`ConstantRadiusAssistedFs::fillet_radius`].
+    pub fn oriented_offsets(&self) -> Result<[f64; 2]> {
+        let [o0, o1] = self.solver.orientations;
+        Ok([self.fillet_radius(0)? * o0, self.fillet_radius(1)? * o1])
     }
 
     /// `GetSurface(i)->SetOffsetDistance(m_dFilletRadii[i]*m_dOrientations[i])`.
@@ -3633,6 +3648,9 @@ mod tests {
         let r = fs.setup_offset_values(&TsectPnt::new()).expect("setup");
         assert_eq!(r, 1.0);
         assert_eq!(fs.surface(0).expect("s0").offset_distance(), 1.0);
+        // the radii times the orientations, whatever the surfaces' distances hold
+        fs.solver.set_surfaces_to_zero_offset().expect("zero");
+        assert_eq!(fs.oriented_offsets().expect("offsets"), [1.0, -2.0]);
         assert!(constant_radius_is_kind_of(CONSTANT_RADIUS_FS_TYPE));
         assert!(constant_radius_is_kind_of(FILLET_SOLVER_TYPE));
         assert!(!constant_radius_is_kind_of(CONSTANT_DISTANCE_FS_TYPE));

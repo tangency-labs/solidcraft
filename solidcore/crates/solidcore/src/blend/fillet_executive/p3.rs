@@ -750,6 +750,11 @@ pub struct FilletExecutive<O> {
     /// the least setback that builds one: `> 0`, `0` when none does, `< 0` when not that
     /// cause (`NoteFitSetBack`).
     pub fit_setback: f64,
+    /// Not upstream (#15906): set while the rails' classification recomputes the edges of
+    /// the corners it adjusted (`classify_solver_rails_with_adjusted`), the pass an End at a
+    /// smooth vertex that waited for the rails' rollover is built in. An End that would wait
+    /// again then has no later pass to build its edges, so it fails instead.
+    pub rollover_adjusting: bool,
 }
 
 /// What a refusal's fit sizes (the fork's `SM_FIT_RADIUS`, `SM_FIT_SCALE`, `SM_FIT_CHORD`).
@@ -3445,7 +3450,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             }
             for corner in adjusted.iter().copied() {
                 ignore(access.rails_reinitialize_corner(k, corner, self))?;
-                if ignore(access.edges_calculate(k, corner, self))?.is_none() {
+                self.rollover_adjusting = true;
+                let edges = ignore(access.edges_calculate(k, corner, self));
+                self.rollover_adjusting = false;
+                if edges?.is_none() {
                     self.corner_vertex_failure(
                         access,
                         corner,
