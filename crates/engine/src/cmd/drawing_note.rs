@@ -69,7 +69,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              (a lost one loses only its own leader), text: what it says now, its fields read for its sheet, \
              fields?: [{source, key, state: shown, empty, lost (its sheet documents a component the design no longer has) or unknown \
              (its source has no such field), value?, why?}], \
-             warnings?: its view edited since to leave out a part a leader points at}. A lost reference keeps the note and its text in place, without a \
+             warnings?: its view edited since to leave out a part a leader points at, or its text, centred on at, running off the paper}. A lost reference keeps the note and its text in place, without a \
              leader. Read-only; no model is evaluated.",
         ),
 ];
@@ -204,6 +204,8 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     let read = |values: &Values| (values.text(&note.content), fields(values, &note.content));
     let at = d.sheet_of(&note.anchor).ok_or_else(|| bad(cmd, format!("note {} is on no sheet", ids::encode(id))))?;
     let (text, fields) = crate::title_block_text::with_values(&s.doc, &mut Tree::new(&s.doc, &state), d, at, std::iter::once(&note.content), read);
+    let mut warnings = note.anchor.view().map(|view| drawn_warning(d, view, note.paths())).unwrap_or_default();
+    warnings.extend(off_paper(d, note, &text, at));
     let reply = NoteResult {
         note: ids::encode(id),
         record: serde_json::to_value(note).map_err(|e| EngineError::Other(e.to_string()))?,
@@ -215,10 +217,32 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
         branches: r.branches.into_iter().map(branch_result).collect(),
         text,
         fields,
-        warnings: note.anchor.view().map(|view| drawn_warning(d, view, note.paths())).unwrap_or_default(),
+        warnings,
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// A warning when `note`'s text, reading `text`, runs off the paper of sheet `at` of `d`: its text is
+/// centred on its place, so a note placed near the paper's edge can run past it. None while its
+/// text isn't set, as while a font to fall back to is still being found.
+fn off_paper(d: &solidcraft_doc::drawing::Drawing, note: &Note, text: &str, at: usize) -> Option<String> {
+    const EPS: f64 = 1e-6;
+    let size = d.sheets.get(at)?.sheet.size_mm().ok()?;
+    let offset = match note.anchor.view() {
+        Some(view) => d.view_centre(view).ok()?,
+        None => solidcore_record::Vec2::ZERO,
+    };
+    let fonts = solidcraft_sketch::PaperFonts::new(&d.font, &d.language, false);
+    let text_box = crate::drawing_note_paper::text_box(note, text, &fonts)?;
+    let (min, max) = (text_box.min + offset, text_box.max + offset);
+    let on = min.x >= -EPS && min.y >= -EPS && max.x <= size.x + EPS && max.y <= size.y + EPS;
+    (!on).then(|| {
+        format!(
+            "its text runs off the paper: it spans {:.1} to {:.1} mm across and {:.1} to {:.1} mm up a {:.0} x {:.0} mm sheet, centred on its place (move it with drawing.note.edit)",
+            min.x, max.x, min.y, max.y, size.x, size.y
+        )
+    })
 }
 
 /// A branch's end in a reply's words.

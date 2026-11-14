@@ -200,7 +200,8 @@ pub struct NoteResult {
     /// Each field it reads, in order, as its sheet reads it now.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fields: Vec<FieldResult>,
-    /// What to know about it: a view edited since to leave out what its leader points at.
+    /// What to know about it: a view edited since to leave out what its leader points at, or its
+    /// text running off the paper.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
