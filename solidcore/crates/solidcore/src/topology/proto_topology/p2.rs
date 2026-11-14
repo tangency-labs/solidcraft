@@ -92,11 +92,11 @@
 //!   of that proto vertex lying on the curve, then resolves the proto vertex (the SMLib
 //!   fork's tangency-labs/smlib@9eec159); upstream keeps the edge whole past that vertex.
 //! - **Opt-in fix (WR-580, #1519).** With `Kernel::fixes.imprint_reuses_coincident_face_edge`,
-//!   [`ProtoTopologyManager::imprint_edge_definition`] takes an edge Brep2's face already
-//!   has between the definition's two vertices along its curve
+//!   [`ProtoTopologyManager::imprint_edge_definition`] takes an edge either B-rep's face
+//!   already has between the definition's two vertices along its curve
 //!   ([`ProtoBrep::face_coincident_edge`], `SmTools::FindCoincidentEdge`) as the
 //!   definition's edge there instead of making a second one (the SMLib fork's
-//!   tangency-labs/smlib@81cd61a).
+//!   tangency-labs/smlib@81cd61a for Brep2; Brep1 likewise, solidcore's own).
 //! - **Not upstream (WR-619, #1794; own design).**
 //!   [`ProtoTopologyManager::imprint_edge_definition`] makes no edge for a definition whose ends
 //!   are one proto vertex and one vertex in each B-rep, along a speck within that vertex's
@@ -1000,6 +1000,70 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         Ok(None)
     }
 
+    /// Not upstream (WR-580, #1519; opt-in `fixes.imprint_reuses_coincident_face_edge`): the
+    /// edge the source face of the definition `ed` in B-rep `which` already has between
+    /// `start` and `end` (the definition's final vertices there) along the definition's
+    /// curve, within the larger of the face's and the definition's tolerance
+    /// ([`ProtoBrep::face_coincident_edge`], `SmTools::FindCoincidentEdge`). `None` when the
+    /// fix is off, the source is not a face, the two vertices are one, the definition has no
+    /// curve, or no edge of the face lies along the curve within that tolerance.
+    ///
+    /// Why: `SmEdgeDefinition::Imprint` makes a new edge with `MakeEdgeInFace` for every face
+    /// source, in Brep1 (`source/SMLib/src/SmProtoTopology.cpp:1436`, the call at `:1462`)
+    /// and in Brep2 (`:1529`, the call at `:1541`). Where the curve runs along an edge the
+    /// face already has, that is a second edge beside the face's own one, and nothing
+    /// relates the face's own edge to the other body. In Brep2 the merge then copied the
+    /// face's edge into Brep1 beside the curve's edge (the bench tubes of #1519, `SmFace`
+    /// tests 33 and 34; the SMLib fork's tangency-labs/smlib@81cd61a). In Brep1 it is the
+    /// same defect from the other side: a union of a hub and a bar whose end arc runs within
+    /// tolerance of the hub's top circle classified the arc inside the hub's top face; the
+    /// imprint made a second hub edge beside the circle's piece, that piece stayed without
+    /// a mate, and the coincident-surface repair (`merge_face_edges`) copied it into the
+    /// bar's cylinder face, which closed a sliver region (a loop of zero area). The face's
+    /// own edge is the definition's edge in either B-rep.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`ProtoBrep::face_coincident_edge`]; a missing-topology error for a face source
+    /// without a face; [`SolidError::InvalidInput`] for an unknown face handle.
+    fn coincident_face_edge(
+        &self,
+        k: &Kernel,
+        brep: &impl ProtoBrep<O>,
+        ed: EdgeDefId,
+        which: i32,
+        start: O,
+        end: O,
+    ) -> Result<Option<O>> {
+        if !k.fixes.imprint_reuses_coincident_face_edge || start == end {
+            return Ok(None);
+        }
+        let d = self.ed_ref(ed)?;
+        if d.src_topo_type(which) != PointClassType::Face {
+            return Ok(None);
+        }
+        let Some(curve) = d.xsect_curve_3d() else {
+            return Ok(None);
+        };
+        let face = as_kind(d.src_topo(which), ClassObjectKind::Face).ok_or_else(|| {
+            SolidError::topology_missing(OP_IMPRINT_ED, "the definition's source face")
+        })?;
+        let face_tol = brep
+            .topology_tolerance(face)
+            .ok_or(dangling("face handle is unknown"))?;
+        let along_tol = max2(face_tol, d.raw_tolerance());
+        let found = brep.face_coincident_edge(
+            k,
+            face,
+            start,
+            end,
+            curve_of(brep, Some(curve))?,
+            d.xsect_interval(),
+            along_tol,
+        )?;
+        Ok(found.and_then(|(edge, deviation)| (deviation <= along_tol).then_some(edge)))
+    }
+
     /// The body of [`ProtoTopologyManager::imprint_edge_definition`]; `edited` is set
     /// before the first B-rep edit.
     fn imprint_edge_definition_inner(
@@ -1062,12 +1126,20 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let type1 = d.src_topo_type(1);
         let type2 = d.src_topo_type(2);
 
+        // Not upstream (WR-580, #1519; opt-in): the edge Brep1's face already has along the
+        // curve, which is this definition's edge there (`coincident_face_edge`).
+        let along_edge1 = self.coincident_face_edge(k, &*brep, ed, 1, start_vtx1, end_vtx1)?;
+
         // First do Brep 1.
         let mut new_e1 = None;
         let mut new_f1 = None;
         let mut old_f1 = None;
 
-        if type1 == PointClassType::Face {
+        if let Some(edge) = along_edge1 {
+            // No edge is made: Brep1 is not edited and the curves stay with the definition
+            // (as for an edge source), no face is split, so there is nothing to update.
+            self.ed_mut(ed)?.set_final_edge(1, Some(edge));
+        } else if type1 == PointClassType::Face {
             old_f1 = as_kind(d.src_topo(1), ClassObjectKind::Face);
             let face = old_f1.ok_or_else(null)?;
             let face_tol = brep
@@ -1114,40 +1186,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             self.ed_mut(ed)?.set_final_edge(1, e);
         }
 
-        // Not upstream (WR-580, #1519; opt-in, the fork's tangency-labs/smlib@81cd61a): in
-        // Brep2 the face may already have an edge between this edge's two vertices that
-        // lies along the curve within tolerance (the curve runs along the face's own
-        // boundary there). That edge is this edge in Brep2: imprinted again, the face had
-        // two coincident edges, and the merge put a copy of the boundary edge beside this
-        // one in Brep1 (`SmFace` tests 33 and 34).
-        let mut along_edge2 = None;
-        if k.fixes.imprint_reuses_coincident_face_edge
-            && type2 == PointClassType::Face
-            && start_vtx2 != end_vtx2
-        {
-            let d = self.ed_ref(ed)?;
-            if let Some(curve) = d.xsect_curve_3d() {
-                let face2 = as_kind(d.src_topo(2), ClassObjectKind::Face).ok_or_else(null)?;
-                let face_tol = brep
-                    .topology_tolerance(face2)
-                    .ok_or(dangling("face handle is unknown"))?;
-                let along_tol = max2(face_tol, d.raw_tolerance());
-                let found = brep.face_coincident_edge(
-                    k,
-                    face2,
-                    start_vtx2,
-                    end_vtx2,
-                    curve_of(brep, Some(curve))?,
-                    d.xsect_interval(),
-                    along_tol,
-                )?;
-                if let Some((edge, deviation)) = found {
-                    if deviation <= along_tol {
-                        along_edge2 = Some(edge);
-                    }
-                }
-            }
-        }
+        // Not upstream (WR-580, #1519; opt-in, the fork's tangency-labs/smlib@81cd61a): the
+        // edge Brep2's face already has along the curve, which is this definition's edge
+        // there (`coincident_face_edge`).
+        let along_edge2 = self.coincident_face_edge(k, &*brep, ed, 2, start_vtx2, end_vtx2)?;
 
         // Now do Brep 2.
         let d = self.ed_ref(ed)?;
@@ -1189,8 +1231,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         // Brep1's new edge is whole
                         *edited = false;
                     }
-                    if !e.is_unported_or_cancelled() {
-                        // Brep1 keeps the curves it consumed; the copy is dropped.
+                    // Brep1 keeps the curves it consumed; the copy is dropped. Brep1 consumed
+                    // none when it reused its face's edge (WR-580): the caller deletes them.
+                    if !e.is_unported_or_cancelled() && along_edge1.is_none() {
                         let d = self.ed_mut(ed)?;
                         d.set_xsect_curve_3d(None);
                         d.set_xsect_curve_uv(1, None);
