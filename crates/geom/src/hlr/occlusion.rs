@@ -77,6 +77,8 @@ pub struct EdgePieces {
     pub hidden: Vec<[f64; 2]>,
     /// Rays cast for it.
     pub rays: usize,
+    /// Stretches found hidden whole by one plane face without sampling them.
+    pub covered: usize,
     /// Faces its rays were tested against, and how many of those were spline surfaces.
     pub tests: usize,
     pub spline_tests: usize,
@@ -244,13 +246,20 @@ impl<'a> Occluders<'a> {
         let at = |t: f64| p.apply(e.curve.at(t));
         let tests = std::cell::Cell::new([0usize; 2]);
         let seen = |t: f64| self.seen(placement, &e.faces, own_eps, at(t), eye, &tests);
+        let scratch = std::cell::RefCell::new(Vec::new());
+        let hides = |face: [u32; 2], t: f64| {
+            let point = at(t);
+            let (Some(toward), Ok(mut hits)) = (Self::toward(point, eye), scratch.try_borrow_mut()) else { return false };
+            self.hides((face[0], face[1]), (placement, &e.faces, own_eps), point, toward, &tests, &mut hits)
+        };
         let [t0, t1] = e.curve.domain();
         if !(t0.is_finite() && t1.is_finite() && t1 >= t0) {
             return Err(HlrError::Invalid("edge range"));
         }
         // Sample parameters: the curve cut into pieces by a coarse polyline, each piece cut again
         // so its samples are at most `spacing` apart where it stands.
-        let coarse = if matches!(e.curve, super::curve::C3::Line { .. }) { 1 } else { 64 };
+        let straight = matches!(e.curve, super::curve::C3::Line { .. });
+        let coarse = if straight { 1 } else { 64 };
         // Each coarse piece's length in sample spacings where it stands; the samples are shared out
         // by it, so an edge a few pixels long on the screen takes a few rays whatever its shape.
         let weights: Vec<f64> = (0..coarse)
@@ -290,13 +299,57 @@ impl<'a> Occluders<'a> {
         }
         params.dedup();
         let mut out = EdgePieces::default();
+        let mut states: Vec<Option<Seen>> = vec![None; params.len()];
+        if straight && params.len() > 2 {
+            // A straight edge: from its ends inward, a stretch whose ends a plane face hides and
+            // which that face covers whole is hidden without the samples between.
+            let (first, last) = (0, params.len() - 1);
+            for k in [first, last] {
+                if let (Some(slot), Some(t)) = (states.get_mut(k), params.get(k)) {
+                    *slot = Some(seen(*t));
+                    out.rays += 1;
+                }
+            }
+            let mut todo = vec![(first, last)];
+            while let Some((lo, hi)) = todo.pop() {
+                if hi - lo < 2 {
+                    continue;
+                }
+                if cancel() {
+                    return Err(HlrError::Cancelled);
+                }
+                let (Some(&Some(a)), Some(&Some(b))) = (states.get(lo), states.get(hi)) else { continue };
+                if let (Seen::Hidden(fa), Seen::Hidden(fb)) = (a, b)
+                    && fa == fb
+                    && let (Some(ta), Some(tb)) = (params.get(lo), params.get(hi))
+                    && self.covers(fa, at(*ta), at(*tb), eye)
+                {
+                    states.iter_mut().take(hi).skip(lo + 1).for_each(|s| *s = Some(a));
+                    out.covered += 1;
+                    continue;
+                }
+                let mid = (lo + hi) / 2;
+                if let (Some(slot), Some(t)) = (states.get_mut(mid), params.get(mid)) {
+                    *slot = Some(seen(*t));
+                    out.rays += 1;
+                }
+                todo.push((mid, hi));
+                todo.push((lo, mid));
+            }
+        }
         let mut samples: Vec<(f64, Seen)> = Vec::with_capacity(params.len());
-        for (i, t) in params.iter().enumerate() {
+        for (i, (t, known)) in params.iter().zip(states).enumerate() {
             if i % 64 == 0 && cancel() {
                 return Err(HlrError::Cancelled);
             }
-            samples.push((*t, seen(*t)));
-            out.rays += 1;
+            let s = match known {
+                Some(s) => s,
+                None => {
+                    out.rays += 1;
+                    seen(*t)
+                }
+            };
+            samples.push((*t, s));
         }
         // Two neighbours hidden by different faces may have a gap between those faces where
         // the edge shows: look for it by halving toward where the hiding face changes.
@@ -305,7 +358,7 @@ impl<'a> Occluders<'a> {
             if let [(a, Seen::Hidden(fa)), (b, Seen::Hidden(fb))] = *w
                 && fa != fb
             {
-                gap(&seen, (a, fa), (b, fb), GAP_HALVINGS, &mut found, &mut out.rays);
+                gap(&seen, &hides, (a, fa), (b, fb), GAP_HALVINGS, &mut found, &mut out.rays);
             }
         }
         if !found.is_empty() {
@@ -339,15 +392,18 @@ impl<'a> Occluders<'a> {
         Ok(out)
     }
 
+    /// The direction from `point` (scene coordinates) toward the viewer and how far the viewer
+    /// is; `None` at the eye itself.
+    fn toward(point: Vec3, eye: Eye) -> Option<(Vec3, f64)> {
+        match eye {
+            Eye::Along(d) => Some((-d, f64::INFINITY)),
+            Eye::At(q) => (q - point).normalized().map(|d| (d, q.dist(point))),
+        }
+    }
+
     /// Whether `point` (scene coordinates) on placement `placement`'s faces `own` is seen.
     fn seen(&self, placement: usize, own: &[usize], own_eps: f64, point: Vec3, eye: Eye, tests: &std::cell::Cell<[usize; 2]>) -> Seen {
-        let (dir, far) = match eye {
-            Eye::Along(d) => (-d, f64::INFINITY),
-            Eye::At(q) => match (q - point).normalized() {
-                Some(d) => (d, q.dist(point)),
-                None => return Seen::Visible,
-            },
-        };
+        let Some((dir, far)) = Self::toward(point, eye) else { return Seen::Visible };
         let reach = |b: &Aabb3| slab(point, dir, b.min, b.max).is_some_and(|[l0, _]| l0 <= far);
         let hidden: std::cell::Cell<Option<[u32; 2]>> = std::cell::Cell::new(None);
         let mut hits = Vec::new();
@@ -357,46 +413,100 @@ impl<'a> Occluders<'a> {
                 if hidden.get().is_some() {
                     return;
                 }
-                let Some(&(qi, fi)) = self.items.get(i as usize) else { return };
-                let (qi, fi) = (qi as usize, fi as usize);
-                let Some(q) = self.scene.get(qi) else { return };
-                let Some(f) = self.defs.get(q.body).and_then(|d| d.faces.get(fi)) else { return };
-                let (p0, dl) = (q.local(point), q.local_dir(dir));
-                let Some([l0, l1]) = slab(p0, dl, f.lo, f.hi) else { return };
-                let own_face = qi == placement && own.contains(&fi);
-                let range = [l0.max(if own_face { own_eps } else { self.eps_other }), l1.min(far)];
-                if !(range[1] >= range[0]) {
-                    return;
-                }
-                let [n, splines] = tests.get();
-                tests.set([n + 1, splines + usize::from(matches!(f.surface, super::surface::S3::Nurbs(_)))]);
-                hits.clear();
-                f.surface.ray_as(&f.analytic, p0, dl, range, &mut hits);
-                for h in &hits {
-                    if h.grazing || h.lam <= self.touch {
-                        continue;
-                    }
-                    // Deep enough under the face, measured under its tangent plane at the hit so a
-                    // point resting on a face seen at a slant stays seen; or far enough along the
-                    // ray, so a round seen almost edge on (its tangent plane nearly along the ray)
-                    // or a face wrapping round in front still hides.
-                    let depth = f.surface.normal(h.uv).map_or(h.lam, |n| h.lam * n.dot(dl).abs());
-                    if !(depth > self.touch || h.lam > self.graze) {
-                        continue;
-                    }
-                    // Inside the face, or on its boundary to within its trim's accuracy: where two
-                    // faces of a body meet the point is behind both, and at a body's outline it
-                    // is hidden or seen by less than that accuracy.
-                    let s = f.surface.point(h.uv);
-                    let near = f.trim.near(s, 2. * f.trim.chord_error + 1e-7 * (f.hi - f.lo).len());
-                    if f.trim.unsupported.is_none() && (near || f.trim.contains(h.uv) == Some(true)) {
-                        hidden.set(Some([qi as u32, fi as u32]));
-                        return;
-                    }
+                let Some(&face) = self.items.get(i as usize) else { return };
+                if self.hides(face, (placement, own, own_eps), point, (dir, far), tests, &mut hits) {
+                    hidden.set(Some([face.0, face.1]));
                 }
             },
         );
         hidden.get().map_or(Seen::Visible, Seen::Hidden)
+    }
+
+    /// Whether face `(qi, fi)` hides `point` (scene coordinates, on placement `placement`'s faces
+    /// `own`) from a viewer along `dir`, `far` away.
+    fn hides(
+        &self,
+        (qi, fi): (u32, u32),
+        (placement, own, own_eps): (usize, &[usize], f64),
+        point: Vec3,
+        (dir, far): (Vec3, f64),
+        tests: &std::cell::Cell<[usize; 2]>,
+        hits: &mut Vec<super::surface::Hit>,
+    ) -> bool {
+        let (qi, fi) = (qi as usize, fi as usize);
+        let Some(q) = self.scene.get(qi) else { return false };
+        let Some(f) = self.defs.get(q.body).and_then(|d| d.faces.get(fi)) else { return false };
+        let (p0, dl) = (q.local(point), q.local_dir(dir));
+        let Some([l0, l1]) = slab(p0, dl, f.lo, f.hi) else { return false };
+        let own_face = qi == placement && own.contains(&fi);
+        let range = [l0.max(if own_face { own_eps } else { self.eps_other }), l1.min(far)];
+        if !(range[1] >= range[0]) {
+            return false;
+        }
+        let [n, splines] = tests.get();
+        tests.set([n + 1, splines + usize::from(matches!(f.surface, super::surface::S3::Nurbs(_)))]);
+        hits.clear();
+        f.surface.ray_as(&f.analytic, p0, dl, range, hits);
+        hits.iter().any(|h| {
+            if h.grazing || h.lam <= self.touch {
+                return false;
+            }
+            // Deep enough under the face, measured under its tangent plane at the hit so a point
+            // resting on a face seen at a slant stays seen; or far enough along the ray, so a
+            // round seen almost edge on (its tangent plane nearly along the ray) or a face
+            // wrapping round in front still hides.
+            let depth = f.surface.normal(h.uv).map_or(h.lam, |n| h.lam * n.dot(dl).abs());
+            if !(depth > self.touch || h.lam > self.graze) {
+                return false;
+            }
+            // Inside the face, or on its boundary to within its trim's accuracy: where two faces
+            // of a body meet the point is behind both, and at a body's outline it is hidden or
+            // seen by less than that accuracy.
+            let s = f.surface.point(h.uv);
+            let near = f.trim.near(s, 2. * f.trim.chord_error + 1e-7 * (f.hi - f.lo).len());
+            f.trim.unsupported.is_none() && (near || f.trim.contains(h.uv) == Some(true))
+        })
+    }
+}
+
+impl Occluders<'_> {
+    /// Whether plane face `face` (`[placement, face]`) hides the whole straight stretch from `a`
+    /// to `b` (scene coordinates) seen from `eye`: both ends deeper behind its plane than
+    /// [`Occluders::touch`], and the stretch's shadow on the plane (a segment, also seen from a
+    /// point) inside the face and clear of its boundary by the trim's accuracy.
+    fn covers(&self, [qi, fi]: [u32; 2], a: Vec3, b: Vec3, eye: Eye) -> bool {
+        let Some(q) = self.scene.get(qi as usize) else { return false };
+        let Some(f) = self.defs.get(q.body).and_then(|d| d.faces.get(fi as usize)) else { return false };
+        let super::surface::S3::Plane { o, n, .. } = f.surface else { return false };
+        if f.trim.unsupported.is_some() {
+            return false;
+        }
+        let tol = 2. * f.trim.chord_error + 1e-7 * (f.hi - f.lo).len();
+        let shadow = |p: Vec3| -> Option<Vec3> {
+            let dir = match eye {
+                Eye::Along(d) => -d,
+                Eye::At(e) => (e - p).normalized()?,
+            };
+            let (p, dl) = (q.local(p), q.local_dir(dir));
+            let along = dl.dot(n);
+            if along.abs() <= 1e-12 {
+                return None;
+            }
+            let lam = (o - p).dot(n) / along;
+            // In front of the point and deep enough behind the face.
+            let depth = lam * along.abs();
+            if let Eye::At(e) = eye
+                && lam >= q.local(e).dist(p)
+            {
+                return None;
+            }
+            (lam > self.touch && depth > self.touch).then_some(p + dl * lam)
+        };
+        let (Some(sa), Some(sb)) = (shadow(a), shadow(b)) else { return false };
+        if f.trim.near(sa, tol) || f.surface.inverse(sa, None).and_then(|uv| f.trim.contains(uv)) != Some(true) {
+            return false;
+        }
+        f.trim.segment_clear(sa, sb, tol) == Some(true)
     }
 }
 
@@ -404,13 +514,16 @@ impl<'a> Occluders<'a> {
 /// toward where the hiding face changes at most `halvings` times; the samples taken go to `found`.
 fn gap(
     seen: &dyn Fn(f64) -> Seen,
+    hides: &dyn Fn([u32; 2], f64) -> bool,
     (a, fa): (f64, [u32; 2]),
     (b, fb): (f64, [u32; 2]),
     halvings: u32,
     found: &mut Vec<(f64, Seen)>,
     rays: &mut usize,
 ) {
-    if halvings == 0 {
+    // Faces that overlap there (either one also hides the other's sample) leave no gap between
+    // the samples, as one face hiding both does not.
+    if halvings == 0 || hides(fb, a) || hides(fa, b) {
         return;
     }
     let m = 0.5 * (a + b);
@@ -419,10 +532,10 @@ fn gap(
     found.push((m, s));
     if let Seen::Hidden(fm) = s {
         if fm != fa {
-            gap(seen, (a, fa), (m, fm), halvings - 1, found, rays);
+            gap(seen, hides, (a, fa), (m, fm), halvings - 1, found, rays);
         }
         if fm != fb {
-            gap(seen, (m, fm), (b, fb), halvings - 1, found, rays);
+            gap(seen, hides, (m, fm), (b, fb), halvings - 1, found, rays);
         }
     }
 }

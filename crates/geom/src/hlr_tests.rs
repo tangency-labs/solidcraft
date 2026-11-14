@@ -3091,3 +3091,28 @@ fn the_spline_ray_test_finds_every_crossing_of_a_wavy_patch() {
     }
     assert!(rays > 500 && crossings > 500, "{rays} rays, {crossings} crossings checked");
 }
+||||||| parent of ff7df5f3f7 (Exact edges: a plane face hides a straight stretch at once, overlapping hiders skip the gap search, basis arrays sized to the degree)
+
+
+#[test]
+fn a_plane_face_hides_a_straight_edge_whole_at_once_but_not_across_its_hole() {
+    // A 10 mm plate 1 mm thick with a hole of radius 3 at (5, 5), seen from above, over two bars
+    // 2 mm below it whose top edges (edge 3, along x from 1 to 9) lie under the plate.
+    let plate = prepare(&holed_plate(1, 10., 3., 1.), &Options::default()).unwrap();
+    let solid = prepare(&cuboid([1., 0., -3.], [9., 1., -2.]), &Options::default()).unwrap();
+    let holed = prepare(&cuboid([1., 4., -3.], [9., 5., -2.]), &Options::default()).unwrap();
+    let defs = [plate, solid, holed];
+    let scene = [identity(0, [0.; 3]), identity(1, [0.; 3]), identity(2, [0.; 3])];
+    for eye in [occlusion::Eye::Along(Vec3::new(0., 0., -1.)), occlusion::Eye::At(Vec3::new(5., 3., 400.))] {
+        // Under the plate away from the hole (y = 1): hidden whole, found from a few rays.
+        let under = seen_pieces(&defs, &scene, 1, 3, eye, 0.05);
+        assert!(under.visible.is_empty() && under.hidden == vec![[0., 1.]], "{eye:?}: {under:?}");
+        assert!(under.covered > 0 && under.rays < 16, "{eye:?}: {under:?}");
+        // Under the hole (y = 5): its ends are hidden by the same face, yet it shows through the
+        // hole, from x = 2 to 8 (2 ± a hair seen from the eye), and nothing is covered across it.
+        let across = seen_pieces(&defs, &scene, 2, 3, eye, 0.05);
+        assert_eq!(across.visible.len(), 1, "{eye:?}: {across:?}");
+        let [a, b] = across.visible[0];
+        assert!((a - 0.125).abs() < 0.01 && (b - 0.875).abs() < 0.01, "{eye:?}: {across:?}");
+    }
+}

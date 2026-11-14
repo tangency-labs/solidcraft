@@ -292,7 +292,27 @@ pub const EVAL_D1_MAX_DEGREE: usize = 15;
 /// The `p + 1` basis functions of degree `p` that are not zero in knot span `span` at `x`, and
 /// their first derivatives (NURBS Book A2.3, for one derivative), in fixed arrays.
 fn basis_d1(kn: &[f64], p: usize, span: usize, x: f64) -> Option<([f64; EVAL_D1_MAX_DEGREE + 1], [f64; EVAL_D1_MAX_DEGREE + 1])> {
-    const M: usize = EVAL_D1_MAX_DEGREE + 1;
+    // The work arrays sized to the degree: zeroing the largest for a cubic took longer than the
+    // recurrence itself.
+    fn widen<const M: usize>((n, d): ([f64; M], [f64; M])) -> ([f64; EVAL_D1_MAX_DEGREE + 1], [f64; EVAL_D1_MAX_DEGREE + 1]) {
+        let (mut wn, mut wd) = ([0.0; EVAL_D1_MAX_DEGREE + 1], [0.0; EVAL_D1_MAX_DEGREE + 1]);
+        for (k, (a, b)) in n.into_iter().zip(d).enumerate().take(EVAL_D1_MAX_DEGREE + 1) {
+            if let (Some(x), Some(y)) = (wn.get_mut(k), wd.get_mut(k)) {
+                *x = a;
+                *y = b;
+            }
+        }
+        (wn, wd)
+    }
+    match p {
+        0..4 => basis_d1_in::<4>(kn, p, span, x).map(widen),
+        4..8 => basis_d1_in::<8>(kn, p, span, x).map(widen),
+        _ => basis_d1_in::<{ EVAL_D1_MAX_DEGREE + 1 }>(kn, p, span, x),
+    }
+}
+
+/// [`basis_d1`] with work arrays of `M` (more than `p`).
+fn basis_d1_in<const M: usize>(kn: &[f64], p: usize, span: usize, x: f64) -> Option<([f64; M], [f64; M])> {
     if p >= M {
         return None;
     }
