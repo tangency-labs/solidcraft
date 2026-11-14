@@ -1,0 +1,50 @@
+{
+  "en": {
+    "ui.new_window.failed": "Could not open a new window: {error}",
+    "ui.new_window.opened": "Opened {name} in a new window",
+    "ui.new_window.save_first": "Save {name} first: a new window opens the saved file",
+    "ui.new_window.unsupported": "New windows are not available in the browser"
+  },
+  "de": {
+    "ui.new_window.failed": "Neues Fenster konnte nicht geöffnet werden: {error}",
+    "ui.new_window.opened": "{name} in neuem Fenster geöffnet",
+    "ui.new_window.save_first": "Speichere zuerst {name}: Ein neues Fenster öffnet die gespeicherte Datei",
+    "ui.new_window.unsupported": "Neue Fenster sind im Browser nicht verfügbar"
+  },
+  "ko": {
+    "ui.new_window.failed": "새 창을 열 수 없습니다: {error}",
+    "ui.new_window.opened": "{name}을(를) 새 창에서 열었습니다",
+    "ui.new_window.save_first": "먼저 {name}을(를) 저장하세요: 새 창은 저장된 파일을 엽니다",
+    "ui.new_window.unsupported": "브라우저에서는 새 창을 사용할 수 없습니다"
+  },
+  "ar": {
+    "ui.new_window.failed": "تعذر فتح نافذة جديدة: {error}",
+    "ui.new_window.opened": "تم فتح {name} في نافذة جديدة",
+    "ui.new_window.save_first": "احفظ {name} أولًا: تفتح النافذة الجديدة الملف المحفوظ",
+    "ui.new_window.unsupported": "النوافذ الجديدة غير متاحة في المتصفح"
+  },
+  "he": {
+    "ui.new_window.failed": "לא ניתן לפתוח חלון חדש: {error}",
+    "ui.new_window.opened": "{name} נפתח בחלון חדש",
+    "ui.new_window.save_first": "יש לשמור את {name} קודם: חלון חדש פותח את הקובץ השמור",
+    "ui.new_window.unsupported": "חלונות חדשים אינם זמינים בדפדפן"
+  },
+  "ja": {
+    "ui.new_window.failed": "新しいウィンドウを開けませんでした: {error}",
+    "ui.new_window.opened": "{name}を新しいウィンドウで開きました",
+    "ui.new_window.save_first": "先に{name}を保存してください: 新しいウィンドウは保存済みのファイルを開きます",
+    "ui.new_window.unsupported": "ブラウザーでは新しいウィンドウを利用できません"
+  },
+  "vi": {
+    "ui.new_window.failed": "Không thể mở cửa sổ mới: {error}",
+    "ui.new_window.opened": "Đã mở {name} trong cửa sổ mới",
+    "ui.new_window.save_first": "Hãy lưu {name} trước: cửa sổ mới mở tệp đã lưu",
+    "ui.new_window.unsupported": "Trình duyệt không hỗ trợ cửa sổ mới"
+  },
+  "zh": {
+    "ui.new_window.failed": "无法打开新窗口：{error}",
+    "ui.new_window.opened": "已在新窗口中打开 {name}",
+    "ui.new_window.save_first": "请先保存 {name}：新窗口会打开已保存的文件",
+    "ui.new_window.unsupported": "浏览器中不支持新窗口"
+  }
+}

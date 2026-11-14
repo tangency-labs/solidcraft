@@ -961,6 +961,12 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
 - `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`
+- `design_reopen_views` (default false: a design opens with only its Model view; true opens it with the views it had when it was last closed)
+- `design_reuse_views` (default true: opening a sheet, sketch or workspace that a view already shows activates that view; false makes a new view each time)
+- `design_sub_tab_render` (default true: Render and Animate open as views of their design; false: they replace the current view)
+- `design_sub_tab_sheets` (default true: a drawing sheet opens as a view of its design; false: it replaces the current view)
+- `design_sub_tab_sketches` (default true: editing a sketch opens it as a view of its design and Finish Sketch returns to the previous view; false: the sketch is edited in the current view)
+- `design_views_as_tabs` (default true: a design's views are tabs inside its tab; false: each design keeps one tab with a view switcher menu)
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dimension_colour` (`null` (default) or `[r, g, b]` numbers 0…255: the colour a sketch dimension draws its lines, arrows and value in; null uses the theme's dimension colours. Selection, hover and conflicts keep their own colours, #14121)
 - `dimension_input` (`view` (default): a sketch dimension's value is typed in a box on the dimension; `window`: placing a dimension with the Dimension tool, or double-clicking one, opens a small window at it with the value field (handle `dimwin:value`), arrows that step the value (`dimwin:up`, `dimwin:down`), a check (`dimwin:ok`, also Enter) and a cross (`dimwin:cancel`, also Esc), #7246)
