@@ -5,6 +5,7 @@
 //! `SM_API/SmApiBrep`.
 
 pub mod construction;
+pub mod curve_on_surfaces;
 pub mod draft;
 pub mod offset_executive;
 pub mod offset_faces;

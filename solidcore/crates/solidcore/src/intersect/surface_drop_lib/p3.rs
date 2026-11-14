@@ -3,7 +3,7 @@
 //! (one start per seam side and pole direction), then every span of the curve cache is
 //! walked with [`DropPt::get_next_point`], tested with [`DropPt::test_span_accuracy`]
 //! and subdivided until it passes, and the passing spans are collected into UV
-//! B-spline curves ([`add_to_curve`], [`flush_curve`]).
+//! B-spline curves ([`super::p2::add_to_curve`], [`super::p2::flush_curve`]).
 //!
 //! Upstream: `source/SMLib/src/SmSurfaceDropLib.cpp`.
 //!
@@ -104,13 +104,14 @@ use crate::surface::surface::p7::approx_derivative_lengths;
 use crate::surface::surface::Surface;
 use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled;
 
+use super::boundary_moves::MoveBound;
 use super::p1::{
     pop_stack, push_point, remove_duplicate_drop_point_solutions, stack_look, DropFailRecord,
     DropPt, SM_ERR_OUTSIDE_OF_DOMAIN, SM_SUCCESS,
 };
 use super::p2::{
-    add_to_curve, flush_curve, DropOffset, SM_ERR_INVALID_INPUT, SM_ERR_NOT_WITHIN_TOLERANCE,
-    SS_NONE,
+    add_to_curve_bounded, flush_curve_bounded, DropOffset, SM_ERR_INVALID_INPUT,
+    SM_ERR_NOT_WITHIN_TOLERANCE, SS_NONE,
 };
 
 /// `SM_ERR_NOT_CONVERGING` (`SmMessages.h`).
@@ -127,6 +128,8 @@ pub use crate::error::SM_ERR_BAD_FIND_DEGEN_PARAM;
 /// (upstream: unbounded).
 pub const MAX_SPAN_DEPTH: usize = 64;
 
+/// The operation of a drop the boundary fix-up refused (`boundary_moves`).
+const OP_REFUSED: &str = "intersect::surface_drop_lib::fix_boundary_curves_bounded";
 const OP: &str = "intersect::surface_drop_lib::Surface::drop_curve_base";
 
 /// The caller's face-aware solving service for a drop: the context that builds the
@@ -719,6 +722,9 @@ impl Surface {
         // temporarily enable slight out-of-bounds convergence (on an evaluation copy)
         let oob = with_out_of_bounds_enabled(self)?;
         let this = oob.as_ref().unwrap_or(self);
+        // not upstream: a B-spline surface's net bounds the boundary fix-up's moves
+        // (`boundary_moves`); its budget is set before each use
+        let mut move_bound = MoveBound::of(k, this, approx_tol_3d);
 
         // surface singularities and their pole points
         let sings = this.get_singularities(k, true, true)?;
@@ -1376,7 +1382,15 @@ impl Surface {
                         }
 
                         // add the span to the curve (status ignored, SE)
-                        ignore_status(add_to_curve(
+                        // (not upstream: on a B-spline surface or an offset of one, the
+                        // boundary fix-up of a curve it flushes keeps the curve in the
+                        // domain and moves each span by a proved bound within the
+                        // tolerance the trace left, or refuses the curve; the bound is
+                        // added to the deviation, see `boundary_moves`)
+                        if let Some(b) = move_bound.as_mut() {
+                            b.budget = approx_tol_3d - max_approx_dev;
+                        }
+                        ignore_status(add_to_curve_bounded(
                             k,
                             this,
                             &s_uv_domain,
@@ -1389,7 +1403,17 @@ impl Surface {
                             uv_tol_y,
                             &mut out.uv_curves,
                             &mut fix_bc_change,
+                            move_bound.as_ref(),
                         ))?;
+                        if let Some(b) = move_bound.as_ref() {
+                            if b.refused() {
+                                return Err(SolidError::intersect_failed(
+                                    OP_REFUSED,
+                                    "the boundary fix-up refused the dropped curve",
+                                ));
+                            }
+                            max_approx_dev += b.spent();
+                        }
 
                         // next span starts at this end
                         start = end;
@@ -1473,8 +1497,12 @@ impl Surface {
                 }
             }
 
-            // output the curve built for this start point
-            flush_curve(
+            // output the curve built for this start point (not upstream: the bounded
+            // boundary fix-up, as above; a refusal fails the drop)
+            if let Some(b) = move_bound.as_mut() {
+                b.budget = approx_tol_3d - max_approx_dev;
+            }
+            flush_curve_bounded(
                 &s_uv_domain,
                 &mut ctrl_poly,
                 &mut knots,
@@ -1482,7 +1510,11 @@ impl Surface {
                 uv_tol_y,
                 &mut out.uv_curves,
                 &mut fix_bc_change,
+                move_bound.as_ref(),
             )?;
+            if let Some(b) = move_bound.as_ref() {
+                max_approx_dev += b.spent();
+            }
         }
 
         // no curves (no record, as upstream)
