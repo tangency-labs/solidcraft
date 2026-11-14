@@ -4372,8 +4372,8 @@ fn host_intersected_minimum_and_maximum_are_honoured_at_the_exact_capacity_bound
     let layout = host_layout(&h, 2000.0, 1600.0, Direction::Ltr);
     assert_eq!(
         layout.resolved.panels[0].outer.size,
-        Size { width: 300.0, height: 240.0 },
-        "sole Content keeps measured height within composite maxima"
+        Size { width: 300.0, height: 400.0 },
+        "a sole panel honours the manual size at the composite maximum"
     );
     assert_eq!(h.runtime.layout().layout().section(&section("editor-section")).unwrap().preferred_extent, Some(400.0));
 }
