@@ -671,8 +671,10 @@ fn lifted_sheets_beside(
     for f in b.face_list().to_vec() {
         b.face_mut(f).unwrap().tolerance = 0.002;
     }
+    // (a body with a third face, which the scope's clearance proof is about, has wider balls)
+    let vertex_zone = if beside.is_some() { 0.012 } else { 0.006 };
     for v in b.vertex_list().to_vec() {
-        b.vertex_mut(v).unwrap().tolerance = 0.006;
+        b.vertex_mut(v).unwrap().tolerance = vertex_zone;
     }
     let translation = Axis2Placement::new(
         Vec3::new(0.0, 0.0, gap),
@@ -778,10 +780,13 @@ fn a_gap_inside_the_summed_local_zones_is_taken_only_by_the_stitch_scope() {
 
     let mut k = Kernel::default();
     k.fixes.validate_tolerances_fixes_reported_gaps = true;
+    // (a check repairs the vertex tolerances it finds short as it runs: one body per check)
+    let (mut every, sewed) = lifted_sheets(&mut k, 0.004, 1e-4, 0.02);
+    assert_eq!(sewed, 1);
+    let body = check_brep(&mut k, &mut every, CheckLevel::Level2).unwrap();
+    assert!(!body.is_valid(), "the rule for every body is unchanged");
     let (mut b, sewed) = lifted_sheets(&mut k, 0.004, 1e-4, 0.02);
     assert_eq!(sewed, 1);
-    let body = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-    assert!(!body.is_valid(), "the rule for every body is unchanged");
     let report =
         check_brep_scoped(&mut k, &mut b, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
     assert!(report.is_valid(), "{:?}", report.lines());
@@ -791,6 +796,7 @@ fn a_gap_inside_the_summed_local_zones_is_taken_only_by_the_stitch_scope() {
     }
     // Checking validity must not silently repair the model.
     let before: Vec<f64> = b.vertex_list().iter().map(|&v| b.vertex(v).unwrap().tolerance).collect();
+    assert!(before.iter().all(|&t| t == 0.006), "the scoped check grows nothing: {before:?}");
     let mut repair = AssertArray::default();
     let gaps = validate_and_update_tolerances(&mut k, &mut b, true, Some(&mut repair), 2).unwrap();
     assert!((gaps.max_vertex_edge_gap - 0.004).abs() < 1e-12);
@@ -799,21 +805,21 @@ fn a_gap_inside_the_summed_local_zones_is_taken_only_by_the_stitch_scope() {
 }
 
 /// The stitch's scope takes a gap past the rule for every body only where the tolerance ball that
-/// covers it reaches no topology it does not bound: a separate face 0.003 from a sewn vertex, inside
-/// its 0.006 ball, keeps the gap reported.
+/// covers it reaches no topology it does not bound: a separate face 0.009 from a sewn vertex, inside
+/// its 0.012 ball and outside every edge's zone, keeps the gap reported; the same face 0.5 away does
+/// not. (A check repairs the vertex tolerances it finds short as it runs, so each check is of a
+/// body of its own.)
 #[test]
 fn the_stitch_scope_refuses_a_gap_whose_ball_reaches_other_topology() {
-    use solidcore::topology::brep::validation::{check_brep, check_brep_scoped, CheckLevel, ValidityScope};
+    use solidcore::topology::brep::validation::{check_brep_scoped, CheckLevel, ValidityScope};
 
     let mut k = Kernel::default();
-    let tols = |b: &Brep| -> Vec<f64> { b.vertex_list().iter().map(|&v| b.vertex(v).unwrap().tolerance).collect() };
-    let (mut near, sewed) = lifted_sheets_beside(&mut k, 0.004, 1e-4, 0.02, Some((1.0, 1.003)));
-    assert_eq!(sewed, 1);
-    eprintln!("T0 {:?}", tols(&near));
-    let r1 = check_brep(&mut k, &mut near, CheckLevel::Level2).unwrap();
-    eprintln!("T1 {:?} {}", tols(&near), r1.lines().len());
-    let r2 = check_brep(&mut k, &mut near, CheckLevel::Level2).unwrap();
-    eprintln!("T2 {:?} {}", tols(&near), r2.lines().len());
-    let r3 = check_brep_scoped(&mut k, &mut near, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
-    eprintln!("T3 {:?} {}", tols(&near), r3.lines().len());
+    for (distance, valid) in [(0.5, true), (0.009, false)] {
+        let (mut b, sewed) =
+            lifted_sheets_beside(&mut k, 0.008, 0.01, 0.005, Some((1.0, 1.0 + distance)));
+        assert_eq!(sewed, 1, "distance {distance}");
+        let report =
+            check_brep_scoped(&mut k, &mut b, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
+        assert_eq!(report.is_valid(), valid, "distance {distance}: {:?}", report.lines());
+    }
 }
