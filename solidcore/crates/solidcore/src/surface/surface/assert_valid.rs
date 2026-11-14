@@ -922,6 +922,14 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
 
         // one additional basis function becomes zero for each multiplicity at sMults[ii]
         let row_cnt_u = degree_u - (mult(&mults_u, ii)? - 1);
+        // Not upstream (WR-505): a knot repeated more than degree + 1 times leaves no row to
+        // compare (the coincidence loop below would not run and the knot would be taken
+        // for a pole untested), so it is skipped; test 1 reports its multiplicity. Upstream's
+        // row index leaves the net there.
+        if row_cnt_u < 0 {
+            ii += 1;
+            continue;
+        }
         // Not upstream (WR-505; tangency-labs/smlib#41): the row through the knot, where
         // upstream's `kntCntU - rowCntU - 1` moves one row further for each repeated copy
         let cp_index_u = knt_cnt_u - 1 - degree_u;
@@ -977,6 +985,11 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
         knt_cnt_v += mult(&mults_v, ii)?;
 
         let row_cnt_v = degree_v - (mult(&mults_v, ii)? - 1);
+        // as the U walk: a knot repeated more than degree + 1 times is skipped (WR-505)
+        if row_cnt_v < 0 {
+            ii += 1;
+            continue;
+        }
         // as the U walk: the row through the knot (WR-505)
         let cp_index_v = knt_cnt_v - 1 - degree_v;
 
@@ -2841,6 +2854,103 @@ mod tests {
         assert!(
             has_internal_pole(&k, &s, &part, ZONE_TOL_3D / 10.0).unwrap(),
             "the pole at the double knot is found"
+        );
+    }
+
+    /// The goldens' `ovf0263` net (degree 3 by 1, 5 x 5): its V knot 0.25 is repeated 3
+    /// times, more than degree + 1, so the walk has no row to compare there. The knot is
+    /// skipped (no pole is reported without a coincidence test), test 1 reports the
+    /// multiplicity, and upstream's row index (one past the net) is not read. With no
+    /// pole, test 5 then runs and finds the net doubling back.
+    #[test]
+    fn a_knot_repeated_past_degree_plus_one_is_not_a_pole() {
+        let xs = [
+            0.619_092_368_149_524_5,
+            0.773_865_460_186_905_6,
+            0.928_638_552_224_286_8,
+            1.083_411_644_261_668,
+            0.619_092_368_149_524_5,
+        ];
+        let ys = [
+            0.309_546_184_074_762_25,
+            0.464_319_276_112_143_4,
+            0.619_092_368_149_524_5,
+            0.773_865_460_186_905_6,
+            0.928_638_552_224_286_8,
+        ];
+        let zs = [
+            [
+                -0.069_466_878_423_028_26,
+                -0.158_859_253_527_507_32,
+                -0.057_906_515_715_139_88,
+                0.164_432_400_201_120_6,
+                -0.185_682_426_738_735_83,
+            ],
+            [
+                -0.141_088_819_553_874_67,
+                0.091_056_928_588_417_02,
+                0.148_379_971_858_609_74,
+                -0.017_864_641_637_210_046,
+                0.102_006_149_419_652_04,
+            ],
+            [
+                0.057_604_537_359_578_44,
+                0.037_936_554_061_692_315,
+                0.178_585_131_715_707_3,
+                -0.057_522_390_266_957_63,
+                -0.143_358_338_095_772_42,
+            ],
+            [
+                0.025_494_854_024_519_058,
+                -0.147_183_825_340_435_34,
+                0.148_141_842_382_298_52,
+                0.182_980_335_462_639_92,
+                -0.091_400_093_294_920_9,
+            ],
+            [
+                -0.069_466_878_423_028_26,
+                -0.158_859_253_527_507_32,
+                -0.057_906_515_715_139_88,
+                0.164_432_400_201_120_6,
+                -0.185_682_426_738_735_83,
+            ],
+        ];
+        let mut pts = Vec::new();
+        for (x, row) in xs.iter().zip(zs) {
+            for (y, z) in ys.iter().zip(row) {
+                pts.push([*x, *y, z]);
+            }
+        }
+        let s = bspline(
+            3,
+            1,
+            &[0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0],
+            &[0.0, 0.0, 0.25, 0.25, 0.25, 1.0, 1.0],
+            &pts,
+        );
+        let k = Kernel::default();
+        let part = make_nurb(&k, &s).unwrap().unwrap();
+        assert!(!has_internal_pole(&k, &s, &part, 0.0).unwrap());
+        let mut list = AssertArray::new();
+        let ok = s
+            .assert_valid(&k, Some(&mut list), 2, ObjectKey(1))
+            .unwrap();
+        let failed: Vec<_> = list
+            .reports()
+            .iter()
+            .filter(|r| !r.ok)
+            .map(|r| (r.reporting_type, r.test_index))
+            .collect();
+        assert!(!ok);
+        // test 5 runs once no internal pole is found (upstream's order), and it is real: the
+        // net's last U row returns to its first (x 1.083 back to 0.619), so it doubles back
+        assert_eq!(
+            failed,
+            [
+                (SURFACE_TYPE, 4),
+                (B_SPLINE_SURFACE_TYPE, 1),
+                (B_SPLINE_SURFACE_TYPE, 5)
+            ]
         );
     }
 
