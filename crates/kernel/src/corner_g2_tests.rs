@@ -118,22 +118,22 @@ fn set_back_8_the_g2_corner_lies_between_the_hull_and_the_prisms() {
     assert!(clear <= CURVATURE_SHARE / 5.0, "{clear}");
 }
 
-/// How far past the box (60, 40, 20) face `face` of `rec` reaches within its trim: the highest
-/// `max(x - 60, y - 40, z - 20)` on it, bracketed `(lo, hi)` from its exact surface alone, with no
-/// mesh. The surface (a polynomial B-spline) is cut into its Bézier patches and those split in
+/// How far past the box with far corner `top` (box_corner's is (60, 40, 20)) face `face` of `rec`
+/// reaches within its trim: the highest `max(x - top.x, y - top.y, z - top.z)` on it, bracketed
+/// `(lo, hi)` from its exact surface alone, with no mesh. The surface (a polynomial B-spline) is cut into its Bézier patches and those split in
 /// four (de Casteljau, exact up to rounding) while they can still hold a higher point: a patch
 /// lies in the hull of its control points, so its controls' highest value bounds it from above
 /// (`hi`), and its corners are points of the surface (`lo`, where inside the trim). A patch
 /// clear of the trim (the face's pcurves, sampled densely in its (u, v)) is dropped; one whose
 /// hull cannot beat `lo` by 1e-12 is done; one split 18 times counts its hull in `hi`. Returns
 /// the bracket and the (u, v) where `lo` is reached.
-fn past_the_box(rec: &b::Brep, face: usize) -> (f64, f64, [f64; 2]) {
+fn past_the_box(rec: &b::Brep, face: usize, top: Vec3) -> (f64, f64, [f64; 2]) {
     use solidcraft_geom::bspline::{HPoint, segment};
     let f = &rec.faces[face];
     let (b::Surface::Spline { u_knots, v_knots, points }, None) = (&f.surface, &f.nurbs) else {
         panic!("face {face} is no polynomial B-spline: {:?}", std::mem::discriminant(&f.surface));
     };
-    let excess = |p: Vec3| (p.x - 60.0).max(p.y - 40.0).max(p.z - 20.0);
+    let excess = |p: Vec3| (p.x - top.x).max(p.y - top.y).max(p.z - top.z);
     // The trim: every loop's pcurves as one polygon set, inside by the even-odd rule.
     let mut rings: Vec<Vec<[f64; 2]>> = Vec::new();
     for l in &f.loops {
@@ -257,7 +257,7 @@ fn a_long_setback_keeps_the_g2_patch_inside_the_box() {
         let rec = brep_record(&g2).unwrap();
         let patch: Vec<usize> = (0..rec.faces.len()).filter(|f| matches!(rec.faces[*f].surface, b::Surface::Spline { .. })).collect();
         assert_eq!(patch.len(), 1, "{s}: one patch");
-        let (lo, hi, at) = past_the_box(&rec, patch[0]);
+        let (lo, hi, at) = past_the_box(&rec, patch[0], Vec3::new(60.0, 40.0, 20.0));
         let (_, clear, _) = corner_seams(&g2, 0.15);
         eprintln!("set back {s}: past the box by {lo:.4e} at (u, v) {at:?} (at most {hi:.4e}), curvature jump clear of the corners {clear:.3e}");
         if !(hi <= 1e-9 && clear <= CURVATURE_SHARE / 5.0) {
@@ -378,8 +378,8 @@ fn curvature_rounds_meet_at_a_g2_corner() {
 /// corner's fill is certified convex only from a setback of 3.5595 (solidcore's
 /// `SetbackTooShort`, from the fill's convex test), so 3.5 is refused naming it. The G2 patch
 /// replaces solidcore's fill here, so 3.5595 is named as what solidcore's corner needs, never as
-/// a setback that builds: the patch does not fit there (it misses the rounds' curvature by
-/// 2.09e-3 against 1.67e-3, measured).
+/// a setback that builds (that it does build is the patch's own result, tested by
+/// [`the_least_setback_solidcores_corner_takes_is_filled_g2`]).
 #[test]
 fn a_setback_too_short_for_the_fill_names_what_solidcores_corner_needs() {
     let body = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
@@ -388,4 +388,50 @@ fn a_setback_too_short_for_the_fill_names_what_solidcores_corner_needs() {
     let short = fillet_g2_corners(&body, &edges, 3.0, &[(corner, 3.5)]).unwrap_err().to_string();
     assert!(short.contains("is too short for its corner's fill: solidcore's corner needs a setback of at least 3.5595 mm"), "{short}");
     assert!(!short.contains("builds"), "{short}");
+}
+
+/// tangency-labs/solidcraft#14427: the corner of #13913 set back 3.5595, the least setback
+/// solidcore's corner fill is certified convex at, is filled with the G2 patch, and so it is at
+/// 3.6 (whose fades take the last, 181-span grid): one closed valid solid of the box's six faces,
+/// the three rounds and the patch, within the box to the face tolerance (on the patch's exact
+/// surface, [`past_the_box`]). Outside the corner cube (side s at the corner) it is the sphere
+/// corner's body (the same rounds and faces), and inside it lies within the three rounds'
+/// prisms (closed forms below). Across every seam of the patch its curvature jump is under
+/// `CURVATURE_SHARE / r` clear of the hole's corners.
+#[test]
+fn the_least_setback_solidcores_corner_takes_is_filled_g2() {
+    let pi = std::f64::consts::PI;
+    let r = 3.0;
+    let body = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let edges = [Vec3::new(20.0, 30.0, 20.0), Vec3::new(40.0, 15.0, 20.0), Vec3::new(40.0, 30.0, 10.0)];
+    let corner = Vec3::new(40.0, 30.0, 20.0);
+    let tol = crate::fill::face_tolerance(&body);
+    let sphere = measure(&fillet(&body, &edges, r).unwrap()).unwrap().volume;
+    for s in [3.5595, 3.6] {
+        let g2 = fillet_g2_corners(&body, &edges, r, &[(corner, s)]).unwrap();
+        assert!(g2.validity().is_empty(), "{s}: {:?}", g2.validity());
+        let v = crate::validity::validity(&g2);
+        assert!(v.ok(), "{s}: {:?}", v);
+        let m = measure(&g2).unwrap();
+        assert_eq!(m.faces, 10, "{s}");
+        let rec = brep_record(&g2).unwrap();
+        let patch: Vec<usize> = (0..rec.faces.len()).filter(|f| matches!(rec.faces[*f].surface, b::Surface::Spline { .. })).collect();
+        assert_eq!(patch.len(), 1, "{s}: one patch");
+        // The patch stays within the box to the body's face tolerance, on its exact surface.
+        let (lo, hi, at) = past_the_box(&rec, patch[0], Vec3::new(40.0, 30.0, 20.0));
+        eprintln!("G2 corner set back {s}: past the box by {lo:.4e} at (u, v) {at:?} (at most {hi:.4e}, tolerance {tol:.4e})");
+        assert!(hi <= tol, "{s}: {hi} past the box (tolerance {tol})");
+        // In the corner cube (side s) the sphere corner holds the cube less the three rounds'
+        // strips (each the r x r square less a quarter disc, s - r long) and the r-cube's corner
+        // less an eighth of the ball; the rounds' prisms hold the cube less the strips and the
+        // r-cube less the eighth of the three cylinders' common solid ((2 - √2) r³).
+        let strips = 3.0 * r * r * (1.0 - pi / 4.0) * (s - r);
+        let outside = sphere - (s.powi(3) - strips - r.powi(3) * (1.0 - pi / 6.0));
+        let prisms = s.powi(3) - strips - r.powi(3) * (2f64.sqrt() - 1.0);
+        eprintln!("G2 corner set back {s}: volume {:.6}, outside the cube {outside:.6}, prisms {:.6}", m.volume, outside + prisms);
+        assert!(m.volume > outside && m.volume < outside + prisms, "{s}: {} in ({outside}, {})", m.volume, outside + prisms);
+        let (all, clear, n) = corner_seams(&g2, 0.15);
+        eprintln!("G2 corner set back {s}: worst jump {all:.4e} per mm, {clear:.4e} clear of the corners ({n} stations)");
+        assert!(n > 0 && clear <= CURVATURE_SHARE / r, "{s}: {clear} over {n} stations");
+    }
 }

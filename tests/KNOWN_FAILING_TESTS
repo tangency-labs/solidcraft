@@ -20,5 +20,4 @@ solidcraft-kernel::blend_corner::tests::issue2422_vertical_after_separate_bottom
 solidcraft-kernel::blend_variable::tests::variable_radius_with_a_corner_through_a_middle_point solidcore refuses a variable fillet whose law has a corner (solidcore#430)
 solidcraft-kernel::corner_g2::tests::a_long_setback_keeps_the_g2_patch_inside_the_box at set backs 11 to 15 the G2 corner patch bulges past the box, as on C++
 solidcraft-kernel::corner_g2::tests::curvature_rounds_meet_at_a_g2_corner the corner between curvature rounds jumps 2.07 in curvature over 538 stations on solidcore; the test wants it curvature continuous, as SMLib f916a8d's setback corner (smlib#104), which solidcore ports in solidcore#2310 builds it
-solidcraft-kernel::corner_g2::tests::the_box_corner_g2_patch_is_a_closed_solid_curvature_continuous_to_its_neighbours the fitted G2 corner patch bulges 1.7e-5 past the box, as on C++
 solidcraft-smlib::ops::tests::a_variable_round_with_a_corner_in_its_law_is_its_balls_union solidcore refuses a variable fillet whose law has a corner (solidcore#430)
