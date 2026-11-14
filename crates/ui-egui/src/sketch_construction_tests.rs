@@ -727,13 +727,23 @@ fn the_classic_preference_keeps_the_construction_normal_switch() {
     assert_eq!(crate::sketch_palette::mode(&h.app), 2);
     crate::sketch_palette::set_mode(&mut h.app, 1);
 
-    type_length(&mut h, '8');
+    // Classic: the digit goes to the Length box before the first click.
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    digit(&mut h, '8');
+    h.frames(2);
     click_switch(&mut h, "normal");
     assert_eq!(h.app.tool.as_ref().unwrap().line_type, 0, "with a length the switch works");
     assert!(h.app.tool.as_ref().unwrap().pts.is_empty(), "a click on the switch places no point");
     assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "8");
 
-    place_with_length(&mut h);
+    for at in [[20, 0], [6, 5]] {
+        h.step(&json!({"move":{"sketch":at}})).unwrap();
+        h.settle();
+        h.frames(30);
+        h.step(&json!({"click":{"sketch":at}})).unwrap();
+        h.settle();
+    }
     let sk = h.app.session.doc.sketch(sid).unwrap();
     assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
     let curve = sk.curves.last().unwrap();
@@ -749,6 +759,48 @@ fn the_classic_preference_keeps_the_construction_normal_switch() {
     let sk = h.app.session.doc.sketch(sid).unwrap();
     let curve = sk.curves.last().unwrap();
     assert!(curve.construction && curve.infinite, "{curve:?}");
+}
+
+/// With the `construction_line_classic` preference the boxes work as before #15618: a digit typed
+/// before the first click is the Length, two clicks then draw a dimensioned segment, and a horizontal
+/// line's typed Offset is a distance on the pointer's side, not a coordinate.
+#[test]
+fn the_classic_preference_keeps_the_length_box_before_the_first_click() {
+    let mut h = sketch();
+    h.app.preferences.construction_line_classic = true;
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    let labels: Vec<&str> = h.app.tool.as_ref().unwrap().dims.iter().map(|b| b.label).collect();
+    assert_eq!(labels, ["Length", "Offset"], "the Length box waits from the start, with no Along box");
+    digit(&mut h, '8');
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "8", "the digit went to the Length box");
+    h.step(&json!({"move":{"sketch":[6,5]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"sketch":[6,5]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    assert!(!curve.infinite && (sk.point(a).unwrap().dist(sk.point(b).unwrap()) - 8.0).abs() < 1e-6, "{curve:?}");
+
+    // A typed Offset of 6 with the pointer below the axis puts the line at Y = -6.
+    let tool = h.app.tool.as_mut().unwrap();
+    let dim = tool.dims.iter_mut().find(|d| d.label == "Offset").unwrap();
+    dim.locked = true;
+    dim.value = "6".into();
+    let mut tool = h.app.tool.take().unwrap();
+    super::place_point(&mut h.app, &mut tool, (solidcore_record::Vec2::new(5., -10.), None));
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    let curve = sk.curves.last().unwrap();
+    let CurveKind::Line { a, .. } = curve.kind else { panic!("a line") };
+    assert!(curve.infinite && (sk.point(a).unwrap().y + 6.0).abs() < 1e-6, "{curve:?}");
 }
 
 #[test]

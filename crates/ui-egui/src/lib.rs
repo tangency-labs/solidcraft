@@ -2418,6 +2418,10 @@ impl SolveApp {
         }
         if let Some(mut t) = tools::Tool::for_command(id) {
             t.classic = self.preferences.construction_line_classic;
+            if t.classic && solidcraft_engine::cmd::construction_line_mode(id).is_some() {
+                // The classic switch starts at Construction, whatever the palette chose last.
+                t.line_type = 3;
+            }
             let state = crate::open_meshing::session_world(&self.session);
             let sketch = self.session.active_sketch.and_then(|s| state.sketch(s)).map(|ss| &ss.sketch);
             if let Some(params) = tools::constraint_preselection(id, &self.session.selection, sketch) {

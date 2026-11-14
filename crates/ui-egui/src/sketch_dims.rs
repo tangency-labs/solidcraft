@@ -290,6 +290,17 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
     let off = 20.0 * px;
     // A one-click construction line's Offset box waits above and right of the pointer before any
     // click, clear of the grey coordinates below it (#15618). A bare digit goes there.
+    // The classic tools (`construction_line_classic`): the Length box waits beside the pointer, and
+    // Offset further along, as before #15618.
+    if t.classic && t.pts.is_empty() && t.dims.iter().any(|b| construction_length(t, b)) {
+        let length_at = e + Vec2::new(2.5 * off, -1.5 * off);
+        let distance = construction_offset_live(app, t, e, px).map(|v| v[0].0.abs()).unwrap_or(0.0);
+        return t
+            .dims
+            .iter()
+            .map(|b| if b.label == "Offset" { (distance, length_at + Vec2::new(6.0 * off, 0.0)) } else { (0.0, length_at) })
+            .collect();
+    }
     if t.pts.is_empty() && solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some() && t.dims.iter().any(|b| b.label == "Offset") {
         let distance = construction_offset_live(app, t, e, px).map(|v| v[0].0).unwrap_or(0.0);
         let along = if t.cmd == "sketch.construction_line.vertical" { e.y } else { e.x };
@@ -300,9 +311,18 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
     match (t.cmd, t.pts.len()) {
         // As for a line: the angle near the start, the length at the middle of the segment being
         // drawn (#10258, #15618).
+        ("sketch.construction_line.angle", 1) if t.classic => line_boxes(a, e, px, off).into_iter().rev().collect(),
         ("sketch.construction_line.angle", 1) => {
             line_boxes(a, crate::sketch_construction::segment_end(app, t, e).unwrap_or(e), px, off).into_iter().rev().collect()
         }
+        // Classic: behind the start, away from the pointer, as before #15618.
+        (
+            "sketch.construction_line.horizontal"
+            | "sketch.construction_line.vertical"
+            | "sketch.construction_line.parallel"
+            | "sketch.construction_line.perpendicular",
+            1,
+        ) if t.classic => vec![(0.0, a - dir_or_x(e - a) * (2.5 * off))],
         // The length at the middle of the segment being drawn, a little off it, as the Line tool
         // shows it (#15618).
         (
@@ -437,6 +457,9 @@ fn construction_offset_at(app: &SolveApp, t: &Tool, h: Vec2) -> Option<Vec2> {
     let (across, along) = (locked(app, t, "Offset"), locked(app, t, "Along"));
     let typed = across.is_some() || along.is_some();
     match t.cmd {
+        // Classic: a distance on the cursor's side, as before #15618.
+        "sketch.construction_line.horizontal" if t.classic => Some(Vec2::new(h.x, sign(h.y) * across?)),
+        "sketch.construction_line.vertical" if t.classic => Some(Vec2::new(sign(h.x) * across?, h.y)),
         "sketch.construction_line.horizontal" if typed => Some(Vec2::new(along.unwrap_or(h.x), across.unwrap_or(h.y))),
         "sketch.construction_line.vertical" if typed => Some(Vec2::new(across.unwrap_or(h.x), along.unwrap_or(h.y))),
         "sketch.construction_line.parallel" => {
@@ -474,6 +497,11 @@ fn boxes_now(t: &Tool) -> Vec<DimBox> {
     let mut boxes = boxes_for(t.cmd, t.pts.len());
     if t.cmd == "sketch.construction_line.parallel" && input_stage(t) == 0 || !t.pts.is_empty() {
         boxes.retain(|b| b.label != "Offset");
+    }
+    // The classic tools keep the Length box from the start and have no Along box.
+    if t.classic {
+        boxes.retain(|b| b.label != "Along");
+        return boxes;
     }
     // A construction line has a Length box only while a segment is drawn, after its first click:
     // the Sketch Palette says whether it is infinite (#15618).
@@ -597,7 +625,7 @@ pub fn validate(app: &SolveApp, t: &Tool) -> Result<(), String> {
             "Angle" => {}
             // A horizontal or vertical construction line's X and Y are coordinates: zero is on the
             // axis, a negative value on its other side (#15618).
-            "Along" | "Offset" if matches!(t.cmd, "sketch.construction_line.horizontal" | "sketch.construction_line.vertical") => {}
+            "Along" | "Offset" if !t.classic && matches!(t.cmd, "sketch.construction_line.horizontal" | "sketch.construction_line.vertical") => {}
             "Sweep" if t.cmd == "sketch.slot.arc_center" && value <= 0.0 => {
                 return Err("Arc slot Sweep must be greater than zero and less than 360 degrees".into());
             }
@@ -790,7 +818,10 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     // the Line tool shows the pointer's, in grey (#15618). A typed digit turns the ones that place
     // the line into boxes there, in X, Y order; one that does not (along an infinite line) stays
     // grey.
-    let coords = construction && t.pts.is_empty() && matches!(t.cmd, "sketch.construction_line.horizontal" | "sketch.construction_line.vertical");
+    let coords = construction
+        && !t.classic
+        && t.pts.is_empty()
+        && matches!(t.cmd, "sketch.construction_line.horizontal" | "sketch.construction_line.vertical");
     let mut coord_pos: Vec<Option<egui::Pos2>> = vec![None; t.dims.len()];
     let mut quiet = false;
     if coords
