@@ -19,7 +19,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use wgpu::util::DeviceExt;
 
 mod adaptive;
 mod denoise;
@@ -95,13 +94,8 @@ fn scopes(device: &wgpu::Device) -> [wgpu::ErrorScopeGuard; 3] {
     [wgpu::ErrorFilter::Validation, wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal].map(|f| device.push_error_scope(f))
 }
 fn checked(scopes: [wgpu::ErrorScopeGuard; 3]) -> Result<()> {
-    let mut error = None;
-    for scope in scopes.into_iter().rev() {
-        if let Some(e) = pollster::block_on(scope.pop()) {
-            error = Some(e);
-        }
-    }
-    error.map_or(Ok(()), |e| Err(gpu(e)))
+    let errors: Vec<_> = scopes.into_iter().rev().filter_map(|scope| pollster::block_on(scope.pop())).collect();
+    solidcraft_viewport_gpu::preferred_error(errors).map_or(Ok(()), |e| Err(gpu(solidcraft_viewport_gpu::describe_error(&e))))
 }
 
 /// Drain every scope, in reverse order, even when resource creation returns an error.
@@ -1130,22 +1124,20 @@ impl Task {
         drop(scene);
         let device = &context.device;
         let (uniform, accumulation, pages, failures, readback, bind, denoiser) = checked_creation(device, || {
-            let make = |label, bytes: &[u8], usage| {
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: bytes, usage })
-            };
+            let make = |label, bytes: &[u8], usage| solidcraft_viewport_gpu::buffer_init(device, label, bytes, usage).map_err(gpu);
             upload_bytes += environment_bytes.len() as u64;
-            let environment = make("path environment", &environment_bytes, wgpu::BufferUsages::STORAGE);
+            let environment = make("path environment", &environment_bytes, wgpu::BufferUsages::STORAGE)?;
             drop(environment_bytes);
-            let triangles = make("path triangles", &upload.geometry, wgpu::BufferUsages::STORAGE);
-            let nodes = make("path BVH", &upload.nodes, wgpu::BufferUsages::STORAGE);
-            let texture_buffer = make("path opaque textures", &texture_upload, wgpu::BufferUsages::STORAGE);
-            let uniform = make("path parameters", &[0; PARAMETER_BYTES], wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST);
+            let triangles = make("path triangles", &upload.geometry, wgpu::BufferUsages::STORAGE)?;
+            let nodes = make("path BVH", &upload.nodes, wgpu::BufferUsages::STORAGE)?;
+            let texture_buffer = make("path opaque textures", &texture_upload, wgpu::BufferUsages::STORAGE)?;
+            let uniform = make("path parameters", &[0; PARAMETER_BYTES], wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST)?;
             // Inconsistent-medium path count and the first such path's location (see read_linear).
             let failures = make(
                 "path medium failures",
                 &[0; FAILURE_BYTES as usize],
                 wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-            );
+            )?;
             let readback = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("path readback"),
                 size: page_layout.readback_bytes()?,
