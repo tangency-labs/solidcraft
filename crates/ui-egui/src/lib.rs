@@ -36,6 +36,8 @@ pub mod deferred;
 pub mod delete;
 pub mod design_properties;
 pub mod design_tab_prefs;
+pub mod design_view_ui;
+pub mod design_views;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
@@ -354,6 +356,7 @@ pub(crate) mod view_angles;
 pub use solidcraft_ui_kit::view_compass;
 mod view_confirm;
 pub mod view_gizmo;
+mod view_memory;
 pub mod view_pick;
 pub mod viewport;
 mod viewport_details;
@@ -1532,6 +1535,7 @@ impl SolveApp {
             // `queued`: it waits for the end of the agent's turn.
             Some("component.edit_in_place") => r.and_then(|v| edit_in_place::command_ran(self, &v).map(|queued| with_queued(v, queued))),
             Some("component.finish_edit") => r.and_then(|v| edit_in_place::finish_command(self).map(|queued| with_queued(v, queued))),
+            Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
             _ => r,
         };
         if let Ok(v) = &r {
@@ -2076,6 +2080,8 @@ impl SolveApp {
                 | "view.navigation_bar"
                 | "view.next_tab"
                 | "view.previous_tab"
+                | "tab.view.open"
+                | "tab.view.reopen"
         ) {
             let _ = self.run(id, json!({}));
             return;
@@ -3777,6 +3783,7 @@ impl SolveApp {
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());
+        documents::sync_views(self);
         documents::sync_window_title(self, ui.ctx());
     }
 

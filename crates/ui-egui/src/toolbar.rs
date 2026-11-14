@@ -2510,6 +2510,17 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         if shown && (crate::keymap::drag_zoom_key(app, k, mods) || crate::navigation::view_key(app, ctx, k, mods, repeat)) {
             continue;
         }
+        // Alt+1 to Alt+9 show the shown design's first to ninth view (Ctrl+1 to Ctrl+7 keep
+        // turning the view cube).
+        if shown
+            && mods.alt
+            && !mods.command
+            && !mods.shift
+            && let Some(place) = view_place(k)
+        {
+            drop(app.run("tab.view.activate", json!({"index": place})));
+            continue;
+        }
         if mods.command {
             match k {
                 // An editing embed's host has its own New, Open, Save, Close and settings.
@@ -2524,9 +2535,16 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                 }
                 _ if !shown => {}
-                // Close the design shown (asking first when it is unsaved); closing the last one
-                // shows the start page (#5366).
-                Key::W if !mods.shift && !mods.alt => crate::documents::close(app, app.docs.active, false),
+                // Ctrl+W closes the view shown, and the design with it when that is its only view;
+                // Ctrl+Shift+W closes the design shown. A design is closed asking first when it is
+                // unsaved; closing the last one shows the start page (#5366).
+                Key::W if !mods.alt => {
+                    if mods.shift || app.docs.views.len() < 2 {
+                        crate::documents::close(app, app.docs.active, false);
+                    } else {
+                        drop(app.run("tab.view.close", json!({})));
+                    }
+                }
                 Key::Z => {
                     if !crate::tools::undo_spline_point(app) {
                         drop(app.run("edit.undo", json!({})));
@@ -2619,6 +2637,15 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
         }
     }
+}
+
+/// The place (0 first) of the view a digit key shows: 1 to 9.
+fn view_place(key: egui::Key) -> Option<u8> {
+    use egui::Key;
+    [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9]
+        .iter()
+        .position(|digit| *digit == key)
+        .and_then(|i| u8::try_from(i).ok())
 }
 
 /// The Report a bug button for this header layout ([`app_bar::report_rect`]).
