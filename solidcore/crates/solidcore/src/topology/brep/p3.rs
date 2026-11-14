@@ -4640,9 +4640,6 @@ fn orient_body(
             continue;
         }
 
-        // processing this face uses a faceuse
-        faceuses_processed += 1;
-
         // init voting for rayfire
         let mut same_faces: Vec<FaceId> = Vec::new();
         let mut reverse_faces: Vec<FaceId> = Vec::new();
@@ -4689,6 +4686,14 @@ fn orient_body(
             maybe_not_closed = true;
             continue;
         }
+
+        // processing this face uses a faceuse. Not upstream: counted only once its votes
+        // decide it, where upstream counts it before the votes: a face left undecided (its
+        // votes skipped or tied) is not processed, and a later face's connected uses can reach
+        // it, so counting it made those uses more than the faces said to remain (two sheets
+        // crossing, the fillet in one quadrant: "more face uses are connected") and could end
+        // the walk before the last face.
+        faceuses_processed += 1;
 
         // votes for deciding which set of faces to flip
         let mut n_reverse = 0u32;
