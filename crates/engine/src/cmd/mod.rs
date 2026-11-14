@@ -42,6 +42,7 @@ mod face;
 mod features;
 mod features_more;
 mod join_pieces;
+pub(crate) use browser::{find_kinds, find_text};
 pub(crate) use component::follow_expressed_moves;
 pub use construct::picked_plane_refs;
 pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, picked_plane};

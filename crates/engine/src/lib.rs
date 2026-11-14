@@ -10,6 +10,7 @@
 pub mod agent_setup;
 pub mod batch_params;
 pub mod batch_preflight;
+pub mod browser_find;
 pub mod capture;
 pub mod cmd;
 pub mod control_auth;
@@ -2495,6 +2496,8 @@ pub fn script_steps(script: &Value) -> Result<&Vec<Value>> {
 
 #[cfg(test)]
 mod boolean_regression_tests;
+#[cfg(test)]
+mod browser_find_tests;
 #[cfg(test)]
 mod computed_commands_tests;
 #[cfg(test)]

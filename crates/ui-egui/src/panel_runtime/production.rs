@@ -188,7 +188,8 @@ impl Product {
                 ("references", "render.stage_panels.surfaces_references", "library"),
             ],
             Self::RenderInspector => vec![("remove", "render.inspector_remove", "delete")],
-            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom => Vec::new(),
+            Self::Browser => vec![("magnifier", "ui.browser_search_hint", "zoom")],
+            Self::RenderShots | Self::SketchOptions | Self::Bom => Vec::new(),
         };
         entries.into_iter().map(|(id, key, icon)| HeaderActionSpec { id: ControlId(id.into()), label_key: key.into(), icon: icon.into() }).collect()
     }
@@ -276,7 +277,14 @@ impl Product {
                     .into_iter()
                     .collect()
             }
-            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom => Vec::new(),
+            Self::Browser => vec![RuntimeAction {
+                id: ControlId("magnifier".into()),
+                label: solidcraft_ui_text::tr("ui.browser_search_hint").into(),
+                enabled: true,
+                disabled_reason: None,
+                pressed: Some(crate::browser_search::bar_shown(app)),
+            }],
+            Self::RenderShots | Self::SketchOptions | Self::Bom => Vec::new(),
         };
         presentation
     }
@@ -537,7 +545,8 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
                 crate::render_workspace::library::set_library_mode(app, mode);
             }
             Product::RenderInspector => crate::render_workspace::inspector_panel::shared_remove(app),
-            Product::Browser | Product::RenderShots | Product::SketchOptions | Product::Bom => {}
+            Product::Browser => crate::browser::magnifier(app),
+            Product::RenderShots | Product::SketchOptions | Product::Bom => {}
         }
     }
     Ok(())

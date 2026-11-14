@@ -27,7 +27,9 @@ mod point_clouds;
 pub use point_clouds::CloudPanel;
 pub(crate) use point_clouds::point_cloud_tracks;
 
+/// Find for a feature shows the whole tree, so it ends a search (#1413).
 pub(crate) fn reveal_feature(app: &mut SolveApp, id: u64, body: &str) {
+    app.tree.search.clear();
     features::reveal(app, id, body);
 }
 
@@ -72,9 +74,11 @@ pub(crate) fn reveal_shared_panel(app: &mut SolveApp, name: &str) {
     }
 }
 
-/// Find in Browser for a body: show the Browser and find the body there ([`find_in_tree`]).
+/// Find in Browser for a body: show the Browser and find the body there ([`find_in_tree`]). It
+/// shows the whole tree, so it ends a search; a pick in the view keeps one ([`reveal_pick`], #1413).
 pub(crate) fn reveal_body(app: &mut SolveApp, body: &str) {
     sync_reveals(app);
+    app.tree.search.clear();
     app.ui.show_browser = true;
     reveal_shared_panel(app, "browser");
     find_in_tree(app, body);
@@ -158,6 +162,7 @@ pub(crate) fn placement_named(app: &SolveApp, source: &str, component: u64, body
 }
 
 pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
+    app.tree.search.clear();
     features::reveal_in_history(app, id);
 }
 
@@ -215,6 +220,8 @@ pub struct TreeState {
     found: Option<Found>,
     /// A native feature to reveal in its placed component's Features folder (Find in Timeline).
     pub(super) reveal_feature: Option<features::Reveal>,
+    /// The search above the tree (#1413).
+    pub search: crate::browser_search::BrowserSearch,
     /// The Move/Copy panel of an occurrence.
     pub occurrence_move: Option<OccMove>,
     /// The Redefine Sketch Plane panel (sketch id).
@@ -1102,12 +1109,14 @@ pub(crate) fn picked_body(sel: &Sel) -> Option<&str> {
 }
 
 /// A pick in the viewport, while the Browser is shown and follows the 3D view ([`follows_view`]):
-/// the Browser finds the body of the last item picked, as Find in Browser does (#3005).
+/// the Browser finds the body of the last item picked, as Find in Browser does (#3005). A search
+/// stays (#1413): a body it found opens in it, and one it didn't leaves the tree as it is.
 pub(crate) fn reveal_pick(app: &mut SolveApp) {
     sync_reveals(app);
     if follows_view(app)
         && app.ui.show_browser
         && let Some(body) = app.session.selection.last().and_then(picked_body).map(str::to_string)
+        && app.tree.search.hits().is_none_or(|hits| hits.found_body(&body))
     {
         find_in_tree(app, &body);
     }
@@ -1142,17 +1151,30 @@ pub(crate) fn placement_open(app: &SolveApp, key: &str) -> bool {
     !app.tree.collapsed.contains(key) && ((app.preferences.browser_components_open && rows_start_open(app)) || app.tree.expanded.contains(key))
 }
 
+/// Is the row with this fold key open? During a search every row is, unless it was closed in
+/// the search; the tree's own folds come back when it ends.
 pub(crate) fn is_open(app: &SolveApp, key: &str, default: bool) -> bool {
+    if app.tree.search.on() {
+        return !app.tree.search.closed(key);
+    }
+    fold_open(app, key, default)
+}
+
+/// Whether a row is open in the tree's own folds, whatever a search shows. The History, beside the
+/// Browser or as the bar, reads its folds here: a search filters the Browser's rows, not the History's.
+pub(crate) fn fold_open(app: &SolveApp, key: &str, default: bool) -> bool {
     if is_placement_key(key) {
         return placement_open(app, key);
     }
     if default { !app.tree.collapsed.contains(key) } else { app.tree.expanded.contains(key) }
 }
 
-/// Open or close a row, whichever way it starts; whether that changed it.
+/// Open or close a row in the tree's own folds, whichever way it starts; whether that changed it.
+/// Opening it also lifts a close made during a search, so a revealed row shows either way.
 fn set_open(app: &mut SolveApp, key: &str, default: bool, open: bool) -> bool {
-    let was = is_open(app, key, default);
+    let was = fold_open(app, key, default);
     if open {
+        app.tree.search.open(key);
         app.tree.collapsed.remove(key);
         app.tree.expanded.insert(key.to_string());
     } else {
@@ -1162,10 +1184,21 @@ fn set_open(app: &mut SolveApp, key: &str, default: bool, open: bool) -> bool {
     was != open
 }
 
-/// A row opened or closed by hand: the next Find in Browser leaves it as it is.
+/// A row opened or closed by hand: the next Find in Browser leaves it as it is. During a search it
+/// folds in the search only, and the tree's own folds come back when the search ends.
 pub(crate) fn toggle(app: &mut SolveApp, key: &str, default: bool) {
+    if app.tree.search.on() {
+        app.tree.search.toggle_closed(key);
+        return;
+    }
+    toggle_fold(app, key, default);
+}
+
+/// A row opened or closed by hand in the tree's own folds, whatever a search shows: the History's
+/// folds, which a search leaves alone. The next Find in Browser leaves it as it is.
+pub(crate) fn toggle_fold(app: &mut SolveApp, key: &str, default: bool) {
     app.tree.found_rows.retain(|(row, _)| row != key);
-    let open = is_open(app, key, default);
+    let open = fold_open(app, key, default);
     set_open(app, key, default, !open);
 }
 
@@ -1415,7 +1448,17 @@ pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     sync_reveals(app);
     let render = crate::render_workspace::active(app);
     if render {
+        // Render has its own search, and its tree never filters by this one.
+        app.tree.search.clear();
         ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_compact_tree"), true));
+    } else if ui.rect_contains_pointer(ui.max_rect())
+        && !ui.ctx().text_edit_focused()
+        && ui.input(|i| i.modifiers.command_only() && i.key_pressed(egui::Key::F))
+        && crate::keymap::commands_for(app, &crate::keymap::key_name(egui::Key::F, egui::Modifiers::COMMAND)).is_empty()
+    {
+        // A field being typed in keeps the keyboard, and a command given this key keeps it: the
+        // magnifier opens the search then.
+        show_search(app);
     }
     if !crate::render_workspace::browser_mode(app, ui) {
         crate::edit_in_place::browser_strip(app, ui);
@@ -1423,6 +1466,22 @@ pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if render {
         ui.ctx().data_mut(|data| data.remove::<bool>(egui::Id::unique("sc_compact_tree")));
+    }
+}
+
+/// Gives the search's field the keyboard, showing its bar and opening and unfolding the Browser's
+/// panel ([`reveal_shared_panel`]).
+fn show_search(app: &mut SolveApp) {
+    reveal_shared_panel(app, "browser");
+    app.tree.search.show();
+}
+
+/// The panel header's magnifier: ends the search when its bar is shown, otherwise shows the bar.
+pub(crate) fn magnifier(app: &mut SolveApp) {
+    if crate::browser_search::bar_shown(app) {
+        app.tree.search.clear();
+    } else {
+        show_search(app);
     }
 }
 
@@ -1493,9 +1552,33 @@ fn browser_rows_hugging(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shrink_height: bool) {
     prepare_model(app);
+    if crate::browser_search::bar_shown(app) {
+        // The panel host draws the title row (#15184), so the field is the first row under it.
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), crate::ui_kit::row_height() + Tokens::get().space_8), Sense::hover());
+        crate::browser_search::field_row(app, ui, rect);
+    }
+    if app.tree.search.on() {
+        // Under the header and never scrolled with the rows, but clipped to the card's height, so it
+        // folds away with the card as the rows do.
+        ui.spacing_mut().item_spacing.y = 0.0;
+        egui::ScrollArea::vertical()
+            .id_salt("browser_search_results")
+            .max_height(ui.available_height())
+            .min_scrolled_height(0.0)
+            .auto_shrink([false, true])
+            .scroll_source(egui::scroll_area::ScrollSource::NONE)
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .show(ui, |ui| crate::browser_search::results(app, ui));
+        if app.tree.search.hits().is_some_and(|h| h.total() == 0) {
+            return;
+        }
+    }
     let mut cache = app.tree.cache.take().unwrap_or_default();
     cache.prepare(app);
     let top = ui.cursor().top();
+    // The rows are the kit panel's (#15942), with the panel's own search off: this search is the
+    // engine's (`browser_find`, also `browser.find`), and the rows leave out what it doesn't list
+    // before they reach the panel, so a search costs only the rows it shows.
     // The card may animate all the way down to its header: the panel's scroll area shrinks to none.
     let output = present(app, ui, acts, (true, shrink_height), |app, rows, acts| {
         if crate::render_workspace::active(app) {
@@ -1518,9 +1601,17 @@ pub(crate) fn render_content(app: &mut SolveApp, ui: &mut egui::Ui, request: cra
     let mut acts = Actions { session: Some(app.session.uid), lit: Lit::of(app), ..Default::default() };
     match request {
         crate::semantic_content::ContentRequest::Browser { shrink_height } => rows_scrolling(app, ui, &mut acts, shrink_height),
-        crate::semantic_content::ContentRequest::ActiveBodiesOrigin => active_bodies_origin(app, ui, &mut acts),
+        // History's rows are never filtered by the Browser's search.
+        crate::semantic_content::ContentRequest::ActiveBodiesOrigin => unsearched(app, |app| active_bodies_origin(app, ui, &mut acts)),
     }
     acts
+}
+
+/// `draw` with the Browser's search set aside, for rows outside the Browser that it never filters.
+fn unsearched(app: &mut SolveApp, draw: impl FnOnce(&mut SolveApp)) {
+    let search = std::mem::take(&mut app.tree.search);
+    draw(app);
+    app.tree.search = search;
 }
 
 /// History's optional prefix shares the Browser's cache, folds, row renderers and commands.
@@ -1660,6 +1751,8 @@ fn component_rows_inner(
     let name = &root.name;
     let badges: &[&str] = if root.grounded { &["pin"] } else { &[] };
     let appearance = crate::render_workspace::scene::decoration(app, bodies);
+    // A search never matches the design itself: it is the matches' parent, dimmed.
+    let searching = app.tree.search.on();
     let row = Row {
         depth,
         fold: Some(open),
@@ -1669,7 +1762,7 @@ fn component_rows_inner(
         name: true,
         rename: true,
         selected: app.tree.picked_components.contains(&id),
-        dim: faded,
+        dim: faded || searching,
         radio: Some(active),
         badges,
         swatch: appearance.swatch,
@@ -1747,7 +1840,7 @@ fn component_rows_inner(
         return;
     }
     let d = depth + 1;
-    if id == 0 && !crate::render_workspace::active(app) {
+    if id == 0 && !crate::render_workspace::active(app) && !searching {
         doc_settings(app, rows, d);
         named_view_rows(app, rows, d, acts);
         origin_rows(app, rows, d, acts);
@@ -1810,6 +1903,11 @@ fn occurrence_rows_inner(
     cache: &mut cache::Cache,
     placement: &mut cache::Node,
 ) {
+    // A search lists the placements that match, and dimmed, those that hold a match.
+    let (listed, matches, folds) = app.tree.search.hits().map_or((true, true, true), |h| (h.lists(path), h.matches(path), h.holds(path)));
+    if !listed {
+        return;
+    }
     let key = &placement.key;
     let open = is_open(app, key, true);
     let on_screen = rows.next_visible();
@@ -1831,7 +1929,7 @@ fn occurrence_rows_inner(
     };
     let row = Row {
         depth,
-        fold: Some(open),
+        fold: folds.then_some(open),
         eye: Some(own_visible),
         icon: "component",
         label: &placement.label,
@@ -1841,7 +1939,7 @@ fn occurrence_rows_inner(
         name: true,
         rename: true,
         selected,
-        dim: faded || !visible,
+        dim: faded || !visible || !matches,
         cut,
         radio: Some(active),
         badges,
@@ -1953,7 +2051,7 @@ fn occurrence_rows_inner(
             ),
         }
     }
-    if !open {
+    if !open || !folds {
         return;
     }
     let render = crate::render_workspace::active(app);
@@ -2072,6 +2170,10 @@ fn origin_rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut
 /// The Origin rows of one component placement, under its row: [`origin_rows`] keyed by the
 /// complete occurrence path, so repeated and nested placements each get their own folder
 fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut Actions, path: &[u64]) {
+    // A search never looks at the Origin rows, the design's or a placement's, so it lists none of them.
+    if app.tree.search.on() {
+        return;
+    }
     let component = !path.is_empty();
     let folder = solidcraft_engine::origins::folder(path);
     let key = if component { folder.as_str() } else { "origin" };
@@ -2713,7 +2815,7 @@ impl Entry {
     }
 
     fn plane(app: &SolveApp, f: &solidcraft_engine::doc::Feature) -> Self {
-        let sel = construction_sel(f);
+        let sel = solidcraft_engine::browser_find::construction_sel(f);
         let thing = match &sel {
             Sel::Axis { name } => Thing::Axis(name.clone()),
             Sel::ConstructionPoint { name } => Thing::Point(name.clone()),
@@ -2795,15 +2897,6 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
             .collect(),
         "sketches" => model_feature_indices(app, comp, true).into_iter().filter_map(|i| doc.features.get(i)).map(|f| Entry::sketch(app, f)).collect(),
         _ => model_feature_indices(app, comp, false).into_iter().filter_map(|i| doc.features.get(i)).map(|f| Entry::plane(app, f)).collect(),
-    }
-}
-
-fn construction_sel(f: &solidcraft_engine::doc::Feature) -> Sel {
-    let name = f.name.clone();
-    match f.kind {
-        FeatureKind::ConstructionPoint { .. } => Sel::ConstructionPoint { name },
-        FeatureKind::ConstructionAxis { .. } => Sel::Axis { name },
-        _ => Sel::Plane { name },
     }
 }
 
@@ -2928,6 +3021,11 @@ fn folder_rows_at(
     if data.key.is_empty() {
         return;
     }
+    // A search lists the folders that hold a match (`folder_level` lists the matches).
+    let searching = app.tree.search.on();
+    if app.tree.search.hits().is_some_and(|h| !h.folder(path.unwrap_or(&[]), folder)) {
+        return;
+    }
     let fstatic = folder_static(folder);
     let key = &data.key;
     let prefix = key.rsplit_once('/').map_or(key.as_str(), |(prefix, _)| prefix);
@@ -2966,7 +3064,7 @@ fn folder_rows_at(
                     eye: Some(shown),
                     icon: "folder",
                     label: folder_label(folder),
-                    dim: folder_faded,
+                    dim: folder_faded || searching,
                     mark: if acts.lit.any() { acts.lit.branch(app, data.entries()) } else { Mark::None },
                     ..Default::default()
                 },
@@ -3034,6 +3132,8 @@ fn folder_level(
 ) {
     let render = crate::render_workspace::active(app);
     let start_open = rows_start_open(app);
+    let searching = app.tree.search.on();
+    let at = path.unwrap_or(&[]);
     // The render workspace has always listed a folder's loose items above its groups.
     let items_first = render && holder.is_none();
     let ordered = level
@@ -3043,11 +3143,16 @@ fn folder_level(
     for row in ordered {
         let group = match row {
             cache::Row::Item(e) => {
-                entry_row(app, rows, comp, path, fstatic, e, depth, holder, top, faded, acts);
+                if app.tree.search.hits().is_none_or(|h| h.row(at, fstatic, &e.key)) {
+                    entry_row(app, rows, comp, path, fstatic, e, depth, holder, top, faded, acts);
+                }
                 continue;
             }
             cache::Row::Group(g) => g,
         };
+        if app.tree.search.hits().is_some_and(|h| !group.any_entry(&|e| h.row(at, fstatic, &e.key))) {
+            continue;
+        }
         let (id, gkey) = (group.id, &group.key);
         let gopen = is_open(app, gkey, start_open);
         let gshown = !app.session.folder_hidden(gkey);
@@ -3072,7 +3177,14 @@ fn folder_level(
         };
         let r = node_row(
             rows,
-            Spec { key: gkey, drag: Some(DRAG_ITEMS), drops: panel::Drops { before: true, into: true }, accept: Some(&accept), ..Default::default() },
+            // Groups don't drag during a search: it shows only part of a folder, and a new order needs every item.
+            Spec {
+                key: gkey,
+                drag: (!searching).then_some(DRAG_ITEMS),
+                drops: panel::Drops { before: true, into: true },
+                accept: Some(&accept),
+                ..Default::default()
+            },
             Row {
                 depth,
                 fold: Some(gopen),
@@ -3081,7 +3193,7 @@ fn folder_level(
                 label,
                 name: true,
                 rename: true,
-                dim: group_faded || (render && !gopen),
+                dim: group_faded || (render && !gopen) || searching,
                 count: &count,
                 mark: if acts.lit.any() { acts.lit.branch(app, group.entries()) } else { Mark::None },
                 ..Default::default()
@@ -3218,12 +3330,17 @@ fn entry_row(
         return;
     }
     app.tree.remember(&e.row_key);
-    let pattern_key = e.patterns.as_deref();
+    // A search lists what it found and what holds it. The rows a row folds open on that aren't
+    // searched (a sketch's patterns, a body's features) show neither them nor their fold until the
+    // search ends.
+    let unsearched = !app.tree.search.on();
+    let pattern_key = e.patterns.as_deref().filter(|_| unsearched);
     let start_open = rows_start_open(app);
     let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, start_open));
     let revealed = folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b));
     // Features under bodies (#11945): the body row folds open on the features that built it.
     let built_key = (folder == "bodies"
+        && unsearched
         && app.preferences.browser_body_features
         && !crate::render_workspace::active(app)
         && matches!(e.sel, Some(Sel::Body { .. })))
@@ -3271,7 +3388,14 @@ fn entry_row(
     };
     let r = node_row(
         rows,
-        Spec { key: &e.row_key, item: true, drag: Some(DRAG_ITEMS), drops: panel::Drops { before: true, into: false }, accept: Some(&accept) },
+        // Items don't drag during a search, as groups don't (`folder_level`).
+        Spec {
+            key: &e.row_key,
+            item: true,
+            drag: unsearched.then_some(DRAG_ITEMS),
+            drops: panel::Drops { before: true, into: false },
+            accept: Some(&accept),
+        },
         Row {
             depth,
             fold: pattern_key.map(|_| patterns_open).or(built_key.as_ref().map(|_| built_open)),

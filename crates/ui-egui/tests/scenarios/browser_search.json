@@ -1,0 +1,298 @@
+[
+ {
+  "note": "The browser's search (#1413): a magnifier in the Browser panel's header opens a field at the top of the panel; typing keeps the matches with their parents, the list narrows them to one kind, and Esc or the \u00d7 ends the search and closes the field."
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "component.create",
+   "params": {
+    "name": "Frame"
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 20,
+    "height": 5,
+    "body_name": "Plate"
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "component.create",
+   "params": {
+    "name": "Pin"
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "solid.box",
+   "params": {
+    "length": 4,
+    "width": 4,
+    "height": 20,
+    "corner": [
+     0,
+     40,
+     0
+    ],
+    "body_name": "Shaft"
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  }
+ },
+ {
+  "expect": {
+   "bodies": 2,
+   "browser_has": [
+    "Frame:1",
+    "Plate",
+    "Pin:1",
+    "Shaft",
+    "Origin"
+   ]
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "browser:magnifier"
+   ],
+   "hidden_handles": [
+    "browser:search",
+    "browser:search:kinds",
+    "browser:search:clear",
+    "browser:search:select-all"
+   ]
+  }
+ },
+ {
+  "note": "The magnifier opens the field and gives it the keyboard."
+ },
+ {
+  "click": {
+   "handle": "browser:magnifier"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "browser:search",
+    "browser:search:clear"
+   ],
+   "hidden_handles": [
+    "browser:search:select-all"
+   ]
+  }
+ },
+ {
+  "text": "plate"
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Plate"
+   ],
+   "browser_lacks": [
+    "Shaft"
+   ],
+   "shown_handles": [
+    "browser:search:clear",
+    "browser:search:select-all"
+   ]
+  }
+ },
+ {
+  "note": "Esc ends the search and closes the field."
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Plate",
+    "Shaft",
+    "Origin"
+   ],
+   "hidden_handles": [
+    "browser:search",
+    "browser:search:clear"
+   ],
+   "shown_handles": [
+    "browser:magnifier"
+   ]
+  }
+ },
+ {
+  "note": "So does the \u00d7."
+ },
+ {
+  "click": {
+   "handle": "browser:magnifier"
+  }
+ },
+ {
+  "text": "shaft"
+ },
+ {
+  "frames": 3
+ },
+ {
+  "click": {
+   "handle": "browser:search:clear"
+  }
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Plate",
+    "Shaft",
+    "Origin"
+   ],
+   "hidden_handles": [
+    "browser:search"
+   ],
+   "shown_handles": [
+    "browser:magnifier"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "browser:magnifier"
+  }
+ },
+ {
+  "text": "sha"
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Frame:1",
+    "Pin:1",
+    "Shaft"
+   ],
+   "browser_lacks": [
+    "Plate",
+    "Origin"
+   ],
+   "shown_handles": [
+    "browser:search:select-all",
+    "browser:search:hide-others"
+   ]
+  }
+ },
+ {
+  "note": "A kind with no match: nothing listed and nothing to act on."
+ },
+ {
+  "click": {
+   "handle": "browser:search:kinds"
+  }
+ },
+ {
+  "frames": 2
+ },
+ {
+  "click": {
+   "handle": "browser:search:kind:component"
+  }
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Shaft",
+    "Frame:1"
+   ],
+   "hidden_handles": [
+    "browser:search:select-all"
+   ],
+   "shown": "No matches"
+  }
+ },
+ {
+  "click": {
+   "handle": "browser:search:kinds"
+  }
+ },
+ {
+  "frames": 2
+ },
+ {
+  "click": {
+   "handle": "browser:search:kind:all"
+  }
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Shaft"
+   ],
+   "browser_lacks": [
+    "Plate"
+   ]
+  }
+ },
+ {
+  "note": "Esc in the field ends the search and the field goes."
+ },
+ {
+  "click": {
+   "handle": "browser:search"
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Plate",
+    "Shaft",
+    "Origin"
+   ],
+   "hidden_handles": [
+    "browser:search"
+   ]
+  }
+ }
+]
