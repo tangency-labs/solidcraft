@@ -9594,10 +9594,21 @@ fn eval_feature(
             }
             Ok(())
         }
-        FeatureKind::Hole { thread, thread_depth, diameter, hand, modeled, ease_out, depth, to, .. } => {
+        FeatureKind::Hole { thread, thread_depth, thread_class, diameter, hand, modeled, ease_out, depth, to, .. } => {
             let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
             if thread_depth.is_some() && thread.is_none() {
                 return Err(DocError::Invalid("thread depth requires a tapped hole".into()));
+            }
+            // A class the command would refuse (a hand-edited file) fails the hole, saying why.
+            // An unknown thread fails where the thread is cut, with its own reason.
+            match (thread_class, thread) {
+                (None, _) => {}
+                (Some(_), None) => return Err(DocError::Invalid("a thread class needs a tapped hole".into())),
+                (Some(class), Some(t)) => {
+                    if let Some(tapped) = crate::parse_tapped_thread(t) {
+                        tapped.check_class(class).map_err(DocError::Invalid)?;
+                    }
+                }
             }
             if *modeled && thread.is_none() {
                 return Err(DocError::Invalid("a modelled thread needs a tapped hole".into()));
