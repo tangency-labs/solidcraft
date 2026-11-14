@@ -85,6 +85,8 @@ struct State {
     extras: HashMap<String, String>,
     open_blocks: HashSet<String>,
     seen_blocks: HashSet<String>,
+    /// Where the last control this pass hid would have been drawn: the ui and its cursor then.
+    hidden_at: Option<(Id, Pos2)>,
 }
 
 /// Held until the preferences body finishes. A dropdown value learned while a row was hidden
@@ -132,6 +134,7 @@ pub fn begin(ui: &Ui, filter: &str, prefix: &str) -> SearchFrame {
         state.nav.clear();
         state.dirty = false;
         state.child_matched = false;
+        state.hidden_at = None;
     });
     SearchFrame { ctx: ui.ctx().clone() }
 }
@@ -416,8 +419,25 @@ pub fn visible(ui: &mut Ui, texts: &[&str]) -> bool {
         } else {
             reveal(ui);
         }
+    } else if !show {
+        let at = (ui.scope_id(), ui.cursor().min);
+        with(ui, |state| state.hidden_at = Some(at));
     }
     show
+}
+
+/// Whether the control just before this point in `ui` was hidden by the search, so a help icon
+/// that follows it is hidden too. A control drawn since moves the cursor, and this is false.
+pub fn follows_hidden(ui: &Ui) -> bool {
+    let at = (ui.scope_id(), ui.cursor().min);
+    with(ui, |state| state.hidden_at == Some(at)).unwrap_or(false)
+}
+
+/// The rectangle a search outline draws around a setting: the setting's own, with room on every
+/// side so the outline does not touch the checkbox or the end of the label (#16115).
+fn outline(rect: Rect) -> Rect {
+    let t = Tokens::get();
+    rect.expand2(vec2(t.space_4, t.space_2))
 }
 
 fn wanted(ui: &Ui, texts: &[&str]) -> bool {
@@ -818,7 +838,7 @@ pub fn remember_matched(ui: &mut Ui, label: &str, hint: Option<&str>, rect: Rect
     .flatten();
     let Some(prefix) = selected else { return };
     let t = Tokens::get();
-    ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
+    ui.painter().rect_stroke(outline(rect), t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
     // Only when Up/Down moved the cursor: following it every frame pins the list to the match.
     if scroll {
         ui.scroll_to_rect(rect, Some(egui::Align::Center));
@@ -859,7 +879,7 @@ pub fn follow(ui: &Ui, label: &str, rect: Rect) {
     }
     ui.scroll_to_rect(rect, Some(egui::Align::Center));
     let t = Tokens::get();
-    ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
+    ui.painter().rect_stroke(outline(rect), t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
     solidcraft_ui_registry::publish_handle(&format!("{}:revealed", reveal.prefix), rect.center());
 }
 
@@ -940,6 +960,41 @@ mod tests {
                 assert_eq!(solidcraft_ui_registry::handle_at("prefs:revealed"), Some(response.rect.center()));
             });
         }
+    }
+
+    /// A help icon belongs to the control before it: when the search hides the setting, its icon
+    /// goes too, and with no search both stay (#16115).
+    #[test]
+    fn a_help_icon_goes_with_the_setting_the_search_hides() {
+        let ctx = crate::test_support::context();
+        for (filter, shown) in [("Quality", [true, false]), ("", [true, true])] {
+            let mut icons = Vec::new();
+            for _ in 0..3 {
+                icons.clear();
+                crate::test_support::raw_frame(&ctx, Default::default(), |ui| {
+                    let _search = begin(ui, filter, "prefs");
+                    begin_page(ui, PAGE_LAYOUT, "Layout");
+                    for label in ["Quality", "Performance"] {
+                        ui.horizontal(|ui| {
+                            let mut on = false;
+                            crate::checkbox(ui, label, &mut on);
+                            icons.push(crate::help_icon(ui, "Help").rect);
+                        });
+                    }
+                    store_nav(ui);
+                });
+            }
+            assert_eq!(icons.iter().map(|rect| rect.is_positive()).collect::<Vec<_>>(), shown, "filter {filter:?}");
+        }
+    }
+
+    /// The outline around a result leaves room on every side of the setting (#16115).
+    #[test]
+    fn a_result_outline_leaves_room_around_the_whole_setting() {
+        let rect = Rect::from_min_size(egui::pos2(10.0, 10.0), vec2(100.0, 20.0));
+        let around = outline(rect);
+        assert!(around.left() < rect.left() && around.right() > rect.right(), "{around:?} around {rect:?}");
+        assert!(around.top() < rect.top() && around.bottom() > rect.bottom(), "{around:?} around {rect:?}");
     }
 
     #[test]
