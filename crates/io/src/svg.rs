@@ -1,17 +1,25 @@
 //! SVG (W3C SVG 1.1) geometry for sketches: `path` (all commands), `line`, `rect`, `circle`,
 //! `ellipse`, `polyline`, `polygon` and `text`, with `transform`s on elements and groups. User
 //! units are CSS pixels (1/96 in) unless the root's `width`/`height` carry units with a
-//! `viewBox`; y is flipped so the drawing reads upright in the sketch.
+//! `viewBox`; y is flipped so the drawing reads upright in the sketch. A shape the file draws
+//! through a reference (a `use` element) is read where the reference stands (#15538).
 
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
+use std::collections::HashMap;
+use std::ops::Range;
 
 use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES};
 use crate::{IoError, Result};
 
 const MAX_DEPTH: usize = 256;
+/// The deepest chain of references (`use` inside `use`) read (#15538).
+const MAX_USE_DEPTH: usize = 16;
+/// Elements read while following references (#15538): a reference to a group that holds more
+/// references draws the same element many times over.
+const MAX_USE_WORK: usize = 4 * MAX_ENTITIES;
 const PX_MM: f64 = 25.4 / 96.0;
 
 /// Affine map [a c e; b d f].
@@ -20,6 +28,12 @@ struct Tf([f64; 6]);
 
 impl Tf {
     const ID: Tf = Tf([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    fn translate(x: f64, y: f64) -> Tf {
+        Tf([1.0, 0.0, 0.0, 1.0, x, y])
+    }
+    fn scale(sx: f64, sy: f64) -> Tf {
+        Tf([sx, 0.0, 0.0, sy, 0.0, 0.0])
+    }
     fn mul(self, o: Tf) -> Tf {
         let [a, b, c, d, e, f] = self.0;
         let [a2, b2, c2, d2, e2, f2] = o.0;
@@ -411,17 +425,27 @@ fn points_list(s: &str) -> Vec<Vec2> {
     numbers(s).chunks(2).filter(|c| c.len() == 2).map(|c| Vec2::new(c[0], c[1])).collect()
 }
 
-/// Whether an element and everything in it is left out of the drawing (#11039): the contents of
-/// `defs`, `clipPath`, `mask`, `symbol`, `marker` and `pattern` are only drawn through a
-/// reference, and `display: none` (as an attribute or in `style`) hides an element with its children.
-fn not_drawn(name: &str, a: &[(String, String)]) -> bool {
-    if matches!(name, "defs" | "clipPath" | "mask" | "symbol" | "marker" | "pattern") {
-        return true;
-    }
+/// Whether an element is hidden with `display: none` (as an attribute or in `style`).
+fn hidden(a: &[(String, String)]) -> bool {
     let none = |v: &str| v.trim().trim_end_matches("!important").trim().eq_ignore_ascii_case("none");
     attr(a, "display").is_some_and(none)
         || attr(a, "style")
             .is_some_and(|s| s.split(';').filter_map(|d| d.split_once(':')).any(|(k, v)| k.trim().eq_ignore_ascii_case("display") && none(v)))
+}
+
+/// Whether an element's contents are only drawn through a reference (#11039): the contents of
+/// `defs`, `clipPath`, `mask`, `symbol`, `marker` and `pattern` are not drawn where they stand.
+fn defined_only(name: &str) -> bool {
+    matches!(name, "defs" | "clipPath" | "mask" | "symbol" | "marker" | "pattern")
+}
+
+/// Whether an element and everything in it is left out of the drawing (#11039): the contents of
+/// `defs`, `clipPath`, `mask`, `symbol`, `marker` and `pattern` are only drawn through a
+/// reference, and `display: none` (as an attribute or in `style`) hides an element with its children.
+/// A `symbol` or `svg` that a reference points at is drawn where the reference stands, not where
+/// it is defined (#15538).
+fn not_drawn(name: &str, a: &[(String, String)], referenced: bool) -> bool {
+    (defined_only(name) && !referenced) || hidden(a)
 }
 
 /// The root element's transformation (user units to millimetres, y flipped) and its sheet in
@@ -436,6 +460,34 @@ fn root_transform(a: &[(String, String)]) -> (Tf, Option<[f64; 4]>) {
         _ => (PX_MM, PX_MM, 0.0, 0.0, None),
     };
     (Tf([sx, 0.0, 0.0, -sy, -ox * sx, oy * sy]), sheet)
+}
+
+/// The transformation that draws a `symbol` or `svg` in the box it is given: its `viewBox` scaled
+/// to fit the box and centred in it (SVG 1.1 `preserveAspectRatio`, which we do not read).
+fn viewport_tf(a: &[(String, String)], size: Viewport) -> Tf {
+    let Some(vb) = attr(a, "viewBox").map(numbers).filter(|v| v.len() == 4) else { return Tf::ID };
+    if vb[2] <= 0.0 || vb[3] <= 0.0 {
+        return Tf::ID;
+    }
+    let w = size.width.or_else(|| num_opt(a, "width")).unwrap_or(vb[2]);
+    let h = size.height.or_else(|| num_opt(a, "height")).unwrap_or(vb[3]);
+    if w <= 0.0 || h <= 0.0 {
+        return Tf::ID;
+    }
+    // The box keeps its shape: the viewBox is scaled to fit it and centred in it.
+    let k = (w / vb[2]).min(h / vb[3]);
+    let tx = (w - vb[2] * k) / 2.0 - vb[0] * k;
+    let ty = (h - vb[3] * k) / 2.0 - vb[1] * k;
+    Tf::translate(tx, ty).mul(Tf::scale(k, k))
+}
+
+/// The number an attribute holds, when it holds one: a percentage is no number of user units.
+fn num_opt(a: &[(String, String)], k: &str) -> Option<f64> {
+    let v = attr(a, k)?;
+    if v.trim().ends_with('%') {
+        return None;
+    }
+    numbers(v).first().copied()
 }
 
 /// The sheet of an SVG drawing in millimetres, in the coordinates its geometry comes out in: the
@@ -469,129 +521,259 @@ pub fn svg_sheet(text: &str) -> Option<(Vec2, Vec2)> {
     None
 }
 
-/// Read the geometry of an SVG document (millimetres, y up). `scale` multiplies the result.
-pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
-    if text.len() > MAX_DRAWING_BYTES {
-        return Err(IoError::Invalid("the SVG file is too large".into()));
-    }
-    let mut rd = Reader::from_reader(text.as_bytes());
-    rd.config_mut().trim_text(true);
-    let mut buf = Vec::new();
-    let mut stack: Vec<Tf> = Vec::new();
-    let mut out = Out { g: Vec::new() };
-    let mut root: Option<Tf> = None;
-    let mut pending_text: Option<(Tf, Vec2, f64)> = None;
-    // The depth of the element whose contents are not drawn (#11039), while inside one.
-    let mut skip_from: Option<usize> = None;
-    loop {
-        let ev = rd.read_event_into(&mut buf).map_err(|e| IoError::Invalid(format!("SVG: {e}")))?;
-        let (e, empty) = match &ev {
-            Event::Start(e) => (Some(e.clone()), false),
-            Event::Empty(e) => (Some(e.clone()), true),
-            Event::End(_) => {
-                stack.pop();
-                if skip_from.is_some_and(|d| stack.len() <= d) {
-                    skip_from = None;
+/// The size a reference (`use`) gives the element it points at, in user units: `None` where the
+/// reference gives none.
+#[derive(Clone, Copy, Default)]
+struct Viewport {
+    width: Option<f64>,
+    height: Option<f64>,
+}
+
+/// The state of reading an SVG document: the file, the elements its references point at, and the
+/// geometry read so far.
+struct SvgReader<'a> {
+    /// The file.
+    text: &'a str,
+    /// The elements the file names with `id`, and where each one is in it, so that a reference
+    /// (`use`) to one of them can be read where the reference stands (#15538).
+    ids: HashMap<String, Range<usize>>,
+    /// Whether the elements named with `id` have been indexed yet: a file without a reference
+    /// never pays for the index.
+    indexed: bool,
+    /// The geometry read so far.
+    out: Out,
+    /// The references being read, so that a reference that leads back to itself is not read twice.
+    chain: Vec<String>,
+    /// Elements read while following references.
+    work: usize,
+}
+
+impl SvgReader<'_> {
+    /// Read the elements of the file in the byte range `span`, drawn with `base` in place.
+    /// `target` says the range holds the element a reference points at, with the size the
+    /// reference gives it.
+    fn read_span(&mut self, span: Range<usize>, base: Tf, depth: usize, target: Option<Viewport>) -> Result<()> {
+        let Some(part) = self.text.get(span.clone()) else { return Ok(()) };
+        let mut rd = Reader::from_reader(part.as_bytes());
+        rd.config_mut().trim_text(true);
+        let mut buf = Vec::new();
+        let mut stack: Vec<Tf> = Vec::new();
+        let mut root: Option<Tf> = None;
+        let mut pending_text: Option<(Tf, Vec2, f64)> = None;
+        // The depth of the element whose contents are not drawn (#11039), while inside one.
+        let mut skip_from: Option<usize> = None;
+        // Whether the element being read is the one a reference points at.
+        let mut first = true;
+        loop {
+            let ev = rd.read_event_into(&mut buf).map_err(|e| IoError::Invalid(format!("SVG: {e}")))?;
+            let (e, empty) = match &ev {
+                Event::Start(e) => (Some(e.clone()), false),
+                Event::Empty(e) => (Some(e.clone()), true),
+                Event::End(_) => {
+                    stack.pop();
+                    if skip_from.is_some_and(|d| stack.len() <= d) {
+                        skip_from = None;
+                    }
+                    buf.clear();
+                    continue;
                 }
+                Event::Text(tx) => {
+                    if let Some((tf, at, h)) = pending_text.take() {
+                        let s = String::from_utf8_lossy(tx.as_ref()).trim().to_string();
+                        if !s.is_empty() {
+                            let k = tf.uniform().unwrap_or(1.0);
+                            let dir = tf.vec(Vec2::X);
+                            self.out.push(Geom2::Text { text: s, at: tf.apply(at), height: h * 0.7 * k, angle: dir.angle() })?;
+                        }
+                    }
+                    buf.clear();
+                    continue;
+                }
+                Event::Eof => break,
+                _ => (None, false),
+            };
+            let Some(e) = e else {
                 buf.clear();
                 continue;
+            };
+            let a = attrs(&e);
+            let parent = stack.last().copied().or(root).unwrap_or(base);
+            let name = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
+            // A `symbol` or `svg` a reference points at is drawn in the box the reference gives it,
+            // not where it is defined (#15538).
+            let referenced = first && target.is_some() && matches!(name.as_str(), "symbol" | "svg");
+            first = false;
+            if depth > 0 {
+                // A reference multiplies the work: the same element can be drawn many times over.
+                self.work = self.work.saturating_add(1);
+                if self.work > MAX_USE_WORK {
+                    return Err(IoError::Invalid("the drawing is too complex".into()));
+                }
             }
-            Event::Text(tx) => {
-                if let Some((tf, at, h)) = pending_text.take() {
-                    let s = String::from_utf8_lossy(tx.as_ref()).trim().to_string();
-                    if !s.is_empty() {
-                        let k = tf.uniform().unwrap_or(1.0);
-                        let dir = tf.vec(Vec2::X);
-                        out.push(Geom2::Text { text: s, at: tf.apply(at), height: h * 0.7 * k, angle: dir.angle() })?;
+            if skip_from.is_some() || not_drawn(&name, &a, referenced) {
+                // Keep the stack in step with the end tags; draw nothing until this element closes.
+                if !empty {
+                    skip_from = skip_from.or(Some(stack.len()));
+                    stack.push(parent);
+                    if stack.len() > MAX_DEPTH {
+                        return Err(IoError::Invalid("SVG nested too deeply".into()));
                     }
                 }
                 buf.clear();
                 continue;
             }
-            Event::Eof => break,
-            _ => (None, false),
-        };
-        let Some(e) = e else {
-            buf.clear();
-            continue;
-        };
-        let a = attrs(&e);
-        let parent = stack.last().copied().or(root).unwrap_or(Tf::ID);
-        let name = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
-        if skip_from.is_some() || not_drawn(&name, &a) {
-            // Keep the stack in step with the end tags; draw nothing until this element closes.
+            let mut tf = match attr(&a, "transform") {
+                Some(s) => parent.mul(parse_transform(s)),
+                None => parent,
+            };
+            if name == "svg" && depth == 0 && root.is_none() {
+                let (r, _) = root_transform(&a);
+                root = Some(r);
+                tf = r;
+            }
+            if referenced {
+                tf = tf.mul(viewport_tf(&a, target.unwrap_or_default()));
+            }
+            if !tf.is_finite() {
+                return Err(IoError::Invalid(OUT_OF_RANGE.into()));
+            }
+            match name.as_str() {
+                "path" => path(&mut self.out, tf, attr(&a, "d").unwrap_or(""))?,
+                "line" => self.out.line(tf, Vec2::new(num_attr(&a, "x1"), num_attr(&a, "y1")), Vec2::new(num_attr(&a, "x2"), num_attr(&a, "y2")))?,
+                "rect" => {
+                    let (x, y, w, h) = (num_attr(&a, "x"), num_attr(&a, "y"), num_attr(&a, "width"), num_attr(&a, "height"));
+                    if w > 0.0 && h > 0.0 {
+                        let c = [Vec2::new(x, y), Vec2::new(x + w, y), Vec2::new(x + w, y + h), Vec2::new(x, y + h)];
+                        for i in 0..4 {
+                            self.out.line(tf, c[i], c[(i + 1) % 4])?;
+                        }
+                    }
+                }
+                "circle" => {
+                    let r = num_attr(&a, "r");
+                    if r > 0.0 {
+                        self.out.elliptic(tf, Vec2::new(num_attr(&a, "cx"), num_attr(&a, "cy")), r, r, 0.0, 0.0, std::f64::consts::TAU)?;
+                    }
+                }
+                "ellipse" => {
+                    let (rx, ry) = (num_attr(&a, "rx"), num_attr(&a, "ry"));
+                    if rx > 0.0 && ry > 0.0 {
+                        self.out.elliptic(tf, Vec2::new(num_attr(&a, "cx"), num_attr(&a, "cy")), rx, ry, 0.0, 0.0, std::f64::consts::TAU)?;
+                    }
+                }
+                "polyline" | "polygon" => {
+                    let pts = points_list(attr(&a, "points").unwrap_or(""));
+                    for w in pts.windows(2) {
+                        self.out.line(tf, w[0], w[1])?;
+                    }
+                    if name == "polygon"
+                        && let (Some(f), Some(l)) = (pts.first(), pts.last())
+                    {
+                        self.out.line(tf, *l, *f)?;
+                    }
+                }
+                "text" => {
+                    let size = attr(&a, "font-size").map(numbers).and_then(|v| v.first().copied()).unwrap_or(16.0);
+                    pending_text = Some((tf, Vec2::new(num_attr(&a, "x"), num_attr(&a, "y")), size));
+                }
+                "use" => {
+                    // A reference draws the element it points at, where the reference stands
+                    // (#15538): that element and its contents are drawn as if they were here.
+                    let href = attr(&a, "href").unwrap_or("").trim().to_string();
+                    if let Some(id) = href.strip_prefix('#') {
+                        // The elements the reference can point at are indexed once, when the
+                        // first reference asks for them.
+                        if !self.indexed {
+                            self.ids = index_ids(self.text);
+                            self.indexed = true;
+                        }
+                        let size = Viewport { width: num_opt(&a, "width"), height: num_opt(&a, "height") };
+                        // The reference's own placement, appended to its transformation.
+                        let at = tf.mul(Tf::translate(num_attr(&a, "x"), num_attr(&a, "y")));
+                        self.read_reference(id, at, depth, size)?;
+                    }
+                }
+                _ => {}
+            }
             if !empty {
-                skip_from = skip_from.or(Some(stack.len()));
-                stack.push(parent);
+                stack.push(tf);
                 if stack.len() > MAX_DEPTH {
                     return Err(IoError::Invalid("SVG nested too deeply".into()));
                 }
             }
             buf.clear();
-            continue;
         }
-        let mut tf = match attr(&a, "transform") {
-            Some(s) => parent.mul(parse_transform(s)),
-            None => parent,
-        };
-        if name == "svg" && root.is_none() {
-            let (r, _) = root_transform(&a);
-            root = Some(r);
-            tf = r;
+        Ok(())
+    }
+
+    /// Read the element a reference points at, drawn where the reference stands (#15538).
+    fn read_reference(&mut self, id: &str, at: Tf, depth: usize, size: Viewport) -> Result<()> {
+        // A reference that leads back to itself is not read again.
+        if depth >= MAX_USE_DEPTH || self.chain.iter().any(|r| r == id) {
+            return Ok(());
         }
-        if !tf.is_finite() {
-            return Err(IoError::Invalid(OUT_OF_RANGE.into()));
-        }
-        match name.as_str() {
-            "path" => path(&mut out, tf, attr(&a, "d").unwrap_or(""))?,
-            "line" => out.line(tf, Vec2::new(num_attr(&a, "x1"), num_attr(&a, "y1")), Vec2::new(num_attr(&a, "x2"), num_attr(&a, "y2")))?,
-            "rect" => {
-                let (x, y, w, h) = (num_attr(&a, "x"), num_attr(&a, "y"), num_attr(&a, "width"), num_attr(&a, "height"));
-                if w > 0.0 && h > 0.0 {
-                    let c = [Vec2::new(x, y), Vec2::new(x + w, y), Vec2::new(x + w, y + h), Vec2::new(x, y + h)];
-                    for i in 0..4 {
-                        out.line(tf, c[i], c[(i + 1) % 4])?;
-                    }
+        let Some(span) = self.ids.get(id).cloned() else { return Ok(()) };
+        self.chain.push(id.to_string());
+        let read = self.read_span(span, at, depth + 1, Some(size));
+        self.chain.pop();
+        read
+    }
+}
+
+/// Read the geometry of an SVG document (millimetres, y up). `scale` multiplies the result.
+/// A reference (a `use` element) is followed: the element it points at is read where the
+/// reference stands (#15538).
+pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
+    if text.len() > MAX_DRAWING_BYTES {
+        return Err(IoError::Invalid("the SVG file is too large".into()));
+    }
+    let mut reader = SvgReader { text, ids: HashMap::new(), indexed: false, out: Out { g: Vec::new() }, chain: Vec::new(), work: 0 };
+    reader.read_span(0..text.len(), Tf::ID, 0, None)?;
+    Ok(reader.out.g)
+}
+
+/// The elements a file names with `id`, and where each one is in the file, so that a reference
+/// (`use`) to one of them can be read where the reference stands (#15538).
+fn index_ids(text: &str) -> HashMap<String, Range<usize>> {
+    let mut ids: HashMap<String, Range<usize>> = HashMap::new();
+    let mut rd = Reader::from_reader(text.as_bytes());
+    rd.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    // The elements that are open, and the byte each one starts at.
+    let mut open: Vec<(Option<String>, usize)> = Vec::new();
+    loop {
+        let start = rd.buffer_position() as usize;
+        let ev = rd.read_event_into(&mut buf);
+        let end = rd.buffer_position() as usize;
+        match &ev {
+            Ok(Event::Start(e)) => open.push((id_of(e), start)),
+            Ok(Event::Empty(e)) => {
+                if let Some(id) = id_of(e) {
+                    ids.entry(id).or_insert(start..end);
                 }
             }
-            "circle" => {
-                let r = num_attr(&a, "r");
-                if r > 0.0 {
-                    out.elliptic(tf, Vec2::new(num_attr(&a, "cx"), num_attr(&a, "cy")), r, r, 0.0, 0.0, std::f64::consts::TAU)?;
-                }
-            }
-            "ellipse" => {
-                let (rx, ry) = (num_attr(&a, "rx"), num_attr(&a, "ry"));
-                if rx > 0.0 && ry > 0.0 {
-                    out.elliptic(tf, Vec2::new(num_attr(&a, "cx"), num_attr(&a, "cy")), rx, ry, 0.0, 0.0, std::f64::consts::TAU)?;
-                }
-            }
-            "polyline" | "polygon" => {
-                let pts = points_list(attr(&a, "points").unwrap_or(""));
-                for w in pts.windows(2) {
-                    out.line(tf, w[0], w[1])?;
-                }
-                if name == "polygon"
-                    && let (Some(f), Some(l)) = (pts.first(), pts.last())
+            Ok(Event::End(_)) => {
+                if let Some((id, from)) = open.pop()
+                    && let Some(id) = id
                 {
-                    out.line(tf, *l, *f)?;
+                    ids.entry(id).or_insert(from..end);
                 }
             }
-            "text" => {
-                let size = attr(&a, "font-size").map(numbers).and_then(|v| v.first().copied()).unwrap_or(16.0);
-                pending_text = Some((tf, Vec2::new(num_attr(&a, "x"), num_attr(&a, "y")), size));
-            }
+            Ok(Event::Eof) | Err(_) => break,
             _ => {}
         }
-        if !empty {
-            stack.push(tf);
-            if stack.len() > MAX_DEPTH {
-                return Err(IoError::Invalid("SVG nested too deeply".into()));
-            }
-        }
         buf.clear();
+        if ids.len() >= MAX_ENTITIES {
+            break;
+        }
     }
-    Ok(out.g)
+    ids
+}
+
+/// The `id` an element is named by, when it has one.
+fn id_of(e: &BytesStart) -> Option<String> {
+    let a = attrs(e);
+    attr(&a, "id").map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
 
 /// The text of an SVG file's bytes: a UTF-8 byte-order mark is dropped and UTF-16 files (with
@@ -809,6 +991,48 @@ mod tests {
         // What follows a skipped part still reads, and a shape that is merely styled still draws.
         let g = read_svg(&doc(r#"<defs><circle r="1"/></defs><g style="display:inline"><circle cx="20" cy="20" r="10"/></g>"#)).unwrap();
         assert_eq!(g.len(), 5, "{g:?}");
+    }
+
+    /// #15538: a file that draws its shapes through a reference (a `use` element pointing at a
+    /// shape in `defs`, as Silhouette Studio exports it) draws them, so they are imported, where
+    /// the reference stands; a shape the file only defines is still not imported (#11039).
+    #[test]
+    fn a_shape_the_file_draws_through_a_reference_is_imported() {
+        let doc = |body: &str| {
+            format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="100mm" height="100mm" viewBox="0 0 100 100">{body}</svg>"##
+            )
+        };
+        let defs = r##"<defs><path id="drawn" d="M0 0 L10 10"/><circle id="only_defined" cx="50" cy="50" r="5"/></defs>"##;
+        // The line the file draws through the reference, at the place the reference stands.
+        let g = read_svg(&doc(&format!(r##"{defs}<g><use xlink:href="#drawn" x="20" y="30"/></g>"##))).unwrap();
+        assert_eq!(g.len(), 1, "{g:?}");
+        assert!(matches!(g[0], Geom2::Line(a, b) if a.dist(Vec2::new(20.0, -30.0)) < 1e-9 && b.dist(Vec2::new(30.0, -40.0)) < 1e-9), "{g:?}");
+        // The same reference with the `href` of SVG 2, and one inside a transformed group.
+        let g = read_svg(&doc(&format!(r##"{defs}<use href="#drawn"/>"##))).unwrap();
+        assert_eq!(g.len(), 1, "{g:?}");
+        let g = read_svg(&doc(&format!(r##"{defs}<g transform="translate(10 20)"><use xlink:href="#drawn"/></g>"##))).unwrap();
+        assert_eq!(g.len(), 1, "{g:?}");
+        assert!(matches!(g[0], Geom2::Line(a, b) if a.dist(Vec2::new(10.0, -20.0)) < 1e-9 && b.dist(Vec2::new(20.0, -30.0)) < 1e-9), "{g:?}");
+        // A reference to a group draws the shapes of the group.
+        let g = read_svg(&doc(r##"<defs><g id="group"><rect x="1" y="2" width="3" height="4"/></g></defs><use xlink:href="#group"/>"##)).unwrap();
+        assert_eq!(g.len(), 4, "{g:?}");
+        // A shape the file only defines and never draws is still not imported (#11039).
+        let g = read_svg(&doc(defs)).unwrap();
+        assert!(g.is_empty(), "{g:?}");
+        // A reference that points at nothing, or at a shape the file hides, draws nothing.
+        let g = read_svg(&doc(r##"<use xlink:href="#nowhere"/>"##)).unwrap();
+        assert!(g.is_empty(), "{g:?}");
+        let g = read_svg(&doc(r##"<defs><path id="hidden" display="none" d="M0 0 L10 10"/></defs><use xlink:href="#hidden"/>"##)).unwrap();
+        assert!(g.is_empty(), "{g:?}");
+        // A reference that leads back to itself is not read twice.
+        let g = read_svg(&doc(r##"<defs><g id="loop"><use xlink:href="#loop"/><path d="M0 0 L1 1"/></g></defs><use xlink:href="#loop"/>"##)).unwrap();
+        assert_eq!(g.len(), 1, "{g:?}");
+        // A shape a reference draws past the range of `f64` is refused, as it is without one.
+        match read_svg(&doc(r##"<defs><path id="big" transform="scale(1e308)" d="M0 0 L10 10"/></defs><use xlink:href="#big"/>"##)) {
+            Err(IoError::Invalid(m)) => assert!(m.contains("out of range"), "{m}"),
+            other => panic!("expected an out-of-range error, got {other:?}"),
+        }
     }
 
     /// A transform that scales a shape past the range of `f64` is refused with a clear error
