@@ -1439,6 +1439,9 @@ pub struct FilletResult {
     pub virtual_corners: Vec<String>,
     /// The constraints and dimensions that moved to a virtual corner.
     pub moved_to_virtual_corner: Vec<String>,
+    /// The offsets whose corners were cut, released into ordinary curves: their curve ids.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub offset_released: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
@@ -1458,6 +1461,9 @@ pub struct ChamferResult {
     pub virtual_corners: Vec<String>,
     /// The constraints and dimensions that moved to a virtual corner.
     pub moved_to_virtual_corner: Vec<String>,
+    /// The offsets whose corners were cut, released into ordinary curves: their curve ids.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub offset_released: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
