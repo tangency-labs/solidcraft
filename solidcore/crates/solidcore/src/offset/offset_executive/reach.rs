@@ -442,21 +442,24 @@ fn plane_pair(a: Tangent, b: Tangent, tangent_sine: f64, tolerance: f64) -> Plan
 
 /// How two quadrics beside an edge meet where they are parallel surfaces, decided once for
 /// the whole edge from the quadrics alone, as [`plane_pair`] decides two planes: two spheres
-/// about one centre, or two cones (cylinders) about one axis whose generators are parallel.
-/// One centre or axis is within `tolerance` (`e`, how far the second's centre or origin is
-/// off the first's centre or axis); parallel is within [`EFF_ZERO`] (the sine of the axes'
-/// angle, and of the generators'), a label's rounding. Their gap `g` along the normals is the
-/// difference of their radii (a cone's at one height, over `√(1 + t²)`), so the surfaces lie
-/// between `|g| − e` and `|g| + e` apart: one surface ([`PlanePair::One`]) where
-/// `|g| + e ≤ tolerance`, apart ([`PlanePair::Apart`]) where `|g| > tolerance + e`. On the
-/// faces' nappes, two quadrics decided apart could meet only past `tolerance / EFF_ZERO`.
-/// Unlike two planes, not within the tangency tolerance: coaxial quadrics a small angle
-/// apart (a cylinder's half drafted 0.3 degrees beside the half it was split from) meet on
-/// the edge, which [`quadric::meet`] proves. `None` for any pair not parallel, or with a gap
-/// between those bounds: [`quadric::meet`] decides it.
+/// about one centre, or two cones (cylinders) on one axis direction (the same, or its exact
+/// negation) with one slope along it, exactly. Their radii then differ by one radial gap `g`
+/// at every height (a cone's taken at one height on the first's axis), and the second's
+/// centre or axis lies `e` off the first's, so the surfaces lie between `|g| / √(1 + t²)
+/// − e` and `|g| + e` apart along their normals (`t` the slope along the axis line): one
+/// surface ([`PlanePair::One`]) where `|g| + e ≤ tolerance`, apart ([`PlanePair::Apart`])
+/// where `|g| / √(1 + t²) > tolerance + e`, each on outward enclosures of `g` and `e`. `None`
+/// for any other pair, a gap between those bounds, or `e` past the tolerance:
+/// [`quadric::meet`] decides it. Not within the tangency tolerance, as two planes are:
+/// coaxial quadrics a small angle apart (a cylinder's half drafted 0.3 degrees beside the half
+/// it was split from) meet on the edge.
 fn quadric_pair(a: &Implicit, b: &Implicit, tolerance: f64) -> Option<PlanePair> {
-    let sine_squared = EFF_ZERO * EFF_ZERO;
-    let (gap, off) = match (*a, *b) {
+    let i = Ivl::from;
+    let enclosed = |p: Vec3| [i(p.x), i(p.y), i(p.z)];
+    let dot = |x: [Ivl; 3], y: [Ivl; 3]| x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+    let minus = |x: [Ivl; 3], y: [Ivl; 3]| [x[0] - y[0], x[1] - y[1], x[2] - y[2]];
+    // the radial gap, the normals' scale √(1 + t²) and the offset, enclosed
+    let (gap, scale, off) = match (*a, *b) {
         (
             Implicit::Sphere {
                 centre: ca,
@@ -466,7 +469,10 @@ fn quadric_pair(a: &Implicit, b: &Implicit, tolerance: f64) -> Option<PlanePair>
                 centre: cb,
                 radius: rb,
             },
-        ) => (rb - ra, (cb - ca).length()),
+        ) => {
+            let v = minus(enclosed(cb), enclosed(ca));
+            (i(rb) - i(ra), i(1.0), dot(v, v).sqrt())
+        }
         (
             Implicit::Cone {
                 origin: oa,
@@ -481,33 +487,40 @@ fn quadric_pair(a: &Implicit, b: &Implicit, tolerance: f64) -> Option<PlanePair>
                 tan_angle: tb,
             },
         ) => {
-            let c = aa.dot(ab);
-            if aa.cross(ab).length_squared()
-                > sine_squared * aa.length_squared() * ab.length_squared()
-            {
+            // one axis direction and one slope along it: the second's height is the first's
+            // less `z`, in the first's sense
+            let sense = if ab == aa {
+                1.0
+            } else if ab == -aa {
+                -1.0
+            } else {
+                return None;
+            };
+            if tb * sense != ta {
                 return None;
             }
-            // the second cone's slope and height along the first's axis
-            let tb = if c < 0.0 { -tb } else { tb };
-            let v = ob - oa;
-            let z = v.dot(aa);
-            // the generators' normals in a meridian plane, (1, −t) / √(1 + t²), parallel
-            let (wa, wb) = (1.0 + ta * ta, 1.0 + tb * tb);
-            if (ta - tb) * (ta - tb) > sine_squared * wa * wb {
-                return None;
-            }
-            // at height h on the first's axis the radii are ra + ta h and rb + tb (h − z)
-            ((rb - tb * z - ra) / wa.sqrt(), (v - aa * z).length())
+            let axis = enclosed(aa);
+            let v = minus(enclosed(ob), enclosed(oa));
+            let z = dot(v, axis);
+            let perp = minus(v, [axis[0] * z, axis[1] * z, axis[2] * z]);
+            // at height h on the first's axis the radii are ra + ta h and rb + ta (h − z)
+            let slope = i(ta) * i(ta) * dot(axis, axis);
+            (
+                i(rb) - i(ta) * z - i(ra),
+                (i(1.0) + slope).sqrt(),
+                dot(perp, perp).sqrt(),
+            )
         }
         _ => return None,
     };
+    let e = off.hi;
     // a centre or axis not proved within the tolerance (or not a number): not one axis
-    if off.is_nan() || off > tolerance {
+    if !(e.is_finite() && gap.lo.is_finite() && gap.hi.is_finite()) || e > tolerance {
         return None;
     }
-    if gap.abs() + off <= tolerance {
+    if round_up(gap.mag() + e) <= tolerance {
         Some(PlanePair::One)
-    } else if gap.abs() > tolerance + off {
+    } else if (i(gap.mig()) / scale).lo > round_up(tolerance + e) {
         Some(PlanePair::Apart)
     } else {
         None
@@ -4286,7 +4299,7 @@ mod tests {
 
     /// Two quadrics that are parallel surfaces are decided from the quadrics, as two planes
     /// are: spheres about one centre, and cones or cylinders about one axis at one angle
-    /// (either axis sense, the origin anywhere along it, a label's rounding off), are one
+    /// (either axis sense, the origin anywhere along it), are one
     /// surface within the tolerance of each other, apart beyond it, with the axis's or
     /// centre's offset counted on either side. A cone beside a cylinder on its
     /// axis (3 degrees, or 0.3, within the tangency tolerance), a tilted or shifted axis, or
@@ -4326,11 +4339,28 @@ mod tests {
         assert_eq!(pair(&r50, &off(8e-4, 50.0005)), both(None));
         assert_eq!(pair(&r50, &off(1e-4, 50.0001)), both(Some(PlanePair::One)));
         assert_eq!(pair(&r50, &off(8e-4, 54.0)), both(Some(PlanePair::Apart)));
-        // an axis a label's rounding off (1.44e-13 rad, a cylinder's label as read)
+        // an axis a rounding off (1.44e-13 rad), or a slope: no longer one axis or one slope
         let rounded = Vec3::new(1.44e-13, 0.0, 1.0);
         assert_eq!(
             pair(&r50, &cone(Vec3::ZERO, rounded, 54.0, 0.0)),
-            both(Some(PlanePair::Apart))
+            both(None)
+        );
+        assert_eq!(
+            pair(&r50, &cone(Vec3::ZERO, Vec3::Z, 54.0, 1e-15)),
+            both(None)
+        );
+        // far along the axis the radial gap's rounding is enclosed: radii 2^40 apart at
+        // heights 2^40 apart, a slope just over 1, leave a gap below a rounding of either
+        let (t, z) = (1.0 + 2.0_f64.powi(-27), 2.0_f64.powi(40) + 2.0_f64.powi(13));
+        let near = cone(
+            on_z(z),
+            Vec3::Z,
+            2.0_f64.powi(40) + 2.0_f64.powi(14) + 1.0,
+            t,
+        );
+        assert_ne!(
+            quadric_pair(&cone(Vec3::ZERO, Vec3::Z, 1.0, t), &near, 1e-6),
+            Some(PlanePair::One)
         );
         // a cone offset 4 along its normals, and the cone itself from another origin and sense
         let t = 0.1;
