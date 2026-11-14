@@ -255,7 +255,7 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "DRAWING PARTS", panel: "SOURCE", promoted: 2, ids: &["assembly.bom", "sheet.flat_pattern"] },
     Section { tab: "DRAWING REVIEW", panel: "CHANGES", promoted: 2, ids: &["drawing.update.planned", "drawing.check.planned"] },
     Section { tab: "DRAWING REVIEW", panel: "REVISION", promoted: 2, ids: &["drawing.revision", "drawing.revision_table"] },
-    Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export.planned", "drawing.print"] },
+    Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export", "drawing.print"] },
     Section {
         tab: "MODEL",
         panel: "SKETCH",
@@ -577,7 +577,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.annotations.space", "Space Notes"),
     ("drawing.check.planned", "Check Drawing"),
     ("drawing.dimension", "Dimension"),
-    ("drawing.export.planned", "Export"),
+    ("drawing.export", "Export"),
     ("drawing.hole_callout", "Hole Callout"),
     ("drawing.image", "Image"),
     ("drawing.leader", "Leader"),

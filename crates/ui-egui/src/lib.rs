@@ -200,6 +200,7 @@ mod blend_dialog_tests;
 #[cfg(test)]
 mod boundary_dialog_tests;
 pub(crate) mod display_lod;
+pub mod drawing_export_panel;
 pub mod drawing_jobs;
 pub mod drawing_sheet_page;
 pub mod drawing_workspace;

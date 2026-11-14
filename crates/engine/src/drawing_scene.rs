@@ -441,6 +441,13 @@ pub(crate) fn update(s: &mut Session) {
     s.drawing_scenes.updated = s.world_state().ok();
 }
 
+/// Moves each time a view or a reading of dimensions is kept, or the cache turns to another
+/// drawing: with the session's revision, it says when [`standing`] (`drawing.status`) may read
+/// differently, so a window that shows it reads it again only then. Read-only and cheap.
+pub fn drawn(s: &Session) -> (Option<u64>, u64) {
+    (s.drawing_scenes.drawing, s.drawing_scenes.serial)
+}
+
 /// `d`, the drawing open, is deferred and the model has moved on from its last [`update`].
 pub(crate) fn held(s: &Session, d: &Drawing) -> bool {
     s.world_state().is_ok_and(|state| s.drawing_scenes.holds(d, &state))

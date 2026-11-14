@@ -406,6 +406,21 @@ impl FileLoad {
         });
         running.into_iter().chain(waiting).chain(self.queued.iter().map(entry)).collect()
     }
+
+    /// Stop only the sheet exports to `paths` (the Export window's Cancel): those waiting are
+    /// dropped and answered as cancelled; the one being written is told to stop and answers once
+    /// its worker says whether it published the file. Every other file operation goes on.
+    pub(crate) fn cancel_sheet_exports(&mut self, paths: &[String]) {
+        let ours = |r: &Request| r.kind == Kind::ExportSheet && paths.contains(&r.path);
+        if let Some(r) = self.running.as_ref().filter(|r| ours(&r.request)) {
+            r.progress.cancel();
+        }
+        let (stopped, kept): (VecDeque<Request>, VecDeque<Request>) = std::mem::take(&mut self.queued).into_iter().partition(|r| ours(r));
+        self.queued = kept;
+        for q in stopped {
+            q.answer(Err("file operation cancelled".into()));
+        }
+    }
 }
 
 /// A file operation as the operations panel shows it ([`FileLoad::operations`]).
