@@ -7,6 +7,7 @@
 //! | Rust                     | Upstream |
 //! |--------------------------|----------|
 //! | [`curve_on_surfaces`]    | none     |
+//! | [`measured_off`]         | none     |
 //!
 //! **The bound.** For a curve `C` and a surface `S`, split the curve's parameter range into
 //! segments `[a, b]`, each inside one polynomial piece of `C`. At both ends take any surface
@@ -131,6 +132,50 @@ pub fn curve_on_surfaces(
         }
     }
     Ok(true)
+}
+
+/// The points [`measured_off`] measures: this many evenly spaced interior parameters.
+pub const MEASURED_POINTS: usize = 33;
+
+/// Whether `curve` over `interval` is measured farther than `tol` from either of `surfaces`
+/// at one of [`MEASURED_POINTS`] evenly spaced interior parameters, by the distance to the
+/// surface's closest point (MEASURED, not certified: a closest point that is only local
+/// overstates the distance, and a gap between the points is missed). A point whose curve
+/// point or closest point is not found is not evidence either way.
+///
+/// # Errors
+///
+/// [`SolidError::Cancelled`](crate::error::SolidError::Cancelled) when the kernel's cancel
+/// token fires (polled once per point).
+pub fn measured_off(
+    k: &Kernel,
+    curve: &Curve,
+    interval: Extent1d,
+    surfaces: [&Surface; 2],
+    tol: f64,
+) -> Result<bool> {
+    let (a, b) = (interval.min(), interval.max());
+    if !(a.is_finite() && b.is_finite() && b > a) {
+        return Ok(false);
+    }
+    #[allow(clippy::cast_precision_loss)] // MEASURED_POINTS is small
+    let steps = (MEASURED_POINTS + 1) as f64;
+    for i in 1..=MEASURED_POINTS {
+        k.check_cancelled(OP)?;
+        #[allow(clippy::cast_precision_loss)] // i <= MEASURED_POINTS
+        let t = a + (b - a) * (i as f64) / steps;
+        let Ok(p) = curve.evaluate_point(k, t) else {
+            continue;
+        };
+        for s in surfaces {
+            if let Ok(c) = surface_closest_point(k, s, p) {
+                if c.closest.point.distance(p) > tol {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// Whether the net has an interior knot of multiplicity at least its degree (one less for
@@ -425,6 +470,21 @@ mod tests {
         assert!(!curve_on_surfaces(&k, &arc(0.0), ivl, [&a, &c], 1e-6).expect("check"));
         // within a looser distance it is proved again
         assert!(curve_on_surfaces(&k, &arc(0.0), ivl, [&a, &c], 2e-3).expect("check"));
+    }
+
+    /// A curve in both planes is not measured off; 1e-3 off one of them it is, at the
+    /// tolerance below the gap and not above it.
+    #[test]
+    fn a_curve_off_a_plane_is_measured_off_it() {
+        let k = Kernel::default();
+        let (a, c) = (plane(0.0), plane(1e-3));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        assert!(!measured_off(&k, &arc(0.0), ivl, [&a, &a], 1e-6).expect("measure"));
+        assert!(measured_off(&k, &arc(0.0), ivl, [&a, &c], 1e-6).expect("measure"));
+        assert!(!measured_off(&k, &arc(0.0), ivl, [&a, &c], 2e-3).expect("measure"));
+        // an empty interval measures nothing
+        let empty = Extent1d::from_min_max(0.5, 0.5);
+        assert!(!measured_off(&k, &arc(0.0), empty, [&a, &c], 1e-6).expect("measure"));
     }
 
     /// An offset of a net is checked through its normal: the arc in z = 0.5 lies on the
