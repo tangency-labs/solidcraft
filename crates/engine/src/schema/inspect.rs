@@ -1208,7 +1208,23 @@ pub struct SketchPoint {
     pub fixed: bool,
     /// For a linked point: the link that owns it; `null` otherwise.
     pub link: Option<String>,
+    /// For a point placed by parameters: the expressions that place it (a coordinate without one
+    /// is the number in `at`). Such a point is `fixed` and follows them; release it with
+    /// `sketch.constraint.fix` and `fixed: false`. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fixed_by: Option<PointFixedBy>,
     pub fully_constrained: bool,
+}
+
+/// The expressions that place a point, over the design's parameters.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PointFixedBy {
+    /// The x coordinate's expression; absent when x is a plain number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub x: Option<String>,
+    /// The y coordinate's expression; absent when y is a plain number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub y: Option<String>,
 }
 
 /// A constraint or dimension: its id, its kind's name and the kind's own fields (`type`, then

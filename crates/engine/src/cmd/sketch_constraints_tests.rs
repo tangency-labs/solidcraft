@@ -1882,3 +1882,33 @@ fn conflict_lists_the_constraints_instead_of_claiming_the_entities_are_fixed() {
         assert!(e.contains("conflicts with"), "{cmd} {params}: {e}");
     }
 }
+
+/// A point placed by a parameter expression (#16554): the inspection says why it is fixed,
+/// Unfix frees it as plain numbers, and moving it before that is refused with the expression.
+#[test]
+fn a_point_placed_by_an_expression_says_so_unfixes_and_refuses_a_move() {
+    let point = |s: &mut Session, id: &str| {
+        run(s, "sketch.inspect", json!({}))["points"].as_array().and_then(|a| a.iter().find(|p| p["id"] == id).cloned()).unwrap_or(Value::Null)
+    };
+    for toggle in [false, true] {
+        let mut s = new_sketch();
+        run(&mut s, "parameters.add", json!({"name": "w", "expression": "20"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], ["w", 0]]}));
+        let p1 = point(&mut s, "p1");
+        assert_eq!(p1["fixed"], true, "{p1}");
+        assert_eq!(p1["fixed_by"], json!({"x": "w"}), "{p1}");
+        let e = s.execute("sketch.move_points", &json!({"moves": [{"point": "p1", "to": [5, 5]}]})).unwrap_err().to_string();
+        assert!(e.contains("\"w\"") && e.contains("p1"), "{e}");
+        let params = if toggle { json!({"entities": ["p1"]}) } else { json!({"entities": ["p1"], "fixed": false}) };
+        let r = run(&mut s, "sketch.constraint.fix", params);
+        assert_eq!(r["result"], json!({"fixed": false, "changed": 1}), "{r}");
+        let p1 = point(&mut s, "p1");
+        assert!(p1.get("fixed_by").is_none_or(Value::is_null), "{p1}");
+        assert_eq!(p1["at"], json!([20.0, 0.0]), "{p1}");
+        // Free now: it no longer follows the parameter, and it can be moved.
+        run(&mut s, "parameters.change", json!({"name": "w", "expression": "30"}));
+        assert_eq!(point(&mut s, "p1")["at"], json!([20.0, 0.0]));
+        let r = run(&mut s, "sketch.move_points", json!({"moves": [{"point": "p1", "to": [25, 0]}]}));
+        assert_eq!(r["moved"][0]["reached"], true, "{r}");
+    }
+}
