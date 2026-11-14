@@ -13,6 +13,7 @@ mod drawing;
 mod import_cache;
 mod native_cache;
 mod provenance;
+mod share;
 mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
 pub use import_cache::ImportCache;
@@ -21,6 +22,7 @@ pub use provenance::{
     OpenPgpSignature, OpenPgpSigner, ProvenanceChain, ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus,
     ProvenanceSummary, SignatureSource, Signer,
 };
+pub use share::{SHARED_DESIGN_EXT, is_shared_design_path, shared_design_name};
 pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail_file};
 
 use serde_json::{Map, Value, json};
@@ -781,6 +783,12 @@ impl<R: Read + Seek> DesignContainerReader<R> {
         native_cache::read_geometry_with(&mut self.reader, &document).ok()
     }
 
+    /// Is this a design container (it has `container.json`), rather than some other ZIP such as
+    /// a zip an archiver made of a design file?
+    pub fn is_container(&self) -> bool {
+        self.reader.has_part("container.json")
+    }
+
     /// Consume the reader, resolving every required blob before returning a document.
     pub fn read_document(mut self) -> Result<Document> {
         read_document(&mut self.reader)
@@ -794,7 +802,16 @@ impl<R: Read + Seek> DesignContainerReader<R> {
 }
 
 pub(super) fn read(bytes: &[u8]) -> Result<Document> {
-    DesignContainerReader::new(Cursor::new(bytes))?.read_document()
+    let reader = DesignContainerReader::new(Cursor::new(bytes));
+    if reader.as_ref().is_ok_and(DesignContainerReader::is_container) {
+        return reader?.read_document();
+    }
+    // A design shared as a zip of its file (#4019); one level only.
+    match share::inner(Cursor::new(bytes))? {
+        Some(inner) if is_design_container(&inner) => DesignContainerReader::new(Cursor::new(inner))?.read_document(),
+        Some(inner) => Ok(Document::from_json(std::str::from_utf8(&inner).map_err(|_| invalid("the shared design is not UTF-8 JSON"))?)?),
+        None => reader?.read_document(),
+    }
 }
 
 /// Open from disk (or browser VFS), publishing only provisional display before
@@ -804,8 +821,22 @@ pub(super) fn read(bytes: &[u8]) -> Result<Document> {
 /// through the normal migrations.
 pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
     let _span = solidcraft_profile::span("io", "read_design_file");
-    let mut source = open_regular_file(path)?;
+    read_source(open_regular_file(path)?, notify, true)
+}
+
+fn read_source<R: Read + Seek>(
+    mut source: R,
+    notify: Option<impl FnOnce(DesignPreview)>,
+    shared: bool,
+) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
     if is_container_source(&mut source)? {
+        // Native containers have their own entry budget, larger than shared ZIPs.
+        if shared && !DesignContainerReader::new(&mut source).is_ok_and(|reader| reader.is_container()) {
+            if let Some(inner) = share::inner(&mut source)? {
+                return read_source(Cursor::new(inner), notify, false);
+            }
+            source.seek(SeekFrom::Start(0)).map_err(invalid)?;
+        }
         let mut reader = DesignContainerReader::new(source)?;
         // A design with its model opens without a picture first: the model is the session.
         let model = reader.geometry_before_document();
@@ -854,7 +885,7 @@ fn open_regular_file(path: &str) -> Result<FileSource> {
 }
 
 /// Whether a source starts as a container does, leaving it at its start.
-fn is_container_source(source: &mut FileSource) -> Result<bool> {
+fn is_container_source<R: Read + Seek>(source: &mut R) -> Result<bool> {
     let mut prefix = [0u8; 4];
     let size = source.seek(SeekFrom::End(0)).map_err(invalid)?;
     source.seek(SeekFrom::Start(0)).map_err(invalid)?;
