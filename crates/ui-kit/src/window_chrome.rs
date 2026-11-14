@@ -215,6 +215,16 @@ pub fn release_press_taken_by_os(ctx: &egui::Context, raw: &mut egui::RawInput) 
     }
 }
 
+/// The tooltip of caption button `c`, in the current language; `max` says the window is maximized.
+fn caption_tip(c: Caption, max: bool) -> &'static str {
+    solidcraft_ui_text::tr(match c {
+        Caption::Minimize => "ui.window_minimize",
+        Caption::Maximize if max => "ui.window_restore",
+        Caption::Maximize => "ui.window_maximize",
+        Caption::Close => "ui.close",
+    })
+}
+
 /// Minimize, Maximize/Restore and Close at the right end of `bar`, full bar height, flush with
 /// the window's edge so a maximized window's corner hits Close. The one clicked, as the action
 /// for the app to run.
@@ -233,13 +243,7 @@ pub fn caption_buttons(ui: &mut Ui, bar: Rect) -> Option<WindowAction> {
         };
         ui.painter().rect_filled(r, 0.0, fill);
         paint_glyph(ui, c, max, r.center(), Stroke::new(1.0, t.app_bar_text));
-        let tip = match c {
-            Caption::Minimize => "Minimize",
-            Caption::Maximize if max => "Restore",
-            Caption::Maximize => "Maximize",
-            Caption::Close => "Close",
-        };
-        if resp.backing_on_hover_text(tip).clicked() {
+        if resp.backing_on_hover_text(caption_tip(c, max)).clicked() {
             clicked = Some(match c {
                 Caption::Minimize => WindowAction::Minimize,
                 Caption::Maximize => WindowAction::Toggle,
@@ -384,6 +388,14 @@ mod tests {
             }
             (cmds, actions)
         }
+    }
+
+    #[test]
+    fn caption_tooltips_come_from_the_catalog_and_follow_the_window_state() {
+        crate::test_support::install_catalog();
+        let tips = |max| CAPTIONS.map(|c| caption_tip(c, max));
+        assert_eq!(tips(false), ["Minimize", "Maximize", "Close"], "SolidCraft's English tooltips are unchanged");
+        assert_eq!(tips(true), ["Minimize", "Restore", "Close"]);
     }
 
     #[test]
