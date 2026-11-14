@@ -411,8 +411,9 @@ pub fn layout(b: &Brep) -> R<Layout> {
 /// that form: a cylinder's rim rounded is a torus, and STEP has the surface where the record has
 /// its rational net, which a reader measures a little off (volume, bounding box). The proof is
 /// the kernel's ([`analytic_label`]: the form lies on the surface and the surface evaluates as
-/// the form); a form no kind is proved on keeps its NURBS. The record itself is not changed, `b`
-/// borrowed where no face is such a form.
+/// the form). A form with no proved kind, or a horn or spindle torus whose pole topology must
+/// remain a spline, keeps its NURBS. The record itself is not changed, `b` borrowed where no
+/// face is such a form.
 fn analytic_rounds(b: &Brep) -> R<Cow<'_, Brep>> {
     let candidate = |f: &Face| match (&f.surface, &f.nurbs) {
         (BSurface::RationalSpline { .. }, None) => true,
@@ -435,8 +436,14 @@ fn analytic_rounds(b: &Brep) -> R<Cow<'_, Brep>> {
         let form = face.nurbs.as_ref().unwrap_or(&face.surface);
         let net = solidcore_convert::surface(form).map_err(invalid)?;
         if let Some(label) = analytic_label(&k, &net, face.domain).map_err(|e| format!("a round's analytic surface: {e}"))? {
+            let label = solidcore_convert::record_surface(label).map_err(invalid)?;
+            // A horn or spindle has a singular circle parametrisation on the axis.
+            // Keep its NURBS and pole topology instead of promoting it to a ring torus.
+            if matches!(label, BSurface::Torus { major_radius, minor_radius, .. } if major_radius <= minor_radius) {
+                continue;
+            }
             let form = face.nurbs.take().unwrap_or_else(|| face.surface.clone());
-            face.surface = solidcore_convert::record_surface(label).map_err(invalid)?;
+            face.surface = label;
             face.nurbs = Some(form);
         }
     }

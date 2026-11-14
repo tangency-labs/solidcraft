@@ -1539,7 +1539,11 @@ fn a_round_on_a_revolved_torus_end_edge_survives_reload() {
         let clip = make_box([-10.0, 0.0, -10.0], [20.0, 50.0, 30.0]).unwrap();
         let body = boolean(ring, clip, BooleanOp::Intersect).unwrap().unwrap();
         let rho = 33.0 + (64.0_f64 - 2.5 * 2.5).sqrt();
-        let selected = edge_at(&body, [-10.0, (rho * rho - 100.0).sqrt(), 6.5]);
+        // This point is on the exact torus/plane intersection. The boolean's edge
+        // is its fitted intersection curve, so select it by distance rather than
+        // requiring the point to lie on that approximation to 1e-9 mm.
+        let point = [-10.0, (rho * rho - 100.0).sqrt(), 6.5];
+        let selected = nearest_edge(&body, point);
         blend(
             &body,
             Blend::Round,
