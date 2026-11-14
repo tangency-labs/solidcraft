@@ -122,12 +122,75 @@ fn wr_407_walls_join_to_the_closed_form_with_the_fix() {
     );
 }
 
-/// Without the fold rule the cover merges onto the folded continuation: the join is too
-/// large by more than 1000 mm3 (7744 mm3; it was short by 5573 mm3 with upstream's sweep
-/// frame, and by 14596 mm3 with a drop piece stretched onto each trim's edge).
+/// How far, in uv, the farthest sampled point of a face's UV trim lies outside its surface's
+/// natural (knot) domain, over all faces: a sampled point past the domain proves the trim
+/// leaves it by at least that much (a lower bound, PROVEN by the sample itself).
+fn farthest_trim_past_domain(k: &Kernel, b: &Brep) -> f64 {
+    use solidcore::topology::brep::p1::faces;
+    use solidcore::topology::edgeuse::p1::{faceuse_loopuses, loopuse_edgeuses, uv_trim_curve};
+    let mut worst = 0.0_f64;
+    for f in faces(b, None).unwrap() {
+        let face = b.face(f).unwrap();
+        let dom = face
+            .surface
+            .as_ref()
+            .unwrap()
+            .natural_uv_domain_with_nurb(k)
+            .unwrap();
+        let up = face.faceuse.unwrap();
+        for lu in faceuse_loopuses(b, up, false, None).unwrap() {
+            for eu in loopuse_edgeuses(b, lu).unwrap() {
+                let Some(t) = uv_trim_curve(b, eu).unwrap().0 else {
+                    continue;
+                };
+                let iv = t.natural_interval();
+                for i in 0..=256 {
+                    let tau = iv.min() + (iv.max() - iv.min()) * f64::from(i) / 256.0;
+                    let p = t.evaluate_point(k, tau).unwrap();
+                    let out = (dom.u_min() - p.x)
+                        .max(p.x - dom.u_max())
+                        .max(dom.v_min() - p.y)
+                        .max(p.y - dom.v_max());
+                    worst = worst.max(out);
+                }
+            }
+        }
+    }
+    worst
+}
+
+/// Without the fold rule the cover merges onto wall A's folded continuation: wall B's top
+/// becomes a face of wall A's top B-spline whose trims run about 1.7 in v past the spline's
+/// knot domain (1.69 here), where every consumer that clamps to the domain (upstream's
+/// `EvaluateSimple`) sees another surface than the face's edges lie on. With the fix no
+/// trim leaves its domain by more than a rounding.
+///
+/// This used to be measured by the volume (7744 mm3 too large; 5573 mm3 short with
+/// upstream's sweep frame, 14596 mm3 with a drop piece stretched onto each trim's edge).
+/// Those figures were the clamped integration of that face. `brep_volume` now integrates
+/// it on the B-spline continued past its domain (#16735), where it lies on its edges, and
+/// the join's volume is the closed form's to the 1 mm3 the radial faces' approximation
+/// allows (MEASURED 1.6e-5 off), as with the fix (5.1e-7).
 #[test]
 fn wr_407_default_join_loses_the_folded_cover() {
+    // (the volume makes the faces' missing UV trims first)
     let (k, mut b) = joined(false);
     let v = volume(&k, &mut b);
-    assert!(v - closed_form() > 1000.0, "{v} against {}", closed_form());
+    let past = farthest_trim_past_domain(&k, &b);
+    assert!(
+        past > 1.5,
+        "the cover's trims leave the domain by only {past}"
+    );
+    assert!(
+        (v - closed_form()).abs() < 1.0,
+        "{v} against {}",
+        closed_form()
+    );
+    let (kf, mut bf) = joined(true);
+    let _ = volume(&kf, &mut bf);
+    let past = farthest_trim_past_domain(&kf, &bf);
+    assert!(
+        past < 1e-9,
+        "with the fix a trim leaves its domain by {past}"
+    );
 }

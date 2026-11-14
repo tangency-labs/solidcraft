@@ -36,7 +36,7 @@
 //!
 //! | component | `f_c` |
 //! |---|---|
-//! | area `[0]` | (not a volume integral: must not move) |
+//! | area `[0]` | (not a volume integral: moves only by the open gaps' shadows, below) |
 //! | volume `[1]`, mass `[2]` (density 1) | `1` |
 //! | centroid `[3..6]` | `(x_a − c_a) / V'` (`c` the old centroid, `V'` the new volume: `m'c' = m c + ∫_D x` gives `c' − c = ∫_D (x − c) / m'`) |
 //! | inertia `[6..9]` about 0 | `y² + z²`, `z² + x²`, `x² + y²` (the parallel-axis shift from `m` to 0 is linear in `m`, `S` and `M7`, and adds up to the world integrand) |
@@ -49,7 +49,12 @@
 //! piece's box (its `z` range widened to `m_z`, the `ζ` of the integral). The pieces are the
 //! strips between consecutive samples of each trim (width the larger of the two sampled gaps,
 //! length the longer of the two sides, box the four points widened by both) and the corner
-//! polygons `[trim end, edge end, vertex, edge start, trim start]` (fan area from their centre).
+//! polygons `[trim end, edge end, vertex, edge start, trim start]` (fan area from their centre),
+//! and the shadows of the uv gaps the trim boundary leaves open, which the faces are now
+//! integrated across (`close_loops`; the old integrator lost each gap's region down to the
+//! integration base, a second leak; `shadow_pieces`). A shadow also moves the face's own
+//! area, by at most the shadow's area: that is the area's bound (the strips and fans leave
+//! it unmoved).
 //! For the volume this is `g L |z − m_z|`, the `tol L |x − o|` leak of the issue. A noise floor
 //! of `1e-12` of the component's scale covers the quadrature (`V`; `|c|∞ + diag` for the
 //! centroid; `V (|m|∞ + diag)²` for the moments).
@@ -324,12 +329,14 @@ fn about_origins(
     })
 }
 
-/// A piece of the closure: its area and a box holding it.
+/// A piece of the closure: its area and a box holding it; `shadow` for an open gap's
+/// shadow ([`shadow_pieces`]), whose area the face integral itself moves.
 #[derive(Debug, Clone, Copy)]
 struct Piece {
     area: f64,
     lo: Vec3,
     hi: Vec3,
+    shadow: bool,
 }
 
 fn bounds(points: &[Vec3], pad: f64) -> (Vec3, Vec3) {
@@ -480,6 +487,7 @@ fn closure_pieces(k: &Kernel, b: &mut Brep) -> (Vec<Piece>, f64, f64, String) {
                         area: g * len,
                         lo,
                         hi,
+                        shadow: false,
                     });
                 }
                 let (pa, pb) = (at(c0), at(c1));
@@ -518,11 +526,146 @@ fn closure_pieces(k: &Kernel, b: &mut Brep) -> (Vec<Piece>, f64, f64, String) {
                             .length();
                 }
                 let (lo, hi) = bounds(&poly, 0.0);
-                pieces.push(Piece { area, lo, hi });
+                pieces.push(Piece {
+                    area,
+                    lo,
+                    hi,
+                    shadow: false,
+                });
             }
         }
+        pieces.extend(shadow_pieces(k, b, f, &s));
     }
     (pieces, worst_gap, worst_corner, worst_at)
+}
+
+/// 8-point Gauss-Legendre nodes and weights on [-1, 1].
+const GL8: [(f64, f64); 8] = [
+    (-0.960_289_856_497_536_2, 0.101_228_536_290_376_26),
+    (-0.796_666_477_413_626_7, 0.222_381_034_453_374_47),
+    (-0.525_532_409_916_329, 0.313_706_645_877_887_3),
+    (-0.183_434_642_495_649_8, 0.362_683_783_378_362),
+    (0.183_434_642_495_649_8, 0.362_683_783_378_362),
+    (0.525_532_409_916_329, 0.313_706_645_877_887_3),
+    (0.796_666_477_413_626_7, 0.222_381_034_453_374_47),
+    (0.960_289_856_497_536_2, 0.101_228_536_290_376_26),
+];
+
+/// The shadows of the uv gaps face `f`'s oriented trim boundary leaves open, which
+/// `brep_properties` now closes with uv lines (`close_loops`, fadb9fa47): consecutive
+/// curves whose end and start differ by `0 < |d|^2 <= EFF_ZERO (1 + |p|)`. The face
+/// integral runs iso-u lines from the integration base `v0` (the trims' lowest v, no lower
+/// than the face's domain), so an open gap from `a` to `z` loses the region over the line,
+/// `u` between `a.u` and `z.u`, `v` from `v0` to the line: the old integrator's second
+/// leak. Each is one piece: its area `sum |F(u, v)| |du|` along the line (8-point
+/// Gauss-Legendre), `F(u, v) = int_{v0}^{v} |S_u x S_v| dv` (64 panels of 8 points; the
+/// line is at most about 1e-6 long, so its points' boxes hold the region), and the box of
+/// the surface over the iso-u lines from `v0` at the line's two ends (65 samples each,
+/// padded by the largest step between samples and by `|du| sup |S_u|`). The area is
+/// MEASURED (quadrature), as the strips' widths are.
+fn shadow_pieces(
+    k: &Kernel,
+    b: &mut Brep,
+    f: solidcore::topology::FaceId,
+    s: &solidcore::surface::surface::Surface,
+) -> Vec<Piece> {
+    use solidcore::math::EFF_ZERO;
+    use solidcore::nurbs::b_spline_curve::p2::BoundingBoxRequest;
+    let key = |_: solidcore::EntityRef| solidcore::geom::object::ObjectRef {
+        type_code: 0,
+        key: ObjectKey(0),
+    };
+    let t = solidcore::topology::face::p1::create_oriented_trim_boundary(
+        k, b, f, true, true, None, &key,
+    )
+    .unwrap();
+    let end = |c: &solidcore::curve::curve::Curve, last: bool| {
+        let iv = c.natural_interval();
+        c.evaluate_point(k, if last { iv.max() } else { iv.min() })
+            .unwrap()
+    };
+    let mut gaps = Vec::new();
+    let mut start = 0;
+    for &n in &t.loops {
+        let lp = &t.curves[start..start + n];
+        for (i, c) in lp.iter().enumerate() {
+            let next = &lp[(i + 1) % n];
+            let (a, z) = (end(c, true), end(next, false));
+            if a != z && (z - a).length_squared() <= EFF_ZERO * (1.0 + z.max_dimension()) {
+                gaps.push((a, z));
+            }
+        }
+        start += n;
+    }
+    if gaps.is_empty() {
+        return Vec::new();
+    }
+    let req = BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+    let mut base = f64::INFINITY;
+    for c in &t.curves {
+        let bb = c
+            .calculate_bounding_box(k, &c.natural_interval(), req, true)
+            .unwrap()
+            .normal
+            .unwrap();
+        base = base.min(bb.min().y);
+    }
+    for (a, z) in &gaps {
+        base = base.min(a.y).min(z.y);
+    }
+    base = base.max(b.face(f).unwrap().uv_domain.min().y);
+    let flags = EvaluateFlags::default();
+    let eval = |u: f64, v: f64| {
+        let d = s.evaluate(k, Point2::new(u, v), 1, 1, flags).unwrap();
+        (d[0][0], d[1][0], d[0][1])
+    };
+    let mut out = Vec::new();
+    for (a, z) in gaps {
+        let du = z.x - a.x;
+        let mut area = 0.0;
+        for (x, w) in GL8 {
+            let sp = 0.5 + 0.5 * x;
+            let (u, v) = (a.x + du * sp, a.y + (z.y - a.y) * sp);
+            let mut big_f = 0.0;
+            for i in 0..64 {
+                let lo = base + (v - base) * f64::from(i) / 64.0;
+                let hi = base + (v - base) * f64::from(i + 1) / 64.0;
+                for (y, wy) in GL8 {
+                    let t = 0.5 * (lo + hi) + 0.5 * (hi - lo) * y;
+                    let (_, su, sv) = eval(u, t);
+                    big_f += 0.5 * (hi - lo) * wy * su.cross(sv).length();
+                }
+            }
+            area += 0.5 * w * big_f.abs() * du.abs();
+        }
+        let mut pts = Vec::new();
+        let (mut step, mut su_max) = (0.0_f64, 0.0_f64);
+        for end in [a, z] {
+            let mut last: Option<Vec3> = None;
+            for i in 0..=64 {
+                let v = base + (end.y - base) * f64::from(i) / 64.0;
+                let (p, su, _) = eval(end.x, v);
+                su_max = su_max.max(su.length());
+                if let Some(q) = last {
+                    step = step.max((p - q).length());
+                }
+                last = Some(p);
+                pts.push(p);
+            }
+        }
+        let (lo, hi) = bounds(&pts, step + du.abs() * su_max);
+        out.push(Piece {
+            area,
+            lo,
+            hi,
+            shadow: true,
+        });
+    }
+    out
 }
 
 fn sup_abs(lo: f64, hi: f64) -> f64 {
@@ -860,7 +1003,14 @@ fn moved_golden_mass_rows_are_the_old_leak() {
                         for c in 0..new.len() {
                             let bound: f64 = pieces
                                 .iter()
-                                .map(|p| p.area * field_sup(kind, c, p, m, centroid, new[vi]))
+                                .map(|p| {
+                                    // a shadow moves the face's own area by at most its area
+                                    if p.shadow && kind != Kind::Volume && c == 0 {
+                                        p.area
+                                    } else {
+                                        p.area * field_sup(kind, c, p, m, centroid, new[vi])
+                                    }
+                                })
                                 .sum();
                             let allowed = bound + NOISE * scale(kind, c, &new, m, diag);
                             allowance.push(allowed);
