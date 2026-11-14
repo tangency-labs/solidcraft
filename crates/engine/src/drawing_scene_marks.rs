@@ -50,8 +50,8 @@ pub(super) fn groups(s: &Session, drawing: &Drawing, frames: &BTreeMap<u64, (Vie
     let resolved_lines = s.doc.resolve_centre_lines(&s.model, drawing, &wanted_lines);
     let mut groups = Vec::new();
     for (i, mark) in marks.into_iter().enumerate() {
-        let result = if let Some(apart) = crate::drawing_view::draws_apart(drawing, mark.view) {
-            Err(format!("centre annotations on {} are not supported yet", apart.view()))
+        let result = if let Some(apart) = crate::drawing_view::unsupported_centre_view(drawing, mark.view) {
+            Err(format!("centre annotations on {apart} are not supported yet"))
         } else {
             match (frames.get(&mark.view), &resolved) {
                 (Some((frame, at)), Ok(found)) => match found.get(i) {
@@ -75,8 +75,8 @@ pub(super) fn groups(s: &Session, drawing: &Drawing, frames: &BTreeMap<u64, (Vie
         groups.push(Mark { object: mark.id, view: mark.view, kind: ObjectKind::CentreMark, group, why });
     }
     for (i, line) in lines.into_iter().enumerate() {
-        let result = if let Some(apart) = crate::drawing_view::draws_apart(drawing, line.view) {
-            Err(format!("centre annotations on {} are not supported yet", apart.view()))
+        let result = if let Some(apart) = crate::drawing_view::unsupported_centre_view(drawing, line.view) {
+            Err(format!("centre annotations on {apart} are not supported yet"))
         } else {
             match (frames.get(&line.view), &resolved_lines) {
                 (Some((frame, at)), Ok(found)) => match found.get(i) {
@@ -105,8 +105,8 @@ pub(super) fn groups(s: &Session, drawing: &Drawing, frames: &BTreeMap<u64, (Vie
 
 /// Saved annotations on a view without a drawable frame are omitted with a reason.
 pub(super) fn unframed(drawing: &Drawing, view: u64) -> Vec<Mark> {
-    let why = crate::drawing_view::draws_apart(drawing, view)
-        .map_or_else(|| "its view has no frame".to_string(), |apart| format!("centre annotations on {} are not supported yet", apart.view()));
+    let why = crate::drawing_view::unsupported_centre_view(drawing, view)
+        .map_or_else(|| "its view has no frame".to_string(), |apart| format!("centre annotations on {apart} are not supported yet"));
     drawing
         .centre_marks
         .iter()

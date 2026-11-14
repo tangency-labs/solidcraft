@@ -1778,7 +1778,16 @@ fn browser_pruning_cuts_bad_parents_and_drops_stale_and_repeated_entries() {
     let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, None).unwrap();
     let key = sketch.to_string();
     doc.components.push(Component { id: 7, name: "Part".into(), ..Default::default() });
-    doc.occurrences.push(Occurrence { id: 20, component: 7, parent: 0, name: "Part".into(), transform: IDENTITY, grounded: false, bom_type: None });
+    doc.occurrences.push(Occurrence {
+        id: 20,
+        component: 7,
+        parent: 0,
+        name: "Part".into(),
+        transform: IDENTITY,
+        grounded: false,
+        expressed_moves: Vec::new(),
+        bom_type: None,
+    });
     let deep = MAX_GROUP_NESTING as u64 + 2;
     doc.browser_groups = vec![
         browser_group(1, 0, "bodies", Some(2), &[]),
@@ -1852,6 +1861,7 @@ fn browser_data_survives_a_save_and_old_designs_read_unchanged() {
             transform: IDENTITY,
             grounded: false,
             bom_type: None,
+            expressed_moves: Vec::new(),
         });
     }
     doc.browser_groups = vec![browser_group(2, 0, "bodies", None, &[item("Lid"), group(3)]), browser_group(3, 0, "bodies", Some(2), &[item("Base")])];

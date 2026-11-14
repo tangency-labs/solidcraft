@@ -239,8 +239,8 @@ fn send_to_slicer_needs_a_slicer_and_bodies() {
     assert!(s.execute("file.send_to_slicer", &json!({"slicer":"no such slicer anywhere"})).is_err());
 }
 
-/// The chosen-programs list is process-wide: tests that set it take turns.
-#[cfg(unix)]
+/// The chosen-programs list and the made-up slicers are process-wide: tests that set them take
+/// turns.
 pub(crate) static CHOSEN_PROGRAMS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// `file.save_mesh` with a `slicer` writes where the caller said and hands that file over, by the
@@ -275,11 +275,9 @@ fn save_mesh_with_a_chosen_program_writes_the_file_where_asked_and_sends_it_ther
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-/// Puts back what the tests of the send commands make up, even when one fails.
-#[cfg(unix)]
+/// Puts back what the tests of the slicer commands make up, even when one fails.
 pub(crate) struct MadeUp;
 
-#[cfg(unix)]
 impl Drop for MadeUp {
     fn drop(&mut self) {
         *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;

@@ -147,6 +147,7 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("gpu.rs", 1, "the white tint that shows the background picture as it is"),
     ("icons/navigation.rs", 1, "the navigation cube's face shading, made from a token"),
+    ("drawing_sheet_page.rs", 2, "the drawing sheet moves toward white, else black, to stand off the backdrop"),
     ("canvas.rs", 3, "white rings around manipulator handles"),
     (
         "body_gizmo.rs",
@@ -165,6 +166,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("gizmo.rs", 2, "the gizmo's neutral grey ball"),
     ("ref_images.rs", 1, "a reference image's opacity tint"),
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
+    ("prefs.rs", 1, "a saved sketch dimension colour: the colour is the user's own data"),
     ("titlebar.rs", 2, "the window close button's red hover (the system's convention) and white ink"),
     ("ui_kit/icons/mod.rs", 1, "the white tint that carries an icon image's opacity"),
     ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),
@@ -266,7 +268,6 @@ fn analysis_shader_colours_come_from_the_uniform() {
     assert_eq!(
         literals,
         [
-            "vec3<f32>(0.0, 0.0, 1.0)",
             "vec3<f32>(1.0, 0.0, 0.0)",
             "vec3<f32>(c)",
             "vec3<f32>(0.32, 0.34, 0.38)",

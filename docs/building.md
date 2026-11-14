@@ -1,5 +1,14 @@
 # Building and running
 
+Use Rust and Cargo 1.95 or newer, as declared in the workspace manifest. Check
+which tools your shell will run with `rustc --version` and `cargo --version`.
+If Cargo reports that resolver `3` is invalid, it is too old to read the
+workspace manifest. When using rustup on Linux or macOS, check that
+`$HOME/.cargo/bin` comes before the system Cargo directory in `PATH`.
+
+For a headless build, run `cargo build --locked --release -p solidcraft-cli`
+from the repository root.
+
 ```sh
 cargo run --release -p solidcraft -- --sample          # desktop app with a sample part
 cargo run --release -p solidcraft-cli -- commands      # the command registry
@@ -21,6 +30,11 @@ Windows builds: `cargo xwin build --release --target x86_64-pc-windows-msvc -p s
 
 In the browser: `cd apps/solidcraft-web && trunk build --release --public-url ./` (WebGPU, or
 WebGL2 with `?webgl`; `?sample` opens the sample part).
+
+To build the documentation, put `mdbook` on `PATH` and run `cargo xtask book`
+from the repository root. This command generates the command reference and
+screenshots before building the book into `target/book`. A fresh checkout needs
+this generation step before `mdbook build docs/book` can read every chapter.
 
 Agents can control the document open in a browser tab through `window.solidcraft.execute(...)`
 and `window.solidcraft.request(...)`; see the [browser command API](browser-api.md).

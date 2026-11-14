@@ -1,0 +1,8 @@
+Updates: WR-60
+
+#### WR-60 (update, 2026-11-13). `bend_volume_trim_param_box_across_period` is removed
+
+The fix is the default and its flag is gone (tangency-labs/solidcraft#14246, batch A13b, which retires the two bend-volume flags). `BendVolume::trim_param_bounding_box_simple` (`surface/bend_volume.rs`) shifts a `v` interval shorter than a period into `[-pi |d|, pi |d|]` when it does not straddle the seam, and widens one that crosses the seam, spans a whole period or is unbounded to the whole period. An inside-out box, a NaN or a box wholly below `u = singularity_tol` is refused with `SM_ERR` and an empty trim box; a bend of neutral distance 0 trims `v` to 0. `trim_param_bounding_box_simple_with_kernel` and `_with_fixes` are gone; `Volume::trim_param_bounding_box_simple` reaches the fix through the plain call.
+
+- **Tests:** `trim` and `wr60_across_period_and_shifted_period_trim` call the plain function; the halves that pinned upstream's stale or refused boxes are gone.
+- **Results:** 94 rows of `surface.bend_volume` (the `trim_*` cases and their random cases) move: 55 boxes that cross or start at the seam, span a whole period or are unbounded trim to the shifted interval or the whole period, and 11 boxes beyond the period, which upstream refused with 1001, now trim to their shifted interval; 13 inside-out boxes, for which upstream returned success with the caller's box unchanged, are refused with 1001; 15 rows of the default bend (neutral distance 0) trim `v` to 0 instead of NaN. In each of the 66 moved rows that succeed (the 55 and the 11), the trim box is not inverted, lies in the period, and holds every `v` of the input box wrapped into the period. No other unit moves.

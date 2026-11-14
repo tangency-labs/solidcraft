@@ -92,7 +92,6 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let record = s.drawing(ADD)?.clone();
     let view = request.view.0;
     record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
-    crate::drawing_view::refuse_apart(&record, view, "balloons", ADD)?;
     let edge = s.doc.edge_reference(&s.model, &request.edge.pick, &request.edge.path).map_err(|why| bad(ADD, why.to_string()))?;
     check_drawn(&record, view, [edge.path.as_slice()], ADD)?;
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
@@ -130,8 +129,10 @@ fn repair(s: &mut Session, p: &Value) -> Result<Value> {
     let id = request.balloon.0;
     let unknown = || bad(REPAIR, format!("the drawing has no balloon {}", ids::encode(id)));
     let d = s.drawing(REPAIR)?;
-    d.balloons.by_id(id).ok_or_else(unknown)?;
-    let read = s.doc.resolve_balloons(&s.model, d, &[id]).map_err(|e| bad(REPAIR, e.to_string()))?;
+    let view = d.balloons.by_id(id).ok_or_else(unknown)?.view;
+    let read = crate::drawing_view::ViewSessions::new(s)
+        .read_on(d, &[(id, view)], solidcraft_doc::Document::resolve_balloons)
+        .map_err(|e| bad(REPAIR, e.to_string()))?;
     let now = read.into_iter().next().map(|r| r.status).ok_or_else(unknown)?;
     repair_reference(s, REPAIR, now, |s, copy| {
         let balloon = copy.balloons.index_of(id).and_then(|at| copy.balloons.get_mut(at)).map(Arc::make_mut).ok_or_else(unknown)?;
@@ -149,7 +150,9 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
 fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     let d = s.drawing(cmd)?;
     let balloon = d.balloons.by_id(id).ok_or_else(|| bad(cmd, format!("the drawing has no balloon {}", ids::encode(id))))?;
-    let resolved = s.doc.resolve_balloons(&s.model, d, &[id]).map_err(|e| bad(cmd, e.to_string()))?;
+    let resolved = crate::drawing_view::ViewSessions::new(s)
+        .read_on(d, &[(id, balloon.view)], solidcraft_doc::Document::resolve_balloons)
+        .map_err(|e| bad(cmd, e.to_string()))?;
     let r = resolved.into_iter().next().ok_or_else(|| bad(cmd, format!("balloon {} wasn't read", ids::encode(id))))?;
     let (status, why, candidates) = status_words(r.status);
     let row = read_row(s, d, balloon);

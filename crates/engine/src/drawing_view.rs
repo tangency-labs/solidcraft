@@ -8,14 +8,16 @@
 //! reference part: it doesn't set the view's extents when model parts are there too ([`measure`]).
 
 use std::borrow::Cow;
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
 use solidcore_record::{Plane, Vec2};
+use solidcraft_doc::config::RowKey;
 use solidcraft_doc::drawing::view::{ResolvedView, SetBy};
 use solidcraft_doc::drawing::{Drawing, Sheet};
-use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep};
+use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
 use solidcraft_geom::{Aabb2, EPS};
@@ -57,6 +59,11 @@ pub enum Unmeasured {
     NoExplodedView,
     /// Its joints can't be driven to the position it draws.
     NotPosed,
+    /// The row of the configuration table it draws is no longer in the design.
+    NoConfiguration,
+    /// The row of the configuration table it draws can't be put on the design: its values don't
+    /// apply (a hostile file), or a sketch would collapse with them.
+    NotConfigured,
 }
 
 /// Why a choice of occurrences that draws nothing is refused.
@@ -72,6 +79,8 @@ impl Unmeasured {
             Unmeasured::NothingChosen => "nothing_chosen",
             Unmeasured::NoExplodedView => "no_exploded_view",
             Unmeasured::NotPosed => "not_posed",
+            Unmeasured::NoConfiguration => "no_configuration",
+            Unmeasured::NotConfigured => "not_configured",
         }
     }
 }
@@ -88,6 +97,8 @@ impl fmt::Display for Unmeasured {
             Unmeasured::NothingChosen => write!(f, "{NOTHING_CHOSEN}: the occurrences it chose may have been deleted"),
             Unmeasured::NoExplodedView => f.write_str("the exploded view it draws is no longer in the design"),
             Unmeasured::NotPosed => f.write_str("its position can't be placed"),
+            Unmeasured::NoConfiguration => f.write_str("the configuration it draws is no longer in the design"),
+            Unmeasured::NotConfigured => f.write_str("its configuration can't be applied to the design"),
         }
     }
 }
@@ -191,19 +202,22 @@ pub fn left_out(view: &ResolvedView, path: &[u64]) -> Option<LeftOut> {
     })
 }
 
-/// The state of its assembly a view draws (#13048): its exploded choice and its position, the one key
-/// of the session it draws from. A position's values are kept as their bits, by joint, so views with
-/// the same position share one copy (`-0.0` is kept as `0.0`); a study step as itself, so views of one
-/// step share one copy. A step and the values it gives, typed as joints, make two copies that draw alike.
+/// The state of the design a view draws (#13048): its configuration, its exploded choice and its
+/// position, the one key of the session it draws from. A configuration is its row's id, so views of one
+/// row share one copy. A position's values are kept as their bits, by joint, so views with the same
+/// position share one copy (`-0.0` is kept as `0.0`); a study step as itself, so views of one step
+/// share one copy. A step and the values it gives, typed as joints, make two copies that draw alike.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Choice {
+    configuration: Option<u64>,
     exploded: Exploded,
     pose: Vec<(u64, Vec<u64>)>,
     study: Option<StudyStep>,
 }
 
 impl Choice {
-    /// What saved view `view` draws.
+    /// What saved view `view` draws, as it saves it. The key of the session it draws from is
+    /// [`ViewSessions::choice`].
     pub fn of(view: &ResolvedView) -> Choice {
         let mut pose: Vec<(u64, Vec<u64>)> = match &view.pose.value {
             Pose::Designed | Pose::Study(_) => Vec::new(),
@@ -211,62 +225,166 @@ impl Choice {
         };
         pose.sort();
         let study = if let Pose::Study(at) = view.pose.value { Some(at) } else { None };
-        Choice { exploded: view.exploded.value, pose, study }
+        let configuration = match view.configuration.value {
+            ViewConfiguration::Active => None,
+            ViewConfiguration::Row(row) => Some(row),
+        };
+        Choice { configuration, exploded: view.exploded.value, pose, study }
     }
 
     /// Whether it draws the design as it places its parts, as the default choice does.
     pub fn is_placed(&self) -> bool {
-        self.exploded == Exploded::Assembled && self.pose.is_empty() && self.study.is_none()
+        self.configuration.is_none() && self.exploded == Exploded::Assembled && self.pose.is_empty() && self.study.is_none()
     }
+
+    /// Whether making its copy evaluates the design, so only its view's job makes it, off the window's
+    /// thread ([`crate::drawing_scene::Job::run`]). A row of the configuration table does: on a key
+    /// ([`ViewSessions::choice`]) it is a row other than the one the design is in, or one the design no
+    /// longer has, and putting it on the copy evaluates the design. A position or an exploded view
+    /// doesn't: it only moves parts already built (0.02-0.38 ms a copy on the test assemblies), so any
+    /// reader makes it, the window's frame paths included.
+    pub fn evaluates(&self) -> bool {
+        self.row().is_some()
+    }
+
+    /// The row of the configuration table its copy is put in, if any; on a key, see
+    /// [`Choice::evaluates`].
+    pub fn row(&self) -> Option<u64> {
+        self.configuration
+    }
+}
+
+/// A copy of the design a view draws from ([`copy_for`]), and the features its configuration row fails
+/// to build that the design builds, each as `name: error`, as `config.activate` says them.
+pub struct ViewCopy {
+    pub session: Session,
+    pub failing: Vec<String>,
 }
 
 /// The sessions the views of one read of a drawing draw from (#13048): the design as it places its
 /// parts, and a copy for each other state a view draws ([`Choice`]), made the first time a view asks
 /// for it and shared by every view that draws it. A copy costs what placing every body again costs
-/// (its world state misses the session's cache), so one read makes each at most once. The design is
-/// never changed.
+/// (its world state misses the session's cache), and a copy of another configuration an evaluation of
+/// the design, so one read makes each at most once. The design is never changed.
 pub struct ViewSessions<'a> {
     placed: &'a Session,
-    copies: BTreeMap<Choice, std::result::Result<Session, Unmeasured>>,
+    /// Whether the design still matches its active row ([`ViewSessions::matches`]).
+    matches: OnceCell<bool>,
+    copies: BTreeMap<Choice, std::result::Result<ViewCopy, Unmeasured>>,
 }
 
 impl<'a> ViewSessions<'a> {
     /// The views' sessions, where `placed` is the design as it places its parts.
     pub fn new(placed: &'a Session) -> ViewSessions<'a> {
-        ViewSessions { placed, copies: BTreeMap::new() }
+        ViewSessions { placed, matches: OnceCell::new(), copies: BTreeMap::new() }
+    }
+
+    /// The key of the session saved view `view` draws from: what it draws ([`Choice::of`]), less a row
+    /// that is the design's active row while the design still matches it ([`ViewSessions::matches`]),
+    /// which draws the design itself, with no copy. A row that isn't the active one, or that the design
+    /// no longer has, never asks. Every map of views by what they draw is keyed by it.
+    pub fn choice(&self, view: &ResolvedView) -> Choice {
+        let choice = Choice::of(view);
+        let own = |row: &u64| self.placed.doc.configs.active_row().is_some_and(|active| active.id == *row) && self.matches();
+        Choice { configuration: choice.configuration.filter(|row| !own(row)), ..choice }
+    }
+
+    /// Whether the design is still in its active row ([`solidcraft_doc::Document::configuration_matches`]):
+    /// asked once, the first time a view needs it.
+    pub fn matches(&self) -> bool {
+        *self.matches.get_or_init(|| self.placed.doc.configuration_matches())
     }
 
     /// The session saved view `view` draws from, or why it can't be drawn ([`copy_for`]).
     pub fn of(&mut self, view: &ResolvedView) -> std::result::Result<&Session, Unmeasured> {
-        self.drawing(&Choice::of(view))
+        let choice = self.choice(view);
+        self.drawing(&choice).map(|(from, _)| from)
     }
 
-    /// The session the views that draw `choice` draw from.
-    pub fn drawing(&mut self, choice: &Choice) -> std::result::Result<&Session, Unmeasured> {
+    /// The session the views whose key is `choice` ([`ViewSessions::choice`]) draw from, and the
+    /// features it fails to build that the design builds ([`ViewCopy`]).
+    pub fn drawing(&mut self, choice: &Choice) -> std::result::Result<(&Session, &[String]), Unmeasured> {
         if choice.is_placed() {
-            return Ok(self.placed);
+            return Ok((self.placed, &[]));
         }
         let placed = self.placed;
-        self.copies.entry(choice.clone()).or_insert_with(|| copy_for(placed, choice)).as_ref().map_err(|why| *why)
+        let copy = self.copies.entry(choice.clone()).or_insert_with(|| copy_for(placed, choice));
+        copy.as_ref().map(|copy| (&copy.session, copy.failing.as_slice())).map_err(|why| *why)
     }
 
     /// How many copies it made.
     pub fn copies(&self) -> usize {
         self.copies.values().filter(|copy| copy.is_ok()).count()
     }
+
+    /// The session view `view` of `d` draws from, where its dimensions, balloons and notes on its model
+    /// are read, so they measure its parts where it draws them (#13048). A view whose copy can't be
+    /// made draws its placeholder, so the sheet draws none of its records: they read as the design
+    /// places its parts, as they did before each view read its own.
+    pub fn of_view(&mut self, d: &Drawing, view: u64) -> &Session {
+        let placed = self.placed;
+        match d.resolve_view(view) {
+            Ok(view) => {
+                let choice = self.choice(&view);
+                self.drawing(&choice).map_or(placed, |(from, _)| from)
+            }
+            Err(_) => placed,
+        }
+    }
+
+    /// What `read` (a resolver: [`solidcraft_doc::Document::resolve_dimensions`], `resolve_notes`
+    /// or `resolve_balloons`) gives for `records` of `d`, each its id and its view's, each read on
+    /// the session its view draws from ([`ViewSessions::of_view`]), in `records`' order. One call per
+    /// state of the assembly, so each body's names are worked out once per state, not per record.
+    pub fn read_on<T>(
+        &mut self,
+        d: &Drawing,
+        records: &[(u64, u64)],
+        read: impl Fn(&solidcraft_doc::Document, &solidcraft_doc::Model, &Drawing, &[u64]) -> solidcraft_doc::Result<Vec<T>>,
+    ) -> solidcraft_doc::Result<Vec<T>> {
+        let mut states: BTreeMap<Choice, Vec<usize>> = BTreeMap::new();
+        for (at, (_, view)) in records.iter().enumerate() {
+            let choice = d.resolve_view(*view).map(|view| self.choice(&view)).unwrap_or_default();
+            states.entry(choice).or_default().push(at);
+        }
+        let mut out: Vec<Option<T>> = records.iter().map(|_| None).collect();
+        let placed = self.placed;
+        for (choice, ats) in states {
+            let from = self.drawing(&choice).map_or(placed, |(from, _)| from);
+            let ids: Vec<u64> = ats.iter().filter_map(|at| records.get(*at)).map(|(id, _)| *id).collect();
+            for (at, one) in ats.into_iter().zip(read(&from.doc, &from.model, d, &ids)?) {
+                if let Some(slot) = out.get_mut(at) {
+                    *slot = Some(one);
+                }
+            }
+        }
+        Ok(out.into_iter().flatten().collect())
+    }
 }
 
-/// A copy of `placed` as a view drawing `choice` draws it: its position's joints driven to their
-/// values as `joint.drive` drives them (the limits, closed loops, motion links and contact sets
-/// alike), or to a study step's as `motion.play` drives them (a step past the study's end at its
-/// last), skipping a joint or study the design no longer has, then its exploded view's parts moved
-/// out from there, as `explode.show` shows them. Or why it can't be: the exploded view is no longer
-/// in the design or moves a part out of range (a hostile file), or the joints can't be driven.
-pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<Session, Unmeasured> {
+/// A copy of `placed` as a view drawing `choice` draws it: its configuration row put on it as
+/// `config.activate` puts one ([`crate::cmd::put_row`]: the row's values and rules, the design
+/// evaluated), then its position's joints driven to their values as `joint.drive` drives them (the
+/// limits, closed loops, motion links and contact sets alike), or to a study step's as `motion.play`
+/// drives them (a step past the study's end at its last), skipping a joint or study the design no
+/// longer has, then its exploded view's parts moved out from there, as `explode.show` shows them,
+/// written into the copy's own design so every reader of where the parts are sees them. Or why it
+/// can't be: the row is no longer in the design (found before anything is evaluated) or can't be put
+/// on it, the exploded view is no longer in the design or moves a part out of range (a hostile file),
+/// or the joints can't be driven.
+pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<ViewCopy, Unmeasured> {
     use crate::cmd::motion::{drive_with_contact, explode_moves, exploded_at, keyed, values_at};
     // From where the design places its parts: an occurrence move not captured yet is left out.
     let mut copy = placed.scratch();
     copy.pending_moves.clear();
+    // The configuration first: the position and the explode start from the geometry it builds.
+    let mut failing = Vec::new();
+    if let Some(row) = choice.configuration {
+        copy.doc.configs.row(RowKey::Id(row)).ok_or(Unmeasured::NoConfiguration)?;
+        // Whatever keeps it off is said as `NotConfigured`: the message, and the command it names, are dropped.
+        let put = crate::cmd::put_row(&mut copy, RowKey::Id(row), crate::drawing_scene::CMD).map_err(|_| Unmeasured::NotConfigured)?;
+        failing = put.new_errors;
+    }
     // A study sets the values it keys, and the joints' other values follow the solve; joint values
     // set every value they give.
     let study = choice.study.and_then(|at| at.drawn(&copy.doc.assembly.studies));
@@ -290,9 +408,14 @@ pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<Sessio
         if !moves.values().all(solidcraft_doc::is_placement) {
             return Err(Unmeasured::NotPlaced);
         }
-        copy.pending_moves = moves;
+        // What `world_state` would do with them as pending moves, once, in the copy's design.
+        for o in &mut copy.doc_mut().occurrences {
+            if let Some(m) = moves.get(&o.id) {
+                o.transform = *m;
+            }
+        }
     }
-    Ok(copy)
+    Ok(ViewCopy { session: copy, failing })
 }
 
 /// The joints saved view `view`'s position names that `s`'s design no longer has, in its order. The
@@ -302,16 +425,29 @@ pub fn gone_joints(s: &Session, view: &ResolvedView) -> Vec<u64> {
     joints.iter().map(|j| j.joint).filter(|id| !s.doc.assembly.joints.iter().any(|joint| joint.id == *id)).collect()
 }
 
-/// What the sheet says beside saved view `view` when its position names joints or a motion study
-/// `s`'s design no longer has (#13048), as a drawn note says why. With none of its joints left, or
-/// its study gone, it draws the design's placement.
-pub fn position_reason(s: &Session, view: &ResolvedView) -> Option<String> {
-    if let Pose::Study(at) = view.pose.value {
-        let gone = at.drawn(&s.doc.assembly.studies).is_none();
-        return gone.then(|| "its position names a motion study the design no longer has".into());
+/// What the sheet says beside saved view `view`, drawn from `s` (#13048), as a drawn note says why:
+/// that its configuration row rebuilds with `failing` features that the design builds ([`ViewCopy`]),
+/// and that its position names joints or a motion study `s`'s design no longer has. With none of its
+/// joints left, or its study gone, it draws the design's placement.
+pub fn state_reason(s: &Session, view: &ResolvedView, failing: &[String]) -> Option<String> {
+    let plural = |n: usize| if n == 1 { "" } else { "s" };
+    let configuration = match view.configuration.value {
+        ViewConfiguration::Row(id) if !failing.is_empty() => {
+            let row = s.doc.configs.row(RowKey::Id(id)).map_or("", |row| row.name.as_str());
+            Some(format!("its configuration `{row}` rebuilds with {} failing feature{}", failing.len(), plural(failing.len())))
+        }
+        _ => None,
+    };
+    let position = match view.pose.value {
+        Pose::Study(at) => at.drawn(&s.doc.assembly.studies).is_none().then(|| "its position names a motion study the design no longer has".into()),
+        _ => Some(gone_joints(s, view).len())
+            .filter(|gone| *gone > 0)
+            .map(|gone| format!("its position names {gone} joint{} the design no longer has", plural(gone))),
+    };
+    match (configuration, position) {
+        (Some(configuration), Some(position)) => Some(format!("{configuration}; {position}")),
+        (configuration, position) => configuration.or(position),
     }
-    let gone = gone_joints(s, view).len();
-    (gone > 0).then(|| format!("its position names {gone} joint{} the design no longer has", if gone == 1 { "" } else { "s" }))
 }
 
 /// What saved view `view` draws from `sessions`: every body its session places ([`shown`]), or why
@@ -363,71 +499,45 @@ pub fn not_drawable(display: VisualStyle, reference: VisualStyle) -> Option<&'st
     (lined(display) || lined(reference)).then_some("not supported yet: shaded views with lines need the view's exact lines (W06)")
 }
 
-/// How a view draws its parts somewhere other than where the design places them (#13048).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Apart {
-    /// An exploded view.
-    Exploded,
-    /// A position of its own.
-    Posed,
-}
-
-impl Apart {
-    /// How `view` draws its parts apart, if it does: exploded first, as an exploded view of a
-    /// position is still exploded.
-    pub fn of(view: &ResolvedView) -> Option<Apart> {
-        if view.exploded.value != Exploded::Assembled {
-            Some(Apart::Exploded)
-        } else if view.pose.value != Pose::Designed {
-            Some(Apart::Posed)
-        } else {
-            None
-        }
-    }
-
-    /// The view, as a message names it.
-    pub fn view(self) -> &'static str {
-        match self {
-            Apart::Exploded => "an exploded view",
-            Apart::Posed => "a view in a position of its own",
-        }
-    }
-
-    /// Why a sheet holds back a dimension or a note on the model of a view that draws its parts this
-    /// way: Check Drawing's words.
-    pub fn held(self) -> &'static str {
-        match self {
-            Apart::Exploded => "its view draws an exploded view: not supported yet, so it isn't drawn",
-            Apart::Posed => "its view draws a position of its own: not supported yet, so it isn't drawn",
-        }
+/// Centre references still read the design's active geometry and placement. Other view states
+/// must omit them rather than put that geometry on a different configuration or position.
+pub fn unsupported_centre_view(d: &Drawing, id: u64) -> Option<&'static str> {
+    let view = d.resolve_view(id).ok()?;
+    if view.exploded.value != Exploded::Assembled {
+        Some("an exploded view")
+    } else if view.pose.value != Pose::Designed {
+        Some("a view in a position of its own")
+    } else if view.configuration.value != ViewConfiguration::Active {
+        Some("a view of a configuration of its own")
+    } else {
+        None
     }
 }
 
-/// How view `id` of `d` draws its parts apart from where the design places them, if it does
-/// ([`Apart`]). Its dimensions, balloons and notes on its model read the design's placements, so they
-/// would measure its parts where the design places them: until they read what it draws, new ones are
-/// refused ([`refuse_apart`]) and a sheet holds back those a file brings.
-pub fn draws_apart(d: &Drawing, id: u64) -> Option<Apart> {
-    d.resolve_view(id).ok().as_ref().and_then(Apart::of)
-}
-
-/// Refuses `what` (dimensions, balloons, notes) on view `view` of `d` when it draws its parts apart
-/// ([`draws_apart`]).
-pub fn refuse_apart(d: &Drawing, view: u64, what: &str, cmd: &str) -> Result<()> {
-    match draws_apart(d, view) {
-        Some(apart) => Err(bad(cmd, format!("not supported yet: {what} on {}", apart.view()))),
+/// Refuses a new centre annotation that would read another state than its view draws.
+pub fn check_centre_view(d: &Drawing, view: u64, what: &str, cmd: &str) -> Result<()> {
+    match unsupported_centre_view(d, view) {
+        Some(view) => Err(bad(cmd, format!("not supported yet: {what} on {view}"))),
         None => Ok(()),
     }
 }
 
 /// Why saved view `view` can't be drawn yet, if it can't, as it draws its parts apart (#13048): its
-/// shaded parts' pictures are rendered from the design as it places its parts. Its lines alone draw.
+/// shaded parts' pictures are rendered from the design as it builds and places its parts. Its lines
+/// alone draw. Exploded comes first, as an exploded view of a position is still exploded, then posed,
+/// as a position of a row is still a position.
 pub fn not_drawable_apart(view: &ResolvedView) -> Option<&'static str> {
-    let shaded = view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded();
-    Apart::of(view).filter(|_| shaded).map(|apart| match apart {
-        Apart::Exploded => "not supported yet: a shaded view of an exploded view",
-        Apart::Posed => "not supported yet: a shaded view in a position of its own",
-    })
+    if !(view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded()) {
+        None
+    } else if view.exploded.value != Exploded::Assembled {
+        Some("not supported yet: a shaded view of an exploded view")
+    } else if view.pose.value != Pose::Designed {
+        Some("not supported yet: a shaded view in a position of its own")
+    } else if view.configuration.value != ViewConfiguration::Active {
+        Some("not supported yet: a shaded view of a configuration of its own")
+    } else {
+        None
+    }
 }
 
 /// What saved view `view` shows of `shown`, with its extents on its plane, or why there's nothing to
@@ -487,7 +597,8 @@ pub fn frame(basis: Plane, scale: Scale, model: &Aabb2, centre: Vec2, cmd: &str)
 /// shows on its plane ([`measured`]; a view's source is the design the drawing is in), grown by
 /// [`shows`], at its scale, with the model's middle on its centre ([`Drawing::view_centre`]); with nothing to
 /// measure, a placeholder [`PLACEHOLDER_MM`] each way round its centre. It reads the model as it
-/// is evaluated: no model is evaluated.
+/// is evaluated: no model is evaluated, but a view of another configuration evaluates a copy of the
+/// design ([`copy_for`]); the design is unchanged.
 pub fn on_sheet(s: &Session, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
     on_sheet_from(&mut ViewSessions::new(s), drawing, id, cmd)
 }

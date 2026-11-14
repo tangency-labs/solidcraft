@@ -3,8 +3,8 @@ use serde_json::{Value, json};
 use super::{
     ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BlendCurveParams, CenterlineParams, ConicParams,
     ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams, InfiniteLineParams, LineTypeResult,
-    MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineRemovePointParams, SplineRemovePointResult, SplineReverseParams,
-    SplineReverseResult, TextResult, ThreeTangentCircleParams, TwoTangentCircleParams,
+    MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineInsertPointParams, SplineInsertPointResult, SplineRemovePointParams,
+    SplineRemovePointResult, SplineReverseParams, SplineReverseResult, TextResult, ThreeTangentCircleParams, TwoTangentCircleParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -14,6 +14,18 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<SplineReverseParams>(), &["curve", "sketch"]);
     assert_keys(input_schema_for::<SplineRemovePointParams>(), &["curve", "point", "sketch"]);
+    let insert = input_schema_for::<SplineInsertPointParams>();
+    assert_keys(insert.clone(), &["at", "curve", "end", "sketch"]);
+    // `curve` is required by the type, `at` by the transform: the handler's own message is what a
+    // caller hears for a missing `at`, which is the message it gives for a point it cannot read.
+    let mut required: Vec<&str> = insert.as_value()["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    required.sort_unstable();
+    assert_eq!(required, ["at", "curve"]);
+    assert_eq!(insert.as_value()["properties"]["end"]["enum"], json!(["start", "end"]));
+    let reply = output_schema_for::<SplineInsertPointResult>();
+    let reply = reply.as_value();
+    let required: Vec<&str> = reply.get("required").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
+    assert!(!required.contains(&"param_warnings"), "{reply}");
 }
 
 #[test]
@@ -27,7 +39,90 @@ fn strict_keeps_todays_errors() {
         ("sketch.spline.remove_point", json!({"curve": "nope", "point": "p1"})),
         ("sketch.spline.remove_point", json!({"curve": "l1", "point": 3})),
         ("sketch.spline.remove_point", json!({"curve": "l1"})),
+        ("sketch.spline.insert_point", json!({"curve": 5, "at": [10, 6]})),
+        ("sketch.spline.insert_point", json!({"curve": "l1", "at": "nope"})),
+        ("sketch.spline.insert_point", json!({"curve": "l1", "at": [10, 6]})),
+        ("sketch.spline.insert_point", json!({"curve": "nope", "at": [10, 6]})),
+        ("sketch.spline.insert_point", json!({"curve": "l1", "at": [10, 6], "end": "middle"})),
+        ("sketch.spline.insert_point", json!({"curve": "l1", "at": [10, 6], "end": 4})),
     ]);
+}
+
+/// What the check words for itself, and what the handler keeps. A missing `curve` and a call that is
+/// not an object are the two cases where only the wording moves (#16085).
+#[test]
+fn the_check_words_its_own_refusals() {
+    let messages = |p: Value| crate::schema::issues("sketch.spline.insert_point", &p).into_iter().map(|i| i.message).collect::<Vec<_>>();
+    let refusal = |level: ParamCheck, p: Value| {
+        let mut s = Session { param_check: level, ..Session::default() };
+        // A sketch to edit: with none, the handler stops at the sketch before it reads `curve`.
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap_or_else(|e| panic!("sketch.create: {e}"));
+        s.execute("sketch.spline.insert_point", &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("{p} should be refused"))
+    };
+    // The handler's message, in both modes.
+    for (p, message) in [
+        (json!({"curve": 5, "at": [10, 6]}), "`curve` must be a spline id"),
+        (json!({"curve": null, "at": [10, 6]}), "`curve` must be a spline id"),
+        (json!({"curve": "s1", "at": "nope"}), "`at` must be a point [x, y]"),
+        (json!({"curve": "s1", "at": [10]}), "`at` must be a point [x, y]"),
+        (json!({"curve": "s1", "at": [10, 6], "end": "middle"}), "`end` must be start or end"),
+        (json!({"curve": "s1", "at": [10, 6], "end": 4}), "`end` must be start or end"),
+    ] {
+        assert_eq!(messages(p.clone()), [message], "{p}");
+        for level in ParamCheck::ALL {
+            assert!(refusal(level, p.clone()).contains(message), "{p} at {level:?}");
+        }
+    }
+    // A call the handler takes is nothing the check names: `end: null` is as left out there too.
+    for p in [
+        json!({"curve": "s1", "at": [10, 6]}),
+        json!({"curve": "s1", "at": { "x": 10, "y": 6 }, "end": null}),
+        json!({"curve": "s1", "at": [10, 6], "end": "start"}),
+    ] {
+        assert!(messages(p.clone()).is_empty(), "{p}");
+    }
+    // The check's own words. An unknown key is named twice: by the key check, which comes first,
+    // and by the reader, which refuses keys the type does not have.
+    let unknown = messages(json!({"curve": "s1", "at": [10, 6], "nope": 1}));
+    assert_eq!(unknown.first().map(String::as_str), Some("unknown key `nope`"), "{unknown:?}");
+    assert_eq!(messages(json!([])), ["parameters must be an object"]);
+    // A missing `curve` is the one key whose wording moves: the handler's message with the check
+    // off, the check's in strict, as for the four sibling spline commands.
+    assert_eq!(refusal(ParamCheck::Off, json!({"at": [10, 6]})), "invalid parameters for `sketch.spline.insert_point`: `curve` must be a spline id");
+    assert_eq!(refusal(ParamCheck::Strict, json!({"at": [10, 6]})), "invalid parameters for `sketch.spline.insert_point`: `curve` is required");
+    assert!(refusal(ParamCheck::Strict, json!([])).contains("parameters must be an object"));
+    assert!(refusal(ParamCheck::Off, json!([])).contains("`at` must be a point [x, y]"));
+}
+
+/// A real spline given a point between its neighbours, and a new end: the answer is the new point's
+/// id, the spline it was given and the solve, and it matches the output schema. An unknown key only
+/// adds `param_warnings`, as for the other spline edits.
+#[test]
+fn spline_insert_point_reply_matches_its_schema() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let run = |s: &mut Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let c = run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [10, 5], [20, 0]]}));
+    let spline = c["curves"][0].as_str().unwrap_or_else(|| panic!("{c}")).to_string();
+    let schema = output_schema_for::<SplineInsertPointResult>();
+    let schema = schema.as_value();
+
+    // A place between two fit points, never one the curve already runs through: the handler refuses
+    // a point that is already there.
+    let r = run(&mut s, "sketch.spline.insert_point", json!({"curve": spline, "at": [15, 3]}));
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    assert!(r.get("param_warnings").is_none(), "{r}");
+    assert_eq!(r["curve"], json!(spline), "the reply names the spline it was given");
+    let middle = r["point"].as_str().unwrap_or_else(|| panic!("{r}")).to_string();
+    let r = run(&mut s, "sketch.spline.insert_point", json!({"curve": spline, "at": [30, 5], "end": "end", "unknown": 1}));
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    assert!(r["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{r}");
+    assert_ne!(r["point"], json!(middle), "the new end is a second new point");
+    assert_eq!(
+        run(&mut s, "sketch.spline.insert_point", json!({"curve": spline, "at": [5, 2], "end": null}))["curve"],
+        json!(spline),
+        "`end: null` is as left out"
+    );
 }
 
 #[test]
@@ -213,6 +308,7 @@ fn creation_schemas_and_the_key_check_agree() {
         "sketch.spline.control_point",
         "sketch.spline.control_point_5",
         "sketch.spline.fit_point",
+        "sketch.spline.insert_point",
         "sketch.text",
     ] {
         let c = crate::cmd::find_command(id).unwrap_or_else(|| panic!("{id}"));
@@ -709,6 +805,7 @@ fn creation_schemas_are_described() {
         "sketch.spline.control_point",
         "sketch.spline.control_point_5",
         "sketch.spline.fit_point",
+        "sketch.spline.insert_point",
         "sketch.text",
     ] {
         let c = crate::cmd::find_command(id).unwrap_or_else(|| panic!("{id}"));

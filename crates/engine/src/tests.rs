@@ -1033,6 +1033,13 @@ fn a_copy_with_history_undoes_like_the_session_it_copies() {
 /// no command panics internally.
 #[test]
 fn hostile_params_never_panic() {
+    // `file.slicers` gets every hostile value like every command, but lists made-up slicers (none)
+    // instead of searching this machine's programs on each of its ~5,600 calls: a third of a second
+    // a call on Windows, half an hour in all. The tests that make slicers up take turns, and
+    // `MadeUp` puts the real search back.
+    let _turn = mesh_convert::CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _reset = mesh_convert::MadeUp;
+    *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
     let keys = [
         "plane",
         "offset",
@@ -1170,6 +1177,14 @@ fn hostile_params_never_panic() {
         "references",
         "head",
         "head_gap",
+        "configuration",
+        "shape",
+        "size",
+        "web",
+        "clip",
+        "through_all",
+        "depth",
+        "dot_grid",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()
@@ -2443,6 +2458,35 @@ fn a_used_up_or_dropped_checkpoint_says_why() {
     let dropped = s.execute("edit.restore_checkpoint", &json!({"checkpoint": first})).unwrap_err().to_string();
     assert!(dropped.contains("16"), "{dropped}");
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": first + 1}));
+}
+
+/// Regression (#15865): forgetting a checkpoint dropped every later one too, so a batch that
+/// forgot its own rollback checkpoint took the checkpoint one of its steps had returned with it.
+#[test]
+fn forgetting_a_checkpoint_keeps_the_later_ones() {
+    let mut s = Session::default();
+    let empty = s.doc.clone();
+    let earlier = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    let outer = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"name": "Kept", "length": 10, "width": 10, "height": 10}));
+    let inner = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    let doc = s.doc.clone();
+    let undo = s.undo.len();
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": outer, "forget": true}));
+    assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": outer})).is_err());
+    run(&mut s, "solid.box", json!({"name": "Later", "length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]}));
+    let back = run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": inner}));
+    assert_eq!(back["restored"], true, "{back}");
+    assert!(Arc::ptr_eq(&s.doc, &doc) && s.doc.find_feature("Kept").is_some() && s.doc.find_feature("Later").is_none());
+    assert_eq!(s.undo.len(), undo);
+    // Restoring still uses up every later checkpoint: they hold states after the one restored.
+    let first = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    let second = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": first}));
+    assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": second})).is_err());
+    // Neither forgetting a later checkpoint nor restoring one used up the earlier one.
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": earlier}));
+    assert!(Arc::ptr_eq(&s.doc, &empty) && s.undo.is_empty());
 }
 
 /// Regression (#3242): `file.new` replaced the session and its checkpoints with it, so a
@@ -5816,4 +5860,37 @@ fn second_choice_metric_threads_are_known_by_name() {
     assert_eq!(ThreadForm::Metric.fit(33.0, false), Some((30.0, 3.5)));
     assert_eq!(ThreadForm::Metric.fit(7.0, false), Some((6.0, 1.0)));
     assert_ne!(ThreadForm::Metric.fit(39.0, true).map(|(d, _)| d), Some(39.0), "a 39 mm hole is not sized M39 automatically");
+}
+
+/// The ISO 273 table a dialog lists: every size `clearance` takes, M1.6 to M64, each with its
+/// three fits, and a size with its pitch finds the same row.
+#[test]
+fn clearance_sizes_are_the_iso_273_table() {
+    let sizes = cmd::clearance_sizes();
+    assert_eq!(sizes.len(), 21);
+    assert_eq!((sizes.first().map(String::as_str), sizes.last().map(String::as_str)), (Some("M1.6"), Some("M64")));
+    assert!(sizes.iter().any(|s| s == "M4") && sizes.iter().any(|s| s == "M2"), "{sizes:?}");
+    for size in &sizes {
+        for fit in ["close", "normal", "loose"] {
+            assert!(cmd::clearance_diameter(size, fit).is_some(), "{size} {fit}");
+        }
+    }
+    assert_eq!(cmd::clearance_diameter("M4", "normal"), Some(4.5));
+    assert_eq!(cmd::clearance_diameter("M4x0.7", "close"), Some(4.3));
+    assert_eq!(cmd::clearance_diameter("m4", "loose"), Some(4.8));
+    assert_eq!(cmd::clearance_diameter("M7", "normal"), None, "no M7 in ISO 273");
+    assert_eq!(cmd::clearance_diameter("M4", "snug"), None, "no such fit");
+}
+
+/// The counterbore `head` makes, as the Hole dialog shows it before running the command: the
+/// head's diameter and height from the standard's table plus the default 0.5 mm gap each side
+/// and below. A size with its pitch finds the same head; a size or standard the tables do not
+/// have gives none.
+#[test]
+fn head_counterbore_is_the_head_plus_the_default_gap() {
+    assert_eq!(cmd::head_counterbore("ISO 4762", "M4"), Some((8.0, 4.5)), "socket head dk 7, k 4");
+    assert_eq!(cmd::head_counterbore("ISO 7380-1", "M4x0.7"), Some((8.6, 2.7)), "button head dk 7.6, k 2.2");
+    assert_eq!(cmd::head_counterbore("socket_head_cap_screw", "M4"), Some((8.0, 4.5)), "the family name parts.insert takes");
+    assert_eq!(cmd::head_counterbore("ISO 7380-1", "M2"), None, "ISO 7380-1 has no M2");
+    assert_eq!(cmd::head_counterbore("DIN 912", "M4"), None);
 }

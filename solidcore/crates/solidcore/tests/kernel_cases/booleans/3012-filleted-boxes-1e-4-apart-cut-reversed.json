@@ -475,7 +475,9 @@
   "case": "3012-filleted-boxes-1e-4-apart-cut-reversed",
   "expected": {
     "body_count": 1,
-    "method": "A and B are the same convex rounded rectangle (area 40*30 - (4-pi)*2^2) x 10 shifted by d = 1e-4 in x. The area of the one outside the other is d times the extent of the shape perpendicular to the shift (a convex shape, translated), here the 30 mm height: 30*1e-4 = 0.003, times 10 high = 0.03 (exact for a convex section translated by d). One body. Tolerance 1e-3 relative",
+    "edges": 24,
+    "faces": 10,
+    "method": "A and B are the same convex rounded rectangle (area 40*30 - (4-pi)*2^2) x 10 shifted by d = 1e-4 in x. The area of the one outside the other is d times the extent of the shape perpendicular to the shift (a convex shape, translated), here the 30 mm height: 30*1e-4 = 0.003, times 10 high = 0.03 (exact for a convex section translated by d). One body. Topology, derived by hand from the geometry: the 2D loop of the sliver has 8 edges: the lower-right arc, the x=40.0001 side and the upper-right arc of B (the target), the same three of A 1e-4 back in x, and two straight segments 1e-4 long on y=0 and y=30 (x from 38 to 38.0001), where B's straight sides run past the end of A's arcs. Extruded 10 high that gives 8 side faces + 2 caps = 10 faces; 8 vertical + 8 top + 8 bottom = 24 edges; 8 top + 8 bottom = 16 vertices (Euler 16-24+10 = 2). Tolerance 1e-3 relative",
     "source": "analytic",
     "sources": [
       "tangency-labs/solidcore#3012"
@@ -483,10 +485,12 @@
     "tolerance": {
       "rel": 0.001
     },
+    "vertices": 16,
     "volume_mm3": 0.03,
-    "what": "two 40x30x10 boxes with R2 vertical corner fillets, the second shifted 1e-4 mm in x (a rounded-rectangle sketch extruded for B, a filleted box for A), cut B - A (B is the target): a sliver 1e-4 thick that the kernel refuses ('not a closed solid')"
+    "what": "two 40x30x10 boxes with R2 vertical corner fillets, the second shifted 1e-4 mm in x (a rounded-rectangle sketch extruded for B, a filleted box for A), cut B - A (B is the target): a sliver 1e-4 thick, on the x=40 side"
   },
   "expressible": true,
+  "gallery_note": "The kernel returns one body of the right volume, but with 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16: the two 1e-4 wide faces on y=0 and y=30 are absorbed into edge tolerances of 4e-5 and 5e-5, for a body tolerance of 1e-5. The case is listed in known_failing.json; the render draws the edges above 2e-5 in black.",
   "operation_expressible": true,
   "records": "3012-filleted-boxes-1e-4-apart-cut-reversed.bodies.json.gz",
   "result": [

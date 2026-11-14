@@ -1747,3 +1747,83 @@ fn fuzz_seed_178_fillet_builds() {
     assert!(m.volume > 0.0, "the fillet result must be a real solid: {}", m.volume);
     println!("#10 seed 178: filleted body volume {volume:.2} mm³", volume = m.volume);
 }
+
+/// A cut that leaves nothing of its target, although its tools could never cover it, is a failed
+/// boolean, not an empty result (#15700). A loft with a box-shaped opening in each side, and a
+/// box mirrored into the second opening with 0.2 mm of air all round: the box does not touch the
+/// loft, yet the cut came back empty and deleted the loft without a word. Either the cut leaves
+/// the loft as it was, or it is refused and the loft stays.
+#[test]
+fn cut_never_deletes_a_target_its_tools_cannot_cover() {
+    let mut s = Session::default();
+    let ring = json!([
+        [0.0, 0.0],
+        [10.0, 2.679],
+        [17.321, 10.0],
+        [20.0, 20.0],
+        [17.321, 30.0],
+        [10.0, 37.321],
+        [0.0, 40.0],
+        [-10.0, 37.321],
+        [-17.321, 30.0],
+        [-20.0, 20.0],
+        [-17.321, 10.0],
+        [-10.0, 2.679]
+    ]);
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "YZ", "offset": -30, "name": "Sec0"})),
+        ("sketch.spline.fit_point", json!({"points": ring, "periodic": true})),
+        ("sketch.finish", json!({})),
+        ("sketch.create", json!({"plane": "YZ", "offset": 30, "name": "Sec1"})),
+        ("sketch.spline.fit_point", json!({"points": ring, "periodic": true})),
+        ("sketch.finish", json!({})),
+        ("solid.loft", json!({"sections": [{"sketch": "Sec0"}, {"sketch": "Sec1"}], "body_name": "LoftBody", "operation": "new"})),
+        ("solid.box", json!({"length": 15, "width": 20, "height": 8, "corner": [-25, 10, 16], "operation": "cut", "targets": ["LoftBody"]})),
+        ("solid.box", json!({"length": 15, "width": 20, "height": 8, "corner": [10, 10, 16], "operation": "cut", "targets": ["LoftBody"]})),
+        ("solid.box", json!({"length": 14.6, "width": 13, "height": 7.6, "corner": [-24.8, 12, 16.2], "body_name": "BoxA"})),
+        ("solid.mirror", json!({"bodies": ["BoxA"], "plane": "YZ"})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let faces = |s: &Session| s.model.state().body("LoftBody").map(|b| b.body.face_count());
+    let (before, before_faces) = (volume(&s, "LoftBody"), faces(&s));
+    assert!(before > 0.0 && before_faces.is_some(), "the loft must be built: {before} mm³");
+    let cut = s.execute("solid.combine", &json!({"target": "LoftBody", "tools": ["BoxA (2)"], "operation": "cut", "keep_tools": true}));
+    let after = volume(&s, "LoftBody");
+    assert!(s.model.state().body("LoftBody").is_some(), "the cut deleted the loft: {cut:?}");
+    assert!((after - before).abs() < 1e-6 * before, "the box does not touch the loft, yet its volume went from {before} to {after} mm³: {cut:?}");
+    assert_eq!(faces(&s), before_faces, "{cut:?}");
+    if let Err(e) = &cut {
+        assert!(e.to_string().contains("the cut failed: it would remove all of `LoftBody`, which the tools do not cover"), "{e}");
+    }
+}
+
+/// A cut still takes away a target that lies wholly inside its tools (#15700): a cube inside a
+/// larger one, a cube cut by its exact copy, whose faces all coincide with the target's, and a
+/// cube that only two tools together cover, each reaching past its middle.
+#[test]
+fn cut_removes_a_target_inside_its_tools() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "Inner"})),
+        ("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [-5, -5, -5], "operation": "new", "body_name": "Outer"})),
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new", "body_name": "Twin"})),
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new", "body_name": "Copy"})),
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [80, 0, 0], "operation": "new", "body_name": "Shared"})),
+        ("solid.box", json!({"length": 11, "width": 20, "height": 20, "corner": [75, -5, -5], "operation": "new", "body_name": "Left"})),
+        ("solid.box", json!({"length": 11, "width": 20, "height": 20, "corner": [84, -5, -5], "operation": "new", "body_name": "Right"})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let cuts: [(&str, &[(&str, f64)]); 3] =
+        [("Inner", &[("Outer", 8000.0)]), ("Twin", &[("Copy", 1000.0)]), ("Shared", &[("Left", 4400.0), ("Right", 4400.0)])];
+    for (target, tools) in cuts {
+        let names: Vec<&str> = tools.iter().map(|(n, _)| *n).collect();
+        let cut = s.execute("solid.combine", &json!({"target": target, "tools": names, "operation": "cut", "keep_tools": true})).unwrap();
+        assert_eq!(cut["removed_bodies"], json!([target]), "{cut}");
+        assert!(s.model.state().body(target).is_none(), "{target} must be gone: {cut}");
+        for (tool, kept) in tools {
+            assert!((volume(&s, tool) - kept).abs() < 1e-6, "{tool} is kept as it was: {cut}");
+        }
+    }
+}

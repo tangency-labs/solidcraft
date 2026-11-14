@@ -55,14 +55,14 @@ pub use curves::{
 };
 pub use decompose::Budget;
 pub use dims::{
-    DimFrame, DimLayout, DimSizes, chain_centres, default_text, default_text_offset, dim_frame, dim_layout, dim_layout_reaching, dim_layout_sized,
-    dim_reach, encode_text,
+    DimFrame, DimLayout, DimSizes, DimText, chain_centres, default_text, default_text_offset, dim_frame, dim_frame_at, dim_layout,
+    dim_layout_reaching, dim_layout_sized, dim_reach, encode_text,
 };
 pub use ends::{END_TOL, EndReport, EndTouch, UntiedEnd, loose_ends};
 pub use equation::{EquationCurve, MAX_EQUATION_TEXT, VariableUnit};
 pub use fonts::{
-    DEFAULT_FONT_FAMILY, FontData, check_family, fallback, families_in, find_style_in, font_data, font_data_styled, font_dirs, font_override_dirs,
-    installed_families, set_font_file_check,
+    DEFAULT_FONT_FAMILY, FontData, check_family, fallback, families_in, find_style_in, font_data, font_data_styled, font_dirs, font_file_path,
+    font_override_dirs, installed_families, set_font_file_check,
 };
 pub use freeform_offset::{FreeformOffset, FreeformOffsetOutput, OFFSET_TOLERANCE};
 pub use link::{Link, LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES, SKETCH_AXIS_HALF, TextExprs, sketch_axis_geom};

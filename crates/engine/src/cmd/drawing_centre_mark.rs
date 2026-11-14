@@ -30,7 +30,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("mark: id; overshoot_mm: extension on paper at each end. One undo step if changed."),
     CommandSpec::new(INSPECT, "Inspect Center Mark", crate::checked!("drawing.center_mark.inspect", inspect))
         .icon("inspect").in_drawing().noundo().doc_only().contract(&MARK_CONTRACT).output(output_schema_for::<MarkResult>)
-        .params("mark: id → saved record and current circle or reference status, with a warning if its view no longer draws the part or draws its parts apart."),
+        .params("mark: id → saved record and current circle or reference status, with a warning if its view no longer draws the part or draws another configuration or position."),
     CommandSpec::new(REMOVE, "Remove Center Mark", crate::checked!("drawing.center_mark.remove", remove))
         .icon("delete").in_drawing().doc_only().contract(&MARK_CONTRACT).output(output_schema_for::<ChangeResult>)
         .params("mark: id → removed mark. One undo step."),
@@ -41,7 +41,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let record = s.drawing(ADD)?.clone();
     let view = request.view.0;
     record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
-    crate::drawing_view::refuse_apart(&record, view, "centre marks", ADD)?;
+    crate::drawing_view::check_centre_view(&record, view, "centre marks", ADD)?;
     let edge = s.doc.edge_reference(&s.model, &request.edge.pick, &request.edge.path).map_err(|e| bad(ADD, e.to_string()))?;
     check_drawn(&record, view, [edge.path.as_slice()], ADD)?;
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
