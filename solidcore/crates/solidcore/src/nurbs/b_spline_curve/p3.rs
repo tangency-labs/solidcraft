@@ -126,7 +126,7 @@ use crate::math::{max2, max3, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI, UND
 use crate::nurbs::b_spline_curve::analysis::{analysis_key, curve_bounds, BOUND_MARGIN};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_curve::p2::{BoundingBoxRequest, ControlPointForm};
-use crate::nurbs::b_spline_curve::trim_image::{piece_within, radius_clears_on_surface};
+use crate::nurbs::b_spline_curve::trim_image::{radius_clears_on_surface, sliver_within};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::geom::dist_cpt_cpt;
 use crate::nurbs::nurbs_crv::to_euclid;
@@ -568,15 +568,16 @@ const STRETCH_SLIVER_ULPS: f64 = 1024.0;
 ///   `a_genuine_zero_speed_end_clears_its_stretch`, pieces from about 1e-7 of the end
 ///   inward do not clear even an eighth of the line);
 ///
-/// capped at the first knot from the end, so that the sliver is one polynomial piece. Its
-/// extent is then certified: [`piece_within`] bounds its UV diameter from all of its power
-/// coefficients in rounded intervals, and it must be at most `L`, at the trim's own
-/// coordinate rounding. Otherwise (for instance where `ulp(t_end)` binds and the trim
-/// moves farther than `L` within it) the stretch is not certified. Within the sliver the
-/// radius vanishes with the speed, and no positive tolerance can clear it. In 3D the
-/// sliver's image is at most `|∇S| L` across (`|∇S|` the surface's first derivatives over
-/// the sliver's UV box; not bounded here). That an extent at the trim's own rounding holds
-/// no corner the trim could represent is ARGUED.
+/// capped at the first knot from the end, so that the sliver is one polynomial piece (the
+/// cap lets a stretch whose first knot lies inside the uncapped cut be certified at all:
+/// `a_zero_speed_end_with_a_knot_inside_its_sliver_clears`). Its extent is then
+/// certified: [`sliver_within`] bounds its UV diameter from all of its power coefficients
+/// in rounded intervals, at most `L`, at the trim's own coordinate rounding; its 3D
+/// diameter is bounded by that times an enclosure of the surface's Jacobian over the
+/// sliver's UV box (so at most the image of the trim's coordinate rounding). Otherwise (for instance where `ulp(t_end)` binds and the trim moves farther
+/// than `L` within it) the stretch is not certified. Within the sliver the radius vanishes
+/// with the speed, and no positive tolerance can clear it; that an image at the image of
+/// the trim's own rounding holds no corner the trim could represent is ARGUED.
 ///
 /// **The pieces.** From `cut` out, the stretch is cut into the dyadic pieces at
 /// `stretch 2^-(j+1)` to `stretch 2^-j` from the end, the last one's near edge at `cut`
@@ -594,7 +595,7 @@ const STRETCH_SLIVER_ULPS: f64 = 1024.0;
 ///
 /// # Errors
 ///
-/// Those of [`radius_clears_on_surface`] and [`piece_within`].
+/// Those of [`radius_clears_on_surface`] and [`sliver_within`].
 fn stretch_clears_on_surface(
     k: &Kernel,
     trim: &BSplineCurve,
@@ -668,7 +669,7 @@ fn stretch_clears_on_surface(
     } else {
         (edge, t_end)
     };
-    if !piece_within(trim, slo, shi, length)? {
+    if !sliver_within(k, trim, surface, slo, shi, length)? {
         return Ok(false);
     }
     for j in 0..STRETCH_PIECES {
@@ -2902,12 +2903,11 @@ mod tests {
     /// turns back there sharply but smoothly inside the span 2e-3 to 3e-3 (asserted: its
     /// radius there does not clear 1e-6; about 8e-9 near t = 3.0e-3 by sampling). A sliver
     /// from the end's derivatives alone would run past 3e-3 (asserted) and cover the
-    /// turn. The cut is capped at the knot 1e-4 and the sliver certified on its own span,
-    /// so the turn is in the pieces, and the stretch (0.05, taken as given) does not clear.
-    /// MEASURED by probe: with the cap removed the sliver crosses knots and its extent
-    /// certificate refuses it, so this test still passes (the cap does not decide it; the
-    /// two guards are each sufficient here); with the cap removed and the sliver taken
-    /// uncertified, as at df391d2ef, the stretch clears and this test fails.
+    /// turn. The sliver's extent certificate keeps the turn out of the sliver: it certifies
+    /// one polynomial piece only, so the sliver ends at the knot 1e-4, the turn is in the
+    /// pieces, and the stretch (0.05, taken as given) does not clear. MEASURED by probe:
+    /// with the sliver taken uncertified, as at df391d2ef, the stretch clears and this test
+    /// fails. The turn's radius is bounded above at one point in rounded intervals.
     #[test]
     fn a_turn_past_a_collapsed_end_span_is_not_cleared() {
         let k = Kernel::default();
@@ -2939,6 +2939,20 @@ mod tests {
             ],
         );
         assert!(!radius_clears_on_surface(&k, &trim, &plane, 2e-3, 3e-3, 1e-6).unwrap());
+        // the radius at t0 = 2.9971e-3 (span 2e-3 to 3e-3), bounded above: |c'|^3 / |c' x c''|
+        {
+            use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
+            use crate::blend::fillet_section::interval::Ivl;
+            let nc = NurbsCurve::of(&trim).unwrap();
+            let d = curve_derivs_over(&nc, Ivl::from(2.9971e-3), 2, Some(6)).unwrap();
+            let (d1, d2) = (d[1], d[2]);
+            let speed_sq = d1.x * d1.x + d1.y * d1.y;
+            let cross = d1.x * d2.y - d1.y * d2.x;
+            assert!(cross.lo > 0.0 || cross.hi < 0.0);
+            let cross_lo = Ivl::from(cross.lo.abs().min(cross.hi.abs()));
+            let radius_hi = (speed_sq * speed_sq.sqrt() / cross_lo).hi;
+            assert!(radius_hi <= 1e-6, "{radius_hi:e}");
+        }
         let d = trim.evaluate(0.0, 2, true, false).unwrap();
         let (speed, accel) = (d[1].length(), d[2].length());
         assert!(speed == 0.0 && accel > 0.0, "{speed:e} {accel:e}");
@@ -2953,10 +2967,12 @@ mod tests {
     /// A C0 corner at a knot of full multiplicity is never cleared: a quadratic trim on the
     /// r 6 ball halfway up, along the latitude circle and then down a meridian, with the
     /// double knot 0.5 at the corner. The radius bound cuts its pieces at the knots, so it
-    /// would see two smooth arcs (MEASURED: without the knot check it clears 1e-3); the knot
-    /// refuses it. Test 7 reports the trim; test 13 finds no solution at such a knot (also
-    /// on main, MEASURED), so the pass-over had nothing to hide here, and the knot check
-    /// keeps it so where test 13 does find one.
+    /// would see two smooth arcs (MEASURED: without the knot check it clears 1e-3); the knot,
+    /// whose two tangents are not certified parallel, refuses it. Test 7 reports the trim;
+    /// test 13 finds no solution at such a knot (also on main, MEASURED), so the pass-over
+    /// had nothing to hide here, and the knot check keeps it so where test 13 does find one.
+    /// The same trim with its double knot on a straight run (a G1 join, the tangents
+    /// parallel) is not refused for the knot: the radius bound decides it.
     #[test]
     fn a_c0_corner_at_a_knot_is_not_cleared() {
         let k = Kernel::default();
@@ -2975,6 +2991,71 @@ mod tests {
         assert!(!radius_clears_on_surface(&k, &trim, &surface, 0.0, 1.0, 1e-3).unwrap());
         let idx = failed_tests(&k, &trim, Some(&surface));
         assert!(idx.contains(&7), "{idx:?}");
+        // a G1 join: the double knot in the middle of a straight run along the circle
+        let join = uv_quadratic(
+            &[
+                lon_lat(&dom, 1.0, 0.3),
+                lon_lat(&dom, 1.1, 0.3),
+                lon_lat(&dom, 1.2, 0.3),
+                lon_lat(&dom, 1.3, 0.3),
+                lon_lat(&dom, 1.4, 0.3),
+            ],
+            &[0.0, 0.5, 1.0],
+            &[3, 2, 3],
+        );
+        assert!(radius_clears_on_surface(&k, &join, &surface, 0.0, 1.0, 1e-3).unwrap());
+    }
+
+    /// The cap is what lets a stretch whose first knot lies inside the uncapped sliver be
+    /// certified: the cubic of [`a_genuine_zero_speed_end_clears_its_stretch`] with the knot
+    /// `a = 0.9` times its sliver length inserted (Boehm: the same curve up to rounding).
+    /// With the cap the sliver ends at `a`, inside one span, and the stretch clears. MEASURED
+    /// by probe: without the cap the sliver crosses `a`, its extent certificate refuses it,
+    /// and the stretch is not certified.
+    #[test]
+    fn a_zero_speed_end_with_a_knot_inside_its_sliver_clears() {
+        let k = Kernel::default();
+        let plane = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let pts = [[0.2, 0.2], [0.2, 0.2], [0.6, 0.2], [0.6, 0.6]];
+        let plain = uv_cubic_on(&pts, 0.0);
+        let d = plain.evaluate(0.0, 2, true, false).unwrap();
+        let accel = d[2].length();
+        let p_max = (0.6_f64 * 0.6 + 0.6 * 0.6).sqrt();
+        let quarter = 0.25 * STRETCH_SLIVER_ULPS * f64::EPSILON * p_max;
+        let sliver = (2.0 * quarter / accel).sqrt();
+        let a = 0.9 * sliver;
+        let lerp = |x: [f64; 2], y: [f64; 2]| {
+            [
+                (1.0 - a) * x[0] + a * y[0],
+                (1.0 - a) * x[1] + a * y[1],
+                0.0,
+            ]
+        };
+        let trim = curve(
+            3,
+            &[
+                [0.2, 0.2, 0.0],
+                lerp(pts[0], pts[1]),
+                lerp(pts[1], pts[2]),
+                lerp(pts[2], pts[3]),
+                [0.6, 0.6, 0.0],
+            ],
+            &[0.0, 0.0, 0.0, 0.0, a, 1.0, 1.0, 1.0, 1.0],
+        );
+        let tol = 1e-3;
+        // the plain cubic's stretch (its third derivative, read off the short first span of
+        // the knotted one, is lost to rounding)
+        let stretch = zero_speed_radius_stretch(&plain, 0, tol).unwrap().unwrap();
+        let unit = Extent1d::from_raw(0.0, 1.0);
+        assert!(stretch_clears_on_surface(&k, &trim, &plane, &unit, 0, stretch, tol).unwrap());
     }
 
     /// Where `ulp(t_end)` binds the sliver, the sliver's extent is not at the trim's

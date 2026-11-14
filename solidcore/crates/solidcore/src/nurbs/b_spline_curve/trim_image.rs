@@ -126,8 +126,9 @@ pub(crate) fn radius_clears_on_surface(
         return Ok(false);
     }
     // a knot of full multiplicity inside the trim can carry a tangent jump (a C0 corner)
-    // that the pieces, cut at the knots, never see: not certified
-    if has_c0_knot(&curve, lo, hi) {
+    // that the pieces, cut at the knots, never see: not certified unless its two tangents
+    // are certified parallel
+    if has_corner_knot(&curve, lo, hi) {
         return Ok(false);
     }
     // a procedural blend's net only approximates its positions: a bound on the net is no
@@ -182,8 +183,13 @@ pub(crate) fn radius_clears_on_surface(
 }
 
 /// Whether `curve` has a knot of multiplicity at least its degree strictly inside its
-/// domain and within `[lo, hi]` (ends included): a point where its tangent may jump.
-fn has_c0_knot(curve: &NurbsCurve, lo: f64, hi: f64) -> bool {
+/// domain and within `[lo, hi]` (ends included) whose left and right tangents are not
+/// certified parallel: a point where its tangent may jump (a C0 corner). The tangents on
+/// both sides are enclosed in rounded intervals ([`curve_derivs_over`] on each side's
+/// span); they are certified parallel where their cross product's enclosure holds 0 and
+/// their dot product's is positive, so a G1 join (parallel within rounding) is not a
+/// corner. A side whose tangent can vanish is a corner.
+fn has_corner_knot(curve: &NurbsCurve, lo: f64, hi: f64) -> bool {
     let (Some(&first), Some(&last)) = (curve.u.get(curve.p), curve.u.get(curve.n)) else {
         return true;
     };
@@ -192,7 +198,23 @@ fn has_c0_knot(curve: &NurbsCurve, lo: f64, hi: f64) -> bool {
         let mult = curve.u.iter().skip(i).take_while(|&&y| y == x).count();
         let inside = x > first && x < last && x >= lo && x <= hi;
         if inside && mult >= curve.p {
-            return true;
+            let (Some(left), right) = (i.checked_sub(1), i + mult - 1) else {
+                return true;
+            };
+            let tangent = |piece: usize| {
+                curve_derivs_over(curve, Ivl::from(x), 1, Some(piece))
+                    .ok()
+                    .and_then(|d| d.get(1).copied())
+            };
+            let (Some(a), Some(b)) = (tangent(left), tangent(right)) else {
+                return true;
+            };
+            let cross = a.x * b.y - a.y * b.x;
+            let dot = a.x * b.x + a.y * b.y;
+            let parallel = cross.lo <= 0.0 && cross.hi >= 0.0 && dot.lo > 0.0;
+            if !parallel {
+                return true;
+            }
         }
         i += mult.max(1);
     }
@@ -200,16 +222,35 @@ fn has_c0_knot(curve: &NurbsCurve, lo: f64, hi: f64) -> bool {
 }
 
 /// Not upstream: whether the piece `[lo, hi]` of the trim `trim`, inside one of its knot
-/// spans, has a UV extent of at most `length`: a diameter bound from the piece's power
-/// coefficients about its middle, enclosed in rounded intervals as [`piece_clears`]
-/// encloses them (every point is the middle's point plus the higher terms, each at most
-/// its coefficient's magnitude over `s` in `[-1, 1]`). `false` for a rational trim, a piece
-/// that crosses a knot or is not ordered, and a bound that is not finite.
+/// spans, is a sliver at rounding level, in UV and on `surface`:
+/// - its UV diameter is at most `length`: a bound from the piece's power coefficients
+///   about its middle, enclosed in rounded intervals as [`piece_clears`] encloses them
+///   (every point is the middle's point plus the higher terms, each at most its
+///   coefficient's magnitude over `s` in `[-1, 1]`);
+/// - its image's 3D diameter, bounded by the UV diameter times an enclosure of the
+///   surface's Jacobian norm `sqrt(|S_u|² + |S_v|²)` over the piece's UV box (from the
+///   net's basis functions and their first derivatives over the box and the quotient rule,
+///   in rounded intervals, on every polynomial patch the box meets), is at most
+///   [`SLIVER_3D_ULPS`] `ε` times the larger of the surface net's largest coordinate and
+///   the Jacobian bound times the trim's largest coordinate (the model's rounding, or the
+///   trim's rounding carried to 3D). Given the UV bound this holds wherever the Jacobian
+///   is enclosed; what it adds is that enclosure, so the sliver's 3D size is certified.
+///
+/// `false` for a rational trim, a piece that crosses a knot or is not ordered, a procedural
+/// blend, and a bound that is not finite.
 ///
 /// # Errors
 ///
-/// A [`crate::error::SolidError::Unported`] or `Cancelled` of the trim's data.
-pub(crate) fn piece_within(trim: &BSplineCurve, lo: f64, hi: f64, length: f64) -> Result<bool> {
+/// A [`crate::error::SolidError::Unported`] or `Cancelled` of the trim's or the surface's
+/// data.
+pub(crate) fn sliver_within(
+    k: &Kernel,
+    trim: &BSplineCurve,
+    surface: &Surface,
+    lo: f64,
+    hi: f64,
+    length: f64,
+) -> Result<bool> {
     // (written to accept: a NaN fails)
     let ordered = lo <= hi;
     if !ordered || !length.is_finite() {
@@ -238,15 +279,132 @@ pub(crate) fn piece_within(trim: &BSplineCurve, lo: f64, hi: f64, length: f64) -
     let Ok(d) = curve_derivs_over(&curve, Ivl::from(m), curve.p, Some(span_t)) else {
         return Ok(false);
     };
-    let (mut ru, mut rv) = (Ivl::from(0.0), Ivl::from(0.0));
+    let (Some(d0), mut ru, mut rv) = (d.first().copied(), Ivl::from(0.0), Ivl::from(0.0)) else {
+        return Ok(false);
+    };
     let mut scale = Ivl::from(1.0);
     for (j, dj) in d.iter().enumerate().skip(1) {
         scale = scale * h / Ivl::from(j as f64);
         ru = ru + Ivl::from((dj.x * scale).mag());
         rv = rv + Ivl::from((dj.y * scale).mag());
     }
-    let diameter = (Ivl::from(2.0) * (ru * ru + rv * rv).sqrt()).hi;
-    Ok(diameter.is_finite() && diameter <= length)
+    let diameter = Ivl::from(2.0) * (ru * ru + rv * rv).sqrt();
+    if !(diameter.hi.is_finite() && diameter.hi <= length) {
+        return Ok(false);
+    }
+    // the image: the surface's Jacobian over the piece's UV box
+    match surface.kind_with_nurb(k) {
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Ok(SurfaceKind::ProceduralBlend(_)) | Err(_) => return Ok(false),
+        Ok(_) => {}
+    }
+    let net = match as_b_spline(k, surface) {
+        Ok(Some(bs)) => match Nurbs::of(&bs) {
+            Ok(n) => n,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(false),
+        },
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Ok(None) | Err(_) => return Ok(false),
+    };
+    let (ur, vr) = (
+        Ivl::checked((d0.x - ru).lo, (d0.x + ru).hi),
+        Ivl::checked((d0.y - rv).lo, (d0.y + rv).hi),
+    );
+    let Some(jacobian) = jacobian_over(&net, ur, vr) else {
+        return Ok(false);
+    };
+    let net_max = net
+        .pw
+        .chunks(4)
+        .map(|c| match c {
+            [x, y, z, w] => (Ivl::from(*x) / Ivl::from(*w))
+                .mag()
+                .max((Ivl::from(*y) / Ivl::from(*w)).mag())
+                .max((Ivl::from(*z) / Ivl::from(*w)).mag()),
+            _ => f64::NAN,
+        })
+        .fold(0.0_f64, f64::max);
+    let trim_max = curve
+        .pw
+        .chunks(4)
+        .map(|c| match c {
+            [x, y, ..] => {
+                (Ivl::from(*x) * Ivl::from(*x) + Ivl::from(*y) * Ivl::from(*y))
+                    .sqrt()
+                    .hi
+            }
+            _ => f64::NAN,
+        })
+        .fold(0.0_f64, f64::max);
+    let image = (diameter * Ivl::from(jacobian)).hi;
+    let carried = (Ivl::from(jacobian) * Ivl::from(trim_max)).lo;
+    let allowed = (Ivl::from(SLIVER_3D_ULPS * f64::EPSILON) * Ivl::from(net_max.max(carried))).lo;
+    Ok(image.is_finite() && image <= allowed)
+}
+
+/// The 3D diameter, in units of `ε` times the larger of the surface net's largest
+/// coordinate and the trim's largest coordinate carried to 3D, that [`sliver_within`]
+/// allows a sliver's image.
+pub(crate) const SLIVER_3D_ULPS: f64 = 1024.0;
+
+/// An upper bound on the surface's Jacobian norm `sqrt(|S_u|² + |S_v|²)` over the UV box
+/// `ur x vr`, on every polynomial patch of `net` the box meets: the basis functions and
+/// their first derivatives over the box clamped to the patch's spans, the homogeneous sums
+/// and the quotient rule, in rounded intervals. `None` where the box leaves the knots, a
+/// weight's enclosure is not positive, or the bound is not finite.
+fn jacobian_over(net: &Nurbs, ur: Ivl, vr: Ivl) -> Option<f64> {
+    let us = spans_met(&net.u, net.p, net.nu, ur)?;
+    let vs = spans_met(&net.v, net.q, net.nv, vr)?;
+    if us.len() * vs.len() > MAX_PATCHES {
+        return None;
+    }
+    let clamp = |x: Ivl, knots: &[f64], k: usize| {
+        let (a, b) = (knots.get(k).copied()?, knots.get(k + 1).copied()?);
+        Some(Ivl::checked(x.lo.max(a), x.hi.min(b)))
+    };
+    let mut worst = 0.0_f64;
+    for &ku in &us {
+        for &kv in &vs {
+            let nu = ders_basis(&net.u, ku, net.p, clamp(ur, &net.u, ku)?, 1);
+            let nv = ders_basis(&net.v, kv, net.q, clamp(vr, &net.v, kv)?, 1);
+            let basis =
+                |m: &Vec<Vec<Ivl>>, a: usize, i: usize| m.get(a).and_then(|r| r.get(i)).copied();
+            let mut h = [[[Ivl::from(0.0); 4]; 2]; 2];
+            for (a, row) in h.iter_mut().enumerate() {
+                for (b, hab) in row.iter_mut().enumerate() {
+                    for i in 0..=net.p {
+                        for j in 0..=net.q {
+                            let li = 4
+                                * ((ku + i).checked_sub(net.p)? * net.nv
+                                    + (kv + j).checked_sub(net.q)?);
+                            let c = basis(&nu, a, i)? * basis(&nv, b, j)?;
+                            for (e, he) in hab.iter_mut().enumerate() {
+                                *he = *he + c * Ivl::from(*net.pw.get(li + e)?);
+                            }
+                        }
+                    }
+                }
+            }
+            let [[h00, h01], [h10, _]] = h;
+            let w = h00[3];
+            let positive = w.lo > 0.0;
+            if !positive {
+                return None;
+            }
+            let point = [h00[0] / w, h00[1] / w, h00[2] / w];
+            let [px, py, pz] = point;
+            let rate =
+                |[x, y, z, wd]: [Ivl; 4]| [(x - wd * px) / w, (y - wd * py) / w, (z - wd * pz) / w];
+            let sq = |d: [Ivl; 3]| d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+            let norm = (sq(rate(h10)) + sq(rate(h01))).sqrt().hi;
+            if !norm.is_finite() {
+                return None;
+            }
+            worst = worst.max(norm);
+        }
+    }
+    Some(worst)
 }
 
 /// One piece `[a, b]` of the trim (inside one of its knot spans): `Some(true)` where the

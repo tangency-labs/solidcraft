@@ -31,10 +31,12 @@ that the sliver within it is one polynomial piece. The sliver's UV diameter is t
 bounded from all of its power coefficients in rounded intervals and must be at most `L`,
 at the trim's own coordinate rounding; otherwise the stretch is not certified (for
 instance where `ulp(t_end)` binds). Within the sliver the radius vanishes with the speed
-and no positive bound clears it. In 3D the sliver's image is at most `|∇S| L` across, which
-is not bounded here; that an extent at the trim's own rounding holds no corner the trim
-could represent is ARGUED. A knot of full multiplicity inside the trim (a possible C0
-corner, which the pieces, cut at the knots, would not see) refuses the bound. The bound composes each polynomial piece
+and no positive bound clears it. The sliver's 3D diameter is also certified, from its UV
+diameter and an interval enclosure of the surface's Jacobian over its UV box, to be at most
+`1024 ε` of the surface net's largest coordinate; that an image at the model's own rounding
+holds no corner the trim could represent is ARGUED. A knot of full multiplicity inside the
+trim (a possible C0 corner, which the pieces, cut at the knots, would not see) refuses the
+bound unless its two tangents are certified parallel (a G1 join). The bound composes each polynomial piece
 of the trim with each polynomial patch of the surface in rounded interval arithmetic and
 bounds `|g'|^3 / |g' x g''|` from the composed coefficients (no sampling); pieces that do not
 clear are halved, breadth first, at most 4096 pieces and 64 halvings each, no recursion. A
