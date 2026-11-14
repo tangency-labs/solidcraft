@@ -679,3 +679,15 @@ fn move_sketches_takes_a_name_that_looks_like_an_id_as_the_name() {
         assert_eq!((component(named) == Some(part), component(numbered) == Some(part)), (moves_named, !moves_named), "{key}");
     }
 }
+
+#[test]
+fn bodies_never_move_into_a_skeleton_component() {
+    let mut s = Session::default();
+    s.run_script(&crate::sample::script()).unwrap();
+    let skeleton = run(&mut s, "component.create_skeleton", json!({}))["component"].as_u64().unwrap();
+    let before = s.doc.features.len();
+    let moved = s.execute("component.move_bodies", &json!({"bodies": ["Plate"], "component": skeleton}));
+    assert!(moved.is_err(), "{moved:?}");
+    assert_eq!(s.doc.features.len(), before, "a refused move changes nothing");
+    assert_eq!(s.world_state().unwrap().body("Plate").unwrap().component, 0);
+}

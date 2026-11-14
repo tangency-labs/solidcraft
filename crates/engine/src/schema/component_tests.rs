@@ -41,6 +41,8 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<MoveSketchesToPartsParams>(), &["sketches"]);
     assert_keys(input_schema_for::<ReparentItemsParams>(), &["bodies", "component", "component_path", "features", "occurrences"]);
     assert_keys(input_schema_for::<CreateParams>(), &["activate", "grounded", "name", "parent", "parent_path"]);
+    assert_keys(input_schema_for::<super::CreateSkeletonParams>(), &["activate", "grounded", "name", "parent", "parent_path"]);
+    assert_keys(input_schema_for::<super::SetKindParams>(), &["component", "kind"]);
     assert_keys(input_schema_for::<FromBodiesParams>(), &["bodies"]);
     assert_keys(input_schema_for::<ActivateParams>(), &["component", "occurrence", "path"]);
     assert_keys(input_schema_for::<ListParams>(), &["bodies", "compact"]);
