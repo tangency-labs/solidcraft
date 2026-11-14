@@ -2484,6 +2484,9 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
     // A plane menu is for construction geometry only, not the box.
     let block = h.app.session.doc.features[0].id;
     let bad_plane = format!("no plane `{block}`");
+    // A construction axis is construction geometry, so its menu opens.
+    h.app.run("construct.axis.two_points", json!({"a": {"point": [0, 0, 0]}, "b": {"point": [0, 0, 30]}, "name": "Spin"})).unwrap();
+    let axis = h.app.session.doc.find_feature("Spin").map(|f| f.id).unwrap();
     // A part's folders are drawn under its placement, never under a `c<id>` row of its own.
     let part = h.app.run("component.create", json!({"name": "Part"})).unwrap()["component"].as_u64().unwrap();
     let placement = h.app.session.doc.occurrence_of(part).unwrap().id;
@@ -2511,6 +2514,7 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
     }
     for target in [
         json!({"type": "body", "name": "Blk"}),
+        json!({"type": "plane", "id": axis}),
         json!({"type": "folder", "component": 0, "folder": "bodies", "scope": "c0"}),
         json!({"type": "group", "id": group, "scope": "c0"}),
         json!({"type": "folder", "component": part, "folder": "bodies", "scope": format!("o:{placement}")}),

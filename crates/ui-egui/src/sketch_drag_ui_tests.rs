@@ -79,6 +79,7 @@ fn elsewhere_a_drag_from_empty_space_draws_a_selection_box() {
     for selected in [true, false] {
         let (mut h, gap) = two_letters(selected);
         let from = if selected { gap + Vec2::new(12.0, 0.0) } else { gap };
+        h.call("ui.camera", json!({"target":[from.x,from.y,0.0],"distance":55}));
         let a = screen(&mut h, from.x, from.y);
         let b = screen(&mut h, from.x + 3.0, from.y + 2.0);
         let mut path = vec![a];

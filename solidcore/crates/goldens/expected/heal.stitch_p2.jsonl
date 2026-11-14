@@ -839,4 +839,4 @@
 {"case":"tjunction_vlist_empty","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,1e+20,0.0,0.0,0.0,0.0]}}
 {"case":"tjunction_vlist_nulls","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[1e+20,1e+20,3e+20]],"n":17}}}
 {"case":"wr569_cube_alone_solid","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[506.00019999999995,506.00019999999995,43892.011320000005]],"n":176}}}
-{"case":"wr569_cube_with_cavity_solid","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[919.0003999999993,919.0003999999993,115296.04152],[570.0,570.0,26963.0]],"n":341}}}
+{"case":"wr569_cube_with_cavity_solid","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[919.0003999999993,919.0003999999993,115296.04152],[571.0,571.0,27047.0]],"n":341}}}

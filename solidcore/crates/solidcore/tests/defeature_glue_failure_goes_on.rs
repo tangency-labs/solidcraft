@@ -97,7 +97,7 @@ fn defeature_goes_on_past_a_failing_glue() {
                 ),
                 "{r:?}"
             );
-            assert!(matches!(f.entity, Some(EntityRef::Edge(_))), "{r:?}");
+            assert!(matches!(f.entity(), Some(EntityRef::Edge(_))), "{r:?}");
             assert_eq!(e.sm_status(), Some(SM_ERR), "{r:?}");
         }
         other => panic!("{other:?}"),

@@ -1921,9 +1921,16 @@ fn extract_iso_curve(
     // `sm_ExtractIsoCurve` takes an `SmBSplineCurve`: every `Curve` kind derived from it
     // has one as base. Other kinds cannot reach upstream's signature, so they are not
     // iso curves here.
+    let line_with_nurb;
     let uv_bspline = match uv_curve.kind() {
         CurveKind::BSpline(b) => b,
-        CurveKind::Line(l) => l.base(),
+        // upstream asks the line object itself for its degree, points and ends, which a
+        // two-point `SmLine` answers without a NURB made yet: its part comes with its NURB
+        // here (the same degree, points and ends)
+        CurveKind::Line(l) => {
+            line_with_nurb = l.base_with_nurb()?;
+            &*line_with_nurb
+        }
         CurveKind::Ellipse(e) => e.base(),
         CurveKind::Hyperbola(h) => h.base(),
         CurveKind::Parabola(p) => p.base(),
@@ -2332,6 +2339,53 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    /// A lazy UV line (`Line::from_points`, no NURB yet, as upstream's two-point `SmLine`)
+    /// on the bilinear patch `S(u, v)` with corners `(0, 0, 0)`, `(0, 4, 0)`, `(4, 0, 0)`,
+    /// `(4, 4, 0)` lifts as an iso curve: `u = 1/4` for `v` in `[0, 1]`. Its middle is
+    /// `S(1/4, 1/2)`, which is `(1, 2, 0)` or `(2, 1, 0)` by the patch's orientation.
+    #[test]
+    fn a_lazy_uv_line_lifts_as_an_iso_curve() {
+        for fixes in [UpstreamFixes::default(), UpstreamFixes::all()] {
+            let k = &Kernel {
+                fixes,
+                ..Kernel::default()
+            };
+            let s = bspline_surface(
+                1,
+                1,
+                &[
+                    &[Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 4.0, 0.0)],
+                    &[Vec3::new(4.0, 0.0, 0.0), Vec3::new(4.0, 4.0, 0.0)],
+                ],
+            );
+            let uv_line = crate::curve::line::Line::from_points(
+                Point3::new(0.25, 0.0, 0.0),
+                Point3::new(0.25, 1.0, 0.0),
+                2,
+            );
+            assert!(uv_line.base().gw_nurb().is_none());
+            let dom = Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
+            let lifted = s
+                .lift_curve(
+                    k,
+                    &dom,
+                    &Curve::from(uv_line),
+                    &Extent1d::from_min_max(0.0, 1.0),
+                    1e-6,
+                    false,
+                )
+                .unwrap();
+            let mid = lifted.curve.evaluate_point(k, 0.5).unwrap();
+            let want = s.evaluate_point(k, Point2::new(0.25, 0.5)).unwrap();
+            assert!(mid.distance(want) <= 1e-12, "{mid:?} vs {want:?}");
+            assert!(
+                mid.distance(Point3::new(1.0, 2.0, 0.0)) <= 1e-12
+                    || mid.distance(Point3::new(2.0, 1.0, 0.0)) <= 1e-12,
+                "{mid:?}"
+            );
+        }
     }
 
     #[test]

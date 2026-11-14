@@ -9,6 +9,9 @@
 //! in a compute shader.
 //!
 //! - [`plan`]: the face planner and its display entry point, at a [`MeshTolerance`];
+//! - [`mesh()`]: the mesh path, not for display: every face by constrained Delaunay with lattice
+//!   seeds and Ruppert shaping to a [`MeshSpec`], for mesh bodies, mesh export and analysis
+//!   meshers, slow by design; [`TessPlan::welded`] joins its faces at their shared vertices;
 //! - [`TessPlan`], [`FacePlan`]: the plan, and [`TessPlan::transformed`] for a placed copy;
 //! - [`Mesh`]: an indexed triangle mesh with its edge polylines and their display flags;
 //! - [`curve_points`]: a free curve's points at a [`MeshTolerance`], by the edge rules;
@@ -36,6 +39,7 @@ mod pole;
 pub mod preview;
 mod ring;
 pub mod simplify;
+mod spec;
 mod stats;
 mod tolerance;
 mod vec;
@@ -47,7 +51,11 @@ pub use mesher::{MAX_ANGLE_BOUNDARY, plan};
 pub use par::guarded;
 pub use plan::{FacePlan, TessPlan};
 pub use pole::{AveragedPole, PoleNode, PoleRule};
-pub use stats::{Cap, CappedEdge, EdgeCap, OverTolerance, PlanStats, RefusedEdge, RefusedFace};
+pub use spec::{MAX_MESH_MIN_ANGLE, MESH_MIN_ANGLE, MeshSpec, WeldedMesh, mesh};
+pub use stats::{
+    Cap, CappedEdge, EdgeCap, OverTolerance, PlanStats, RefusedEdge, RefusedFace, ShapeLimit,
+    Unshaped,
+};
 pub use tolerance::{DISPLAY_ANGLE, MeshTolerance};
 
 /// The plan evaluator's curve and surface forms a [`TessPlan`] holds (its `surfaces`), so a

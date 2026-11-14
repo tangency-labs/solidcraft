@@ -156,6 +156,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             let response = setting::dark_parts_shading(app, ui).backing_on_hover_text(app.tr("prefs.dark_parts_shading_help"));
             crate::scenario::publish_target("prefs:dark_parts_shading", response.rect);
+            let response = setting::viewport_material_finish(app, ui).backing_on_hover_text(app.tr("prefs.viewport_material_finish_help"));
+            crate::scenario::publish_target("prefs:viewport_material_finish", response.rect);
         });
         ui_kit::settings_section(ui, "current_view", app.tr("prefs.graphics_page.current_view"), |ui| {
             ui_kit::settings_badge(ui, app.tr("prefs.graphics_page.view_bar"), false);
@@ -320,6 +322,19 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         *value = !*value;
                     }
                 }
+            });
+            ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
+                ui_kit::row(ui, app.tr_label("Joint symbols"), |ui| {
+                    let styles = crate::joint_symbols::STYLES;
+                    let mut selected = usize::from(app.preferences.joint_symbols).min(styles.len() - 1);
+                    ui_kit::dropdown(ui, "pref_joint_symbols", &mut selected, &styles);
+                    app.preferences.joint_symbols = selected as u8;
+                });
+            });
+            // Only badges tell moving joints from the rest.
+            ui.add_enabled_ui(app.preferences.joint_symbols != crate::joint_symbols::RING_AND_AXIS, |ui| {
+                let response = setting::highlight_moving_joints(app, ui).on_hover_text(app.tr("prefs.highlight_moving_joints_help"));
+                crate::scenario::publish_handle("prefs:highlight_moving_joints", response.rect.center());
             });
         });
         ui_kit::settings_section(ui, "surfaces_edges", app.tr("prefs.graphics_page.surfaces_edges"), |ui| {

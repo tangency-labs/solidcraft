@@ -334,7 +334,7 @@ fn taper(
     // Break up all input curves at G1 discontinuities into local copies
     let mut split = Vec::new();
     for curve in &input {
-        let bspline = as_bspline(curve)
+        let bspline = as_bspline(a.kernel(brep)?, curve)?
             .ok_or_else(|| SolidError::invalid_input(OP, "taper curve is not a B-spline"))?;
         split.extend(
             ignored(passed_on(
@@ -368,7 +368,7 @@ fn taper(
     let mut generators = Vec::with_capacity(composite.segments().len());
     for segment in composite.segments() {
         generators.push(
-            as_bspline(&segment.curve)
+            as_bspline(a.kernel(brep)?, &segment.curve)?
                 .ok_or_else(|| SolidError::invalid_input(OP, "segment is not a B-spline"))?,
         );
     }
@@ -486,7 +486,7 @@ fn taper(
 
             // for every offset curve - find its original partner and build a ruled surface
             for (curve, map) in trim_curves.iter_mut().zip(fixed_maps) {
-                let mut offset_curve = as_bspline(curve)
+                let mut offset_curve = as_bspline(a.kernel(brep)?, curve)?
                     .ok_or_else(|| SolidError::invalid_input(OP, "offset is not a B-spline"))?;
                 let result = ruled(
                     a.kernel(brep)?,
@@ -639,7 +639,7 @@ fn surface_intersection_method(
 
     // for every offset curve - find its original partner and build a ruled surface
     for piece in untrimmed {
-        let mut offset_curve = as_bspline(&piece.curve)
+        let mut offset_curve = as_bspline(a.kernel(brep)?, &piece.curve)?
             .ok_or_else(|| SolidError::invalid_input(OP, "offset is not a B-spline"))?;
         match ruled(
             a.kernel(brep)?,
