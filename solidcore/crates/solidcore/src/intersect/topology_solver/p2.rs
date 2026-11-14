@@ -63,7 +63,7 @@ use crate::query::face::p2 as qf2;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 use crate::surface::trim_srf_cache::POINT_CLASS_UNKNOWN;
-use crate::topology::face::p3::{IntersectObject, IntersectObjects};
+use crate::topology::face::p3::{IntersectObject, IntersectObjects, IntersectObjectsMut};
 
 const OP_LOCAL: &str = "intersect::topology_solver::p2::TopologySolver::local_solve_branch";
 const OP_VF: &str = "intersect::topology_solver::p2::LocalSolver::solve_vertex_face";
@@ -210,9 +210,12 @@ fn name_curve_face<O: Copy + PartialEq>(
 /// by `pFace->CurveOnClassify(TRUE, sCurveClass)` (the remaining arguments default): the
 /// intervals and their interior point classes.
 ///
-/// The face is the B-rep face [`TopologyObjects::face_entity`] names; the classification
-/// runs on that B-rep through [`qf2::curve_on_classify`], with the solver's curve as the
-/// classified curve ([`IntersectObject::Curve`] over a one-curve slice) and the face's
+/// The face is the B-rep face the adapter names. An adapter over a live B-rep lends it
+/// ([`TopologyObjects::with_face_entity_mut`]) and the classification runs on it in place
+/// ([`qf2::curve_on_classify_mut`]), keeping the UV trim curves it makes as upstream's
+/// does; otherwise it runs on [`TopologyObjects::face_entity`]'s B-rep through
+/// [`qf2::curve_on_classify`] (on a private copy). Either way the solver's curve is the
+/// classified curve ([`IntersectObject::Curve`] over a one-curve slice), with the face's
 /// topology as handles of the B-rep.
 fn classified_curve_intervals<O: Copy>(
     kernel: &Kernel,
@@ -237,34 +240,52 @@ fn classified_curve_intervals<O: Copy>(
         ti: None,
     };
     let mut classification = CurveClassification::with_curve(kernel, &init)?;
-    let Some((b, f)) = objects.face_entity(face) else {
-        // DISPATCH GAP: SmFace::CurveOnClassify is ported (`query::face::p2`), but this
-        // adapter cannot resolve the face handle to its `Brep` and `FaceId`
-        // (`TopologyObjects::face_entity`).
-        return Err(SolidError::unported(
-            "SmFace::CurveOnClassify",
-            "query.face_p2",
-        ));
-    };
-    let classify_objects = IntersectObjects {
-        b,
-        other: b,
-        side: false,
-        curves_3d: core::slice::from_ref(curve),
-        uv1: &[],
-        uv2: &[],
-    };
-    qf2::curve_on_classify(
-        kernel,
-        b,
-        f,
-        &classify_objects,
-        true,
-        &mut classification,
-        false,
-        false,
-        true,
-    )?;
+    let lent = objects.with_face_entity_mut(face, &mut |b, f| {
+        let mut classify_objects = IntersectObjectsMut::of_curves(b, core::slice::from_ref(curve));
+        qf2::curve_on_classify_mut(
+            kernel,
+            f,
+            &mut classify_objects,
+            true,
+            &mut classification,
+            false,
+            false,
+            true,
+        )
+        .map(|_| ())
+    });
+    if let Some(classified) = lent {
+        classified?;
+    } else {
+        let Some((b, f)) = objects.face_entity(face) else {
+            // DISPATCH GAP: SmFace::CurveOnClassify is ported (`query::face::p2`), but this
+            // adapter cannot resolve the face handle to its `Brep` and `FaceId`
+            // (`TopologyObjects::with_face_entity_mut`, `TopologyObjects::face_entity`).
+            return Err(SolidError::unported(
+                "SmFace::CurveOnClassify",
+                "query.face_p2",
+            ));
+        };
+        let classify_objects = IntersectObjects {
+            b,
+            other: b,
+            side: false,
+            curves_3d: core::slice::from_ref(curve),
+            uv1: &[],
+            uv2: &[],
+        };
+        qf2::curve_on_classify(
+            kernel,
+            b,
+            f,
+            &classify_objects,
+            true,
+            &mut classification,
+            false,
+            false,
+            true,
+        )?;
+    }
     Ok(classification
         .intervals()
         .iter()

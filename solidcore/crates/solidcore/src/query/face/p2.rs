@@ -38,7 +38,8 @@
 //!   (`SnapshotObjects` over `CurveOnClassifyCache`'s snapshot; the healer copies some of
 //!   its edits back). That entry goes once its last callers are converted: the stage 3 /
 //!   `ClassifyLoops` path, the `intersect::topology_solver` (its face silhouettes'
-//!   `CreateCurvesByTrimming`, through `topology::face::p2`'s snapshot entry) and
+//!   `CreateCurvesByTrimming`, through `topology::face::p2`'s snapshot entry, and its
+//!   range classifications on adapters that lend no live B-rep) and
 //!   `blend::fillet_solver` classifications, `sm_CountContainedSamples`'
 //!   `CalculateAnInternalPoint` in `query::api_queries`, the `&self`
 //!   `ProtoBrep::face_curve_on_classify` (proto-topology's coincident-curve
