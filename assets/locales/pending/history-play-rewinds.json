@@ -1,0 +1,42 @@
+{
+  "en": {
+    "prefs.history_play_rewinds": "Play at the end starts over",
+    "prefs.history_play_rewinds_note": "With the History marker at the end, Play History moves it to the start and plays every feature again. Off: Play does nothing there until you move the marker back.",
+    "ui.history_play_from_start": "Play from the start"
+  },
+  "ar": {
+    "prefs.history_play_rewinds": "التشغيل عند النهاية يبدأ من جديد",
+    "prefs.history_play_rewinds_note": "عندما يكون مؤشر السجل في النهاية، ينقله «تشغيل السجل» إلى البداية ويشغّل كل الميزات من جديد. عند الإيقاف: لا يفعل التشغيل شيئًا هناك حتى تعيد المؤشر إلى الخلف.",
+    "ui.history_play_from_start": "التشغيل من البداية"
+  },
+  "de": {
+    "prefs.history_play_rewinds": "Abspielen am Ende beginnt von vorn",
+    "prefs.history_play_rewinds_note": "Steht die Verlaufsmarkierung am Ende, setzt Verlauf abspielen sie an den Anfang und spielt alle Merkmale noch einmal ab. Aus: Abspielen tut dort nichts, bis die Markierung zurückgesetzt wird.",
+    "ui.history_play_from_start": "Von Anfang an abspielen"
+  },
+  "he": {
+    "prefs.history_play_rewinds": "הפעלה בסוף מתחילה מחדש",
+    "prefs.history_play_rewinds_note": "כשסמן ציר הזמן נמצא בסוף, הפעלת ציר הזמן מעבירה אותו להתחלה ומפעילה שוב את כל הפיצ'רים. כבוי: ההפעלה לא עושה דבר שם עד שמזיזים את הסמן לאחור.",
+    "ui.history_play_from_start": "הפעלה מההתחלה"
+  },
+  "ja": {
+    "prefs.history_play_rewinds": "末尾での再生は最初から",
+    "prefs.history_play_rewinds_note": "履歴マーカーが末尾にあるとき、「履歴を再生」はマーカーを先頭に戻し、すべてのフィーチャーをもう一度再生します。オフ：マーカーを戻すまで、そこでは再生しても何も起こりません。",
+    "ui.history_play_from_start": "最初から再生"
+  },
+  "ko": {
+    "prefs.history_play_rewinds": "끝에서 재생하면 처음부터 다시",
+    "prefs.history_play_rewinds_note": "기록 마커가 끝에 있을 때 기록 재생은 마커를 처음으로 옮기고 모든 피처를 다시 재생합니다. 끄면: 마커를 이전으로 옮길 때까지 그곳에서는 재생해도 아무 일도 일어나지 않습니다.",
+    "ui.history_play_from_start": "처음부터 재생"
+  },
+  "vi": {
+    "prefs.history_play_rewinds": "Phát ở cuối sẽ bắt đầu lại",
+    "prefs.history_play_rewinds_note": "Khi điểm đánh dấu lịch sử ở cuối, Phát lịch sử đưa nó về đầu và phát lại mọi tính năng. Tắt: nút Phát không làm gì ở đó cho đến khi bạn đưa điểm đánh dấu lùi lại.",
+    "ui.history_play_from_start": "Phát từ đầu"
+  },
+  "zh": {
+    "prefs.history_play_rewinds": "在末尾播放时从头开始",
+    "prefs.history_play_rewinds_note": "当历史标记位于末尾时，“播放历史”会将其移到开头并重新播放所有特征。关闭：在将标记向后移动之前，在该处播放不会有任何作用。",
+    "ui.history_play_from_start": "从头播放"
+  }
+}
