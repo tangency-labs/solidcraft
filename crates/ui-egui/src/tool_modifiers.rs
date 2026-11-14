@@ -63,6 +63,11 @@ impl Held {
     pub fn from_modifiers(m: Modifiers) -> Self {
         Self::new(m, Platform::host())
     }
+
+    /// Preview matching preserves physical Control even when Command is also held.
+    pub fn for_preview(m: Modifiers, platform: Platform) -> Self {
+        Self { other: platform == Platform::Mac && m.ctrl, ..Self::new(m, platform) }
+    }
 }
 
 /// How a chord matches held keys.
@@ -166,6 +171,58 @@ pub fn alt_name_for(platform: Platform) -> &'static str {
     match platform {
         Platform::Mac => "Option",
         Platform::Other => "Alt",
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewModifier {
+    Control,
+    Primary,
+    #[default]
+    PrimaryAtLeast,
+    Alt,
+    Shift,
+    Disabled,
+}
+
+impl PreviewModifier {
+    pub const CHOICES: [Self; 6] = [Self::Control, Self::Primary, Self::PrimaryAtLeast, Self::Alt, Self::Shift, Self::Disabled];
+
+    pub fn label(self, platform: Platform) -> &'static str {
+        match self {
+            Self::Control => "Control",
+            Self::Primary => ctrl_name_for(platform),
+            Self::PrimaryAtLeast => match platform {
+                Platform::Mac => "Cmd + modifiers",
+                Platform::Other => "Ctrl + modifiers",
+            },
+            Self::Alt => alt_name_for(platform),
+            Self::Shift => "Shift",
+            Self::Disabled => "None",
+        }
+    }
+
+    pub fn shown_label(self, platform: Platform, app: &crate::SolveApp) -> &'static str {
+        if self == Self::PrimaryAtLeast {
+            app.tr(match platform {
+                Platform::Mac => "prefs.preview_reselect_primary_at_least_mac",
+                Platform::Other => "prefs.preview_reselect_primary_at_least",
+            })
+        } else {
+            app.tr_label(self.label(platform))
+        }
+    }
+
+    pub fn matches(self, held: Held, platform: Platform) -> bool {
+        match self {
+            Self::Control if platform == Platform::Mac => held.other && !held.primary && !held.alt && !held.shift,
+            Self::Control | Self::Primary => ModifierCombo::CTRL.matches(held, Match::Exact),
+            Self::PrimaryAtLeast => ModifierCombo::CTRL.matches(held, Match::AtLeast),
+            Self::Alt => ModifierCombo::ALT.matches(held, Match::Exact),
+            Self::Shift => ModifierCombo::SHIFT.matches(held, Match::Exact),
+            Self::Disabled => false,
+        }
     }
 }
 
@@ -320,7 +377,7 @@ pub enum Scope {
     SketchDraw,
     SketchDrag,
     Manipulator,
-    /// Feature dialogs with a live preview (Primary can roll the preview back for reselect).
+    /// Feature dialogs with a live preview (reselect uses the preview modifier preference).
     FeaturePreview,
     /// Point inputs that take snap points (Move, Align, Measure, joints): a held key keeps the
     /// shown points while the pointer moves.
@@ -377,14 +434,8 @@ const MANIPULATOR_BINDINGS: &[Binding] = &[Binding {
     rebindable: true,
 }];
 
-const FEATURE_PREVIEW_BINDINGS: &[Binding] = &[Binding {
-    // Hold Primary to roll the command preview back so obscured geometry can be (re)selected.
-    action: ModAction::PreviewReselect,
-    defaults: &[ModifierCombo::CTRL],
-    matching: Match::AtLeast,
-    trigger: Trigger::Live,
-    rebindable: true,
-}];
+const FEATURE_PREVIEW_BINDINGS: &[Binding] =
+    &[Binding { action: ModAction::PreviewReselect, defaults: &[], matching: Match::Exact, trigger: Trigger::Live, rebindable: true }];
 
 const POINT_PICK_BINDINGS: &[Binding] = &[Binding {
     // Hold Shift to keep the shown snap points while the pointer crosses other edges and faces.
@@ -438,12 +489,9 @@ pub fn selection_click(held: Held, shift_add_only: bool) -> (bool, bool) {
     (add, allow_toggle)
 }
 
-/// Whether preview reselect should apply: Primary chord matched and no manipulator drag under way.
-pub fn preview_reselect(held: Held, manipulator_dragging: bool) -> bool {
-    if manipulator_dragging {
-        return false;
-    }
-    resolve(&[Scope::FeaturePreview], None, held, Trigger::Live).contains(ModAction::PreviewReselect)
+/// Whether the configured preview modifier is held without a manipulator drag.
+pub fn preview_reselect(binding: PreviewModifier, held: Held, platform: Platform, manipulator_dragging: bool) -> bool {
+    !manipulator_dragging && binding.matches(held, platform)
 }
 
 /// Whether the held keys keep the shown snap points where they are (Shift by default).
@@ -513,6 +561,68 @@ pub fn resolve(context: &[Scope], tool: Option<&ToolModifiers>, held: Held, trig
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_modifier_uses_physical_control_and_leaves_screenshot_chords_alone() {
+        let control = Modifiers { ctrl: true, ..Default::default() };
+        let command = Modifiers { command: true, mac_cmd: true, ..Default::default() };
+        let screenshot = Modifiers { shift: true, ..command };
+        let binding = PreviewModifier::Control;
+        assert!(binding.matches(Held::for_preview(control, Platform::Mac), Platform::Mac));
+        for modifiers in [Modifiers::default(), command, screenshot] {
+            assert!(!binding.matches(Held::for_preview(modifiers, Platform::Mac), Platform::Mac));
+        }
+        assert!(binding.matches(Held::for_preview(control, Platform::Other), Platform::Other));
+        assert!(PreviewModifier::Primary.matches(Held::new(command, Platform::Mac), Platform::Mac));
+        assert!(!PreviewModifier::Primary.matches(Held::new(screenshot, Platform::Mac), Platform::Mac));
+        assert!(PreviewModifier::Alt.matches(Held::new(Modifiers::ALT, Platform::Mac), Platform::Mac));
+        assert!(PreviewModifier::Shift.matches(Held::new(Modifiers::SHIFT, Platform::Mac), Platform::Mac));
+        assert!(!PreviewModifier::Disabled.matches(Held::new(control, Platform::Mac), Platform::Mac));
+    }
+
+    #[test]
+    fn preview_modifier_default_preserves_legacy_primary_matching() {
+        assert_eq!(PreviewModifier::default(), PreviewModifier::PrimaryAtLeast);
+        assert_eq!(serde_json::to_value(PreviewModifier::PrimaryAtLeast).unwrap(), "primary_at_least");
+        assert_eq!(serde_json::from_value::<PreviewModifier>(serde_json::json!("primary_at_least")).unwrap(), PreviewModifier::PrimaryAtLeast);
+        for platform in [Platform::Mac, Platform::Other] {
+            for bits in 0..16 {
+                let modifiers = Modifiers {
+                    ctrl: bits & 1 != 0,
+                    shift: bits & 2 != 0,
+                    alt: bits & 4 != 0,
+                    command: bits & 8 != 0,
+                    mac_cmd: platform == Platform::Mac && bits & 8 != 0,
+                };
+                let held = Held::for_preview(modifiers, platform);
+                assert_eq!(
+                    PreviewModifier::default().matches(held, platform),
+                    ModifierCombo::CTRL.matches(Held::new(modifiers, platform), Match::AtLeast)
+                );
+                assert_eq!(PreviewModifier::Primary.matches(held, platform), ModifierCombo::CTRL.matches(held, Match::Exact));
+            }
+        }
+        let screenshot = Modifiers { command: true, mac_cmd: true, shift: true, ..Default::default() };
+        let held = Held::new(screenshot, Platform::Mac);
+        assert!(PreviewModifier::PrimaryAtLeast.matches(held, Platform::Mac));
+        assert!(PreviewModifier::default().matches(held, Platform::Mac));
+        assert!(!PreviewModifier::PrimaryAtLeast.matches(Held::new(Modifiers::CTRL, Platform::Mac), Platform::Mac));
+    }
+
+    #[test]
+    fn preview_modifier_primary_rejects_command_with_physical_control() {
+        let command = Modifiers { command: true, mac_cmd: true, ..Default::default() };
+        let command_control = Modifiers { ctrl: true, ..command };
+        let primary = Held::for_preview(command, Platform::Mac);
+        let combined = Held::for_preview(command_control, Platform::Mac);
+        assert!(PreviewModifier::Primary.matches(primary, Platform::Mac));
+        assert!(combined.other, "physical Control survives Command normalisation");
+        assert!(!PreviewModifier::Primary.matches(combined, Platform::Mac));
+        assert!(!PreviewModifier::Control.matches(combined, Platform::Mac));
+        assert!(PreviewModifier::default().matches(combined, Platform::Mac), "legacy matching permits extra modifiers");
+        assert!(!preview_reselect(PreviewModifier::Primary, combined, Platform::Mac, false));
+        assert!(!preview_reselect(PreviewModifier::default(), combined, Platform::Mac, true));
+    }
 
     fn mods(shift: bool, ctrl: bool, alt: bool) -> Modifiers {
         Modifiers { shift, ctrl, alt, command: ctrl, ..Default::default() }
@@ -594,10 +704,10 @@ mod tests {
     }
 
     #[test]
-    fn preview_reselect_resolves_from_feature_preview_scope() {
+    fn preview_reselect_has_no_hardcoded_primary_binding() {
         let primary = Held { primary: true, ..Default::default() };
         let set = resolve(&[Scope::FeaturePreview], None, primary, Trigger::Live);
-        assert!(set.contains(ModAction::PreviewReselect));
+        assert!(!set.contains(ModAction::PreviewReselect));
         let press = resolve(&[Scope::FeaturePreview], None, primary, Trigger::Press);
         assert!(!press.contains(ModAction::PreviewReselect));
     }
@@ -605,8 +715,10 @@ mod tests {
     #[test]
     fn preview_reselect_skips_while_manipulator_dragging() {
         let primary = Held { primary: true, ..Default::default() };
-        assert!(preview_reselect(primary, false));
-        assert!(!preview_reselect(primary, true), "Ctrl free-drag must not hide the preview");
+        for binding in PreviewModifier::CHOICES {
+            assert!(!preview_reselect(binding, primary, Platform::Other, true), "free-drag must not hide the preview");
+        }
+        assert!(preview_reselect(PreviewModifier::Control, primary, Platform::Other, false));
         set_manipulator_dragging(true);
         assert!(manipulator_dragging());
         set_manipulator_dragging(false);
