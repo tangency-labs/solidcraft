@@ -572,6 +572,7 @@ fn urdf_warns_when_placements_are_cut_off() {
             transform: solidcraft_doc::IDENTITY,
             grounded: false,
             bom_type: None,
+            expressed_moves: Vec::new(),
         });
     }
     // A component placed twice with a part nested in it, next to the deep chain: its copy is
@@ -588,6 +589,7 @@ fn urdf_warns_when_placements_are_cut_off() {
             transform: solidcraft_doc::IDENTITY,
             grounded: false,
             bom_type: None,
+            expressed_moves: Vec::new(),
         };
         doc.occurrences.insert(0, o);
     }

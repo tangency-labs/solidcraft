@@ -12,7 +12,7 @@ use solidcraft_geom::paper::annotate::{LANDING_PER_LINE_WIDTH, Leader};
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
 use solidcraft_sketch::PaperFonts;
 
-use crate::drawing_dimension_paper::{ARROW, OnPaper, TEXT_MM, Text, placed};
+use crate::drawing_dimension_paper::{ARROW, Layout, OnPaper, TEXT_MM, Text, placed};
 
 /// The gap between a note's text and its leader's end.
 const GAP_MM: f64 = 1.0;
@@ -35,7 +35,13 @@ pub fn note_group(note: &Note, text: &str, tips: &[Vec2], line_mm: f64, letterin
         }
     }
     items.extend(placed(text.runs, text.half, cap_mm, centre, Vec2::X));
-    OnPaper { group: Group { object: note.id, kind: ObjectKind::Note, items }, fonts: text.fonts, why, pending: text.pending }
+    OnPaper {
+        group: Group { object: note.id, kind: ObjectKind::Note, items },
+        fonts: text.fonts,
+        why,
+        pending: text.pending,
+        layout: Layout::default(),
+    }
 }
 
 /// A leader from `tip` to the text `half` in size round `centre`. From beside the text it ends with a

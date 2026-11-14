@@ -531,3 +531,40 @@ fn a_balloon_reads_a_components_list_below_it() {
     s.execute("drawing.open", &json!({"drawing": drawing})).unwrap();
     assert_eq!(read(&mut s, &balloon)["row_status"], json!("not_found"));
 }
+
+/// That `reply` reads ok with its arrow on `p`, to within what the joints' solve places parts to.
+fn ends_near(reply: &Value, p: [f64; 3]) {
+    let point: Vec<f64> = reply["point"].as_array().unwrap_or_else(|| panic!("no point: {reply}")).iter().map(|x| x.as_f64().unwrap()).collect();
+    assert!(reply["status"] == "ok" && point.iter().zip(p).all(|(a, b)| (a - b).abs() < 1e-6), "{reply}");
+}
+
+/// A balloon goes on a part of a view in a position of its own, and its arrow ends where that view
+/// draws the edge (#13048): on [`hinge_pair`](crate::drawing_scene::tests::hinge_pair)'s view with the
+/// leaf turned up 90° about the hinge line (y 20, z 0), the leaf's free bottom edge, (0..40, 40, 0) as
+/// designed, is at y 20 + 0, z 0 + 20: its middle at (20, 20, 20), not the design's (20, 40, 0).
+#[test]
+fn a_balloon_on_a_posed_view_ends_where_the_view_draws_its_edge() {
+    let (mut s, view, _) = crate::drawing_scene::tests::hinge_pair();
+    let leaf = s.doc.occurrences.iter().find(|o| o.name.starts_with("Leaf")).map(|o| o.id).unwrap();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"pose": [{"joint": "Hinge", "values": [90]}]}}));
+    let added = run(&mut s, ADD, json!({"view": ids::encode(view), "edge": {"point": [20, 40, 0], "path": [leaf]}, "at": [60, 40]}));
+    ends_near(&added, [20.0, 20.0, 20.0]);
+    ends_near(&run(&mut s, INSPECT, json!({"balloon": added["balloon"]})), [20.0, 20.0, 20.0]);
+}
+
+/// A balloon goes on a part of a view that draws an exploded view, and its arrow ends where that view
+/// draws the edge: on [`two_cubes`](crate::drawing_scene::tests::two_cubes) with the second moved 30 mm
+/// further along x, the second's bottom front edge, (30..40, 0, 0) assembled, has its middle at
+/// (35 + 30, 0, 0).
+#[test]
+fn a_balloon_on_an_exploded_view_ends_where_the_view_draws_its_edge() {
+    let (mut s, [_, second]) = crate::drawing_scene::tests::two_cubes();
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": second, "translate": [30, 0, 0]}]}));
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let p = json!({"sheet": sheet, "view": "front", "scale": "1:1", "position_mm": [150, 150], "exploded": "Apart"});
+    let view = run(&mut s, "drawing.view.base", p)["view"].clone();
+    let added = run(&mut s, ADD, json!({"view": view, "edge": {"point": [35, 0, 0], "path": [second]}, "at": [60, 40]}));
+    ends_near(&added, [65.0, 0.0, 0.0]);
+    ends_near(&run(&mut s, INSPECT, json!({"balloon": added["balloon"]})), [65.0, 0.0, 0.0]);
+}

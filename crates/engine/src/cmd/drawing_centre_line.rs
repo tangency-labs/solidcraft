@@ -43,7 +43,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&LINE_CONTRACT)
         .output(output_schema_for::<LineResult>)
-        .params("line: id → saved record and current endpoints or reference status, with a warning if its view no longer draws a part or draws its parts apart."),
+        .params("line: id → saved record and current endpoints or reference status, with a warning if its view no longer draws a part or draws another configuration or position."),
     CommandSpec::new(REMOVE, "Remove Center Line", crate::checked!("drawing.center_line.remove", remove))
         .icon("delete")
         .in_drawing()
@@ -58,7 +58,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let record = s.drawing(ADD)?.clone();
     let view = request.view.0;
     record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
-    crate::drawing_view::refuse_apart(&record, view, "centre lines", ADD)?;
+    crate::drawing_view::check_centre_view(&record, view, "centre lines", ADD)?;
     let resolve = |pick: &crate::schema::drawing_dimension::CornerParam| {
         s.doc.corner_reference(&s.model, &pick.pick, &pick.path).map_err(|e| bad(ADD, e.to_string()))
     };

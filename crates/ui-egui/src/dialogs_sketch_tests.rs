@@ -1024,6 +1024,7 @@ fn project_box_over_edges_and_curves_still_takes_only_the_edges_14927() {
 #[test]
 fn project_box_beside_the_model_still_takes_curves_of_other_sketches_14927() {
     let (mut h, first, _, lone) = project_chain_fixture_in(true);
+    h.call("ui.camera", json!({"target":[65,35,0],"distance":180}));
     h.step(&json!({"drag": [{"world": [55, 35, 0]}, {"world": [85, 45, 0]}]})).unwrap();
     assert_eq!(external_curves(&h, first), vec![lone], "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
 }

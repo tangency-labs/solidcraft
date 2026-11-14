@@ -276,7 +276,7 @@ never returns "no kind": a configuration the table does not name is a Setback.
 | **Turn** | two blends sharing a face, turning at a sharp unrounded side edge (a boss base, a pocket's floor or rim; also blends meeting G1 where a side edge between their faces is sharp, such as a ruled loft's side edge at its rim), or one closed blend meeting itself at an angle (a teardrop's tip) | **Mitre** (default) or **Swept** (option) |
 | **Ball** | three equal rounds of one convexity at a vertex of three faces, the vertex not set back | the corner ball's sphere |
 | **Chamfer** | every edge at the vertex chamfered, each chamfer a plane between two planes | **Mitre** (default): the chamfer planes run on to their common point; or **Facet** (option): one plane through the rails' crossings |
-| **Setback** | everything else: unequal radii, four or more blends, mixed convexity, any corner where G2 is selected, and three equal constant rounds of one convexity between planes at a vertex set back by a given distance (marked set back with no distance, such a vertex stays the N x N corner; a marked corner beside a curved face, or one of rounds the Setback does not take, such as variable rounds or edges of mixed convexity, keeps the N x N corner's uncertified patch) | the setback hole and its certified convex fill |
+| **Setback** | everything else: unequal radii, four or more blends, mixed convexity, any corner where G2 is selected, and three equal constant rounds of one convexity between planes at a vertex set back by a given distance (marked set back with no distance, such a vertex stays the N x N corner; a marked corner beside a curved face, or one of rounds the Setback does not take, such as variable rounds or G1 rounds of mixed convexity, keeps the N x N corner's uncertified patch) | the setback hole and its certified fill: convex at a corner of one convexity, a saddle with a certified normal at a mixed one |
 
 ![Plan views of the four corner kinds: mitre crease, swept torus, ball sphere patch, setback hole.](generic-blend/corner-events.svg)
 
@@ -345,9 +345,32 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
   a spring curve on its face stays on it at every smaller setback; this too is checked on
   cases, not proved. The size it names is always one the check itself found clear, so a
   failure of the assumption can only make it smaller than need be. No uncertified fill is ever
-  returned. At a convex edge meeting concave ones, any setback blend dips under the faces' planes
-  regardless of representation [44]; there the spring curve between adjacent convex and concave
-  blends is dropped and their trimlines meet.
+  returned.
+
+  **Mixed convexity** (convex and concave edges at one vertex, every edge rounded with the
+  curvature section between planes): the same 2n-sided hole and the same order-2 fill, with a
+  finite spring curve on every face, the faces between a convex and a concave round included
+  (owner, 2026-11-13). Each round removes a strip of each of its faces whatever its convexity,
+  so the concave and convex ends never touch and the spring keeps them apart. The fill is a
+  saddle there and cannot be certified convex; it carries the certificate any convexity mix
+  has instead:
+  - its normal is regular and to the material's side: on every patch `N . d` is certified one
+    sign, away from zero, by interval enclosure of its Bernstein form, d the outward normal of
+    the patch's round (an interior part: the corner's, the faces' outward normals summed), one
+    sign over the whole fill. This certificate replaces a sampled fold check for every order-2
+    fill;
+  - it stays off the faces' kept parts. A face between two rounds of one convexity keeps the
+    half-space test above. A face between a convex and a concave round has no side the fill
+    keeps to: at a convex edge meeting concave ones the fill dips under the faces' planes
+    regardless of representation [44], inside the rounds' strips. There every piece of the fill is
+    certified one of three ways: beside a spring half, its projected cross derivative points
+    into the hole; elsewhere, its projection lies on the vertex's side of the rails bounding the
+    kept part (both rails where the face's angle at the vertex is reflex); at the base point, on
+    the hole's side of the spring's tangent. A piece certified none of these ways after the
+    fixed number of halvings refuses the corner.
+
+  A mixed corner whose fill is G1 (no saddle certifies convex), or which lies beside a curved
+  face (its kept parts have no test yet), is not set back.
 
 **Corners in a radius law.** A law with a corner (r continuous, r′ not) is a corner of the union of
 balls. At a dip the corner ball's sphere zone between the two sides' touch circles lies on the

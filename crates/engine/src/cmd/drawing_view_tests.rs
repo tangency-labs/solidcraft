@@ -9,7 +9,7 @@ use solidcraft_geom::paper::NoPictures;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 
 use super::*;
-use crate::drawing_scene::tests::{add_a_pin, hinge_pair, two_cubes};
+use crate::drawing_scene::tests::{add_a_pin, configured_block, hinge_pair, two_cubes};
 use crate::schema::tests::conforms;
 
 const EPS: f64 = 1e-9;
@@ -2097,70 +2097,70 @@ fn a_projected_view_draws_its_parents_exploded_view_until_it_sets_its_own() {
     assert!((width(&mut s, above) - 70.0).abs() < 1e-6, "null follows the parent again");
 }
 
-/// Dimensions, balloons and notes on a view's model read the design's placements, so on an exploded
-/// view they would measure the parts assembled: they are refused there until they read what the
-/// view draws. An edit that would explode a view holding one, itself or through a view that follows
-/// it, is refused and changes nothing; one whose follower draws assembled goes ahead. A note on the
-/// view itself is no hindrance, unless a branch points at its model; on an exploded view, a note's
-/// branches can't be edited.
+/// Whether a dimension's `reply` reads ok, near `want`.
+fn near_value(reply: &Value, want: f64) -> bool {
+    reply["status"] == "ok" && reply["value"].as_f64().is_some_and(|v| (v - want).abs() < 1e-6)
+}
+
+/// Whether `reply` reads ok with its arrow ending on `p`.
+fn ends_near(reply: &Value, p: [f64; 3]) -> bool {
+    let point = reply["point"].as_array().map(|p| p.iter().filter_map(Value::as_f64).collect::<Vec<_>>()).unwrap_or_default();
+    reply["status"] == "ok" && point.len() == 3 && point.iter().zip(p).all(|(a, b)| (a - b).abs() < 1e-6)
+}
+
+/// Dimensions, balloons and notes on a view's model read where the view draws its parts (#13048), so a
+/// view holding them can be exploded, itself or through a view that follows it, and they follow it. From
+/// the first cube's left corner to the second's right one reads 40 assembled and 40 + 30 = 70 with the
+/// second moved out; a balloon and a note on the second's bottom front edge end on its middle, (35, 0, 0)
+/// assembled and (65, 0, 0) exploded. New ones go on the exploded view, and a note's branches can be
+/// edited there.
 #[test]
-fn an_exploded_view_refuses_what_would_measure_its_parts_assembled() {
-    let (mut s, view, [first, _], apart) = exploded_pair();
+fn an_exploded_view_takes_what_measures_its_parts_where_it_draws_them() {
+    let (mut s, view, [first, second], apart) = exploded_pair();
     let on_view = |view: u64| ids::encode(view);
-    let unchanged = |s: &mut Session, view: u64, set: Value, says: &str| {
-        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
-        let e = edit_refused(s, view, set);
-        assert!(e.contains(says), "{e}");
-        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
-    };
-    let blocked = "not supported yet: an exploded view with dimensions, balloons or notes on its model";
-
-    run(&mut s, "drawing.dimension.add", json!({"view": on_view(view), "kind": {"length": {"edge": first_cubes_edge(first)}}}));
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    run(&mut s, "edit.undo", json!({}));
-    run(&mut s, "drawing.balloon.add", json!({"view": on_view(view), "edge": first_cubes_edge(first), "at": [60, 40]}));
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    run(&mut s, "edit.undo", json!({}));
-    let note = json!({"anchor": {"edge": {"view": on_view(view), "edge": first_cubes_edge(first)}}, "at": [60, 40], "content": "Deburr"});
-    run(&mut s, "drawing.note.add", note);
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    run(&mut s, "edit.undo", json!({}));
-    let branched = json!({"anchor": {"view": on_view(view)}, "at": [60, 40], "content": "Deburr", "branches": [{"edge": first_cubes_edge(first)}]});
+    let across =
+        json!({"linear": {"a": {"point": [0, 0, 0], "path": [first]}, "b": {"point": [40, 0, 0], "path": [second]}, "direction": "horizontal"}});
+    let edge = json!({"point": [35, 0, 0], "path": [second]});
+    let dimension = run(&mut s, "drawing.dimension.add", json!({"view": on_view(view), "kind": across}))["dimension"].clone();
+    let balloon = run(&mut s, "drawing.balloon.add", json!({"view": on_view(view), "edge": edge, "at": [60, 40]}))["balloon"].clone();
+    let note = json!({"anchor": {"edge": {"view": on_view(view), "edge": edge}}, "at": [60, 40], "content": "Deburr"});
+    let note = run(&mut s, "drawing.note.add", note)["note"].clone();
+    let branched = json!({"anchor": {"view": on_view(view)}, "at": [60, -40], "content": "Both", "branches": [{"edge": edge}]});
     run(&mut s, "drawing.note.add", branched.clone());
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    run(&mut s, "edit.undo", json!({}));
-    let plain = run(&mut s, "drawing.note.add", json!({"anchor": {"view": on_view(view)}, "at": [60, 40], "content": "Exploded"}))["note"].clone();
+    assert!(near_value(&run(&mut s, "drawing.dimension.inspect", json!({"dimension": dimension})), 40.0));
+
     edit_view(&mut s, view, json!({"exploded": apart}));
-    assert!((width(&mut s, view) - 70.0).abs() < 1e-6, "a note on the view isn't on its model");
+    assert!((width(&mut s, view) - 70.0).abs() < 1e-6);
+    let read = run(&mut s, "drawing.dimension.inspect", json!({"dimension": dimension}));
+    assert!(near_value(&read, 70.0), "{read}");
+    let read = run(&mut s, "drawing.balloon.inspect", json!({"balloon": balloon}));
+    assert!(ends_near(&read, [65.0, 0.0, 0.0]), "{read}");
+    let read = run(&mut s, "drawing.note.inspect", json!({"note": note}));
+    assert!(ends_near(&read, [65.0, 0.0, 0.0]), "{read}");
 
-    // New ones on an exploded view.
-    let e = s
-        .execute("drawing.dimension.add", &json!({"view": on_view(view), "kind": {"length": {"edge": first_cubes_edge(first)}}}))
-        .unwrap_err()
-        .to_string();
-    assert!(e.contains("not supported yet: dimensions on an exploded view"), "{e}");
-    let e =
-        s.execute("drawing.balloon.add", &json!({"view": on_view(view), "edge": first_cubes_edge(first), "at": [60, 40]})).unwrap_err().to_string();
-    assert!(e.contains("not supported yet: balloons on an exploded view"), "{e}");
-    let note = json!({"anchor": {"edge": {"view": on_view(view), "edge": first_cubes_edge(first)}}, "at": [60, 40], "content": "Deburr"});
-    let e = s.execute("drawing.note.add", &note).unwrap_err().to_string();
-    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
-    let e = s.execute("drawing.note.add", &branched).unwrap_err().to_string();
-    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
-    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    // New ones on the exploded view.
+    let length = run(&mut s, "drawing.dimension.add", json!({"view": on_view(view), "kind": {"length": {"edge": edge}}}));
+    assert!(near_value(&length, 10.0), "{length}");
+    let added = run(&mut s, "drawing.balloon.add", json!({"view": on_view(view), "edge": edge, "at": [-60, 40]}));
+    assert!(ends_near(&added, [65.0, 0.0, 0.0]), "{added}");
+    run(
+        &mut s,
+        "drawing.note.add",
+        json!({"anchor": {"edge": {"view": on_view(view), "edge": first_cubes_edge(first)}}, "at": [60, 40], "content": "A"}),
+    );
+    run(&mut s, "drawing.note.add", branched);
+    let plain = run(&mut s, "drawing.note.add", json!({"anchor": {"view": on_view(view)}, "at": [0, -40], "content": "Exploded"}))["note"].clone();
     let add = json!({"note": plain, "set": {"branches": {"remove": [], "add": [{"edge": first_cubes_edge(first)}]}}});
-    let e = s.execute("drawing.note.edit", &add).unwrap_err().to_string();
-    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
-    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    assert_eq!(run(&mut s, "drawing.note.edit", add)["changed"], json!(["branches"]));
 
-    // Through a follower: its dimension blocks its parent's edit, until it draws assembled itself.
+    // Through a follower: the view above, holding a dimension of its own, follows its parent's explode.
     edit_view(&mut s, view, json!({"exploded": "assembled"}));
     let (_, above) = create(&mut s, PROJECTED, json!({"parent": on_view(view), "side": "above", "place": {"at": [150, 250]}}));
-    run(&mut s, "drawing.dimension.add", json!({"view": on_view(above), "kind": {"length": {"edge": first_cubes_edge(first)}}}));
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    let on_above = run(&mut s, "drawing.dimension.add", json!({"view": on_view(above), "kind": across}))["dimension"].clone();
+    assert!(near_value(&run(&mut s, "drawing.dimension.inspect", json!({"dimension": on_above})), 40.0));
     edit_view(&mut s, view, json!({"exploded": apart}));
-    assert!((width(&mut s, view) - 70.0).abs() < 1e-6 && (width(&mut s, above) - 40.0).abs() < 1e-6);
+    assert!((width(&mut s, view) - 70.0).abs() < 1e-6 && (width(&mut s, above) - 70.0).abs() < 1e-6);
+    assert!(near_value(&run(&mut s, "drawing.dimension.inspect", json!({"dimension": on_above})), 70.0));
 }
 
 /// A projected view's centre annotation blocks its parent from exploding until the follower
@@ -2308,6 +2308,262 @@ fn hostile_exploded_choices_are_refused() {
         assert!(e.contains(says), "{choice}: {e}");
         assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps), "{choice}");
     }
+}
+
+/// [`configured_block`], whose length is parameter `L` (100 mm), with configuration rows Default (as
+/// it is) and Long (`L` = 120 mm), drawn as [`three_views`]: the session, the views and Long's row
+/// id. The front view, at 1:2, is `L` / 2 wide on paper.
+fn configured_views() -> (Session, [u64; 3], u64) {
+    let (s, long) = configured_block();
+    let (s, views) = three_views_of(s);
+    (s, views, long)
+}
+
+/// Runs `id` on the design with the drawing open closed, as the model can only be changed then, and
+/// opens the drawing again.
+fn in_the_design(s: &mut Session, id: &str, p: Value) {
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(s, "drawing.close", json!({}));
+    run(s, id, p);
+    run(s, "drawing.open", json!({"drawing": drawing}));
+}
+
+/// How view `view` of the drawing open stands in its sheet's scene: its status, and why (null when it
+/// says nothing).
+fn scene_entry(s: &mut Session, view: u64) -> (Value, Value) {
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let scene = run(s, "drawing.scene", json!({"sheet": sheet}));
+    let entry = scene["views"].as_array().and_then(|views| views.iter().find(|v| v["view"] == json!(ids::encode(view)))).cloned();
+    entry.map(|v| (v["status"].clone(), v.get("reason").cloned().unwrap_or(Value::Null))).unwrap_or_default()
+}
+
+/// The words a view of a row the design no longer has says.
+const NO_ROW: &str = "the configuration it draws is no longer in the design";
+
+/// A view of a row of the configuration table draws the row while the design stays as it is: the
+/// front view of Long is 60 mm wide at 1:2 beside a view of the active configuration at 50, and
+/// drawing it changes nothing in the design. Activating Long in the design leaves the Long view as it
+/// was, and the view of the active configuration follows (#13048).
+#[test]
+fn a_view_of_a_row_draws_it_and_leaves_the_design() {
+    let (mut s, [front, ..], _) = configured_views();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let p = json!({"sheet": sheet, "view": "front", "scale": "1:2", "position_mm": [200, 80], "configuration": "active"});
+    let (_, active) = create(&mut s, BASE, p);
+    let design = |s: &Session| (s.doc.params.clone(), s.doc.configs.clone(), s.doc.features.clone());
+    let before = design(&s);
+    let steps = s.undo.len();
+    assert_eq!(edit_view(&mut s, front, json!({"configuration": "Long"}))["changed"], json!(["configuration"]));
+    assert_eq!(s.undo.len(), steps + 1);
+    assert!((width(&mut s, front) - 60.0).abs() < 1e-6 && (width(&mut s, active) - 50.0).abs() < 1e-6);
+    run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+    assert!(design(&s) == before && s.pending_moves.is_empty(), "the design is as it was");
+    in_the_design(&mut s, "config.activate", json!({"row": "Long"}));
+    assert!((width(&mut s, front) - 60.0).abs() < 1e-6 && (width(&mut s, active) - 60.0).abs() < 1e-6);
+}
+
+/// Deleting a row never refuses the drawing: a view that drew it is a placeholder that says why, and
+/// so are the views that follow it; its choice stays, for an undo, and undoing the delete draws the row
+/// again, as the row comes back with its id (#13048).
+#[test]
+fn a_deleted_configuration_row_leaves_the_views_that_named_it() {
+    let (mut s, [front, right, top], long) = configured_views();
+    edit_view(&mut s, front, json!({"configuration": "Long"}));
+    in_the_design(&mut s, "config.row", json!({"name": "Long", "delete": true}));
+    let gone = inspect_view(&mut s, front);
+    assert_eq!(
+        (gone["extents"]["status"].as_str(), gone["extents"]["provenance"].as_str()),
+        (Some("placeholder"), Some("no_configuration")),
+        "{gone}"
+    );
+    assert_eq!(gone["settings"]["configuration"]["value"], json!({"row": long}), "the choice stays, for an undo: {gone}");
+    assert_eq!(gone["settings"]["configuration"].get("drawn"), Some(&Value::Null), "it draws no row: {gone}");
+    for view in [front, right, top] {
+        assert_eq!(scene_entry(&mut s, view), (json!("placeholder"), json!(NO_ROW)), "{view}");
+    }
+    let d = s.drawing("test").unwrap();
+    assert_eq!(&Drawing::from_json(&d.to_json().unwrap()).unwrap(), &**d);
+    in_the_design(&mut s, "edit.undo", json!({}));
+    assert!((width(&mut s, front) - 60.0).abs() < 1e-6);
+}
+
+/// A row added again under a deleted row's name is another row, with an id of its own: the view of the
+/// deleted one stays its placeholder until it is set to the new one by name, which saves its id.
+#[test]
+fn a_row_added_again_by_name_is_another_row() {
+    let (mut s, [front, ..], long) = configured_views();
+    edit_view(&mut s, front, json!({"configuration": "Long"}));
+    in_the_design(&mut s, "config.row", json!({"name": "Long", "delete": true}));
+    in_the_design(&mut s, "config.row", json!({"name": "Long", "values": {"L": "120 mm"}}));
+    let again = s.doc.configs.rows.iter().find(|row| row.name == "Long").map(|row| row.id).unwrap();
+    assert_ne!(again, long);
+    assert_eq!(inspect_view(&mut s, front)["extents"]["provenance"], json!("no_configuration"));
+    edit_view(&mut s, front, json!({"configuration": "Long"}));
+    assert_eq!(saved(&s, front).settings.configuration, Some(ViewConfiguration::Row(again)));
+    assert!((width(&mut s, front) - 60.0).abs() < 1e-6);
+}
+
+/// A row that can't be put on the design (here a file whose Long cell is no expression) is never a
+/// reason to refuse the file: the design and the drawing read, and the view is a placeholder that says
+/// why, a different reason from a row that is gone (#13048).
+#[test]
+fn a_row_that_cant_be_put_on_the_design_is_a_placeholder() {
+    let (mut s, [front, ..], long) = configured_views();
+    edit_view(&mut s, front, json!({"configuration": "Long"}));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    let row = s.doc_mut().configs.rows.iter_mut().find(|row| row.id == long).unwrap();
+    row.cells[0] = "1/".into();
+    assert!(solidcraft_doc::format::read(&s.doc.to_json()).is_ok());
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(inspect_view(&mut s, front)["extents"]["provenance"], json!("not_configured"));
+    assert_eq!(scene_entry(&mut s, front), (json!("placeholder"), json!("its configuration can't be applied to the design")));
+    let d = s.drawing("test").unwrap();
+    assert_eq!(&Drawing::from_json(&d.to_json().unwrap()).unwrap(), &**d);
+}
+
+/// A view of a row whose features fail to build draws what the row builds, as activating it would, and
+/// says so: its scene reason names the row and counts the features that fail there and not in the
+/// design, and inspect lists them as `config.activate` does. A view of the active row says nothing
+/// (#13048).
+#[test]
+fn a_view_of_a_row_that_rebuilds_with_errors_draws_what_it_builds_and_says_so() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "100 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "R", "expression": "5 mm"}));
+    run(&mut s, "solid.box", json!({"length": "L", "width": 50, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.sphere", json!({"radius": "R"}));
+    let sphere = s.doc.features.last().map(|f| f.name.clone()).unwrap();
+    run(&mut s, "config.configure", json!({"params": ["L", "R"]}));
+    run(&mut s, "config.row", json!({"name": "Broken", "values": {"L": "120 mm", "R": "-1 mm"}}));
+    let broken = s.doc.configs.rows.iter().find(|row| row.name == "Broken").map(|row| row.id).unwrap();
+    let (mut s, [front, _, top]) = three_views_of(s);
+    edit_view(&mut s, front, json!({"configuration": "Broken"}));
+    let configuration = &inspect_view(&mut s, front)["settings"]["configuration"];
+    assert_eq!(configuration["drawn"], json!({"id": broken, "name": "Broken"}), "{configuration}");
+    let errors = configuration["errors"].as_array().cloned().unwrap_or_default();
+    assert!(errors.len() == 1 && errors[0].as_str().is_some_and(|e| e.starts_with(&format!("{sphere}: "))), "{configuration}");
+    assert!((width(&mut s, front) - 60.0).abs() < 1e-6, "the block draws at the row's length");
+    let says = json!("its configuration `Broken` rebuilds with 1 failing feature");
+    assert_eq!(scene_entry(&mut s, front), (json!("drawn"), says.clone()));
+    assert_eq!(scene_entry(&mut s, top), (json!("drawn"), says), "a view that follows it says it too");
+    edit_view(&mut s, front, json!({"configuration": "active"}));
+    let configuration = &inspect_view(&mut s, front)["settings"]["configuration"];
+    assert_eq!((configuration["drawn"]["name"].as_str(), configuration.get("errors")), (Some("Default"), None), "{configuration}");
+    assert_eq!(scene_entry(&mut s, front), (json!("drawn"), Value::Null));
+    // Edited by hand, the design is in none of its rows.
+    in_the_design(&mut s, "parameters.change", json!({"name": "L", "expression": "110 mm"}));
+    assert_eq!(inspect_view(&mut s, front)["settings"]["configuration"].get("drawn"), Some(&Value::Null));
+}
+
+/// A shaded view's pictures are rendered from the design as it is, so a view of a configuration of its
+/// own can't be shaded yet: refused, as on an exploded view, and nothing changes. Its dimensions are
+/// read where it draws (#13048): the front bottom edge measures the Long row's 120 mm, not the
+/// design's 100.
+#[test]
+fn a_view_of_a_configuration_of_its_own_is_never_shaded_and_is_dimensioned_where_it_draws() {
+    let (mut s, [front, ..], _) = configured_views();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let shaded = "not supported yet: a shaded view of a configuration of its own";
+    let e = create_refused(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "visual_style": "shaded", "configuration": "Long"}));
+    assert!(e.contains(shaded), "{e}");
+    edit_view(&mut s, front, json!({"visual_style": "shaded"}));
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    assert!(edit_refused(&mut s, front, json!({"configuration": "Long"})).contains(shaded));
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    edit_view(&mut s, front, json!({"visual_style": "visible", "configuration": "Long"}));
+    let edge = json!({"view": ids::encode(front), "kind": {"length": {"edge": {"point": [50, 0, 0], "path": []}}}});
+    let added = run(&mut s, "drawing.dimension.add", edge);
+    assert!(added["value"].as_f64().is_some_and(|value| (value - 120.0).abs() < 1e-9), "{added}");
+}
+
+/// A view takes its configuration by a row's name or id, or "active", and saves the row's id, so a
+/// rename leaves it on its row. A projected view follows its parent's until it sets its own, and
+/// inspect says where each comes from; `null` follows the parent again. Choosing what it already
+/// draws changes nothing.
+#[test]
+fn a_view_takes_a_configuration_by_name_or_id_and_saves_the_rows_id() {
+    let (mut s, [front, right, top], long) = configured_views();
+    let steps = s.undo.len();
+    let edited = edit_view(&mut s, front, json!({"configuration": "Long"}));
+    assert_eq!(edited["changed"], json!(["configuration"]), "{edited}");
+    let mut followers: Vec<Value> = edited["followers"].as_array().cloned().unwrap_or_default();
+    followers.sort_by_key(|f| f.to_string());
+    let mut expected = vec![json!(ids::encode(right)), json!(ids::encode(top))];
+    expected.sort_by_key(|f| f.to_string());
+    assert_eq!(followers, expected, "{edited}");
+    assert_eq!(s.undo.len(), steps + 1);
+    assert_eq!(saved(&s, front).settings.configuration, Some(ViewConfiguration::Row(long)));
+    // What each draws: the row by its id and name, or the design's active row while it matches it.
+    let followed = |name: &str| {
+        let drawn = json!({"id": long, "name": name});
+        json!({"value": {"row": long}, "from": "parent", "parent": ids::encode(front), "set": null, "drawn": drawn})
+    };
+    let default = s.doc.configs.rows.iter().find(|row| row.name == "Default").map(|row| row.id).unwrap();
+    let active = json!({"id": default, "name": "Default"});
+    assert_eq!(inspect_view(&mut s, top)["settings"]["configuration"], followed("Long"));
+    // Renamed in the design, the view stays on its row.
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "config.row", json!({"name": "Long", "rename": "Longer"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(saved(&s, front).settings.configuration, Some(ViewConfiguration::Row(long)));
+    assert!((width(&mut s, front) - 60.0).abs() < 1e-6, "it draws the renamed row");
+    // By id it is the same row: nothing changes and no step is made.
+    let steps = s.undo.len();
+    assert_eq!(edit_view(&mut s, front, json!({"configuration": long}))["changed"], json!([]));
+    assert_eq!(s.undo.len(), steps);
+    // "active" is a choice of its own under a parent that draws another row.
+    edit_view(&mut s, right, json!({"configuration": "ACTIVE"}));
+    let own = json!({"value": "active", "from": "parent", "parent": ids::encode(right), "set": null, "drawn": active.clone()});
+    assert_eq!(inspect_view(&mut s, top)["settings"]["configuration"], own);
+    edit_view(&mut s, right, json!({"configuration": null}));
+    assert_eq!(inspect_view(&mut s, top)["settings"]["configuration"], followed("Longer"), "null follows the parent again");
+    edit_view(&mut s, front, json!({"configuration": null}));
+    let base = json!({"value": "active", "from": "default", "set": null, "drawn": active});
+    assert_eq!(inspect_view(&mut s, front)["settings"]["configuration"], base);
+    // A base view made with a row saves its id.
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, made) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:2", "position_mm": [200, 80], "configuration": "Longer"}));
+    assert_eq!(saved(&s, made).settings.configuration, Some(ViewConfiguration::Row(long)));
+}
+
+/// Making or editing a view refuses a configuration the design hasn't got, or that isn't one, with its
+/// reason, and leaves the drawing and the undo steps as they were. A row is named by its name (text)
+/// or its id (a whole number), never by the form a view saves it in.
+#[test]
+fn hostile_configuration_choices_are_refused() {
+    let (mut s, [front, ..], long) = configured_views();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let cases = [
+        (json!("Tall"), "no configuration `Tall`"),
+        (json!(long.to_string()), "no configuration"),
+        (json!(999_999), "no configuration `999999`"),
+        (json!(-1), "configuration"),
+        (json!(1.5), "configuration"),
+        (json!(1e300), "configuration"),
+        (json!([]), "configuration"),
+        (json!({"row": long}), "configuration"),
+        (json!(""), "no configuration"),
+        (json!("x".repeat(100_000)), "no configuration"),
+    ];
+    for (choice, says) in cases {
+        let e = create_refused(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "configuration": choice}));
+        assert!(e.contains(says), "{choice}: {}", e.chars().take(200).collect::<String>());
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = edit_refused(&mut s, front, json!({"configuration": choice}));
+        assert!(e.contains(says), "{choice}: {}", e.chars().take(200).collect::<String>());
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps), "{choice}");
+    }
+    // A design with no configuration table has no row to name.
+    let (mut plain, [view, ..]) = three_views();
+    assert!(edit_refused(&mut plain, view, json!({"configuration": "Long"})).contains("no configuration `Long`"));
+    edit_view(&mut plain, view, json!({"configuration": "active"}));
+    // A deleted row is refused by its id, while the view that saved it still reads.
+    edit_view(&mut s, front, json!({"configuration": long}));
+    in_the_design(&mut s, "config.row", json!({"name": "Long", "delete": true}));
+    assert!(edit_refused(&mut s, front, json!({"configuration": long})).contains(&format!("no configuration `{long}`")));
+    assert_eq!(saved(&s, front).settings.configuration, Some(ViewConfiguration::Row(long)));
 }
 
 /// A view's height on its sheet: [`hinge_pair`]'s top view is 40 mm with the leaf flat, 20 mm with it
@@ -2620,25 +2876,37 @@ fn a_study_holds_only_the_values_it_keys_and_a_closed_loop_moves_the_rest() {
     assert!((angle - want[0].to_degrees()).abs() < 1e-6 && (slide - want[1]).abs() < 1e-6, "drawn {angle}°, {slide} mm; play {want:?}: {pose}");
 }
 
-/// Dimensions on a posed view would measure the design's placement: they are refused there, by the
-/// rule an exploded view follows, and an edit that would pose a view holding one is refused.
+/// Dimensions on a posed view read where it draws its parts (#13048), by the rule an exploded view
+/// follows: a view holding one can be posed, and the dimension follows it, and new ones go on a posed
+/// view. The plate's far top corner to the leaf's free top corner reads 40 with the leaf flat and 18
+/// with it turned up 90° about the hinge line (y 20, z 0): (0, 40, 2) goes to (0, 20 - 2, 20). The
+/// plate's top front edge, which doesn't move, reads 40 in both. A shaded posed view is still refused:
+/// its pictures are rendered from the design's placement.
 #[test]
-fn a_posed_view_refuses_what_would_measure_it_in_the_designs_place() {
+fn a_posed_view_takes_what_measures_it_where_it_draws_it() {
     let (mut s, view, _) = hinge_pair();
     let (_, other) = {
         let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
         create(&mut s, BASE, json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [150, 250]}))
     };
+    let leaf = s.doc.occurrences.iter().find(|o| o.name.starts_with("Leaf")).map(|o| o.id).unwrap();
+    let across = |view: u64| {
+        let kind = json!({"linear": {"a": [0, 0, 2], "b": {"point": [0, 40, 2], "path": [leaf]}, "direction": "vertical"}});
+        json!({"view": ids::encode(view), "kind": kind})
+    };
     // The plate's top front edge.
     let edge = |view: u64| json!({"view": ids::encode(view), "kind": {"length": {"edge": {"point": [20, 0, 2], "path": []}}}});
-    run(&mut s, "drawing.dimension.add", edge(other));
-    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
-    let e = edit_refused(&mut s, other, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
-    assert!(e.contains("dimensions, balloons or notes on its model"), "{e}");
-    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    let free = run(&mut s, "drawing.dimension.add", across(other))["dimension"].clone();
+    let front = run(&mut s, "drawing.dimension.add", edge(other))["dimension"].clone();
+    let read = |s: &mut Session, d: &Value| run(s, "drawing.dimension.inspect", json!({"dimension": d}));
+    assert!(near_value(&read(&mut s, &free), 40.0));
+    edit_view(&mut s, other, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
+    assert!(near_value(&read(&mut s, &free), 18.0) && near_value(&read(&mut s, &front), 40.0));
     edit_view(&mut s, view, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
-    let e = s.execute("drawing.dimension.add", &edge(view)).err().map(|e| e.to_string()).unwrap_or_default();
-    assert!(e.contains("not supported yet") && e.contains("a position of its own"), "{e}");
+    assert!(near_value(&run(&mut s, "drawing.dimension.add", across(view)), 18.0));
+    assert!(near_value(&run(&mut s, "drawing.dimension.add", edge(view)), 40.0));
+    let e = edit_refused(&mut s, other, json!({"visual_style": "shaded"}));
+    assert!(e.contains("not supported yet: a shaded view in a position of its own"), "{e}");
 }
 
 /// A view exploded from a position: the leaf turned up, then moved out 30 mm along Y. Exploded alone,

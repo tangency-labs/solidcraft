@@ -56,7 +56,8 @@ pub enum Error {
     /// A blend's edges meet at a vertex of a kind no blend corner handles yet.
     CornerUnsupported,
     /// The kernel does not set back corner `corner` (an index into the call's corners): it sets
-    /// back a corner only where every edge meeting it is blended, all convex or all concave.
+    /// back a corner only where every edge meeting it is blended, all convex or all concave, or
+    /// of mixed convexity with curvature-continuous rounds between planes.
     CornerRefused {
         /// The corner's index among the call's corners.
         corner: usize,
@@ -92,6 +93,10 @@ pub enum Error {
     /// The kernel reported success but the operation did nothing: a blend that made no face, a
     /// face move or draft that moved no face, an extension shorter than the side can carry.
     NoEffect,
+    /// Curves on a face that do not divide it into regions ([`crate::trim`]): an open curve
+    /// whose ends reach neither the face's boundary nor another curve leaves a slit, and curves
+    /// off the face cut nothing.
+    CurveDoesNotCut,
     /// The answer is not exact in the input's geometry.
     NotExact,
     /// A planar profile the kernel refuses, and why (`solidcore::prism::profile::check_regions`).
@@ -313,6 +318,19 @@ pub enum Error {
         face: Option<usize>,
         /// Why.
         why: OffsetRefusal,
+    },
+    /// A fillet or chamfer the kernel fails with a reason it states in words (its
+    /// `BlendFailure`, which replaced a bare status): the kernel's class of the failure, the
+    /// status it stands for, and the kernel's statement of it. Transitional, as
+    /// [`OffsetRefusal::Phrase`] is: each reason gets a type of its own once the kernel gives
+    /// it a cause of its own.
+    BlendFailed {
+        /// The kernel's class of the failure.
+        class: solidcore::error::ErrorKind,
+        /// The status the failure stands for (1001 `SM_ERR`, ...).
+        status: i32,
+        /// The kernel's statement of it.
+        phrase: String,
     },
 }
 
@@ -586,6 +604,7 @@ impl std::fmt::Display for Error {
                 "the room runs out at {at} along the edge (largest radius there {largest})"
             ),
             Error::NoEffect => write!(f, "the operation did nothing"),
+            Error::CurveDoesNotCut => write!(f, "the curves do not divide the face into regions"),
             Error::NotExact => write!(f, "not exact in the input's geometry"),
             Error::Profile(r) => write!(
                 f,
@@ -704,6 +723,9 @@ impl std::fmt::Display for Error {
                 Some(face) => write!(f, "the offset is refused at face {face}: {why}"),
                 None => write!(f, "the offset is refused: {why}"),
             },
+            Error::BlendFailed { status, phrase, .. } => {
+                write!(f, "the blend failed (status {status}): {phrase}")
+            }
         }
     }
 }

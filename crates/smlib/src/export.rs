@@ -435,6 +435,43 @@ impl Nurbs {
     }
 }
 
+/// The points of edge `e`'s start and end vertices, in SMLib's direction along it.
+fn edge_ends(flat: View, e: usize) -> Res<[[f64; 3]; 2]> {
+    let ends = flat.i(EDGE_VERTICES);
+    let point = |k: usize| -> Res<[f64; 3]> {
+        let v = usize::try_from(at(ends, k, "edge vertices")?).map_err(|_| invalid("edge vertex"))?;
+        v3(flat.f(VERTEX_POSITION), v, "edge vertex")
+    };
+    Ok([point(2 * e)?, point(2 * e + 1)?])
+}
+
+/// `SM_INFINITE_PARAMETER`: the parameter range of an unbounded line.
+const INFINITE_PARAMETER: f64 = 1_234_567.0;
+
+/// A NURBS edge on an unbounded line given as a B-spline (degree 1, two control points of one
+/// weight, knots at [`INFINITE_PARAMETER`]): the line through the edge's own vertices, its
+/// interval, and the [`TrimMap`] that carries SMLib's parameter onto it (affine, as the
+/// B-spline's is). SMLib's mirror gives every line so (upstream's `CreateMirrorCurve` over the
+/// line's whole range): control points that far out lose the edge's precision and, once the edge
+/// is longer than 810 mm, pass the 1e9 the flat arrays take back, so the mirrored body could not
+/// be measured or used again. None for anything else: a B-spline with knots of its own (a round's
+/// straight piece) stays as SMLib holds it.
+fn straight_piece(n: &Nurbs, r: [f64; 2], ends: [[f64; 3]; 2]) -> Option<(b::Curve, [f64; 2], [f64; 2])> {
+    let ([k0, k1], [w0, w1]) = match (n.knots.as_slice(), n.points.len(), n.weights.as_slice()) {
+        ([a, b, c, d], 2, [w0, w1]) if a == b && c == d => ([*a, *c], [*w0, *w1]),
+        _ => return None,
+    };
+    let (lo, hi) = (r[0].min(r[1]), r[0].max(r[1]));
+    if w0 != w1 || k0 != -INFINITE_PARAMETER || k1 != INFINITE_PARAMETER || !(k0 < lo && lo < hi && hi < k1) || ends[0] == ends[1] {
+        return None;
+    }
+    // The vertex at `lo` starts the line: SMLib's start vertex sits at r[0].
+    let (start, end) = if r[0] <= r[1] { (ends[0], ends[1]) } else { (ends[1], ends[0]) };
+    let scale = 1.0 / (hi - lo);
+    let on = |t: f64| (t - lo) * scale;
+    Some((b::Curve::Line { start, end }, [on(r[0]), on(r[1])], [scale, -lo * scale]))
+}
+
 /// How a UV trim's parameter (SMLib's edge parameter, as the arrays carry it) becomes the edge
 /// record's: t ↦ scale · t + offset, scale > 0. None where the record's parameter is not an
 /// affine image of SMLib's (a circle or ellipse, whose angle is not its NURBS parameter).
@@ -514,14 +551,20 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, Option<b::Curve>, [
                 }
             }
             CURVE_NURBS => {
-                let c = next_nurbs()?.record();
-                // A NURBS edge stays the NURBS SMLib holds, its trims on its own parameter: SMLib
-                // gives lines, circles and ellipses as their own kinds, and nothing is recognised here.
-                // SMLib's interval may start or end a rounding past its knots (a variable round's
-                // end trimmed by a cylinder, ladder 07-fillets/012: 7e-15 before the first knot).
-                kept += 1;
-                let r = onto(r, c.natural());
-                (c, None, r, Some([1.0, 0.0]))
+                let n = next_nurbs()?;
+                if let Some((line, r, map)) = straight_piece(&n, r, edge_ends(flat, e)?) {
+                    (line, None, r, Some(map))
+                } else {
+                    let c = n.record();
+                    // A NURBS edge stays the NURBS SMLib holds, its trims on its own parameter: SMLib
+                    // gives lines, circles and ellipses as their own kinds, and nothing else is recognised
+                    // here (a piece of a straight B-spline is a line, [`straight_piece`]).
+                    // SMLib's interval may start or end a rounding past its knots (a variable round's
+                    // end trimmed by a cylinder, ladder 07-fillets/012: 7e-15 before the first knot).
+                    kept += 1;
+                    let r = onto(r, c.natural());
+                    (c, None, r, Some([1.0, 0.0]))
+                }
             }
             other => return Err(unsupported(format!("SMLib curve kind {other}"))),
         });

@@ -107,12 +107,8 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
         };
         Some(finding(FindingKind::Failed, sheet, object(kind, failure.object), failure.reason))
     }));
-    // Out of date as a deferred drawing shows it as it last was, or held back by a view that draws its
-    // parts apart, which no update draws.
-    let held = crate::drawing_scene::held_apart(d, d.views.iter().filter(|v| v.sheet == sheet).map(|v| v.id));
+    // Out of date as a deferred drawing shows it as it last was.
     let last = "the sheet shows it as it last was: drawing.update draws it from the model as it is now";
-    let view_of = |id: u64| d.dimension(id).map(|r| r.view).or_else(|| d.notes.iter().find(|n| n.id == id)?.anchor.view());
-    let apart = |id: u64| view_of(id).and_then(|view| crate::drawing_view::draws_apart(d, view));
     for id in shown.out_of_date {
         let kind = if d.view(id).is_some() {
             CheckedKind::View
@@ -121,8 +117,7 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
         } else {
             CheckedKind::Note
         };
-        let why = apart(id).filter(|_| held.contains(&id)).map_or(last, crate::drawing_view::Apart::held);
-        out.push(finding(FindingKind::OutOfDate, sheet, object(kind, id), why.into()));
+        out.push(finding(FindingKind::OutOfDate, sheet, object(kind, id), last.into()));
     }
     // A view belongs where its sheet's Room says, by its boundary as the sheet shows it. Anything
     // else is held to the paper, whose box is display data, as the scene's boxes are: it decides
@@ -205,20 +200,22 @@ fn status_finding(sheet: u64, object: CheckedObject, status: Status) -> Option<F
 }
 
 /// The balloons and notes in views on `sheets` whose references don't stand with the model: one
-/// read of each kind for the drawing, each body's names worked out once. A note on a sheet reads
-/// no model, so it is never read here.
+/// read of each kind for each state of the assembly the views draw, each body's names worked out
+/// once per state. A note on a sheet reads no model, so it is never read here.
 fn references(s: &Session, d: &Drawing, sheets: &[u64]) -> Result<Vec<Finding>> {
     let on = |view: u64| d.view(view).map(|v| v.sheet).filter(|sheet| sheets.contains(sheet));
-    let balloons: Vec<(u64, u64)> = d.balloons.iter().filter_map(|b| Some((b.id, on(b.view)?))).collect();
-    let notes: Vec<(u64, u64)> = d.notes.iter().filter_map(|n| Some((n.id, on(n.anchor.view()?)?))).collect();
-    let wanted = |records: &[(u64, u64)]| records.iter().map(|(id, _)| *id).collect::<Vec<_>>();
-    let read_balloons = s.doc.resolve_balloons(&s.model, d, &wanted(&balloons)).map_err(|e| bad(CHECK, e.to_string()))?;
-    let read_notes = s.doc.resolve_notes(&s.model, d, &wanted(&notes)).map_err(|e| bad(CHECK, e.to_string()))?;
-    let balloons = balloons.iter().zip(read_balloons).map(|((id, sheet), r)| (*sheet, object(CheckedKind::Balloon, *id), r.status));
+    let balloons: Vec<(u64, u64, u64)> = d.balloons.iter().filter_map(|b| Some((b.id, b.view, on(b.view)?))).collect();
+    let notes: Vec<(u64, u64, u64)> = d.notes.iter().filter_map(|n| Some((n.id, n.anchor.view()?, on(n.anchor.view()?)?))).collect();
+    let wanted = |records: &[(u64, u64, u64)]| records.iter().map(|(id, view, _)| (*id, *view)).collect::<Vec<_>>();
+    // Each on the session its view draws from (#13048), as the sheet reads its dimensions.
+    let mut sessions = crate::drawing_view::ViewSessions::new(s);
+    let read_balloons = sessions.read_on(d, &wanted(&balloons), solidcraft_doc::Document::resolve_balloons).map_err(|e| bad(CHECK, e.to_string()))?;
+    let read_notes = sessions.read_on(d, &wanted(&notes), solidcraft_doc::Document::resolve_notes).map_err(|e| bad(CHECK, e.to_string()))?;
+    let balloons = balloons.iter().zip(read_balloons).map(|((id, _, sheet), r)| (*sheet, object(CheckedKind::Balloon, *id), r.status));
     let mut out: Vec<Finding> = balloons.filter_map(|(sheet, object, status)| status_finding(sheet, object, status)).collect();
     // A note's anchor stands as a reference does; each branch that doesn't is a finding of its own, by
     // its number, as a lost branch loses only itself.
-    for ((id, sheet), r) in notes.iter().zip(read_notes) {
+    for ((id, _, sheet), r) in notes.iter().zip(read_notes) {
         out.extend(status_finding(*sheet, object(CheckedKind::Note, *id), r.anchor.status));
         for (n, end) in (1..).zip(r.branches) {
             let branch = status_finding(*sheet, object(CheckedKind::Note, *id), end.status);
@@ -265,15 +262,12 @@ fn fields_and_rows(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Finding> {
 }
 
 /// Each feature of the design, in timeline order, and whether the dimensions and notes on `sheets`
-/// point at a face it made ([`coverage::of`]), with what the views on them draw (`drawn`). One that a
-/// view drawing its parts apart holds back covers nothing: it isn't on paper, and the findings name it
-/// out of date.
+/// point at a face it made ([`coverage::of`]), with what the views on them draw (`drawn`).
 fn feature_coverage(s: &Session, d: &Drawing, sheets: &[u64], drawn: &coverage::Drawn) -> Vec<Coverage> {
     let on = |view: u64| d.view(view).is_some_and(|v| sheets.contains(&v.sheet));
-    let held = crate::drawing_scene::held_apart(d, d.views.iter().filter(|v| sheets.contains(&v.sheet)).map(|v| v.id));
-    let dimensions = d.dimensions.iter().filter(|dim| on(dim.view) && !held.contains(&dim.id));
+    let dimensions = d.dimensions.iter().filter(|dim| on(dim.view));
     let dimensions = dimensions.map(|dim| (object(CheckedKind::Dimension, dim.id), dim.kind.references()));
-    let notes = d.notes.iter().filter(|n| n.anchor.view().is_some_and(on) && !held.contains(&n.id));
+    let notes = d.notes.iter().filter(|n| n.anchor.view().is_some_and(on));
     let notes = notes.map(|n| (object(CheckedKind::Note, n.id), n.references().collect()));
     let state = |state: coverage::State| match state {
         coverage::State::Covered => CoverageState::Covered,

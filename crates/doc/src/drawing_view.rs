@@ -89,6 +89,18 @@ pub enum Exploded {
     View(u64),
 }
 
+/// Which configuration of the design a view draws (#13048): the design's active one, as the design
+/// is now (the default), or a row of its configuration table by the row's id
+/// ([`crate::config::ConfigRow`]), which a rename keeps. The design is never changed: the view draws a
+/// copy. A row the design no longer has draws a placeholder, never refuses the file.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewConfiguration {
+    #[default]
+    Active,
+    Row(u64),
+}
+
 /// Most joints a view's position sets.
 pub const MAX_POSE_JOINTS: usize = 64;
 /// Most values one joint has in a position: at least as many as any joint kind has
@@ -189,6 +201,9 @@ pub struct ViewOverrides {
     /// The position of its assembly it draws: the design's when no view of its chain sets one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pose: Option<Pose>,
+    /// The configuration of the design it draws: the active one when no view of its chain sets one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub configuration: Option<ViewConfiguration>,
 }
 
 impl ViewOverrides {

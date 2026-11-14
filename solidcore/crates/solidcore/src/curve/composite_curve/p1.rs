@@ -102,8 +102,7 @@
 //! - `Dump`, `Draw`, `DrawParams`, `GetMemoryUsed`, `WriteToDB`, `ReadFromDB`,
 //!   `AddCurve`, `MakeCompositeNurb` and the offsetters belong to other units or are
 //!   unused.
-//! - **Segment bounding-box intervals (WR-34).** With the opt-in
-//!   [`Kernel::fixes`] `composite_curve_bbox_segment_intervals`,
+//! - **Segment bounding-box intervals (WR-34).**
 //!   [`CompositeCurve::calculate_bounding_box`] stacks segment spans from the first
 //!   segment's `natural_interval().min()` and maps each intersected sub-interval back
 //!   onto the segment's natural interval (reversing within `[min, max]` when
@@ -750,18 +749,15 @@ impl CompositeCurve {
 
     /// `CalculateBoundingBox`: the union of the segments' boxes over `interval`.
     ///
-    /// By default (upstream parity), each segment's natural interval is shifted by the
-    /// summed lengths of the previous segments (starting at `0`) and intersected with
-    /// `interval`; the segment's boxes are taken over that shifted interval directly.
-    ///
-    /// With [`Kernel::fixes`] `composite_curve_bbox_segment_intervals` (`WR-34`, `#2135`),
-    /// each valid segment's composite span is stacked end to end starting at the first
+    /// Each valid segment's composite span is stacked end to end starting at the first
     /// segment's `natural_interval().min()` (matching [`Self::natural_interval`] and
     /// [`Self::make_composite_nurb`]), intersected with `interval`, and mapped back onto
     /// the segment's own natural interval (reversing within `[min, max]` when
     /// `!same_sense`) before querying the segment's boxes; segment box evaluation and
     /// unioning (including [`PolarBox`] tangent sense on reversed segments) are otherwise
-    /// unchanged.
+    /// unchanged (`WR-34`, `#2135`; upstream shifts each segment's natural interval by
+    /// the summed lengths of the previous segments, starting at `0`, and takes the
+    /// segment's boxes over that shifted interval directly).
     ///
     /// The axis aligned box starts uninitialised, the pseudo box initialised and the
     /// polar box reset; the first pseudo union takes the segment box's basis.
@@ -794,36 +790,20 @@ impl CompositeCurve {
         polar.reset();
 
         // locals
-        let fix_intervals = k.fixes.composite_curve_bbox_segment_intervals;
         let mut first_union = true;
         let mut this_bbox = Extent3d::new();
         let mut this_pseudo = PseudoBox::new();
         let mut this_polar = PolarBox::new();
-        let mut ivl_offset = 0.0;
         let mut next_comp_start: Option<f64> = None;
 
         // for every interval
         for s in &self.segments {
-            let tgt_ivl = if fix_intervals {
-                fixed_segment_target_interval(
-                    s.curve.natural_interval(),
-                    s.same_sense,
-                    *interval,
-                    &mut next_comp_start,
-                )
-            } else {
-                let mut seg_ivl = s.curve.natural_interval();
-
-                // get target Ivl for this segment
-                seg_ivl.translate(ivl_offset);
-                let tgt = seg_ivl
-                    .intersect(interval)
-                    .unwrap_or_else(|_| Extent1d::new());
-
-                // (the loop increment)
-                ivl_offset += seg_ivl.length();
-                tgt
-            };
+            let tgt_ivl = fixed_segment_target_interval(
+                s.curve.natural_interval(),
+                s.same_sense,
+                *interval,
+                &mut next_comp_start,
+            );
 
             // when TgtIvl is not negative
             if !tgt_ivl.has_negative_length() {
@@ -2450,9 +2430,7 @@ mod tests {
 
     #[test]
     fn wr34_first_segment_non_zero_start_and_sub_interval() {
-        let k_default = Kernel::default();
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.composite_curve_bbox_segment_intervals = true;
+        let k_fixed = Kernel::default();
 
         let seg0 = line_on_interval([0.0, 0.0, 0.0], [2.0, 0.0, 0.0], 5.0, 7.0);
         let seg1 = line_on_interval([2.0, 0.0, 0.0], [2.0, 3.0, 0.0], 0.0, 3.0);
@@ -2462,26 +2440,6 @@ mod tests {
 
         let joined = c.clone().make_composite_nurb().unwrap();
         assert_eq!(joined.natural_interval(), full_ivl);
-
-        // Default upstream parity shifts seg1 [0, 3] by 2 to [2, 5], touching [5, 10]
-        // only at t = 5 (extrapolated on seg1 [0, 3] to y = 5) and missing [7.5, 9.5].
-        let default_full = c
-            .calculate_bounding_box(&k_default, &full_ivl, normal_req(), false)
-            .unwrap()
-            .normal
-            .unwrap();
-        assert!((default_full.max().y - 5.0).abs() < 1e-12);
-        let default_seg1 = c
-            .calculate_bounding_box(
-                &k_default,
-                &Extent1d::from_min_max(7.5, 9.5),
-                normal_req(),
-                false,
-            )
-            .unwrap()
-            .normal
-            .unwrap();
-        assert!(default_seg1.is_init());
 
         // Fixed WR-34 stacks [5, 7] then [7, 10] and maps each overlap back onto its segment.
         let fixed_full = c
@@ -2517,9 +2475,7 @@ mod tests {
 
     #[test]
     fn wr34_multi_segment_non_zero_starts_5_7_and_10_13() {
-        let k_default = Kernel::default();
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.composite_curve_bbox_segment_intervals = true;
+        let k_fixed = Kernel::default();
 
         let seg0 = polyline_on_knots(
             &[[0.0, 0.0, 0.0], [1.0, 2.0, 0.0], [2.0, 0.0, 0.0]],
@@ -2539,16 +2495,6 @@ mod tests {
         let full_ivl = c.natural_interval();
         assert_eq!(full_ivl, Extent1d::from_min_max(5.0, 10.0));
         let joined = c.clone().make_composite_nurb().unwrap();
-
-        // Default shifts seg1 [10, 13] by 2 to [12, 15], missing seg1 on [5, 10].
-        let default_full = c
-            .calculate_bounding_box(&k_default, &full_ivl, normal_req(), false)
-            .unwrap()
-            .normal
-            .unwrap();
-        assert!((default_full.max().x - 2.0).abs() < 1e-12);
-        assert!(!default_full.contains_point(joined.evaluate_point(8.0).unwrap(), 1e-6));
-        assert!(!default_full.contains_point(joined.evaluate_point(9.0).unwrap(), 1e-6));
 
         // Fixed WR-34 covers both segments on [5, 10] and maps sub-intervals to exact knot spans.
         let fixed_full = c
@@ -2605,9 +2551,7 @@ mod tests {
 
     #[test]
     fn wr34_reversed_same_sense_false_segment_sub_interval() {
-        let k_default = Kernel::default();
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.composite_curve_bbox_segment_intervals = true;
+        let k_fixed = Kernel::default();
 
         // Single reversed Line segment on [5, 8]: composite t = 5 starts at u = 8 -> (3, 6, 0).
         let single_rev = CompositeCurve::with_curves(
@@ -2625,12 +2569,6 @@ mod tests {
         );
 
         let sub_single = Extent1d::from_min_max(5.0, 5.5);
-        let default_single = single_rev
-            .calculate_bounding_box(&k_default, &sub_single, normal_req(), false)
-            .unwrap()
-            .normal
-            .unwrap();
-        assert!(!default_single.contains_point(joined_single.evaluate_point(5.25).unwrap(), 1e-6));
 
         let fixed_single = single_rev
             .calculate_bounding_box(&k_fixed, &sub_single, normal_and_pseudo_req(), false)
@@ -2684,12 +2622,6 @@ mod tests {
 
         // [9.2, 9.8] maps in reverse to u in [10.2, 10.8], strictly inside knot span [10, 11].
         let sub_lo = Extent1d::from_min_max(9.2, 9.8);
-        let default_lo = comp_rev
-            .calculate_bounding_box(&k_default, &sub_lo, normal_req(), false)
-            .unwrap()
-            .normal
-            .unwrap();
-        assert!(default_lo.is_init());
 
         let rev_span_lo = comp_rev
             .calculate_bounding_box(&k_fixed, &sub_lo, normal_and_pseudo_req(), false)
@@ -2706,18 +2638,10 @@ mod tests {
 
     #[test]
     fn wr34_disjoint_degenerate_and_empty_queries() {
-        let k_default = Kernel::default();
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.composite_curve_bbox_segment_intervals = true;
+        let k_fixed = Kernel::default();
 
         let empty = CompositeCurve::new(3);
         let any_ivl = Extent1d::from_min_max(0.0, 10.0);
-        assert!(empty
-            .calculate_bounding_box(&k_default, &any_ivl, normal_req(), false)
-            .unwrap()
-            .normal
-            .unwrap()
-            .is_init());
         assert!(empty
             .calculate_bounding_box(&k_fixed, &any_ivl, normal_req(), false)
             .unwrap()
@@ -2734,12 +2658,6 @@ mod tests {
         // [0.0, 2.5] lies strictly below [5.0, 10.0]: default spuriously hits shifted
         // seg1 [2.0, 5.0], whereas fixed WR-34 leaves the box uninitialised.
         let below = Extent1d::from_min_max(0.0, 2.5);
-        assert!(!c
-            .calculate_bounding_box(&k_default, &below, normal_req(), false)
-            .unwrap()
-            .normal
-            .unwrap()
-            .is_init());
         assert!(c
             .calculate_bounding_box(&k_fixed, &below, normal_req(), false)
             .unwrap()

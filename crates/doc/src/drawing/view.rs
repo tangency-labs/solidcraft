@@ -30,8 +30,8 @@ use solidcraft_render::VisualStyle;
 use super::dimension::{ModelEdge, check_edge};
 use super::{Drawing, add_by_id, in_id_order, require};
 use crate::drawing_view::{
-    Exploded, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, TangentEdges, ViewDirection,
-    ViewOverrides, ViewSettings,
+    Exploded, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, TangentEdges, ViewConfiguration,
+    ViewDirection, ViewOverrides, ViewSettings,
 };
 use crate::{DocError, MAX_PLACEMENT_DEPTH, Result, ids};
 
@@ -151,6 +151,8 @@ pub struct ResolvedView {
     pub exploded: Setting<Exploded>,
     /// The position of its assembly it draws: the design's, or its joints at values of its own.
     pub pose: Setting<Pose>,
+    /// The configuration of the design it draws: the active one, or a row of its table.
+    pub configuration: Setting<ViewConfiguration>,
 }
 
 fn is_zero(v: &f64) -> bool {
@@ -350,6 +352,7 @@ impl Drawing {
             reference_shown_percent: chain.first().map_or(0.0, |view| view.reference_shown_percent),
             exploded: or_default(&chain, |s| s.exploded, Exploded::Assembled),
             pose: or_default(&chain, |s| s.pose.clone(), Pose::Designed),
+            configuration: or_default(&chain, |s| s.configuration, ViewConfiguration::Active),
         })
     }
 

@@ -30,7 +30,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&SET_CONTRACT)
         .output(output_schema_for::<RuleResult>)
-        .params("view: id; enabled: bool. Disabling removes the rule and its exclusions; one undo step. Enabling is refused on a view that draws its parts apart (not supported yet); disabling is always allowed."),
+        .params("view: id; enabled: bool. Disabling removes the rule and its exclusions; one undo step. Enabling is refused on a view that draws another configuration or position (not supported yet); disabling is always allowed."),
     CommandSpec::new(INSPECT, "Inspect Automatic Center Marks", crate::checked!("drawing.auto_center_mark.inspect", inspect))
         .icon("inspect")
         .in_drawing()
@@ -50,14 +50,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&EXCLUDE_CONTRACT)
         .output(output_schema_for::<RuleResult>)
-        .params("view: id; edge: model edge pick with optional occurrence path. Refused on a view that draws its parts apart. One undo step."),
+        .params("view: id; edge: model edge pick with optional occurrence path. Refused on a view that draws another configuration or position. One undo step."),
     CommandSpec::new(INCLUDE, "Include Automatic Center Mark", crate::checked!("drawing.auto_center_mark.include", include))
         .icon("new")
         .in_drawing()
         .doc_only()
         .contract(&INCLUDE_CONTRACT)
         .output(output_schema_for::<RuleResult>)
-        .params("view: id; reference: saved exclusion as returned by inspect, even when lost; allowed on a view that draws its parts apart, to clean up a saved rule. One undo step."),
+        .params("view: id; reference: saved exclusion as returned by inspect, even when lost; allowed on a view that draws another configuration or position, to clean up a saved rule. One undo step."),
 ];
 
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -71,7 +71,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         }
         // Disabling always cleans up; enabling needs a view that draws the design as assembled.
         if request.enabled {
-            crate::drawing_view::refuse_apart(d, id, "automatic centre marks", SET)?;
+            crate::drawing_view::check_centre_view(d, id, "automatic centre marks", SET)?;
         }
         let view = d.views.get_mut(i).map(Arc::make_mut).ok_or_else(|| bad(SET, "the view no longer exists"))?;
         view.centre_marks = request.enabled.then(AutoMarks::default);
@@ -92,7 +92,7 @@ fn exclude(s: &mut Session, p: &Value) -> Result<Value> {
     if view.centre_marks.is_none() {
         return Err(bad(EXCLUDE, "automatic centre marks are disabled on this view"));
     }
-    crate::drawing_view::refuse_apart(s.drawing(EXCLUDE)?, id, "an automatic centre mark exclusion", EXCLUDE)?;
+    crate::drawing_view::check_centre_view(s.drawing(EXCLUDE)?, id, "an automatic centre mark exclusion", EXCLUDE)?;
     let edge = s.doc.edge_reference(&s.model, &request.edge.pick, &request.edge.path).map_err(|e| bad(EXCLUDE, e.to_string()))?;
     let candidates = crate::drawing_scene::automatic_mark_candidates(s, id).map_err(|e| bad(EXCLUDE, e.to_string()))?;
     if !candidates.iter().any(|candidate| candidate.sources.contains(&edge)) {

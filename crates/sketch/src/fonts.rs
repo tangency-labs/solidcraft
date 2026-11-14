@@ -95,6 +95,12 @@ pub fn font_data(name: Option<&str>) -> Result<FontData> {
         .ok_or_else(|| SketchError::Invalid(format!("unknown font `{name}`: not an installed font family, and not a .ttf/.otf file path")))
 }
 
+/// The file a font name means (`~` and `%VAR%` expanded), or `None` for a family name.
+pub fn font_file_path(name: &str) -> Option<PathBuf> {
+    let name = name.trim();
+    (name.len() <= MAX_FONT_NAME && is_path(name)).then(|| expand(name))
+}
+
 /// The face of a font for a style: the bold and/or italic face of an installed family (or the
 /// file or built-in font itself). True with it: the font has no italic face, so the text is to
 /// be slanted instead. A variable face without a bold face of its own is set to Bold on its
@@ -601,6 +607,17 @@ mod tests {
     /// A face of family "Arial" whose full name is `full`.
     fn face(full: &str, bold: bool, italic: bool) -> FaceNames {
         FaceNames { index: 0, bold, italic, names: vec![(name_id::FAMILY, normalize("Arial")), (name_id::FULL_NAME, normalize(full))] }
+    }
+
+    #[test]
+    fn a_font_file_path_is_expanded_and_a_family_name_is_none() {
+        assert_eq!(font_file_path(" /fonts/Foo-Bold.ttf "), Some(PathBuf::from("/fonts/Foo-Bold.ttf")));
+        assert_eq!(font_file_path("Foo.otf"), Some(PathBuf::from("Foo.otf")));
+        if let Some(home) = home() {
+            assert_eq!(font_file_path("~/Foo.ttf"), Some(PathBuf::from(format!("{}/Foo.ttf", home.display()))));
+        }
+        assert_eq!(font_file_path("DejaVu Sans"), None);
+        assert_eq!(font_file_path(&format!("/{}.ttf", "a".repeat(MAX_FONT_NAME))), None);
     }
 
     #[test]

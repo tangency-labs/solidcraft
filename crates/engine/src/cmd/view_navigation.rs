@@ -28,6 +28,7 @@ const HISTORY_LAYOUT_CONTRACT: TypedContract<HistoryLayoutParams> = TypedContrac
 const GRAPHICS_PRESET_CONTRACT: TypedContract<GraphicsPresetParams> = TypedContract::new();
 const AMBIENT_OCCLUSION_CONTRACT: TypedContract<AmbientOcclusionParams> = TypedContract::new();
 const NAVIGATE_CONTRACT: TypedContract<NavigateParams> = TypedContract::new();
+const ORIGIN_AXES_ACROSS_VIEW_CONTRACT: TypedContract<crate::schema::view_navigation::OriginAxesAcrossViewParams> = TypedContract::new();
 
 // Both existing request forms share the Browser command and its published schema.
 #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -61,13 +62,13 @@ CommandSpec::new("view.status_items", "Viewport Status Items", crate::checked!("
     .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_items::StatusItems>)
     .params("no parameters → {items}; persistent viewport effects, oldest slot first, with structured settings and executable clear requests; read-only, no model evaluation"),
 CommandSpec::new("view.fit", "Fit", fit)
-    .icon("fit").key("F6").noundo().doc_only().params("no parameters → frame the active canvas or selection; display only"),
+    .icon("fit").key("F6").noundo().doc_only().any_part().params("no parameters → frame the active canvas or selection (with a drawing open, its sheet); display only"),
 CommandSpec::new("view.home", "Home View", home)
-    .icon("home").noundo().doc_only().params("no parameters → home orientation framing the active canvas; display only"),
+    .icon("home").noundo().doc_only().any_part().params("no parameters → home orientation framing the active canvas (with a drawing open, its whole sheet); display only"),
 CommandSpec::new("view.tool", "Navigation Tool", tool)
-    .icon("orbit").noundo().doc_only().params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it"),
+    .icon("orbit").noundo().doc_only().any_part().params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it (a drawing's sheet pans and zooms)"),
 CommandSpec::new("view.tool.zoom", "Drag to Zoom", crate::checked!("view.tool.zoom", zoom_tool))
-    .icon("zoom").noundo().doc_only()
+    .icon("zoom").noundo().doc_only().any_part()
     .contract(&ZOOM_TOOL_CONTRACT).output(output_schema_for::<ZoomTool>)
     .params("on?: bool (omitted: toggle) → on?; latch the Zoom tool for left-button drags. A shortcut assigned in the UI zooms while held"),
 CommandSpec::new("view.spin", "Continuous Orbit", spin)
@@ -130,6 +131,8 @@ CommandSpec::new("view.graphics_preset", "Graphics Preset", crate::checked!("vie
     .icon("settings").noundo().doc_only().contract(&GRAPHICS_PRESET_CONTRACT).output(output_schema_for::<GraphicsPresetResult>).params("preset: performance|quality → preset, enabled, display_quality, supersampling, supersampling_adaptive; Quality: AO, Fine, adaptive 2x SSAA; Performance: no AO, Normal, no SSAA"),
 CommandSpec::new("view.ambient_occlusion", "Ambient Occlusion", crate::checked!("view.ambient_occlusion", ambient_occlusion))
     .icon("settings").noundo().doc_only().contract(&AMBIENT_OCCLUSION_CONTRACT).output(output_schema_for::<AmbientOcclusionResult>).params("enabled: bool → enabled; apply soft contact shading in the GPU viewport"),
+CommandSpec::new("view.origin_axes_across_view", "Origin Axes Across the Whole View", crate::checked!("view.origin_axes_across_view", origin_axes_across_view))
+    .icon("origin").noundo().doc_only().contract(&ORIGIN_AXES_ACROSS_VIEW_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::OriginAxesAcrossViewResult>).params("enabled: bool → enabled; extend the origin axes across the view, or keep the short axes when false; display only, never opens a dialog"),
 CommandSpec::new("view.perspective", "Perspective view", perspective)
     .icon("perspective").noundo().doc_only().params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
 CommandSpec::new("view.angle_readout", "View Angles", crate::checked!("view.angle_readout", angle_readout))
@@ -721,6 +724,26 @@ mod tests {
         assert!(s.camera.is_none());
     }
 
+    /// Fit, Home and the pan and zoom tools also frame and move a drawing's sheet, so they run with
+    /// a drawing open; the other view commands act on the model and stay refused there. None makes
+    /// an undo step or changes the design.
+    #[test]
+    fn sheet_navigation_runs_with_a_drawing_open() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("drawing.create", &json!({})).unwrap();
+        let (before, undo) = (s.doc.to_json(), s.undo.len());
+        for (id, params) in
+            [("view.fit", json!({})), ("view.home", json!({})), ("view.tool", json!({"tool": "pan"})), ("view.tool", json!({"tool": "none"}))]
+        {
+            assert!(s.execute(id, &params).is_ok(), "{id}");
+        }
+        for id in ["view.normal_to", "view.visual_style"] {
+            assert!(s.execute(id, &json!({"style": "shaded"})).unwrap_err().to_string().contains("a drawing is open"), "{id}");
+        }
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, undo));
+    }
+
     #[test]
     fn ribbon_tabs_only_echoes_the_request_without_editing_the_design() {
         let mut s = Session::default();
@@ -1106,6 +1129,13 @@ fn angle_readout(_s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
+/// Origin-axis display is an application preference, not a design edit.
+fn origin_axes_across_view(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.origin_axes_across_view";
+    let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad(cmd, "`enabled` must be a boolean"))?;
+    typed_reply(cmd, crate::schema::view_navigation::OriginAxesAcrossViewResult { enabled, param_warnings: Vec::new() })
+}
+
 fn next_tab(_s: &mut Session, _p: &Value) -> Result<Value> {
     tab_step(1)
 }
@@ -1122,6 +1152,22 @@ fn tab_step(step: i8) -> Result<Value> {
 #[cfg(test)]
 mod ambient_occlusion_tests {
     use super::*;
+
+    #[test]
+    fn origin_axes_across_view_validates_without_editing_design_history_or_camera() {
+        for param_check in crate::schema::ParamCheck::ALL {
+            let mut s = Session { param_check, ..Session::default() };
+            let design = s.doc.to_json();
+            for enabled in [true, false] {
+                assert_eq!(s.execute("view.origin_axes_across_view", &json!({"enabled": enabled})).unwrap(), json!({"enabled": enabled}));
+            }
+            for params in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null})] {
+                assert!(s.execute("view.origin_axes_across_view", &params).is_err(), "{param_check:?}: {params}");
+            }
+            assert_eq!(s.doc.to_json(), design);
+            assert!(s.undo.is_empty() && s.camera.is_none());
+        }
+    }
 
     #[test]
     fn angle_readout_validates_display_setting_without_editing_design_or_history() {

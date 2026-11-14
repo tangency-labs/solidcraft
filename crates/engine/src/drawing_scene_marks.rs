@@ -20,8 +20,8 @@ use crate::{Result, Session};
 // Paper millimetres, independent of view scale. A future drawing style owns these choices.
 const WIDTH_MM: f64 = 0.18;
 const AUTO_OVERSHOOT_MM: f64 = 2.0;
-fn apart_why(apart: crate::drawing_view::Apart) -> String {
-    format!("not supported yet: automatic centre marks on {}", apart.view())
+fn apart_why(apart: &str) -> String {
+    format!("not supported yet: automatic centre marks on {apart}")
 }
 
 /// One annotation and either its view-local paper group or the reason it has no group.
@@ -62,8 +62,8 @@ pub(super) fn groups(
     let resolved_lines = s.doc.resolve_centre_lines(&s.model, drawing, &wanted_lines);
     let mut groups = Vec::new();
     for (i, mark) in marks.into_iter().enumerate() {
-        let result = if let Some(apart) = crate::drawing_view::draws_apart(drawing, mark.view) {
-            Err(format!("centre annotations on {} are not supported yet", apart.view()))
+        let result = if let Some(apart) = crate::drawing_view::unsupported_centre_view(drawing, mark.view) {
+            Err(format!("centre annotations on {apart} are not supported yet"))
         } else {
             match (frames.get(&mark.view), &resolved) {
                 (Some((frame, at)), Ok(found)) => match found.get(i) {
@@ -87,8 +87,8 @@ pub(super) fn groups(
         groups.push(Mark { object: mark.id, view: mark.view, kind: ObjectKind::CentreMark, group, why });
     }
     for (i, line) in lines.into_iter().enumerate() {
-        let result = if let Some(apart) = crate::drawing_view::draws_apart(drawing, line.view) {
-            Err(format!("centre annotations on {} are not supported yet", apart.view()))
+        let result = if let Some(apart) = crate::drawing_view::unsupported_centre_view(drawing, line.view) {
+            Err(format!("centre annotations on {apart} are not supported yet"))
         } else {
             match (frames.get(&line.view), &resolved_lines) {
                 (Some((frame, at)), Ok(found)) => match found.get(i) {
@@ -116,8 +116,8 @@ pub(super) fn groups(
         let Some(rule) = drawing.view(*id).and_then(|view| view.centre_marks.as_ref()) else { continue };
         let result = (|| -> Result<Vec<Mark>> {
             let view = drawing.resolve_view(*id).map_err(|e| bad(CMD, e.to_string()))?;
-            // A saved rule cannot scan a view that draws its parts in another placement.
-            if let Some(apart) = crate::drawing_view::Apart::of(&view) {
+            // A saved rule cannot scan a view that draws its parts in another configuration or placement.
+            if let Some(apart) = crate::drawing_view::unsupported_centre_view(drawing, *id) {
                 return Err(bad(CMD, apart_why(apart)));
             }
             let shown = match shown {
@@ -178,9 +178,9 @@ fn automatic(view: u64, result: std::result::Result<Group, String>) -> Mark {
 
 /// Explain annotations whose view has no drawable frame.
 pub(super) fn unframed(drawing: &Drawing, id: u64, status: &super::Status) -> Vec<Mark> {
-    let apart = crate::drawing_view::draws_apart(drawing, id);
+    let apart = crate::drawing_view::unsupported_centre_view(drawing, id);
     let manual_why =
-        apart.map_or_else(|| "its view has no frame".to_string(), |apart| format!("centre annotations on {} are not supported yet", apart.view()));
+        apart.map_or_else(|| "its view has no frame".to_string(), |apart| format!("centre annotations on {apart} are not supported yet"));
     let mut marks: Vec<_> = drawing
         .centre_marks
         .iter()
@@ -212,7 +212,7 @@ pub(super) fn unframed(drawing: &Drawing, id: u64, status: &super::Status) -> Ve
 pub(super) fn candidates(s: &Session, id: u64) -> Result<Vec<MarkCandidate>> {
     let drawing = s.drawing(CMD)?;
     let view = drawing.resolve_view(id).map_err(|e| bad(CMD, e.to_string()))?;
-    if let Some(apart) = crate::drawing_view::Apart::of(&view) {
+    if let Some(apart) = crate::drawing_view::unsupported_centre_view(drawing, id) {
         return Err(bad(CMD, apart_why(apart)));
     }
     let copy = (!s.pending_moves.is_empty()).then(|| super::designed(s));

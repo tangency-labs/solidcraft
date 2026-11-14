@@ -12,12 +12,16 @@ use super::CommandSpec;
 use super::sketch::{Left, edit_solved, ids_of};
 use super::sketch_store;
 use crate::params::{bad, bool_, num, str_, vec2};
-use crate::schema::sketch_import::{DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams, SketchSolve};
+use crate::schema::sketch_import::{
+    DrawingBoundsParams, DrawingBoundsResult, DrawingBox, DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult, InsertDxfParams,
+    InsertSvgParams, SketchSolve,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const INSERT_DXF_CONTRACT: TypedContract<InsertDxfParams> = TypedContract::new();
 const INSERT_SVG_CONTRACT: TypedContract<InsertSvgParams> = TypedContract::new();
+const DRAWING_BOUNDS_CONTRACT: TypedContract<DrawingBoundsParams> = TypedContract::new();
 const EXPORT_DXF_CONTRACT: TypedContract<ExportDxfParams> = TypedContract::new();
 
 /// A command's reply as JSON, built from the type its output schema describes so the two can't
@@ -39,9 +43,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSERT_SVG_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
         .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
-    CommandSpec::new("sketch.drawing_bounds", "Drawing Size", drawing_bounds)
+    CommandSpec::new("sketch.drawing_bounds", "Drawing Size", crate::checked!("sketch.drawing_bounds", drawing_bounds))
         .icon("svg")
-        .noundo()
+        .noundo().read_only()
+        .contract(&DRAWING_BOUNDS_CONTRACT)
+        .output(output_schema_for::<DrawingBoundsResult>)
         .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); returns min, max, width and height of the drawn geometry in the file's own size, and for an SVG with a viewBox (or width and height) its sheet: {min, max, width, height}"),
     CommandSpec::new("sketch.export_dxf", "Save As DXF", crate::checked!("sketch.export_dxf", export_dxf))
         .icon("sketch_dxf")
@@ -231,8 +237,9 @@ fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<(Vec<Geom2>, (Vec2, V
     Ok((geom, bounds, text))
 }
 
-fn sheet_json((lo, hi): (Vec2, Vec2)) -> Value {
-    json!({"min": [lo.x, lo.y], "max": [hi.x, hi.y], "width": hi.x - lo.x, "height": hi.y - lo.y})
+/// The box around a drawing, as the reply describes it: `min`, `max` and the span between them.
+fn drawing_box((lo, hi): (Vec2, Vec2)) -> DrawingBox {
+    DrawingBox { min: [lo.x, lo.y], max: [hi.x, hi.y], width: hi.x - lo.x, height: hi.y - lo.y }
 }
 
 /// How big a drawing is in its own file, to size it before it is inserted.
@@ -244,11 +251,9 @@ fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
         None => !name_is_dxf,
     };
     let (_, bounds, text) = read_drawing(p, cmd, svg)?;
-    let mut out = sheet_json(bounds);
-    if svg && let Some(sheet) = solidcraft_io::svg_sheet(&text) {
-        out["sheet"] = sheet_json(sheet);
-    }
-    Ok(out)
+    // Only an SVG names a sheet, and only when it says how big its sheet is.
+    let sheet = svg.then(|| solidcraft_io::svg_sheet(&text)).flatten().map(drawing_box);
+    reply(cmd, DrawingBoundsResult { drawing: drawing_box(bounds), sheet, param_warnings: Vec::new() })
 }
 
 fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {

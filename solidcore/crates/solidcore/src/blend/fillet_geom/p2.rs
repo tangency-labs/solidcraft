@@ -902,6 +902,23 @@ fn rail_edgeuse_intersect(
     result
 }
 
+/// The side edge parameters the search for a rail's end tries, in order. `defaults` are the
+/// radius-based guess and then the fixed fractions of the side edge; `corner_guess` is where the
+/// corner's section touches the side edge ([`corner_section_on_side_edge`]), tried first. At the
+/// corner's own side edge (`at_corner`) it takes the radius-based guess's place. On a side edge
+/// further along a chain every default stays after it, so the radius-based guess, which looked
+/// for the end there before the corner's section did, is still tried.
+fn rail_end_guesses(
+    corner_guess: Option<f64>,
+    at_corner: bool,
+    defaults: &[f64],
+) -> impl Iterator<Item = f64> + '_ {
+    let skip = usize::from(at_corner && corner_guess.is_some());
+    corner_guess
+        .into_iter()
+        .chain(defaults.iter().skip(skip).copied())
+}
+
 /// Where the round of `ops`'s edge touches `side_edge` at the corner `vertex`: the rail
 /// `rail_index`'s contact of the ball's section in the plane through the edge's end at
 /// `vertex`, normal to the edge there ([`edge_section`]), dropped onto the side edge within
@@ -1719,11 +1736,11 @@ impl FilletBrep {
         // Get the TsectPnts and call the solver.
         let (vu1, mut tsect1) = self.rail_end_tsect(v, Some(fillet_geom1), None, OP)?;
         let (vu2, mut tsect2) = self.rail_end_tsect(v, Some(fillet_geom2), None, OP)?;
-        // Fork tangency-labs/smlib@465b62b (`fixes.fillet_retry_radius_as_first`, WR-300):
-        // the radii are held at their end values only at a corner calculated as constant
-        // radius, as the rail/side-edge search holds them; upstream holds them anywhere.
-        let hold_end_radii =
-            !k.fixes.fillet_retry_radius_as_first || corners.corner(corner)?.is_calc_as_const_rad();
+        // WR-300 (the fork's tangency-labs/smlib@465b62b): the radii are held at their
+        // end values only at a corner calculated as constant radius, as the rail/side-edge
+        // search holds them; upstream holds them anywhere, so the rails met at a ball that
+        // is not the law's.
+        let hold_end_radii = corners.corner(corner)?.is_calc_as_const_rad();
         let found = solvers.rail_rail_intersect(
             k,
             target,
@@ -2053,23 +2070,29 @@ impl FilletBrep {
             // the corner, so the search starts where that section touches the side edge, not
             // at a fraction of the edge's length. Where the faces meet the rail end's solve
             // twice (two cylinders crossing: the round at each of their crossings), the first
-            // guess decides which ball the solve finds.
-            let mut guess_edge_parameters = guess_edge_parameters;
+            // guess decides which ball the solve finds. The section is the one at the corner's
+            // vertex also where the rail's end is looked for on a side edge past it (a rail
+            // rolled over a smooth far edge of its face, or one running on across a seam's
+            // vertex), where the side edge's near end `cp_vertex` ends no end of the solver's
+            // edge. On a side edge chain (the side edge's near end is not the corner's vertex)
+            // its guess goes in front of the default ones, which all stay: the radius-based
+            // guess, which looked for the end there before, is still tried next. At the corner's
+            // own side edge it takes the radius-based guess's place.
             let si = RailSolvers::geom_solver(self, g1)?;
-            if let Some(t) = corner_section_on_side_edge(
+            let section_vertex = corners.corner(corner)?.filleted_vertex();
+            let corner_guess = corner_section_on_side_edge(
                 k,
                 solvers.solver_ops_mut(si)?,
                 target,
-                cp_vertex,
+                section_vertex,
                 rail_index,
                 side_edge,
                 &ivl,
-            )? {
-                guess_edge_parameters[0] = t;
-            }
+            )?;
+            let at_corner = section_vertex == cp_vertex;
             let mut found = false;
             let mut edgeuse_parameter = 0.0;
-            for &guess in &guess_edge_parameters {
+            for guess in rail_end_guesses(corner_guess, at_corner, &guess_edge_parameters) {
                 // Temporarily change this to a constant-radius function.
                 let temp_si = if corners.corner(corner)?.is_calc_as_const_rad() {
                     let si = RailSolvers::geom_solver(self, g1)?;
@@ -2111,16 +2134,14 @@ impl FilletBrep {
                 fs.set_extension_factor(2.0 * ext_factor);
 
                 // WR-300 (#1023): upstream's retry holds the radius at a corner not
-                // calculated as constant radius too; the fix holds it only as the first
+                // calculated as constant radius too; this holds it only as the first
                 // search did.
-                let retry_si = if k.fixes.fillet_retry_radius_as_first
-                    && !corners.corner(corner)?.is_calc_as_const_rad()
-                {
-                    None
-                } else {
+                let retry_si = if corners.corner(corner)?.is_calc_as_const_rad() {
                     Some(si)
+                } else {
+                    None
                 };
-                for &guess in &guess_edge_parameters {
+                for guess in rail_end_guesses(corner_guess, at_corner, &guess_edge_parameters) {
                     let _ = solvers.solver(si)?;
                     let r = rail_edgeuse_intersect(
                         self,
@@ -2308,13 +2329,23 @@ impl FilletBrep {
                 // Temporarily change this to a constant-radius function.
                 let si = RailSolvers::geom_solver(self, g2)?;
                 let _ = solvers.solver(si)?;
+                // WR-300 (#1023): upstream holds the adjacent round's radius here at every
+                // corner; this holds it only at a corner calculated as constant radius, as
+                // the first round's search and retry do. Where the side edge is not square
+                // to the round's edge, the ball meeting it is not the end's, and the end
+                // radius put the rail's end off the round.
+                let temp_si = if corners.corner(corner)?.is_calc_as_const_rad() {
+                    Some(si)
+                } else {
+                    None
+                };
                 let r = rail_edgeuse_intersect(
                     self,
                     k,
                     g2,
                     solvers,
                     target,
-                    Some(si),
+                    temp_si,
                     other_rail_index,
                     side_eu2,
                     guess,
@@ -3501,11 +3532,9 @@ impl FilletBrep {
                         corners.corner(corner)?.filleted_vertex().ok_or_else(|| {
                             SolidError::blend_missing(OP, "the corner's filleted vertex")
                         })?;
-                    // Fork tangency-labs/smlib@465b62b (`fixes.fillet_retry_radius_as_first`):
-                    // the rails' meeting point holds the radii only at a corner calculated
-                    // as constant radius.
-                    let hold_end_radii =
-                        !k.fixes.fillet_retry_radius_as_first || the_corner.is_calc_as_const_rad();
+                    // WR-300 (the fork's tangency-labs/smlib@465b62b): the rails' meeting
+                    // point holds the radii only at a corner calculated as constant radius.
+                    let hold_end_radii = the_corner.is_calc_as_const_rad();
                     let new_uv = solvers.cubic(si1, si2, OP, |s1, s2| {
                         create_cubic_rail_rail_interpolant(
                             k,
@@ -3646,6 +3675,27 @@ fn find_stepoff_uv(
 mod tests {
     use super::*;
     use crate::nurbs::b_spline_curve::BSplineCurve;
+
+    #[test]
+    fn a_side_edge_chain_keeps_every_default_guess_after_the_corner_section() {
+        let defaults = [0.4, 0.05, 0.1, 0.23, 0.5, 0.77, 0.9, 0.95, 0.99];
+        // further along a chain: the corner's guess first, then all nine defaults, the
+        // radius-based one included
+        let chain: Vec<f64> = rail_end_guesses(Some(0.7), false, &defaults).collect();
+        assert_eq!(chain.len(), 10);
+        assert_eq!(chain[0], 0.7);
+        assert_eq!(chain[1..], defaults);
+        // at the corner's own side edge it takes the radius-based guess's place
+        let at_corner: Vec<f64> = rail_end_guesses(Some(0.7), true, &defaults).collect();
+        assert_eq!(at_corner.len(), 9);
+        assert_eq!(at_corner[0], 0.7);
+        assert_eq!(at_corner[1..], defaults[1..]);
+        // without a corner guess the defaults are tried as they are, on either edge
+        for edge in [false, true] {
+            let none: Vec<f64> = rail_end_guesses(None, edge, &defaults).collect();
+            assert_eq!(none, defaults);
+        }
+    }
 
     #[test]
     fn live_solver_lookup_retains_virtuals_and_actual_identity() {

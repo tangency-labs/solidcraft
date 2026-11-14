@@ -1,0 +1,90 @@
+{
+  "en": {
+    "ui.drawing_browser_count_one": "{count} object",
+    "ui.drawing_browser_count_other": "{count} objects",
+    "ui.drawing_browser_view": "View {number}",
+    "ui.drawing_browser_dimension": "Dimension {number}",
+    "ui.drawing_browser_balloon": "Balloon {number}",
+    "ui.drawing_browser_note": "Note {number}",
+    "ui.drawing_browser_table": "Table {number}",
+    "ui.drawing_browser_image": "Image {number}",
+    "ui.drawing_browser_revision_tag": "Revision tag {number}"
+  },
+  "de": {
+    "ui.drawing_browser_count_one": "{count} Objekt",
+    "ui.drawing_browser_count_other": "{count} Objekte",
+    "ui.drawing_browser_view": "Ansicht {number}",
+    "ui.drawing_browser_dimension": "Bemaßung {number}",
+    "ui.drawing_browser_balloon": "Positionsnummer {number}",
+    "ui.drawing_browser_note": "Notiz {number}",
+    "ui.drawing_browser_table": "Tabelle {number}",
+    "ui.drawing_browser_image": "Bild {number}",
+    "ui.drawing_browser_revision_tag": "Revisionszeichen {number}"
+  },
+  "ja": {
+    "ui.drawing_browser_count_one": "{count} 個のオブジェクト",
+    "ui.drawing_browser_count_other": "{count} 個のオブジェクト",
+    "ui.drawing_browser_view": "ビュー {number}",
+    "ui.drawing_browser_dimension": "寸法 {number}",
+    "ui.drawing_browser_balloon": "バルーン {number}",
+    "ui.drawing_browser_note": "注記 {number}",
+    "ui.drawing_browser_table": "表 {number}",
+    "ui.drawing_browser_image": "画像 {number}",
+    "ui.drawing_browser_revision_tag": "改訂記号 {number}"
+  },
+  "ko": {
+    "ui.drawing_browser_count_one": "객체 {count}개",
+    "ui.drawing_browser_count_other": "객체 {count}개",
+    "ui.drawing_browser_view": "뷰 {number}",
+    "ui.drawing_browser_dimension": "치수 {number}",
+    "ui.drawing_browser_balloon": "풍선 {number}",
+    "ui.drawing_browser_note": "주석 {number}",
+    "ui.drawing_browser_table": "표 {number}",
+    "ui.drawing_browser_image": "이미지 {number}",
+    "ui.drawing_browser_revision_tag": "개정 기호 {number}"
+  },
+  "zh": {
+    "ui.drawing_browser_count_one": "{count} 个对象",
+    "ui.drawing_browser_count_other": "{count} 个对象",
+    "ui.drawing_browser_view": "视图 {number}",
+    "ui.drawing_browser_dimension": "尺寸 {number}",
+    "ui.drawing_browser_balloon": "序号气泡 {number}",
+    "ui.drawing_browser_note": "注释 {number}",
+    "ui.drawing_browser_table": "表格 {number}",
+    "ui.drawing_browser_image": "图像 {number}",
+    "ui.drawing_browser_revision_tag": "修订标记 {number}"
+  },
+  "ar": {
+    "ui.drawing_browser_count_one": "{count} عنصر",
+    "ui.drawing_browser_count_other": "{count} عناصر",
+    "ui.drawing_browser_view": "مسقط {number}",
+    "ui.drawing_browser_dimension": "بُعد {number}",
+    "ui.drawing_browser_balloon": "بالون {number}",
+    "ui.drawing_browser_note": "ملاحظة {number}",
+    "ui.drawing_browser_table": "جدول {number}",
+    "ui.drawing_browser_image": "صورة {number}",
+    "ui.drawing_browser_revision_tag": "علامة مراجعة {number}"
+  },
+  "he": {
+    "ui.drawing_browser_count_one": "עצם אחד ({count})",
+    "ui.drawing_browser_count_other": "{count} עצמים",
+    "ui.drawing_browser_view": "מבט {number}",
+    "ui.drawing_browser_dimension": "מידה {number}",
+    "ui.drawing_browser_balloon": "בלון {number}",
+    "ui.drawing_browser_note": "הערה {number}",
+    "ui.drawing_browser_table": "טבלה {number}",
+    "ui.drawing_browser_image": "תמונה {number}",
+    "ui.drawing_browser_revision_tag": "תג גרסה {number}"
+  },
+  "vi": {
+    "ui.drawing_browser_count_one": "{count} đối tượng",
+    "ui.drawing_browser_count_other": "{count} đối tượng",
+    "ui.drawing_browser_view": "Hình chiếu {number}",
+    "ui.drawing_browser_dimension": "Kích thước {number}",
+    "ui.drawing_browser_balloon": "Bóng chú thích {number}",
+    "ui.drawing_browser_note": "Ghi chú {number}",
+    "ui.drawing_browser_table": "Bảng {number}",
+    "ui.drawing_browser_image": "Ảnh {number}",
+    "ui.drawing_browser_revision_tag": "Nhãn sửa đổi {number}"
+  }
+}

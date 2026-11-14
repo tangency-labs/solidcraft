@@ -75,8 +75,12 @@ const INVALID_INPUT: i32 = 1007;
 
 /// An SMLib status as the capi passes it on (`status`, smlib_shim.h): solidcore's upstream
 /// status codes as they are; its refusals of code it has not ported as not supported; a refusal
-/// solidcore-ops types as that refusal ([`Error::Refused`]); the rest as solidcore's text.
+/// or a blend failure solidcore-ops types as that ([`Error::Refused`]: an offset refused with
+/// its reason, a blend failed with the kernel's statement of why); the rest as solidcore's text.
 pub(super) fn status(e: SolidError) -> Error {
+    if let Some(failed) = solidcore_ops::blend::failure(&e) {
+        return Error::Refused(failed);
+    }
     match e {
         SolidError::Upstream { code, .. } => Error::Status(code),
         e if stands_for_status(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
@@ -96,9 +100,9 @@ pub(super) fn status(e: SolidError) -> Error {
 /// returned (`Upstream` before solidcore described it), whether or not it names an entity. A
 /// B-spline method's (`NurbsFailure::BSpline`); an intersection or classification, primitive
 /// (extrusion, revolution, skin, taper), mass-property, healing, geometry-utility, query,
-/// topology or surface routine's; and a sweep, curve, offset or blend routine's that replaced a
-/// status (a railed loft's, a length bracket's and an offset's refusals replaced none and pass on
-/// otherwise). `tests::status_sites_only_shrink` counts the sites that make a status, a set that only shrinks.
+/// topology or surface routine's; and a sweep, curve or offset routine's that replaced a status
+/// (a railed loft's, a length bracket's and an offset's refusals replaced none and pass on
+/// otherwise). A blend routine's is solidcore-ops' blend failure ([`status`]). `tests::status_sites_only_shrink` counts the sites that make a status, a set that only shrinks.
 fn stands_for_status(e: &SolidError) -> bool {
     matches!(e.nurbs_failure(), Some(NurbsFailure::BSpline(_)))
         || e.intersect_failure().is_some()
@@ -112,7 +116,6 @@ fn stands_for_status(e: &SolidError) -> bool {
         || e.curve_failure().is_some_and(|c| c.replaces_upstream_status())
         || e.surface_failure().is_some()
         || e.offset_failure().is_some_and(|o| o.replaces_upstream_status())
-        || e.blend_failure().is_some_and(|b| b.replaces_upstream_status())
 }
 
 /// A failure of the Boolean engine (which slice, sweep and the other users of the merge engine
@@ -1524,22 +1527,38 @@ mod tests {
     }
 
     /// A blend routine's failure passes on as the status it replaced, as the `Upstream` it
-    /// replaced did, whether or not it names an edge.
+    /// replaced did, whether or not it names an edge, and keeps solidcore's reason for it
+    /// ([`Error::BlendFailed`]): a bare status names no cause the user or a report can act on.
     #[test]
-    fn blend_failures_pass_on_as_their_status() {
+    fn blend_failures_pass_on_as_their_status_with_their_reason() {
         use solidcore::error::Failure;
         use solidcore::error::blend::BlendFailure;
         let blend = |b| Failure::new("blend::feature_executive", b).into_error();
-        assert!(matches!(status(blend(BlendFailure::Failed("x"))), Error::Status(1001)));
-        assert!(matches!(status(blend(BlendFailure::Missing("the edge use's edge"))), Error::Status(1006)));
-        assert!(matches!(status(blend(BlendFailure::InvalidValue("x"))), Error::Status(1007)));
-        assert!(matches!(status(blend(BlendFailure::Inconsistent("x"))), Error::Status(1005)));
-        assert!(matches!(status(blend(BlendFailure::BadIntersections("x"))), Error::Status(1027)));
-        assert!(matches!(status(blend(BlendFailure::NotConverged("x"))), Error::Status(1022)));
-        assert!(matches!(status(blend(BlendFailure::PassedOn { what: "x", status: 1020 })), Error::Status(1020)));
+        // the status and the reason the failure carries, and its class (the kernel's own)
+        let carried = |e: Error| match e {
+            Error::Refused(solidcore_ops::Error::BlendFailed { class, status, phrase }) => (status, phrase, class),
+            e => panic!("not a typed blend failure: {e:?}"),
+        };
+        let x = |status: i32, phrase: &str| (status, phrase.to_owned());
+        let cases = [
+            (BlendFailure::Failed("x"), x(1001, "x")),
+            (BlendFailure::Missing("the edge use's edge"), x(1006, "the edge use's edge is missing")),
+            (BlendFailure::InvalidValue("x"), x(1007, "x")),
+            (BlendFailure::Inconsistent("x"), x(1005, "a consistency check failed: x")),
+            (BlendFailure::BadIntersections("x"), x(1027, "x")),
+            (BlendFailure::NotConverged("x"), x(1022, "x")),
+            (BlendFailure::PassedOn { what: "x", status: 1020 }, x(1020, "x")),
+        ];
+        for (failure, (want_status, want_phrase)) in cases {
+            let (status, phrase, class) = carried(status(blend(failure)));
+            assert_eq!((status, phrase.as_str(), class), (want_status, want_phrase.as_str(), failure.class()), "{failure:?}");
+        }
         let at = Failure::new("blend::fillet_executive::p3", BlendFailure::Failed("x"))
             .at(solidcore::EntityRef::Edge(solidcore::topology::EdgeId::from_index(2)))
             .into_error();
-        assert!(matches!(status(at), Error::Status(1001)));
+        assert_eq!(carried(status(at)).0, 1001);
+        // the trim of a blend whose faces leak past its rails, as the message says it
+        let leak = blend(BlendFailure::Failed("the faces the rails enclose reach past the rails"));
+        assert_eq!(status(leak).to_string(), "the blend failed (status 1001): the faces the rails enclose reach past the rails");
     }
 }

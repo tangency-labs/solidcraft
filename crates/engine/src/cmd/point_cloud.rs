@@ -1,7 +1,7 @@
 //! Point clouds (#5151): scanned points (PLY, XYZ or PTS files) kept in the design as a reference
 //! to model from. They are drawn as points and never become bodies.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_doc::Mat;
 use solidcraft_doc::point_cloud::{
     ColorBy, Colors, Complex, Filter, Keep, MAX_COORD, MAX_FILTERS, MAX_NAMES, MAX_POINTS, POINT_SIZE, PointCloud, Points, UNITS, unit_scale,
@@ -9,30 +9,48 @@ use solidcraft_doc::point_cloud::{
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_};
-use crate::schema::point_cloud::{PointCloudReloadParams, PointCloudReloadResult};
+use crate::schema::point_cloud::{
+    PointCloudDeleteParams, PointCloudDeleteResult, PointCloudEditParams, PointCloudEditResult, PointCloudFilter, PointCloudFilterKeeps,
+    PointCloudInfo, PointCloudInsertParams, PointCloudInsertResult, PointCloudListParams, PointCloudListResult, PointCloudProperty,
+    PointCloudReloadParams, PointCloudReloadResult,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const INSERT_CONTRACT: TypedContract<PointCloudInsertParams> = TypedContract::new();
+const EDIT_CONTRACT: TypedContract<PointCloudEditParams> = TypedContract::new();
 const RELOAD_CONTRACT: TypedContract<PointCloudReloadParams> = TypedContract::new();
+const DELETE_CONTRACT: TypedContract<PointCloudDeleteParams> = TypedContract::new();
+const LIST_CONTRACT: TypedContract<PointCloudListParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("pointcloud.insert", "Insert Point Cloud", insert)
+    CommandSpec::new("pointcloud.insert", "Insert Point Cloud", crate::checked!("pointcloud.insert", insert))
         .at("SOLID", "INSERT")
         .icon("import")
+        .contract(&INSERT_CONTRACT)
+        .output(output_schema_for::<PointCloudInsertResult>)
         .params("path: .ply, .xyz or .pts file (its points join the design as a point cloud: drawn as points, never a body; a PLY's red, green and blue are its colours, its other properties can colour and filter it; its edge and face elements become segments and triangles, a segment with width and height properties drawn as a bead) → cloud, name, points, segments, triangles, source_points, bounds, warnings; name?; units?: mm|cm|m|in|ft (the file's length unit, default mm); max_points?: most points kept (default 5000000, at most 20000000; a larger file is thinned evenly); center?: bool (move the cloud so the middle of its base sits at the origin); point_size?: pixels (0.5…16, default 2); color_by?: file|single|height or a property's name (the file's colours, the default; one colour; a ramp by height, blue low to red high; or by any property of the file, a ramp over its values or a palette for whole numbers); color?: [r, g, b] 0…1 (the single colour; given alone it sets color_by single, null sets color_by file); color_range?: [low, high] the ramp runs between (design Z in mm by height), or null for the automatic range (by height all but the lowest and highest 2 % of the points; by a property the values it takes over what the filters keep); height_range?: the same as color_range; filters?: [{property, range: [low, high]} or {property, values: [whole numbers]} for a property with named values], or null (only what every filter keeps is shown)"),
-    CommandSpec::new("pointcloud.edit", "Edit Point Cloud", edit)
+    CommandSpec::new("pointcloud.edit", "Edit Point Cloud", crate::checked!("pointcloud.edit", edit))
         .icon("edit")
+        .contract(&EDIT_CONTRACT)
+        .output(output_schema_for::<PointCloudEditResult>)
         .params("cloud: id or name; name?; visible?; point_size?: pixels (0.5…16); color_by?: file|single|height or a property's name (the file's colours, the default; one colour; a ramp by height, blue low to red high; or by any property of the file, a ramp over its values or a palette for whole numbers); color?: [r, g, b] 0…1 (the single colour; given alone it sets color_by single, null sets color_by file); color_range?: [low, high] the ramp runs between (design Z in mm by height), or null for the automatic range (by height all but the lowest and highest 2 % of the points; by a property the values it takes over what the filters keep); height_range?: the same as color_range; units?: mm|cm|m|in|ft (the file's length unit: the points are scaled from the unit they came in as); matrix?: [12 or 16 numbers] (where the cloud sits: a rigid row-major 3x4 or 4x4 matrix, as occurrence.move takes it); tolerance?; filters?: [{property, range: [low, high]} or {property, values: [whole numbers]} for a property with named values], or null (only what every filter keeps is shown) → cloud"),
     CommandSpec::new("pointcloud.reload", "Reload Point Cloud", crate::checked!("pointcloud.reload", reload))
         .icon("import")
         .contract(&RELOAD_CONTRACT)
         .output(output_schema_for::<PointCloudReloadResult>)
         .params("cloud: id or name (its file is read again from where it was inserted; name, placement, units, colouring and the filters on properties it still has are kept; read under the limit it was inserted with, so a file that grew is thinned only past that limit) → cloud, points, segments, triangles, warnings"),
-    CommandSpec::new("pointcloud.delete", "Delete Point Cloud", delete).icon("delete").params("cloud: id or name → deleted"),
-    CommandSpec::new("pointcloud.list", "Point Clouds", list)
+    CommandSpec::new("pointcloud.delete", "Delete Point Cloud", crate::checked!("pointcloud.delete", delete))
+        .icon("delete")
+        .contract(&DELETE_CONTRACT)
+        .output(output_schema_for::<PointCloudDeleteResult>)
+        .params("cloud: id or name → deleted"),
+    CommandSpec::new("pointcloud.list", "Point Clouds", crate::checked!("pointcloud.list", list))
         .icon("list")
         .noundo()
         .doc_only()
+        .contract(&LIST_CONTRACT)
+        .output(output_schema_for::<PointCloudListResult>)
         .params("→ clouds: [{cloud, name, file, source (the file's path, read again by pointcloud.reload), points, segments, triangles, source_points, units, visible, point_size, color_by (file, single, height or a property's name), color, colored, properties: [{name, integer, span, names}], filters, color_range (the ramp's now, exact over what the filters keep), height_range (the ramp's own range or the automatic one by height), height_auto, bounds: [[x,y,z], [x,y,z]] in the design, matrix}]"),
 ];
 
@@ -89,7 +107,7 @@ fn color_by(p: &Value, cmd: &str) -> Result<Option<(ColorBy, Option<String>)>> {
 
 /// `filters`: absent (`None`), null for none, or [{property, range: [low, high]} or
 /// {property, values: [whole numbers]}].
-fn filters(p: &Value, cmd: &str) -> Result<Option<Vec<Filter>>> {
+pub(crate) fn filters(p: &Value, cmd: &str) -> Result<Option<Vec<Filter>>> {
     let refuse = || {
         bad(
             cmd,
@@ -185,8 +203,8 @@ fn matrix_rows(m: &Mat) -> Vec<f64> {
     (0..3).flat_map(|row| (0..4).map(move |col| m[col][row])).collect()
 }
 
-fn bounds(c: &PointCloud) -> Value {
-    let Some(corners) = c.world_corners() else { return Value::Null };
+fn bounds(c: &PointCloud) -> Option<[[f64; 3]; 2]> {
+    let corners = c.world_corners()?;
     // The box around the corners in the design.
     let mut a = [f64::INFINITY; 3];
     let mut b = [f64::NEG_INFINITY; 3];
@@ -196,7 +214,7 @@ fn bounds(c: &PointCloud) -> Value {
             b[k] = b[k].max(v);
         }
     }
-    json!([a, b])
+    Some([a, b])
 }
 
 fn insert(s: &mut Session, p: &Value) -> Result<Value> {
@@ -258,16 +276,18 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = s.doc_mut();
     let id = doc.allocate_id()?;
     cloud.id = id;
-    let out = json!({
-        "cloud": id,
-        "name": name,
-        "points": cloud.len(),
-        "segments": cloud.complex.segment_count(),
-        "triangles": cloud.complex.triangle_count(),
-        "source_points": cloud.source_points,
-        "bounds": bounds(&cloud),
-        "warnings": warnings,
-    });
+    let out = PointCloudInsertResult {
+        cloud: id,
+        name,
+        points: cloud.len(),
+        segments: cloud.complex.segment_count(),
+        triangles: cloud.complex.triangle_count(),
+        source_points: cloud.source_points,
+        bounds: bounds(&cloud),
+        warnings,
+        param_warnings: Vec::new(),
+    };
+    let out = serde_json::to_value(out).map_err(|e| EngineError::Other(e.to_string()))?;
     doc.point_clouds.push(cloud);
     Ok(out)
 }
@@ -331,7 +351,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let id = c.id;
     let slot = s.doc_mut().point_clouds.get_mut(i).ok_or_else(|| bad(cmd, "point cloud"))?;
     *slot = c;
-    Ok(json!({"cloud": id}))
+    serde_json::to_value(PointCloudEditResult { cloud: id, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// The most points a reload keeps: the limit the cloud was read under. A read is a function of
@@ -387,44 +407,61 @@ fn reload(s: &mut Session, p: &Value) -> Result<Value> {
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let i = find(s, p, "pointcloud.delete")?;
     let c = s.doc_mut().point_clouds.remove(i);
-    Ok(json!({"deleted": c.id}))
+    serde_json::to_value(PointCloudDeleteResult { deleted: c.id, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn list(s: &mut Session, _: &Value) -> Result<Value> {
-    let clouds: Vec<Value> = s
+    let clouds: Vec<PointCloudInfo> = s
         .doc
         .point_clouds
         .iter()
-        .map(|c| {
-            json!({
-                "cloud": c.id,
-                "name": c.name,
-                "file": c.file,
-                "points": c.len(),
-                "source_points": c.source_points,
-                "units": c.units,
-                "visible": c.visible,
-                "point_size": c.point_size,
-                "color_by": c.colored_property().filter(|_| c.color_by == ColorBy::Property).unwrap_or(c.color_by.name()),
-                "segments": c.complex.segment_count(),
-                "triangles": c.complex.triangle_count(),
-                "properties": c
-                    .property_names()
-                    .map(|n| json!({"name": n, "integer": c.complex.integer(n), "span": c.span(n), "names": c.complex.names(n).map(|m| &m.values)}))
-                    .collect::<Vec<_>>(),
-                "filters": c.filters,
-                "color_range": solidcraft_doc::point_cloud_distribution::color_range(c, &solidcraft_doc::point_cloud_distribution::Geometry::of(c), &c.filters),
-                "source": c.source,
-                "color": c.color,
-                "colored": !c.colors.is_empty(),
-                "height_range": c.height_range_now(),
-                "height_auto": c.height_range.is_none(),
-                "bounds": bounds(c),
-                "matrix": matrix_rows(&c.transform),
-            })
+        .map(|c| PointCloudInfo {
+            cloud: c.id,
+            name: c.name.clone(),
+            file: c.file.clone(),
+            source: c.source.clone(),
+            points: c.len(),
+            segments: c.complex.segment_count(),
+            triangles: c.complex.triangle_count(),
+            source_points: c.source_points,
+            units: c.units.clone(),
+            visible: c.visible,
+            point_size: c.point_size,
+            color_by: c.colored_property().filter(|_| c.color_by == ColorBy::Property).unwrap_or(c.color_by.name()).to_string(),
+            color: c.color,
+            colored: !c.colors.is_empty(),
+            properties: c
+                .property_names()
+                .map(|n| PointCloudProperty {
+                    name: n.to_string(),
+                    integer: c.complex.integer(n),
+                    span: c.span(n),
+                    names: c.complex.names(n).map(|m| m.values.clone()),
+                })
+                .collect(),
+            filters: c
+                .filters
+                .iter()
+                .map(|f| PointCloudFilter {
+                    property: f.property.clone(),
+                    keep: match &f.keep {
+                        Keep::Range { range } => PointCloudFilterKeeps::Range { range: *range },
+                        Keep::Values { values } => PointCloudFilterKeeps::Values { values: values.clone() },
+                    },
+                })
+                .collect(),
+            color_range: solidcraft_doc::point_cloud_distribution::color_range(
+                c,
+                &solidcraft_doc::point_cloud_distribution::Geometry::of(c),
+                &c.filters,
+            ),
+            height_range: c.height_range_now(),
+            height_auto: c.height_range.is_none(),
+            bounds: bounds(c),
+            matrix: matrix_rows(&c.transform),
         })
         .collect();
-    Ok(json!({"clouds": clouds}))
+    serde_json::to_value(PointCloudListResult { clouds, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 #[cfg(test)]

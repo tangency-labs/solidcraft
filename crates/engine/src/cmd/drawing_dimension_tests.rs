@@ -1,12 +1,13 @@
 use std::collections::BTreeSet;
 
 use serde_json::json;
-use solidcore_record::Vec3;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
 use solidcraft_geom::drawing_view::NamedView;
 
 use super::*;
+use crate::drawing_dimension_paper::tests::measured;
 use crate::schema::tests::conforms;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -173,9 +174,9 @@ fn refused_alike(s: &mut Session, p: &Value) -> String {
     e
 }
 
-/// A dry run of add answers what the add made next answers, and changes nothing: not the design,
-/// the drawing, its undo steps, whether it needs saving or the values read. An explicit `false`
-/// is an add.
+/// A dry run of add answers what the add made next answers, where it would sit on its sheet included,
+/// and changes nothing: not the design, the drawing, its undo steps, whether it needs saving or the
+/// values read. An explicit `false` is an add.
 #[test]
 fn a_dry_run_answers_what_add_would_add_and_changes_nothing() {
     let (mut s, view) = front_view();
@@ -192,6 +193,7 @@ fn a_dry_run_answers_what_add_would_add_and_changes_nothing() {
         let (doc, steps, dirty, values) = (s.doc.clone(), s.undo.len(), s.is_dirty(), s.dimension_values.clone());
         let before = s.drawing("test").unwrap().to_json().unwrap();
         let dry = previewed(&mut s, &p);
+        assert!(dry.get("layout").is_some(), "{kind}: a dry run says where its dimension would sit: {dry}");
         assert!(Arc::ptr_eq(&s.doc, &doc), "{kind}: the same design");
         assert_eq!((s.drawing("test").unwrap().to_json().unwrap(), s.undo.len(), s.is_dirty()), (before, steps, dirty), "{kind}");
         assert_eq!(s.dimension_values, values, "{kind}: no last good value kept");
@@ -2108,4 +2110,371 @@ fn renaming_the_plate_keeps_its_five_dimensions() {
     }
     closed_edit(&mut s, &drawing, "edit.undo", json!({}));
     read_as(&mut s, &five, PLATE);
+}
+
+/// A point of a reply, `[x, y]`.
+fn xy(v: &Value) -> Vec2 {
+    Vec2::new(v[0].as_f64().unwrap(), v[1].as_f64().unwrap())
+}
+
+/// `reply`'s layout lines under `key` (`extension_lines` or `dimension_lines`), point by point.
+fn layout_lines(reply: &Value, key: &str) -> Vec<Vec<Vec2>> {
+    let lines = reply["layout"][key].as_array().unwrap_or_else(|| panic!("no layout.{key}: {reply}"));
+    lines.iter().map(|line| line.as_array().unwrap().iter().map(xy).collect()).collect()
+}
+
+/// `reply`'s layout arrows: each tip, and the unit direction it points in.
+fn layout_arrows(reply: &Value) -> Vec<(Vec2, Vec2)> {
+    let arrows = reply["layout"]["arrows"].as_array().unwrap_or_else(|| panic!("no layout.arrows: {reply}"));
+    arrows.iter().map(|arrow| (xy(&arrow["tip"]), xy(&arrow["points"]))).collect()
+}
+
+/// `reply`'s layout text boxes, corner by corner.
+fn layout_boxes(reply: &Value) -> Vec<Vec<Vec2>> {
+    let boxes = reply["layout"]["text_boxes"].as_array().unwrap_or_else(|| panic!("no layout.text_boxes: {reply}"));
+    boxes.iter().map(|corners| corners.as_array().unwrap().iter().map(xy).collect()).collect()
+}
+
+/// Every point of `reply`'s layout, in order: its extension lines', its dimension lines', its arrows'
+/// tips and its text boxes' corners.
+fn layout_points(reply: &Value) -> Vec<Vec2> {
+    let lines = ["extension_lines", "dimension_lines"].into_iter().flat_map(|key| layout_lines(reply, key)).flatten();
+    lines.chain(layout_arrows(reply).into_iter().map(|(tip, _)| tip)).chain(layout_boxes(reply).into_iter().flatten()).collect()
+}
+
+/// Whether `a` and `b` are the same points, each within `tolerance` mm.
+fn same_points(a: &[Vec2], b: &[Vec2], tolerance: f64) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(p, q)| p.dist(*q) <= tolerance)
+}
+
+/// What `added`'s group on `sheet` draws: its strokes point by point, its arrowheads' tips and its
+/// text runs' origins.
+fn drawn_parts(sheet: &crate::drawing_scene::SheetScene, added: &Value) -> (Vec<Vec<Vec2>>, Vec<Vec2>, Vec<Vec2>) {
+    use solidcraft_geom::paper::Item;
+    let id = ids::decode(added["dimension"].as_str().unwrap()).unwrap();
+    let group = sheet.scene.groups.iter().find(|g| g.object == id).unwrap_or_else(|| panic!("{} isn't drawn", added["dimension"]));
+    let (mut strokes, mut tips, mut origins) = (Vec::new(), Vec::new(), Vec::new());
+    for item in &group.items {
+        match item {
+            Item::Stroke { path, .. } => strokes.push(std::iter::once(path[0].start()).chain(path.iter().map(|seg| seg.end())).collect()),
+            Item::Fill { region } => tips.push(region.outer.segs[0].start()),
+            Item::Text(text) => origins.push(text.origin),
+            Item::Picture(_) => {}
+        }
+    }
+    (strokes, tips, origins)
+}
+
+/// Sheet 1 of the drawing open as a command reads it ([`crate::drawing_scene::as_shown`]): for a
+/// deferred drawing, what its last update drew.
+fn shown_now(s: &mut Session) -> crate::drawing_scene::SheetScene {
+    let d = s.drawing("test").unwrap().clone();
+    crate::drawing_scene::as_shown(s, &d, d.sheets[0].id).unwrap()
+}
+
+/// What `drawing.scene` says of `added` on the drawing's first sheet: its `why`.
+fn scene_why(s: &mut Session, added: &Value) -> Value {
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let scene = run(s, "drawing.scene", json!({"sheet": sheet}));
+    let listed = scene["dimensions"].as_array().and_then(|all| all.iter().find(|d| d["dimension"] == added["dimension"]));
+    listed.map(|d| d["why"].clone()).unwrap_or_else(|| panic!("{} isn't listed: {scene}", added["dimension"]))
+}
+
+/// Inspect says where a dimension sits on its sheet, in paper mm from the sheet's lower-left corner.
+/// The front view at 1:1 has the middle of the box's outline (x 40, z 15) on its centre (200, 150),
+/// so the top front edge (z 30, x 0 to 80) is at y 150 + 30 - 15 = 165, from x 200 - 40 = 160 to 240.
+/// Its length sits 10 above it by default: the dimension line at 175 from tip to tip; the extension
+/// lines from the gap above the edge (166) to the overshoot past the line (175 + 2 = 177); an arrow
+/// at each end pointing out; and the text's box over x 200, as wide as "80.00" measures, from the gap
+/// above the line (176) to the capitals' 3.5 above that (179.5).
+#[test]
+fn inspect_says_where_a_dimension_sits_on_its_sheet() {
+    let (mut s, view) = front_view();
+    let added = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
+    let read = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
+    assert!(read.get("layout_why").is_none(), "{read}");
+    let at = Vec2::new;
+    // Left to right, whichever end of the edge is read first.
+    let mut extensions = layout_lines(&read, "extension_lines");
+    extensions.sort_by(|a, b| a[0].x.total_cmp(&b[0].x));
+    assert_eq!(extensions.len(), 2, "{read}");
+    assert!(same_points(&extensions[0], &[at(160.0, 166.0), at(160.0, 177.0)], 1e-9), "{read}");
+    assert!(same_points(&extensions[1], &[at(240.0, 166.0), at(240.0, 177.0)], 1e-9), "{read}");
+    let along = layout_lines(&read, "dimension_lines");
+    assert!(along.len() == 1 && same_points(&along[0], &[at(160.0, 175.0), at(240.0, 175.0)], 1e-9), "{read}");
+    let arrows: Vec<Vec2> = layout_arrows(&read).into_iter().flat_map(|(tip, dir)| [tip, dir]).collect();
+    assert!(same_points(&arrows, &[at(160.0, 175.0), at(-1.0, 0.0), at(240.0, 175.0), at(1.0, 0.0)], 1e-9), "{read}");
+    let half = measured("80.00") * 0.5;
+    let boxes = layout_boxes(&read);
+    let corners = [at(200.0 - half, 176.0), at(200.0 + half, 176.0), at(200.0 + half, 179.5), at(200.0 - half, 179.5)];
+    assert!(boxes.len() == 1 && same_points(&boxes[0], &corners, 1e-9), "{read}");
+}
+
+/// The layout is where the sheet draws it, exactly, with no tolerance: on the plate's sheet, each of
+/// the five dimensions' extension lines is one of its group's strokes, its arrows' tips are its
+/// arrowheads' tips, and its text boxes' first corners are its text runs' origins, as one function
+/// lays both out through the same frame and both are moved by the view's centre. Asked before the
+/// sheet is drawn and after, the same. With the view moved from (150, 180) to (162, 173), every point
+/// moves by (12, -7) (within a rounding: the centre is added to the point once, not in two steps).
+#[test]
+fn the_layout_is_where_the_sheet_draws_it() {
+    let (mut s, _, view, five) = plate_with_five();
+    let read = |s: &mut Session| five.iter().map(|added| run(s, INSPECT, json!({"dimension": added["dimension"]}))).collect::<Vec<_>>();
+    let before = read(&mut s);
+    let sheet = sheet_now(&s);
+    for (added, reply) in five.iter().zip(&before) {
+        let (strokes, tips, origins) = drawn_parts(&sheet, added);
+        for line in layout_lines(reply, "extension_lines") {
+            assert!(strokes.contains(&line), "{}: {line:?} isn't drawn: {strokes:?}", added["dimension"]);
+        }
+        let arrows: Vec<Vec2> = layout_arrows(reply).into_iter().map(|(tip, _)| tip).collect();
+        assert_eq!(arrows, tips, "{}", added["dimension"]);
+        let firsts: Vec<Vec2> = layout_boxes(reply).into_iter().map(|corners| corners[0]).collect();
+        assert_eq!(firsts, origins, "{}", added["dimension"]);
+    }
+    assert_eq!(read(&mut s), before, "the same once the sheet is drawn");
+
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"place": {"at": [162.0, 173.0]}}}));
+    let by = Vec2::new(12.0, -7.0);
+    for (was, now) in before.iter().zip(read(&mut s)) {
+        let moved: Vec<Vec2> = layout_points(was).into_iter().map(|p| p + by).collect();
+        assert!(same_points(&layout_points(&now), &moved, 1e-9), "{was} {now}");
+        let directions = |reply: &Value| layout_arrows(reply).into_iter().map(|(_, dir)| dir).collect::<Vec<_>>();
+        assert_eq!(directions(&now), directions(was));
+    }
+}
+
+/// A dimension that isn't drawn has no layout, and says why where its status doesn't, in the words the
+/// sheet uses. Lost (its edge filleted away): no layout, and nothing more than its status. Its view
+/// drawing nothing (its only part, Block, hidden, as a file can hold it: a placeholder) or in a shaded
+/// style with lines (which the sheet can't draw yet): "its view isn't drawn", as `drawing.scene` says.
+/// Its view drawing an exploded view (set after the add, as a file can hold it) is no longer one of
+/// these: it is drawn where that view draws its parts (#13048), so it has a layout, its arrows' tips
+/// where the sheet draws its arrowheads, and `drawing.check` holds nothing back.
+#[test]
+fn a_dimension_not_drawn_has_no_layout_and_says_why() {
+    let (mut s, drawing, dimension) = read_once();
+    lose_the_edge(&mut s);
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let lost = inspect_of(&mut s, dimension);
+    assert_eq!(lost["status"], json!("lost"), "{lost}");
+    assert!(lost.get("layout").is_none() && lost.get("layout_why").is_none(), "{lost}");
+
+    let not_drawn = json!("its view isn't drawn");
+    let mut s = Session::default();
+    let block = run(&mut s, "component.create", json!({"name": "Block"}))["occurrence"].clone();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 30, "height": 10, "body_name": "Block", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let (mut s, view) = drawn_from_the_front(s);
+    let on_block = add(&mut s, view, json!({"length": {"edge": {"point": [10, 0, 10], "path": [block]}}}));
+    assert!(on_block.get("layout").is_some(), "drawn before the hide: {on_block}");
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let record = d.views.iter_mut().find(|v| v.id == view).unwrap();
+    Arc::make_mut(record).settings.hide = Some(vec![vec![block.as_u64().unwrap()]].into());
+    s.doc_mut().put_drawing(Arc::new(d));
+    let hidden = run(&mut s, INSPECT, json!({"dimension": on_block["dimension"]}));
+    assert!(hidden.get("layout").is_none(), "{hidden}");
+    assert_eq!((&hidden["layout_why"], &scene_why(&mut s, &on_block)), (&not_drawn, &not_drawn), "{hidden}");
+
+    let (mut s, view) = front_view();
+    let added = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"visual_style": "shaded_visible"}}));
+    let shaded = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
+    assert!(shaded.get("layout").is_none(), "{shaded}");
+    assert_eq!((&shaded["layout_why"], &scene_why(&mut s, &added)), (&not_drawn, &not_drawn), "{shaded}");
+
+    // Two components, as an exploded view pulls components apart; Apart lifts the Bolt 50.
+    let mut s = Session::default();
+    let bolt = run(&mut s, "component.create", json!({"name": "Bolt"}))["occurrence"].clone();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Bolt", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "component.create", json!({"name": "Nut"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0], "body_name": "Nut", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": bolt, "translate": [0, 0, 50]}]}));
+    let (mut s, view) = drawn_from_the_front(s);
+    let on_bolt = add(&mut s, view, json!({"length": {"edge": {"point": [5, 0, 10], "path": [bolt]}}}));
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let record = d.views.iter_mut().find(|v| v.id == view).unwrap();
+    Arc::make_mut(record).settings.exploded = Some(solidcraft_doc::drawing_view::Exploded::View(s.doc.assembly.exploded[0].id));
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+    let apart = run(&mut s, INSPECT, json!({"dimension": on_bolt["dimension"]}));
+    assert!(apart.get("layout").is_some() && apart.get("layout_why").is_none(), "{apart}");
+    let tips: Vec<Vec2> = layout_arrows(&apart).into_iter().map(|(tip, _)| tip).collect();
+    let (_, drawn, _) = drawn_parts(&sheet_now(&s), &on_bolt);
+    assert_eq!(tips, drawn, "the layout is where the sheet draws the bolt, moved apart");
+    let check = run(&mut s, "drawing.check", json!({}));
+    let of_bolt = |f: &&Value| f["kind"] == "out_of_date" && f["object"]["id"] == on_bolt["dimension"];
+    assert!(check["findings"].as_array().is_some_and(|all| !all.iter().any(|f| of_bolt(&f))), "{check}");
+}
+
+/// Add and repair answer with the layout inspect gives. The top front edge's length, added, answers
+/// what inspect then answers, layout and all. Lost to a fillet of 5, it has none. Repaired to the
+/// fillet's front edge, it has its layout again: that edge is at z 25, so at y 150 + 25 - 15 = 160 on
+/// the sheet (the box's outline is still 0 to 30 high, its middle at z 15), and its line 10 above it
+/// at 170, from x 160 to 240, the arrows pointing out; inspect then gives the same layout.
+#[test]
+fn add_and_repair_answer_with_the_layout_inspect_gives() {
+    let (mut s, view) = front_view();
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    let added = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
+    assert!(added.get("layout").is_some(), "{added}");
+    assert_eq!(run(&mut s, INSPECT, json!({"dimension": added["dimension"]})), added);
+    run(&mut s, "drawing.close", json!({}));
+    lose_the_edge(&mut s);
+    run(&mut s, "drawing.open", drawing);
+    let lost = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
+    assert!(lost["status"] == "lost" && lost.get("layout").is_none(), "{lost}");
+    let front = json!({"edge": {"body": "Box", "index": edge_index(&s, [0.0, 0.0, 25.0], [80.0, 0.0, 25.0])}});
+    let repaired = run(&mut s, REPAIR, json!({"dimension": added["dimension"], "slot": "edge", "pick": front}));
+    reads(&repaired, 80.0, "80.00");
+    let arrows: Vec<Vec2> = layout_arrows(&repaired).into_iter().flat_map(|(tip, dir)| [tip, dir]).collect();
+    let want = [Vec2::new(160.0, 170.0), Vec2::new(-1.0, 0.0), Vec2::new(240.0, 170.0), Vec2::new(1.0, 0.0)];
+    assert!(same_points(&arrows, &want, 1e-9), "{repaired}");
+    assert_eq!(run(&mut s, INSPECT, json!({"dimension": added["dimension"]}))["layout"], repaired["layout"]);
+}
+
+/// A layout follows the drawing's units in its text alone: the top front edge's length in an inch
+/// drawing reads "3.1496" (80 / 25.4; an inch length shows at least three decimals, four when the
+/// fourth counts, whatever the record's decimals: `display_units::length_precision`), with the lines
+/// and arrows it has in millimetres, and each box as wide as its own text measures over the same
+/// middle (x 200).
+#[test]
+fn a_layout_follows_the_drawings_units() {
+    let (mut s, view) = front_view();
+    let mm = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
+    run(&mut s, "drawing.set", json!({"units": "in"}));
+    let inches = run(&mut s, INSPECT, json!({"dimension": mm["dimension"]}));
+    assert_eq!(inches["text"], json!("3.1496"), "{inches}");
+    for key in ["extension_lines", "dimension_lines"] {
+        assert_eq!(layout_lines(&inches, key), layout_lines(&mm, key), "{key}");
+    }
+    assert_eq!(layout_arrows(&inches), layout_arrows(&mm));
+    // The box's first two corners, on the line's side: its width, and its middle.
+    let across = |reply: &Value| {
+        let corners = &layout_boxes(reply)[0];
+        (corners[1].x - corners[0].x, (corners[0].x + corners[1].x) * 0.5)
+    };
+    for (reply, text) in [(&inches, "3.1496"), (&mm, "80.00")] {
+        let (width, middle) = across(reply);
+        assert!((width - measured(text)).abs() < 1e-9 && (middle - 200.0).abs() < 1e-9, "{text}: {reply}");
+    }
+}
+
+/// In a deferred drawing the layout reads the model as it is now, as `value` and `text` do, while the
+/// sheet shows what its last update drew. The plate's length changed from 100 to 120 with the drawing
+/// closed: the length's arrows are 60 apart in the layout (120 at 1:2), at x 150 - 30 = 120 and
+/// 150 + 30 = 180 round the view's centre, while the sheet still holds its update's 50 apart. Updated
+/// and drawn, the sheet's arrowheads are where the layout's tips are.
+#[test]
+fn a_layout_reads_the_model_as_it_is_now_in_a_deferred_drawing() {
+    let (mut s, drawing, _, five) = plate_with_five();
+    let length = &five[3];
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    assert!((tips_apart(&shown_now(&mut s), length) - 50.0).abs() < 1e-6);
+    closed_edit(&mut s, &drawing, "parameters.change", json!({"name": "length", "expression": "120 mm"}));
+    let read = run(&mut s, INSPECT, json!({"dimension": length["dimension"]}));
+    reads(&read, 120.0, "120.00");
+    let tips: Vec<Vec2> = layout_arrows(&read).into_iter().map(|(tip, _)| tip).collect();
+    let mut xs: Vec<f64> = tips.iter().map(|tip| tip.x).collect();
+    xs.sort_by(f64::total_cmp);
+    assert!(xs.len() == 2 && (xs[0] - 120.0).abs() < 1e-6 && (xs[1] - 180.0).abs() < 1e-6, "{read}");
+    assert!((tips_apart(&shown_now(&mut s), length) - 50.0).abs() < 1e-6, "the sheet holds its update's lines");
+    run(&mut s, "drawing.update", json!({}));
+    let (_, drawn, _) = drawn_parts(&shown_now(&mut s), length);
+    assert!(same_points(&tips, &drawn, 1e-9), "{tips:?} {drawn:?}");
+}
+
+/// That `reply` reads ok and `value` to within what the joints' solve places parts to.
+fn reads_about(reply: &Value, value: f64) {
+    assert_eq!(reply["status"].as_str(), Some("ok"), "{reply}");
+    assert!((reply["value"].as_f64().unwrap() - value).abs() < 1e-6, "{reply}");
+}
+
+/// [`crate::drawing_scene::tests::hinge_pair`] with a second top view at 1:1 on (150, 250), in a
+/// position of its own: Hinge at 90°, the leaf turned up. The session, the view of the design's
+/// placement, the posed one and the leaf's occurrence.
+fn hinge_posed() -> (Session, u64, u64, u64) {
+    let (mut s, designed, _) = crate::drawing_scene::tests::hinge_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let pose = json!([{"joint": "Hinge", "values": [90]}]);
+    let p = json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [150, 250], "pose": pose});
+    let posed = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    let leaf = s.doc.occurrences.iter().find(|o| o.name.starts_with("Leaf")).map(|o| o.id).unwrap();
+    (s, designed, posed, leaf)
+}
+
+/// From the plate's far top corner (0, 0, 2) to the leaf's free top corner, (0, 40, 2) as designed,
+/// along y: vertical in a top view.
+fn plate_to_free_edge(leaf: u64) -> Value {
+    json!({"linear": {"a": [0, 0, 2], "b": {"point": [0, 40, 2], "path": [leaf]}, "direction": "vertical"}})
+}
+
+/// A view in a position of its own measures its parts where it draws them (#13048). With the leaf
+/// flat, its free corner is 40 from the plate's far edge; turned up 90° about the hinge line (y 20,
+/// z 0), (0, 40, 2) goes to (0, 20 - 2, 0 + 20), 18 from it. The leaf's own free edge is 40 long in both.
+#[test]
+fn a_posed_view_measures_its_parts_where_it_draws_them() {
+    let (mut s, designed, posed, leaf) = hinge_posed();
+    reads_about(&add(&mut s, designed, plate_to_free_edge(leaf)), 40.0);
+    reads_about(&add(&mut s, posed, plate_to_free_edge(leaf)), 18.0);
+    let free_edge = json!({"length": {"edge": {"point": [20, 40, 2], "path": [leaf]}}});
+    reads_about(&add(&mut s, designed, free_edge.clone()), 40.0);
+    reads_about(&add(&mut s, posed, free_edge), 40.0);
+}
+
+/// A posed view's dimension reads its own position, not the design's: Hinge driven to 45° in the design
+/// moves the designed view's reading to 20 + 20 cos 45° - 2 sin 45° = 20 + 18 / √2 = 32.7279, and leaves
+/// the posed view's at 18.
+#[test]
+fn driving_the_design_moves_a_designed_views_dimension_and_not_a_posed_ones() {
+    let (mut s, designed, posed, leaf) = hinge_posed();
+    let on_designed = add(&mut s, designed, plate_to_free_edge(leaf))["dimension"].clone();
+    let on_posed = add(&mut s, posed, plate_to_free_edge(leaf))["dimension"].clone();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "joint.drive", json!({"joint": "Hinge", "values": [45]}));
+    run(&mut s, "drawing.open", drawing);
+    reads_about(&run(&mut s, INSPECT, json!({"dimension": on_designed})), 20.0 + 18.0 / 2f64.sqrt());
+    reads_about(&run(&mut s, INSPECT, json!({"dimension": on_posed})), 18.0);
+}
+
+/// A plate 100 x 60 x 10 mm from the origin; a 10 mm cube in component Bolt at (0, 0, 20), and one in
+/// component Nut at (30, 0, 20), as an exploded view needs two components; exploded view Apart, moving
+/// the Bolt 50 mm up; and a drawing, open, with two front views at 1:1, one assembled at (100, 150) and
+/// one drawing Apart at (300, 150). The session, the two views and the Bolt's occurrence.
+fn bolt_apart() -> (Session, [u64; 2], u64) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
+    let bolt = run(&mut s, "component.create", json!({"name": "Bolt"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 20], "body_name": "Cube"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Nut"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 20], "body_name": "Nut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": bolt, "translate": [0, 0, 50]}]}));
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let view = |s: &mut Session, at: [f64; 2], exploded: &str| {
+        let p = json!({"sheet": sheet, "view": "front", "scale": "1:1", "position_mm": at, "exploded": exploded});
+        ids::decode(run(s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap()
+    };
+    let views = [view(&mut s, [100.0, 150.0], "assembled"), view(&mut s, [300.0, 150.0], "Apart")];
+    (s, views, bolt)
+}
+
+/// An exploded view measures its parts where it draws them (#13048): the plate's top (z 10) to the
+/// bolt's top (z 30) reads 20 assembled and 50 more, 70, with the bolt moved up; the bolt's own height
+/// reads 10 in both.
+#[test]
+fn an_exploded_view_measures_its_parts_where_it_draws_them() {
+    let (mut s, [assembled, exploded], bolt) = bolt_apart();
+    let tops = json!({"linear": {"a": [0, 0, 10], "b": {"point": [0, 0, 30], "path": [bolt]}, "direction": "vertical"}});
+    reads_about(&add(&mut s, assembled, tops.clone()), 20.0);
+    reads_about(&add(&mut s, exploded, tops), 70.0);
+    let height = json!({"length": {"edge": {"point": [0, 0, 25], "path": [bolt]}}});
+    reads_about(&add(&mut s, assembled, height.clone()), 10.0);
+    reads_about(&add(&mut s, exploded, height), 10.0);
 }

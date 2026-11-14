@@ -73,6 +73,7 @@ fn occurrence(id: u64, component: u64, parent: u64) -> Occurrence {
         transform: rigid(t, Vec3::ZERO, Vec3::Z, 0.01 * id as f64),
         grounded: false,
         bom_type: None,
+        expressed_moves: Vec::new(),
     }
 }
 

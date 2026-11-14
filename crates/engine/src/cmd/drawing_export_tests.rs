@@ -168,6 +168,41 @@ fn a_failed_view_is_named_and_nothing_is_written() {
     assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(scene_svg(&s, sheet).as_slice()));
 }
 
+/// A view of a configuration row is exported as the row builds it (#13048): nothing has drawn it before
+/// the export, so its copy is made for the export, on an automatic drawing and on a deferred one. A
+/// view of a row the design no longer has, and the view that follows it, are placeholders that say
+/// why, and the sheet is written all the same.
+#[test]
+fn a_view_of_a_configuration_row_exports_as_the_row_builds_it() {
+    let (mut s, sheet, [front, _], _) = crate::drawing_scene::tests::configured_front_and_top();
+    let wide = |shown: &crate::drawing_scene::SheetScene| shown.objects.iter().find(|o| o.object == front).map(|o| o.bounds_mm.size().x);
+    let statuses = |reply: &Value| reply["views"].as_array().unwrap().iter().map(|v| (v["status"].clone(), v["reason"].clone())).collect::<Vec<_>>();
+    let drawn = vec![(json!("drawn"), Value::Null); 2];
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Long"}}));
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(statuses(&reply), drawn, "{reply}");
+    assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(scene_svg(&s, sheet).as_slice()));
+    let d = s.drawing("test").unwrap().clone();
+    assert!(wide(&crate::drawing_scene::build(&s, &d, sheet).unwrap()).is_some_and(|w| (w - 60.0).abs() < 1e-6));
+    // Deferred and updated: the export draws it from the model as its update left it.
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(statuses(&reply), drawn, "{reply}");
+    let d = s.drawing("test").unwrap().clone();
+    assert!(wide(&crate::drawing_scene::as_shown(&mut s, &d, sheet).unwrap()).is_some_and(|w| (w - 60.0).abs() < 1e-6));
+    // Its row deleted.
+    run(&mut s, "drawing.set", json!({"updates": "automatic"}));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "config.row", json!({"name": "Long", "delete": true}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let why = json!("the configuration it draws is no longer in the design");
+    assert_eq!(statuses(&reply), vec![(json!("placeholder"), why); 2], "{reply}");
+    assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(scene_svg(&s, sheet).as_slice()));
+}
+
 /// A sheet exports as its scene's PNG, byte for byte: in the reply as base64 data, grey at the
 /// sheet's own dpi when nothing says (300 for a new sheet, so A3 is 4961 x 3508 pixels: 420 and
 /// 297 mm at 300 / 25.4 a millimetre, rounded; then 50 once the sheet says so), and at each colour
