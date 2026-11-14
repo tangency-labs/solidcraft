@@ -2430,6 +2430,30 @@ impl OffsetGeometryCreation {
         uv_curve: Option<O>,
         opt_orig_edgeuse: Option<O>,
     ) -> Result<ReplaceEdgeCurves> {
+        Self::replace_edge_curves_in(k, brep, edgeuse, curve_3d, uv_curve, opt_orig_edgeuse, true)
+    }
+
+    /// [`Self::replace_edge_curves`], with `keep_on_matching_ends` choosing whether a
+    /// curve whose ends match the edge curve's leaves the edge as it is. That is sound only
+    /// where the candidate is the edge's own curve extended or trimmed (`ExtendTrimEdges`,
+    /// the shell-tangent rails): two such curves with the same ends are the same curve. Not
+    /// upstream: `MateEdges` passes `false`, as its candidate is a different curve, the
+    /// intersection of the two faces' surfaces. Matching ends say nothing about its
+    /// interior: where the faces are tangent at both vertices and meet at an angle between
+    /// them (a loft's ruling edge), each face's own offset edge ends at the intersection's
+    /// ends but leaves it in between (by up to 0.032 for the hood corner sheet of
+    /// `tests/issue_1502_thicken_rim_halves.rs` thickened by 2), and keeping them leaves the
+    /// two offset faces apart along the edge.
+    #[allow(clippy::too_many_arguments)] // `ReplaceEdgeCurves` and the choice above
+    fn replace_edge_curves_in<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        edgeuse: O,
+        curve_3d: Option<O>,
+        uv_curve: Option<O>,
+        opt_orig_edgeuse: Option<O>,
+        keep_on_matching_ends: bool,
+    ) -> Result<ReplaceEdgeCurves> {
         // locals
         let edge = brep
             .edgeuse_edge(edgeuse)?
@@ -2458,7 +2482,8 @@ impl OffsetGeometryCreation {
             let curve_end = curve_of(brep, c3)?.evaluate_point(k, c3_ivl.max())?;
 
             // low work - Edgesuse->Curve and 3DCurve start and end Points are within tol
-            if distance(edgeuse_start, curve_start) < edge_tol
+            if keep_on_matching_ends
+                && distance(edgeuse_start, curve_start) < edge_tol
                 && distance(edgeuse_end, curve_end) < edge_tol
             {
                 // No change in ends of curve - don't bother using the inputs - delete them and get out.
@@ -2468,7 +2493,8 @@ impl OffsetGeometryCreation {
             }
 
             // low work - Edgeuse->Curve and 3DCurve start and end Points are within tol with reverse parameterization.
-            if distance(edgeuse_start, curve_end) < edge_tol
+            if keep_on_matching_ends
+                && distance(edgeuse_start, curve_end) < edge_tol
                 && distance(edgeuse_end, curve_start) < edge_tol
             {
                 // No change in ends of curve - just delete the curves and get out
@@ -4366,26 +4392,29 @@ impl OffsetGeometryCreation {
         let copy_3d = curve_of(brep, curve_3d_found)?.copy(k)?;
         let copy_3d_h = store_curve(brep, copy_3d)?;
 
-        // when appropriate - change the pOffsetEdgeuse geometry
-        self.replace_edge_curves(
+        // when appropriate - change the pOffsetEdgeuse geometry (not upstream: also when
+        // the ends match, see `replace_edge_curves_in`)
+        Self::replace_edge_curves_in(
             k,
             brep,
             offset_edgeuse,
             Some(curve_3d_found),
             Some(uv_curve1_found),
             Some(edgeuse),
+            false,
         )?;
 
         // when appropriate - change the pOtherOffsetEdgeuse geometry
         // GWC:BUG?? These two Edgeuses point to the same edge - these two calls should
         //           have the same 3DCurve. It's ok: At this point they do not (yet) point to the same edge.
-        self.replace_edge_curves(
+        Self::replace_edge_curves_in(
             k,
             brep,
             other_offset_edgeuse,
             Some(copy_3d_h),
             Some(uv_curve2_found),
             Some(other_edgeuse),
+            false,
         )?;
 
         // all done
