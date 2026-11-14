@@ -144,7 +144,6 @@ crates/kernel/src/distance.rs:DistanceShape::on_face decides whether a point lie
 crates/kernel/src/helix.rs:sweep_helix_mesh models a thread as a triangle mesh for faceted booleans
 crates/kernel/src/intersection.rs:meeting_edges samples meeting edges from a mesh
 crates/kernel/src/lip.rs:face_at picks the planar face at a point by a mesh
-crates/kernel/src/measure.rs:measure counts a B-rep body's merged topology on a mesh
 crates/kernel/src/offset_backend.rs:face_points takes a point per face from mesh triangles
 crates/kernel/src/offset_backend.rs:faces_under picks the face under each point by the nearest mesh triangle
 crates/kernel/src/offset_backend.rs:with_offsets tags offset faces by a mesh
@@ -164,4 +163,3 @@ crates/kernel/src/surfaces.rs:nearest_face picks the face nearest a point by mes
 crates/kernel/src/topo.rs:cylinder_end_at finds a cylinder's end circle by a mesh
 crates/kernel/src/topo.rs:cylinder_extent measures a cylindrical face's extent and side from mesh normals
 crates/kernel/src/topo.rs:cylinder_face_at finds the cylindrical face at a point by a mesh
-crates/kernel/src/topo.rs:merged_topology counts merged topology from a mesh
