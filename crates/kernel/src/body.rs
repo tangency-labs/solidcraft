@@ -1418,32 +1418,20 @@ impl Body {
     }
 
     /// The point of face `face_index` nearest `point`, when `point` lies on that face itself
-    /// within `tolerance`, else `None`. Decided exactly: the point is projected onto the face's
-    /// surface, then the face is isolated from the rest of the body so that a point on another
-    /// face of the same surface cannot pass the trim test (no mesh). `None` too for a mesh body,
-    /// an index out of range, a point that is not finite, or a surface that cannot be projected
-    /// onto; `Err` only when the kernel cannot classify the isolated face.
+    /// within `tolerance`, else `None`: solidcore decides it exactly on the face's surface and
+    /// trim ([`solidcore_ops::Body::point_on_face`]), no mesh. `None` too for a mesh body, an
+    /// index out of range, a point or tolerance that is not usable; `Err` for the kernel's
+    /// failure.
     pub fn point_lies_on_face(&self, face_index: usize, point: Vec3, tolerance: f64) -> Result<Option<Vec3>> {
-        if self.mesh.is_some() || !point.is_finite() || !tolerance.is_finite() || tolerance < 0.0 {
+        let Some((body, order)) = self.ops_body() else { return Ok(None) };
+        if face_index >= self.record.faces.len() {
             return Ok(None);
         }
-        let Some(face) = self.record.faces.get(face_index) else { return Ok(None) };
-        let [[u0, u1], [v0, v1]] = face.domain;
-        let Ok(surface) = solidcraft_geom::brep::eval::SurfaceEval::new(face.parameters()) else { return Ok(None) };
-        let Some(uv) = surface.project(point, Some([u0.midpoint(u1), v0.midpoint(v1)]), tolerance) else { return Ok(None) };
-        let Some(nearest) = surface.point(uv) else { return Ok(None) };
-        if !nearest.is_finite() || !(nearest.dist(point) <= tolerance) {
-            return Ok(None);
+        match body.point_on_face(order, face_index, [point.x, point.y, point.z], tolerance) {
+            Ok(found) => Ok(found.map(|p| Vec3::new(p[0], p[1], p[2]))),
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(e) => Err(KernelError::Failed(format!("point on face: {e}"))),
         }
-        let others: Vec<usize> = (0..self.face_count()).filter(|index| *index != face_index).collect();
-        let isolated;
-        let trimmed = if others.is_empty() {
-            self
-        } else {
-            isolated = crate::remove_faces(self, &others)?;
-            &isolated
-        };
-        Ok(matches!(trimmed.classify_point(nearest)?, PointClass::OnBoundary).then_some(nearest))
     }
 
     /// [`Body::classify_point`] for each of `points`, in order, through one classification of

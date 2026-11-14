@@ -310,16 +310,10 @@ fn points_classify_against_a_mesh_body() {
 }
 
 #[test]
-fn point_lies_on_face_is_decided_on_the_face_itself() {
+fn point_lies_on_face_answers_through_solidcore() {
+    // The query itself is tested in solidcore-ops (`tests/measure.rs`); this is the wrapper.
     let body = cube(10.0);
-    let faces = body.record().faces.len();
-    // The +X face of the cube: the one whose plane passes through (10, 0, 0).
-    let top =
-        (0..faces).find(|&f| matches!(body.point_lies_on_face(f, Vec3::new(10.0, 0.0, 0.0), 1e-6), Ok(Some(_)))).expect("one face holds (10, 0, 0)");
-    let on = body.point_lies_on_face(top, Vec3::new(10.0, 3.0, -4.0), 1e-6).unwrap().unwrap();
-    assert!(on.dist(Vec3::new(10.0, 3.0, -4.0)) < 1e-6);
-    // On the face's plane but off its trim, and off its plane altogether.
-    assert_eq!(body.point_lies_on_face(top, Vec3::new(10.0, 30.0, 0.0), 1e-6).unwrap(), None);
-    assert_eq!(body.point_lies_on_face(top, Vec3::new(12.0, 0.0, 0.0), 1e-6).unwrap(), None);
-    assert_eq!(body.point_lies_on_face(faces, Vec3::ZERO, 1e-6).unwrap(), None);
+    let found = (0..body.record().faces.len()).filter_map(|f| body.point_lies_on_face(f, Vec3::new(10.0, 3.0, -4.0), 1e-6).ok().flatten()).count();
+    assert_eq!(found, 1);
+    assert_eq!(body.point_lies_on_face(99, Vec3::ZERO, 1e-6).unwrap(), None);
 }
