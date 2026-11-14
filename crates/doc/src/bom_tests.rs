@@ -452,6 +452,33 @@ fn row_of_finds_the_row_a_placement_is_counted_in() {
     assert_eq!(washer.key.parents, [sub.key.member]);
 }
 
+/// A placement counts in the row around it only when it adds to what that row stands for. In parts
+/// only a subassembly with bodies of its own stands for those alone, so a subassembly without bodies
+/// inside it is in no row (listed through its parts); in first level the same row stands for all it
+/// holds, and the inner subassembly counts in it.
+#[test]
+fn a_placement_counts_in_the_row_around_it_only_when_it_adds_to_it() {
+    let mut doc = Document::default();
+    let (outer, o_outer) = add(&mut doc, "Outer", 0);
+    boxed(&mut doc, outer, false);
+    let (inner, o_inner) = add(&mut doc, "Inner", outer);
+    let (part, o_part) = add(&mut doc, "Part", inner);
+    boxed(&mut doc, part, false);
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let mut tree = Tree::new(&doc, &state);
+    let name = |r: std::result::Result<(Vec<u32>, &Row), Unlisted>| r.map(|(_, r)| (r.names.join("; "), r.stands_for));
+    let flat = list_with(&mut tree, &Request::default(), true).unwrap();
+    assert_eq!(name(flat.row_of(&tree, &[o_outer])), Ok(("Outer".to_string(), Holds::Own)));
+    assert_eq!(name(flat.row_of(&tree, &[o_outer, o_inner])), Err(Unlisted::NoRow), "Outer's row stands for its own bodies alone");
+    assert_eq!(name(flat.row_of(&tree, &[o_outer, o_inner, o_part])), Ok(("Part".to_string(), Holds::Own)));
+    let top = list_with(&mut tree, &view(View::FirstLevel), true).unwrap();
+    for path in [&[o_outer, o_inner][..], &[o_outer, o_inner, o_part]] {
+        assert_eq!(name(top.row_of(&tree, path)), Ok(("Outer".to_string(), Holds::All)), "{path:?}");
+    }
+}
+
 /// Each placement is counted in one row or none, every view and grouping: the counts, the
 /// members and the total agree, and `row_of` finds each member's row.
 #[test]

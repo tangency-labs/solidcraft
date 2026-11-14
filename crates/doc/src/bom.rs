@@ -285,9 +285,10 @@ pub enum Unlisted {
     NotFound,
     /// It counts as a reference, or is inside one: no bill of materials counts it.
     Reference,
-    /// It has no row of its own and isn't inside one: a phantom without bodies, a part a
-    /// configuration switches off, or in parts only a subassembly listed through its parts (the
-    /// assembly listed, an empty path, is none either).
+    /// It has no row of its own and isn't part of what the row around it stands for: a phantom
+    /// without bodies, a part a configuration switches off, or in parts only a subassembly listed
+    /// through its parts, even inside a subassembly whose own bodies are a row (the assembly listed,
+    /// an empty path, is none either).
     NoRow,
 }
 
@@ -309,29 +310,30 @@ impl Bom {
     }
 
     /// The row a placement is counted in, by its occurrence path from the assembly listed: the row
-    /// that lists it, else the row of the part it is inside (a nut inside a purchased bolt is
-    /// counted in the bolt's), but none for a part switched off that the list doesn't list. `tree`
-    /// is the one the list was made from, with its members
-    /// (`list_with`).
+    /// that lists it, else the row of the part it is inside when it is part of what that row stands
+    /// for ([`Tree::adds_to`]: a nut inside a purchased bolt is counted in the bolt's), else none.
+    /// `tree` is the one the list was made from, with its members (`list_with`).
     pub(crate) fn row_of(&self, tree: &Tree, path: &[u64]) -> std::result::Result<(Vec<u32>, &Row), Unlisted> {
         if path.len() > MAX_PLACEMENT_DEPTH {
             return Err(Unlisted::NotFound);
         }
+        let mut members = Vec::with_capacity(path.len());
         let mut component = self.source;
         for id in path {
             let placed = tree.contents(component).iter().find(|p| p.occurrence == *id).ok_or(Unlisted::NotFound)?;
             if placed.member.bom_type == BomType::Reference {
                 return Err(Unlisted::Reference);
             }
+            members.push(placed.member);
             component = placed.member.component;
         }
-        // A part switched off counts nowhere unless the list lists it: not in the row it is inside.
-        if tree.switched_off(component) && !self.index.contains_key(path) {
-            return Err(Unlisted::NoRow);
-        }
-        // Each placement is in one row or none, so the longest member path it starts with is its row's.
-        let at = (1..=path.len()).rev().find_map(|n| path.get(..n).and_then(|start| self.index.get(start)));
-        at.and_then(|at| self.row_at(at)).ok_or(Unlisted::NoRow)
+        // Each placement is in one row or none, so the longest member path it starts with is the row
+        // it may count in; it does when everything below that row is part of what the row stands for.
+        let found = (1..=path.len()).rev().find_map(|n| Some((n, self.index.get(path.get(..n)?)?)));
+        let (n, at) = found.ok_or(Unlisted::NoRow)?;
+        let (item, row) = self.row_at(at).ok_or(Unlisted::NoRow)?;
+        let below = members.get(n..).unwrap_or_default();
+        if below.iter().all(|m| tree.adds_to(row.stands_for, *m)) { Ok((item, row)) } else { Err(Unlisted::NoRow) }
     }
 
     /// The row at `at` (its position among the rows, then among each one's children), with its item
@@ -459,12 +461,18 @@ impl<'a> Tree<'a> {
         None
     }
 
-    /// The components placed in `id` whose parts are part of what `id` stands for as `holds` says
-    /// (see `adds`), one for each placement, with the type each counts as there. A part switched off
-    /// isn't, whatever the list shows: it weighs nothing, and its static material names nothing.
+    /// A placement of `member` inside a part is part of what the part stands for as `holds` says (see
+    /// `adds`). A part switched off isn't, whatever the list shows: it weighs nothing, and its static
+    /// material names nothing. What a row weighs and is made of, and the row a placement below it
+    /// counts in ([`Bom::row_of`]), all follow this.
+    fn adds_to(&self, holds: Holds, member: Member) -> bool {
+        adds(holds, member.bom_type) && !self.switched_off(member.component)
+    }
+
+    /// The components placed in `id` that are part of what `id` stands for as `holds` says
+    /// ([`Tree::adds_to`]), one for each placement, with the type each counts as there.
     fn adding(&self, id: u64, holds: Holds) -> Vec<Member> {
-        let adds_here = |p: &&Placed| adds(holds, p.member.bom_type) && !self.switched_off(p.member.component);
-        self.contents(id).iter().filter(adds_here).map(|p| p.member).collect()
+        self.contents(id).iter().map(|p| p.member).filter(|m| self.adds_to(holds, *m)).collect()
     }
 
     /// The static material typed in for a component, if any.
