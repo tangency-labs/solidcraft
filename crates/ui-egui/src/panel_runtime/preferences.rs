@@ -627,7 +627,14 @@ pub fn restore_preferences(app: &mut crate::SolveApp, value: Option<Value>) -> P
                     PreferenceRecord::read_repairing(raw, integration.runtime().layout().registry(), integration.preference_catalogue_state())?;
                 if let Some(state) = &mut integration.preferences {
                     state.reset = reset;
-                    state.preserve = preserve;
+                    // The saved record kept for an over-cap session is never released: it
+                    // is only ever set here, never cleared, so Cancel (which restores the
+                    // repaired in-memory layout) cannot make a later save overwrite the
+                    // original bytes. A session that starts over the cap stays read-only
+                    // for the stored layout record until the next start.
+                    if state.preserve.is_none() {
+                        state.preserve = preserve;
+                    }
                 }
                 record
             }

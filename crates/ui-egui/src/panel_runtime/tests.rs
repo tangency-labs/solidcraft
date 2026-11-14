@@ -466,11 +466,23 @@ fn over_the_cap_the_saved_record_is_left_byte_identical() {
     let room = MAX_REJECTED_RECORD_BYTES - used - filler.size() - 16;
     kept.push(UnreadEntry::native(&WorkspaceId::new("kept.fill").unwrap(), &vec![0_u8; room / 4 * 3]));
     value["unread"] = serde_json::json!(kept);
-    let session = start_with_saved_layouts(&value);
+    let mut session = start_with_saved_layouts(&value);
     assert!(user_preset_names(&session).is_empty(), "the repaired catalogue is used in memory");
     assert!(session.status.as_ref().is_some_and(|status| status.0.contains("left as they were")));
     let saved: serde_json::Value = serde_json::from_str(&session.prefs()).unwrap();
     assert_eq!(saved["panel_layout"], value, "nothing was written over the stored record");
+    // Preferences opens (snapshot), a layout changes, Cancel restores the snapshot: the original stays.
+    let baseline = preferences_value(&session);
+    let group = session.panel_runtime().unwrap().layout().layout().sections.first().unwrap().id.clone();
+    session
+        .dispatch_panel_layout(LayoutAction::Apply {
+            expected_revision: None,
+            mutations: vec![Mutation::Collapse { section: group, collapsed: true }],
+        })
+        .unwrap();
+    restore_preferences(&mut session, baseline).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&session.prefs()).unwrap();
+    assert_eq!(saved["panel_layout"], value, "Cancel does not release the original record");
 }
 
 #[test]
