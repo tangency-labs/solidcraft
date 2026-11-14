@@ -497,7 +497,11 @@ pub fn piecewise_merge(
 /// first operand is modified into the result and the second consumed; an operand
 /// without faces leaves both unchanged ([`Boolean2dOutcome::Unassigned`]). Both
 /// operands' edge attributes ([`Brep::add_attribute`]) carry through to the
-/// corresponding result edges.
+/// corresponding result edges. If coincident edges carry attributes with the same
+/// identifier, only one attribute with that identifier is propagated to the
+/// result edge; which operand's attribute is retained is unspecified. Use distinct
+/// identifiers when both attributes must be retained. When input edges are merged,
+/// attributes apply to the resulting edge and do not identify source subintervals.
 ///
 /// # Errors
 ///
