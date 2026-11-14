@@ -204,12 +204,15 @@ fn holes_at_sketch_points_count_and_a_deleted_point_is_lost() {
     assert_eq!(lost["status"], "lost", "{lost}");
     assert_eq!(lost["hole"], json!({"feature": id_of(&s, "Holes"), "point": "p3"}));
     assert!(lost.get("callout").is_none(), "{lost}");
-    // Today the whole Hole feature fails when one of its points is deleted, so the others read
-    // failed, naming the point. When the feature drills the points that are left, this becomes
-    // `5× Ø9.00 THRU` with p2 at its own point.
-    let p2 = callout_with(&mut s, "Holes", Some("p2"), json!({}));
-    assert_eq!(p2["status"], "failed", "{p2}");
-    assert!(p2["reason"].as_str().is_some_and(|r| r.contains("p3")), "{p2}");
+    // The feature drills the points that are left (#8087): the others resolve to five holes, each at its
+    // own point, p4 after the gap too.
+    for (id, i) in [("p2", 2), ("p4", 4)] {
+        let c = callout_with(&mut s, "Holes", Some(id), json!({}));
+        assert_eq!(c["status"], "resolved", "{c}");
+        assert_eq!(lines(&c), ["5× Ø9.00 THRU"]);
+        let a = std::f64::consts::TAU * i as f64 / 6.0;
+        assert!(near(&c["callout"]["start"][0], 47.5 * a.cos()) && near(&c["callout"]["start"][1], 47.5 * a.sin()), "{id}: {c}");
+    }
     // Undo brings p3's hole back, at p3.
     run(&mut s, "edit.undo", json!({}));
     let back = callout_with(&mut s, "Holes", Some("p3"), json!({}));
@@ -471,6 +474,16 @@ fn a_hole_in_a_moved_body_follows_the_move() {
     run(&mut c, "solid.move", json!({"bodies": ["Plate"], "translate": [100, 0, 0], "copy": true}));
     let h = callout(&mut c, "H");
     assert!(near(&h["callout"]["start"][0], 15.0), "{h}");
+    // Turned over about X through its middle (the Move's origin): it stays over itself, now drilled
+    // upwards from z = 0, where a turn about the world's origin would put it at y = -15, z = -8.
+    let mut p = Session::default();
+    run(&mut p, "solid.box", json!({"length": 60, "width": 30, "height": 8, "body_name": "Plate"}));
+    run(&mut p, "solid.hole", json!({"position": [45, 15, 8], "diameter": 5, "depth": 4, "name": "Blind"}));
+    run(&mut p, "solid.move", json!({"bodies": ["Plate"], "axis": [1, 0, 0], "angle": "180 deg", "origin": [0, 15, 4]}));
+    let b = callout(&mut p, "Blind");
+    let at = |k: usize| b["callout"]["start"][k].as_f64().unwrap_or(f64::NAN);
+    assert!((at(0) - 45.0).abs() < 1e-6 && (at(1) - 15.0).abs() < 1e-6 && at(2).abs() < 1e-6, "{b}");
+    assert!((b["callout"]["direction"][2].as_f64().unwrap_or(f64::NAN) - 1.0).abs() < 1e-6, "{b}");
 }
 
 #[test]

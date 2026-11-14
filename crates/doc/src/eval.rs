@@ -4751,6 +4751,26 @@ pub(crate) const DESIGN_LEN: &str = "\u{1}design_len";
 /// An expression's value. A length that comes out unit-less without being a bare number (a
 /// unit-less parameter used as a length) is in the design's units.
 /// A point given as length expressions.
+/// A Move's translation, rotation pivot (the origin when unset), axis (Z when unset) and angle, its
+/// expressions read: the one reading for the bodies it moves, their constructions and a hole callout
+/// that follows them.
+pub(crate) fn move_motion(
+    vals: &BTreeMap<String, Value>,
+    translate: &[crate::Expr; 3],
+    rotate_axis: Option<crate::Dir>,
+    origin: Option<&crate::PointExpr>,
+    angle: Option<&crate::Expr>,
+) -> Result<(Vec3, Vec3, Vec3, f64)> {
+    let t = Vec3::new(val(vals, &translate[0], Kind::Length)?, val(vals, &translate[1], Kind::Length)?, val(vals, &translate[2], Kind::Length)?);
+    let angle = match angle {
+        Some(a) => val(vals, a, Kind::Angle)?,
+        None => 0.0,
+    };
+    let axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
+    let origin = origin.map(|p| point(vals, p)).transpose()?.unwrap_or(Vec3::ZERO);
+    Ok((t, origin, axis, angle))
+}
+
 fn point(vals: &BTreeMap<String, Value>, p: &crate::PointExpr) -> Result<Vec3> {
     let [x, y, z] = p;
     let v = Vec3::new(val(vals, x, Kind::Length)?, val(vals, y, Kind::Length)?, val(vals, z, Kind::Length)?);
@@ -12889,14 +12909,7 @@ fn eval_feature_kind(
             {
                 return Err(DocError::Invalid("invalid Move copy placements".into()));
             }
-            let t =
-                Vec3::new(val(vals, &translate[0], Kind::Length)?, val(vals, &translate[1], Kind::Length)?, val(vals, &translate[2], Kind::Length)?);
-            let ang = match angle {
-                Some(a) => val(vals, a, Kind::Angle)?,
-                None => 0.0,
-            };
-            let axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
-            let origin = origin.as_ref().map(|p| point(vals, p)).transpose()?.unwrap_or(Vec3::ZERO);
+            let (t, origin, axis, ang) = move_motion(vals, translate, *rotate_axis, origin.as_ref(), angle.as_ref())?;
             // A turn picked on an edge follows the edge where it is now (#17974).
             let (origin, axis) = match rotate_about {
                 Some(about) => move_turn_line(doc, st, f.component, about, origin, axis, warning)?,

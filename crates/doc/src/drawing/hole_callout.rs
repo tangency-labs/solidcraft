@@ -39,7 +39,7 @@
 //! Holes made by other features, and the copies a pattern or a mirror makes of a hole, are not
 //! supported yet.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
@@ -217,7 +217,8 @@ pub fn resolve(doc: &Document, model: &Model, hole: &HoleRef) -> Result<Resoluti
             let Some(i) = sp.ids.iter().position(|x| x == id) else {
                 return Ok(Resolution::Lost { reason: format!("feature {} drills no hole at point `{}`", f.id, id.escape_debug()) });
             };
-            if !sketch_has_point(doc, sp.sketch.0, id) {
+            let present = sketch_points(doc, sp.sketch.0);
+            if !present.contains(id.as_str()) {
                 return Ok(Resolution::Lost { reason: format!("point `{}` is gone from sketch {}", id.escape_debug(), sp.sketch.0) });
             }
             // A Single hole drills at its first point only.
@@ -225,7 +226,9 @@ pub fn resolve(doc: &Document, model: &Model, hole: &HoleRef) -> Result<Resoluti
                 let first = sp.ids.first().map(|p| p.escape_debug().to_string()).unwrap_or_default();
                 return Ok(Resolution::Lost { reason: format!("feature {} drills only at point `{first}`", f.id) });
             }
-            i
+            // The feature drills only the points still in its sketch (#8087), so its hole is this point's
+            // place among those.
+            sp.ids[..i].iter().filter(|x| present.contains(x.as_str())).count()
         }
         (None, Some(_)) => return Err(DocError::Invalid(format!("feature {} is placed by position: it takes no `point`", f.id))),
         (None, None) => 0,
@@ -242,7 +245,7 @@ pub fn resolve(doc: &Document, model: &Model, hole: &HoleRef) -> Result<Resoluti
     let (vals, _) = crate::eval::evaluation_values(doc);
     let before = model.state_before(f.id);
     let motion = |body: &str| later_motion(doc, model, &vals, f.id, body);
-    measure(&vals, &before, &own, &model.state(), f, index, &motion)
+    measure(doc, &vals, &before, &own, &model.state(), f, index, &motion)
 }
 
 /// The rigid motion the Move features after feature `id` give the body `body`, in order: what
@@ -252,22 +255,16 @@ fn later_motion(doc: &Document, model: &Model, vals: &BTreeMap<String, Value>, i
     let mut m = crate::IDENTITY;
     let Some(i) = model.results.iter().position(|r| r.id == id) else { return Ok(m) };
     for r in model.results.iter().skip(i + 1).filter(|r| !r.skipped && r.error.is_none()) {
-        let Some(FeatureKind::Move { bodies, translate, rotate_axis, angle, copy }) = doc.feature(r.id).filter(|f| !f.suppressed).map(|f| &f.kind)
+        let Some(FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy, .. }) =
+            doc.feature(r.id).filter(|f| !f.suppressed).map(|f| &f.kind)
         else {
             continue;
         };
         if *copy || !bodies.iter().any(|b| *b == body) {
             continue;
         }
-        let [x, y, z] = translate;
-        let t =
-            Vec3::new(crate::eval::val(vals, x, Kind::Length)?, crate::eval::val(vals, y, Kind::Length)?, crate::eval::val(vals, z, Kind::Length)?);
-        let angle = match angle {
-            Some(a) => crate::eval::val(vals, a, Kind::Angle)?,
-            None => 0.0,
-        };
-        let axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
-        m = crate::mat_mul(&crate::rigid(t, Vec3::ZERO, axis, angle), &m);
+        let (t, origin, axis, angle) = crate::eval::move_motion(vals, translate, *rotate_axis, origin.as_ref(), angle.as_ref())?;
+        m = crate::mat_mul(&crate::rigid(t, origin, axis, angle), &m);
     }
     Ok(m)
 }
@@ -291,15 +288,19 @@ fn other_item(doc: &Document, id: u64) -> Option<&'static str> {
     .find_map(|(kind, is)| is.then_some(kind))
 }
 
-/// Whether the sketch feature `sketch` still has the point `id`.
-fn sketch_has_point(doc: &Document, sketch: u64, id: &str) -> bool {
-    matches!(doc.feature(sketch).map(|f| &f.kind), Some(FeatureKind::Sketch { sketch, .. }) if sketch.points.iter().any(|p| p.id == id))
+/// The ids of the points the sketch feature `sketch` has now: none when it is no sketch.
+fn sketch_points(doc: &Document, sketch: u64) -> BTreeSet<&str> {
+    match doc.feature(sketch).map(|f| &f.kind) {
+        Some(FeatureKind::Sketch { sketch, .. }) => sketch.points.iter().map(|p| p.id.as_str()).collect(),
+        _ => BTreeSet::new(),
+    }
 }
 
 /// Hole `index` of the Hole feature `f`, drilled into `before`, made in `own` (the model just
 /// after the feature) and found in `after` (the model as it is now), where `motion` (of the body
 /// it is in) carried it. Failed when `after` has no face of that hole there.
 fn measure(
+    doc: &Document,
     vals: &BTreeMap<String, Value>,
     before: &ModelState,
     own: &ModelState,
@@ -311,7 +312,7 @@ fn measure(
     let FeatureKind::Hole { diameter, depth, hole, thread, thread_depth, to, .. } = &f.kind else {
         return Err(DocError::Invalid("not a hole".into()));
     };
-    let (spots, dir) = crate::eval::hole_spots(vals, before, f)?;
+    let (spots, dir) = crate::eval::hole_spots(doc, vals, before, f)?;
     if spots.is_empty() || spots.len() > MAX_HOLES {
         return Err(DocError::Invalid(format!("a hole needs 1…{MAX_HOLES} points")));
     }
@@ -337,7 +338,7 @@ fn measure(
     let form = match hole {
         HoleKind::Simple => Form::Simple,
         HoleKind::Drilled { tip_angle } => Form::Drilled { tip_angle: angle(tip_angle, "tip angle")? },
-        HoleKind::Counterbore { cb_diameter, cb_depth, tip_angle: _ } => {
+        HoleKind::Counterbore { cb_diameter, cb_depth, tip_angle: _, bridge: _ } => {
             Form::Counterbore { diameter: length(cb_diameter, "counterbore diameter")?, depth: length(cb_depth, "counterbore depth")? }
         }
         HoleKind::Countersink { cs_diameter, cs_angle, tip_angle: _ } => {
