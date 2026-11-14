@@ -260,11 +260,9 @@ pub(super) fn shared(brep: &b::Brep) -> R<Option<Glued>> {
     };
     let vertex_new = renumber(&vertex_rep)?;
     let edge_new = renumber(&edge_rep)?;
-    let new_vertex = |v: u32| {
-        vertex_rep.get(v as usize).and_then(|&r| vertex_new.get(r as usize).copied().flatten()).ok_or(Unsupported::Invalid("vertex"))
-    };
-    let new_edge =
-        |e: u32| edge_rep.get(e as usize).and_then(|&r| edge_new.get(r as usize).copied().flatten()).ok_or(Unsupported::Invalid("edge"));
+    let new_vertex =
+        |v: u32| vertex_rep.get(v as usize).and_then(|&r| vertex_new.get(r as usize).copied().flatten()).ok_or(Unsupported::Invalid("vertex"));
+    let new_edge = |e: u32| edge_rep.get(e as usize).and_then(|&r| edge_new.get(r as usize).copied().flatten()).ok_or(Unsupported::Invalid("edge"));
 
     let mut vertices: Vec<b::Vertex> = Vec::new();
     for (v, vertex) in brep.vertices.iter().enumerate() {
