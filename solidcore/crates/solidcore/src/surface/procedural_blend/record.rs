@@ -764,8 +764,8 @@ pub struct MixedSideRecord {
     pub has_t: bool,
 }
 
-/// A Mixed corner's face (#2488): its rule (the Coons patch of its four sides, bilinear for
-/// chamfers, turned or not), its supports (the two trimmed blends and T), its trimline's
+/// A Mixed corner's face (#2488): its rule (the Coons patch of its four sides, the chamfer's
+/// for chamfers, turned or not), its supports (the two trimmed blends and T), its trimline's
 /// blend, side and uv, its conic's side, the construction's tolerance and its net.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MixedCornerRecord {
@@ -775,7 +775,8 @@ pub struct MixedCornerRecord {
     pub common: SupportRecord,
     /// The four sides c0, c1, d0, d1.
     pub sides: Vec<MixedSideRecord>,
-    /// Whether the rule is the bilinear Coons patch.
+    /// Whether the rule is the chamfer's Coons patch (bilinear unless two sides lie in a
+    /// plane wall).
     pub bilinear: bool,
     /// Whether the patch is turned.
     pub transposed: bool,
