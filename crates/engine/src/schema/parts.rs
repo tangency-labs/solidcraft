@@ -53,6 +53,10 @@ pub struct PartsInsertParams {
     /// out of the face; with `point`, its +Z against `direction` (default false).
     #[serde(default)]
     pub flip: Option<bool>,
+    /// With `at`: seat each part at the other end of its hole, head on the face the hole comes
+    /// out of (default false). Refused for a pick that is not on a through hole.
+    #[serde(default)]
+    pub other_side: Option<bool>,
 }
 
 /// Change an inserted standard part's size or length, rebuilding it in place; its joints keep it
