@@ -390,6 +390,9 @@ impl TabsRig {
             view_right_row: "vright",
             view_rename: self.rename.map(|k| (k, TabRename { text: &mut text, focused: &mut focused, max: 8 })),
             plus_menu: if self.plus { &PLUS_MENU } else { &[] },
+            layout_menu: &[],
+            layout_current: "",
+            layout_tip: "Layout",
             switcher_menu: &SWITCHER_MENU,
             tear_off_below: 40.0,
         };

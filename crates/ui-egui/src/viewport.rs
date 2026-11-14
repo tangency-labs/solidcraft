@@ -153,6 +153,8 @@ pub struct ViewportState {
     /// The view being drawn when the window shows several together ([`crate::view_tiles`]): its
     /// frame goes to the GPU as a tile of its own. None: the one viewport.
     pub(crate) tile: Option<u32>,
+    /// The cards of a tiled window with the body of each (below its header), for their controls.
+    pub(crate) cards: Vec<(u64, Rect)>,
     pub(crate) layout: Option<crate::viewport_layout::Layout>,
     pub(crate) palette_rect: Option<Rect>,
     /// None before the host's early confirmation paint; Some(NOTHING) means
@@ -9577,6 +9579,15 @@ pub(crate) fn show_host_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Re
         }
     }
     crate::navigation_bar_view::show(app, ui, rect);
+}
+
+/// The controls a card of a tiled window carries: the compass of its view, in the corner of its
+/// body, acting on the view the app is standing in for ([`crate::view_tiles::card_controls`]).
+pub(crate) fn show_card_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+    refresh_layout(app, ui.ctx());
+    if crate::navigation_bar_view::canvas_caps(app).orbit {
+        axis_view(app, ui, rect);
+    }
 }
 
 /// Orientation controls share the layout reservation used by model fitting.

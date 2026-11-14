@@ -61,12 +61,17 @@ pub fn plus_menu(dark: bool) -> Vec<TabMenuRow<'static>> {
         TabMenuRow::new(PLUS_BESIDE, "Another angle of this view", "").with_icon("tiles", None).separated(),
         TabMenuRow::new(PLUS_DUPLICATE, "Duplicate this view", "").with_icon("duplicate", None),
         TabMenuRow::new(PLUS_REOPEN, "Reopen closed view", "Ctrl+Shift+T").with_icon("reopen", None),
-        TabMenuRow::heading("Show views together").separated(),
-        TabMenuRow::new("layout.single", "Single view", "").with_icon("tiles", None),
-        TabMenuRow::new("layout.side_by_side", "Two side by side", "").with_icon("tiles", None),
-        TabMenuRow::new("layout.stacked", "Two stacked", "").with_icon("tiles", None),
-        TabMenuRow::new("layout.large_and_two", "One large and two small", "").with_icon("tiles", None),
-        TabMenuRow::new("layout.grid", "Two by two", "").with_icon("tiles", None),
+    ]
+}
+
+/// The Layout button's menu: one row for each way to arrange the views in the window.
+pub fn layout_menu() -> Vec<TabMenuRow<'static>> {
+    vec![
+        TabMenuRow::new("layout.single", "Single view", ""),
+        TabMenuRow::new("layout.side_by_side", "Two side by side", ""),
+        TabMenuRow::new("layout.stacked", "Two stacked", ""),
+        TabMenuRow::new("layout.large_and_two", "One large and two small", ""),
+        TabMenuRow::new("layout.grid", "Two by two", ""),
     ]
 }
 
@@ -93,7 +98,7 @@ pub fn handle(app: &mut SolveApp, action: TabAction) -> bool {
         }
         TabAction::ReorderView { from, to } => documents::view_move(app, from, to),
         TabAction::ViewMenu { view, id } => return view_menu(app, view, &id),
-        TabAction::PlusMenu { id } => return plus_row(app, &id),
+        TabAction::PlusMenu { id } | TabAction::LayoutMenu { id } => return plus_row(app, &id),
         TabAction::SwitcherMenu { id } => return switcher_menu(app, &id),
         TabAction::TearOff(i) => {
             documents::switch(app, i);
@@ -274,7 +279,8 @@ mod tests {
     #[test]
     fn menu_ids_are_unique_and_plus_rows_name_every_kind() {
         let plus = plus_menu(false);
-        let ids: Vec<&str> = VIEW_MENU.iter().chain(plus.iter()).map(|r| r.id).collect();
+        let layouts = layout_menu();
+        let ids: Vec<&str> = VIEW_MENU.iter().chain(plus.iter()).chain(layouts.iter()).map(|r| r.id).collect();
         let mut sorted = ids.clone();
         sorted.sort_unstable();
         sorted.dedup();
@@ -283,7 +289,7 @@ mod tests {
             assert!(plus.iter().any(|r| r.id.strip_prefix("plus.") == Some(kind.key()) && r.icon == kind.key() && r.accent.is_some()));
         }
         assert!(plus[0].heading, "the menu opens with a header");
-        assert!(plus.iter().filter(|r| r.heading).count() == 2, "and has one more over the layouts");
+        assert!(plus.iter().filter(|r| r.heading).count() == 1, "and has no other");
     }
 
     #[test]
