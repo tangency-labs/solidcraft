@@ -4405,7 +4405,7 @@
   "ui.add_parameter": "Ajouter un paramètre",
   "ui.agent_chat": "Chat de l'agent",
   "ui.agent_chat_add": "Joindre des fichiers",
-  "ui.agent_chat_add_file": "Choisir un fichier…",
+  "ui.agent_chat_add_file": "Choisir des fichiers…",
   "ui.agent_chat_allow": "Autoriser",
   "ui.agent_chat_allow_once": "Autoriser une fois",
   "ui.agent_chat_allowed": "Autorisé",

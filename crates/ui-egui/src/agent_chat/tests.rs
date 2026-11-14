@@ -3114,20 +3114,120 @@ fn files_wait_with_their_message_and_pictures_skip_an_agent_that_takes_none() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// The contents of at most eight files go with a message; past them a file goes by its place
+/// (the agent reads it with its own tools, whole), up to MAX_ON_MESSAGE in all. A pasted picture
+/// has no place, so past eight it is refused and says what to do. Files that go by their place
+/// don't take one of the eight.
 #[test]
-fn at_most_eight_files_on_a_message() {
+fn past_eight_files_the_rest_go_by_their_place() {
     let d = attachable("eight");
-    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    let (mut app, script, ctx) = app_with_script();
+    std::fs::write(d.join("fixtures.zip"), [0u8; 10]).unwrap();
+    attach_path(&mut app, &at(&d, "fixtures.zip")).unwrap();
     for _ in 0..attach::MAX_FILES {
         attach_path(&mut app, &at(&d, "brief.md")).unwrap();
     }
-    assert!(attach_path(&mut app, &at(&d, "brief.md")).unwrap_err().contains('8'));
-    assert!(attach_rgba(&mut app, 2, 2, &[9; 16]).is_err());
-    assert_eq!(app.agent_chat.attachments.len(), attach::MAX_FILES);
-    let ctx = egui::Context::default();
-    assert!(control(&mut app, &ctx, &json!({"remove_file": 8})).is_err(), "no ninth file to take off");
-    control(&mut app, &ctx, &json!({"remove_file": 0})).unwrap();
-    assert_eq!(app.agent_chat.attachments.len(), attach::MAX_FILES - 1);
+    assert!(app.agent_chat.attachments.iter().skip(1).all(|f| matches!(f.content, attach::Content::Text(_))), "the zip took none of the eight");
+    attach_paths(&mut app, [at(&d, "target.png"), at(&d, "brief.md")].into_iter().map(std::path::PathBuf::from));
+    assert_eq!(app.agent_chat.attachments.len(), attach::MAX_FILES + 3, "nothing refused");
+    assert!(app.agent_chat.loading.is_empty(), "a file by its place is not read");
+    assert!(app.agent_chat.attachments[attach::MAX_FILES + 1..].iter().all(attach::Attachment::by_place));
+    let told: Vec<(&str, bool)> = app
+        .agent_chat
+        .items
+        .iter()
+        .filter_map(|i| if let Item::Notice { text, error } = i { Some((text.as_str(), *error)) } else { None })
+        .filter(|(t, _)| t.contains("by their place"))
+        .collect();
+    assert_eq!(
+        told,
+        [("Past 8 files, the rest go by their place on disk: the agent reads them with its own tools, at full size", false)],
+        "said once for the batch"
+    );
+    assert!(attach_rgba(&mut app, 2, 2, &[9; 16]).unwrap_err().contains("save the picture as a file"));
+    assert!(attach_path(&mut app, &at(&d, "missing.png")).is_err(), "a missing file is still refused");
+    assert!(control(&mut app, &ctx, &json!({"remove_file": 11})).is_err(), "no twelfth file to take off");
+    control(&mut app, &ctx, &json!({"remove_file": 1})).unwrap();
+    assert_eq!(app.agent_chat.attachments.len(), attach::MAX_FILES + 2);
+    send(&mut app, &ctx, "these".into());
+    let sent = &script.prompts()[0];
+    let text = text_of(sent);
+    assert_eq!(pictures_in(sent), 0, "the picture past the eight goes by its place: {text}");
+    assert_eq!(text.matches("Attached file `brief.md`:").count(), attach::MAX_FILES - 1, "seven in full: {text}");
+    assert!(text.contains("Attached file `target.png` (image/png, 40×30 px, "), "{text}");
+    assert_eq!(text.matches("read it with your own tools; it is not in this message").count(), 3, "{text}");
+    let more = attach::MAX_ON_MESSAGE - app.agent_chat.files();
+    for _ in 0..more {
+        attach_path(&mut app, &at(&d, "brief.md")).unwrap();
+    }
+    assert!(attach_path(&mut app, &at(&d, "brief.md")).unwrap_err().contains("200"), "a bound on files in all");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Choose files… takes several at once from the host's dialog; Choose a folder… attaches the
+/// folder by its place, as dropping one does.
+#[test]
+fn choose_files_takes_several_and_choose_a_folder_one_folder() {
+    use solidcraft_ui_registry::handle_at;
+    let d = attachable("choose-many");
+    let mut h = narrow_chat();
+    let chosen = vec![at(&d, "brief.md"), at(&d, "target.png")];
+    h.app.services.pick_files = Some(Box::new(move |_label: &str, _exts: &[&str]| {
+        let all = chosen.clone();
+        Box::pin(async move { all })
+    }));
+    let folder = d.to_string_lossy().to_string();
+    h.app.services.pick_folder = Some(Box::new(move || {
+        let f = folder.clone();
+        Box::pin(async move { Some(f) })
+    }));
+    h.frames(2);
+    let plus = handle_at("agent_chat:add").expect("a + button");
+    h.call("ui.click", json!({"x": plus.x, "y": plus.y}));
+    h.frames(2);
+    let choose = handle_at("agent_chat:add_file").expect("Choose files… in its menu");
+    h.call("ui.click", json!({"x": choose.x, "y": choose.y}));
+    h.frames(2);
+    settle_chat(&mut h);
+    assert_eq!(status(&h.app)["attachments"], json!(["brief.md", "target.png"]), "both chosen files");
+    h.call("ui.click", json!({"x": plus.x, "y": plus.y}));
+    h.frames(2);
+    let choose = handle_at("agent_chat:add_folder").expect("Choose a folder… in its menu");
+    h.call("ui.click", json!({"x": choose.x, "y": choose.y}));
+    h.frames(2);
+    settle_chat(&mut h);
+    let name = format!("{}/", d.file_name().unwrap().to_string_lossy());
+    assert_eq!(status(&h.app)["attachments"], json!(["brief.md", "target.png", name]));
+    assert!(h.app.agent_chat.attachments[2].by_place(), "the folder goes by its place");
+    // Cancelled: nothing more.
+    h.app.services.pick_files = Some(Box::new(|_: &str, _: &[&str]| Box::pin(async { Vec::new() })));
+    h.call("ui.click", json!({"x": plus.x, "y": plus.y}));
+    h.frames(2);
+    let choose = handle_at("agent_chat:add_file").expect("Choose files…");
+    h.call("ui.click", json!({"x": choose.x, "y": choose.y}));
+    settle_chat(&mut h);
+    assert_eq!(h.app.agent_chat.attachments.len(), 3);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// A folder attached through the control channel, as a path, is listed off the window thread and
+/// goes to the agent as its place and what it holds; a folder doesn't take one of the eight.
+#[test]
+fn an_attached_folder_tells_the_agent_where_it_is_and_what_it_holds() {
+    let d = attachable("folder");
+    let (mut app, script, ctx) = app_with_script();
+    control(&mut app, &ctx, &json!({"attach": d.to_string_lossy()})).unwrap();
+    assert_eq!(app.agent_chat.files_sent(), 0, "a folder being listed takes none of the eight");
+    settle_files(&mut app, &ctx);
+    assert_eq!(app.agent_chat.files_sent(), 0);
+    for _ in 0..attach::MAX_FILES {
+        attach_path(&mut app, &at(&d, "brief.md")).unwrap();
+    }
+    assert_eq!(app.agent_chat.files_sent(), attach::MAX_FILES, "eight more in full");
+    send(&mut app, &ctx, "look in here".into());
+    let text = text_of(&script.prompts()[0]);
+    assert!(text.contains(&format!("Attached folder `{}/` (at ", d.file_name().unwrap().to_string_lossy())), "{text}");
+    assert!(text.contains("2 files, ") && text.contains("In it: brief.md (") && text.contains("target.png ("), "{text}");
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -3163,7 +3263,8 @@ fn a_queued_message_keeps_its_files_through_stop_and_sends_them() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// Queued messages go as one prompt with at most eight files; the rest are named, not sent.
+/// Queued messages go as one prompt with at most eight files' contents; the rest are named, not
+/// sent. Files that go by their place go with it whatever their number.
 #[test]
 fn the_queue_sends_at_most_eight_files_and_names_the_rest() {
     let d = attachable("queue-cap");
@@ -3173,6 +3274,7 @@ fn the_queue_sends_at_most_eight_files_and_names_the_rest() {
         for _ in 0..4 {
             attach_path(&mut app, &at(&d, "brief.md")).unwrap();
         }
+        app.agent_chat.add_file(attach::reference(&d.join("target.png")).unwrap());
         send(&mut app, &ctx, format!("batch {n}"));
     }
     ended(&script, "");
@@ -3180,7 +3282,12 @@ fn the_queue_sends_at_most_eight_files_and_names_the_rest() {
     let sent = script.prompts();
     assert_eq!(sent.len(), 2);
     assert_eq!(text_of(&sent[1]).matches("Attached file `brief.md`").count(), attach::MAX_FILES);
-    let told = app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, .. } if text.contains("brief.md") && text.contains('8')));
+    assert_eq!(text_of(&sent[1]).matches("Attached file `target.png` (image/png").count(), 3, "every file by its place goes");
+    let told = app
+        .agent_chat
+        .items
+        .iter()
+        .any(|i| matches!(i, Item::Notice { text, .. } if text.contains("brief.md") && text.contains('8') && !text.contains("target.png")));
     assert!(told, "the files left out are named");
     let _ = std::fs::remove_dir_all(&d);
 }
@@ -3412,6 +3519,25 @@ fn assert_inside_the_panel(chips: usize) {
     for (name, r) in rects {
         assert!(r.left() >= panel.left() && r.right() <= panel.right(), "{name} {r:?} in {panel:?}");
     }
+}
+
+/// Many files on a message scroll in a strip of chips about three rows high, so the text box stays
+/// in the panel; a message holds up to 200 files.
+#[test]
+fn many_files_scroll_in_a_strip_of_chips() {
+    use solidcraft_ui_registry::rect_of;
+    let d = attachable("many-chips");
+    let mut h = narrow_chat();
+    for _ in 0..40 {
+        attach_path(&mut h.app, &at(&d, "brief.md")).unwrap();
+    }
+    h.frames(3);
+    let first = rect_of("agent_chat:file:0").expect("the first chip");
+    let input = rect_of("agent_chat:input").expect("the text box");
+    let panel = rect_of("agent_chat:panel").expect("the panel");
+    assert!(input.top() - first.top() <= panel::CHIPS_MAX_HEIGHT + 24.0, "the chips stay in their strip: {first:?}, text box {input:?}");
+    assert!(panel.contains_rect(input), "the text box stays in the panel: {input:?} in {panel:?}");
+    let _ = std::fs::remove_dir_all(&d);
 }
 
 /// Files for the next message show as chips above the text box (a picture's thumbnail, the name,

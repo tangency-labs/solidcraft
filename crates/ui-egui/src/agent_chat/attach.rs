@@ -1,7 +1,9 @@
 //! Files a person adds to a message (the + button, a drop on the chat, a paste): pictures go to the
 //! agent with it, text files go in as text, PDFs go as documents to agents that take them, CAD
 //! files are imported into the design, and any other file is named by reference (its type, size
-//! and place on this machine) for the agent to read with its own tools. The agent is told what
+//! and place on this machine) for the agent to read with its own tools. A folder goes by its place
+//! too, with what it holds; and past [`MAX_FILES`] files, every further one does, so a batch of
+//! photos reaches the agent whole, at full size, however many there are. The agent is told what
 //! arrived. Each file is checked and bounded before it is kept; a refused one says why.
 
 use std::path::{Path, PathBuf};
@@ -22,8 +24,14 @@ fn failed(name: &str, e: impl std::fmt::Display) -> String {
     refused("ui.agent_chat_file_error", name, &[("error", &e.to_string())])
 }
 
-/// Most files on one message.
+/// Most files whose contents go with one message (pictures, PDFs, text, imported parts); past it,
+/// a file goes by its place ([`reference`]).
 pub const MAX_FILES: usize = 8;
+/// Most files and folders on one message, those that go by their place included.
+pub const MAX_ON_MESSAGE: usize = 200;
+/// A folder's entries read to say what it holds, and the most of them named in the message.
+const MAX_FOLDER_SCAN: usize = 10_000;
+const MAX_FOLDER_NAMED: usize = 200;
 /// Largest picture file read, before it is scaled down.
 const MAX_PICTURE_BYTES: u64 = 40 * 1024 * 1024;
 /// Largest text file sent in full.
@@ -99,14 +107,35 @@ pub enum Content {
         path: PathBuf,
         text: Option<Arc<PdfText>>,
     },
-    /// A file the agent is pointed to, not given: what it is, its size and where it is.
+    /// A file the agent is pointed to, not given: what it is, its size and where it is (and a
+    /// picture's size in pixels, from its header).
     Reference {
         path: PathBuf,
         size: u64,
         mime: &'static str,
+        pixels: Option<[u32; 2]>,
+    },
+    /// A folder the agent is pointed to: where it is and what it holds, none of its files.
+    Folder {
+        path: PathBuf,
+        listing: Arc<Listing>,
     },
     /// A CAD file imported into the design as its own component.
     Imported,
+}
+
+/// What a folder holds at its top level, as far as it was read (hidden entries left out).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Listing {
+    /// The first [`MAX_FOLDER_NAMED`] names in order, a file's with its size; a folder's ends in
+    /// `/` and has none.
+    pub entries: Vec<(String, Option<u64>)>,
+    pub files: usize,
+    pub folders: usize,
+    /// The files' sizes together.
+    pub bytes: u64,
+    /// Reading stopped at [`MAX_FOLDER_SCAN`] entries: it holds more than counted.
+    pub cut: bool,
 }
 
 /// What was taken out of a PDF: its page count and its text, without layout, pictures or fonts.
@@ -181,8 +210,15 @@ impl Attachment {
     pub fn is_picture(&self) -> bool {
         matches!(self.content, Content::Picture { .. })
     }
+    /// The agent is told where it is, not given it: it costs the message no more than its line.
+    pub fn by_place(&self) -> bool {
+        matches!(self.content, Content::Reference { .. } | Content::Folder { .. })
+    }
     /// The chip's mark for a file with no thumbnail: its extension, in capitals, cut to fit.
     pub fn mark(&self) -> String {
+        if matches!(self.content, Content::Folder { .. }) {
+            return String::new();
+        }
         let ext = Path::new(&self.name).extension().and_then(|e| e.to_str()).unwrap_or("");
         ext.chars().take(4).collect::<String>().to_uppercase()
     }
@@ -192,6 +228,21 @@ impl Attachment {
 fn mime_of(path: &Path) -> &'static str {
     let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
     match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "tif" | "tiff" => "image/tiff",
+        "svg" => "image/svg+xml",
+        "txt" | "log" | "ini" | "cfg" => "text/plain",
+        "md" | "markdown" => "text/markdown",
+        "csv" => "text/csv",
+        "tsv" => "text/tab-separated-values",
+        "json" => "application/json",
+        "yaml" | "yml" => "application/yaml",
+        "toml" => "application/toml",
+        "xml" => "application/xml",
         "pdf" => "application/pdf",
         "zip" => "application/zip",
         "7z" => "application/x-7z-compressed",
@@ -279,20 +330,90 @@ pub fn read(path: &Path) -> Result<Attachment, String> {
             let path = absolute(path);
             // Too big to send: the agent is pointed to it instead.
             if meta.len() > MAX_PDF_BYTES {
-                return Ok(Attachment { id: 0, name, content: Content::Reference { path, size: meta.len(), mime: "application/pdf" }, thumb: None });
+                return Ok(Attachment {
+                    id: 0,
+                    name,
+                    content: Content::Reference { path, size: meta.len(), mime: "application/pdf", pixels: None },
+                    thumb: None,
+                });
             }
             let bytes = std::fs::read(&path).map_err(|e| failed(&name, e))?;
             // Read here, off the window thread: for an agent that takes no documents.
             let text = pdf_text(&bytes).map(Arc::new);
             Ok(Attachment { id: 0, name, content: Content::Pdf { bytes: Arc::new(bytes), path, text }, thumb: None })
         }
-        Kind::Other if matches!(path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("heic" | "heif")) => {
-            Err(refused("ui.agent_chat_file_heic", &name, &[]))
-        }
+        Kind::Other if heic(path) => Err(refused("ui.agent_chat_file_heic", &name, &[])),
         Kind::Other => {
-            Ok(Attachment { id: 0, name, content: Content::Reference { path: absolute(path), size: meta.len(), mime: mime_of(path) }, thumb: None })
+            let content = Content::Reference { path: absolute(path), size: meta.len(), mime: mime_of(path), pixels: None };
+            Ok(Attachment { id: 0, name, content, thumb: None })
         }
     }
+}
+
+fn heic(path: &Path) -> bool {
+    matches!(path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("heic" | "heif"))
+}
+
+/// A file the agent is pointed to instead of given, whatever its kind (one past [`MAX_FILES`]):
+/// its type, size and place, and a picture's size in pixels, read from its header. Nothing else
+/// is read, so the agent gets it whole, at full size, with its own tools.
+pub fn reference(path: &Path) -> Result<Attachment, String> {
+    let name = name_of(path);
+    let meta = std::fs::metadata(path).map_err(|e| failed(&name, e))?;
+    if !meta.is_file() {
+        return Err(refused("ui.agent_chat_file_not_a_file", &name, &[]));
+    }
+    if heic(path) {
+        return Err(refused("ui.agent_chat_file_heic", &name, &[]));
+    }
+    let pixels = if kind(path) == Kind::Picture { pixels(path) } else { None };
+    let content = Content::Reference { path: absolute(path), size: meta.len(), mime: mime_of(path), pixels };
+    Ok(Attachment { id: 0, name, content, thumb: None })
+}
+
+/// A picture's width and height from its header, without decoding it.
+fn pixels(path: &Path) -> Option<[u32; 2]> {
+    let (w, h) = image::ImageReader::open(path).ok()?.with_guessed_format().ok()?.into_dimensions().ok()?;
+    Some([w, h])
+}
+
+/// A folder's name on its chip and in the message: its own name, marked as a folder.
+pub(crate) fn folder_name(path: &Path) -> String {
+    format!("{}/", name_of(path).trim_end_matches(['/', '\\']))
+}
+
+/// A folder for a message: the agent is told where it is and what it holds at its top level (up
+/// to [`MAX_FOLDER_SCAN`] entries read, [`MAX_FOLDER_NAMED`] named, hidden ones left out), and
+/// reads the files it needs with its own tools. None of its files is read here.
+pub fn folder(path: &Path) -> Result<Attachment, String> {
+    let name = folder_name(path);
+    let entries = std::fs::read_dir(path).map_err(|e| failed(&name, e))?;
+    let mut listing = Listing::default();
+    for (seen, entry) in entries.enumerate() {
+        if seen >= MAX_FOLDER_SCAN {
+            listing.cut = true;
+            break;
+        }
+        let Ok(entry) = entry else { continue };
+        let entry_name = entry.file_name().to_string_lossy().to_string();
+        if entry_name.starts_with('.') {
+            continue;
+        }
+        // A link counts as what it leads to, as the agent's tools would see it; a broken one is
+        // left out.
+        let Ok(meta) = std::fs::metadata(entry.path()) else { continue };
+        if meta.is_dir() {
+            listing.folders += 1;
+            listing.entries.push((format!("{entry_name}/"), None));
+        } else {
+            listing.files += 1;
+            listing.bytes = listing.bytes.saturating_add(meta.len());
+            listing.entries.push((entry_name, Some(meta.len())));
+        }
+    }
+    listing.entries.sort_by_cached_key(|(n, _)| n.to_lowercase());
+    listing.entries.truncate(MAX_FOLDER_NAMED);
+    Ok(Attachment { id: 0, name, content: Content::Folder { path: absolute(path), listing: Arc::new(listing) }, thumb: None })
 }
 
 /// The path as an absolute one, so the agent (working in another folder) finds the file.
@@ -418,7 +539,8 @@ fn fit(out: &mut String, left: &mut usize, head: &str, text: &str) {
 /// pictures and imported parts by name (the agent sees the pictures themselves as images).
 /// `pictures_sent` and `documents_sent`: whether this agent takes pictures and PDFs. The text files share `budget` characters
 /// in order: one that doesn't fit is cut and says how much is missing, and one past the budget
-/// is named only, so the message stays within the prompt cap.
+/// is named only, so the message stays within the prompt cap. The lines that name files (those
+/// that go by their place, a folder's listing) take their room from the budget first.
 pub fn note(files: &[Attachment], pictures_sent: bool, documents_sent: bool, budget: usize) -> String {
     let mut out = String::new();
     let pictures: Vec<&str> = files.iter().filter(|f| f.is_picture()).map(|f| f.name.as_str()).collect();
@@ -430,54 +552,96 @@ pub fn note(files: &[Attachment], pictures_sent: bool, documents_sent: bool, bud
             format!("\n\n(Pictures attached but not sent, this agent takes none: {list}.)")
         };
     }
-    let mut left = budget;
+    let named: usize = files.iter().filter_map(|f| named_line(f, documents_sent)).map(|l| l.chars().count()).sum();
+    let mut left = budget.saturating_sub(named);
     for f in files {
+        if let Some(line) = named_line(f, documents_sent) {
+            out += &line;
+            continue;
+        }
         match &f.content {
             Content::Text(t) => fit(&mut out, &mut left, &format!("Attached file `{}`", f.name), t),
-            Content::Pdf { path, bytes, .. } if documents_sent => {
-                out += &format!(
-                    "\n\nAttached PDF `{}` ({}, at {}): sent with this message as a document.",
+            // An agent that takes no documents gets the text (one with none is named instead).
+            Content::Pdf { path, bytes, text: Some(t) } => {
+                let cut = if t.cut { "; cut, the rest is in the file" } else { "" };
+                let head = format!(
+                    "Attached PDF `{}` ({} pages, {}, at {}): its text only, layout, pictures and fonts are dropped{cut}",
                     f.name,
+                    t.pages,
                     size_text(bytes.len() as u64),
                     path.display()
                 );
+                fit(&mut out, &mut left, &head, &t.text);
             }
-            // An agent that takes no documents gets the text, or is pointed to the file.
-            Content::Pdf { path, bytes, text } => {
-                let size = size_text(bytes.len() as u64);
-                match text.as_deref().filter(|t| !t.text.trim().is_empty()) {
-                    Some(t) => {
-                        let cut = if t.cut { "; cut, the rest is in the file" } else { "" };
-                        let head = format!(
-                            "Attached PDF `{}` ({} pages, {size}, at {}): its text only, layout, pictures and fonts are dropped{cut}",
-                            f.name,
-                            t.pages,
-                            path.display()
-                        );
-                        fit(&mut out, &mut left, &head, &t.text);
-                    }
-                    None => {
-                        let why = if text.is_some() { "no text could be taken from it (scanned or protected)" } else { "its text could not be read" };
-                        out += &format!(
-                            "\n\nAttached file `{}` (PDF, {size}, at {}): {why}; read it with your own tools, it is not in this message.",
-                            f.name,
-                            path.display()
-                        );
-                    }
-                }
-            }
-            Content::Reference { path, size, mime } => {
-                out += &format!(
-                    "\n\nAttached file `{}` ({mime}, {}, at {}): read it with your own tools; it is not in this message.",
-                    f.name,
-                    size_text(*size),
-                    path.display()
-                );
-            }
-            Content::Imported => out += &format!("\n\n(I added `{}` to the design as a component of its own.)", f.name),
-            Content::Picture { .. } => {}
+            _ => {}
         }
     }
+    out
+}
+
+/// The line that names a file without its contents: a PDF sent as a document, or one whose text
+/// could not be taken; a file or folder that goes by its place; an imported part. `None` for
+/// pictures (named together) and for text, which shares the budget.
+fn named_line(f: &Attachment, documents_sent: bool) -> Option<String> {
+    let line = match &f.content {
+        Content::Pdf { path, bytes, .. } if documents_sent => {
+            format!("\n\nAttached PDF `{}` ({}, at {}): sent with this message as a document.", f.name, size_text(bytes.len() as u64), path.display())
+        }
+        Content::Pdf { path, bytes, text } if text.as_deref().is_none_or(|t| t.text.trim().is_empty()) => {
+            let why = if text.is_some() { "no text could be taken from it (scanned or protected)" } else { "its text could not be read" };
+            format!(
+                "\n\nAttached file `{}` (PDF, {}, at {}): {why}; read it with your own tools, it is not in this message.",
+                f.name,
+                size_text(bytes.len() as u64),
+                path.display()
+            )
+        }
+        Content::Reference { path, size, mime, pixels } => {
+            let pixels = pixels.map(|[w, h]| format!("{w}×{h} px, ")).unwrap_or_default();
+            format!(
+                "\n\nAttached file `{}` ({mime}, {pixels}{}, at {}): read it with your own tools; it is not in this message.",
+                f.name,
+                size_text(*size),
+                path.display()
+            )
+        }
+        Content::Folder { path, listing } => folder_line(&f.name, path, listing),
+        Content::Imported => format!("\n\n(I added `{}` to the design as a component of its own.)", f.name),
+        Content::Text(_) | Content::Pdf { .. } | Content::Picture { .. } => return None,
+    };
+    Some(line)
+}
+
+/// A folder in the message: where it is, what it holds, and the names of the first entries.
+fn folder_line(name: &str, path: &Path, l: &Listing) -> String {
+    let mut out = format!("\n\nAttached folder `{name}` (at {}): ", path.display());
+    if l.files + l.folders == 0 {
+        out += "it is empty (hidden files aside).";
+        return out;
+    }
+    let count = |n: usize, one: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {one}s") };
+    out += &format!("{}, {} in all", count(l.files, "file"), size_text(l.bytes));
+    if l.folders > 0 {
+        out += &format!(", and {}", count(l.folders, "folder"));
+    }
+    if l.cut {
+        out += &format!(" in the first {MAX_FOLDER_SCAN} entries read; it holds more");
+    }
+    out += ". Read what you need from it with your own tools; its files are not in this message, and none was scaled down.\nIn it: ";
+    let names: Vec<String> = l
+        .entries
+        .iter()
+        .map(|(n, size)| match size {
+            Some(s) => format!("{n} ({})", size_text(*s)),
+            None => n.clone(),
+        })
+        .collect();
+    out += &names.join(", ");
+    let more = (l.files + l.folders).saturating_sub(l.entries.len());
+    if more > 0 || l.cut {
+        out += &format!(", and {more}{} more", if l.cut { "+" } else { "" });
+    }
+    out.push('.');
     out
 }
 
@@ -709,7 +873,7 @@ mod tests {
         let dxf = d.join("outline.DXF");
         std::fs::write(&dxf, b"0\nSECTION\n").unwrap();
         let a = read(&zip).unwrap();
-        let Content::Reference { path, size, mime } = &a.content else { panic!("a reference") };
+        let Content::Reference { path, size, mime, .. } = &a.content else { panic!("a reference") };
         assert_eq!((*size, *mime), (3000, "application/zip"));
         assert!(path.is_absolute() && path.ends_with("fixtures.zip"));
         assert!(a.thumb.is_none() && a.mark() == "ZIP");
@@ -725,6 +889,102 @@ mod tests {
         assert!(read(&d).unwrap_err().contains("not a file"), "a folder is refused");
         assert!(read(&d.join("missing.bin")).is_err());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Past the files whose contents go with a message, a file of any kind goes by its place:
+    /// nothing is read or scaled, a picture's size in pixels comes from its header, and the
+    /// message points the agent to it. HEIC is refused here too.
+    #[test]
+    fn a_file_by_its_place_is_left_whole() {
+        crate::i18n::install();
+        let d = dir("place");
+        let photo = d.join("IMG_0001.JPG");
+        image::RgbImage::from_pixel(4032, 3024, image::Rgb([90, 90, 90])).save_with_format(&photo, image::ImageFormat::Jpeg).unwrap();
+        let size = std::fs::metadata(&photo).unwrap().len();
+        let a = reference(&photo).unwrap();
+        let Content::Reference { path, size: s, mime, pixels } = &a.content else { panic!("a reference: {:?}", a.content) };
+        assert_eq!((*s, *mime, *pixels), (size, "image/jpeg", Some([4032, 3024])), "its own size, not scaled down");
+        assert!(path.is_absolute() && a.thumb.is_none() && a.by_place());
+        let n = note(std::slice::from_ref(&a), true, true, usize::MAX);
+        assert!(n.contains("Attached file `IMG_0001.JPG` (image/jpeg, 4032×3024 px, "), "{n}");
+        assert!(n.contains("read it with your own tools; it is not in this message"), "{n}");
+        assert!(parts(&[a], true, true).is_empty(), "nothing but the note");
+        let notes = d.join("brief.md");
+        std::fs::write(&notes, "wall 2 mm").unwrap();
+        assert!(
+            matches!(reference(&notes).unwrap().content, Content::Reference { mime: "text/markdown", pixels: None, .. }),
+            "text goes by its place too"
+        );
+        let heic = d.join("photo.heic");
+        std::fs::write(&heic, b"....ftypheic").unwrap();
+        assert!(reference(&heic).unwrap_err().contains("HEIC"));
+        assert!(reference(&d).unwrap_err().contains("not a file"));
+        assert!(reference(&d.join("missing.jpg")).is_err());
+        let fake = d.join("fake.png");
+        std::fs::write(&fake, b"not a picture").unwrap();
+        assert!(matches!(reference(&fake).unwrap().content, Content::Reference { pixels: None, .. }), "a bad header just has no size");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A folder goes by its place: the message says where it is, how many files and folders it
+    /// holds and their size, and names its entries in order (hidden ones left out, a long list cut
+    /// with how many more there are). None of its files is read.
+    #[test]
+    fn a_folder_goes_by_its_place_with_what_it_holds() {
+        crate::i18n::install();
+        let d = dir("folder");
+        let photos = d.join("site photos");
+        std::fs::create_dir_all(photos.join("raw")).unwrap();
+        std::fs::write(photos.join("b.jpg"), vec![0u8; 2048]).unwrap();
+        std::fs::write(photos.join("A.jpg"), vec![0u8; 1024]).unwrap();
+        std::fs::write(photos.join(".DS_Store"), b"x").unwrap();
+        let a = folder(&photos).unwrap();
+        assert_eq!(a.name, "site photos/");
+        assert!(a.by_place() && a.mark().is_empty());
+        let Content::Folder { path, listing } = &a.content else { panic!("a folder: {:?}", a.content) };
+        assert!(path.is_absolute() && path.ends_with("site photos"));
+        assert_eq!((listing.files, listing.folders, listing.bytes, listing.cut), (2, 1, 3072, false));
+        let names: Vec<&str> = listing.entries.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["A.jpg", "b.jpg", "raw/"], "in order, whatever the case, hidden ones left out");
+        let n = note(std::slice::from_ref(&a), true, true, usize::MAX);
+        assert!(n.contains("Attached folder `site photos/` (at "), "{n}");
+        assert!(n.contains("2 files, 3 KB in all, and 1 folder."), "{n}");
+        assert!(n.contains("Read what you need from it with your own tools"), "{n}");
+        assert!(n.contains("In it: A.jpg (1 KB), b.jpg (2 KB), raw/."), "{n}");
+        assert!(parts(&[a], true, true).is_empty());
+        let empty = d.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert!(note(&[folder(&empty).unwrap()], true, true, usize::MAX).contains("it is empty"));
+        let many = d.join("many");
+        std::fs::create_dir_all(&many).unwrap();
+        for i in 0..MAX_FOLDER_NAMED + 5 {
+            std::fs::write(many.join(format!("p{i:04}.png")), b"x").unwrap();
+        }
+        let m = folder(&many).unwrap();
+        let Content::Folder { listing, .. } = &m.content else { panic!("a folder") };
+        assert_eq!((listing.files, listing.entries.len()), (MAX_FOLDER_NAMED + 5, MAX_FOLDER_NAMED), "all counted, the first named");
+        assert!(note(&[m], true, true, usize::MAX).ends_with("p0199.png (1 bytes), and 5 more."));
+        assert!(folder(&photos.join("A.jpg")).is_err(), "a file is not a folder");
+        assert!(folder(&d.join("missing")).is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The lines naming files that go by their place take their room before the text files share
+    /// the budget, so the whole message stays within it.
+    #[test]
+    fn named_files_take_their_room_from_the_text_budget() {
+        let place = Attachment {
+            id: 0,
+            name: "big.zip".into(),
+            content: Content::Reference { path: "/a/big.zip".into(), size: 10, mime: "application/zip", pixels: None },
+            thumb: None,
+        };
+        let text = Attachment { id: 0, name: "a.md".into(), content: Content::Text(Arc::new("x".repeat(1000))), thumb: None };
+        let files = vec![text, place];
+        let named = named_line(&files[1], true).unwrap().chars().count();
+        let n = note(&files, true, true, 500 + named);
+        assert_eq!(n.matches('x').count(), 500, "the text gets what the named file leaves: {n}");
+        assert!(n.contains("`big.zip`"));
     }
 
     /// A PDF goes whole as a document to an agent that takes them (and is named with its place);

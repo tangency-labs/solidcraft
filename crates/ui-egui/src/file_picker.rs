@@ -12,11 +12,15 @@ use crate::SolveApp;
 
 /// A host picker answer: a selected path, or `None` when cancelled.
 pub type FilePickerFuture = Pin<Box<dyn Future<Output = Option<String>>>>;
+/// A host picker answer for several files: the selected paths, none when cancelled.
+pub type FilesPickerFuture = Pin<Box<dyn Future<Output = Vec<String>>>>;
 type Completion = Box<dyn FnOnce(&mut SolveApp, Option<String>)>;
+type FilesCompletion = Box<dyn FnOnce(&mut SolveApp, Vec<String>)>;
 
+/// A picker waiting for its answer: every picker answers with paths, one when it asks for one.
 pub(crate) struct Pending {
-    future: FilePickerFuture,
-    complete: Completion,
+    future: FilesPickerFuture,
+    complete: FilesCompletion,
 }
 
 struct Repaint(egui::Context);
@@ -62,6 +66,29 @@ impl SolveApp {
         self.begin_picker(future, Box::new(complete));
     }
 
+    /// Ask for files of a kind, several at once (the agent chat's files): the host's dialog for
+    /// several, else one file as [`Self::pick_file`] asks.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn pick_files(&mut self, label: &str, extensions: &[&str], complete: impl FnOnce(&mut SolveApp, Vec<String>) + 'static) {
+        if self.file_picker_busy() {
+            return;
+        }
+        match self.services.pick_files.as_ref() {
+            Some(pick) => self.file_picker = Some(Pending { future: pick(label, extensions), complete: Box::new(complete) }),
+            None => self.pick_file(label, extensions, move |app, path| complete(app, path.into_iter().collect())),
+        }
+    }
+
+    /// Ask for a folder (the agent chat's files). Without a host dialog, the answer is a cancel.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn pick_folder(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
+        if self.file_picker_busy() {
+            return;
+        }
+        let future = self.services.pick_folder.as_ref().map(|pick| pick());
+        self.begin_picker(future, Box::new(complete));
+    }
+
     pub(crate) fn pick_save(&mut self, name: &str, extensions: &[&str], complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
         if self.file_picker_busy() {
             return;
@@ -84,7 +111,10 @@ impl SolveApp {
             complete(self, None);
             return;
         };
-        self.file_picker = Some(Pending { future, complete });
+        self.file_picker = Some(Pending {
+            future: Box::pin(async move { future.await.into_iter().collect() }),
+            complete: Box::new(move |app, paths: Vec<String>| complete(app, paths.into_iter().next())),
+        });
     }
 
     pub(crate) fn pick_open_command(&mut self, command: &str, params: Value, extensions: &[&str]) {
@@ -123,14 +153,14 @@ impl SolveApp {
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(pending) = app.file_picker.as_mut() else { return };
     let waker = Waker::from(Arc::new(Repaint(ctx.clone())));
-    let Poll::Ready(path) = pending.future.as_mut().poll(&mut Context::from_waker(&waker)) else {
+    let Poll::Ready(paths) = pending.future.as_mut().poll(&mut Context::from_waker(&waker)) else {
         // A fallback for native backends that do not wake reliably. Resizing still draws
         // the ordinary UI in every frame.
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
         return;
     };
     if let Some(pending) = app.file_picker.take() {
-        (pending.complete)(app, path);
+        (pending.complete)(app, paths);
         // Hosts can flush writes or restore native input on the following frame.
         ctx.request_repaint();
     }

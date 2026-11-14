@@ -370,6 +370,9 @@ pub(crate) struct Loading {
     pub id: u64,
     pub name: String,
     what: Reading,
+    /// A folder being listed: it goes by its place, so it doesn't count toward
+    /// [`attach::MAX_FILES`].
+    by_place: bool,
 }
 
 enum Reading {
@@ -701,11 +704,18 @@ impl AgentChat {
     fn files(&self) -> usize {
         self.attachments.len() + self.loading.len()
     }
-    /// Read a file for the next message on a worker thread, in the window's language.
+    /// Files on the next message whose contents go with it (read or still being read): those that
+    /// go by their place don't count.
+    fn files_sent(&self) -> usize {
+        self.attachments.iter().filter(|f| !f.by_place()).count() + self.loading.iter().filter(|l| !l.by_place).count()
+    }
+    /// Read a file for the next message on a worker thread, in the window's language (`by_place`:
+    /// a folder, which goes by its place).
     #[cfg(not(target_arch = "wasm32"))]
     fn load(
         &mut self,
         name: String,
+        by_place: bool,
         job: impl FnOnce() -> std::result::Result<attach::Attachment, String> + Send + 'static,
     ) -> std::result::Result<String, String> {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -718,13 +728,13 @@ impl AgentChat {
             })
             .map_err(|e| trf("ui.agent_chat_file_error", &[("name", &name), ("error", &e.to_string())]))?;
         let id = self.next_file_id();
-        self.loading.push(Loading { id, name: name.clone(), what: Reading::File(rx) });
+        self.loading.push(Loading { id, name: name.clone(), what: Reading::File(rx), by_place });
         Ok(name)
     }
     /// A CAD file whose import was asked for: it joins the message once the import is in.
     fn importing(&mut self, name: String, rx: Receiver<crate::control::ControlResponse>) -> String {
         let id = self.next_file_id();
-        self.loading.push(Loading { id, name: name.clone(), what: Reading::Import(rx) });
+        self.loading.push(Loading { id, name: name.clone(), what: Reading::Import(rx), by_place: false });
         name
     }
 
@@ -1776,15 +1786,31 @@ fn send_queue(app: &mut SolveApp, ctx: &egui::Context, interrupted: bool) {
             texts.push(pills::shift(&p.text, by));
         }
     }
-    // One message carries at most MAX_FILES files; the rest are named, not sent.
-    if files.len() > attach::MAX_FILES {
-        let left: Vec<String> = files.split_off(attach::MAX_FILES).into_iter().map(|f| f.name).collect();
+    // One message carries the contents of at most MAX_FILES files, and MAX_ON_MESSAGE files in
+    // all with those that go by their place; the rest are named, not sent.
+    let (files, left) = within_caps(files);
+    if !left.is_empty() {
         let max = attach::MAX_FILES.to_string();
         chat.notice(trf("ui.agent_chat_files_left_out", &[("max", &max), ("files", &left.join(", "))]), true);
     }
     let text = texts.join("\n\n");
     let text: String = text.chars().take(MAX_PROMPT).collect();
     submit(app, ctx, text, image, context, files, interrupted);
+}
+
+/// The files that fit on one message, in order, and the names of those that don't: past
+/// [`attach::MAX_FILES`] whose contents go with it, or past [`attach::MAX_ON_MESSAGE`] in all.
+fn within_caps(files: Vec<attach::Attachment>) -> (Vec<attach::Attachment>, Vec<String>) {
+    let (mut kept, mut left, mut sent) = (Vec::new(), Vec::new(), 0);
+    for f in files {
+        if kept.len() >= attach::MAX_ON_MESSAGE || (!f.by_place() && sent >= attach::MAX_FILES) {
+            left.push(f.name);
+            continue;
+        }
+        sent += usize::from(!f.by_place());
+        kept.push(f);
+    }
+    (kept, left)
 }
 
 /// Send now: stop the running step and send the queue as the next prompt once the agent has said
@@ -1932,13 +1958,46 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
     }
 }
 
-/// Add a file to the next message. A picture or text file is read and kept (see [`attach`]); a CAD
-/// file is imported into the design at once, as its own component, and the message says so.
+/// Add a file or folder to the next message; its name back. A picture or text file is read and
+/// kept (see [`attach`]); a CAD file is imported into the design at once, as its own component,
+/// and the message says so. A folder, and any file past [`attach::MAX_FILES`], goes by its place.
 pub fn attach_path(app: &mut SolveApp, path: &str) -> std::result::Result<String, String> {
-    if app.agent_chat.files() >= attach::MAX_FILES {
-        return Err(trf("ui.agent_chat_files_max", &[("max", &attach::MAX_FILES.to_string())]));
+    attach_one(app, path).map(|a| a.name)
+}
+
+/// What attaching one path did.
+struct Attached {
+    name: String,
+    /// A file past [`attach::MAX_FILES`]: it goes by its place, not in the message.
+    past_max: bool,
+}
+
+fn attach_one(app: &mut SolveApp, path: &str) -> std::result::Result<Attached, String> {
+    if app.agent_chat.files() >= attach::MAX_ON_MESSAGE {
+        return Err(trf("ui.agent_chat_files_max", &[("max", &attach::MAX_ON_MESSAGE.to_string())]));
     }
     let p = std::path::Path::new(path);
+    // A folder: the agent is told where it is and what it holds (listed off the window thread: a
+    // folder on a network drive can take a while).
+    if p.is_dir() {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let dir = p.to_path_buf();
+            let name = app.agent_chat.load(attach::folder_name(p), true, move || attach::folder(&dir))?;
+            return Ok(Attached { name, past_max: false });
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let file = attach::folder(p)?;
+            return Ok(Attached { name: app.agent_chat.add_file(file), past_max: false });
+        }
+    }
+    // Past MAX_FILES files whose contents go with the message, a file goes by its place: the agent
+    // reads it whole, at full size, with its own tools, and the message stays small.
+    if app.agent_chat.files_sent() >= attach::MAX_FILES {
+        let file = attach::reference(p)?;
+        return Ok(Attached { name: app.agent_chat.add_file(file), past_max: true });
+    }
     let file = if attach::kind(p) == attach::Kind::Cad {
         if !p.is_file() {
             return Err(trf("ui.agent_chat_file_not_a_file", &[("name", path)]));
@@ -1950,7 +2009,7 @@ pub fn attach_path(app: &mut SolveApp, path: &str) -> std::result::Result<String
         let mut request = crate::file_load::Request::new(path, crate::file_load::Kind::Insert);
         request.reply = Some(tx);
         crate::file_load::begin_request(app, request).map_err(|e| trf("ui.agent_chat_import_failed", &[("name", &name), ("error", &e)]))?;
-        return Ok(app.agent_chat.importing(name, rx));
+        return Ok(Attached { name: app.agent_chat.importing(name, rx), past_max: false });
     } else {
         // A picture is decoded and a PDF read off the window thread: a large one takes long enough
         // to stop it.
@@ -1961,17 +2020,22 @@ pub fn attach_path(app: &mut SolveApp, path: &str) -> std::result::Result<String
                 return Err(trf("ui.agent_chat_file_not_a_file", &[("name", &attach::name_of(p))]));
             }
             let path = p.to_path_buf();
-            return app.agent_chat.load(attach::name_of(p), move || attach::read(&path));
+            let name = app.agent_chat.load(attach::name_of(p), false, move || attach::read(&path))?;
+            return Ok(Attached { name, past_max: false });
         }
         attach::read(p)?
     };
-    Ok(app.agent_chat.add_file(file))
+    Ok(Attached { name: app.agent_chat.add_file(file), past_max: false })
 }
 
 /// Add a picture from the clipboard (RGBA rows, as the system gives them) to the next message.
 pub fn attach_rgba(app: &mut SolveApp, width: usize, height: usize, rgba: &[u8]) -> std::result::Result<String, String> {
-    if app.agent_chat.files() >= attach::MAX_FILES {
-        return Err(trf("ui.agent_chat_files_max", &[("max", &attach::MAX_FILES.to_string())]));
+    if app.agent_chat.files() >= attach::MAX_ON_MESSAGE {
+        return Err(trf("ui.agent_chat_files_max", &[("max", &attach::MAX_ON_MESSAGE.to_string())]));
+    }
+    // A pasted picture has no place to point the agent to: past MAX_FILES it can't go.
+    if app.agent_chat.files_sent() >= attach::MAX_FILES {
+        return Err(trf("ui.agent_chat_paste_past_max", &[("max", &attach::MAX_FILES.to_string())]));
     }
     let n = app.agent_chat.pasted + 1;
     let name = format!("pasted picture {n}.png");
@@ -1981,7 +2045,7 @@ pub fn attach_rgba(app: &mut SolveApp, width: usize, height: usize, rgba: &[u8])
     {
         let rgba = rgba.to_vec();
         let named = name.clone();
-        app.agent_chat.load(name, move || attach::from_rgba(named, width, height, &rgba))
+        app.agent_chat.load(name, false, move || attach::from_rgba(named, width, height, &rgba))
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -2006,7 +2070,7 @@ pub fn take_drops(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let files = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
-    attach_dropped(app, files.iter().map(|f| f.path().to_path_buf()));
+    attach_paths(app, files.iter().map(|f| f.path().to_path_buf()));
 }
 
 /// Whether files dropped now would be the chat's: the pointer was last seen over it.
@@ -2016,15 +2080,21 @@ pub(crate) fn drop_is_ours(chat: &AgentChat, ctx: &egui::Context) -> bool {
     ctx.input(|i| i.pointer.latest_pos()).is_some_and(|p| rect.contains(p))
 }
 
-/// Attach dropped files; a refused one says why in the conversation.
-pub(crate) fn attach_dropped(app: &mut SolveApp, paths: impl Iterator<Item = std::path::PathBuf>) {
+/// Attach files and folders dropped or chosen together; a refused one says why in the
+/// conversation, and files past [`attach::MAX_FILES`] going by their place are said once.
+pub(crate) fn attach_paths(app: &mut SolveApp, paths: impl Iterator<Item = std::path::PathBuf>) {
+    let mut past_max = false;
     for p in paths {
         if p.as_os_str().is_empty() {
             continue;
         }
-        if let Err(e) = attach_path(app, &p.to_string_lossy()) {
-            app.agent_chat.notice(e, true);
+        match attach_one(app, &p.to_string_lossy()) {
+            Ok(a) => past_max |= a.past_max,
+            Err(e) => app.agent_chat.notice(e, true),
         }
+    }
+    if past_max {
+        app.agent_chat.notice(trf("ui.agent_chat_files_by_place", &[("max", &attach::MAX_FILES.to_string())]), false);
     }
 }
 
