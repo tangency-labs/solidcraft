@@ -816,5 +816,11 @@ fn the_stitch_scope_refuses_a_gap_whose_ball_reaches_other_topology() {
     assert_eq!(sewed, 1);
     let report =
         check_brep_scoped(&mut k, &mut near, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
+    let body = solidcore::topology::brep::validation::check_brep(&mut k, &mut near, CheckLevel::Level2).unwrap();
+    eprintln!("BODY {:?}", body.lines());
+    for &v in near.vertex_list() {
+        eprintln!("VERTEX {:?} tol {}", near.vertex(v).unwrap().point, near.vertex(v).unwrap().tolerance);
+    }
+    eprintln!("STITCHED {:?}", report.lines());
     assert!(!report.is_valid(), "the ball reaches the third face");
 }
