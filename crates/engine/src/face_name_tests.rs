@@ -484,3 +484,28 @@ fn a_different_line_in_its_place_asks_to_reselect_and_a_point_pick_repairs_it() 
     let reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
     assert_eq!(shell_error(&reopened, shell), None);
 }
+
+/// #16661: an edit that sends only `extent.distance` of an extrude that ends at a face sends no
+/// face point, so the stored face names stay; sending the `extent.to` point stores them fresh.
+#[test]
+fn an_extrude_to_a_face_keeps_its_names_when_only_the_distance_is_edited() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-5, -5], "p1": [5, 5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "operation": "join"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.circle.center", json!({"center": [8, 0], "radius": 1.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    let id = run(&mut s, "solid.extrude", json!({"to": [5, 0, 20], "operation": "join"}))["feature"].as_u64().unwrap_or(0);
+    let marker = vec!["marker".to_string()];
+    let names = |s: &Session| s.doc.feature(id).map(|f| f.face_names.clone());
+    if let Some(f) = s.doc_mut().feature_mut(id) {
+        f.face_names = marker.clone();
+    }
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"extent.distance": 7}}));
+    assert_eq!(names(&s), Some(marker.clone()));
+    run(&mut s, "timeline.edit", json!({"feature": id, "set": {"extent.to": [5, 0, 20]}}));
+    assert_ne!(names(&s), Some(marker));
+}

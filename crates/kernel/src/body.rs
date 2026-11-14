@@ -1417,6 +1417,35 @@ impl Body {
         Ok(point_class(class))
     }
 
+    /// The point of face `face_index` nearest `point`, when `point` lies on that face itself
+    /// within `tolerance`, else `None`. Decided exactly: the point is projected onto the face's
+    /// surface, then the face is isolated from the rest of the body so that a point on another
+    /// face of the same surface cannot pass the trim test (no mesh). `None` too for a mesh body,
+    /// an index out of range, a point that is not finite, or a surface that cannot be projected
+    /// onto; `Err` only when the kernel cannot classify the isolated face.
+    pub fn point_lies_on_face(&self, face_index: usize, point: Vec3, tolerance: f64) -> Result<Option<Vec3>> {
+        if self.mesh.is_some() || !point.is_finite() || !tolerance.is_finite() || tolerance < 0.0 {
+            return Ok(None);
+        }
+        let Some(face) = self.record.faces.get(face_index) else { return Ok(None) };
+        let [[u0, u1], [v0, v1]] = face.domain;
+        let Ok(surface) = solidcraft_geom::brep::eval::SurfaceEval::new(face.parameters()) else { return Ok(None) };
+        let Some(uv) = surface.project(point, Some([u0.midpoint(u1), v0.midpoint(v1)]), tolerance) else { return Ok(None) };
+        let Some(nearest) = surface.point(uv) else { return Ok(None) };
+        if !nearest.is_finite() || !(nearest.dist(point) <= tolerance) {
+            return Ok(None);
+        }
+        let others: Vec<usize> = (0..self.face_count()).filter(|index| *index != face_index).collect();
+        let isolated;
+        let trimmed = if others.is_empty() {
+            self
+        } else {
+            isolated = crate::remove_faces(self, &others)?;
+            &isolated
+        };
+        Ok(matches!(trimmed.classify_point(nearest)?, PointClass::OnBoundary).then_some(nearest))
+    }
+
     /// [`Body::classify_point`] for each of `points`, in order, through one classification of
     /// the body: SMLib's copy of it and its search structures are made once for all the points,
     /// where a call a point makes them again each time (on a large body far more work than a

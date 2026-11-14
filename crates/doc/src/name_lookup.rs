@@ -19,7 +19,6 @@
 
 use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
-use solidcraft_geom::brep::eval::SurfaceEval;
 use solidcraft_geom::prelude::*;
 
 use crate::history_names::{Match, Names};
@@ -1090,32 +1089,12 @@ fn recover_numbered_projected_face(body: &ModelBody, name: &str, pick: Vec3) -> 
     on_face(body, face, pick)
 }
 
-/// The point of face `face` nearest `pick`, when `pick` lies on that face itself: the face is
-/// isolated so a point on another face of the same surface cannot pass the trim test.
+/// The point of face `face` nearest `pick`, when `pick` lies on that face itself (the exact
+/// query is the kernel's [`solidcraft_kernel::Body::point_lies_on_face`]).
 fn on_face(body: &ModelBody, face: usize, pick: Vec3) -> Option<(usize, Vec3)> {
-    let count = body.body.face_count();
-    let record = body.body.record().faces.get(face)?;
-    let [[u0, u1], [v0, v1]] = record.domain;
-    let surface = SurfaceEval::new(record.parameters()).ok()?;
     let tolerance = (body.body.size() * 1e-3).max(1e-3);
-    if !tolerance.is_finite() {
-        return None;
-    }
-    let point = surface.point(surface.project(pick, Some([u0.midpoint(u1), v0.midpoint(v1)]), tolerance)?)?;
-    if !point.is_finite() || !(point.dist(pick) <= tolerance) {
-        return None;
-    }
-
-    // Isolate the face so a point on another face of the same surface cannot pass the trim test.
-    let others: Vec<_> = (0..count).filter(|index| *index != face).collect();
-    let isolated;
-    let trimmed = if others.is_empty() {
-        &body.body
-    } else {
-        isolated = solidcraft_kernel::remove_faces(&body.body, &others).ok()?;
-        &isolated
-    };
-    matches!(trimmed.classify_point(point), Ok(solidcraft_kernel::PointClass::OnBoundary)).then_some((face, point))
+    let point = body.body.point_lies_on_face(face, pick, tolerance).ok()??;
+    Some((face, point))
 }
 
 /// The one face a name `model.faces` lists finds, on the body called `body` or, without one, on

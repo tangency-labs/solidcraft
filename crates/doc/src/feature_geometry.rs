@@ -53,8 +53,9 @@ impl FeatureKind {
         v
     }
 
-    /// The fields of this kind that hold face points (a feature's `faces`, a hole's `position`):
-    /// the fields whose names an edit that sends them stores fresh, even when the point sent is
+    /// The fields of this kind that hold face points (a feature's `faces`, a hole's `position`,
+    /// an extrude's `extent.to`: a dotted path reaches into a nested field, so an edit of only
+    /// `extent.distance` is not one): the fields whose names an edit that sends them stores fresh, even when the point sent is
     /// the stored one (#16661). A field this lists but the kind has no point in is harmless.
     pub fn face_point_fields(&self) -> &'static [&'static str] {
         match self {
@@ -76,7 +77,7 @@ impl FeatureKind {
             }
             FeatureKind::Emboss { .. } => &["face"],
             FeatureKind::Revolve { .. } => &["to"],
-            FeatureKind::Extrude { .. } | FeatureKind::SurfaceExtrude { .. } => &["extent"],
+            FeatureKind::Extrude { .. } | FeatureKind::SurfaceExtrude { .. } => &["extent.to", "extent.from"],
             FeatureKind::SurfaceExtend { .. } => &["up_to"],
             _ => &[],
         }

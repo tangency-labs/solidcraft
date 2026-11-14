@@ -1496,7 +1496,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // equal the stored ones: that is how a broken reference is picked again (#16661), where
     // the stored name would be kept and fail the same way. An edit that sends no point (a new
     // thickness) leaves the names alone.
-    if nf.kind.face_points() != f.kind.face_points() || f.kind.face_point_fields().iter().any(|k| set.get(*k).is_some()) {
+    if nf.kind.face_points() != f.kind.face_points() || f.kind.face_point_fields().iter().any(|path| sets_path(set, path)) {
         nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component)?;
     }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
@@ -1507,6 +1507,11 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(EngineError::Other(e));
     }
     reply(cmd, TimelineEditResult { feature: id, recomputed: s.model.last_recomputed, restored: s.model.last_restored, param_warnings: Vec::new() })
+}
+
+/// Whether `set` sends the field at `path`, a dotted path into nested objects (`extent.to`).
+fn sets_path(set: &Value, path: &str) -> bool {
+    path.split('.').try_fold(set, |at, key| at.get(key)).is_some()
 }
 
 /// Complete a partial script pick without changing the stored selection type or reinterpreting
