@@ -417,6 +417,9 @@ impl Harness {
     }
 
     /// Run one step.
+    // The harness runs only under tests, where libtest captures `eprintln!`; `note!` would write
+    // past the capture and fill the logs of passing tests.
+    #[allow(clippy::print_stderr)]
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
         let res =

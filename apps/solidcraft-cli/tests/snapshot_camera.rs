@@ -3,6 +3,9 @@
 //! when asked (the grid lies on Z 0 and cuts through a part that straddles it). Pictures are drawn
 //! on the GPU and compared with a tolerance; without a GPU adapter the tests that draw are skipped
 //! with the reason printed (`SOLIDCRAFT_REQUIRE_GPU=1` makes that a failure).
+// Test helpers outside #[test] functions print what they skip or measure; clippy.toml
+// `allow-print-in-tests` covers only #[test] functions and #[cfg(test)] code.
+#![allow(clippy::print_stderr)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};

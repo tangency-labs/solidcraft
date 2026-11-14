@@ -152,7 +152,7 @@ fn main() -> ExitCode {
     let profiling = match profiling {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("error: {e}");
+            solidcraft_engine::note!("error: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -366,7 +366,7 @@ fn load_with(path: &str, check: solidcraft_engine::schema::ParamCheck, validatio
     let s = read_session(path, check, validation)?;
     // A newer SolidCraft's file opens all the same; stderr says so, stdout stays the caller's.
     for warning in s.doc.newer_file.iter().flat_map(|file| file.warnings()) {
-        eprintln!("{path}: warning: {warning}");
+        solidcraft_engine::note!("{path}: warning: {warning}");
     }
     Ok(s)
 }
@@ -903,7 +903,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
     install_renderer();
     let options = solidcraft_mcp::Options::from_args_and_env(args).map_err(|e| format!("mcp: {e}"))?;
     if options.compact {
-        eprintln!("solidcraft mcp: compact output (inspect_design summarises sketches; tool JSON is not pretty-printed)");
+        solidcraft_engine::note!("solidcraft mcp: compact output (inspect_design summarises sketches; tool JSON is not pretty-printed)");
     }
     let scope = (!args.iter().any(|a| a == "--allow-any-path"))
         .then(|| solidcraft_mcp::agent_scope(flags(args, "--allow-path").into_iter().map(std::path::PathBuf::from)));

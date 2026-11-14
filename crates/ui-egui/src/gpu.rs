@@ -441,6 +441,8 @@ pub(crate) fn offscreen_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Q
 /// policy admits, or when the variable names no policy: [`solidcraft_gpu::env`]), on [`offscreen_backends`]. One test at a
 /// time starts its instance, adapter and device ([`offscreen_starting`]).
 #[cfg(all(test, not(target_arch = "wasm32")))]
+// Test-only (`allow-print-in-tests` does not see a `cfg(all(test, ..))`).
+#[allow(clippy::print_stderr)]
 pub(crate) fn offscreen_own_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     let policy = solidcraft_gpu::env::policy().map_err(|e| eprintln!("no offscreen device: {e}")).ok()?;
     let _one_at_a_time = offscreen_starting();
@@ -646,6 +648,8 @@ pub(crate) fn render_offscreen_ao(
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
+// Test-only (`allow-print-in-tests` does not see a `cfg(all(test, ..))`).
+#[allow(clippy::print_stderr)]
 fn offscreen(
     scene: GpuScene,
     highlight: Option<GpuScene>,

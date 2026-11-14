@@ -2,6 +2,8 @@
 //! Reads one bounded resource at a time and never changes a document or source asset.
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo)]
+// A developer tool run by hand, not a process another program starts (see print_stderr in Cargo.toml).
+#![allow(clippy::print_stderr)]
 
 use image::ImageDecoder;
 use serde::{Deserialize, Serialize};

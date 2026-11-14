@@ -5499,7 +5499,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         let tris = sc.tris.len() + in_blocks(|b| b.bytes.vertices.len());
         let lines = sc.lines.len() + in_blocks(|b| b.bytes.lines.len());
         let hidden = sc.hidden.len() + in_blocks(|b| b.bytes.hidden.len());
-        eprintln!(
+        solidcraft_engine::note!(
             "SolidCraft highlight: {:.0} ms, hovered {} bodies, planned {} hover + {} selected, blocks {} hover + {} selected, instanced {} hover + {} selected, CPU triangles {tris} B, lines {lines} B, hidden {hidden} B",
             crate::now_ms() - began,
             hovered.len(),

@@ -161,6 +161,11 @@ too_many_arguments = "allow"
 type_complexity = "allow"
 # `!(x > tol)` is our idiom for "not a usable number" (NaN-safe).
 neg_cmp_op_on_partial_ord = "allow"
+# `eprintln!` and `eprint!` panic when stderr is a pipe whose reader has closed, which an agent
+# running `solidcraft mcp` (and the app that one starts) can leave behind (#10111). Write through
+# `solidcraft_geom::note!` (`solidcraft_engine::note!`), which ignores a failed write. Tests are
+# exempt (clippy.toml `allow-print-in-tests`); examples and build scripts allow it at the top.
+print_stderr = "deny"
 
 [profile.dev.package."*"]
 opt-level = 2
