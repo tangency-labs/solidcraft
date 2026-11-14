@@ -2289,9 +2289,9 @@ mod tests {
 
     /// The chord round and the G2 round of the boss's base edge are carried on as the constant
     /// round is. Where SMLib builds them on the face as it is (chord 7, G2 5) the carried-on
-    /// build gives its volume. Past the face (chord 8 and 10, G2 9) SMLib refuses them and
+    /// build gives its volume. Past the face (chord 8 and 10, G2 7 and 8.5) SMLib refuses them and
     /// they are built: one shell, inside the body's box, growing with the size. (The G2 round
-    /// is still refused at some radii, 6 and 8 among them: a boolean of the build fails on its
+    /// is still refused at some radii, 8 among them: a boolean of the build fails on its
     /// face, #15417.)
     #[test]
     fn concave_chord_and_g2_rounds_run_on_past_where_their_face_turns_into_a_round() {
@@ -2317,10 +2317,17 @@ mod tests {
         let smlib = added(&fillet_g2(&body, &[BOSS_EDGE], 5.0).unwrap());
         let carried = concave_overflow_round(&body, BOSS_EDGE, 5.0, |c| crate::blend_smlib::fillet_g2(c, &[BOSS_EDGE], 5.0)).unwrap().unwrap();
         assert!((added(&carried) - smlib).abs() < 1e-6, "G2: carried on {}, SMLib {smlib}", added(&carried));
-        assert!(matches!(crate::blend_smlib::fillet_g2(&body, &[BOSS_EDGE], 9.0), Err(KernelError::TooLarge(_))), "SMLib refuses G2 9");
-        grown(&fillet_g2(&body, &[BOSS_EDGE], 9.0).unwrap(), smlib, "G2 9");
+        // 7 and 8.5 build carried on, on Linux and Windows alike (9 builds on Windows only: a
+        // boolean of the build on the G2 face goes either way there)
+        let mut last = smlib;
+        for r in [7.0, 8.5] {
+            assert!(matches!(crate::blend_smlib::fillet_g2(&body, &[BOSS_EDGE], r), Err(KernelError::TooLarge(_))), "SMLib refuses G2 {r}");
+            let round = fillet_g2(&body, &[BOSS_EDGE], r).unwrap_or_else(|e| panic!("G2 {r}: {e}"));
+            grown(&round, last, &format!("G2 {r}"));
+            last = added(&round);
+        }
         // At 8 a boolean of the carried-on build fails on the G2 face: the refusal names that
-        // step and its cause, not SMLib's largest radius that fits, which 9 beats.
+        // step and its cause, not SMLib's largest radius that fits, which 8.5 beats.
         let why = match fillet_g2(&body, &[BOSS_EDGE], 8.0) {
             Err(KernelError::Failed(why)) => why,
             other => panic!("G2 8: {:?}", other.map(|_| ())),
