@@ -2,7 +2,7 @@
 
 The views of a design as plain data. A design keeps several views (Model, Sketch, Sheet, Render,
 Animation); this crate holds what they are, which one is shown and the saved form. It knows no UI
-toolkit, no document and no app, and has no workspace dependencies, so the commands, the tab strip
+toolkit, no document and no app, and depends only on the viewport crate for a view's camera, so the commands, the tab strip
 and any other front end read one model and draw it their own way.
 
 ## API
