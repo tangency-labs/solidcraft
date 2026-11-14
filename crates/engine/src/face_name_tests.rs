@@ -442,7 +442,7 @@ fn a_chamfer_saved_under_numbered_side_pieces_of_a_peg_is_found_at_its_pick() {
     run(&mut s, "solid.cylinder", json!({"base": [30, 10, 10], "radius": 2, "height": 6, "operation": "join", "name": "PegE"}));
     run(&mut s, "solid.chamfer", json!({"edges": [[12, 10, 16], [32, 10, 16]], "distance": 0.5, "name": "LeadIn"}));
     let lead_in = s.doc.features.iter().position(|f| f.name == "LeadIn").unwrap();
-    let id = |name: &str| s.doc.features.iter().find(|f| f.name == name).map(|f| f.id.0).unwrap();
+    let id = |name: &str| s.doc.features.iter().find(|f| f.name == name).map(|f| f.id).unwrap();
     let (west, east) = (id("PegW"), id("PegE"));
     assert_eq!(s.doc.features[lead_in].edge_names, vec![format!("F{west}:side|F{west}:top"), format!("F{east}:side|F{east}:top")]);
     let (chamfered, chamfered_faces) = (volume(&mut s, "Plate"), faces(&mut s, "Plate"));
