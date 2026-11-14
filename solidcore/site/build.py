@@ -596,7 +596,7 @@ def parse_issue_files():
         if head is None:
             continue
         title = lines[head][5:].strip()
-        m = re.match(r"([A-Z]+)-(\d+)\.\s*(.*)$", title)
+        m = re.match(r"([A-Z]+)-(\d+)(-[2-9]|-[1-9]\d+)?\.\s*(.*)$", title)
         header, i = {}, head + 1
         while i < len(lines):
             f = re.match(r"^- \*\*(Severity|Area):\*\*\s*(.*)$", lines[i])
@@ -614,8 +614,8 @@ def parse_issue_files():
         conf = fields.get("Confirmed", "").strip().lower()
         entries.append({
             "series": m.group(1) if m else "OTHER", "num": int(m.group(2)) if m else 0,
-            "id": f"{m.group(1)}-{m.group(2)}" if m else title,
-            "title": m.group(3) if m else title,
+            "id": f"{m.group(1)}-{m.group(2)}{m.group(3) or ''}" if m else title,
+            "title": m.group(4) if m else title,
             "severity": header.get("Severity", ""), "area": header.get("Area", ""),
             "body": body,
             "confirmed": "yes" if conf.startswith("yes") else ("no" if conf.startswith("no") else "unknown"),
