@@ -330,15 +330,20 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     }
     // Match the evaluator's implicit participants: a grouped cut from an empty
     // assembly component considers every body; otherwise keep the active scope.
-    // Explicit participants override either default.
+    // Explicit targets, else participants, override either default.
     // A component with no body of its own works on those of the components inside it (#3223).
-    // The participants only pick the scope here; the feature itself refuses a list of the
-    // wrong type (`add_feature`), so a wrong type cannot make this cut anything. This preview
-    // cannot fail, so it reads the list leniently.
-    let parts = string_list_or_default(p, "participants");
+    // The targets and participants only pick the scope here; the feature itself refuses a list
+    // of the wrong type (`add_feature`), so a wrong type cannot make this cut anything. This
+    // preview cannot fail, so it reads the lists leniently.
+    let parts = match string_list_or_default(p, "targets") {
+        targets if targets.is_empty() => string_list_or_default(p, "participants"),
+        targets => targets,
+    };
     let implicit_all = grouped.is_some() && !st.bodies.iter().any(|body| s.doc.model_body_component(body) == s.active_component);
     let mut bodies: Vec<_> = if !parts.is_empty() {
-        st.bodies.iter().filter(|b| parts.contains(&b.name)).collect()
+        // `*` alone is every body, as the evaluator reads it.
+        let every = parts.len() == 1 && parts.first().is_some_and(|t| t == "*");
+        st.bodies.iter().filter(|b| every || parts.contains(&b.name)).collect()
     } else if implicit_all {
         st.bodies.iter().collect()
     } else {
@@ -964,6 +969,7 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(reply);
         }
         let (id, points, body) = super::face::sketch_of_faces(s, &points, cmd, str_(p, "face_body"), fixed)?;
+        s.active_sketch = None;
         Some((id, Some(ProfileSel::Points { points }), Some(body)))
     } else {
         None
@@ -980,6 +986,7 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
         match p.get("face").and_then(vec3) {
             Some(fp) => {
                 let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
+                s.active_sketch = None;
                 (id, Some(ProfileSel::Points { points: vec![inside] }), Some(body))
             }
             None => (feature_sketch(s, p, cmd)?, None, None),
@@ -1125,23 +1132,28 @@ fn into_body_frame(s: &Session, b: &solidcraft_doc::ModelBody) -> Option<solidcr
 /// its bodies come from a linked design file, or the face was picked on a further placement of a
 /// component placed more than once (the change is drawn at the first).
 fn face_body_reached(s: &Session, sketch: u64) -> Result<Option<String>> {
+    face_body_reached_in(s, sketch, s.active_component)
+}
+
+/// [`face_body_reached`] for a join or cut made in `active`.
+fn face_body_reached_in(s: &Session, sketch: u64, active: u64) -> Result<Option<String>> {
     let Some(FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Face { anchor: Some(anchor), .. }, .. }) = s.doc.feature(sketch).map(|f| &f.kind)
     else {
         return Ok(None);
     };
     let st = s.model.state();
-    if let Some(own) = active_scope(s, &st).into_iter().find(|b| b.name == anchor.target.body) {
+    if let Some(own) = active_scope_in(s, &st, active).into_iter().find(|b| b.name == anchor.target.body) {
         return Ok(Some(own.name.clone()));
     }
     let Some(body) = st.body(&anchor.target.body) else { return Ok(None) };
     let component = s.doc.model_body_component(body);
-    if !s.doc.component_within(component, s.active_component) {
+    if !s.doc.component_within(component, active) {
         return Ok(None);
     }
     let name = |c: u64| s.doc.components.iter().find(|x| x.id == c).map_or_else(|| format!("component {c}"), |x| x.name.clone());
     let mut c = component;
     for _ in 0..1000 {
-        if c == s.active_component || c == 0 {
+        if c == active || c == 0 {
             break;
         }
         if s.doc.links.contains_key(&c) {
@@ -1181,6 +1193,35 @@ fn hole_face_names(s: &Session, p: &Value, kind: &FeatureKind) -> Result<Vec<Str
     scoped.bodies = st.bodies.iter().filter(|b| drilled.contains(&b.name)).cloned().collect();
     let own = solidcraft_doc::face_point_names(&s.doc, &scoped, kind, s.active_component)?;
     Ok(own.into_iter().zip(all).map(|(own, any)| if own.is_empty() { any } else { own }).collect())
+}
+
+/// What an extrude from a pick starts on: a face of a body, or a profile's sketch.
+#[derive(Clone, Copy, Debug)]
+pub enum JoinStart<'a> {
+    Face(&'a str),
+    Sketch(u64),
+}
+
+/// The body a Join made in `component` takes when it names no targets: the picked face's body,
+/// or the one the sketch lies on ([`face_body_reached_in`]), when `component` works on it or it
+/// lies in a component inside `component` (#5679). `None` otherwise, or where the change is
+/// refused.
+pub fn join_start_body(s: &Session, start: JoinStart<'_>, component: u64) -> Option<String> {
+    match start {
+        JoinStart::Sketch(sketch) => face_body_reached_in(s, sketch, component).ok().flatten(),
+        JoinStart::Face(name) => {
+            let st = s.model.state();
+            let body = st.body(name)?;
+            let reached = active_scope_in(s, &st, component).iter().any(|b| b.name == body.name)
+                || s.doc.component_within(s.doc.model_body_component(body), component);
+            reached.then(|| body.name.clone())
+        }
+    }
+}
+
+/// The bodies `component` works on when a feature names none ([`active_scope`]).
+pub fn scope_bodies(s: &Session, component: u64) -> Vec<String> {
+    active_scope_in(s, &s.model.state(), component).into_iter().map(|b| b.name.clone()).collect()
 }
 
 /// The body whose face `sketch` is attached to (on the face itself, not offset from it), when
@@ -1229,7 +1270,11 @@ pub fn shown_scope(s: &Session) -> Option<Vec<String>> {
 /// in its own frame, as an import places it: a profile sketched on such a part's face meets the
 /// part where it is shown (#3223).
 fn active_scope<'a>(s: &Session, st: &'a solidcraft_doc::ModelState) -> Vec<&'a solidcraft_doc::ModelBody> {
-    let active = s.active_component;
+    active_scope_in(s, st, s.active_component)
+}
+
+/// [`active_scope`] for `active`.
+fn active_scope_in<'a>(s: &Session, st: &'a solidcraft_doc::ModelState, active: u64) -> Vec<&'a solidcraft_doc::ModelBody> {
     let own: Vec<_> = st.bodies.iter().filter(|b| s.doc.model_body_component(b) == active).collect();
     if !own.is_empty() {
         return own;

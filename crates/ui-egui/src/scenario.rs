@@ -109,6 +109,17 @@ fn widget_centres(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], te
         .collect()
 }
 
+/// The widget showing `text` nearest the label `near`. A field takes its row's label as its
+/// accessible name, so the row's anchor is a `near` widget that is not itself showing `text`.
+fn widget_near_in(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], text: &str, near: &str) -> Option<[f64; 2]> {
+    let fields = widget_centres(nodes, text);
+    let [lx, ly] = widget_centres(nodes, near).into_iter().find(|at| !fields.contains(at))?;
+    fields.into_iter().filter(|[x, _]| *x > lx).min_by(|a, b| {
+        let d = |p: &[f64; 2]| (p[1] - ly).abs() * 4.0 + (p[0] - lx).abs();
+        d(a).total_cmp(&d(b))
+    })
+}
+
 /// The app in a headless egui context.
 pub struct Harness {
     pub app: SolveApp,
@@ -339,11 +350,8 @@ impl Harness {
 
     /// The widget showing `text` nearest the label `near` (the field in a label's row).
     pub fn widget_near(&self, text: &str, near: &str) -> Option<[f64; 2]> {
-        let [lx, ly] = self.widgets(near).into_iter().next()?;
-        self.widgets(text).into_iter().filter(|[x, _]| *x > lx).min_by(|a, b| {
-            let d = |p: &[f64; 2]| (p[1] - ly).abs() * 4.0 + (p[0] - lx).abs();
-            d(a).total_cmp(&d(b))
-        })
+        let tree = self.output.accesskit_update.as_ref()?;
+        widget_near_in(&tree.nodes, text, near)
     }
 
     /// Accessibility bounds include scrolled-out page content. Reveal that content with
