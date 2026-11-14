@@ -55,16 +55,13 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::surface::surface::Surface;
 use crate::topology::face::p2::{
-    surface_knots_inside, trim_curve_breaks, OdeArea, OdeIsoCurveLength, PrecisePropertyLayout,
-    PPF_ALL, PPF_AREA, PPF_AREA_FIRST_MOMENTS,
+    surface_knots_inside, trim_curve_breaks, OdeIsoCurveLength, PrecisePropertyLayout, PPF_ALL,
+    PPF_AREA, PPF_AREA_FIRST_MOMENTS,
 };
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
 use crate::{EntityRef, Result, SolidError};
 
 const OP: &str = "mass::integrator::properties";
-/// The operation the `SM_ERR` of a span the integrator took no step over names (not
-/// upstream: the code is upstream's, the name says which failure it is).
-const OP_SKIPPED_SPAN: &str = "mass::integrator::properties::skipped_span";
 /// The fewest surface v knots inside a face's trims for which the face is integrated in
 /// bands between them (#14460).
 const MIN_BANDS: usize = 12;
@@ -266,7 +263,9 @@ fn boundary(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<Curve>> {
         .map(|t| t.curves)
 }
 /// `SmFace::ComputePreciseProperties`; the default property mask is `PPF_ALL`. Missing UV
-/// trim curves of the face are made on `b`.
+/// trim curves of the face are made on `b`, after the arguments are checked: a non-finite
+/// `accuracy` or an invalid mask is [`SolidError::InvalidInput`], as in
+/// [`boundary_properties`].
 pub fn face_properties(
     k: &Kernel,
     b: &mut Brep,
@@ -279,6 +278,7 @@ pub fn face_properties(
     flags: u64,
 ) -> Result<PreciseProperties> {
     valid_flags(flags)?;
+    valid_accuracy(accuracy)?;
     let trims = boundary(k, b, f)?;
     let fbox = face_box(k, b, f)?;
     let surface = b
@@ -341,72 +341,85 @@ fn trims_v_range(k: &Kernel, trims: &[Curve], domain: &Extent2d) -> Result<(f64,
 fn unsteppable(a: f64, b: f64) -> bool {
     are_same(a, b) || are_same(0.5 * (b - a), EFF_ZERO) || 0.5 * (b - a) < EFF_ZERO
 }
-/// The integral of `integrand` (writing `dy` at `x`) from `a` to `b` into `y`, the
-/// precise properties' outer integration: Runge-Kutta at `accuracy` with the components'
-/// error `scale`, a first step of half the span, then finer first steps where the
-/// coarser fails.
-fn integrate_piece<F>(
-    k: &Kernel,
-    a: f64,
-    b: f64,
+/// The surface lines of one face's iso-u integrals and how tightly each is integrated:
+/// the inner level of the trim pieces' integral.
+struct IsoLine<'a> {
+    surface: &'a Surface,
+    origin: Point3,
+    thickness: f64,
+    layout: &'a PrecisePropertyLayout,
+    /// the inner integrals' accuracy (`SmODEAreaIFEO::m_dIsoCurveAccuracy`)
     accuracy: f64,
-    scale: &[f64],
-    y: &mut [f64],
-    mut integrand: F,
-) -> Result<()>
-where
-    F: FnMut(f64, &mut [f64]) -> Result<()>,
-{
-    // A coarse first Runge-Kutta step can trip the integrator's abort guard for one
-    // traversal direction, so a reversed cap loop fails where its twin succeeds. Try
-    // a span/2 first step, then fall back to finer steps.
-    let mut status = Err(SolidError::mass_failed(OP, "the span was not integrated"));
-    for divisor in [2.0, 8.0, 64.0, 512.0, 4096.0] {
-        k.check_cancelled(OP)?;
-        let mut eval_calls = 0u64;
-        status = OdeIntegrator::default()
-            .integrate(
-                y,
-                a,
-                b,
-                OdeOptions {
-                    accuracy,
-                    initial_step: (b - a) / divisor,
-                    minimum_step: 0.0,
-                    scale: Some(scale),
-                    quadrature: true,
-                    rounding: None,
-                    rate: None,
-                },
-                |t, _, dy| {
-                    eval_calls += 1;
-                    if (eval_calls & 63) == 1 {
-                        k.check_cancelled(OP)?;
-                    }
-                    integrand(t, dy)
-                },
-            )
-            // Success with no steps means the integrator skipped the span.
-            .and_then(|counts| {
-                if counts.good + counts.reduced == 0 {
-                    Err(SolidError::mass(OP_SKIPPED_SPAN, MassFailure::SkippedSpan))
-                } else {
-                    Ok(())
-                }
-            });
-        if status.is_ok() {
-            break;
-        }
-        if status
-            .as_ref()
-            .is_err_and(SolidError::is_unported_or_cancelled)
-        {
-            break;
-        }
+    /// the components' error scales
+    scale: &'a [f64],
+}
+
+/// The trim pieces' integrand at `t` on `trim` into `dy` (`SmODEAreaIFEO::Evaluate`):
+/// the iso-u integral at the trim point `(u, v)` from `v = base` to `v`, times the trim's
+/// `-du/dt`. Zero, without the iso-u integral, where `du/dt` is exactly zero or the trim
+/// point is on its base (`v = base`: a zero-width iso-u integral). The iso-u
+/// integral is taken by [`kronrod_integrate`] piece by piece between the surface's v knots
+/// between `base` and `v` (WR-494), at `iso.accuracy`; one running down (a trim point
+/// below its base) is the negated integral up. `scratch` holds the iso integrand's
+/// values.
+///
+/// Not upstream: upstream integrates both levels by Runge-Kutta (`SmODEAreaIFEO`'s inner
+/// `SmRungeKuttaODEIntegrate`), and leaves `dy` as it was where `|du/dt| <= SM_EFF_ZERO`
+/// (see [`OdeArea::evaluate`](crate::topology::face::p2::OdeArea::evaluate)).
+///
+/// # Errors
+///
+/// Those of the trim's evaluation, of [`surface_knots_inside`] and of the inner
+/// integration.
+fn trim_integrand(
+    k: &Kernel,
+    iso: &IsoLine<'_>,
+    trim: &Curve,
+    base: f64,
+    t: f64,
+    scratch: &mut [f64],
+    dy: &mut [f64],
+) -> Result<()> {
+    let pv = trim.evaluate(k, t, 1, true, true)?;
+    let (Some(p0), Some(p1)) = (pv.first().copied(), pv.get(1).copied()) else {
+        return Err(SolidError::mass_failed(
+            OP,
+            "the trim has no point or tangent",
+        ));
+    };
+    dy.fill(0.0);
+    if p1.x == 0.0 {
+        return Ok(());
     }
-    // Propagate failure instead of dropping the boundary: a silent skip would
-    // return success with zero/partial properties.
-    status
+    let (lo, hi, sign) = if p0.y >= base {
+        (base, p0.y, 1.0)
+    } else {
+        (p0.y, base, -1.0)
+    };
+    // (a trim point on its base: a zero-width iso-u integral, nothing to evaluate)
+    if lo == hi {
+        return Ok(());
+    }
+    let eval = OdeIsoCurveLength::new(k, iso.surface, p0.x, iso.origin, iso.thickness, iso.layout);
+    let mut v0 = lo;
+    for v1 in surface_knots_inside(k, iso.surface, SurfParamType::V, lo, hi)?
+        .into_iter()
+        .chain(core::iter::once(hi))
+    {
+        kronrod_integrate(k, v0, v1, iso.accuracy, iso.scale, dy, |v, g| {
+            eval.evaluate(v, scratch)?;
+            for (d, x) in g.iter_mut().zip(scratch.iter().skip(1)) {
+                *d = *x;
+            }
+            Ok(())
+        })?;
+        v0 = v1;
+    }
+    for d in dy.iter_mut() {
+        // (* -1.0: an exact negation)
+        *d = -(*d * p1.x) * sign;
+    }
+    Ok(())
 }
 /// The 7-point Gauss-Kronrod rule on `[-1, 1]` and its embedded 3-point Gauss rule: the
 /// nodes `0, ±x1, ±x2, ±x3` (`x2 = sqrt(3/5)`, the Gauss nodes with `0`), the Kronrod
@@ -436,8 +449,8 @@ const KRONROD_MAX_PIECES: u32 = 100_000;
 /// the Kronrod value returned is exact on polynomials of degree 10 where the Gauss value
 /// is on degree 5, so on a smooth integrand its own error is far below that estimate. A
 /// piece is accepted when, per component, the estimate is within `accuracy` of the larger
-/// of the piece's value and the component's error `scale` (as a Runge-Kutta step of
-/// [`integrate_piece`] is held to its values or that scale); otherwise it is halved.
+/// of the piece's value and the component's error `scale` (as upstream's Runge-Kutta steps
+/// are held to their values or that scale); otherwise it is halved.
 /// The pieces are summed left to right. No node is an end of the range, so an integrand
 /// smooth inside `(a, b)` is never read on the far side of a knot at either end.
 ///
@@ -517,6 +530,15 @@ where
     }
     Ok(())
 }
+/// A NaN accuracy would pass every piece's error test (`estimate > NaN` is false) and an
+/// infinite one would hold no piece to any: neither asks for an accuracy.
+fn valid_accuracy(accuracy: f64) -> Result<()> {
+    if accuracy.is_finite() {
+        Ok(())
+    } else {
+        Err(SolidError::invalid_input(OP, "accuracy not finite"))
+    }
+}
 fn valid_flags(flags: u64) -> Result<()> {
     if flags == 0 || flags & !PPF_ALL != 0 {
         Err(SolidError::invalid_input(OP, "invalid property mask"))
@@ -528,6 +550,12 @@ fn valid_flags(flags: u64) -> Result<()> {
 /// `trims` must have the orientation and order returned by `CreateOrientedTrimBoundary`;
 /// `face_box` is the face's bounding box (`CalculateBoundingBox`), which sets the error
 /// scale of the volume and moment components.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an invalid property mask or a non-finite `accuracy`
+/// (a NaN one would accept every quadrature piece unchecked); otherwise those of the
+/// trims' and the surface's evaluation and of the integration.
 pub fn boundary_properties(
     k: &Kernel,
     surface: &Surface,
@@ -544,6 +572,7 @@ pub fn boundary_properties(
     // the moment groups' extra length dimensions
     const POWERS: [u32; 8] = [1, 2, 2, 2, 2, 3, 3, 3];
     valid_flags(flags)?;
+    valid_accuracy(accuracy)?;
     if accuracy < EFF_ZERO {
         accuracy = EFF_ZERO_SQ;
     }
@@ -621,19 +650,16 @@ pub fn boundary_properties(
         }
     }
     // (no trims: nothing to integrate)
-    let Some(first) = trims.first() else {
+    if trims.is_empty() {
         return Ok(PreciseProperties::default());
-    };
-    let area = OdeArea {
-        kernel: k,
+    }
+    let iso = IsoLine {
         surface,
-        uv_curve: first,
-        min_v: base_v,
-        iso_curve_accuracy: accuracy / 10.0,
-        y_scale: &scale,
         origin,
-        face_thickness: thickness,
+        thickness,
         layout: &layout,
+        accuracy: accuracy / 10.0,
+        scale: &scale,
     };
 
     let mut y = vec![0.0; layout.num_components];
@@ -672,19 +698,15 @@ pub fn boundary_properties(
             if b.partial_cmp(&a) != Some(std::cmp::Ordering::Greater) {
                 continue; // a crossing at a knot
             }
-            let eval = OdeArea {
-                uv_curve: trim,
-                min_v: floor(band),
-                ..area
-            };
+            // Gauss-Kronrod at both levels, as the bands are (#14460): a Runge-Kutta step
+            // pair a level cost at least 144 samples a piece, and an iso-u line long in v
+            // (a cylinder's quarter turns) hundreds a sample; the 7-point rule takes 49 a
+            // piece when no piece is halved. Neither level's nodes reach a piece's ends,
+            // so no sample is read across a knot of the trim or of the surface.
+            let base = floor(band);
             span_y.fill(0.0);
-            integrate_piece(k, a, b, accuracy / 10.0, &scale, &mut span_y, |t, dy| {
-                // (the evaluator writes every component, zero where the trim's du/dt is)
-                eval.evaluate(k, t, &mut scratch)?;
-                for (d, v) in dy.iter_mut().zip(scratch.iter().skip(1)) {
-                    *d = *v;
-                }
-                Ok(())
+            kronrod_integrate(k, a, b, accuracy / 10.0, &scale, &mut span_y, |t, dy| {
+                trim_integrand(k, &iso, trim, base, t, &mut scratch, dy)
             })?;
             for (total, part) in trim_y.iter_mut().zip(span_y.iter()) {
                 *total += *part;
@@ -752,26 +774,17 @@ pub fn boundary_properties(
                 }
                 span_y.fill(0.0);
                 kronrod_integrate(k, a, b, accuracy / 10.0, &scale, &mut span_y, |u, dy| {
-                    let eval =
-                        OdeIsoCurveLength::new(area.kernel, surface, u, origin, thickness, &layout);
+                    let eval = OdeIsoCurveLength::new(k, surface, u, origin, thickness, &layout);
                     // (the band's height, piece by piece between any v knots inside it)
                     let mut v0 = lo;
                     for v1 in v_knots.iter().copied().chain(core::iter::once(hi)) {
-                        kronrod_integrate(
-                            k,
-                            v0,
-                            v1,
-                            area.iso_curve_accuracy,
-                            &scale,
-                            dy,
-                            |v, g| {
-                                eval.evaluate(v, &mut scratch_iso)?;
-                                for (d, x) in g.iter_mut().zip(scratch_iso.iter().skip(1)) {
-                                    *d = *x;
-                                }
-                                Ok(())
-                            },
-                        )?;
+                        kronrod_integrate(k, v0, v1, iso.accuracy, &scale, dy, |v, g| {
+                            eval.evaluate(v, &mut scratch_iso)?;
+                            for (d, x) in g.iter_mut().zip(scratch_iso.iter().skip(1)) {
+                                *d = *x;
+                            }
+                            Ok(())
+                        })?;
                         v0 = v1;
                     }
                     Ok(())
@@ -1885,6 +1898,7 @@ mod tests {
     #[test]
     fn integration_failures_are_typed_by_cause() {
         use super::super::{OP_INTEGRAND, OP_STEP_CONTROL};
+        const OP_SKIPPED_SPAN: &str = "mass::integrator::properties::skipped_span";
         assert!(matches!(
             typed_failure(SolidError::mass(OP_STEP_CONTROL, MassFailure::StepControl)),
             SolidError::NotConverged { .. }

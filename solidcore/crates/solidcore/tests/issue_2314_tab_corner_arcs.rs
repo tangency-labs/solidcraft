@@ -181,8 +181,8 @@ fn both_corner_arcs_picked_the_other_way_round() {
 fn the_pair_is_the_sum_of_each_alone() {
     let (a, fa) = removed(true, &[CORNER]).unwrap();
     let (b, fb) = removed(true, &[CORNER_L]).unwrap();
-    // from the Pappus wedge: x > 0 1.15e-10 less, x < 0 5.5e-11 more (asserted a decade
-    // above, so a later drift is caught)
+    // from the Pappus wedge: x > 0 2.1e-12 more, x < 0 3.2e-13 more (with Runge-Kutta trim
+    // pieces 1.15e-10 less and 5.5e-11 more, the bounds a decade above those)
     assert!((a - pappus()).abs() <= 1.2e-9, "x > 0 alone {a}");
     assert!((b - pappus()).abs() <= 6e-10, "x < 0 alone {b}");
     // pinned at the values measured here: the fork at 18e96f1 and 63c7962
@@ -190,13 +190,17 @@ fn the_pair_is_the_sum_of_each_alone() {
     // 0.159135839836381; these lie 3.1e-11 and 5.9e-11 from it because of the
     // solidcore-native exact spine. Since #2890 (precise properties integrate from the
     // trims' base); they were 0.15913583961037148 and 0.15913583978226598, 1.12e-10 below
-    // and 6.0e-11 above the Pappus wedge
+    // and 6.0e-11 above the Pappus wedge. Since the trim pieces integrate by Gauss-Kronrod
+    // (#14460) they are 2.1e-12 and 3.2e-13 above it, where they were 0.1591358396067335 and
+    // 0.15913583977726375 (1.15e-10 below, 5.5e-11 above); forced to accuracy 1e-11,
+    // Gauss-Kronrod gives 7.8e-13 and 3.2e-13 above, and the earlier Runge-Kutta pieces
+    // forced to 1e-12 7.4e-12 and 5.6e-12 below
     assert!(
-        (a - 0.159_135_839_606_733_5).abs() <= 1e-12,
+        (a - 0.159_135_839_724_058_31).abs() <= 1e-12,
         "x > 0 alone {a}"
     );
     assert!(
-        (b - 0.159_135_839_777_263_75).abs() <= 1e-12,
+        (b - 0.159_135_839_722_239_33).abs() <= 1e-12,
         "x < 0 alone {b}"
     );
     assert_eq!((fa, fb), (11, 11));

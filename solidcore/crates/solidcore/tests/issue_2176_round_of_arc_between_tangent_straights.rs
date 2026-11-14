@@ -215,7 +215,10 @@ fn the_blend_corner_ends_the_round_at_the_smooth_vertices() {
 /// tab's side and twice for its top. The tab side's other end and the rim's ends are
 /// mixed-convexity Ends (the fork's 3e26f76). The fork's figures are at 18e96f1 on the same
 /// plate (this test's fixes add WR-682's plane curve, among others: solidcore's are within 0
-/// and 4.5e-11 of them for the tab's top and the rim), except the tab side's. The fork's tab
+/// and 4.5e-11 of them for the tab's top and the rim), except the tab side's. The rim's is
+/// checked against its volumes forced to accuracy 1e-11 instead: since the trim pieces
+/// integrate by Gauss-Kronrod (#14460) it lies 2.6e-10 below the fork's, as both forced
+/// references do. The fork's tab
 /// side round removes 0.344196265039045 and leaves its End rib's UV curve off its 3D curve
 /// (`check_brep` `Bad Gap`). Here `FlushCurve` keeps the short last span (WR-697 addendum,
 /// end-rib flush merge, solidcore's own), the body is sound and the capped round removes
@@ -233,7 +236,10 @@ fn the_neighbours_keep_their_rounds() {
             0.214_601_836_334_623 + 2.0 * RUN_ON,
             2e-6,
         ),
-        ([0.0, -25.0, 2.0], 7.958_672_926_831_696, 1e-10),
+        // (the rim: the volume forced to accuracy 1e-11, by Gauss-Kronrod; the earlier
+        // Runge-Kutta trim pieces forced to 1e-12 give 7.958672926567942, the fork
+        // 7.958672926831696, 2.6e-10 above both)
+        ([0.0, -25.0, 2.0], 7.958_672_926_572_945, 1e-10),
     ] {
         let mut k = kernel(true);
         let mut b = plate(&mut k);

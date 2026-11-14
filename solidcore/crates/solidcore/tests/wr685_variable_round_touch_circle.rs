@@ -243,19 +243,25 @@ fn cliff_round(mut k: Kernel, r0: f64, r1: f64) -> Result<f64, (String, Option<N
 
 #[test]
 fn a_cliff_overflows_variable_round_holds_its_law_on_its_touch_circles() {
-    // the fork's 5e8c9c1 build (SmFilletExecutive as SmApiVariableRadiusFillet runs it),
-    // the exact circles: here to the last digit printed
-    for (r0, r1, fork) in [
-        (2.0, 11.0, 5802.4435349841779),
-        (11.0, 2.0, 5802.4435208241775),
-        (2.0, 20.0, 5503.8871700927575),
-        (2.0, 30.0, 5184.0573578203966),
-        (2.0, 50.0, 4693.6093103438334),
+    // The fork's 5e8c9c1 build (SmFilletExecutive as SmApiVariableRadiusFillet runs it),
+    // the exact circles, printed 5802.4435349841779, 5802.4435208241775, 5503.8871700927575,
+    // 5184.0573578203966 and 4693.6093103438334, as solidcore measured them with Runge-Kutta
+    // trim pieces at accuracy 1e-8 (to 6e-14). The bodies' volumes are below these by 1.5e-10
+    // to 1.6e-9 of them: by Gauss-Kronrod forced to accuracy 1e-11, the figures here, and by
+    // the earlier Runge-Kutta trim pieces, whose error falls tenfold a decade of accuracy onto
+    // them (within 1.4e-13 at 1e-12). Since the trim pieces integrate by Gauss-Kronrod (#14460)
+    // the volumes are measured within 1e-12 of those.
+    for (r0, r1, want) in [
+        (2.0, 11.0, 5802.443534124264),
+        (11.0, 2.0, 5802.443519965387),
+        (2.0, 20.0, 5503.887168715325),
+        (2.0, 30.0, 5184.057355491021),
+        (2.0, 50.0, 4693.609302907393),
     ] {
         let v = cliff_round(kernel(true), r0, r1);
-        eprintln!("{r0} -> {r1}: {v:?} fork {fork}");
+        eprintln!("{r0} -> {r1}: {v:?} want {want}");
         let v = v.expect("builds");
-        assert!(rel(v, fork) < 1e-12, "{r0} -> {r1}: {v} vs {fork}");
+        assert!(rel(v, want) < 1e-12, "{r0} -> {r1}: {v} vs {want}");
     }
 }
 

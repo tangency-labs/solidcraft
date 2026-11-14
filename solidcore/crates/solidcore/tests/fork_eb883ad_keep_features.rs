@@ -209,9 +209,17 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
 /// most, 1e-11 of it), since solidcore's precise properties integrate each iso-u line from the
 /// trims' lowest v (WR-563, #1556) where the fork starts at the face UV domain's, and its steps
 /// read a fifth-order error estimate (#1556, 5.0e-13 at most). Against the closed forms: the
-/// r 1.9 boss and hole are off by +2.0e-7 and -3.6e-7 (the fork's +4.4e-7 and -1.9e-7), and the
+/// r 1.9 boss and hole were off by +2.0e-7 and -3.6e-7 (the fork's +4.4e-7 and -1.9e-7), and the
 /// r 8 kept cylinder boss and hole, cone boss and 19 degree lean stay 3.4e-5 to 4.8e-5 above
 /// theirs, the crease's fit, as the fork's do; the cone pit has none.
+///
+/// Since the trim pieces integrate by Gauss-Kronrod (#14460) every figure is within 7.6e-15
+/// of the same volume forced to accuracy 1e-11 by Gauss-Kronrod; the earlier Runge-Kutta
+/// pieces forced to 1e-12 agree with that to 7.8e-16. The earlier figures were 8.4e-12 to
+/// 4.5e-11 off. The r 1.9
+/// boss and hole moved by -2.02e-7 and +3.54e-7, onto their closed forms to the digits given
+/// above, and the prism boss and pocket now differ by exactly their two prisms' 160 (by
+/// 159.99999981681 before).
 fn assert_pinned(feature: Feature, r: f64, volume: f64, faces: usize) {
     let (v, n) = rounded_with(feature, r).unwrap();
     // Bit for bit where the figures were taken (Linux). Elsewhere the platform's libm can move
@@ -266,24 +274,24 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
-    assert_pinned(cylinder_boss, 8.0, 23528.165527753492, 9);
-    assert_pinned(cylinder_hole, 8.0, 23402.501835298488, 9);
-    assert_pinned(cylinder_boss, 1.9, 24031.84334806833, 9);
-    assert_pinned(cylinder_hole, 1.9, 23906.179641369188, 9);
+    assert_pinned(cylinder_boss, 8.0, 23528.165527389272, 9);
+    assert_pinned(cylinder_hole, 8.0, 23402.501834781691, 9);
+    assert_pinned(cylinder_boss, 1.9, 24031.843347866376, 9);
+    assert_pinned(cylinder_hole, 1.9, 23906.179641722782, 9);
 }
 
 /// Planar walls: each crease is an exact section.
 #[test]
 fn prisms_keep_their_pinned_volumes() {
-    assert_pinned(prism_boss, 8.0, 23549.896259768986, 12);
-    assert_pinned(prism_pocket, 8.0, 23389.896259952173, 12);
+    assert_pinned(prism_boss, 8.0, 23549.896260150133, 12);
+    assert_pinned(prism_pocket, 8.0, 23389.896260150133, 12);
 }
 
 /// Walls that lean: kept as the fork keeps them, the boss's with no refusal.
 #[test]
 fn cones_keep_their_pinned_volumes() {
-    assert_pinned(cone_boss, 8.0, 23501.985588856085, 11);
-    assert_pinned(cone_pit, 8.0, 23427.54088939281, 9);
+    assert_pinned(cone_boss, 8.0, 23501.985588609361, 11);
+    assert_pinned(cone_pit, 8.0, 23427.54088905338, 9);
 }
 
 /// A boss's walls count as upright within the fillet's angular tolerance: at 19 degrees off they
@@ -302,7 +310,7 @@ fn a_boss_leaning_past_the_angular_tolerance_is_refused_as_the_fork() {
         let c = create_cone(k, Point3::new(20.0, 4.0, 20.0), 2.0, 1.0, 1.0)?;
         boolean_union(k, block, c)
     }
-    assert_pinned(lean_19, 8.0, 23486.59179069601, 11);
+    assert_pinned(lean_19, 8.0, 23486.591790262424, 11);
     for steep in [lean_30 as Feature, lean_45] {
         assert!(rounded_with(steep, 8.0).is_err());
     }
@@ -327,7 +335,7 @@ fn a_pocket_astride_the_contact_line_matches_the_fork() {
         let c = create_box(k, Point3::new(18.0, 6.0, 15.0), 4.0, 4.0, 6.0)?;
         boolean_difference(k, block, c)
     }
-    assert_pinned(astride, 8.0, 23371.292359915951, 12);
+    assert_pinned(astride, 8.0, 23371.292358869621, 12);
 }
 
 // ---- Work ----
@@ -357,7 +365,7 @@ fn walls_are_read_from_one_copy_per_body() {
         .lines();
     assert!(lines.is_empty(), "{lines:?}");
     let v = volume_of(&k, &mut b);
-    let want = 23549.896259768986 + 23389.896259952176 - TAKEN;
+    let want = 23549.896260150133 + 23389.896260150133 - TAKEN;
     println!(
         "volume {v:.17}, want {want:.17}; {} faces; {copies} copies",
         b.face_list().len()
