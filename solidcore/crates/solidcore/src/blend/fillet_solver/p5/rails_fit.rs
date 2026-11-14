@@ -103,19 +103,17 @@ pub fn is_knife_edge(
 /// `SmFilletSolver::IsConcaveEdge` (fork, WR-631): whether the body's material wedge
 /// at `edge` spans more than a half turn (a wall's foot), rather than less (a cliff's
 /// rim). The first loop edge use of the edge on the material side (its shell's region
-/// not void) is asked `IsConvexRadialSector(10)`. A tangent edge is not concave.
+/// not void) is asked `IsConvexRadialSector(10)`. A tangent edge is not concave, and nor is
+/// an edge that bounds no material (a sheet's): it has no wedge of material at all. Not the
+/// fork's, whose `IsConcaveEdge` fails there, and the fillet with it.
 ///
 /// # Errors
 ///
-/// `SM_ERR` for an edge with no loop edge use on the material side; those of the
-/// sector test.
+/// Those of the sector test.
 pub fn is_concave_edge(k: &Kernel, target: &mut Brep, edge_id: EdgeId) -> Result<bool> {
     match material_use(target, edge_id)? {
         Some(use_) => eu2::is_convex_radial_sector(k, target, use_, 10, false, 0.0),
-        None => Err(SolidError::blend_failed(
-            OP,
-            "the edge has no material edge use",
-        )),
+        None => Ok(false),
     }
 }
 

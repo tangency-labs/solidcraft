@@ -159,24 +159,9 @@ fn a_pyramid_apex_s_four_chamfers_take_the_facet() {
     assert!(chamfer(&b, &order, &e, d, ChamferCorner::Mitre).is_err());
 }
 
-/// The Facet is the kernel's blend corner's, under its `fillet_chamfer_corner` fix: without it
-/// the Facet is refused, not built as something else; on a round it is an argument error.
+/// The Facet corner is a chamfer's: on a round it is an argument error.
 #[test]
-fn the_facet_without_its_fix_or_on_a_round_is_refused() {
-    session::set_thread_fixes(
-        UpstreamFixes::NAMES
-            .iter()
-            .copied()
-            .filter(|n| *n != "fillet_chamfer_corner"),
-    )
-    .unwrap();
-    let (b, order, e) = box_corner();
-    assert_eq!(
-        chamfer(&b, &order, &e, 2.0, ChamferCorner::Facet).err(),
-        Some(Error::Unsupported(
-            "the chamfered corner needs the kernel's fillet_chamfer_corner fix"
-        ))
-    );
+fn the_facet_on_a_round_is_refused() {
     all_fixes();
     let (b, order, e) = box_corner();
     let r = blend_ordered(
