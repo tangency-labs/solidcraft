@@ -57,8 +57,11 @@ fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
+/// `SM_ERR`: a stage of the gap search failed with no reason the kernel names
+/// ([`OffsetFailure::StageFailed`], a defect).
+#[track_caller]
 fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+    SolidError::offset_stage_failed(OP, crate::error::SM_ERR)
 }
 
 /// The mate of an edge use.
@@ -1201,4 +1204,19 @@ fn set_edge_curve(
         b.set_geometry_owner_key(EntityRef::Edge(e), Some(owner));
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_gap_search_that_cannot_continue_is_a_stage_failure() {
+        let e = sm_err();
+        assert_eq!(e.offset_failure(), Some(&OffsetFailure::StageFailed));
+        assert!(e.is_defect());
+        assert_eq!(e.operation(), OP);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert!(e.is_status_answer());
+    }
 }

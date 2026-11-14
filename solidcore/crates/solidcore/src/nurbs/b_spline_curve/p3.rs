@@ -95,6 +95,7 @@
 use crate::curve::curve::p2::{Curve, CurvePropertyType};
 use crate::curve::curve::p7::{PropertyAnalysis, PropertyAnalysisOptions};
 use crate::curve::curve::p8::CurveIntersectOptions;
+use crate::error::nurbs::BSplineFailure;
 use crate::error::{ignore_or_pass_on, ignored, Result, SolidError};
 use crate::geom::assert_array::{labels, AssertArray, AssertReport, ObjectKey, ReportSpec};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -715,7 +716,7 @@ impl BSplineCurve {
         let end = self.evaluate_point(ivl.max())?;
 
         if start.closer_than(EFF_ZERO, end) {
-            return Err(SolidError::sm_err(OP_SCALE));
+            return Err(SolidError::b_spline(OP_SCALE, BSplineFailure::EndsCoincide));
         }
         let mut res = self.clone();
 
@@ -838,7 +839,7 @@ impl BSplineCurve {
         tol: f64,
     ) -> Result<SegmentLine> {
         if self.nurb.is_none() {
-            return Err(SolidError::sm_err(OP_SEG));
+            return Err(SolidError::b_spline(OP_SEG, BSplineFailure::NoNurbsForm));
         }
         let mut sample_count = sample_count;
 
@@ -1074,7 +1075,13 @@ impl BSplineCurve {
         let pnt1 = self.evaluate_point(ivl1.evaluate(end_this))?;
         let pnt2 = other.evaluate_point(ivl2.evaluate(end_other))?;
         if pnt1.distance(pnt2) > tol {
-            return Err(SolidError::sm_err(OP_JOIN));
+            return Err(SolidError::b_spline(
+                OP_JOIN,
+                BSplineFailure::EndsApart {
+                    distance: pnt1.distance(pnt2),
+                    tolerance: tol,
+                },
+            ));
         }
 
         // First let's handle the simple case of two lines with the same vector.
@@ -1120,7 +1127,14 @@ impl BSplineCurve {
         let composite = match composite {
             Ok(c) => c,
             Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
-            Err(_) => return Err(SolidError::sm_err(OP_JOIN)),
+            Err(e) => {
+                return Err(crate::error::Failure::new(
+                    OP_JOIN,
+                    crate::error::nurbs::NurbsFailure::BSpline(BSplineFailure::StageFailed),
+                )
+                .caused_by(e)
+                .into_error());
+            }
         };
         self.set_from_gw_nurb(composite.gw_nurb())
     }
@@ -1146,7 +1160,7 @@ impl BSplineCurve {
 
         // check state
         if knots.len() != continuities.len() {
-            return Err(SolidError::sm_err(OP_SUBDIV));
+            return Err(SolidError::b_spline(OP_SUBDIV, BSplineFailure::StageFailed));
         }
 
         // init iter params
@@ -2198,7 +2212,49 @@ mod tests {
             &[[9.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
             &[0.0, 0.0, 1.0, 1.0],
         );
-        assert!(a.join_with(k, true, &mut b, false, Some(0.01)).is_err());
+        let e = a.join_with(k, true, &mut b, false, Some(0.01)).unwrap_err();
+        // the end (4, 0, 0) of `quad` and the start (9, 0, 0) of the line are 5 apart
+        match e.nurbs_failure() {
+            Some(crate::error::nurbs::NurbsFailure::BSpline(BSplineFailure::EndsApart {
+                distance,
+                tolerance,
+            })) => {
+                assert!((distance - 5.0).abs() < 1e-12, "{distance}");
+                assert_eq!(*tolerance, 0.01);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+    }
+
+    #[test]
+    fn join_with_keeps_the_join_construction_error_as_its_cause() {
+        let k = &Kernel::default();
+        // two lines at an angle, 0.005 apart: within the caller's gap tolerance (0.01), so
+        // join_with reaches CreateByJoining, which refuses ends that far apart
+        let mut a = curve(
+            1,
+            &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            &[0.0, 0.0, 1.0, 1.0],
+        );
+        let mut b = curve(
+            1,
+            &[[1.005, 0.0, 0.0], [1.005, 1.0, 0.0]],
+            &[0.0, 0.0, 1.0, 1.0],
+        );
+        let e = a.join_with(k, true, &mut b, false, Some(0.01)).unwrap_err();
+        assert_eq!(
+            e.nurbs_failure(),
+            Some(&crate::error::nurbs::NurbsFailure::BSpline(
+                BSplineFailure::StageFailed
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        let cause = e.cause().expect("the join construction's error is kept");
+        assert!(
+            cause.to_string().contains("segments not end to end"),
+            "{cause}"
+        );
     }
 
     #[test]

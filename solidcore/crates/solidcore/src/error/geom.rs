@@ -14,13 +14,19 @@
 //! | [`GeomFailure::NearlySingular`]       | `SM_ERR_WARNING`             |
 //! | [`GeomFailure::CoincidentPoints`]     | `FALSE` (0)                  |
 //! | [`GeomFailure::ToleranceTooSmall`]    | `SM_ERR_INVALID_INPUT`       |
+//! | [`GeomFailure::Disjoint`], [`GeomFailure::PointOutsideExtent`], [`GeomFailure::ZeroDifferenceStep`] | `SM_ERR` |
+//! | [`GeomFailure::StageFailed`]          | the site's (`SM_ERR`)        |
 //!
-//! Deviations: not upstream. A failure says in a phrase (or by its variant) what went
-//! wrong; the failure's `operation` path says which routine. No failure names an
+//! **The record** (#15034). A check that refuses builds a typed cause with its numbers; a
+//! stage that fails with no reason the kernel names is a [`GeomFailure::StageFailed`], a
+//! defect ([`ErrorKind::StageFailed`]). The phrase causes ([`GeomFailure::Failed`],
+//! [`GeomFailure::Missing`]) are sites not yet converted.
+//!
+//! Deviations: not upstream. The failure's `operation` path says which routine. No failure names an
 //! entity: the sites they replace named none. The failures that are checks of a
-//! caller's arguments stay [`crate::SolidError::InvalidInput`]. `extent1d`, `extent2d`,
-//! `expansion` and `local_solve_nd` do not use these yet. `local_solve_nd` reads the
-//! singular system of `Matrix::solve_linear_system` by its `SM_ERR` status.
+//! caller's arguments stay [`crate::SolidError::InvalidInput`]. `expansion` does not use
+//! these yet. `local_solve_nd` reads the singular system of
+//! `Matrix::solve_linear_system` by its `SM_ERR` status.
 
 use super::{
     ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER, SM_ERR_WARNING,
@@ -47,13 +53,44 @@ pub enum GeomFailure {
         /// The tolerance that would be set.
         tolerance: f64,
     },
+    /// Two intervals to intersect are disjoint: they have no intersection.
+    Disjoint {
+        /// The first interval, `[min, max]`.
+        a: [f64; 2],
+        /// The second interval, `[min, max]`.
+        b: [f64; 2],
+    },
+    /// A point to normalise lies outside the extent (or off a degenerate side of it), so
+    /// it has no normalised coordinates.
+    PointOutsideExtent {
+        /// The point's `u`.
+        u: f64,
+        /// The point's `v`.
+        v: f64,
+    },
+    /// A difference step for a Jacobian's column is zero: the parameter's interval leaves
+    /// no room to step either way from `at`.
+    ZeroDifferenceStep {
+        /// The parameter's index.
+        parameter: usize,
+        /// The parameter's value.
+        at: f64,
+    },
+    /// A stage of a geometry utility failed with no reason the kernel names: a defect
+    /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
+    /// reports (for the goldens only) and where it was built.
+    StageFailed,
 }
 
 impl GeomFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) => SM_ERR,
+            Self::Failed(_)
+            | Self::Disjoint { .. }
+            | Self::PointOutsideExtent { .. }
+            | Self::ZeroDifferenceStep { .. }
+            | Self::StageFailed => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::NearlySingular => SM_ERR_WARNING,
             // upstream returns FALSE, not a status
@@ -62,12 +99,16 @@ impl GeomFailure {
         }
     }
 
-    /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
+    /// The failure's stable [`ErrorKind`]: [`ErrorKind::StageFailed`] for
+    /// [`GeomFailure::StageFailed`], a defect; [`ErrorKind::Missing`] for
     /// [`GeomFailure::Missing`], [`ErrorKind::InvalidInput`] for
     /// [`GeomFailure::ToleranceTooSmall`], [`ErrorKind::Failed`] otherwise.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
-        ErrorKind::of_status(self.comparison_status())
+        match self {
+            Self::StageFailed => ErrorKind::StageFailed,
+            _ => ErrorKind::of_status(self.comparison_status()),
+        }
     }
 }
 
@@ -84,6 +125,19 @@ impl core::fmt::Display for GeomFailure {
                 f,
                 "the tolerance {tolerance} is too small to tell apart from zero"
             ),
+            Self::Disjoint { a, b } => write!(
+                f,
+                "the intervals [{}, {}] and [{}, {}] are disjoint",
+                a[0], a[1], b[0], b[1]
+            ),
+            Self::PointOutsideExtent { u, v } => {
+                write!(f, "the point ({u}, {v}) lies outside the extent")
+            }
+            Self::ZeroDifferenceStep { parameter, at } => write!(
+                f,
+                "the difference step of parameter {parameter} at {at} is zero"
+            ),
+            Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
         }
     }
 }
@@ -91,6 +145,7 @@ impl core::fmt::Display for GeomFailure {
 impl crate::SolidError {
     /// [`crate::SolidError::Failed`] for a geometry utility that fails with `failure`.
     #[must_use]
+    #[track_caller]
     pub(crate) fn geom(operation: &'static str, failure: GeomFailure) -> Self {
         Failure::new(operation, failure).into_error()
     }
@@ -108,6 +163,15 @@ impl crate::SolidError {
     #[must_use]
     pub(crate) fn geom_missing(operation: &'static str, what: &'static str) -> Self {
         Self::geom(operation, GeomFailure::Missing(what))
+    }
+
+    /// [`crate::SolidError::Failed`] for a stage of a geometry utility that failed with no
+    /// reason the kernel names ([`GeomFailure::StageFailed`], a defect), with status
+    /// [`SM_ERR`].
+    #[must_use]
+    #[track_caller]
+    pub(crate) fn geom_stage_failed(operation: &'static str) -> Self {
+        Self::geom(operation, GeomFailure::StageFailed)
     }
 
     /// The geometry-utility failure behind this error, for a
@@ -177,18 +241,49 @@ mod tests {
         assert_eq!(SolidError::sm_err("geom::op").geom_failure(), None);
     }
 
+    #[test]
+    fn a_stage_failure_is_a_defect_and_a_typed_cause_keeps_its_status() {
+        super::super::tests::assert_stage_failure(
+            &SolidError::geom_stage_failed("geom::op"),
+            "geom::op",
+            SM_ERR,
+        );
+        for cause in [
+            GeomFailure::Disjoint {
+                a: [0.0, 1.0],
+                b: [2.0, 3.0],
+            },
+            GeomFailure::PointOutsideExtent { u: 2.0, v: 0.5 },
+            GeomFailure::ZeroDifferenceStep {
+                parameter: 0,
+                at: 0.5,
+            },
+        ] {
+            let e = SolidError::geom("geom::op", cause);
+            assert_eq!(e.upstream_status(), Some(SM_ERR), "{cause:?}");
+            assert_eq!(e.kind(), ErrorKind::Failed, "{cause:?}");
+            assert!(!e.is_defect(), "{cause:?}");
+        }
+        assert_eq!(
+            SolidError::geom(
+                "geom::op",
+                GeomFailure::Disjoint {
+                    a: [0.0, 1.0],
+                    b: [2.0, 3.0]
+                }
+            )
+            .to_string(),
+            "geom::op: the intervals [0, 1] and [2, 3] are disjoint"
+        );
+    }
+
     /// The geometry utilities describe their failures: their library code builds no bare
-    /// `Upstream` status, except the files listed (with the bare sites each may still hold)
-    /// whose conversion waits on other open work.
+    /// `Upstream` status.
     #[test]
     fn the_geom_routines_build_no_bare_statuses() {
         assert_eq!(
             super::super::query::tests::bare_statuses_in("geom", 30),
-            [
-                ("geom/extent1d.rs".to_owned(), 1),
-                ("geom/extent2d.rs".to_owned(), 2),
-                ("geom/local_solve_nd.rs".to_owned(), 1),
-            ]
+            Vec::<(String, usize)>::new()
         );
     }
 }
