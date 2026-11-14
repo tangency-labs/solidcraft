@@ -731,8 +731,7 @@ fn a_title_blocks_text_follows_the_model_state_alone() {
 
 /// Closing the drawing drops its scenes and the world states they hold, and keeps each view's lines,
 /// and each dimension's, with no world state. Opened again with nothing changed, its views show those
-/// lines, up to date, and none is drawn: only its dimensions are read again. What came back is
-/// numbered within the cache's serial, so no later drawing repeats a number.
+/// lines, up to date, and none is drawn: only its dimensions are read again.
 #[test]
 fn closing_the_drawing_keeps_its_lines_for_when_it_opens_again() {
     let (mut s, sheet, [front, _]) = front_and_top();
@@ -754,11 +753,39 @@ fn closing_the_drawing_keeps_its_lines_for_when_it_opens_again() {
     // A new scene, so a new number: the page can't take it for the one it showed before.
     assert!(reopened.stale.is_empty() && reopened.generation > before.generation, "{:?}", reopened.stale);
     assert_eq!(reopened.stale_dimensions.len(), 1);
-    let cache = &s.drawing_scenes;
-    let serials: BTreeSet<u64> = cache.views.values().map(|e| e.serial).chain(cache.dimensions.values().map(|e| e.serial)).collect();
-    assert!(serials.len() == 3 && serials.iter().all(|n| *n <= cache.serial), "{serials:?} within {}", cache.serial);
     let after = settled(&mut s, sheet);
     assert_eq!((bytes(&after.scene), s.drawing_scenes.projections), (bytes(&before.scene), 0));
+}
+
+/// The lines kept at a close come back numbered from the reopened cache's serial, which starts over:
+/// so a view drawn again after the reopen never gets back the number it has in the scene assembled
+/// then, and the sheet shows its new lines, not that scene again. The front view is drawn as many
+/// times after the reopen as before the close, which would give it its old number back.
+#[test]
+fn a_view_drawn_again_after_a_reopen_shows_its_new_lines() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    let scale = |s: &mut Session, to: &str| run(s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": to}}));
+    settled(&mut s, sheet);
+    for to in ["1:3", "1:4", "1:5"] {
+        scale(&mut s, to);
+        settled(&mut s, sheet);
+    }
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "drawing.open", drawing);
+    let reopened = extract(&mut s, sheet).unwrap();
+    let assembled = s.drawing_scenes.views[&front].serial;
+    // Drawn again, with no read of the sheet between, until its number reaches the one assembled.
+    for to in ["1:6", "1:8", "1:10", "1:20", "1:25", "1:50"] {
+        scale(&mut s, to);
+        while step(&mut s) {}
+        if s.drawing_scenes.views[&front].serial >= assembled {
+            break;
+        }
+    }
+    let now = extract(&mut s, sheet).unwrap();
+    assert!(now.generation > reopened.generation, "a new scene, not the one assembled at the reopen");
+    assert_eq!(bytes(&now.scene), bytes(&built(&s, sheet).scene));
 }
 
 /// Opened again with nothing changed, before any sheet is drawn, `drawing.status` says its views are
