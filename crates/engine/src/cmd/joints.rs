@@ -1092,6 +1092,15 @@ fn values_param(s: &Session, p: &Value, kind: JointKind, cmd: &str) -> Result<Ve
     Ok(out)
 }
 
+fn limit_pair(s: &Session, lo: &Value, hi: &Value, angle: bool, cmd: &str) -> Result<(f64, f64)> {
+    let lo = value(s, lo, angle, cmd)?;
+    let hi = value(s, hi, angle, cmd)?;
+    if lo > hi {
+        return Err(bad(cmd, "joint limit minimum must not exceed maximum"));
+    }
+    Ok((lo, hi))
+}
+
 fn limits_param(s: &Session, p: &Value, kind: JointKind, cmd: &str) -> Result<Vec<Option<(f64, f64)>>> {
     let n = kind.dofs().len();
     let mut out = vec![None; n];
@@ -1103,7 +1112,7 @@ fn limits_param(s: &Session, p: &Value, kind: JointKind, cmd: &str) -> Result<Ve
             if let (Some(lo), Some(hi)) = (l.get(0), l.get(1))
                 && let Some(slot) = out.get_mut(i)
             {
-                *slot = Some((value(s, lo, kind.is_angle(i), cmd)?, value(s, hi, kind.is_angle(i), cmd)?));
+                *slot = Some(limit_pair(s, lo, hi, kind.is_angle(i), cmd)?);
             }
         }
     }
@@ -2056,7 +2065,7 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "no such value"));
     }
     let lim = match (p.get("min"), p.get("max")) {
-        (Some(lo), Some(hi)) => Some((value(s, lo, kind.is_angle(i), cmd)?, value(s, hi, kind.is_angle(i), cmd)?)),
+        (Some(lo), Some(hi)) => Some(limit_pair(s, lo, hi, kind.is_angle(i), cmd)?),
         (None, None) => None,
         _ => return Err(bad(cmd, "give both `min` and `max`, or neither to clear")),
     };
