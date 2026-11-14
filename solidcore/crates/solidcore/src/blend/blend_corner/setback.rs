@@ -2461,6 +2461,12 @@ fn pieces_hold(
                 continue;
             }
             seen.push(e);
+            // an edge at the vertex is left out, as condition 1 leaves it out: at a Setback
+            // corner the face meets the vertex between its two blended edges only, which
+            // bound the piece themselves (the piece's sides along them stop at their
+            // setbacks, and (a) checks the rest of the face's edges against those sides). A
+            // seam ending at the vertex, or a third edge of the face's loop there, is not
+            // expected at a Setback corner and is not checked.
             if edge::start_vertex(target, e)? == Some(vtx)
                 || edge::end_vertex(target, e)? == Some(vtx)
             {

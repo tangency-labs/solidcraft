@@ -21,8 +21,10 @@
 //! end section's trace on the face from its setback point to its rail end (a plane section of
 //! the face, [`section_trace`]), and the spring curve's two halves. The decision, for each
 //! other edge of the face:
-//! - (a) every side but the spring curve's halves (condition 1 checks those) keeps clear of
-//!   the edge by more than the tolerances, proved on control-point hulls
+//! - (a) every side but the spring curve's halves (condition 1 checks those), and every
+//!   straight piece closing a gap between one side's end and the next one's start (an edge's
+//!   tolerance lets its restricted curve end off the next side's start; the gap kept is then
+//!   widened by the piece's length), keeps clear of the edge by more than the tolerances, proved on control-point hulls
 //!   ([`on_face::clear_of`]: explicit-stack halving bounded by [`on_face::DEPTH`] and
 //!   [`on_face::PAIRS`], polling the kernel's cancel token);
 //! - (b) given (a), the edge (connected, and meeting no side) lies wholly inside the piece or
@@ -196,6 +198,32 @@ impl CornerPiece {
                     return Ok(Decision::Undecided);
                 }
             }
+            // (a) also on the straight pieces that close the gaps between one side's end and
+            // the next one's start (where an edge's own tolerance lets them part): each is
+            // `winding`'s closing piece, so it must keep clear too, by the gap and its length
+            for (i, side) in self.sides.iter().enumerate() {
+                let Some(next) = (i + 1)
+                    .checked_rem(self.sides.len())
+                    .and_then(|j| self.sides.get(j))
+                else {
+                    return Ok(Decision::Undecided);
+                };
+                let (Some(&end), Some(&start)) = (side.space.last(), next.space.first()) else {
+                    return Ok(Decision::Undecided);
+                };
+                let (a, b) = (euclid3(&end), euclid3(&start));
+                if a == b {
+                    continue;
+                }
+                let closing = vec![[a.x, a.y, a.z, 1.0], [b.x, b.y, b.z, 1.0]];
+                let gap = other.gap + side.off.max(next.off) + a.distance(b);
+                let gap_valid = gap >= 0.0;
+                if !gap_valid
+                    || on_face::clear_of(k, &closing, &other.pieces, gap)? != Clearance::Clear
+                {
+                    return Ok(Decision::Undecided);
+                }
+            }
             // (b): inside or outside, at one point
             let Some((x, z)) = other
                 .points
@@ -213,6 +241,11 @@ impl CornerPiece {
         }
         Ok(Decision::Clear)
     }
+}
+
+/// The Euclidean point of a homogeneous one.
+fn euclid3(h: &Hom) -> Point3 {
+    Point3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])
 }
 
 /// The rounding bound of a 3-D homogeneous point set's Euclidean points after `ops` more
@@ -617,6 +650,38 @@ mod tests {
             bad.decide(&k, &[circle(0.5, 0.5, 0.1)]).unwrap(),
             Decision::Undecided
         );
+    }
+
+    /// A blended edge with a large tolerance (1e-4) can end its restricted curve off the
+    /// next side's start; an edge of a small tolerance (1e-7) crossing through that gap
+    /// clears every side but the closing piece, and lies partly inside: not decided.
+    #[test]
+    fn an_edge_through_a_gap_between_sides_is_undecided() {
+        let k = Kernel::default();
+        let mut piece = CornerPiece::new(plane());
+        let corners = [[0.0, 0.0], [1.0, 0.0], [1.0, 1e-4], [1.0, 1.0], [0.0, 1.0]];
+        // the sides run (0,0)-(1,0), then (1,1e-4)-(1,1) (the gap at (1,0) left open), ...
+        for (a, b) in [(0, 1), (2, 3), (3, 4), (4, 0)] {
+            let (p, q) = (corners[a], corners[b]);
+            assert!(piece.push(
+                vec![[p[0], p[1], 0.0, 1.0], [q[0], q[1], 0.0, 1.0]],
+                0.0,
+                false
+            ));
+        }
+        let through = OtherEdge {
+            pieces: vec![vec![[0.99, 5e-5, 0.0, 1.0], [1.01, 5e-5, 0.0, 1.0]]],
+            gap: 1e-7,
+            points: vec![Vec3::new(0.99, 5e-5, 0.0)],
+        };
+        assert_eq!(piece.decide(&k, &[through]).unwrap(), Decision::Undecided);
+        // well inside, clear of the gap: still blocked
+        let inside = OtherEdge {
+            pieces: vec![vec![[0.4, 0.5, 0.0, 1.0], [0.6, 0.5, 0.0, 1.0]]],
+            gap: 1e-7,
+            points: vec![Vec3::new(0.4, 0.5, 0.0)],
+        };
+        assert_eq!(piece.decide(&k, &[inside]).unwrap(), Decision::Blocked);
     }
 
     #[test]
