@@ -46,6 +46,15 @@ fn follows_view(app: &SolveApp) -> bool {
     rows_start_open(app)
 }
 
+/// Whether the Browser tree panel is open now. The panel layout holds the effective state (a
+/// panel closed from its host menu keeps its instance with `requested_open` false), and the
+/// window's flag is the fallback for a layout that has no Browser instance yet.
+pub(crate) fn panel_open(app: &SolveApp) -> bool {
+    app.panel_runtime()
+        .and_then(|runtime| runtime.layout().layout().instances.iter().find(|panel| panel.id.0 == "browser").map(|panel| panel.requested_open))
+        .unwrap_or(app.ui.show_browser)
+}
+
 /// Reveal a production panel and its tab so an explicit Find can reach the real rows.
 pub(crate) fn reveal_shared_panel(app: &mut SolveApp, name: &str) {
     use solidcraft_engine::panels::{LayoutAction, Mutation};

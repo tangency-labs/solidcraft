@@ -371,6 +371,10 @@ fn display_menu(app: &SolveApp) -> Menu {
     );
     axes.tip = Some(app.tr("prefs.origin_axes_across_view_help").to_owned());
     entries.push(MenuEntry::Row(axes));
+    // The Browser tree panel closes from its own host menu, which left no way back (#16058).
+    let mut browser = row("browser_tree", app.tr("cmd.view_browser"), "list", "view:browser_tree", crate::browser::panel_open(app));
+    browser.tip = Some(app.tr("help.view.browser").to_owned());
+    entries.push(MenuEntry::Row(browser));
     entries.extend([MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.projection_heading").to_owned())]);
     for (perspective, key) in [(false, "navbar.orthographic"), (true, "navbar.perspective")] {
         let mut item = row(
@@ -420,6 +424,9 @@ fn display_pick(app: &mut SolveApp, item: &str) {
         }
         "origin_axes_across_view" => {
             let _ = app.run("view.origin_axes_across_view", json!({"enabled": !app.preferences.origin_axes_across_view}));
+        }
+        "browser_tree" => {
+            let _ = app.run("view.browser", json!({}));
         }
         "agent_cursor" => app.ui.agent_cursor.show = !app.ui.agent_cursor.show,
         "agent_chat" => {

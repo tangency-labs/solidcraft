@@ -353,6 +353,7 @@ pub const SECTIONS: &[Section] = &[
             "view.grid",
             "view.ground_shadow",
             "view.navigation_bar",
+            "view.browser",
             "view.ribbon_tabs_only",
         ],
     },

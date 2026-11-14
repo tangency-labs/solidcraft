@@ -1,0 +1,50 @@
+{
+  "en": {
+    "cmd.view_browser": "Browser Tree",
+    "help.view.browser": "Shows or hides the Browser tree panel, with the design's components, bodies and sketches. Use it to bring the Browser back after closing it from its own menu.",
+    "prefs.layout_page.browser_tree": "Browser tree",
+    "prefs.layout_page.browser_tree_note": "Show the Browser tree panel with the design's components, bodies and sketches."
+  },
+  "ar": {
+    "cmd.view_browser": "شجرة المستعرض",
+    "help.view.browser": "يعرض لوحة شجرة المستعرض أو يخفيها، وفيها مكونات التصميم وأجسامه ورسوماته. استخدمه لإرجاع المستعرض بعد إغلاقه من قائمته.",
+    "prefs.layout_page.browser_tree": "شجرة المستعرض",
+    "prefs.layout_page.browser_tree_note": "إظهار لوحة شجرة المستعرض مع مكونات التصميم وأجسامه ورسوماته."
+  },
+  "he": {
+    "cmd.view_browser": "לוח עץ התכן",
+    "help.view.browser": "מציג את לוח עץ התכן או מסתיר אותו, שבו רכיבי התכן, הגופים והסקיצות. משתמשים בו כדי להחזיר את העץ לאחר סגירתו מהתפריט שלו.",
+    "prefs.layout_page.browser_tree": "עץ התכן",
+    "prefs.layout_page.browser_tree_note": "הצגת לוח עץ התכן עם רכיבי התכן, הגופים והסקיצות."
+  },
+  "ja": {
+    "cmd.view_browser": "ブラウザーツリー",
+    "help.view.browser": "設計のコンポーネント、ボディ、スケッチを一覧するブラウザーツリーパネルを表示または非表示にします。パネルのメニューから閉じた後、ブラウザーを戻すときに使います。",
+    "prefs.layout_page.browser_tree": "ブラウザーツリー",
+    "prefs.layout_page.browser_tree_note": "設計のコンポーネント、ボディ、スケッチを一覧するブラウザーツリーパネルを表示します。"
+  },
+  "vi": {
+    "cmd.view_browser": "Cây trình duyệt",
+    "help.view.browser": "Hiện hoặc ẩn bảng cây trình duyệt, nơi có các thành phần, vật thể và phác thảo của thiết kế. Dùng nó để đưa trình duyệt trở lại sau khi đóng từ menu của nó.",
+    "prefs.layout_page.browser_tree": "Cây trình duyệt",
+    "prefs.layout_page.browser_tree_note": "Hiện bảng cây trình duyệt với các thành phần, vật thể và phác thảo của thiết kế."
+  },
+  "zh": {
+    "cmd.view_browser": "浏览器树",
+    "help.view.browser": "显示或隐藏浏览器树面板，其中列出设计的组件、实体和草图。从面板自己的菜单关闭后，用它重新打开浏览器。",
+    "prefs.layout_page.browser_tree": "浏览器树",
+    "prefs.layout_page.browser_tree_note": "显示浏览器树面板，其中列出设计的组件、实体和草图。"
+  },
+  "de": {
+    "cmd.view_browser": "Browser-Baum",
+    "help.view.browser": "Zeigt oder blendet das Browser-Baum-Fenster mit den Komponenten, Körpern und Skizzen des Modells aus. Damit holen Sie den Browser zurück, nachdem Sie ihn über sein eigenes Menü geschlossen haben.",
+    "prefs.layout_page.browser_tree": "Browser-Baum",
+    "prefs.layout_page.browser_tree_note": "Zeigt das Browser-Baum-Fenster mit den Komponenten, Körpern und Skizzen des Modells."
+  },
+  "ko": {
+    "cmd.view_browser": "브라우저 트리",
+    "help.view.browser": "설계의 구성요소, 바디 및 스케치를 담은 브라우저 트리 패널을 표시하거나 숨깁니다. 자체 메뉴에서 닫은 뒤 브라우저를 되살릴 때 사용합니다.",
+    "prefs.layout_page.browser_tree": "브라우저 트리",
+    "prefs.layout_page.browser_tree_note": "설계의 구성요소, 바디 및 스케치를 담은 브라우저 트리 패널을 표시합니다."
+  }
+}
