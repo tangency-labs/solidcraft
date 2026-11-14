@@ -753,6 +753,10 @@ fn a_micro_edge_on_a_bezier_with_a_tiny_knot_span_keeps_the_block() {
         assert!(rel(m.volume, 6000.0) < 1e-9, "{case}: volume {}", m.volume);
         assert_eq!(m.faces, 6, "{case}");
     }
+    // At 1.283 nm the micro edge lies on [0, 6.549e-15], below SMLib's knot resolution (1e-12):
+    // the solid is refused with that interval named, not taken as a body SMLib's check fails.
+    let e = step_import(&bezier_block("1.020781457822E-07", 1.283e-6)).map(|i| i.bodies.len()).unwrap_err().to_string();
+    assert!(e.contains("knot resolution is 1e-12"), "{e}");
 }
 
 fn context(id: u64, unit: &str) -> String {
