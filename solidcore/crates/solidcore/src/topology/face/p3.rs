@@ -716,7 +716,6 @@ impl LoopOrientationSampler<'_> {
             let mut prev_raw = previous.raw_uv;
             sample.shift = previous.shift;
             face2::check_seam_crossing(
-                self.k,
                 &mut prev_raw,
                 sample.raw_uv,
                 &self.surf_domain,

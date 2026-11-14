@@ -48,9 +48,8 @@
 //!   `SM_ERR_NULL_POINTER`) or the callee's error.
 //! - **`sm_CheckSeamCrossing`** returns `SM_SUCCESS` (`1000`, true as an
 //!   `SmBoolean`) for a surface closed in neither direction; [`check_seam_crossing`]
-//!   returns `true` there by default (`plan/upstream-issues.md`), and `false` with
-//!   the opt-in fix [`UpstreamFixes::check_seam_crossing_unclosed`](crate::kernel::UpstreamFixes::check_seam_crossing_unclosed).
-//!   The unused surface argument is dropped.
+//!   returns `false` there: no seam was crossed (WR-87). The unused surface argument
+//!   and the kernel are dropped.
 //! - **`SmPrecisePropertyLayout`** indices are `usize`; `0` still means "not selected".
 //!   The evaluators take the derivative array as a slice and return
 //!   [`SolidError::InvalidInput`] for an index outside it (upstream writes out of
@@ -107,19 +106,17 @@
 //!   `RAND_MAX`), so results asked for more than one point are not reproducible
 //!   against upstream (`plan/findings.md`). Point counts above
 //!   [`MAX_POINTS_IN_FACE`] are [`SolidError::InvalidInput`] (upstream allocates
-//!   them). The rectangular branch samples from `dUInc` / `dVInc`, not from the
-//!   domain minimum, as upstream does by default
-//!   (`plan/upstream-issues/WR-86--smface-getpointsinface-samples-a-rectangular-face-from-0-not.md`).
-//!   With [`UpstreamFixes::face_points_span_domain`](crate::kernel::UpstreamFixes::face_points_span_domain)
-//!   it starts each column and row at the domain's minimum and sizes the columns by
-//!   the domain's u length over the column count plus one (WR-86 addendum,
-//!   `2026-10-31-domain-relative-grid`). That corrects the origin and the column
-//!   spacing, not uniform coverage for every count: counts above 30 still plan only
-//!   `min(count, 30)` columns and stop once the requested count is reached, so when
-//!   those rows do not divide the requested count the last sampled column is truncated
-//!   and later columns are not sampled (31 points fill 16 of 30 columns), and the V
-//!   dither is still drawn once per point from
-//!   `kernel.rng` in both modes. It takes the B-rep mutably: its UV-domain and
+//!   them). The rectangular branch starts each column and row at the domain's minimum
+//!   and sizes the columns by the domain's u length over the column count plus one,
+//!   where upstream samples from `dUInc` / `dVInc` as fractions of the domain's lengths
+//!   from zero, with a column increment left from the search count
+//!   (`plan/upstream-issues/WR-86--smface-getpointsinface-samples-a-rectangular-face-from-0-not.md`
+//!   and its `2026-10-31-domain-relative-grid` addendum). That corrects the origin and
+//!   the column spacing, not uniform coverage for every count: counts above 30 still
+//!   plan only `min(count, 30)` columns and stop once the requested count is reached, so
+//!   when those rows do not divide the requested count the last sampled column is
+//!   truncated and later columns are not sampled (31 points fill 16 of 30 columns), and
+//!   the V dither is still drawn once per point from `kernel.rng`. It takes the B-rep mutably: its UV-domain and
 //!   iso-line classifications run on it (the classification's snapshot hands back the
 //!   UV trim curves, the tolerance growth that fits them and the gap caches), so what
 //!   upstream's `const` queries leave on the B-rep stays there.
@@ -1184,12 +1181,9 @@ fn runge_kutta_ode_integrate(
 /// `sm_CheckSeamCrossing`: when the step from `uv1` to `uv2` jumps more than 90% of a
 /// closed direction's period of `domain`, moves `uv1` into `uv2`'s period and adds the
 /// period (with the sign of the jump's opposite) to `param_shift`. Returns whether a
-/// seam was crossed; `true` for a surface closed in neither direction by default
-/// (upstream returns `SM_SUCCESS` there; WR-87). With the opt-in fix
-/// [`UpstreamFixes::check_seam_crossing_unclosed`](crate::kernel::UpstreamFixes::check_seam_crossing_unclosed),
-/// returns `false` when closed in neither direction.
+/// seam was crossed: `false` for a surface closed in neither direction (upstream
+/// returns `SM_SUCCESS` there, `true` as an `SmBoolean`; WR-87).
 pub fn check_seam_crossing(
-    k: &Kernel,
     uv1: &mut Point2,
     uv2: Point2,
     domain: &Extent2d,
@@ -1200,9 +1194,8 @@ pub fn check_seam_crossing(
     let mut ret = false;
 
     if !closed_u && !closed_v {
-        // SM_SUCCESS as an SmBoolean upstream (WR-87).
-        // With the opt-in fix `k.fixes.check_seam_crossing_unclosed`, returns `false`.
-        return !k.fixes.check_seam_crossing_unclosed;
+        // nothing can be crossed (upstream returns SM_SUCCESS as an SmBoolean, WR-87)
+        return false;
     }
 
     if closed_u {
@@ -1668,11 +1661,9 @@ fn rand_dither(k: &mut Kernel) -> f64 {
 /// constant-U UV lines. With more than one point the V values are dithered by a
 /// random draw (`kernel.rng`).
 ///
-/// The default keeps the pinned C++ grid: fractions of the UV domain's lengths from
-/// zero. With [`UpstreamFixes::face_points_span_domain`](crate::kernel::UpstreamFixes::face_points_span_domain)
-/// the rectangular branch starts at the domain's minimum and sizes its columns by the
-/// domain's u length over the column count plus one (WR-86 addendum,
-/// `2026-10-31-domain-relative-grid`). Counts above 30 still plan only
+/// The rectangular branch starts at the domain's minimum and sizes its columns by the
+/// domain's u length over the column count plus one (upstream samples fractions of the
+/// UV domain's lengths from zero; WR-86). Counts above 30 still plan only
 /// `min(count, 30)` columns and stop at the requested count, so when those rows do not
 /// divide the requested count the last sampled column is truncated and later columns
 /// are not sampled; this is not uniform coverage of the domain for every count.
@@ -1697,9 +1688,9 @@ pub fn points_in_face(
     let dom = face.uv_domain;
     let mut u_interval = dom.u_interval();
     let v_interval = dom.v_interval();
-    let mut u_inc = u_interval.length();
+    let u_len = u_interval.length();
     let mut v_inc = v_interval.length();
-    if u_inc <= EFF_ZERO || v_inc <= EFF_ZERO {
+    if u_len <= EFF_ZERO || v_inc <= EFF_ZERO {
         return Err(SolidError::topology_failed(
             OP,
             "the face's UV domain is degenerate",
@@ -1717,19 +1708,15 @@ pub fn points_in_face(
     let surf = surface_deref(b, f)?.clone();
     let count = point_count as usize;
     let mut trim_curve_cnt = (2 * point_count).min(30);
-    u_inc /= (trim_curve_cnt + 1) as f64;
-    let mut u = u_inc;
 
     if rectangular_trim == 1 {
         // when faced is rectangularly trimmed
         trim_curve_cnt = point_count.min(30);
-        // WR-86 opt-in: the columns start at the domain's minimum u, with an
-        // increment of the domain's u length over the column count plus one
-        let span_domain = k.fixes.face_points_span_domain;
-        if span_domain {
-            u_inc = u_interval.length() / (trim_curve_cnt + 1) as f64;
-            u = u_interval.min() + u_inc;
-        }
+        // the columns start at the domain's minimum u, with an increment of the
+        // domain's u length over the column count plus one (WR-86; upstream keeps the
+        // search count's increment and starts from zero)
+        let u_inc = u_len / (trim_curve_cnt + 1) as f64;
+        let mut u = u_interval.min() + u_inc;
         let j_cnt = if (point_count / trim_curve_cnt) * trim_curve_cnt < point_count {
             (point_count / trim_curve_cnt) + 1
         } else {
@@ -1739,10 +1726,7 @@ pub fn points_in_face(
 
         // generate an array of sample points
         for _ in 0..trim_curve_cnt {
-            let mut v = v_inc;
-            if span_domain {
-                v = v_interval.min() + v_inc;
-            }
+            let mut v = v_interval.min() + v_inc;
             for _ in 0..j_cnt {
                 if out.uv.len() == count {
                     break;
@@ -3708,12 +3692,10 @@ mod tests {
 
     #[test]
     fn seam_crossing() {
-        let k = Kernel::default();
         let dom = Extent2d::from_bounds(0.0, 0.0, 2.0, 4.0);
         let mut uv1 = Point2::new(1.95, 1.0);
         let mut shift = Vec2::new(0.0, 0.0);
         assert!(check_seam_crossing(
-            &k,
             &mut uv1,
             Point2::new(0.05, 1.0),
             &dom,
@@ -3725,7 +3707,6 @@ mod tests {
         assert!((uv1.x - -0.05).abs() < 1e-15);
         let mut uv1 = Point2::new(1.0, 0.1);
         assert!(check_seam_crossing(
-            &k,
             &mut uv1,
             Point2::new(1.0, 3.9),
             &dom,
@@ -3735,7 +3716,6 @@ mod tests {
         ));
         assert_eq!(shift, Vec2::new(2.0, -4.0));
         assert!(!check_seam_crossing(
-            &k,
             &mut uv1,
             Point2::new(1.0, 4.0),
             &dom,
@@ -3745,7 +3725,6 @@ mod tests {
         ));
         // closed in neither direction: default returns SM_SUCCESS (true) for C++ parity
         assert!(check_seam_crossing(
-            &k,
             &mut uv1,
             Point2::new(9.0, 9.0),
             &dom,
@@ -3756,16 +3735,13 @@ mod tests {
     }
 
     #[test]
-    fn seam_crossing_opt_in_unclosed_returns_false() {
-        let mut k = Kernel::default();
-        k.fixes.check_seam_crossing_unclosed = true;
+    fn seam_crossing_unclosed_returns_false() {
         let dom = Extent2d::from_bounds(0.0, 0.0, 2.0, 4.0);
         let mut uv1 = Point2::new(1.0, 1.0);
         let mut shift = Vec2::new(0.0, 0.0);
 
         // When closed in neither direction, returns false and applies no shift
         assert!(!check_seam_crossing(
-            &k,
             &mut uv1,
             Point2::new(9.0, 9.0),
             &dom,
@@ -3776,11 +3752,10 @@ mod tests {
         assert_eq!(shift, Vec2::new(0.0, 0.0));
         assert_eq!(uv1, Point2::new(1.0, 1.0));
 
-        // When closed in U, seam crossing detection is unaffected by the flag
+        // When closed in U, a seam crossing is still found
         let mut uv1_u = Point2::new(1.95, 1.0);
         let mut shift_u = Vec2::new(0.0, 0.0);
         assert!(check_seam_crossing(
-            &k,
             &mut uv1_u,
             Point2::new(0.05, 1.0),
             &dom,
@@ -3904,7 +3879,6 @@ mod tests {
 
         // opt-in: count 1 is the centre of the domain, in u and v
         let mut k = Kernel::default();
-        k.fixes.face_points_span_domain = true;
         let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
         assert_eq!(r.uv, vec![Point2::new(3.5, -6.75)]);
         // The plane's frame gives the world point (-v, u, 0).
@@ -3913,7 +3887,6 @@ mod tests {
         // a negative-u, positive-v domain samples its centre too
         let (mut b, f) = rectangular_face((-4.0, 3.0, -3.0, 4.0));
         let mut k = Kernel::default();
-        k.fixes.face_points_span_domain = true;
         let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
         assert_eq!(r.uv, vec![Point2::new(-3.5, 3.5)]);
         assert_eq!(r.pv, vec![Point3::new(-3.5, -3.5, 0.0), Vec3::Z]);
@@ -3921,7 +3894,6 @@ mod tests {
         // zero origin: the centre of [0, 1] x [0, 2]
         let (mut b, f) = rectangular_face((0.0, 0.0, 1.0, 2.0));
         let mut k = Kernel::default();
-        k.fixes.face_points_span_domain = true;
         let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
         assert_eq!(r.uv, vec![Point2::new(0.5, 1.0)]);
         assert_eq!(r.pv, vec![Point3::new(-1.0, 0.5, 0.0), Vec3::Z]);
@@ -3930,7 +3902,6 @@ mod tests {
         // row at min v + v length / 2 plus its dither
         let (mut b, f) = rectangular_face(bounds);
         let mut k = Kernel::default();
-        k.fixes.face_points_span_domain = true;
         let r = points_in_face(&mut k, &mut b, f, 7).unwrap();
         assert_eq!(r.uv.len(), 7);
         for (i, uv) in r.uv.iter().enumerate() {
@@ -3947,7 +3918,6 @@ mod tests {
         };
         let mut off = Kernel::new(&opts);
         let mut on = Kernel::new(&opts);
-        on.fixes.face_points_span_domain = true;
         let r_off = points_in_face(&mut off, &mut b, f, 7).unwrap();
         let r_on = points_in_face(&mut on, &mut b, f, 7).unwrap();
         assert_eq!(r_off.uv.len(), 7);
@@ -3966,7 +3936,6 @@ mod tests {
         for count in [30, 31] {
             let mut off = Kernel::new(&opts);
             let mut on = Kernel::new(&opts);
-            on.fixes.face_points_span_domain = true;
             let r_off = points_in_face(&mut off, &mut b, f, count).unwrap();
             let r_on = points_in_face(&mut on, &mut b, f, count).unwrap();
             assert_eq!(r_off.uv.len(), count as usize);
@@ -3979,7 +3948,6 @@ mod tests {
 
         // 31 points still fill only 16 of the 30 columns: the row planner is unchanged
         let mut k = Kernel::default();
-        k.fixes.face_points_span_domain = true;
         let r = points_in_face(&mut k, &mut b, f, 31).unwrap();
         let xs: Vec<f64> = r.uv.iter().map(|p| p.x).collect();
         let columns = 1 + xs.windows(2).filter(|w| w[0] != w[1]).count();

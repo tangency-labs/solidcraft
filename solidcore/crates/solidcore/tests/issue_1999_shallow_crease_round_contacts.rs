@@ -93,9 +93,6 @@ fn shallow_crease_round_contact_profiles() {
             (1.9, 1.0, true),
         ] {
             let mut k = Kernel::default();
-            if profile == "half_degree" {
-                k.fixes.fillet_half_degree_crease = true;
-            }
             if profile == "new_blend" {
                 // The current generic-blend construction and supporting fillet fixes;
                 // leave unrelated boolean, sweep and validation fixes at default.

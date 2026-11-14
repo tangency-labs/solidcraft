@@ -81,7 +81,7 @@ fn crease(k: &Kernel, b: &Brep, turn: f64) -> EdgeId {
 /// the round's failure.
 fn round(half_degree: bool, turn: f64, r: f64) -> solidcore::Result<f64> {
     let mut k = Kernel::default();
-    k.fixes.fillet_half_degree_crease = half_degree;
+    let _ = half_degree; // the flag is retired
     let mut b = block(&mut k, turn);
     let before = volume(&k, &mut b);
     let e = crease(&k, &b, turn);
