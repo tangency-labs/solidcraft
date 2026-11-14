@@ -118,6 +118,15 @@ fn number(p: &Value, key: &str, msg: &str) -> Read<Option<f64>> {
     }
 }
 
+/// A number the handler reads itself, so at any finite size rather than through `num`, which
+/// also caps it; `msg` is the handler's message; `None` when the key is left out.
+fn any_number(p: &Value, key: &str, msg: &str) -> Read<Option<f64>> {
+    match p.get(key) {
+        None => Ok(None),
+        Some(v) => v.as_f64().filter(|x| x.is_finite()).map(Some).ok_or_else(|| msg.to_string()),
+    }
+}
+
 /// A list of names as `params::string_list` reads it (`null` is an empty list, which the
 /// handler refuses with its own message); `None` when the key is left out.
 fn names(p: &Value, key: &str) -> Read<Option<Vec<String>>> {
@@ -640,6 +649,12 @@ fn angle_schema(_: &mut SchemaGenerator) -> Schema {
     coordinate_number("An angle in degrees, a number.")
 }
 
+/// An angle the handler takes at any size: `sketch.transform` reads it as any finite number,
+/// not through `params::num`, which also caps the size.
+fn transform_angle_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"description": "An angle in degrees, any finite number.", "type": "number"})
+}
+
 fn chamfer_angle_required(schema: &mut Schema) {
     require_all(schema, &["distance", "angle"]);
     corner_forms(schema);
@@ -984,9 +999,9 @@ pub struct TransformParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "factor_schema")]
     pub factor: Option<f64>,
-    /// The turn, in degrees (a number). Default: 0.
+    /// The turn, in degrees (any finite number). Default: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "angle_schema")]
+    #[schemars(schema_with = "transform_angle_schema")]
     pub angle: Option<f64>,
     /// What the scale and the turn keep in place: a point [x, y] in mm or a point's id.
     /// Default: the sketch origin.
@@ -1012,7 +1027,7 @@ impl TransformParams {
             None => None,
             Some(_) => Some(num(p, "factor").filter(|k| *k > 1e-9 && *k < 1e6).ok_or_else(|| "`factor` must be a positive number".to_string())?),
         };
-        let angle = number(p, "angle", "`angle` must be a number (degrees)")?;
+        let angle = any_number(p, "angle", "`angle` must be a number (degrees)")?;
         let translate = point(p, "translate", "`translate` must be a point [x, y]")?;
         let entities = names(p, "entities")?;
         let center = point_or_id(p, "center")?;

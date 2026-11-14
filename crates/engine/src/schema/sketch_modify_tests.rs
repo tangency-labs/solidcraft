@@ -369,6 +369,10 @@ fn the_types_read_each_key_as_the_handler_does() {
     assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "factor": 0})), ["`factor` must be a positive number"]);
     assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "factor": 1e6})), ["`factor` must be a positive number"]);
     assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "angle": "90"})), ["`angle` must be a number (degrees)"]);
+    // The transform reads its angle itself, so at any finite size; the move reads its angle
+    // through `params::num`, which caps the size. Each contract says what its handler says.
+    assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "angle": 1e12})), none);
+    assert_eq!(warnings("sketch.move", json!({"entities": ["l1"], "angle": 1e12})), ["`angle` must be finite"]);
     assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "translate": [1]})), ["`translate` must be a point [x, y]"]);
     assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "center": 7})), ["`center` must be [x, y] or a point id"]);
     assert_eq!(warnings("sketch.transform", json!({"entities": ["l1"], "sketch": false})), ["`sketch` must be an id or a name"]);
@@ -494,6 +498,7 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"entities": ["l1"]}), true),
             (json!({"entities": "l1", "factor": 2, "angle": 90, "center": "p1", "translate": [1, 2]}), true),
             (json!({"entities": ["l1"], "center": [1, 2]}), true),
+            (json!({"entities": ["l1"], "angle": 1e12}), true),
             (json!({"entities": ["l1"], "factor": 0}), false),
             (json!({"entities": ["l1"], "angle": "90"}), false),
             (json!({"entities": ["l1"], "center": [1]}), false),
