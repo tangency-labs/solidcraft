@@ -57,6 +57,41 @@ await app.request("document.import", {text: kept.text, name: "Bracket"});
 The 16 MiB limit on parameters applies to `document.import`'s `text`. A design that links other
 design files keeps those links as paths; the files themselves are not in `text`.
 
+## A host page that keeps the files
+
+`?host=parent` (in a frame) or `?host_origin=https://host.example` (naming a cross-origin parent)
+hands the files to the page that frames the app, as with the other Craft apps' web bridges. The
+page hears, by `postMessage` to it and only at the origin it is at (or `?host_origin=` names):
+
+| Message | Meaning |
+|---|---|
+| `solidcraft:ready {version}` | The app started. |
+| `solidcraft:save {name, bytes, id, export?}` | A save or export the app would have downloaded: `bytes` is an `ArrayBuffer` (a design is `.sc`; exports carry `export: true`). |
+| `solidcraft:dirty {dirty}` | Unsaved changes appeared (`true`) or went away (`false`). |
+| `solidcraft:failed {error}` | The app did not start, or a save was not kept in time. |
+
+The page answers a save it kept with `solidcraft:saved {id}`; a save not answered within 30
+seconds is reported as `solidcraft:failed`. The page hands a file in with
+`solidcraft:open {name, bytes}`, where `bytes` is an `ArrayBuffer` or `Uint8Array` of at most
+256 MiB and `name` a plain file name: the app opens it like File > Open (a design, or STEP or a
+mesh as a new design). Any other message is ignored, and so are messages from any other origin.
+An unframed page is unchanged; `?sample` is left to the host.
+
+```js
+const app = document.querySelector("iframe");
+window.addEventListener("message", (event) => {
+  if (event.origin !== HOST_ORIGIN) return;
+  const m = event.data;
+  if (m.type === "solidcraft:save") {
+    keep(m.name, m.bytes, m.export === true);
+    app.contentWindow.postMessage({type: "solidcraft:saved", id: m.id}, HOST_ORIGIN);
+  }
+});
+function openFile(name, bytes) {
+  app.contentWindow.postMessage({type: "solidcraft:open", name, bytes}, HOST_ORIGIN);
+}
+```
+
 ## Verify a browser build
 
 Build the app with `trunk build` in `apps/solidcraft-web`, then run from the repository root:
