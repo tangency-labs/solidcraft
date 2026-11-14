@@ -37,14 +37,21 @@ const DOUBLE_TAP_SLOP: f32 = 24.0;
 const ORPHAN_TIME: f64 = 1.0;
 /// The most fingers followed at once.
 const MAX_CONTACTS: usize = 16;
+/// The most pen touches followed at once.
+const MAX_PENS: usize = 16;
 
 /// What the platform knows about this frame's contacts and egui doesn't.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlatformTaps {
     /// Where a pen tip was lifted: the primary release at this point is a pen tap.
     pub pen_release: Option<Pos2>,
     /// Where a finger went down on the app's canvas since the last frame.
     pub finger_down: Option<Pos2>,
+    /// A pen tip is on the screen now.
+    pub pen_down: bool,
+    /// Touches the platform names a stylus's since the last frame. Safari sends touch events for
+    /// an Apple Pencil as well as pen pointer events, and eframe hands them on as egui touches.
+    pub stylus: Vec<egui::TouchId>,
 }
 
 /// One finger on the screen.
@@ -71,6 +78,8 @@ pub(crate) struct Fingers {
     last_tap: Option<(Pos2, f64)>,
     /// A finger double-tap in the view, for the viewport to act on.
     pub(crate) double_tap: Option<Pos2>,
+    /// Touches that are a pen's, not a finger's: they are left out of the frame.
+    pens: Vec<egui::TouchId>,
 }
 
 /// Whether `p` is on the open view: inside it, not under a panel or a window over it, and not on
@@ -87,8 +96,11 @@ fn in_view(app: &SolveApp, ctx: &egui::Context, p: Pos2) -> bool {
 
 /// Before the frame: while a finger that went down in the open view is down, take the primary
 /// presses and releases the browser makes for it out of the frame, and note finger double-taps.
+/// A pen's touches (Safari's for an Apple Pencil) are not a finger's: they leave the frame, so
+/// neither this nor touchscreen navigation takes the pen for a finger, and its presses stay.
 /// Does nothing with Pencil mode off.
-pub(crate) fn filter(app: &mut SolveApp, ctx: &egui::Context, raw: &mut RawInput, finger_down: Option<Pos2>) {
+pub(crate) fn filter(app: &mut SolveApp, ctx: &egui::Context, raw: &mut RawInput, taps: &PlatformTaps) {
+    let finger_down = taps.finger_down;
     if !app.preferences.pencil_mode {
         app.viewport.fingers = Fingers::default();
         return;
@@ -111,7 +123,19 @@ pub(crate) fn filter(app: &mut SolveApp, ctx: &egui::Context, raw: &mut RawInput
             _ => None,
         })
         .collect();
+    let mut pen_touches = Vec::new();
     for (device, id, phase, pos) in touches {
+        let fingers = &mut app.viewport.fingers;
+        let pen = if phase == TouchPhase::Start { taps.pen_down || taps.stylus.contains(&id) } else { fingers.pens.contains(&id) };
+        if pen {
+            match phase {
+                TouchPhase::Start if fingers.pens.len() < MAX_PENS && !fingers.pens.contains(&id) => fingers.pens.push(id),
+                TouchPhase::End | TouchPhase::Cancel => fingers.pens.retain(|p| *p != id),
+                _ => {}
+            }
+            pen_touches.push(id);
+            continue;
+        }
         let starts_in_view = phase == TouchPhase::Start && in_view(app, ctx, pos);
         let fingers = &mut app.viewport.fingers;
         match phase {
@@ -160,11 +184,21 @@ pub(crate) fn filter(app: &mut SolveApp, ctx: &egui::Context, raw: &mut RawInput
             }
         }
     }
+    if !pen_touches.is_empty() {
+        raw.events.retain(|e| !matches!(e, Event::Touch { id, .. } if pen_touches.contains(id)));
+    }
     let fingers = &mut app.viewport.fingers;
     if !fingers.holding {
         return;
     }
-    raw.events.retain(|e| !matches!(e, Event::PointerButton { button: PointerButton::Primary, .. }));
+    // A touch's press is also where egui learns the finger is (eframe sends no move before it):
+    // the press becomes a move there, so the view still knows the finger is over it and
+    // touchscreen navigation can take the gesture, but nothing is clicked.
+    for e in &mut raw.events {
+        if let Event::PointerButton { pos, button: PointerButton::Primary, .. } = *e {
+            *e = Event::PointerMoved(pos);
+        }
+    }
     // The last finger has lifted (its release was just taken out), or a finger reported down
     // never sent its touch events: presses are the pointer's again.
     let lifted = fingers.contacts.is_empty() && raw.events.iter().any(|e| matches!(e, Event::Touch { phase: TouchPhase::End | TouchPhase::Cancel, .. }));

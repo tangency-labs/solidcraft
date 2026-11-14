@@ -65,7 +65,13 @@ pub struct Tracker {
     /// Where a finger last went down on the canvas, for the next frame. eframe runs a frame on
     /// `pointerdown` before the touch events arrive, so the app learns of a finger from here.
     finger_down: Option<Pos2>,
+    /// Touches the browser names a stylus's (`touchType: "stylus"`, an Apple Pencil in Safari),
+    /// noted from `touchstart` before eframe turns the touch into egui's, for the next frame.
+    stylus: Vec<egui::TouchId>,
 }
+
+/// The most stylus touches waiting for a frame.
+const MAX_STYLUS: usize = 32;
 
 impl Tracker {
     /// Track the pen tip independently of mouse chords and other pointer contacts.
@@ -82,6 +88,13 @@ impl Tracker {
     fn note_finger(&mut self, on_canvas: bool, pos: Pos2) {
         if on_canvas {
             self.finger_down = Some(pos);
+        }
+    }
+
+    /// A touch the browser names a stylus's.
+    fn note_stylus(&mut self, id: egui::TouchId) {
+        if self.stylus.len() < MAX_STYLUS && !self.stylus.contains(&id) {
+            self.stylus.push(id);
         }
     }
 
@@ -176,7 +189,12 @@ pub fn egui_down(ctx: &egui::Context) -> [bool; NUM_POINTER_BUTTONS] {
 /// pen tip was lifted and where a finger went down.
 pub fn reconcile(tracker: &std::cell::RefCell<Tracker>, ctx: &egui::Context, raw: &mut egui::RawInput) -> solidcraft_ui_egui::pencil::PlatformTaps {
     let mut tracker = tracker.borrow_mut();
-    let taps = solidcraft_ui_egui::pencil::PlatformTaps { pen_release: tracker.take_pen_release(&raw.events), finger_down: tracker.take_finger_down() };
+    let taps = solidcraft_ui_egui::pencil::PlatformTaps {
+        pen_release: tracker.take_pen_release(&raw.events),
+        finger_down: tracker.take_finger_down(),
+        pen_down: tracker.pen_contact.is_some(),
+        stylus: std::mem::take(&mut tracker.stylus),
+    };
     let Some(observed) = tracker.take() else { return taps };
     let pos = ctx.input(|i| i.pointer.interact_pos().or(i.pointer.latest_pos())).unwrap_or_default();
     let modifiers = ctx.input(|i| i.modifiers);
@@ -246,6 +264,24 @@ mod web {
                     }
                     if tracker.note(Happened::Pointer { buttons: e.buttons(), down_on_canvas }) {
                         ctx.request_repaint();
+                    }
+                }),
+            );
+        }
+        // Safari also sends touch events for an Apple Pencil, and eframe hands them on as egui
+        // touches: name the ones from a stylus, so Pencil mode does not take them for fingers.
+        {
+            let tracker = tracker.clone();
+            listen(
+                "touchstart",
+                Box::new(move |e: web_sys::Event| {
+                    let Some(list) = e.dyn_ref::<web_sys::TouchEvent>().map(web_sys::TouchEvent::changed_touches) else { return };
+                    for i in 0..list.length() {
+                        let Some(touch) = list.get(i) else { continue };
+                        let kind = js_sys::Reflect::get(&touch, &"touchType".into()).ok().and_then(|v| v.as_string());
+                        if kind.as_deref() == Some("stylus") {
+                            tracker.borrow_mut().note_stylus(egui::TouchId::from(touch.identifier()));
+                        }
                     }
                 }),
             );
@@ -353,6 +389,19 @@ mod tests {
         tracker.note_finger(true, P);
         assert_eq!(tracker.take_finger_down(), Some(P));
         assert_eq!(tracker.take_finger_down(), None);
+    }
+
+    /// Stylus touches are reported to the next frame once, each once, and at most `MAX_STYLUS`.
+    #[test]
+    fn stylus_touches_are_reported_once() {
+        let mut tracker = Tracker::default();
+        tracker.note_stylus(egui::TouchId(3));
+        tracker.note_stylus(egui::TouchId(3));
+        assert_eq!(std::mem::take(&mut tracker.stylus), vec![egui::TouchId(3)]);
+        for i in 0..100 {
+            tracker.note_stylus(egui::TouchId(i));
+        }
+        assert_eq!(tracker.stylus.len(), MAX_STYLUS);
     }
 
     /// A pen tap is matched once, and only after the same canvas contact releases.

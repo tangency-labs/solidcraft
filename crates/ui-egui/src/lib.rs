@@ -3766,7 +3766,7 @@ impl SolveApp {
     /// Process a frame with what the platform says about its taps (a pen tip lifted, a finger
     /// down): Pencil mode first keeps a finger in the view from clicking there.
     pub fn raw_input_hook_with_taps(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput, taps: pencil::PlatformTaps) {
-        pencil::filter(self, ctx, raw, taps.finger_down);
+        pencil::filter(self, ctx, raw, &taps);
         self.raw_input_hook_with_pen(raw, taps.pen_release);
     }
 

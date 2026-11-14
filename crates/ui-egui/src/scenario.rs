@@ -210,7 +210,7 @@ impl Harness {
 
     /// One frame with a release identified as a pen tip by the platform.
     pub fn frame_with_pen(&mut self, events: Vec<egui::Event>, pen_release: Option<egui::Pos2>) {
-        self.frame_with_taps(events, crate::pencil::PlatformTaps { pen_release, finger_down: None });
+        self.frame_with_taps(events, crate::pencil::PlatformTaps { pen_release, ..Default::default() });
     }
 
     /// One frame with what the platform says about its taps (a pen tip lifted, a finger down).

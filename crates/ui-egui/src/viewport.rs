@@ -8926,11 +8926,23 @@ mod tests {
         pos2(x as f32, y as f32)
     }
 
-    /// A pen tap at `pos`: the press, then the release the platform names a pen tip's.
+    /// An Apple Pencil tap at `pos` as Safari and eframe report it: `pointerdown` (a pen) makes a
+    /// press and runs a frame, `touchstart` (a stylus touch) another press with a touch, and
+    /// `pointerup` and `touchend` the release, the pointer gone and the touch's end. Each tap's
+    /// touch has its own id, as the browser's do.
     fn pen_tap(h: &mut crate::scenario::Harness, pos: Pos2) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(100);
+        let id = egui::TouchId(NEXT.fetch_add(1, Ordering::Relaxed));
         let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
-        h.frame_with(vec![egui::Event::PointerMoved(pos), button(true)]);
-        h.frame_with_pen(vec![button(false)], Some(pos));
+        let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id, phase, pos, force: Some(0.5) };
+        let pen_down = crate::pencil::PlatformTaps { pen_down: true, ..Default::default() };
+        h.frame_with_taps(vec![egui::Event::PointerMoved(pos), button(true)], pen_down.clone());
+        h.frame_with_taps(vec![button(true), touch(egui::TouchPhase::Start)], crate::pencil::PlatformTaps { stylus: vec![id], ..pen_down });
+        h.frame_with_taps(
+            vec![button(false), egui::Event::PointerGone, touch(egui::TouchPhase::End)],
+            crate::pencil::PlatformTaps { pen_release: Some(pos), ..Default::default() },
+        );
     }
 
     /// A finger tap at `pos` as eframe's web runner reports it: `pointerdown` makes a press and
@@ -8939,7 +8951,7 @@ mod tests {
     fn finger_tap(h: &mut crate::scenario::Harness, pos: Pos2, id: u64) {
         let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
         let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(id), phase, pos, force: None };
-        h.frame_with_taps(vec![egui::Event::PointerMoved(pos), button(true)], crate::pencil::PlatformTaps { pen_release: None, finger_down: Some(pos) });
+        h.frame_with_taps(vec![egui::Event::PointerMoved(pos), button(true)], crate::pencil::PlatformTaps { finger_down: Some(pos), ..Default::default() });
         h.frame_with(vec![button(true), touch(egui::TouchPhase::Start)]);
         h.frame_with(vec![button(false), egui::Event::PointerGone, touch(egui::TouchPhase::End)]);
     }
@@ -9002,6 +9014,11 @@ mod tests {
         let mut want = top_face.clone();
         want.push(solidcraft_engine::Sel::Body { name: "Body1".into() });
         assert_eq!(h.app.session.selection, want);
+        let empty = h.app.viewport.rect.map(|r| r.left_top() + egui::vec2(r.width() * 0.85, r.height() * 0.8)).unwrap();
+        pen_tap(&mut h, empty);
+        h.frames(30);
+        assert!(h.app.session.selection.is_empty(), "a pen tap on empty space clears: {:?}", h.app.session.selection);
+        assert!(h.app.session.active_sketch.is_none(), "the Apple Pencil's touches are not a finger's double-tap");
 
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
@@ -9019,6 +9036,29 @@ mod tests {
         assert!(h.app.session.selection.iter().all(|s| matches!(s, solidcraft_engine::Sel::SketchCurve { .. })));
     }
 
+    /// Pencil mode: a one-finger drag across the view still orbits it (touchscreen navigation
+    /// needs to know the finger is over the view, which egui learns from the touch's press), and
+    /// selects nothing.
+    #[test]
+    fn pencil_mode_finger_drag_orbits_the_view() {
+        let mut h = pencil_box();
+        let start = screen(&mut h, [5.0, 5.0, 10.0]);
+        let (yaw, pitch) = (h.app.cam.yaw, h.app.cam.pitch);
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let touch = |phase, pos| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(7), phase, pos, force: None };
+        h.frame_with_taps(vec![button(start, true)], crate::pencil::PlatformTaps { finger_down: Some(start), ..Default::default() });
+        h.frame_with(vec![button(start, true), touch(egui::TouchPhase::Start, start)]);
+        let mut at = start;
+        for _ in 0..12 {
+            at += egui::vec2(8.0, 3.0);
+            h.frame_with(vec![egui::Event::PointerMoved(at), touch(egui::TouchPhase::Move, at)]);
+        }
+        h.frame_with(vec![button(at, false), egui::Event::PointerGone, touch(egui::TouchPhase::End, at)]);
+        h.frames(10);
+        assert!((h.app.cam.yaw - yaw).abs() > 1e-3 || (h.app.cam.pitch - pitch).abs() > 1e-3, "the view orbited");
+        assert!(h.app.session.selection.is_empty(), "{:?}", h.app.session.selection);
+    }
+
     /// Pencil mode keeps a finger's presses where the finger is not on the open view (a panel,
     /// the ribbon, a window over it), drops them while it is, and survives hostile positions.
     #[test]
@@ -9031,24 +9071,24 @@ mod tests {
 
         let ribbon = pos2(5.0, 5.0);
         let mut raw = frame(vec![press(ribbon)]);
-        crate::pencil::filter(&mut h.app, &ctx, &mut raw, Some(ribbon));
+        crate::pencil::filter(&mut h.app, &ctx, &mut raw, &crate::pencil::PlatformTaps { finger_down: Some(ribbon), ..Default::default() });
         assert_eq!(presses(&raw), 1, "a finger on the ribbon clicks it");
 
         let top = screen(&mut h, [5.0, 5.0, 10.0]);
         let mut raw = frame(vec![press(top)]);
-        crate::pencil::filter(&mut h.app, &ctx, &mut raw, Some(top));
+        crate::pencil::filter(&mut h.app, &ctx, &mut raw, &crate::pencil::PlatformTaps { finger_down: Some(top), ..Default::default() });
         assert_eq!(presses(&raw), 0, "a finger on the view does not");
         // Its touch events never came: presses are the pointer's again after a while.
         let mut raw = egui::RawInput { time: Some(102.0), events: vec![press(top)], ..Default::default() };
-        crate::pencil::filter(&mut h.app, &ctx, &mut raw, None);
+        crate::pencil::filter(&mut h.app, &ctx, &mut raw, &crate::pencil::PlatformTaps::default());
         let mut raw = egui::RawInput { time: Some(102.1), events: vec![press(top)], ..Default::default() };
-        crate::pencil::filter(&mut h.app, &ctx, &mut raw, None);
+        crate::pencil::filter(&mut h.app, &ctx, &mut raw, &crate::pencil::PlatformTaps::default());
         assert_eq!(presses(&raw), 1);
 
         for bad in [pos2(f32::NAN, 0.0), pos2(f32::INFINITY, f32::NEG_INFINITY)] {
             let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(9), phase, pos: bad, force: None };
             let mut raw = frame(vec![press(bad), touch(egui::TouchPhase::Start), touch(egui::TouchPhase::Move), touch(egui::TouchPhase::End)]);
-            crate::pencil::filter(&mut h.app, &ctx, &mut raw, Some(bad));
+            crate::pencil::filter(&mut h.app, &ctx, &mut raw, &crate::pencil::PlatformTaps { finger_down: Some(bad), ..Default::default() });
         }
     }
 
