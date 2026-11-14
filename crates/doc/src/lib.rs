@@ -73,7 +73,9 @@ pub use thread_catalog::{
     DRILL_ALLOWANCE, TaperDrill, TappedThread, TappedThreadFamily, metric_tap_drill, parse_tapped_thread, tapped_thread_sizes, untabulated_taper_tap,
 };
 mod walk;
-pub use profile_refs::{capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient};
+pub use profile_refs::{
+    WHOLE_PROFILE_TOO_MANY_CURVES, capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient,
+};
 pub mod plastic;
 mod print_face;
 pub use print_face::PrintFace;

@@ -1,0 +1,29 @@
+{
+  "en": {
+    "diagnostic.whole_profile_too_many_curves": "The picked profiles have too many curves to keep track of. Pick fewer profiles at once, or draw their outlines with fewer curves."
+  },
+  "ar": {
+    "diagnostic.whole_profile_too_many_curves": "تحتوي المقاطع المختارة على منحنيات أكثر مما يمكن تتبعه. اختر مقاطع أقل في المرة الواحدة، أو ارسم حدودها بمنحنيات أقل."
+  },
+  "de": {
+    "diagnostic.whole_profile_too_many_curves": "Die gewählten Profile haben zu viele Kurven, um sie nachzuverfolgen. Wähle weniger Profile auf einmal oder zeichne ihre Umrisse mit weniger Kurven."
+  },
+  "he": {
+    "diagnostic.whole_profile_too_many_curves": "בפרופילים שנבחרו יש יותר מדי עקומות למעקב. יש לבחור פחות פרופילים בבת אחת, או לשרטט את קווי המתאר שלהם בפחות עקומות."
+  },
+  "ja": {
+    "diagnostic.whole_profile_too_many_curves": "選択したプロファイルの曲線が多すぎて追跡できません。一度に選ぶプロファイルを減らすか、輪郭をより少ない曲線で描いてください。"
+  },
+  "ko": {
+    "diagnostic.whole_profile_too_many_curves": "선택한 프로파일의 곡선이 너무 많아 추적할 수 없습니다. 한 번에 더 적은 프로파일을 선택하거나 윤곽을 더 적은 곡선으로 그리세요."
+  },
+  "pt-BR": {
+    "diagnostic.whole_profile_too_many_curves": "Os perfis selecionados têm curvas demais para serem acompanhadas. Selecione menos perfis de cada vez ou desenhe os contornos com menos curvas."
+  },
+  "vi": {
+    "diagnostic.whole_profile_too_many_curves": "Các biên dạng đã chọn có quá nhiều đường cong để theo dõi. Hãy chọn ít biên dạng hơn mỗi lần, hoặc vẽ đường bao của chúng bằng ít đường cong hơn."
+  },
+  "zh": {
+    "diagnostic.whole_profile_too_many_curves": "所选轮廓的曲线太多，无法跟踪。请一次选择较少的轮廓，或用较少的曲线绘制其外形。"
+  }
+}
