@@ -285,3 +285,84 @@ fn section_normals_face_along_the_loft_and_turn_the_short_way() {
         assert!(n[0].dot(n[1]) > 0.0 && n[1].dot(z) > 0.0, "{n:?}");
     }
 }
+
+/// Natural cubic interpolation through `p` with chord-length parameters, as a sketch spline is
+/// made: one cubic Bézier (its four control points) per span.
+fn natural_cubic(p: &[Vec3]) -> Vec<[Vec3; 4]> {
+    let n = p.len();
+    let h: Vec<f64> = p.windows(2).map(|w| w[0].dist(w[1])).collect();
+    // Second derivatives (zero at both ends) by the tridiagonal solve.
+    let m = n - 2;
+    let (mut diag, mut rhs) = (vec![0.0; m], vec![Vec3::ZERO; m]);
+    for i in 0..m {
+        diag[i] = 2.0 * (h[i] + h[i + 1]);
+        rhs[i] = ((p[i + 2] - p[i + 1]) * (1.0 / h[i + 1]) - (p[i + 1] - p[i]) * (1.0 / h[i])) * 6.0;
+    }
+    for i in 1..m {
+        let w = h[i] / diag[i - 1];
+        diag[i] -= w * h[i];
+        rhs[i] = rhs[i] - rhs[i - 1] * w;
+    }
+    let mut sol = vec![Vec3::ZERO; m];
+    for i in (0..m).rev() {
+        let next = if i + 1 < m { sol[i + 1] * h[i + 1] } else { Vec3::ZERO };
+        sol[i] = (rhs[i] - next) * (1.0 / diag[i]);
+    }
+    let mm = |i: usize| if i == 0 || i == n - 1 { Vec3::ZERO } else { sol[i - 1] };
+    (0..n - 1)
+        .map(|i| {
+            let slope = (p[i + 1] - p[i]) * (1.0 / h[i]);
+            let d0 = slope - (mm(i) * 2.0 + mm(i + 1)) * (h[i] / 6.0);
+            let d1 = slope + (mm(i) + mm(i + 1) * 2.0) * (h[i] / 6.0);
+            [p[i], p[i] + d0 * (h[i] / 3.0), p[i + 1] - d1 * (h[i] / 3.0), p[i + 1]]
+        })
+        .collect()
+}
+
+/// The spline through `p` as a rail: 200 points per span.
+fn spline_rail(p: &[Vec3]) -> Vec<Vec3> {
+    let mut out = vec![p[0]];
+    for [a, b, c, d] in natural_cubic(p) {
+        for i in 1..=200 {
+            let t = f64::from(i) / 200.0;
+            let s = 1.0 - t;
+            out.push(a * (s * s * s) + b * (3.0 * s * s * t) + c * (3.0 * s * t * t) + d * (t * t * t));
+        }
+    }
+    out
+}
+
+/// The spline through `p` as a section's curves on `plane`.
+fn spline_section(plane: &Plane, p: &[Vec3]) -> Vec<Seg2> {
+    let flat = |q: Vec3| Vec2::new((q - plane.origin).dot(plane.x), (q - plane.origin).dot(plane.y));
+    natural_cubic(p).into_iter().map(|[a, b, c, d]| Seg2::Cubic { p0: flat(a), p1: flat(b), p2: flat(c), p3: flat(d) }).collect()
+}
+
+/// A 10 m hull side (#13663): a keel and a sheer as sections, the stem and the transom as rails.
+/// The stem runs straight down from the sheer and then turns about 90° within some 120 mm into
+/// the forefoot. The loft's edges follow both rails all along, not only at its stations: every
+/// point of each rail is within 0.5 mm of the sheet, half the loft's tolerance (1e-4 of its size).
+/// With only even stations the stem strayed 2.7 mm from the sheet in the forefoot.
+#[test]
+fn a_hull_side_follows_a_stem_that_turns_tightly() {
+    let keel = [Vec3::new(0.0, 0.0, -160.0), Vec3::new(4880.0, 0.0, -600.0), Vec3::new(10000.0, 0.0, 0.0)];
+    let sheer = [Vec3::new(0.0, 40.0, 1200.0), Vec3::new(5000.0, 1650.0, 1200.0), Vec3::new(10000.0, 1500.0, 1200.0)];
+    let stem = [
+        Vec3::new(0.0, 40.0, 1200.0),
+        Vec3::new(0.0, 45.373332545769244, -62.868622627622926),
+        Vec3::new(0.0, 17.293450399707694, -155.24526595568008),
+        Vec3::new(0.0, 0.0, -160.0),
+    ];
+    let transom = [Vec3::new(10000.0, 0.0, 0.0), Vec3::new(10000.0, 1377.2647194380875, 394.8316231623623), Vec3::new(10000.0, 1500.0, 1200.0)];
+    let keel_plane = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::new(0.0, 0.0, 1.0) };
+    let sheer_plane = at(1200.0);
+    let sections = [(keel_plane, spline_section(&keel_plane, &keel)), (sheer_plane, spline_section(&sheer_plane, &sheer))];
+    let rails = [spline_rail(&stem), spline_rail(&transom)];
+    for fit in [RailFit::Scale, RailFit::Stretch] {
+        let b = loft_sheet_with_rails(&sections, &rails, fit).unwrap();
+        for (name, r) in ["stem", "transom"].iter().zip(&rails) {
+            let (worst, p) = r.iter().map(|p| (off(&b, *p), *p)).fold((0.0, Vec3::ZERO), |a, b| if b.0 > a.0 { b } else { a });
+            assert!(worst < 0.5, "{fit:?}: the {name} is {worst:.3} mm off the loft at {p:?}");
+        }
+    }
+}
