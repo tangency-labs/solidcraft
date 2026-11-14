@@ -26,6 +26,7 @@ mod colour_tokens_tests;
 #[cfg(test)]
 mod colour_vision_tests;
 pub mod command_help;
+pub mod command_sketch;
 pub mod context_menu;
 pub mod control;
 pub mod control_job;
@@ -193,6 +194,8 @@ mod extrude_auto_to_object_tests;
 #[cfg(test)]
 mod extrude_edit_tests;
 mod extrude_face_snap;
+#[cfg(test)]
+mod extrude_new_sketch_tests;
 mod extrude_preview;
 mod file_load;
 mod file_picker;
@@ -660,6 +663,8 @@ pub struct SolveApp {
     /// The component active before a Browser double-click activated the one a feature is in
     /// (#12720); the end of that feature's editor makes it active again.
     pub pre_edit_component: Option<PreEditComponent>,
+    /// A feature dialog waiting while the sketch it asked for is drawn (New Sketch, #6383).
+    pub inline_sketch: Option<command_sketch::InlineSketch>,
     pub services: Services,
     file_picker: Option<file_picker::Pending>,
     /// A slicer started alone and waited for before the file is sent (Send to Slicer).
@@ -1038,6 +1043,7 @@ impl SolveApp {
             pre_command_cam: None,
             pre_sketch_component: None,
             pre_edit_component: None,
+            inline_sketch: None,
             services,
             file_picker: None,
             slicer_wait: None,
@@ -2312,6 +2318,10 @@ impl SolveApp {
             }
             // The ribbon stays on SKETCH while the plane is picked, not on Create Sketch's MODEL.
             self.ui.tab = "SKETCH".into();
+            return;
+        }
+        // The command whose dialog waits for this sketch goes back to it.
+        if command_sketch::start_hook(self, id) {
             return;
         }
         // A disabled command starts nothing, however it was reached. The toolbar greys its
