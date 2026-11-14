@@ -35,8 +35,10 @@
 //!   (`sm_FixBoundaryCurves` only ever sets its flag, so the caller ORs the result
 //!   into its own). On an error the partial outputs upstream may have written
 //!   (`rbSuccessfulIsoDrop` before a failed `CreateLineSegment`) are not returned.
-//! - **Boundary tangents.** Only exact boundary contacts flatten tangents; points
-//!   inside the domain retain their projected derivatives, even near a boundary.
+//! - **Boundary tangents.** Within the tolerance band, a point whose tangent runs
+//!   mostly across the boundary keeps it (`FixBoundaryTangents`,
+//!   `sm_FixBoundaryCurves`); flattening it would fold the trace into a cusp.
+//!   Exact boundary contacts flatten as upstream.
 //! - **Seam continuation.** A projected point across the seam keeps the same
 //!   seam side when the starting tangent runs along it. The
 //!   correction must still meet the existing 3D approximation bound.
@@ -78,7 +80,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_point_distance;
 use crate::geom::point_set::PointContainment;
 use crate::geom::solution_array::{ObjectKind, SolutionArray, SolutionObject};
-use crate::geom::tol::are_same;
+use crate::geom::tol::{are_same, are_same_to_tol};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::surface_drop_curve::SurfaceDropCurve;
@@ -675,17 +677,19 @@ impl DropPt {
         Ok(())
     }
 
-    /// When this drop point and `end` both lie exactly on the same domain boundary
-    /// and the step runs mostly along it, zeroes the UV
+    /// When this drop point and `end` both lie on the same domain boundary (within
+    /// `uv_tol_x` / `uv_tol_y`) and the step runs mostly along it, zeroes the UV
     /// tangent component across that boundary in both (`FixBoundaryTangents`).
-    /// Returns whether anything changed (`rbFixBTChange`). The tolerance arguments
-    /// are retained for callers; nearness alone cannot justify flattening a tangent.
+    /// Within the tolerance band but off the boundary, a point whose tangent runs
+    /// mostly across it keeps that tangent: zeroing it would fold the span into a
+    /// cusp. Returns whether anything changed (`rbFixBTChange`). `approx_tol_3d`
+    /// is not used.
     pub fn fix_boundary_tangents(
         &mut self,
         uv_domain: &Extent2d,
         end: &mut Self,
-        _uv_tol_x: f64,
-        _uv_tol_y: f64,
+        uv_tol_x: f64,
+        uv_tol_y: f64,
         _approx_tol_3d: f64,
     ) -> bool {
         let mut changed = false;
@@ -695,29 +699,48 @@ impl DropPt {
         let min = uv_domain.min();
         let max = uv_domain.max();
 
+        // The tangent across a boundary may be dropped when both points touch it, or
+        // are within tolerance and their tangents run mostly along it.
+        let across_u = |s: &Self, e: &Self, edge: f64, tol: f64| {
+            let on = |d: &Self| d.uv_pd[0].x == edge;
+            let near = |d: &Self| {
+                are_same_to_tol(d.uv_pd[0].x, edge, tol)
+                    && d.uv_pd[1].x.abs() <= RUNS_ALONG * d.uv_pd[1].y.abs()
+            };
+            (on(s) || near(s)) && (on(e) || near(e))
+        };
+        let across_v = |s: &Self, e: &Self, edge: f64, tol: f64| {
+            let on = |d: &Self| d.uv_pd[0].y == edge;
+            let near = |d: &Self| {
+                are_same_to_tol(d.uv_pd[0].y, edge, tol)
+                    && d.uv_pd[1].y.abs() <= RUNS_ALONG * d.uv_pd[1].x.abs()
+            };
+            (on(s) || near(s)) && (on(e) || near(e))
+        };
+
         // SpanStart and SpanEnd DropUVPts on UMin bdry - moving in V dir
-        if start.uv_pd[0].x == min.x && end.uv_pd[0].x == min.x && v_step > u_step {
+        if across_u(start, end, min.x, uv_tol_x) && v_step > u_step {
             start.uv_pd[1].x = 0.0;
             end.uv_pd[1].x = 0.0;
             changed = true;
         }
 
         // SpanStart and SpanEnd DropUVPts on UMax bdry - moving in V dir
-        if start.uv_pd[0].x == max.x && end.uv_pd[0].x == max.x && v_step > u_step {
+        if across_u(start, end, max.x, uv_tol_x) && v_step > u_step {
             start.uv_pd[1].x = 0.0;
             end.uv_pd[1].x = 0.0;
             changed = true;
         }
 
         // SpanStart and SpanEnd DropUVPts on VMin bdry - moving in U dir
-        if start.uv_pd[0].y == min.y && end.uv_pd[0].y == min.y && u_step > v_step {
+        if across_v(start, end, min.y, uv_tol_y) && u_step > v_step {
             start.uv_pd[1].y = 0.0;
             end.uv_pd[1].y = 0.0;
             changed = true;
         }
 
         // SpanStart and SpanEnd DropUVPts on VMax bdry - moving in U dir
-        if start.uv_pd[0].y == max.y && end.uv_pd[0].y == max.y && u_step > v_step {
+        if across_v(start, end, max.y, uv_tol_y) && u_step > v_step {
             start.uv_pd[1].y = 0.0;
             end.uv_pd[1].y = 0.0;
             changed = true;
@@ -772,6 +795,10 @@ pub fn stack_look(stack: &[f64]) -> Result<(f64, [Point2; 2])> {
 }
 
 // ---- control polygon --------------------------------------------------------------------
+
+/// How small the across-boundary offset of a control point must be, against its
+/// offset along the boundary, for the curve to count as running along it.
+const RUNS_ALONG: f64 = 0.1;
 
 /// Keeps the piecewise cubic Bezier UV curve of `ctrl_poly` (knot points at every
 /// third point) inside `uv_domain` (`sm_FixBoundaryCurves`): knot points outside are
@@ -837,15 +864,39 @@ pub fn fix_boundary_curves(
         }
         *ctrl_poly.get_mut(this_pt).ok_or_else(bad)? = knot;
 
-        // when interior KnotPoint is on boundary - move adjacent points to the bdry
+        // when interior KnotPoint is on (or within tolerance of) a boundary and the
+        // curve runs along it - move adjacent points to the bdry. A curve that
+        // passes mostly across the boundary keeps its tangent there: flattening
+        // it would turn the curve back on itself in a cusp.
         if ii > 0 && ii < num_spans {
             let (prev, next) = (this_pt - 1, this_pt + 1);
-            if knot.x == u0 || knot.x == u1 {
+            let (p, n) = (
+                *ctrl_poly.get(prev).ok_or_else(bad)?,
+                *ctrl_poly.get(next).ok_or_else(bad)?,
+            );
+            // How far a neighbour lies across the boundary compared with along it.
+            let slope = |across: f64, along: f64| across.abs() <= RUNS_ALONG * along.abs();
+            let level = |across: f64, along: f64| across.abs() <= along.abs();
+            let run_u = |f: fn(f64, f64) -> bool| {
+                f(p.x - knot.x, p.y - knot.y) && f(n.x - knot.x, n.y - knot.y)
+            };
+            let run_v = |f: fn(f64, f64) -> bool| {
+                f(p.y - knot.y, p.x - knot.x) && f(n.y - knot.y, n.x - knot.x)
+            };
+            let leaves_u = p.x < u0 || p.x > u1 || n.x < u0 || n.x > u1;
+            let leaves_v = p.y < v0 || p.y > v1 || n.y < v0 || n.y > v1;
+            let along_u = run_u(slope) || (leaves_u && run_u(level));
+            let along_v = run_v(slope) || (leaves_v && run_v(level));
+            if (knot.x == u0 || knot.x == u1)
+                || ((knot.x < u0 + uv_tol_x || knot.x > u1 - uv_tol_x) && along_u)
+            {
                 ctrl_poly.get_mut(prev).ok_or_else(bad)?.x = knot.x;
                 ctrl_poly.get_mut(next).ok_or_else(bad)?.x = knot.x;
                 changed = true;
             }
-            if knot.y == v0 || knot.y == v1 {
+            if (knot.y == v0 || knot.y == v1)
+                || ((knot.y < v0 + uv_tol_y || knot.y > v1 - uv_tol_y) && along_v)
+            {
                 ctrl_poly.get_mut(prev).ok_or_else(bad)?.y = knot.y;
                 ctrl_poly.get_mut(next).ok_or_else(bad)?.y = knot.y;
                 changed = true;
@@ -1490,28 +1541,49 @@ mod tests {
     }
 
     #[test]
-    fn nearby_interior_points_keep_their_projected_tangents() {
+    fn near_a_boundary_only_a_curve_running_along_it_is_flattened() {
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+
+        // Within tolerance of the V minimum, tangents running along it are flattened
+        // as upstream does.
         let mut start = DropPt::new(0.0, None);
         let mut end = DropPt::new(1.0, None);
         start.uv_pd = [Point2::new(0.2, 0.004), Vec2::new(1.0, -0.002)];
         end.uv_pd = [Point2::new(0.8, 0.002), Vec2::new(1.0, -0.002)];
-        assert!(!start.fix_boundary_tangents(&domain, &mut end, 0.01, 0.01, 1e-3));
-        assert_eq!(start.uv_pd[1].y, -0.002);
-        assert_eq!(end.uv_pd[1].y, -0.002);
+        assert!(start.fix_boundary_tangents(&domain, &mut end, 0.01, 0.01, 1e-3));
+        assert_eq!(start.uv_pd[1].y, 0.0);
+        assert_eq!(end.uv_pd[1].y, 0.0);
 
-        // A two-span straight line approaching the boundary, wholly inside it.
-        // The internal knot is within uv_tol of the boundary, but flattening its
-        // tangent would introduce curvature into this exact line.
+        // A tangent running mostly across the boundary is kept: zeroing it would
+        // fold the span into a cusp where the curve only passes near the boundary.
+        start.uv_pd = [Point2::new(0.2, 0.004), Vec2::new(0.5, -1.0)];
+        end.uv_pd = [Point2::new(0.8, 0.002), Vec2::new(0.5, -1.0)];
+        assert!(!start.fix_boundary_tangents(&domain, &mut end, 0.01, 0.01, 1e-3));
+        assert_eq!(start.uv_pd[1].y, -1.0);
+        assert_eq!(end.uv_pd[1].y, -1.0);
+
+        // Likewise a two-span polygon whose interior knot is within tolerance of
+        // the boundary but whose neighbours lie mostly across it stays as it is.
         let mut polygon: Vec<_> = (0..=6)
             .map(|i| {
-                let t = f64::from(i) / 6.0;
-                Point3::new(0.2 + 0.6 * t, 0.004 - 0.002 * t, 0.0)
+                let d = f64::from(i) - 3.0;
+                Point3::new(0.5 + 0.0001 * d, 0.004 - 0.0005 * d, 0.0)
             })
             .collect();
         let before = polygon.clone();
         let _ = fix_boundary_curves(&mut polygon, &domain, 0.01, 0.01).unwrap();
         assert_eq!(polygon, before);
+
+        // The same knot with neighbours running along the boundary is flattened.
+        let mut along: Vec<_> = (0..=6)
+            .map(|i| {
+                let d = f64::from(i) - 3.0;
+                Point3::new(0.5 + 0.1 * d, 0.004 - 0.0005 * d, 0.0)
+            })
+            .collect();
+        assert!(fix_boundary_curves(&mut along, &domain, 0.01, 0.01).unwrap());
+        assert_eq!(along[2].y, 0.004);
+        assert_eq!(along[4].y, 0.004);
     }
 
     #[test]

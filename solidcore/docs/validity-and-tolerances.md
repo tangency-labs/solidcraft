@@ -227,11 +227,11 @@ vertex-zone rule from both sides; a separate edge beside the seam still counts a
 (`intersect/curve_class/p7.rs`).
 When dropping a curve along a seam, equivalent parameter endpoints stay on one side only when
 the existing 3D approximation bound permits that correction (`intersect/surface_drop_lib/p1.rs`).
-Subdivision retains the complete deferred drop point and rechecks its projection when the span's
-start changes. An unresolved parameter jump cannot use the inaccurate-short-span escape
-(`intersect/surface_drop_lib/p3.rs`).
-Boundary tangent adjustment preserves projected derivatives at interior points near a boundary;
-only exact boundary contacts justify flattening them.
+Subdivision drops a pending endpoint again only when the new span makes its seam branch
+ambiguous, and a failed redrop falls back to the saved endpoint
+(`intersect/surface_drop_lib/p3.rs`). Within a boundary's tolerance band, a trace whose tangent
+runs mostly across the boundary keeps that tangent; only a curve running along the boundary, or
+touching it, is flattened onto it (`surface_drop_lib/p1.rs`).
 
 The healer's seam steps (§7.2) repair the same three: `fix_move_seam` turns a face's seam away from
 its boundary, `fix_split_edges_at_seam` splits boundary edges at interior poles and then at the U and

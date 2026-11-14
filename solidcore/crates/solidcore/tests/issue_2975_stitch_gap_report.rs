@@ -667,6 +667,11 @@ fn locally_tolerant_sheets(k: &mut Kernel, gap: f64) -> Brep {
         Vec3::new(1.0, 0.0, 0.0),
         Vec3::new(0.0, 1.0, 0.0),
     );
+    // add_square's domain is in the plane's frame, which need not align
+    // its u coordinate with world x. Select the shared u = 1 edge in that frame.
+    let surface = b.face(b.face_list()[0]).unwrap().surface.as_ref().unwrap();
+    let shared_start = surface.evaluate_point(k, Point2::new(1.0, 0.0)).unwrap();
+    let shared_end = surface.evaluate_point(k, Point2::new(1.0, 1.0)).unwrap();
     let mut lifted = 0;
     for e in b.edge_list().to_vec() {
         let data = b.edge_mut(e).unwrap();
@@ -674,7 +679,9 @@ fn locally_tolerant_sheets(k: &mut Kernel, gap: f64) -> Brep {
         let curve = data.curve.as_mut().unwrap();
         let a = curve.evaluate_point(k, data.interval.min()).unwrap();
         let z = curve.evaluate_point(k, data.interval.max()).unwrap();
-        if (a.x - 1.0).abs() < 1e-12 && (z.x - 1.0).abs() < 1e-12 {
+        if (a.distance(shared_start) < 1e-12 && z.distance(shared_end) < 1e-12)
+            || (a.distance(shared_end) < 1e-12 && z.distance(shared_start) < 1e-12)
+        {
             curve.transform(k, &translation, None).unwrap();
             lifted += 1;
         }
