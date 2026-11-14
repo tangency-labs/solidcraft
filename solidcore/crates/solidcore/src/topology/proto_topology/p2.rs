@@ -2247,7 +2247,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         position: Point3,
     ) -> Result<(ProtoVertexId, bool)> {
         let found =
-            self.find_proto_vertex_within(k, position, zone_tol3d(k, self.raw_tolerance()))?;
+            self.find_proto_vertex_within(k, position, zone_tol3d(k, self.raw_tolerance()), None)?;
         if let Some(pv) = found {
             return Ok((pv, false));
         }

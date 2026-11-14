@@ -2123,6 +2123,9 @@ pub struct ProtoTopologyManager<O> {
     /// Not upstream: the contact points a rule has proved one point
     /// ([`ProtoTopologyManager::set_declared_contacts`]).
     declared_contacts: Vec<DeclaredContact>,
+    /// Not upstream: the uncertainty regions of the points each listed proto vertex was
+    /// made of or took in ([`ProtoTopologyManager::find_proto_vertex_within`]).
+    regions: Vec<(ProtoVertexId, DeclaredContact)>,
 }
 
 /// Not upstream: a contact point that a rule of the intersector proves one point although
@@ -2141,6 +2144,84 @@ pub struct DeclaredContact {
 }
 
 impl DeclaredContact {
+    /// The uncertainty region of a point `p` known to `tolerance` that a curve fixes on an
+    /// edge of unit direction `along` which it crosses at an angle of sine `sine`
+    /// (docs/booleans.md, "One point or two"): across the edge the point is known to
+    /// `tolerance`, along it only to `tolerance / sine`, so the region is the segment that
+    /// far either way along the edge, widened by `tolerance`. The sine is taken at its
+    /// lower rounding bound (`gamma_8` of a cross product over two norms); at or below
+    /// zero, and for a NaN, the curve runs along the edge and the region reaches `limit`
+    /// (the capture distance: how far proto vertices are looked for at all).
+    #[must_use]
+    pub fn of_crossing(p: Point3, tolerance: f64, along: Vec3, sine: f64, limit: f64) -> Self {
+        let sine_lo = sine * (1.0 - gamma(8)) - gamma(8);
+        let reach = if sine_lo > 0.0 {
+            (tolerance / sine_lo * (1.0 + gamma(2))).min(limit)
+        } else {
+            limit
+        };
+        let reach = if reach.is_nan() { limit } else { reach };
+        Self {
+            a: p - along * reach,
+            b: p + along * reach,
+            radius: tolerance,
+        }
+    }
+
+    /// The region of a point with no crossing angle: the ball of its tolerance.
+    #[must_use]
+    pub const fn of_point(p: Point3, tolerance: f64) -> Self {
+        Self {
+            a: p,
+            b: p,
+            radius: tolerance,
+        }
+    }
+
+    /// Whether this region and `other` are not proved apart: the distance between their
+    /// segments, shrunk by its rounding (`gamma_8` of the sizes involved), is within the
+    /// sum of their radii. The distance is that of the closest pair found by clamping each
+    /// segment's foot on the other in turn; the regions are taken for overlapping in
+    /// doubt. A NaN is apart.
+    #[must_use]
+    pub fn overlaps(&self, other: &Self) -> bool {
+        let (d1, d2, r) = (self.b - self.a, other.b - other.a, self.a - other.a);
+        let (a, e, f) = (d1.dot(d1), d2.dot(d2), d2.dot(r));
+        let unit = |x: f64| x.clamp(0.0, 1.0);
+        let (s, t) = if a <= 0.0 && e <= 0.0 {
+            (0.0, 0.0)
+        } else if a <= 0.0 {
+            (0.0, unit(f / e))
+        } else {
+            let c = d1.dot(r);
+            if e <= 0.0 {
+                (unit(-c / a), 0.0)
+            } else {
+                let b = d1.dot(d2);
+                let denom = a * e - b * b;
+                let mut s = if denom > 0.0 {
+                    unit((b * f - c * e) / denom)
+                } else {
+                    0.0
+                };
+                let mut t = (b * s + f) / e;
+                if t < 0.0 {
+                    t = 0.0;
+                    s = unit(-c / a);
+                } else if t > 1.0 {
+                    t = 1.0;
+                    s = unit((b - c) / a);
+                }
+                (s, t)
+            }
+        };
+        let gap = (self.a + d1 * s - (other.a + d2 * t)).length();
+        let size = d1.length() + d2.length() + r.length();
+        let least = gap * (1.0 - gamma(8)) - gamma(8) * size;
+        let reach = (self.radius + other.radius) * (1.0 + gamma(1));
+        !(least.is_nan() || least > reach)
+    }
+
     /// Whether `p` is within the radius of the segment, by an upper bound of its distance:
     /// the parameter of the nearest point is clamped to the segment, so any rounding of it
     /// only moves that point along the segment (the distance is at least the true one, as
@@ -2220,6 +2301,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             split_self_loops_on_vertices: true,
             skipped_speck_vertices: Vec::new(),
             declared_contacts: Vec::new(),
+            regions: Vec::new(),
         })
     }
 
@@ -2346,10 +2428,17 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// Empties the three lists without deleting anything (`Reset`).
     pub fn reset(&mut self) {
         self.declared_contacts.clear();
+        self.regions.clear();
         self.pvs.clear();
         self.pes.clear();
         self.pfs.clear();
         self.skipped_speck_vertices.clear();
+    }
+
+    /// Not upstream: notes `region`, the uncertainty region of a point `pv` was made of or
+    /// took in, so that later points are compared with it.
+    pub fn note_region(&mut self, pv: ProtoVertexId, region: DeclaredContact) {
+        self.regions.push((pv, region));
     }
 
     /// Not upstream: the contact points proved one point
@@ -3408,7 +3497,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         k: &Kernel,
         position: Point3,
         tolerance: f64,
+        region: Option<&DeclaredContact>,
     ) -> Result<Option<ProtoVertexId>> {
+        let point = DeclaredContact::of_point(position, tolerance);
+        let region = region.unwrap_or(&point);
         let mut ret_val = None;
         let mut min_dist = BIG_DOUBLE;
         for &id in &self.pvs {
@@ -3420,7 +3512,17 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let combined = (pv.tolerance(k) + tolerance) * (1.0 + gamma(1));
             let excess = this_dist * (1.0 - gamma(4)) - combined;
             let apart = excess.is_nan() || excess > 0.0;
+            // (the proto vertex's own ball, and the regions of the points it holds)
+            let own = DeclaredContact::of_point(pv.position, pv.tolerance(k));
+            let one_region = || {
+                region.overlaps(&own)
+                    || self
+                        .regions
+                        .iter()
+                        .any(|(of, r)| *of == id && region.overlaps(r))
+            };
             if apart
+                && !one_region()
                 && !self
                     .declared_contacts
                     .iter()

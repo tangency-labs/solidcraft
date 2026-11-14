@@ -245,6 +245,20 @@ where to look. Upstream merges everything within it, and points 1.4e-4 to 1.7e-4
 crossing a 0.3 mm sphere twice, each crossing fixed to 5e-6) became one vertex: the arc between them
 a loop, the boolean the sphere alone or "no radial sector of the edge takes the new edge use".
 
+A point's tolerance is how well it is known across the curves that fix it. Along an edge that a
+curve crosses at angle θ, the crossing is known only to tolerance / sin θ: a curve moved by the
+tolerance moves its crossing that far along the edge (the bound of the near-coincident strips
+above). So a point that a curve fixes on an edge has an uncertainty region, the segment tolerance /
+sin θ either way along the edge, widened by the tolerance (`DeclaredContact::of_crossing`; θ from
+the curve's and the edge's tangents at the point, the sine at its lower rounding bound; for two
+edges crossing, the angle between them; a curve running along its edge reaches as far as the
+capture distance looks). A point with no crossing angle has the ball of its tolerance. Two points
+are one when their regions are not proved apart (`DeclaredContact::overlaps`, the distance shrunk by
+its rounding), and each proto vertex keeps the regions of the points it holds. A wall/round curve
+along a slab's edge at 5° and a rod/round curve across it at 40° end 9.3e-5 apart at 1e-5: one
+point (1e-5 / sin 5° = 1.1e-4). The two crossings of the sphere's circles by the box edge, 1.5e-4
+apart, are crossed at sines of 0.26 and more: 3.9e-5 each, two points.
+
 Two points farther apart than that are one only where a rule proves them one contact point, and the
 rule declares it before any proto vertex of a face pair is made (`DeclaredContact`,
 `set_declared_contacts`): every point within a radius of a segment, whatever their distance. The strip rule is such a proof. Two

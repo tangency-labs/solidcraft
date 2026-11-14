@@ -114,6 +114,7 @@ use crate::math::{Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 
 use super::p1::proto::{can_imprint, find_position_from_pcs, topo_dimension};
+use super::p1::DeclaredContact;
 use super::p1::{
     EdgeDefId, ProtoEdgeId, ProtoFaceId, ProtoTopologyManager, ProtoVertexId, VertexDefId,
 };
@@ -315,6 +316,28 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         pc1: &mut PointClassification<O>,
         pc2: &mut PointClassification<O>,
     ) -> Result<(Option<ProtoVertexId>, bool)> {
+        self.find_or_create_proto_vertex_crossing(k, geometry, pc1, pc2, None)
+    }
+
+    /// [`ProtoTopologyManager::find_or_create_proto_vertex_pcs`] for a point that a curve
+    /// fixes on an edge: `crossing` is the edge's unit direction there and the sine of the
+    /// angle at which the curve crosses it. Not upstream: the point's uncertainty region
+    /// ([`DeclaredContact::of_crossing`]) reaches its tolerance over that sine along the
+    /// edge, and a proto vertex is found where the regions are not proved apart. With no
+    /// `crossing`, two classifications onto edges take the angle between the two edges;
+    /// any other point is known to its tolerance alone.
+    ///
+    /// # Errors
+    ///
+    /// As [`ProtoTopologyManager::find_or_create_proto_vertex_pcs`].
+    pub fn find_or_create_proto_vertex_crossing(
+        &mut self,
+        k: &Kernel,
+        geometry: &impl ProtoBrep<O>,
+        pc1: &mut PointClassification<O>,
+        pc2: &mut PointClassification<O>,
+        crossing: Option<(Vec3, f64)>,
+    ) -> Result<(Option<ProtoVertexId>, bool)> {
         // Skip PtXSects that don't classify to Region, Face, Edge, or Vertex in both Breps
         if !can_imprint(pc1.point_class()) {
             return Ok((None, false));
@@ -372,10 +395,23 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // vertex made of it would get)
         let deviation = found_position.map_or(f64::NAN, |p| p.deviation);
         let point_tol = self.proto_vertex_tolerance_of_pcs(k, geometry, deviation, pc1, pc2)?;
-        let found = self.find_proto_vertex_within(k, position, zone_tol3d(k, point_tol))?;
+        let crossing = match crossing {
+            Some(c) => Some(c),
+            None => edges_crossing(k, geometry, pc1, pc2)?,
+        };
+        let point_tol = zone_tol3d(k, point_tol);
+        let region = match crossing {
+            Some((along, sine)) => {
+                let limit = crate::query::face::p2::proto_vertex_capture_distance(self);
+                DeclaredContact::of_crossing(position, point_tol, along, sine, limit)
+            }
+            None => DeclaredContact::of_point(position, point_tol),
+        };
+        let found = self.find_proto_vertex_within(k, position, point_tol, Some(&region))?;
 
         // when nearby PV exists
         if let Some(pv) = found {
+            self.note_region(pv, region);
             // AddVertexDefinition(rPC1, rPC2, pNewVD): status ignored (passed on with the
             // flag)
             ignore_soft(passed_on(
@@ -387,6 +423,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
         // a new ProtoVertex has to be created
         let created = self.create_proto_vertex(k, geometry, pc1, pc2)?;
+        if let Some(pv) = created {
+            self.note_region(pv, region);
+        }
         Ok((created, created.is_some()))
     }
 
@@ -445,11 +484,21 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let mut start_pv = None;
         let mut end_pv = None;
         if can_imprint(ci1.start.point_class()) && can_imprint(ci2.start.point_class()) {
-            start_pv = ignore_soft(self.find_or_create_proto_vertex_pcs(
+            let crossing = end_crossing(
+                k,
+                &*geometry,
+                classification1,
+                ci1,
+                classification2,
+                ci2,
+                false,
+            )?;
+            start_pv = ignore_soft(self.find_or_create_proto_vertex_crossing(
                 k,
                 geometry,
                 &mut ci1.start,
                 &mut ci2.start,
+                crossing,
             ))?
             .and_then(|r| r.0);
             // not upstream (WR-410, #1059, opt-in): placed by its best edge crossing
@@ -467,11 +516,21 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             }
         }
         if can_imprint(ci1.end.point_class()) && can_imprint(ci2.end.point_class()) {
-            end_pv = ignore_soft(self.find_or_create_proto_vertex_pcs(
+            let crossing = end_crossing(
+                k,
+                &*geometry,
+                classification1,
+                ci1,
+                classification2,
+                ci2,
+                true,
+            )?;
+            end_pv = ignore_soft(self.find_or_create_proto_vertex_crossing(
                 k,
                 geometry,
                 &mut ci1.end,
                 &mut ci2.end,
+                crossing,
             ))?
             .and_then(|r| r.0);
             // not upstream (WR-410, #1059, opt-in): placed by its best edge crossing
@@ -2033,6 +2092,89 @@ fn edge_crossing_sine<O: ClassObject>(
         return Ok(-1.0);
     }
     Ok(c.cross(e).length() / len)
+}
+
+/// Not upstream: the unit tangent of the edge `pc` classifies onto, at its point there;
+/// `None` when it is on no edge with a curve, its parameters are unset, the evaluation
+/// fails or the tangent vanishes.
+fn edge_direction<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ProtoBrep<O>,
+    pc: &PointClassification<O>,
+) -> Result<Option<Vec3>> {
+    if pc.point_class() != PointClassType::Edge || !pc.are_parameters_set() {
+        return Ok(None);
+    }
+    let Some(curve) = pc
+        .edge_object()
+        .and_then(|e| geometry.edge_curve(e))
+        .flatten()
+        .and_then(|c| geometry.curve(c))
+    else {
+        return Ok(None);
+    };
+    let d = match curve.evaluate(k, pc.t_param(), 1, true, false) {
+        Ok(d) => d.get(1).copied(),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => None,
+    };
+    Ok(d.and_then(|t| {
+        let len = t.length();
+        (len.is_finite() && len > 0.0).then(|| t / len)
+    }))
+}
+
+/// Not upstream: for two classifications onto edges, the direction of the first edge and
+/// the sine of the angle between the two edges at the point (the crossing of two edges is
+/// fixed along them to its tolerance over that sine); `None` for any other pair.
+fn edges_crossing<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ProtoBrep<O>,
+    pc1: &PointClassification<O>,
+    pc2: &PointClassification<O>,
+) -> Result<Option<(Vec3, f64)>> {
+    let (Some(a), Some(b)) = (
+        edge_direction(k, geometry, pc1)?,
+        edge_direction(k, geometry, pc2)?,
+    ) else {
+        return Ok(None);
+    };
+    Ok(Some((a, a.cross(b).length())))
+}
+
+/// Not upstream: the crossing that fixes one end (`at_end`, else the start) of the curve
+/// interval pair `ci1`, `ci2` on an edge: the direction of the edge the curve crosses at
+/// the shallower angle, and that angle's sine ([`edge_crossing_sine`]); `None` when the
+/// end lies on no edge.
+fn end_crossing<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ProtoBrep<O>,
+    classification1: &CurveClassification<O>,
+    ci1: &CurveInterval<O>,
+    classification2: &CurveClassification<O>,
+    ci2: &CurveInterval<O>,
+    at_end: bool,
+) -> Result<Option<(Vec3, f64)>> {
+    let pick = |ci: &CurveInterval<O>| if at_end { ci.end } else { ci.start };
+    let mut best: Option<(Vec3, f64)> = None;
+    for (classification, ci) in [(classification1, ci1), (classification2, ci2)] {
+        let pc = pick(ci);
+        let sine = edge_crossing_sine(
+            k,
+            geometry,
+            classification.curve(),
+            ci.interval,
+            &pc,
+            at_end,
+        )?;
+        let Some(dir) = edge_direction(k, geometry, &pc)? else {
+            continue;
+        };
+        if sine >= 0.0 && best.is_none_or(|(_, s)| sine < s) {
+            best = Some((dir, sine));
+        }
+    }
+    Ok(best)
 }
 
 /// Not upstream (WR-410; the SolidCraft fork's `sm_CrossingSine`): the sine of the angle

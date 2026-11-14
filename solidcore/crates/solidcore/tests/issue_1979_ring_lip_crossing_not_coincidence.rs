@@ -98,19 +98,18 @@ fn issue_1979_ring_lip_union_is_valid_at_every_offset_with_the_fix() {
     assert!(report.is_empty(), "want {}: {report:#?}", want());
 }
 
-/// Upstream (the default): no valid solid at 1e-4 nor at 1e-3. With proto vertices held
-/// to their points' combined tolerance (docs/booleans.md, "One point or two") the union
-/// may be refused where it was returned non-manifold (1e-4, `SmTrimmingTools` #4) or
-/// without a solid (1e-3, volume 0): either is "not valid" here.
+/// Upstream (the default) is non-manifold at 1e-4 (`SmTrimmingTools` #4) and gives no
+/// solid at 1e-3. The tiny edge's two ends at 1e-4 are one point: each is fixed along its
+/// circle only to its tolerance over the sine of the angle at which the circles cross
+/// (docs/booleans.md, "One point or two"), so the default union there is now the valid
+/// solid too. At 1e-3 it still has no solid.
 #[test]
-fn issue_1979_ring_lip_union_is_invalid_by_default() {
-    for e in [1e-4, 1e-3] {
-        match union_at(e, false) {
-            Err(refused) => println!("e = {e}: refused: {refused}"),
-            Ok((manifold, lines, v)) => assert!(
-                !lines.is_empty() && (!manifold || v == 0.0),
-                "e = {e} is a valid solid by default: {manifold} {lines:?} {v}"
-            ),
-        }
-    }
+fn issue_1979_ring_lip_union_by_default() {
+    let (manifold, lines, v) = union_at(1e-4, false).unwrap();
+    assert!(
+        manifold && lines.is_empty() && (v - want()).abs() <= 1e-5 * want(),
+        "e = 1e-4: {manifold} {lines:?} {v}"
+    );
+    let (_, lines, v) = union_at(1e-3, false).unwrap();
+    assert!(!lines.is_empty() && v == 0.0, "e = 1e-3: {lines:?} {v}");
 }
