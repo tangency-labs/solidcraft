@@ -263,6 +263,8 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         });
                         let response = setting::construct_menu_groups(app, ui);
                         crate::scenario::publish_target("prefs:construct_menu_groups", response.rect);
+                        let response = setting::sketch_chamfer_submenu(app, ui);
+                        crate::scenario::publish_target("prefs:sketch_chamfer_submenu", response.rect);
                         ui_kit::row(ui, app.tr("prefs.toast_place"), |ui| {
                             let places = [crate::viewport::ToastPlace::Corner, crate::viewport::ToastPlace::Centre];
                             let mut selected = places.iter().position(|p| *p == app.preferences.toast_place).unwrap_or(0);

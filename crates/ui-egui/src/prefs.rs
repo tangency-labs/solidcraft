@@ -1407,6 +1407,8 @@ preference_settings! {
     ribbon_icon_grid: bool = false, PAGE_LAYOUT;
     /// Group Construct menus under Planes, Axes and Points headings; off keeps the original command order.
     construct_menu_groups: bool = true, PAGE_LAYOUT => check_id_help("prefs.construct_menu_groups", "prefs.construct_menu_groups_help");
+    /// Group the three sketch chamfer modes under Chamfer in the Modify menu.
+    sketch_chamfer_submenu: bool = true, PAGE_LAYOUT => check_id_help("prefs.sketch_chamfer_submenu", "prefs.sketch_chamfer_submenu_help");
     /// After a ribbon panel menu is open, hover another panel to switch to its menu.
     ribbon_menus_follow_hover: bool = false, PAGE_LAYOUT;
     /// Leave the commands the ribbon shows as buttons (pinned ones) out of its panel drop-downs,
@@ -6807,6 +6809,7 @@ mod tests {
             ("file_operations_wait", json!(true), PAGE_LAYOUT),
             ("ribbon_icon_grid", json!(true), PAGE_LAYOUT),
             ("construct_menu_groups", json!(false), PAGE_LAYOUT),
+            ("sketch_chamfer_submenu", json!(false), PAGE_LAYOUT),
             ("ribbon_menus_follow_hover", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_skip_pinned", json!(true), PAGE_LAYOUT),
             ("history_sketches", json!("under_feature"), PAGE_LAYOUT),

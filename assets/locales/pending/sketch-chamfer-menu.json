@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.sketch_chamfer_submenu": "Group sketch chamfer modes in a submenu",
+    "prefs.sketch_chamfer_submenu_help": "Turn this off to list each chamfer mode separately in the sketch Modify menu."
+  },
+  "de": {
+    "prefs.sketch_chamfer_submenu": "Skizzenfasen in einem Untermenü gruppieren",
+    "prefs.sketch_chamfer_submenu_help": "Deaktivieren, um jeden Fasenmodus im Menü Ändern der Skizze einzeln aufzulisten."
+  },
+  "ja": {
+    "prefs.sketch_chamfer_submenu": "スケッチの面取りをサブメニューにまとめる",
+    "prefs.sketch_chamfer_submenu_help": "オフにすると、スケッチの修正メニューに各面取りモードが個別に表示されます。"
+  },
+  "ko": {
+    "prefs.sketch_chamfer_submenu": "스케치 모따기를 하위 메뉴로 묶기",
+    "prefs.sketch_chamfer_submenu_help": "이 옵션을 끄면 스케치 수정 메뉴에 각 모따기 모드가 개별적으로 표시됩니다."
+  },
+  "zh": {
+    "prefs.sketch_chamfer_submenu": "将草图倒角模式归入子菜单",
+    "prefs.sketch_chamfer_submenu_help": "关闭此选项可在草图的修改菜单中分别列出各个倒角模式。"
+  },
+  "ar": {
+    "prefs.sketch_chamfer_submenu": "تجميع أوضاع شطف الرسم في قائمة فرعية",
+    "prefs.sketch_chamfer_submenu_help": "أوقف تشغيل هذا الخيار لعرض كل وضع شطف على حدة في قائمة تعديل الرسم."
+  },
+  "he": {
+    "prefs.sketch_chamfer_submenu": "קיבוץ מצבי שיפוע של שרטוט בתפריט משנה",
+    "prefs.sketch_chamfer_submenu_help": "כיבוי האפשרות מציג כל מצב שיפוע בנפרד בתפריט השינוי של השרטוט."
+  },
+  "vi": {
+    "prefs.sketch_chamfer_submenu": "Nhóm các chế độ vát mép phác thảo vào menu con",
+    "prefs.sketch_chamfer_submenu_help": "Tắt tùy chọn này để liệt kê riêng từng chế độ vát mép trong trình đơn sửa đổi của bản phác thảo."
+  }
+}

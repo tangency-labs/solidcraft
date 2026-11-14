@@ -1591,7 +1591,10 @@ pub fn grid_step(cells: &[(usize, usize)], enabled: &[usize], at: Option<usize>,
 }
 
 /// Arrow keys move the keyboard focus through a grid menu's enabled icons ([`grid_step`]).
-fn grid_keys(ui: &egui::Ui, entries: &[MenuEntry], cells: &[(usize, usize)], style: &MenuStyle) {
+fn grid_keys(ui: &egui::Ui, entries: &[MenuEntry], layout: &GridLayout, style: &MenuStyle, family: Option<(egui::Id, bool)>) {
+    if family.is_some_and(|(_, open)| open) {
+        return;
+    }
     let key = ui.input(|i| {
         [
             (egui::Key::ArrowLeft, GridKey::Left),
@@ -1604,12 +1607,29 @@ fn grid_keys(ui: &egui::Ui, entries: &[MenuEntry], cells: &[(usize, usize)], sty
         .map(|(_, key)| key)
     });
     let Some(key) = key else { return };
-    let enabled: Vec<usize> = entries.iter().enumerate().filter(|(_, e)| e.enabled).map(|(i, _)| i).collect();
+    // The submenu button occupies a row above the grid. Give it the same arrow-key order
+    // as the commands without changing indices in the grid's drawing and action results.
+    let row_offset = usize::from(family.is_some());
+    let mut ids = Vec::new();
+    let mut cells = Vec::new();
+    let mut enabled = Vec::new();
+    if let Some((id, _)) = family {
+        ids.push(id);
+        cells.push((0, 0));
+        enabled.push(0);
+    }
+    for (entry, (_, (row, column))) in entries.iter().zip(&layout.cells) {
+        if entry.enabled {
+            enabled.push(ids.len());
+        }
+        ids.push(style.focus_id(entry.id));
+        cells.push((row + row_offset, *column));
+    }
     let focused = ui.ctx().memory(|m| m.focused());
-    let at = enabled.iter().position(|i| entries.get(*i).is_some_and(|e| focused == Some(style.focus_id(e.id))));
-    if let Some(e) = grid_step(cells, &enabled, at, key).and_then(|k| enabled.get(k)).and_then(|i| entries.get(*i)) {
+    let at = enabled.iter().position(|i| ids.get(*i).copied() == focused);
+    if let Some(id) = grid_step(&cells, &enabled, at, key).and_then(|k| enabled.get(k)).and_then(|i| ids.get(*i)) {
         ui.ctx().memory_mut(|m| {
-            m.request_focus(style.focus_id(e.id));
+            m.request_focus(*id);
             m.move_focus(egui::FocusDirection::None);
         });
     }
@@ -1664,6 +1684,18 @@ fn pin_armed(ui: &egui::Ui, key: egui::Id, id: &str, on: bool) -> bool {
 /// A group's menu drawn as a grid of large icons (#4739): the same entries, headings (translated)
 /// and actions as the list, the names in the tooltips. `loose` as for [`grid_layout`].
 pub fn grid(ui: &mut egui::Ui, entries: &[(Option<&str>, MenuEntry)], loose: &[&str], style: &MenuStyle) -> GridOut {
+    grid_with_family(ui, entries, loose, style, None)
+}
+
+/// Draw a grid with an optional submenu button immediately above it. Pass the button's focus
+/// id and whether its submenu is open. An open submenu handles its own arrow keys.
+pub fn grid_with_family(
+    ui: &mut egui::Ui,
+    entries: &[(Option<&str>, MenuEntry)],
+    loose: &[&str],
+    style: &MenuStyle,
+    family: Option<(egui::Id, bool)>,
+) -> GridOut {
     // Wide enough for groups side by side, short of the window's edge.
     let room = ui.ctx().content_rect().right() - ui.cursor().left() - 24.0;
     let grouped: Vec<(Option<&str>, &str)> = entries.iter().map(|(heading, e)| (*heading, e.id)).collect();
@@ -1673,8 +1705,7 @@ pub fn grid(ui: &mut egui::Ui, entries: &[(Option<&str>, MenuEntry)], loose: &[&
     let inset = ((width - layout.size.x) / 2.0).max(0.0);
     ui.set_width(width);
     let plain: Vec<MenuEntry> = entries.iter().map(|(_, e)| *e).collect();
-    let keys: Vec<(usize, usize)> = layout.cells.iter().map(|(_, at)| *at).collect();
-    grid_keys(ui, &plain, &keys, style);
+    grid_keys(ui, &plain, &layout, style, family);
     // Like the list, the grid scrolls when it would run past the window's bottom (#874).
     let height = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(GRID_CELL * 2.0);
     let mut out = GridOut { action: None, cells: Vec::new() };
