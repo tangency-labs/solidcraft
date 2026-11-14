@@ -195,6 +195,10 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
             ..Row::new(format!("save:{command}"), command_name(command))
         });
     }
+    if let Some(saving) = &app.host_save {
+        let command = saving.command;
+        rows.push(Row::new(format!("save:{command}"), command_name(command)));
+    }
     // A file being opened, inserted or exported, and those waiting behind it.
     let mut queued = 0;
     for file in app.file_load.operations() {

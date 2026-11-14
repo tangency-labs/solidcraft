@@ -1480,6 +1480,7 @@ fn quiet(app: &SolveApp, r: &Running) -> bool {
         && app.delete_check.is_none()
         && app.pending_feature_edit.is_none()
         && app.saving.is_none()
+        && app.host_save.is_none()
         && app.file_picker.is_none()
         && app.control_job.is_none()
         && app.docs.closing.is_none()
@@ -2064,6 +2065,41 @@ mod tests {
         assert!(error && status.contains(&crate::documents::MAX_OPEN.to_string()), "{status}");
         assert_eq!(app.docs.count(), crate::documents::MAX_OPEN);
         assert!(reply.try_recv().is_ok_and(|r| r["ok"] == json!(false)), "the caller hears it failed");
+    }
+
+    #[test]
+    fn a_background_open_keeps_the_uploading_design_in_its_active_tab() {
+        use std::{cell::RefCell, rc::Rc, task::Poll};
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.file_operations_wait = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let path = h.dir.join("Uploading.sc").to_string_lossy().into_owned();
+        let answer = Rc::new(RefCell::new(None));
+        let reply = answer.clone();
+        h.app.services.persist_save = Some(Box::new(move |_| {
+            let reply = reply.clone();
+            Some(Box::pin(std::future::poll_fn(move |_| reply.borrow_mut().take().map_or(Poll::Pending, Poll::Ready))))
+        }));
+        assert!(crate::save_job::start(&mut h.app, "file.save_as", json!({"path": path})));
+        crate::save_job::tick(&mut h.app, true);
+        assert!(h.app.host_save.is_some());
+        let active = h.app.docs.active;
+        let uploading = h.app.session.doc.clone();
+        let mut loaded = Session::default();
+        loaded.path = Some("Background.sc".into());
+        Arc::make_mut(&mut loaded.doc).name = "Background".into();
+        loaded.mark_saved();
+        completed_open(&mut h.app, Request::new("Background.sc", Kind::Open), loaded);
+        tick(&mut h.app, &h.ctx);
+        assert_eq!(h.app.docs.count(), 2, "the arriving design opens behind the upload");
+        assert_eq!(h.app.docs.active, active);
+        assert!(Arc::ptr_eq(&uploading, &h.app.session.doc));
+        assert_eq!(h.app.session.path.as_deref(), Some(path.as_str()));
+        *answer.borrow_mut() = Some(Ok(()));
+        crate::save_job::tick(&mut h.app, false);
+        assert!(!h.app.session.is_dirty());
+        assert_eq!(h.app.session.path.as_deref(), Some(path.as_str()));
     }
 
     #[test]

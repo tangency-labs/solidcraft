@@ -22,7 +22,7 @@ on:
   release:
     types: [published]
   pull_request:
-    paths: ["packaging/docker/**", ".github/workflows/docker.yml"]
+    paths: ["packaging/docker/**", "apps/solidcraft-web-folder/**", "apps/solidcraft-web/src/server*.rs", ".github/workflows/docker.yml"]
   workflow_dispatch:
 
 permissions:

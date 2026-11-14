@@ -34,7 +34,7 @@ fn start_with(app: &mut SolveApp, after_reuse: bool) -> bool {
     if app.verifying.is_some() {
         return false;
     }
-    if app.saving.is_some() || app.file_picker.is_some() || (!after_reuse && app.file_load_holds()) {
+    if app.saving.is_some() || app.host_save.is_some() || app.file_picker.is_some() || (!after_reuse && app.file_load_holds()) {
         app.set_status(solidcraft_ui_text::tr("ui.verify_waits_for_file_operation").to_string(), true);
         return false;
     }
