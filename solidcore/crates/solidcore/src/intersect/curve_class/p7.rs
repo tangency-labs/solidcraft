@@ -3490,19 +3490,64 @@ fn interval_dot(a: [Ivl; 3], b: [Ivl; 3]) -> Ivl {
 }
 
 /// Whether `uv_seam` is, exactly, a line of constant angle `u` on the cone or
-/// cylinder: a native line whose direction has no `u` component. Read from the line's
-/// stored point and vector, as [`same_iso_support`] reads a constant coordinate; no
-/// station is sampled.
+/// cylinder. Read from stored data, as [`same_iso_support`] reads a constant
+/// coordinate; no station is sampled. Either a native line whose direction has no `u`
+/// component, or a native B-spline whose every control point has the same `u` (exactly,
+/// including rational controls: `x_i * w_0 = x_0 * w_i`) and whose `v` is not constant.
+/// Positive weights then keep every parameter on that `u`.
 fn constant_angle_uv_line(uv_seam: &Curve) -> bool {
-    let CurveKind::Line(line) = uv_seam.kind() else {
-        return false;
-    };
-    let (point, vector) = (line.line_point(), line.line_vector());
-    vector.x == 0.0
-        && vector.y != 0.0
-        && vector.y.is_finite()
-        && point.x.is_finite()
-        && point.y.is_finite()
+    match uv_seam.kind() {
+        CurveKind::Line(line) => {
+            let (point, vector) = (line.line_point(), line.line_vector());
+            vector.x == 0.0
+                && vector.y != 0.0
+                && vector.y.is_finite()
+                && point.x.is_finite()
+                && point.y.is_finite()
+        }
+        CurveKind::BSpline(spline) => {
+            let Some(net) = convex_native_net(spline) else {
+                return false;
+            };
+            let weight = |p: &crate::nurbs::math::CPoint| {
+                if p.w == crate::nurbs::math::NOW {
+                    1.0
+                } else {
+                    p.w
+                }
+            };
+            let Some(first) = net.cpts().first() else {
+                return false;
+            };
+            let w0 = weight(first);
+            let same_u = |p: &crate::nurbs::math::CPoint| {
+                let w = weight(p);
+                w > 0.0
+                    && w.is_finite()
+                    && p.x.is_finite()
+                    && p.y.is_finite()
+                    && exact_four_products_zero([
+                        (p.x, w0, false),
+                        (first.x, w, true),
+                        (0.0, 0.0, false),
+                        (0.0, 0.0, false),
+                    ])
+            };
+            let moves_in_v = |p: &crate::nurbs::math::CPoint| {
+                !exact_four_products_zero([
+                    (p.y, w0, false),
+                    (first.y, weight(p), true),
+                    (0.0, 0.0, false),
+                    (0.0, 0.0, false),
+                ])
+            };
+            w0 > 0.0
+                && w0.is_finite()
+                && net.cpts().iter().all(same_u)
+                && net.cpts().iter().any(moves_in_v)
+        }
+        _ => false,
+    }
 }
 
 /// The origin and across-seam direction of a cone's or cylinder's seam over `domain`,
@@ -3925,6 +3970,20 @@ mod tests {
         assert!(ruling_frame(&k, &seam, &uv, &cylinder, domain)
             .unwrap()
             .is_none());
+        // A degree-1 B-spline whose controls all sit at angle 0 is an exact ruling too.
+        let uv_spline = {
+            let ctrl = [0.0, 0.5, 1.0]
+                .iter()
+                .map(|&z| CPoint::new(0.0, z, 0.0, NOW))
+                .collect();
+            Curve::from(BSplineCurve::from_nurb(
+                NurbCurve::new(ctrl, 1, vec![0.0, 0.0, 0.5, 1.0, 1.0]).unwrap(),
+                3,
+                false,
+            ))
+        };
+        assert!(constant_angle_uv_line(&uv_spline));
+        assert!(!constant_angle_uv_line(&uv));
         // A native line on the same ruling is still granted the relief.
         let ruling = line([1.0, 0.0, 0.0], [1.0, 0.0, 1.0]);
         let uv_ruling = line([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
