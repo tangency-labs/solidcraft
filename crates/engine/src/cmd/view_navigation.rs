@@ -593,12 +593,26 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
                 .map(|d| if d == 90.0 { (1.0, 0.0) } else { d.to_radians().sin_cos() })
                 .ok_or_else(|| bad(cmd, "degrees must be a number above 0 and at most 180"))?,
         };
-        let turn = |toward: solidcore_record::Vec3| cam.looking_from(b * cos + toward * sin);
+        // The navigator's arrows (no `degrees`) turn about the screen's own axis and keep the roll, so
+        // four clicks one way go all the way round, over the top too (#15633). The arrow keys'
+        // steps stand the view upright about the world's up axis.
+        let quarter = p.get("degrees").is_none();
+        let turn = |toward: solidcore_record::Vec3, about: solidcore_record::Vec3| {
+            if quarter {
+                let mut to = cam;
+                to.rotate_in_view(about * FRAC_PI_2);
+                to
+            } else {
+                cam.looking_from(b * cos + toward * sin)
+            }
+        };
+        // Screen axes for `rotate_in_view`: a turn about up moves the view toward the right.
+        let (x, y) = (solidcore_record::Vec3::X, solidcore_record::Vec3::Y);
         match p.get("action").and_then(Value::as_str) {
-            Some("left") => cam = turn(-r),
-            Some("right") => cam = turn(r),
-            Some("up") => cam = turn(u),
-            Some("down") => cam = turn(-u),
+            Some("left") => cam = turn(-r, -y),
+            Some("right") => cam = turn(r, y),
+            Some("up") => cam = turn(u, -x),
+            Some("down") => cam = turn(-u, x),
             Some("clockwise") => cam.roll = (cam.roll + FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
             Some("counterclockwise") => cam.roll = (cam.roll - FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
             Some("home") => {
@@ -1105,6 +1119,53 @@ mod tests {
         ] {
             assert!(s.execute("view.navigate", &params).is_err());
         }
+    }
+
+    /// #15633: each navigator arrow turns a quarter turn about the screen's own axis and keeps the
+    /// roll, from upright, rolled, pole and Y-up starts, and four clicks one way come back round.
+    #[test]
+    fn navigator_arrows_turn_about_the_screen_axis_over_the_poles_and_keep_the_roll() {
+        let mut s = Session::default();
+        let mut step = |cam: Camera, action: &str| -> Camera {
+            let reply = navigate(&mut s, &json!({"camera": cam, "action": action})).unwrap();
+            serde_json::from_value(reply["camera"].clone()).unwrap()
+        };
+        let front = Camera { yaw: 0.0, pitch: 0.0, ..Camera::default() };
+        let starts = [
+            front,
+            Camera { roll: std::f64::consts::FRAC_PI_2, ..front },
+            Camera { roll: 0.4, ..Camera::default() },
+            Camera { pitch: std::f64::consts::FRAC_PI_2, ..front },
+            Camera { up: UpAxis::Y, roll: -1.0, ..Camera::default() },
+        ];
+        for start in starts {
+            for (action, toward, keep) in [("right", 0, 1), ("left", 0, 1), ("up", 1, 0), ("down", 1, 0)] {
+                let sign = if matches!(action, "left" | "down") { -1.0 } else { 1.0 };
+                let mut cam = start;
+                for click in 1..=4 {
+                    let before = cam.basis();
+                    let axes = |b: (Vec3, Vec3, Vec3)| [b.0, b.1, b.2];
+                    cam = step(cam, action);
+                    let (was, now) = (axes(before), axes(cam.basis()));
+                    let msg = format!("{action} click {click} from {start:?}");
+                    assert!(now[keep].dist(was[keep]) < 1e-9, "keeps the axis it turns about: {msg}");
+                    assert!(now[2].dist(was[toward] * sign) < 1e-9, "looks from the arrow's side: {msg}");
+                }
+                for (a, b) in [(cam.basis().0, start.basis().0), (cam.basis().1, start.basis().1), (cam.basis().2, start.basis().2)] {
+                    assert!(a.dist(b) < 1e-9, "four {action} clicks come back to the start from {start:?}");
+                }
+            }
+        }
+        // The report's sequence: Up ×4 from Front passes Top, an upside-down Back and Bottom.
+        let mut cam = front;
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            cam = step(cam, "up");
+            let a = cam.view_angles();
+            seen.push((a.yaw.round().abs() as i64 % 360, a.pitch.round() as i64, a.roll.round().abs() as i64));
+        }
+        // Straight down the picture turns with yaw + roll, so yaw 180 with roll 180 is the upright Bottom.
+        assert_eq!(seen, [(0, 90, 0), (180, 0, 180), (180, -90, 180), (0, 0, 0)]);
     }
 }
 
