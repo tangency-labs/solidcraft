@@ -22,6 +22,7 @@ appearance.replace                appearance only: colours and textures
 assembly.bom                      a bill of materials report
 assembly.constraint.create        assembly placement: tested in joints_relations_tests.rs
 assembly.constraint.edit          assembly placement: tested in joints_relations_tests.rs
+body.print_faces                  reports which bodies have a print face; crates/engine/src/cmd/print_face.rs tests
 body.rename                       a body name
 browser.collapse_all              the browser tree: order, groups and folding
 browser.expand_all                the browser tree: order, groups and folding
