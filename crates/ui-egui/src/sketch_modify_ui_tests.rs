@@ -664,6 +664,51 @@ fn two_sided_offset_shows_a_dimension_for_each_distance() {
 }
 
 #[test]
+fn offset_takes_no_curve_outside_a_closed_shape_until_a_pick_opens_it() {
+    use crate::sketch_modify_ui::candidate;
+    use crate::viewport::Hit;
+    // An arch: a rectangle with an arc across its top line, three curves at each top corner.
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [-10, -20], "p1": [10, 0]})).unwrap();
+    let arc = h.app.run("sketch.arc.three_point", json!({"start": [10, 0], "end": [-10, 0], "through": [0, 6.2]})).unwrap()["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    h.settle();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let line = |h: &Harness, at: fn(solidcore_record::Vec2) -> bool| {
+        let st = h.app.session.model.state();
+        let sk = &st.sketch(sketch).unwrap().sketch;
+        let found = sk
+            .curves
+            .iter()
+            .find(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { a, b } if at(sk.points[a].pos) && at(sk.points[b].pos)));
+        found.unwrap().id.clone()
+    };
+    let top = line(&h, |p| p.y.abs() < 1e-6);
+    let left = line(&h, |p| (p.x + 10.0).abs() < 1e-6);
+    let right = line(&h, |p| (p.x - 10.0).abs() < 1e-6);
+    h.step(&json!({"start": "sketch.offset"})).unwrap();
+    let offered = |h: &Harness, id: &str| {
+        let hit = Hit::SketchCurve { sketch, id: id.to_owned(), straight: true, point: solidcore_record::Vec3::ZERO };
+        candidate(h.app.dialog.as_ref().unwrap(), &h.app.session, &hit).is_some()
+    };
+    let click =
+        |h: &mut Harness, id: &str| h.app.dialog.as_mut().unwrap().inputs[0].toggle(vec![Sel::SketchCurve { id: id.to_owned(), sketch: None }]);
+
+    click(&mut h, &left);
+    assert!(offered(&h, &arc), "one side closes nothing, so the arc is still offered");
+    click(&mut h, &top);
+    // The left and top lines close the rectangle (#14788).
+    assert!(!offered(&h, &arc), "a curve outside the closed rectangle neither highlights nor picks");
+    assert!(offered(&h, &right), "an unpicked line of the rectangle is part of the shape");
+    assert!(offered(&h, &top), "a picked line can be clicked to take it out");
+    click(&mut h, &top);
+    assert!(offered(&h, &arc), "taking the top line out opens the shape again");
+}
+
+#[test]
 fn rectangular_pattern_window_opens_instead_of_a_click_tool() {
     let (h, _) = open("sketch.pattern.rectangular");
     assert!(h.app.tool.is_none(), "the click tool still takes the command");

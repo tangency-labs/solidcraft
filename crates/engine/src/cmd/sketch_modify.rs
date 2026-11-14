@@ -2600,13 +2600,29 @@ fn chamfer_dist_angle(s: &mut Session, p: &Value) -> Result<Value> {
 /// the sketch already treats as one profile offsets as one chain.
 const ENDPOINT_JOIN: f64 = 1e-4;
 
-/// Curves of the connected chain through `start` (joined where exactly two curves meet), in
-/// order, with whether each is walked from its stored start (`a`) to its end (`b`).
+/// The most picks tried, one more at a time in the order they were picked, to find the ones that
+/// first close a chain. Each try walks the chain again, so hostile input stays bounded.
+const CLOSING_TRIES: usize = 64;
+
+/// Curves of the connected chain through `start` (joined where two curves meet), in
+/// order, with whether each is walked from its stored start (`a`) to its end (`b`); whether the
+/// chain is closed; and the stray picks to leave alone (see below).
 ///
 /// A corner counts when the curves share the point, when a coincident constraint makes the two
 /// ends one point, or when the ends simply lie on each other. The offset then trims a corner
 /// that runs past the crossing and extends one that stops short, so the new curves intersect.
-fn chain(sk: &Sketch, start: usize, pool: &[usize]) -> (Vec<(usize, bool)>, bool) {
+///
+/// Where more than two curves meet, the chain goes on only through the one picked curve there,
+/// and ends at the corner when none or several are picked. On an arch (a rectangle with an arc on
+/// its top line), the arc alone or the top line alone offsets on its own, one side offsets the
+/// three sides below the arc, and the picks that close a shape (the arc and three sides, or a
+/// side and the top line) offset that closed shape with every corner joined.
+///
+/// `picks` are in the order they were picked. Once the picks so far close a chain, that closed
+/// chain is the shape: a curve picked after it that meets it at a corner is a stray, which would
+/// otherwise leave two picked ways at that corner and break the chain open. Strays come back so
+/// the offset leaves them out instead of offsetting them on their own.
+fn chain(sk: &Sketch, start: usize, pool: &[usize], picks: &[usize]) -> (Vec<(usize, bool)>, bool, Vec<usize>) {
     // Ends joined by a coincident constraint are one joint, as well as a shared point: lines drawn
     // one by one meet at their own points, held together by constraints, and must chain the same
     // (else each is offset on its own, to the left of the way it was drawn).
@@ -2614,7 +2630,7 @@ fn chain(sk: &Sketch, start: usize, pool: &[usize]) -> (Vec<(usize, bool)>, bool
     let root = |i: usize| groups.get(i).copied().unwrap_or(i);
     let endpoints: Vec<_> = sk.curves.iter().map(|c| c.kind.ends().map(|(a, b)| (root(a), root(b)))).collect();
     let ends = |c: usize| endpoints.get(c).copied().flatten();
-    let Some((s0, s1)) = ends(start) else { return (vec![(start, true)], true) };
+    let Some((s0, s1)) = ends(start) else { return (vec![(start, true)], true, Vec::new()) };
     let mut parent: Vec<usize> = (0..sk.points.len()).collect();
     for constraint in &sk.constraints {
         if let ConstraintKind::Coincident { p, q } = constraint.kind {
@@ -2634,32 +2650,40 @@ fn chain(sk: &Sketch, start: usize, pool: &[usize]) -> (Vec<(usize, bool)>, bool
             _ => false,
         }
     };
-    let next = |from: usize, at: usize, used: &[usize]| -> Option<usize> {
-        let users: Vec<usize> = pool.iter().copied().filter(|c| ends(*c).is_some_and(|(a, b)| same(a, at) || same(b, at))).collect();
-        if users.len() != 2 {
-            return None;
+    let meets = |c: usize, at: usize| ends(c).is_some_and(|(a, b)| same(a, at) || same(b, at));
+    let walk = |picked: &[usize]| -> (Vec<(usize, bool)>, bool) {
+        let next = |from: usize, at: usize, used: &[usize]| -> Option<usize> {
+            let others: Vec<usize> = pool.iter().copied().filter(|c| *c != from && meets(*c, at)).collect();
+            let chosen = match others.as_slice() {
+                [only] => *only,
+                _ => match others.iter().copied().filter(|c| picked.contains(c)).collect::<Vec<_>>().as_slice() {
+                    [only] => *only,
+                    _ => return None,
+                },
+            };
+            (!used.contains(&chosen)).then_some(chosen)
+        };
+        let mut fwd = vec![(start, true)];
+        let mut used = vec![start];
+        let (mut cur, mut at) = (start, s1);
+        while let Some(n) = next(cur, at, &used) {
+            let Some((a, b)) = ends(n) else { break };
+            let forward = same(a, at);
+            fwd.push((n, forward));
+            used.push(n);
+            cur = n;
+            at = if forward { b } else { a };
+            if used.len() > 10_000 {
+                break;
+            }
         }
-        users.into_iter().find(|c| *c != from && !used.contains(c))
-    };
-    let mut fwd = vec![(start, true)];
-    let mut used = vec![start];
-    let (mut cur, mut at) = (start, s1);
-    let mut closed = false;
-    while let Some(n) = next(cur, at, &used) {
-        let Some((a, b)) = ends(n) else { break };
-        let forward = same(a, at);
-        fwd.push((n, forward));
-        used.push(n);
-        cur = n;
-        at = if forward { b } else { a };
-        if used.len() > 10_000 {
-            break;
+        if fwd.len() > 1 && same(at, s0) {
+            return (fwd, true);
         }
-    }
-    if fwd.len() > 1 && same(at, s0) {
-        closed = true;
-    } else {
-        // Walk backwards from the start.
+        // Walk backwards from the start. Coming round to the corner where the forward walk
+        // stopped closes the chain: a side and the top line of an arch, picked, stop the forward
+        // walk at the arc's foot and the backward walk reaches it round the rectangle.
+        let stopped = at;
         let (mut cur, mut at) = (start, s0);
         let mut back = Vec::new();
         while let Some(n) = next(cur, at, &used) {
@@ -2673,11 +2697,32 @@ fn chain(sk: &Sketch, start: usize, pool: &[usize]) -> (Vec<(usize, bool)>, bool
                 break;
             }
         }
+        let joined = !back.is_empty() && same(at, stopped);
         back.reverse();
         back.extend(fwd);
-        fwd = back;
-    }
-    (fwd, closed)
+        (back, joined)
+    };
+    let all = walk(picks);
+    let (order, closed) = if all.1 {
+        // Every corner that took a pick had exactly one, so fewer picks close nothing else.
+        all
+    } else {
+        // Picks decide only where more than two curves meet; one with no such end changes
+        // nothing, so the picks before it walk the same chain.
+        let branch = |c: usize| ends(c).is_some_and(|(a, b)| [a, b].into_iter().any(|at| pool.iter().filter(|o| meets(**o, at)).count() > 2));
+        (1..picks.len())
+            .filter(|k| *k == 1 || picks.get(k - 1).is_some_and(|c| branch(*c)))
+            .take(CLOSING_TRIES)
+            .find_map(|k| picks.get(..k).map(walk).filter(|w| w.1))
+            .unwrap_or(all)
+    };
+    let strays = if closed {
+        let corners: Vec<usize> = order.iter().filter_map(|(c, _)| ends(*c)).flat_map(|(a, b)| [a, b]).collect();
+        picks.iter().copied().filter(|p| !order.iter().any(|(c, _)| c == p) && corners.iter().any(|at| meets(*p, *at))).collect()
+    } else {
+        Vec::new()
+    };
+    (order, closed, strays)
 }
 
 fn find_point(parent: &mut [usize], mut i: usize) -> usize {
@@ -2983,9 +3028,44 @@ struct OffsetOptions {
     distance2: Option<f64>,
 }
 
+/// The curves a chain from `first` may walk: every eligible curve of its kind (drawn or
+/// construction) when the chain follows, else only the picks.
+fn offset_pool(sk: &Sketch, first: usize, sel: &[usize], eligible: &std::collections::HashSet<String>, use_chain: bool) -> Vec<usize> {
+    if !use_chain {
+        return sel.to_vec();
+    }
+    let construction = sk.curves.get(first).is_some_and(|f| f.construction);
+    (0..sk.curves.len()).filter(|i| sk.curves.get(*i).is_some_and(|c| eligible.contains(&c.id) && c.construction == construction)).collect()
+}
+
+/// The curves (ids) of every closed shape that Offset makes of `picks` (curve ids, in the order
+/// they were picked), or none when the picks close nothing. While there is one, the Offset window
+/// takes no other curve: a picked one clicked again opens the shape, and then more can be picked.
+pub fn offset_closed_shape(sk: &Sketch, picks: &[String], use_chain: bool) -> Vec<String> {
+    let eligible: std::collections::HashSet<String> = sk.curves.iter().map(|c| c.id.clone()).collect();
+    let mut pending: Vec<usize> = picks.iter().filter_map(|id| sk.curve_index(id)).collect();
+    let mut shape = Vec::new();
+    // The groups the command offsets one after another; each takes at least its first pick.
+    while let Some(&first) = pending.first() {
+        let pool = offset_pool(sk, first, &pending, &eligible, use_chain);
+        let (order, closed, strays) = chain(sk, first, &pool, &pending);
+        if closed {
+            shape.extend(order.iter().filter_map(|(c, _)| sk.curves.get(*c).map(|c| c.id.clone())));
+        }
+        pending.retain(|c| *c != first && !strays.contains(c) && !order.iter().any(|(o, _)| o == c));
+    }
+    shape
+}
+
 /// Build every side of one connected source group. The pool is frozen before any output
-/// is created, so later groups cannot accidentally walk a newly created offset.
-fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::HashSet<String>, options: OffsetOptions) -> Result<Vec<Side>> {
+/// is created, so later groups cannot accidentally walk a newly created offset. The stray picks
+/// a closed chain leaves alone (see [`chain`]) come back with the sides.
+fn offset_group(
+    sk: &mut Sketch,
+    ids: &[String],
+    eligible: &std::collections::HashSet<String>,
+    options: OffsetOptions,
+) -> Result<(Vec<Side>, Vec<String>)> {
     let OffsetOptions { side, chain: use_chain, distance: d0, symmetric, distance2 } = options;
     let cmd = "sketch.offset";
     sk.refresh_offsets()?;
@@ -3031,24 +3111,17 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
             });
             sides.push(Side { distance: r - nr, curves: outputs, constraints: Vec::new(), association: None, param: None, unlinked_sources: None });
         }
-        return Ok(sides);
+        return Ok((sides, Vec::new()));
     }
     // The chain is walked once, before anything is created: a second side has to follow the
     // same source curves, not a pool the first side has already added its output to.
-    let pool: Vec<usize> = if use_chain {
-        (0..sk.curves.len())
-            .filter(|i| {
-                sk.curves.get(*i).is_some_and(|c| eligible.contains(&c.id) && c.construction == sk.curves.get(first).is_some_and(|f| f.construction))
-            })
-            .collect()
-    } else {
-        sel.clone()
-    };
-    let (order, closed) = chain(sk, first, &pool);
+    let pool = offset_pool(sk, first, &sel, eligible, use_chain);
     // Side: toward `side`, else the sign. A positive distance offsets to the left of the walk.
     // A line or an arc says directly which side `side` is on (the half-plane; inside or outside
     // the circle, as for a circle above), so neither rounding of a tiny step nor an arc too small
     // for the distance can turn it round; other curves compare both offsets' distance to it.
+    let (order, closed, strays) = chain(sk, first, &pool, &sel);
+    let strays: Vec<String> = strays.iter().filter_map(|i| sk.curves.get(*i).map(|c| c.id.clone())).collect();
     let d = match side {
         Some(q) => {
             let forward = order.iter().find(|x| x.0 == first).is_none_or(|x| x.1);
@@ -3111,7 +3184,7 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
             };
             sides.push(side);
         }
-        return Ok(sides);
+        return Ok((sides, strays));
     }
     let sources = order
         .iter()
@@ -3123,13 +3196,14 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
     for dd in runs {
         sides.push(offset_side(sk, cmd, &order, &sources, closed, convex, dd)?);
     }
-    Ok(sides)
+    Ok((sides, strays))
 }
 
 /// One rung of an offset ladder: the offsets of `ids`, with the infinite flag carried over from
 /// infinite sources (#1359) and a driving dimension on each side that is linked to its source.
 /// `names` is the parameter each side is driven by, in side order, falling back to the first for
-/// a side the rung before it had none for. The sources the rung consumed come back with it.
+/// a side the rung before it had none for. The sources the rung consumed come back with it, and with them the stray
+/// picks a closed chain left alone.
 fn offset_rung(
     sk: &mut Sketch,
     cmd: &str,
@@ -3138,7 +3212,7 @@ fn offset_rung(
     options: OffsetOptions,
     names: &[String],
 ) -> Result<(Vec<Side>, Vec<String>)> {
-    let mut group = offset_group(sk, ids, eligible, options)?;
+    let (mut group, strays) = offset_group(sk, ids, eligible, options)?;
     let output = group.first().and_then(|side| side.curves.first()).ok_or_else(|| bad(cmd, "offset produced no curves"))?;
     let sources = sk
         .offsets
@@ -3173,7 +3247,8 @@ fn offset_rung(
         )?);
         side.param = Some(name.clone());
     }
-    Ok((group, sources))
+    // Strays are used up with the sources, so the caller does not offset them on their own.
+    Ok((group, sources.into_iter().chain(strays).collect()))
 }
 
 /// Where the next instance of an offset belongs: one more step the way the rung already went.
