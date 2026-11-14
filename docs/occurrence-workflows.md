@@ -22,7 +22,7 @@ A drag in the viewport, or `occurrence.drag`, moves one exact placement and its 
 
 It captures that placement's position (other pending positions stay pending) and is one undo step. With the design active, the viewport drags the placement on the picked body's path just inside the design; with a component placement active, the one just inside it. Grounded placements and placements that joints hold to something fixed are refused; a free chain of joints moves together, and a chain through a placement used several times is refused. The design's first top-level part is grounded when it is made (not when a design is opened); copies start free.
 
-World movement includes pending parent and child positions. The default space remains parent-local for existing scripts. Capture Position commits pending transforms; Revert Position drops them. Copying an occurrence copies that selected occurrence's effective transform, including its pending position.
+World movement includes pending parent and child positions. The default space remains parent-local for existing scripts. Capture Position commits pending transforms and saves every joint's current values; Revert Position drops the pending transforms and puts the joints back to the saved values, clamped to their limits. Copying an occurrence copies that selected occurrence's effective transform, including its pending position.
 
 An occurrence definition inside a component is shared by every instance of that parent component. Moving, grounding, copying, or deleting that nested definition changes all its parent instances. Selecting its exact path determines the world frame used for movement and Properties; it does not create an independent child definition.
 

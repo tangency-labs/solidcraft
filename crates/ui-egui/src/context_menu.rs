@@ -11,8 +11,9 @@
 //! state; [`items`] lists them and [`run_item`] runs one, so the control channel (`ui.menu`,
 //! `ui.menuPick`) and tests reach everything a click does.
 
-use crate::ui_kit::{BackingTooltipExt as _, Container, Item, LIST_W, Surface};
-use egui::{Color32, Pos2, Rect, Sense, Vec2, pos2, vec2};
+use crate::ui_kit::menu::{list_row_lit, menu_frame, scroll_rows};
+use crate::ui_kit::{BackingTooltipExt as _, Container, Item, LIST_W, MenuItem, Surface};
+use egui::{Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde::Serialize;
 use serde_json::{Value, json};
 use solidcraft_engine::geom::prelude::*;
@@ -87,6 +88,10 @@ pub enum Target {
     Joint {
         id: u64,
     },
+    /// A motion link under the browser's Joints folder, as `joint.list` numbers them (#6825).
+    Link {
+        index: usize,
+    },
     /// A command (toolbar button, panel drop-down row, S box row).
     ToolbarCommand {
         id: String,
@@ -95,6 +100,8 @@ pub enum Target {
     Toolbar,
     /// The History controls (first, previous, next, last, and Play when shown).
     HistoryControls,
+    /// The History folder, with History in the browser: the History controls as menu entries.
+    HistoryFolder,
     /// A feature in the History bar.
     Timeline {
         feature: u64,
@@ -140,7 +147,7 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
         label: label.into(),
         shortcut,
         enabled: info.as_ref().is_some_and(|i| i.enabled),
-        icon: info.map(|i| i.icon.to_string()).unwrap_or_default(),
+        icon: info.map(|i| i.icon).unwrap_or_default().into(),
         params: None,
         children: Vec::new(),
         swatch: None,
@@ -207,6 +214,8 @@ pub struct MenuState {
 #[derive(Clone, Debug, PartialEq)]
 pub enum RenameWhat {
     Body(String),
+    /// Several bodies renamed with one name, numbered after the first (#12341).
+    Bodies(Vec<String>),
     Feature(u64),
     Component(u64),
     Group(u64),
@@ -222,8 +231,9 @@ pub struct Rename {
     pub text: String,
     pub at: Pos2,
     pub(crate) focused: bool,
-    /// Edited in the browser row itself (a double-click on a body), not in the floating box.
+    /// Edited in the browser row itself, not in the floating box.
     pub(crate) inline: bool,
+    pub(crate) inline_id: Option<egui::Id>,
 }
 
 /// Radial slots, clockwise from the top.
@@ -235,6 +245,14 @@ const RY: f32 = crate::ui_kit::RADIAL_RADIUS;
 // ---------------------------------------------------------------------------------------------
 // What the menus offer
 // ---------------------------------------------------------------------------------------------
+
+/// The bodies a body menu's Rename Selected Bodies renames together (#12341): the selection,
+/// when it holds several bodies and the menu is for one or all of them. `None` leaves the item
+/// out.
+fn rename_selected(app: &SolveApp, bodies: &[String]) -> Option<Vec<String>> {
+    let selected = sel_bodies(app);
+    (selected.len() > 1 && !bodies.is_empty() && bodies.iter().all(|b| selected.contains(b))).then_some(selected)
+}
 
 fn sel_bodies(app: &SolveApp) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
@@ -360,9 +378,11 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::ViewGizmo => crate::view_gizmo::menu_items(app),
         Target::Section => crate::browser::section_items(app),
         Target::Joint { id } => joint_items(app, *id),
+        Target::Link { index } => link_items(app, *index),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
         Target::HistoryControls => crate::timeline::transport_items(app),
+        Target::HistoryFolder => crate::timeline::history_folder_items(app),
         Target::Timeline { feature } => crate::timeline::feature_items(app, *feature),
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
@@ -371,7 +391,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 act("ui.workspace.render", "Render", "ws_render")
                     .with(json!({"workspace":"render"}))
                     .key(if rendering { "current" } else { "" })
-                    .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
+                    .on(crate::render_workspace::entry_open(app)),
             ];
             for (w, icon) in [("Animation", "ws_animate"), ("Simulation", ""), ("Manufacture", ""), ("Drawing", "ws_drawing")] {
                 v.push(act("ui.workspace", w, icon).key("coming later").on(false));
@@ -409,13 +429,13 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 .collect();
             if items.is_empty() { vec![act("ui.editSketch", app.tr("ui.edit_sketch_empty"), "sketch").on(false)] } else { items }
         }
-        Target::VisualStyle => crate::navigation_bar::VISUAL_STYLES
+        Target::VisualStyle => crate::navigation_slots::VISUAL_STYLES
             .iter()
             .enumerate()
             .map(|(index, (style, label))| {
                 let current = usize::from(app.ui.visual_style) == index;
                 let mut item = cmd(app, "view.visual_style", label).with(json!({"style": style})).key(if current { "current" } else { "" });
-                item.icon = crate::navigation_bar::visual_style_icon(u8::try_from(index).unwrap_or_default()).into();
+                item.icon = crate::navigation_slots::visual_style_icon(u8::try_from(index).unwrap_or_default()).into();
                 item
             })
             .collect(),
@@ -523,12 +543,13 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 params["appearance"] = json!(look.name);
                 params["color"] = json!(crate::dialogs_appearance::hex(look.color));
                 params["opacity"] = json!(look.opacity);
-                let mut child = cmd(app, "appearance.assign", &look.name).with(params);
+                // The A key opens the editor, so only the editor's row shows it.
+                let mut child = cmd(app, "appearance.assign", &look.name).key("").with(params);
                 child.swatch = Some(look.color);
                 item.children.push(child);
             }
             item.children.push(Item::sep());
-            item.children.push(cmd(app, "appearance.assign", "Remove override").with(targets));
+            item.children.push(cmd(app, "appearance.assign", "Remove override").key("").with(targets));
         }
     });
     v
@@ -638,20 +659,26 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(cmd(app, "view.normal_to", "Normal to Selection").with(json!({"camera": app.cam})));
             v.push(Item::sep());
         }
-        v.push(cmd(app, "sketch.create", "Create Sketch"));
-        v.push(cmd(app, "solid.extrude", "Extrude"));
-        v.push(cmd(app, "construct.plane.offset", "Offset Plane"));
+        let planar =
+            sel.iter().any(|s| matches!(s, Sel::Face { body, index, .. } if crate::dialogs::planar_face(&app.session, body, *index).is_some()));
+        let one_flat = planar && matches!(sel.as_slice(), [Sel::Face { .. }]);
+        // A curved face, or several faces, have no one plane to sketch on, offset or extrude from;
+        // Press Pull offsets them.
+        if one_flat {
+            v.push(cmd(app, "sketch.create", "Create Sketch"));
+            v.push(cmd(app, "solid.extrude", "Extrude"));
+            v.push(cmd(app, "construct.plane.offset", "Offset Plane"));
+        } else {
+            v.push(cmd(app, "solid.press_pull", "Press Pull"));
+        }
         v.push(cmd(app, "solid.shell", "Shell"));
         if crate::joint_handles::selected_occurrence(app).is_some() {
             v.push(cmd(app, "occurrence.move", "Move"));
         }
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
         v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
-        let planar =
-            sel.iter().any(|s| matches!(s, Sel::Face { body, index, .. } if crate::dialogs::planar_face(&app.session, body, *index).is_some()));
         v.push(act("ui.lookAt", "Look At", "lookat").on(planar));
         let marked = matches!(sel.as_slice(), [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
-        let one_flat = planar && matches!(sel.as_slice(), [Sel::Face { .. }]);
         v.push(cmd(app, "body.print_face", if marked { "Clear Print Face" } else { "Print Face" }).on(one_flat));
         v.push(Item::sep());
         v.push(act("ui.appearance", "Appearance", "appearance").key("A"));
@@ -664,8 +691,12 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": face })));
         v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": feature, "body": face })).on(feature.is_some()));
         v.push(Item::sep());
-        v.push(cmd(app, "solid.press_pull", "Press Pull"));
+        if one_flat {
+            v.push(cmd(app, "solid.press_pull", "Press Pull"));
+        }
         v.push(cmd(app, "inspect.measure", "Measure"));
+        // What cannot act on these faces is left out.
+        v.retain(|i| i.enabled || i.is_sep());
     } else if has(|s| matches!(s, Sel::Edge { .. })) {
         let body = sel.iter().find_map(|s| if let Sel::Edge { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
         let hidden = app.session.visibility.hidden_bodies.contains(&body);
@@ -740,6 +771,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     let one = bodies.len() == 1;
     let locked = bodies.iter().all(|b| app.session.visibility.locked_bodies.contains(b));
     let items = json!(bodies.iter().map(|b| json!({"type": "body", "name": b})).collect::<Vec<_>>());
+    let several = rename_selected(app, bodies);
     let mut v = vec![
         act("ui.moveBodies", "Move/Copy", "move").key("M").with(json!({ "bodies": names })).on(!locked),
         cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })),
@@ -758,12 +790,20 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste(app)),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": items })).on(!locked),
         cmd(app, "solid.remove", "Remove").with(json!({ "bodies": names })).on(!locked),
-        act("ui.rename", "Rename", "rename").key("F2").with(json!({ "body": bodies.first() })).on(one),
+        // F2 renames the selection: with several bodies selected, it is Rename Selected Bodies.
+        act("ui.rename", "Rename", "rename").key(if several.is_some() { "" } else { "F2" }).with(json!({ "body": bodies.first() })).on(one),
         Item::sep(),
         act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
         act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })),
     ];
+    // Several selected bodies take one name, numbered after the first (#12341), as F2 renames
+    // them. Rename itself still renames only the body the menu is for.
+    if let Some(list) = several
+        && let Some(at) = v.iter().position(|i| i.id == "ui.rename")
+    {
+        v.insert(at + 1, act("ui.rename", "Rename Selected Bodies", "rename").key("F2").with(json!({ "bodies": list })));
+    }
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
         if let Some(component) = crate::dialogs_part_size::component_for_bodies(app, bodies) {
@@ -930,6 +970,21 @@ fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
     ]
 }
 
+/// The menu of a motion link's browser row: the Edit dialog opens on the link's kind with its
+/// current values, and Delete runs `joint.delete` with the link's number (#6825).
+fn link_items(app: &SolveApp, index: usize) -> Vec<Item> {
+    if index >= app.session.doc.assembly.links.len() {
+        return Vec::new();
+    }
+    vec![
+        act("ui.editLink", "Edit Link", "edit").with(json!({ "link": index })),
+        Item::sep(),
+        cmd(app, "joint.delete", "Delete").key("Del").with(json!({ "link": index })),
+    ]
+}
+
+/// The menu of the placement at `path`: its component's menu, with the rows aimed at this
+/// placement, and "Relink Source…" for it alone when the component is placed more than once.
 fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
     let Ok(placement) = app.session.occurrence_placement(path) else { return Vec::new() };
     let mut entries = component_items(app, placement.component);
@@ -975,9 +1030,25 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.params = Some(json!({"path": path}));
         }
         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
-        "browser.expand_all" | "browser.collapse_all" => item.params = Some(json!({"path": path})),
+        // Expand Below and Collapse Below fold this placement's branch; Collapse All keeps the
+        // whole tree.
+        "browser.expand_all" | "browser.collapse_all" if item.params.as_ref().is_some_and(|p| p.get("component").is_some()) => {
+            item.params = Some(json!({"path": path}))
+        }
         _ => {}
     });
+    // One placement of several can show another design on its own, above the row for all of them.
+    if app.session.doc.links.contains_key(&placement.component)
+        && app.session.doc.occurrences.iter().filter(|o| o.component == placement.component).count() > 1
+    {
+        let one =
+            act("ui.relinkPlacement", "Relink Source…", "update").with(json!({"component": placement.component, "occurrence": placement.occurrence}));
+        each_item(&mut entries, &mut |item: &mut Item| {
+            if let Some(i) = item.children.iter().position(|c| c.id == "ui.relinkSource") {
+                item.children.insert(i, one.clone());
+            }
+        });
+    }
     entries
 }
 
@@ -1057,11 +1128,16 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         let oid = occ.map(|o| o.id).unwrap_or(0);
         let movable = !grounded && occ.is_some() && app.session.held_by_rigid_group(oid).is_none();
         v.push(act("ui.moveOccurrence", "Move/Copy", "move").key("M").with(json!({ "occurrence": oid })).on(movable));
+        let moved = !app.session.pending_moves.is_empty();
+        let joints = &app.session.doc.assembly.joints;
         let mut placement = vec![
             cmd(app, "occurrence.ground", if grounded { "Unground" } else { "Ground" }).with(json!({ "occurrence": oid, "grounded": !grounded })),
             turn_up_axis(oid, movable),
-            cmd(app, "component.capture_position", "Capture Position").on(!app.session.pending_moves.is_empty()),
-            cmd(app, "component.revert_position", "Revert Position").on(!app.session.pending_moves.is_empty()),
+            // Capture Position also saves the joints' values, and Revert Position puts them back.
+            cmd(app, "component.capture_position", "Capture Position")
+                .on(moved || joints.iter().any(|j| j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
+            cmd(app, "component.revert_position", "Revert Position")
+                .on(moved || joints.iter().any(|j| j.captured.is_some() && j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
         ];
         // An imported assembly moves as one until its rigid group is released.
         if !app.session.contents_joints(id).is_empty() {
@@ -1148,8 +1224,16 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         );
     }
     organize.push(Item::sep());
-    organize.push(cmd(app, "browser.expand_all", "Expand All").with(json!({ "component": id })));
-    organize.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({ "component": id })));
+    if id == 0 {
+        organize.push(cmd(app, "browser.expand_all", "Expand All").with(json!({ "component": id })));
+        organize.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({ "component": id })));
+    } else {
+        // A component folds its own branch; Collapse All still rolls up the whole tree, every
+        // placement at every level, as it does from the design row (#11866).
+        organize.push(cmd(app, "browser.expand_all", "Expand Below").with(json!({ "component": id })));
+        organize.push(cmd(app, "browser.collapse_all", "Collapse Below").with(json!({ "component": id })));
+        organize.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({})));
+    }
     v.push(group("Organize", "folder", organize));
     v
 }
@@ -1328,6 +1412,17 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     {
         v.push(cmd(app, "sketch.spline.reverse", "Reverse Spline Direction").with(json!({ "curve": curve })));
     }
+    // #6502: a selected fit point spline shows its tangent handles and a drag stores them; the
+    // spline, or one of its tangent guides, puts edited handles back where they started.
+    if let [curve] = curves.as_slice()
+        && let Some(c) = ss.sketch.curve_index(curve).and_then(|i| ss.sketch.curves.get(i))
+        && let Some(spline) = match &c.kind {
+            CurveKind::Spline { handles, .. } if !handles.is_empty() => Some(c.id.clone()),
+            _ => c.spline_handle_of.clone(),
+        }
+    {
+        v.push(cmd(app, "sketch.spline.reset_handles", "Reset Tangent Handles").with(json!({ "curve": spline })));
+    }
     // #10783: a point of one spline of the sketch's own, alone, comes out of that spline.
     if let ([], [point]) = (curves.as_slice(), points.as_slice())
         && let Some(at) = ss.sketch.resolve_point(point)
@@ -1500,9 +1595,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.finishSketch" => app.finish_sketch(),
         "ui.cancelSketch" => app.cancel_sketch(),
-        "ui.relinkSource" => {
+        "ui.relinkSource" | "ui.relinkPlacement" => {
             if let Some(component) = id_of(&p, "component") {
-                crate::linked_source::start(app, component);
+                crate::linked_source::start(app, component, id_of(&p, "occurrence"));
             }
         }
         "ui.extractComponent" => {
@@ -1573,7 +1668,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             app.start("solid.move");
         }
         "ui.rename" => {
-            let what = if let Some(b) = p.get("body").and_then(Value::as_str) {
+            let several: Option<Vec<String>> =
+                p.get("bodies").and_then(Value::as_array).and_then(|a| a.iter().map(|b| b.as_str().map(str::to_string)).collect());
+            let what = if let Some(mut list) = several.filter(|l| !l.is_empty()) {
+                if list.len() == 1 { RenameWhat::Body(list.remove(0)) } else { RenameWhat::Bodies(list) }
+            } else if let Some(b) = p.get("body").and_then(Value::as_str) {
                 RenameWhat::Body(b.to_string())
             } else if let Some(f) = id_of(&p, "feature") {
                 // The History bar renames in a dialog.
@@ -1624,8 +1723,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.insertBrowse" => app.pick_design_to_insert(),
         "ui.export" => {
-            let name = bodies.first().cloned().unwrap_or_else(|| app.session.doc.name.clone());
-            app.pick_save_command(&format!("{name}.step"), &["step", "stp", "igs", "stl", "3mf", "obj"], "file.export", json!({"bodies": bodies}));
+            let body = bodies.first().map(String::as_str);
+            let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
+            app.pick_save_command(
+                &format!("{name}.step"),
+                &["step", "stp", "igs", "stl", "3mf", "obj", "glb"],
+                "file.export",
+                json!({"bodies": bodies}),
+            );
         }
         "ui.findBrowser" => {
             if let Some(b) = p.get("body").and_then(Value::as_str) {
@@ -1670,6 +1775,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 }
                 let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": f}]}));
                 crate::browser::request_timeline_reveal(app, f);
+                let panel = if app.preferences.history_in_browser { "browser" } else { "history" };
+                crate::browser::reveal_shared_panel(app, panel);
             }
         }
         "ui.tangentChain" => tangent_chain(app),
@@ -1797,6 +1904,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.set_status(e, true);
             }
         }
+        "ui.historyTransport" => {
+            if let Some(control) = crate::ui_kit::HistoryTransport::WITH_PLAY.into_iter().find(|c| Some(c.id()) == p["control"].as_str()) {
+                crate::timeline::run_transport(app, control);
+            }
+        }
         "ui.historyShowHidden" => app.tree.history_show_hidden = p["show"].as_bool().unwrap_or(false),
         "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" => {
             if let Some(workspace) = p.get("workspace").and_then(Value::as_str)
@@ -1822,6 +1934,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                     app.tool = None;
                     app.dialog = Some(d);
                 }
+            }
+        }
+        "ui.editLink" => {
+            if let Some(index) = p.get("link").and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok())
+                && let Some(d) = crate::dialogs_assembly::edit_link(app, index)
+            {
+                app.tool = None;
+                app.dialog = Some(d);
             }
         }
         "ui.newView" => drop(crate::browser::save_view(app, None)),
@@ -1906,7 +2026,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             if let Some(ss) = id_of(&p, "sketch").and_then(|id| st.sketch(id)) {
                 let to = crate::dialogs::onto_sketch(app.cam.looking_from(ss.plane.normal()), ss);
                 app.animate_to(to);
-            } else if let Some(plane) = p.get("plane").and_then(Value::as_str).and_then(solidcore_record::Plane::named) {
+            } else if let Some(plane) = p.get("plane").and_then(Value::as_str).and_then(|name| crate::dialogs::plane_by_name(&app.session, name)) {
                 let mut to = app.cam.looking_from(crate::dialogs::facing(app, plane.normal(), true));
                 to.target = plane.origin;
                 app.animate_to(to);
@@ -1934,6 +2054,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 if calibrate {
                     app.set_status(solidcraft_ui_text::tr("browser.calibrate_click_a"), false);
                 }
+            }
+        }
+        "ui.straightenCanvas" => {
+            if let Some(c) = id_of(&p, "canvas") {
+                app.tree.canvas_panel = Some(crate::browser::CanvasPanel::straighten(app, c));
+                app.set_status(solidcraft_ui_text::tr("browser.straighten_click_a"), false);
             }
         }
         "ui.newGroup" | "ui.ungroup" | "ui.groupSelected" => crate::browser::group_action(app, &item.id, &p),
@@ -1995,7 +2121,12 @@ pub fn delete(app: &mut SolveApp) {
 pub fn press_shortcut(app: &mut SolveApp, key: &str) -> bool {
     let Some(at) = app.viewport.context_menu else { return false };
     let target = app.menu.target.clone();
-    let Some(item) = entries(app, &target).into_iter().find(|i| i.shortcut == key && i.children.is_empty()) else { return false };
+    // "V" is the tag of Show/Hide rows, which run on Show/Hide's own key: a command row showing V
+    // has V bound to it and is not what that key means (#13241).
+    let Some(item) = entries(app, &target).into_iter().find(|i| i.shortcut == key && i.children.is_empty() && (key != "V" || i.label == "Show/Hide"))
+    else {
+        return false;
+    };
     if item.enabled {
         close(app);
         run_item(app, &item, at);
@@ -2003,8 +2134,24 @@ pub fn press_shortcut(app: &mut SolveApp, key: &str) -> bool {
     true
 }
 
+/// The key a menu row shows for its `shortcut` tag: Show/Hide rows are tagged "V" and show the
+/// key Show/Hide has now (#13241), or none.
+pub fn shortcut_shown(app: &SolveApp, tag: &str) -> String {
+    if tag == "V" { crate::keymap::display_for(app, "ui.toggle_visibility").unwrap_or_default() } else { tag.to_string() }
+}
+
+/// Only Show/Hide rows carry the `V` tag for that command: another row showing V has V bound to it.
+pub(crate) fn show_current_keys(app: &SolveApp, list: &mut [Item]) {
+    for item in list {
+        if item.label == "Show/Hide" {
+            item.shortcut = shortcut_shown(app, &item.shortcut);
+        }
+        show_current_keys(app, &mut item.children);
+    }
+}
+
 /// Show/Hide (the V key): what is selected in the viewport or picked in the browser flips its
-/// visibility (bodies, faces' and edges' bodies, sketches, construction and origin planes and
+/// visibility (bodies, faces' and edges' bodies, sketches and profiles' sketches, construction and origin planes and
 /// axes, components' bodies, canvases, joints' glyphs). When some are shown and some hidden, all are hidden.
 /// A clicked folder takes precedence, and toggles its own visibility without changing its items.
 pub fn toggle_visibility(app: &mut SolveApp) {
@@ -2022,13 +2169,19 @@ pub fn toggle_visibility(app: &mut SolveApp) {
     for c in app.tree.picked_components.clone() {
         bodies.extend(component_bodies(app, c));
     }
-    let sketches: Vec<u64> = app
+    // A picked profile stands for its sketch, as a picked face stands for its body (#13026).
+    let mut sketches: Vec<u64> = app
         .session
         .selection
         .iter()
-        .filter_map(|s| if let Sel::Feature { id } = s { Some(*id) } else { None })
+        .filter_map(|s| match s {
+            Sel::Feature { id } | Sel::Profile { sketch: id, .. } => Some(*id),
+            _ => None,
+        })
         .filter(|id| app.session.doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })))
         .collect();
+    sketches.sort_unstable();
+    sketches.dedup();
     let origin: Vec<String> = app
         .session
         .selection
@@ -2070,8 +2223,23 @@ pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {
         start_rename(app, RenameWhat::Group(g), at);
         return true;
     }
+    // A clicked History folder too, as a double-click on it does: folders are not in the
+    // selection either (#16213).
+    if let ([], [g]) = (app.session.selection.as_slice(), app.tree.picked_timeline_groups.as_slice()) {
+        start_rename(app, RenameWhat::TimelineGroup(*g), at);
+        return true;
+    }
     let what = match (app.session.selection.as_slice(), app.tree.picked_components.as_slice(), app.tree.picked_canvases.as_slice()) {
         ([Sel::Body { name }], [], []) => RenameWhat::Body(name.clone()),
+        // F2 on several selected bodies renames them all, numbered after the first (#12341).
+        (sel, [], []) if sel.len() > 1 && sel.iter().all(|s| matches!(s, Sel::Body { .. })) => RenameWhat::Bodies(
+            sel.iter()
+                .filter_map(|s| match s {
+                    Sel::Body { name } => Some(name.clone()),
+                    _ => None,
+                })
+                .collect(),
+        ),
         ([Sel::Feature { id }], [], []) => RenameWhat::Feature(*id),
         ([Sel::Occurrence { path }], [], []) => match app.session.occurrence_placement(path) {
             Ok(p) => RenameWhat::Component(p.component),
@@ -2097,7 +2265,7 @@ fn tangent_chain(app: &mut SolveApp) {
         let Sel::Edge { body, index, .. } = s else { continue };
         let Some(b) = st.body(body) else { continue };
         let m = b.mesh();
-        for i in m.tangent_chain(*index, 2f64.to_radians()) {
+        for i in m.tangent_chain(*index, solidcraft_engine::geom::TANGENT_CHAIN) {
             let Some(e) = m.edges.get(i) else { continue };
             let Some(mid) = e.get(e.len() / 2).copied() else { continue };
             let x = Sel::Edge { body: body.clone(), index: i, point: mid };
@@ -2115,6 +2283,7 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
     let doc = &app.session.doc;
     let text = match &what {
         RenameWhat::Body(b) => b.clone(),
+        RenameWhat::Bodies(list) => list.first().cloned().unwrap_or_default(),
         RenameWhat::Feature(f) => doc.feature(*f).map(|f| f.name.clone()).unwrap_or_default(),
         RenameWhat::Component(0) => doc.name.clone(),
         RenameWhat::Component(c) => doc.components.iter().find(|x| x.id == *c).map(|x| x.name.clone()).unwrap_or_default(),
@@ -2124,7 +2293,15 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
         RenameWhat::View(v) => v.clone(),
         RenameWhat::Joint(j) => doc.assembly.joints.iter().find(|x| x.id == *j).map(|x| x.name.clone()).unwrap_or_default(),
     };
-    app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false });
+    app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false, inline_id: None });
+}
+
+pub(crate) fn start_inline_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2, row_id: egui::Id) {
+    start_rename(app, what, at);
+    if let Some(rename) = app.menu.rename.as_mut() {
+        rename.inline = true;
+        rename.inline_id = Some(row_id);
+    }
 }
 
 pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) -> Result<(), String> {
@@ -2137,8 +2314,16 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) -> Result<(), String
             // The command renames the body where it is hidden or locked too.
             app.run_heavy("body.rename", json!({ "body": old, "name": name })).map(|_| ())
         }
+        RenameWhat::Bodies(list) => app.run_heavy("body.rename", json!({ "bodies": list, "name": name })).map(|_| ()),
         RenameWhat::Feature(f) => app.run("timeline.rename", json!({ "feature": f, "name": name })).map(|_| ()),
-        RenameWhat::Component(c) => app.run("component.rename", json!({ "component": c, "name": name })).map(|_| ()),
+        RenameWhat::Component(c) => {
+            // A name another component has takes the next free number: `Bracket` → `Bracket (2)`.
+            let c = *c;
+            let doc = &app.session.doc;
+            let taken = |n: &str| doc.components.iter().any(|k| k.id != c && k.name == n);
+            let name = if taken(&name) { solidcraft_engine::doc::copy_name(&name, taken) } else { name };
+            app.run("component.rename", json!({ "component": c, "name": name })).map(|_| ())
+        }
         RenameWhat::Group(g) => {
             crate::browser::group_action(app, "ui.renameGroup", &json!({ "group": g, "name": name }));
             Ok(())
@@ -2302,10 +2487,10 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
             doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
         }
         // Construction geometry, as the browser's Construction folder lists it.
-        Target::Plane { id } => doc.feature(*id).is_some_and(|f| {
-            matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
-        }),
+        Target::Plane { id } => doc.feature(*id).is_some_and(|f| f.kind.is_construction()),
         Target::Feature { id } => feature(*id),
+        // The browser lists History while it is docked there and the design has features.
+        Target::HistoryFolder => app.preferences.history_in_browser && !doc.features.is_empty(),
         Target::Timeline { feature: id } => feature(*id),
         Target::OriginPlane { name } => crate::prefs::OriginPlaneNames::PLANES.contains(&name.as_str()),
         Target::OriginAxis { name } => ["X", "Y", "Z"].contains(&name.as_str()),
@@ -2317,6 +2502,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
             component(*id) && ["bodies", "sketches", "construction"].contains(&folder.as_str()) && crate::browser::scope_shows(app, scope, *id)
         }
         Target::Joint { id } => doc.assembly.joints.iter().any(|j| j.id == *id),
+        Target::Link { index } => *index < doc.assembly.links.len(),
         Target::ToolbarCommand { id } => solidcraft_engine::find_command(id).is_some(),
         Target::NamedView { name } => {
             doc.named_views.iter().any(|v| v.name == *name) || crate::browser::STANDARD_VIEWS.iter().any(|(label, _)| label == name)
@@ -2356,7 +2542,10 @@ pub fn describe(app: &SolveApp) -> Value {
     let Some(at) = app.viewport.context_menu else {
         return json!({ "open": false, "pending": app.menu.pending.is_some() });
     };
-    let radial = if app.menu.radial { radial_items(app) } else { Vec::new() };
+    let mut radial = if app.menu.radial { radial_items(app) } else { Vec::new() };
+    show_current_keys(app, &mut radial);
+    let mut rows = items(app, &app.menu.target);
+    show_current_keys(app, &mut rows);
     /// A row with its `placeholder` flag, and a flyout's rows likewise.
     fn describe_items(items: Vec<Item>) -> Vec<Value> {
         items
@@ -2378,7 +2567,7 @@ pub fn describe(app: &SolveApp) -> Value {
         "at": [at.x, at.y],
         "target": app.menu.target,
         "radial": describe_items(radial),
-        "items": describe_items(items(app, &app.menu.target)),
+        "items": describe_items(rows),
         "rename": app.menu.rename.as_ref().map(|r| r.text.clone()),
     })
 }
@@ -2424,20 +2613,27 @@ fn radial_center(at: Pos2, screen: Rect) -> Pos2 {
     pos2(x, y)
 }
 
+/// The height [`menu_frame`] adds around its rows: margins and border.
+const MENU_CHROME: f32 = 14.0;
+
+/// The room a menu leaves between itself and the window's top and bottom edges.
+const MENU_SCREEN_GAP: f32 = 4.0;
+
 /// Height of a list of items as [`list_row`] draws them in [`menu_frame`] (margins and border).
 fn list_height(items: &[Item]) -> f32 {
-    14.0 + items
-        .iter()
-        .map(|i| {
-            if i.is_sep() {
-                11.0
-            } else if i.is_heading() {
-                24.0
-            } else {
-                30.0
-            }
-        })
-        .sum::<f32>()
+    MENU_CHROME
+        + items
+            .iter()
+            .map(|i| {
+                if i.is_sep() {
+                    11.0
+                } else if i.is_heading() {
+                    24.0
+                } else {
+                    30.0
+                }
+            })
+            .sum::<f32>()
 }
 
 /// Where the list goes next to a ring centred at `c`: below it when it fits, otherwise beside
@@ -2548,7 +2744,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(at) = app.viewport.context_menu else { return };
     let screen = ctx.content_rect();
     let target = app.menu.target.clone();
-    let list = items(app, &target);
+    let mut list = items(app, &target);
+    show_current_keys(app, &mut list);
     let mut picked: Option<Item> = None;
     let pointer = ctx.input(|i| i.pointer.latest_pos());
     let mut inside = app.menu.opener.is_some_and(|r| pointer.is_some_and(|p| r.contains(p)));
@@ -2571,6 +2768,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             });
         inside |= resp.response.contains_pointer();
         list_place(c, list_height(&list), screen)
+    } else if list_height(&list) > screen.height() - 2.0 * MENU_SCREEN_GAP {
+        // Taller than the window: it fills the window's height and scrolls.
+        let x = place(at, Vec2::ZERO, vec2(LIST_W, 0.0), screen).x;
+        pos2(x, screen.top() + MENU_SCREEN_GAP)
     } else {
         place(at, Vec2::ZERO, vec2(LIST_W, list_height(&list)), screen)
     };
@@ -2615,9 +2816,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             if target == Target::Workspace {
-                picked = crate::ui_kit::workspace_menu(ui, &list, key_row, (screen.bottom() - list_at.y).max(160.0)).or(picked.take());
+                picked = workspace_menu(ui, &list, key_row, (screen.bottom() - list_at.y).max(160.0)).or(picked.take());
             } else {
-                menu_frame(ui, |ui| seen.push(level_rows(ui, &list, 0, key_row, path.first().copied(), leaving == Some(0), &mut picked)));
+                // A menu taller than the window scrolls between full-width bars; a menu opened
+                // anywhere else starts at its top again.
+                let rows = egui::Id::unique(("sc_context_menu_rows", at.x.to_bits(), at.y.to_bits()));
+                let room = screen.height() - MENU_CHROME - 2.0 * MENU_SCREEN_GAP;
+                menu_frame(ui, |ui| {
+                    scroll_rows(ui, rows, room, list_height(&list) - MENU_CHROME, |ui| {
+                        seen.push(level_rows(ui, &list, 0, key_row, path.first().copied(), leaving == Some(0), &mut picked))
+                    })
+                });
             }
         });
     inside |= resp.response.contains_pointer() || resp.response.rect.contains(pointer.unwrap_or(Pos2::ZERO));
@@ -2685,38 +2894,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-/// Shared kit surface; legacy callers retain their menu positioning and dispatch.
-pub fn menu_frame<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    crate::ui_kit::Menu::show(ui, LIST_W, add)
-}
-
-pub fn button(ui: &mut egui::Ui, label: &str, icon: &str) -> egui::Response {
-    button_enabled(ui, label, icon, true)
-}
-
-pub fn button_enabled(ui: &mut egui::Ui, label: &str, icon: &str, enabled: bool) -> egui::Response {
-    let mut item = crate::ui_kit::MenuItem::new(label, label, icon);
-    item.enabled = enabled;
-    item.show(ui)
-}
-
-pub fn list_row(ui: &mut egui::Ui, item: &Item) -> Option<Item> {
-    list_row_lit(ui, item, false)
-}
-
-pub fn list_row_lit(ui: &mut egui::Ui, item: &Item, lit: bool) -> Option<Item> {
-    if item.is_sep() {
-        crate::ui_kit::Menu::separator(ui);
-        return None;
-    }
-    if item.is_heading() {
-        crate::ui_kit::Menu::heading(ui, &item.label);
-        return None;
-    }
-    let row = kit_item(item, lit);
-    (row.show(ui).clicked() && item.enabled).then(|| item.clone())
-}
-
 /// The rows of each open level: the menu itself, then every open flyout in turn. It stops at a
 /// row that is gone or has no flyout.
 fn open_levels<'a>(list: &'a [Item], path: &[usize]) -> Vec<&'a [Item]> {
@@ -2766,11 +2943,15 @@ fn level_rows(
         }
         // Flyout entries may share an id (swatches): their handles add the label.
         let handle = format!("{}:{}", item.id, item.label);
-        let mut kit = kit_item(item, cursor == Some(k) || (open == Some(k) && !leaving));
+        let mut kit = MenuItem::from_item(item, cursor == Some(k) || (open == Some(k) && !leaving));
         if depth > 0 {
             kit.id = &handle;
         }
         let row = kit.show(ui);
+        // A row chosen with the keys scrolls into view in a menu taller than the window.
+        if cursor == Some(k) && ui.input(|i| i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::ArrowDown)) {
+            row.scroll_to_me(None);
+        }
         let row = match &item.tip {
             Some(tip) => row.backing_on_hover_text(tip.as_str()),
             None => row,
@@ -2792,21 +2973,6 @@ fn level_rows(
         }
     }
     seen
-}
-
-fn kit_item(item: &Item, lit: bool) -> crate::ui_kit::MenuItem<'_> {
-    crate::ui_kit::MenuItem {
-        id: &item.id,
-        label: &item.label,
-        icon: &item.icon,
-        shortcut: if item.shortcut == "current" { "" } else { &item.shortcut },
-        enabled: item.enabled,
-        highlighted: lit,
-        danger: item.icon == "delete",
-        checked: (item.shortcut == "current").then_some(true),
-        swatch: item.swatch.map(|c| Color32::from_rgb(c[0], c[1], c[2])),
-        submenu: !item.children.is_empty(),
-    }
 }
 
 fn show_rename(app: &mut SolveApp, ctx: &egui::Context) {
@@ -2849,6 +3015,35 @@ pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> bo
         let _ = commit_rename(app, &r);
     }
     true
+}
+
+/// How the workspace menu shows each of SolidCraft's workspaces ([`Target::Workspace`]).
+fn workspace_style(item: &Item) -> Option<crate::ui_kit::WorkspaceStyle> {
+    use crate::ui_kit::WorkspaceStyle;
+    use solidcraft_theme::AccentRamp;
+    let planned = |slug, description| WorkspaceStyle { slug, description, tabs: None, ramp: None };
+    Some(match item.label.as_str() {
+        "Design" => {
+            WorkspaceStyle { slug: "design", description: "ui.workspace_design_description", tabs: Some("ui.workspace_design_tabs"), ramp: None }
+        }
+        "Render" => WorkspaceStyle {
+            slug: "render",
+            description: "ui.workspace_render_description",
+            tabs: Some("ui.workspace_render_tabs"),
+            ramp: Some(AccentRamp::Render),
+        },
+        "Animation" => planned("animation", "ui.workspace_animation_description"),
+        "Simulation" => planned("simulation", "ui.workspace_simulation_description"),
+        "Manufacture" => planned("manufacture", "ui.workspace_manufacture_description"),
+        "Drawing" => planned("drawing", "ui.workspace_drawing_description"),
+        _ => return None,
+    })
+}
+
+/// The kit's workspace menu over SolidCraft's workspaces (`items` of [`Target::Workspace`]).
+pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<usize>, height: f32) -> Option<Item> {
+    let menu = crate::ui_kit::WorkspaceMenu { items, style: &workspace_style, footer: solidcraft_ui_text::tr("ui.workspace_footer") };
+    crate::ui_kit::workspace_menu(ui, &menu, key_row, height)
 }
 
 #[cfg(test)]
@@ -3214,7 +3409,11 @@ mod tests {
         let count = |h: &crate::scenario::Harness, id: &str| {
             let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sid).unwrap().sketch;
-            sk.curves[sk.curve_index(id).unwrap()].kind.point_ids().len()
+            // Its fit points, not their tangent handles (#6502).
+            match &sk.curves[sk.curve_index(id).unwrap()].kind {
+                solidcraft_engine::sketch::CurveKind::Spline { pts, .. } => pts.len(),
+                kind => kind.point_ids().len(),
+            }
         };
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.0;
@@ -3274,7 +3473,9 @@ mod tests {
         let places = |h: &crate::scenario::Harness| {
             let state = h.app.session.world_state().unwrap();
             let sk = &state.sketch(sid).unwrap().sketch;
-            sk.curves[sk.curve_index(&fit).unwrap()].kind.point_ids().iter().map(|i| sk.point(*i).unwrap()).collect::<Vec<_>>()
+            // Its fit points, not their tangent handles (#6502), which go with a removed point.
+            let solidcraft_engine::sketch::CurveKind::Spline { pts, .. } = &sk.curves[sk.curve_index(&fit).unwrap()].kind else { panic!("a spline") };
+            pts.iter().map(|i| sk.point(*i).unwrap()).collect::<Vec<_>>()
         };
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.0;
@@ -3333,7 +3534,7 @@ mod tests {
         h.frames(90);
         assert!(h.app.cam.back().dist(flat.plane_normal.unwrap()) < 2e-6);
         h.app.session.selection = vec![Sel::Face { body: body.name.clone(), index: curved.index, point: curved.centroid }];
-        assert!(items(&h.app, &Target::Viewport).iter().any(|i| i.id == "view.normal_to" && !i.enabled));
+        assert!(!items(&h.app, &Target::Viewport).iter().any(|i| i.id == "view.normal_to"));
     }
 
     #[test]
@@ -3442,7 +3643,7 @@ mod workspace_menu_tests {
         let app = SolveApp::new(Default::default(), Default::default());
         let list = items(&app, &Target::Workspace);
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            crate::ui_kit::workspace_menu(ui, &list, None, 1000.0);
+            workspace_menu(ui, &list, None, 1000.0);
         });
         output.textures_delta.clear();
         let titles: Vec<_> = output
@@ -3486,5 +3687,32 @@ mod workspace_menu_tests {
         h.step(&json!({"click":{"handle":"workspace:menu:render"}})).unwrap();
         assert!(!crate::render_workspace::active(&h.app));
         assert!(h.app.viewport.context_menu.is_some());
+    }
+
+    /// Isocurve Analysis leaves its face-picking tool running. That tool edits nothing, so the
+    /// Render row stays enabled; choosing it ends the tool and keeps the curves (#14993). A
+    /// modelling operation still holds the workspace switcher.
+    #[test]
+    fn render_row_opens_while_isocurve_analysis_is_on() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1200,"height":1000}));
+        h.app.run("solid.cylinder", json!({"radius": 10, "height": 30})).unwrap();
+        h.settle();
+        let render_row = |app: &SolveApp| items(app, &Target::Workspace).iter().any(|i| i.id == "ui.workspace.render" && i.enabled);
+        h.step(&json!({"start": "inspect.isocurve"})).unwrap();
+        h.step(&json!({"click": {"world": [10, 0, 15]}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("inspect.isocurve"));
+        assert_eq!(h.app.session.isocurves.len(), 1, "{:?}", h.app.status);
+        assert!(render_row(&h.app), "a look-only Inspect tool does not lock Render");
+        h.step(&json!({"click":{"handle":"ribbon:workspace"}})).unwrap();
+        h.step(&json!({"click":{"handle":"workspace:menu:render"}})).unwrap();
+        assert!(crate::render_workspace::active(&h.app), "{:?}", h.app.status);
+        assert!(h.app.tool.is_none(), "the picking tool ended");
+        assert_eq!(h.app.session.isocurves.len(), 1, "the curves stay on");
+        crate::render_workspace::enter(&mut h.app, false).unwrap();
+        h.step(&json!({"start": "solid.fillet"})).unwrap();
+        assert!(h.app.tool.is_some() || h.app.dialog.is_some());
+        assert!(!render_row(&h.app), "a modelling operation still locks Render");
+        assert!(crate::render_workspace::enter(&mut h.app, true).is_err());
     }
 }

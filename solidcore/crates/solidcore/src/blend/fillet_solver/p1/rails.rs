@@ -218,6 +218,7 @@ pub(crate) trait RailOps {
             crate::blend::fillet_geom::p2::SrfSrfOptions {
                 skip_two_pnts_intersection: skip_two_points_intersection,
                 ref_point: reference_point,
+                closed_by_start_direction: false,
             },
         )
         .map(|curves| curves.curve_3d)
@@ -296,7 +297,7 @@ pub(crate) fn compute_support_edge_with_ops(
     .support_edge(support, geom, approx, angle, ops)
 }
 fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::null_pointer(OP))
+    value.ok_or_else(|| SolidError::blend_missing(OP, "a fillet entity the support edge needs"))
 }
 struct Rails<'a> {
     k: &'a Kernel,
@@ -391,7 +392,10 @@ impl Rails<'_> {
     ) -> Result<()> {
         let start = self.start(support)?;
         if !self.fillets.fillet_vertex(start)?.is_processed() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the support edge's start vertex is not processed",
+            ));
         }
         let start_point = self.fillets.vertex_point(start)?;
         let primary = required(eu::primary_edgeuse(self.fillets.brep(), support)?)?;
@@ -422,7 +426,10 @@ impl Rails<'_> {
                 self.fillets
                     .fillet_edge_mut(support)?
                     .set_status(FilStatus::SurfIntFailure);
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the two fillet surfaces do not intersect",
+                ));
             }
         };
         let mut interval = curve.natural_interval();
@@ -435,13 +442,12 @@ impl Rails<'_> {
             &interval,
             approx,
         )?;
-        let sol = solutions.get(0).ok_or_else(|| SolidError::sm_err(OP))?;
-        let t = sol
-            .start
-            .parameters
-            .first()
-            .copied()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let sol = solutions.get(0).ok_or_else(|| {
+            SolidError::blend_failed(OP, "the support curve does not meet the surface")
+        })?;
+        let t = sol.start.parameters.first().copied().ok_or_else(|| {
+            SolidError::blend_missing(OP, "the curve parameter of the intersection")
+        })?;
         let end_point = curve.evaluate_point(self.k, t)?;
         let end = self.end(support)?;
         self.fillets.brep_mut().vertex_mut(end)?.point = end_point;
@@ -458,7 +464,10 @@ impl Rails<'_> {
             SolverOperation::Minimize,
         )?;
         if !drop1.success {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the start point does not drop onto the curve",
+            ));
         }
         let drop2 = curve.drop_point(
             self.k,
@@ -470,7 +479,10 @@ impl Rails<'_> {
             SolverOperation::Minimize,
         )?;
         if !drop2.success {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the end point does not drop onto the curve",
+            ));
         }
         let reverse = drop1.parameter > drop2.parameter;
         if reverse {

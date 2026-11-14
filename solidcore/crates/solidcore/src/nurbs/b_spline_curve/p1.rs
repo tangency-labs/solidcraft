@@ -607,7 +607,7 @@ impl BSplineCurve {
 
     /// The NURB for read-only callers (`GetOrCreateGwNurbPointer` through a const
     /// cast), or `SM_ERR` without one (upstream dereferences `NULL`).
-    pub(super) fn nurb_ref(&self) -> Result<&Curve> {
+    pub(crate) fn nurb_ref(&self) -> Result<&Curve> {
         self.nurb
             .as_ref()
             .ok_or_else(|| SolidError::sm_err(OP_NURB))
@@ -822,6 +822,18 @@ impl BSplineCurve {
             start_weight: weight(first),
             end_weight: weight(last),
         })
+    }
+
+    /// The Euclidean control points whose convex hull holds the curve over `ivl`, each
+    /// with the error bound of its coordinates
+    /// ([`crv_hull_points`](crate::nurbs::nurbs_crv::crv_hull_points)); `None` without a
+    /// NURB or when no such hull is certain (a 2D curve, a weight not positive, `ivl`
+    /// outside the natural domain).
+    ///
+    /// Not upstream.
+    #[must_use]
+    pub(crate) fn hull_points_over(&self, ivl: &Extent1d) -> Option<Vec<(Vec3, f64)>> {
+        crate::nurbs::nurbs_crv::crv_hull_points(self.nurb_ref().ok()?, ivl)
     }
 
     /// The unique knots and their multiplicities, optionally only those in `ivl`
@@ -1506,7 +1518,7 @@ impl BSplineCurve {
     /// [`BSplineCurve::create_circle_segment`] whose quadratic form is split into at
     /// least `min_arcs` equal arcs (at most four; `0` is upstream's count from the
     /// sweep). Not upstream: an exact circular fillet's sections take one arc count
-    /// along the rails (`fixes.fillet_exact_arc_spans`, WR-711).
+    /// along the rails (WR-711).
     ///
     /// # Errors
     ///

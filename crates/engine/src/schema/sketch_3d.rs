@@ -18,6 +18,7 @@ use solidcore_record::Vec3;
 use super::check::whole;
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
+use super::sketch_shapes::Created;
 use super::types::Point3;
 use crate::params;
 
@@ -294,6 +295,10 @@ pub struct Curves3dResult {
     pub curves: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`, and
+    /// `wires` when there are any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -306,6 +311,10 @@ pub struct Point3dResult {
     pub point: String,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`, and
+    /// `wires` when there are any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

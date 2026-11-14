@@ -29,8 +29,17 @@
 //! - `KERNEL_CASES_AREA`: comma-separated areas (a prefix each: `ladder` takes every tier) to run
 //!   only those, the CI shards (#2394);
 //! - `KERNEL_CASES_CASE`: run only cases whose name contains it;
-//! - `KERNEL_CASES_TIMEOUT_S`: a case's time limit, 180 s by default; one past it is a hang, and
-//!   the cases after it are not run (it holds the process kernel);
+//! - `KERNEL_CASES_TIMEOUT_S`: a case's time limit in seconds; one past it is a hang. In this
+//!   process (`KERNEL_CASES_JOBS` unset or 1) it is wall time, 180 s by default, and the cases
+//!   after a hang are not run (it holds the process kernel). With jobs it is the case process's
+//!   CPU time (user and system, from `/proc` on Linux; wall time elsewhere), 600 s by default,
+//!   with a backstop of four times it in wall time for a process that hangs without using CPU;
+//!   the hung process is killed, and the other cases still run;
+//! - `KERNEL_CASES_JOBS`: run each case in a process of its own, this many at a time (`0`: one per
+//!   available thread). Unset or 1, every case runs in this process, one after the other. The
+//!   grades, the table and the lists are the same either way, in the selection's order;
+//! - `KERNEL_CASES_SHARD`: `i/n`, run only the i-th (from 1) of n slices of the selection: every
+//!   n-th case from the i-th, so that each area spreads over every slice;
 //! - `KERNEL_CASES_REPORT`: a file to write the per-area table and the lists to;
 //! - `KERNEL_CASES_REPORT_ONLY`: set, the test reports without failing;
 //! - `KERNEL_CASES_SMB`: a directory to write each run case's bodies to as `<case>.smb`, for
@@ -55,7 +64,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use solidcore_ops::blend::{
     blend_ordered, chamfer_sides_ordered, edge_faces_along_ordered, fillet_variable_ordered, Blend,
-    ChamferSecond, Corners, SetBack, Turn,
+    BlendOptions, ChamferSecond, Corners, SetBack, Turn,
 };
 use solidcore_ops::boolean::{boolean, union_all, BooleanOp};
 use solidcore_ops::extend::{extend_sheet, Continuation};
@@ -111,7 +120,9 @@ const DEFAULT_REL: f64 = 1e-3;
 /// The volume's relative accuracy asked of the kernel.
 const VOLUME_ACCURACY: f64 = 1e-9;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 enum Kind {
     Pass,
     Fail,
@@ -120,8 +131,10 @@ enum Kind {
     KnownFailing,
 }
 
-/// One case's grade, and what to say about it.
-#[derive(Debug)]
+/// One case's grade, and what to say about it. A case run in a process of its own hands it
+/// back to the parent as JSON.
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Graded {
     area: String,
     case: String,
@@ -129,12 +142,27 @@ struct Graded {
     note: String,
     /// The operations not ported, for an unported case (a listed one included).
     unported: Vec<String>,
-    /// The largest relative volume difference from the rig, for a run case.
+    /// The largest relative volume difference from the rig, for a run case. Handed back as
+    /// its bits, so that it crosses exactly (a NaN included).
+    #[serde(with = "f64_bits")]
     deviation: Option<f64>,
     /// For a listed case: whether its result moved from the rig's.
     moved: bool,
     /// Whether it ran past its time limit.
     hang: bool,
+}
+
+/// An `Option<f64>` as its IEEE bits, for [`Graded::deviation`].
+mod f64_bits {
+    #[expect(clippy::ref_option, reason = "the signature serde's `with` calls")]
+    pub fn serialize<S: serde::Serializer>(v: &Option<f64>, s: S) -> Result<S::Ok, S::Error> {
+        serde::Serialize::serialize(&v.map(f64::to_bits), s)
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+        let bits: Option<u64> = serde::Deserialize::deserialize(d)?;
+        Ok(bits.map(f64::from_bits))
+    }
 }
 
 /// An entry of the known-failing list.
@@ -944,7 +972,10 @@ fn call_with_copy(
                 &each,
                 &setbacks,
                 Corners::Filled,
-                Turn::Mitre,
+                BlendOptions {
+                    turn: Turn::Mitre,
+                    ..BlendOptions::default()
+                },
             )
             .map(|_| ());
             in_place(Slot { order: None, ..s }, r)
@@ -1003,7 +1034,10 @@ fn call_with_copy(
                 &each,
                 &[],
                 Corners::Filled,
-                turn,
+                BlendOptions {
+                    turn,
+                    ..BlendOptions::default()
+                },
             )
             .map(|_| ());
             in_place(Slot { order: None, ..s }, r)
@@ -1206,19 +1240,40 @@ fn grade_seams(result: &[Slot], expected: &Value) -> Result<(), Stop> {
     Ok(())
 }
 
-/// With `KERNEL_CASES_SMB` set, writes `bodies` there as `<case>.smb`, `<case>-1.smb`, ...
+/// With `KERNEL_CASES_SMB` set, writes a corpus case's `bodies` there; a failed write is
+/// printed, not graded.
 fn write_smb(e: &Value, bodies: &[Slot]) {
     let Some(dir) = std::env::var_os("KERNEL_CASES_SMB") else {
         return;
     };
-    let case = e["case"].as_str().unwrap();
-    for (i, s) in bodies.iter().enumerate() {
-        let name = match i {
-            0 => format!("{case}.smb"),
-            _ => format!("{case}-{i}.smb"),
-        };
-        std::fs::write(Path::new(&dir).join(name), s.body.to_smb(true).unwrap()).unwrap();
+    if let Err(x) = write_smb_to(Path::new(&dir), e, bodies) {
+        println!("KERNEL_CASES_SMB: {x}");
     }
+}
+
+/// Writes `bodies` to `dir` as `<case>.smb`, `<case>-1.smb`, ..., and removes the numbered
+/// files a previous run left past them. A synthetic case (no `case`) writes nothing.
+fn write_smb_to(dir: &Path, e: &Value, bodies: &[Slot]) -> Result<(), String> {
+    let Some(case) = e["case"].as_str() else {
+        return Ok(());
+    };
+    let path = |i: usize| match i {
+        0 => dir.join(format!("{case}.smb")),
+        _ => dir.join(format!("{case}-{i}.smb")),
+    };
+    for (i, s) in bodies.iter().enumerate() {
+        let bytes = s
+            .body
+            .to_smb(true)
+            .map_err(|x| format!("{case}: to_smb: {x}"))?;
+        std::fs::write(path(i), bytes).map_err(|x| format!("{}: {x}", path(i).display()))?;
+    }
+    let mut i = bodies.len();
+    while path(i).exists() {
+        std::fs::remove_file(path(i)).map_err(|x| format!("{}: {x}", path(i).display()))?;
+        i += 1;
+    }
+    Ok(())
 }
 
 /// Runs a case's calls and grades the result against `rig` (or, for a hand-written case
@@ -1326,7 +1381,10 @@ fn run_case_with_records(
                 write_smb(e, &ins);
                 return Ok(None);
             }
-            (Err(x), None) => return Err(Stop::Fail(format!("call {i} ({op}) refused: {x}"))),
+            (Err(x), None) => {
+                write_smb(e, &ins);
+                return Err(Stop::Fail(format!("call {i} ({op}) refused: {x}")));
+            }
             (Ok(_), Some(want)) => {
                 return Err(Stop::Fail(format!(
                     "call {i} ({op}) ran where the rig's refused: {want}"
@@ -1935,6 +1993,32 @@ fn check_discarded_edit(record: Record, op: &str, params: &Value, made: &Value, 
     run_case_with_records(&e, || records.clone()).unwrap();
 }
 
+/// The render export replaces a case's whole file set, skips synthetic cases and returns a
+/// failed write instead of panicking.
+#[test]
+fn smb_export_replaces_the_case_files_and_reports_failures() {
+    session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let slot = || Slot {
+        body: Arc::new(solidcore_ops::make_box([0.0; 3], [3.0, 2.0, 1.0]).unwrap()),
+        order: None,
+    };
+    let dir = std::env::temp_dir().join(format!("kernel-cases-smb-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let e = serde_json::json!({"case": "c"});
+    write_smb_to(&dir, &e, &[slot(), slot(), slot()]).unwrap();
+    assert!(dir.join("c-2.smb").exists());
+    write_smb_to(&dir, &e, &[slot()]).unwrap();
+    assert!(dir.join("c.smb").exists());
+    assert!(!dir.join("c-1.smb").exists() && !dir.join("c-2.smb").exists());
+    // a synthetic case has no name to write under
+    write_smb_to(&dir, &serde_json::json!({}), &[slot()]).unwrap();
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    let missing = dir.join("missing");
+    let err = write_smb_to(&missing, &e, &[slot()]).unwrap_err();
+    assert!(err.contains("missing"), "{err}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn a_discarded_shell_preserves_the_retained_box() {
     session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
@@ -2267,7 +2351,10 @@ fn filled_setback_ordered_api_rejects_foreign_entities_without_editing() {
                 distance: 8.0,
             }],
             Corners::Filled,
-            Turn::Mitre,
+            BlendOptions {
+                turn: Turn::Mitre,
+                ..BlendOptions::default()
+            },
         );
         assert!(
             matches!(r, Err(solidcore_ops::Error::Argument)),
@@ -4155,12 +4242,25 @@ fn kernel_cases() {
             .collect()
     });
     let only = std::env::var("KERNEL_CASES_CASE").ok();
+    if let Some(d) = std::env::var_os("KERNEL_CASES_SMB") {
+        assert!(
+            Path::new(&d).is_dir(),
+            "KERNEL_CASES_SMB: {} is not a directory",
+            Path::new(&d).display()
+        );
+    }
+    let jobs = jobs();
     let timeout = Duration::from_secs(
         std::env::var("KERNEL_CASES_TIMEOUT_S")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(180),
+            .unwrap_or(if jobs > 1 { 600 } else { 180 }),
     );
+    // a case process grades its one case, hands the grade back and ends
+    if let Some(one) = std::env::var_os(CHILD) {
+        child(&corpus().join(one), &listed, timeout);
+        return;
+    }
     let mut files = Vec::new();
     entries(&corpus(), &mut files);
     files.sort();
@@ -4201,14 +4301,23 @@ fn kernel_cases() {
         );
     }
 
+    let selected = match std::env::var("KERNEL_CASES_SHARD") {
+        Ok(spec) => shard(selected, &spec).unwrap_or_else(|x| panic!("{x}")),
+        Err(_) => selected,
+    };
+
     let mut graded = Vec::new();
     let mut not_run = 0;
-    for f in &selected {
-        if graded.last().is_some_and(|g: &Graded| g.hang) {
-            not_run += 1;
-            continue;
+    if jobs > 1 {
+        graded = run_in_processes(&selected, &listed, timeout, jobs);
+    } else {
+        for f in &selected {
+            if graded.last().is_some_and(|g: &Graded| g.hang) {
+                not_run += 1;
+                continue;
+            }
+            graded.push(grade(f, &listed, timeout));
         }
-        graded.push(grade(f, &listed, timeout));
     }
 
     let report = report(&graded, &listed, not_run);
@@ -4225,6 +4334,384 @@ fn kernel_cases() {
             failed.len(),
             moved.len()
         );
+    }
+}
+
+/// Set, a run of this binary is a case process: the case's path under the corpus.
+const CHILD: &str = "KERNEL_CASES_CHILD";
+
+/// Where a case process writes its grade, as JSON.
+const CHILD_OUT: &str = "KERNEL_CASES_CHILD_OUT";
+
+/// How often the parent looks at its case processes.
+const POLL: Duration = Duration::from_millis(10);
+
+/// `KERNEL_CASES_JOBS`: how many case processes run at a time; 1 (unset) runs every case in this
+/// process.
+fn jobs() -> usize {
+    let Ok(s) = std::env::var("KERNEL_CASES_JOBS") else {
+        return 1;
+    };
+    match s.trim().parse::<usize>() {
+        Ok(0) => std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
+        Ok(n) => n,
+        Err(x) => {
+            panic!("KERNEL_CASES_JOBS={s}: {x}; want a number of processes (0: one per thread)")
+        }
+    }
+}
+
+/// `KERNEL_CASES_SHARD=i/n`: the i-th (from 1) of n slices of the selection, every n-th case
+/// from the i-th, so that each area's cases spread over every slice.
+fn shard<T>(selected: Vec<T>, spec: &str) -> Result<Vec<T>, String> {
+    let (i, n) = spec
+        .split_once('/')
+        .and_then(|(i, n)| {
+            Some((
+                i.trim().parse::<usize>().ok()?,
+                n.trim().parse::<usize>().ok()?,
+            ))
+        })
+        .filter(|&(i, n)| (1..=n).contains(&i))
+        .ok_or_else(|| format!("KERNEL_CASES_SHARD={spec}: want i/n with 1 <= i <= n"))?;
+    Ok(selected
+        .into_iter()
+        .enumerate()
+        .filter(|(k, _)| k % n == i - 1)
+        .map(|(_, f)| f)
+        .collect())
+}
+
+/// The clock ticks (user and system) a process has used, from the text of its
+/// `/proc/<pid>/stat`: fields 14 and 15, counted after the command name, which is in
+/// parentheses and may itself hold spaces and parentheses.
+fn stat_cpu_ticks(stat: &str) -> Option<u64> {
+    let rest = stat.get(stat.rfind(')')? + 1..)?;
+    let mut f = rest.split_ascii_whitespace();
+    // `rest` starts at field 3 (the state): utime is field 14, stime field 15
+    let utime: u64 = f.nth(11)?.parse().ok()?;
+    let stime: u64 = f.next()?.parse().ok()?;
+    utime.checked_add(stime)
+}
+
+/// The CPU time a process has used, from `/proc/<pid>/stat` (Linux, whose user clock runs at
+/// 100 ticks a second); `None` where it cannot be read, and the wall clock is the limit.
+fn cpu_time(pid: u32) -> Option<Duration> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    Some(Duration::from_millis(
+        stat_cpu_ticks(&stat)?.checked_mul(10)?,
+    ))
+}
+
+/// A case process: grades its one case and writes the grade to [`CHILD_OUT`], whole or not at
+/// all. It ends when the parent does: the parent holds its stdin open while it lives.
+fn child(entry: &Path, listed: &BTreeMap<String, Listed>, timeout: Duration) {
+    std::thread::spawn(|| {
+        let mut buf = [0u8; 64];
+        loop {
+            match std::io::stdin().read(&mut buf) {
+                Ok(0) | Err(_) => std::process::exit(3),
+                Ok(_) => {}
+            }
+        }
+    });
+    let out = PathBuf::from(std::env::var_os(CHILD_OUT).expect("KERNEL_CASES_CHILD_OUT is set"));
+    let g = grade(entry, listed, timeout);
+    let part = out.with_extension("part");
+    std::fs::write(&part, serde_json::to_vec(&g).unwrap()).unwrap();
+    std::fs::rename(&part, &out).unwrap();
+}
+
+/// One running case process.
+struct Running {
+    /// The case's index in the selection.
+    index: usize,
+    child: std::process::Child,
+    started: Instant,
+    /// Where it writes its grade, its stdout and its stderr.
+    out: PathBuf,
+    log: PathBuf,
+    err: PathBuf,
+}
+
+/// The running case processes and their directory: dropped, on a panic too, it kills the
+/// processes and removes the directory.
+struct Pool {
+    running: Vec<Running>,
+    dir: PathBuf,
+}
+
+impl Drop for Pool {
+    fn drop(&mut self) {
+        for r in &mut self.running {
+            let _ = r.child.kill();
+            let _ = r.child.wait();
+        }
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// Grades each case in a process of its own, `jobs` at a time, started in the selection's order.
+/// A case past `timeout` of CPU time (of wall time where the CPU time cannot be read, and in any
+/// case past four times it of wall time) is killed and graded a hang, and the rest still run. A
+/// process that ends without a whole grade for its case is a failure. The grades come back in
+/// the selection's order, whatever order the processes end in.
+fn run_in_processes(
+    selected: &[PathBuf],
+    listed: &BTreeMap<String, Listed>,
+    timeout: Duration,
+    jobs: usize,
+) -> Vec<Graded> {
+    let exe = std::env::current_exe().unwrap();
+    let root = corpus();
+    let mut pool = Pool {
+        running: Vec::new(),
+        dir: std::env::temp_dir().join(format!("kernel-cases-{}", std::process::id())),
+    };
+    std::fs::create_dir_all(&pool.dir).unwrap();
+    // the case process's own wall limit, a backstop behind the parent's
+    let backstop = timeout.saturating_mul(4).as_secs().saturating_add(60);
+    let mut results: Vec<Option<Graded>> = selected.iter().map(|_| None).collect();
+    let mut next = 0;
+    loop {
+        while pool.running.len() < jobs && next < selected.len() {
+            let rel = selected[next].strip_prefix(&root).unwrap();
+            let out = pool.dir.join(format!("{next}.json"));
+            let log = pool.dir.join(format!("{next}.log"));
+            let err = pool.dir.join(format!("{next}.err"));
+            let stdout = std::fs::File::create(&log).unwrap();
+            let stderr = std::fs::File::create(&err).unwrap();
+            let child = std::process::Command::new(&exe)
+                .args(["--ignored", "--exact", "kernel_cases"])
+                .args(["--test-threads", "1", "--nocapture", "-q"])
+                .env(CHILD, rel)
+                .env(CHILD_OUT, &out)
+                .env("KERNEL_CASES_TIMEOUT_S", backstop.to_string())
+                .env_remove("KERNEL_CASES_JOBS")
+                .env_remove("KERNEL_CASES_SHARD")
+                .env_remove("KERNEL_CASES_REPORT")
+                .env_remove("KERNEL_CASES_REPORT_ONLY")
+                .stdin(std::process::Stdio::piped())
+                .stdout(stdout)
+                .stderr(stderr)
+                .spawn()
+                .unwrap_or_else(|x| panic!("starting the process for {}: {x}", rel.display()));
+            pool.running.push(Running {
+                index: next,
+                child,
+                started: Instant::now(),
+                out,
+                log,
+                err,
+            });
+            next += 1;
+        }
+        if pool.running.is_empty() {
+            break;
+        }
+        std::thread::sleep(POLL);
+        let mut k = 0;
+        while k < pool.running.len() {
+            let r = &mut pool.running[k];
+            let entry = &selected[r.index];
+            let graded = match r.child.try_wait() {
+                Ok(Some(status)) => Some(collect(entry, listed, status, &r.out, &r.err)),
+                Ok(None) => {
+                    let wall = r.started.elapsed();
+                    let cpu = cpu_time(r.child.id());
+                    if cpu.unwrap_or(wall) > timeout || wall > timeout.saturating_mul(4) {
+                        let _ = r.child.kill();
+                        let _ = r.child.wait();
+                        let used = cpu.map_or_else(String::new, |c| {
+                            format!("{} s of CPU time, ", c.as_secs())
+                        });
+                        let mut g = failed(
+                            entry,
+                            listed,
+                            &format!(
+                                "hang: past {} s ({used}{} s wall); killed, the other cases \
+                                 still run",
+                                timeout.as_secs(),
+                                wall.as_secs()
+                            ),
+                        );
+                        g.hang = true;
+                        Some(g)
+                    } else {
+                        None
+                    }
+                }
+                Err(x) => {
+                    let _ = r.child.kill();
+                    let _ = r.child.wait();
+                    Some(failed(
+                        entry,
+                        listed,
+                        &format!("the case's process: wait: {x}"),
+                    ))
+                }
+            };
+            if let Some(g) = graded {
+                let r = pool.running.swap_remove(k);
+                // what the case printed for the reader: a failed `KERNEL_CASES_SMB` write
+                let printed = std::fs::read(&r.log).unwrap_or_default();
+                for line in String::from_utf8_lossy(&printed).lines() {
+                    if line.starts_with("KERNEL_CASES_SMB:") {
+                        println!("{line}");
+                    }
+                }
+                let _ = std::fs::remove_file(&r.out);
+                let _ = std::fs::remove_file(&r.log);
+                let _ = std::fs::remove_file(&r.err);
+                results[r.index] = Some(g);
+            } else {
+                k += 1;
+            }
+        }
+    }
+    drop(pool);
+    results
+        .into_iter()
+        .zip(selected)
+        .map(|(g, entry)| g.unwrap_or_else(|| failed(entry, listed, "not graded")))
+        .collect()
+}
+
+/// The grade a case process that ended handed back, or a failure: it did not end well, or its
+/// grade is not whole, or is for another case.
+fn collect(
+    entry: &Path,
+    listed: &BTreeMap<String, Listed>,
+    status: std::process::ExitStatus,
+    out: &Path,
+    err: &Path,
+) -> Graded {
+    let handed: Result<Graded, String> = std::fs::read(out)
+        .map_err(|x| match x.kind() {
+            std::io::ErrorKind::NotFound => "no grade".to_owned(),
+            _ => format!("no readable grade ({x})"),
+        })
+        .and_then(|b| serde_json::from_slice(&b).map_err(|x| format!("a broken grade ({x})")));
+    let mut problem = match handed {
+        Ok(g) if status.success() => {
+            let e: Value = serde_json::from_str(&std::fs::read_to_string(entry).unwrap()).unwrap();
+            if e["area"].as_str() == Some(g.area.as_str()) && e["case"].as_str() == Some(&g.case) {
+                return g;
+            }
+            format!("a grade for {}/{}", g.area, g.case)
+        }
+        Ok(_) => "a grade".to_owned(),
+        Err(x) => x,
+    };
+    problem = format!("the case's process ended ({status}) with {problem}");
+    let tail = stderr_tail(err);
+    if !tail.is_empty() {
+        write!(problem, ": {tail}").unwrap();
+    }
+    failed(entry, listed, &problem)
+}
+
+/// The last lines of a case process's stderr, on one line, for a failure's note.
+fn stderr_tail(err: &Path) -> String {
+    let text = std::fs::read(err).unwrap_or_default();
+    let text = String::from_utf8_lossy(&text);
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let tail = lines[lines.len().saturating_sub(4)..].join(" | ");
+    match tail.char_indices().nth(400) {
+        Some((cut, _)) => format!("{}...", &tail[..cut]),
+        None => tail,
+    }
+}
+
+/// A case whose process was killed, or ended without its grade: a failure, or for a listed
+/// case a known failure whose result moved.
+fn failed(entry: &Path, listed: &BTreeMap<String, Listed>, note: &str) -> Graded {
+    let e: Value = serde_json::from_str(&std::fs::read_to_string(entry).unwrap()).unwrap();
+    let area = e["area"].as_str().unwrap().to_owned();
+    let case = e["case"].as_str().unwrap().to_owned();
+    let is_listed = listed.contains_key(&format!("{area}/{case}"));
+    Graded {
+        area,
+        case,
+        kind: if is_listed {
+            Kind::KnownFailing
+        } else {
+            Kind::Fail
+        },
+        note: note.to_owned(),
+        unported: Vec::new(),
+        deviation: None,
+        moved: is_listed,
+        hang: false,
+    }
+}
+
+#[test]
+fn shard_slices_the_selection_round_robin() {
+    let all: Vec<usize> = (0..10).collect();
+    assert_eq!(shard(all.clone(), "1/3").unwrap(), [0, 3, 6, 9]);
+    assert_eq!(shard(all.clone(), "2/3").unwrap(), [1, 4, 7]);
+    assert_eq!(shard(all.clone(), " 3 / 3 ").unwrap(), [2, 5, 8]);
+    assert_eq!(shard(all.clone(), "1/1").unwrap(), all);
+    // every case lands in exactly one slice, and the slices keep the selection's order
+    let mut joined: Vec<usize> = (1..=4)
+        .flat_map(|i| shard(all.clone(), &format!("{i}/4")).unwrap())
+        .collect();
+    joined.sort_unstable();
+    assert_eq!(joined, all);
+    assert!(shard(all.clone(), "4/3")
+        .unwrap_err()
+        .contains("1 <= i <= n"));
+    for bad in ["0/3", "1/0", "3", "a/b", "", "1/2/3", "-1/3"] {
+        assert!(shard(all.clone(), bad).is_err(), "{bad}");
+    }
+    assert!(shard(Vec::<usize>::new(), "2/2").unwrap().is_empty());
+}
+
+#[test]
+fn stat_cpu_ticks_reads_user_and_system_time() {
+    // a real line's shape: pid (comm) state ppid ... utime stime ...
+    let line = "4242 (kernel_cases-3) R 4241 4242 4241 0 -1 4194304 1234 0 0 0 1500 27 0 0 20 0 \
+                3 0 99 123456 789 18446744073709551615 1 1 0 0 0 0 0 0 0 0 0 0 17 5 0 0 0 0 0";
+    assert_eq!(stat_cpu_ticks(line), Some(1527));
+    // a command name with spaces and parentheses
+    let odd = "7 (a b) (c) S 1 7 7 0 -1 0 0 0 0 0 9 1 0 0 20 0 1 0 5 0 0";
+    assert_eq!(stat_cpu_ticks(odd), Some(10));
+    assert_eq!(stat_cpu_ticks(""), None);
+    assert_eq!(stat_cpu_ticks("1 (x) R 0 0"), None);
+    assert_eq!(stat_cpu_ticks("1 (x) R 0 0 0 0 0 0 0 0 0 0 x 1"), None);
+    // this process's own line parses, where there is a /proc
+    if let Ok(own) = std::fs::read_to_string("/proc/self/stat") {
+        assert!(stat_cpu_ticks(&own).is_some(), "{own}");
+        assert!(cpu_time(std::process::id()).is_some());
+    }
+}
+
+#[test]
+fn a_grade_crosses_a_process_exactly() {
+    for deviation in [None, Some(0.1 + 0.2), Some(f64::NAN), Some(5e-324)] {
+        let g = Graded {
+            area: "fillets".to_owned(),
+            case: "c".to_owned(),
+            kind: Kind::KnownFailing,
+            note: "n".to_owned(),
+            unported: vec!["op".to_owned()],
+            deviation,
+            moved: true,
+            hang: false,
+        };
+        let back: Graded = serde_json::from_slice(&serde_json::to_vec(&g).unwrap()).unwrap();
+        assert_eq!(
+            back.deviation.map(f64::to_bits),
+            deviation.map(f64::to_bits)
+        );
+        if deviation.is_none_or(|d| !d.is_nan()) {
+            assert_eq!(back, g);
+        }
     }
 }
 

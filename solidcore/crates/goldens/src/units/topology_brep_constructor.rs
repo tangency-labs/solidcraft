@@ -2,7 +2,7 @@
 //! checked against its golden. Rust: `solidcore::topology::brep_constructor` through
 //! [`crate::constructor`].
 //!
-//! A case is a constructor script ([`step_import::script`]): the calls an importer makes,
+//! A case is a constructor script ([`crate::script`]): the calls an importer makes,
 //! over a table of curves and surfaces. The runner runs it and reports every call's status,
 //! where upstream crashes on a null dereference (the port's constructor
 //! [`solidcore::SolidError::InvalidInput`]), and the B-rep built: its whole graph in
@@ -14,7 +14,7 @@
 //! Built-in cases: solids from prisms (cubes, polygons, boxes with square and polygonal
 //! holes through them), cylinders (seam edges), a vertex-loop sphere, a box with a void,
 //! open shells, a non-manifold fan of three faces on one edge, the hand-written STEP
-//! tetrahedron and disk of `step-import`, each with limits from vertex points or curve
+//! tetrahedron and disk of `step-export`'s import tests, each with limits from vertex points or curve
 //! parameters, reversed faces, and as separate edges stitched by `EndShell(TRUE)`; faces
 //! bounded by lifted UV lines and B-splines; and malformed call sequences (calls out of
 //! state, null curves, decreasing limits, missing curves). Generated cases: random shapes,
@@ -26,11 +26,11 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use step_import::model::{
+use solidcore_record::step::model::{
     BSplineCurve, Body, BodyKind, Bound, Curve, Edge, Face, Frame, Loop, OrientedEdge, Shell,
     Surface, Vertex, P3,
 };
-use step_import::script::{
+use crate::script::{
     self, FromBodyOptions, Node, Op, Orient, RegionRef, Script, ScriptCurve,
 };
 
@@ -573,7 +573,7 @@ fn bspline_face(bump: bool) -> Body {
                 cubic_edge(3, 2, row(3)),
                 cubic_edge(0, 3, col(0)),
             ],
-            Surface::BSpline(step_import::model::BSplineSurface {
+            Surface::BSpline(solidcore_record::step::model::BSplineSurface {
                 u_degree: 3,
                 v_degree: 3,
                 points: net.clone(),
@@ -620,7 +620,7 @@ fn reverse_plane(b: &mut Body, fi: usize) {
 const TETRA_STEP: &str = include_str!("topology_brep_constructor_tetra.stp");
 
 fn step_bodies() -> Vec<Body> {
-    step_import::import(TETRA_STEP.as_bytes(), &step_import::Limits::default())
+    step_export::import(TETRA_STEP.as_bytes(), &step_export::Limits::default())
         .map(|m| m.bodies)
         .unwrap_or_default()
 }

@@ -43,9 +43,10 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 LIST = Path("plan/panic-sites.tsv")
-# solidcore and the STEP crates SolidCraft links. nurbs-grid-mesh is not here: nothing
-# depends on it, and docs/layers.md has it merged into solidcore-tess and then deleted.
-CRATES = ["solidcore", "step-brep", "step-import", "step-export"]
+# solidcore and the STEP crates SolidCraft links (solidcore-step: SolidCraft's STEP reader,
+# moved in by tangency-labs/solidcraft#13979). nurbs-grid-mesh is not here: nothing depends on
+# it, and docs/layers.md has it merged into solidcore-tess and then deleted.
+CRATES = ["solidcore", "step-export", "solidcore-step"]
 COLUMNS = ["file", "fn", "pattern", "n", "status", "code", "reason"]
 
 # clippy `disallowed-methods` path -> pattern name. Only calls that can panic on their
@@ -342,8 +343,10 @@ def span_code(span, src):
 def library_span(span, prefixes):
     """The span itself, or the macro call site it was expanded from, inside library code."""
     while span is not None:
-        if span["file_name"].startswith(prefixes):
-            return span
+        # clippy names files with backslashes on Windows (#13623); the list and the prefixes use `/`
+        file = span["file_name"].replace("\\", "/")
+        if file.startswith(prefixes):
+            return dict(span, file_name=file)
         exp = span.get("expansion")
         span = exp["span"] if exp else None
     return None
@@ -416,7 +419,11 @@ def run_clippy(root):
         for crate in CRATES:
             cmd += ["-p", crate]
         # a renamed or misspelt lint would otherwise pass with no sites at all
-        cmd += ["--", "-D", "unknown_lints"] + [arg for lint in LINTS for arg in ("-W", lint)]
+        # --cap-lints warn: a workspace crate a listed crate depends on but this list does not
+        # cover (solidcore-record, which denies disallowed_methods in its own source) is checked
+        # too, and its denies must not fail the run; its sites are not rows.
+        cmd += ["--", "--cap-lints", "warn", "-D", "unknown_lints"]
+        cmd += [arg for lint in LINTS for arg in ("-W", lint)]
         env = dict(os.environ, CLIPPY_CONF_DIR=tmp)
         res = subprocess.run(cmd, cwd=root, env=env, stdout=subprocess.PIPE, text=True)
     if res.returncode != 0:
@@ -601,9 +608,15 @@ def base_list(root, rev):
     git = ["git", "-C", str(root)]
     if subprocess.run(git + ["cat-file", "-e", f"{rev}^{{commit}}"]).returncode != 0:
         raise SystemExit(f"base revision {rev} is not in this clone (fetch it first)")
-    res = subprocess.run(git + ["show", f"{rev}:{LIST}"], stdout=subprocess.PIPE,
-                         stderr=subprocess.DEVNULL, text=True)
-    return read_list(res.stdout) if res.returncode == 0 else None
+    # git takes `/` on every system (#13623). `./` names the list relative to `root`, which is a
+    # folder of the repository inside SolidCraft (`solidcore/`); a base commit holding `root`'s
+    # tree alone (CI's, there) has it at the top.
+    for spec in (f"{rev}:./{LIST.as_posix()}", f"{rev}:{LIST.as_posix()}"):
+        res = subprocess.run(git + ["show", spec], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True)
+        if res.returncode == 0:
+            return read_list(res.stdout)
+    return None
 
 
 def main(argv):

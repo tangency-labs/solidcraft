@@ -375,11 +375,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     // every other dialog's value gets (`dir` is None below).
     if matches!(d.kind, Kind::Move { .. }) {
         let mut dragging = false;
-        if let Some(t) = crate::dialogs_move::triad(app, &d)
-            && let Some(g) = crate::gizmo::show(ui, painter, proj, egui::Id::unique("sc_move_triad"), &t, snap_step(app.cam.half_height()))
-        {
-            crate::dialogs_move::drag(app, &mut d, g);
-            dragging = true;
+        let triad_id = egui::Id::unique("sc_move_triad");
+        if let Some(t) = crate::dialogs_move::triad(app, &d) {
+            if let Some(g) = crate::gizmo::show(ui, painter, proj, triad_id, &t, snap_step(app.cam.half_height())) {
+                crate::dialogs_move::drag(app, &mut d, g);
+                dragging = true;
+            } else if let Some(handle) = crate::gizmo::take_click(ui, triad_id) {
+                // A click on a handle, with no drag, still shows the value it drives.
+                crate::dialogs_move::show_handle_value(&mut d, handle);
+            }
         }
         // Read the triad again after the drag, so the box follows it in the same frame. Move
         // types with no triad put the box on the picked bodies, or beside Rotate's handle
@@ -419,10 +423,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         return;
     }
     // A cylinder's values are typed in its window; its distances from its reference edges
-    // (#6380) are shown and typed on the canvas, as a hole's.
+    // (#6380) are shown and typed on the canvas, as a hole's, then its placement handles drawn.
     if matches!(d.kind, Kind::Primitive { cmd: "solid.cylinder", .. }) {
         crate::hole_refs::canvas(app, ui, painter, proj, &mut d);
         app.dialog = Some(d);
+        crate::place_gizmo::show(app, ui, painter, proj);
         return;
     }
     if let Some((base, dir)) = anchor(app, &d)
@@ -430,10 +435,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     {
         draw(app, ui, painter, proj, &mut d, base, bs, dir);
     }
-    crate::place_gizmo::show(app, ui, painter, proj, &mut d);
     app.dialog = Some(d);
-    // A Single hole's handles, over the depth arrow's stem: a press on a hole moves it.
-    crate::hole_place::show(app, ui, painter, proj);
+    // The placement handles (a Single hole's among them), over the depth arrow's stem: a press
+    // on a marker moves the feature.
+    crate::place_gizmo::show(app, ui, painter, proj);
+    crate::hole_place::marks(app, painter, proj);
 }
 
 struct MoveRotation {
@@ -513,6 +519,11 @@ pub(crate) fn along(proj: &Proj, pos: Pos2, base: Vec3, dir: Vec3) -> Option<f64
         return None;
     }
     Some((b * e - d) / den)
+}
+
+/// Snapped drag write: Length decimals, but enough places for `step` (#9035).
+pub(crate) fn format_len_drag(doc: &solidcraft_engine::doc::Document, v: f64, step: f64, decimals: u8) -> String {
+    crate::length_input::model_drag(doc, v, step, decimals)
 }
 
 pub(crate) fn format_len(doc: &solidcraft_engine::doc::Document, v: f64) -> String {
@@ -599,6 +610,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     };
     let mut focus = take_focus(ui.ctx(), d);
     let half_height = app.cam.half_height();
+    let decimals = app.preferences.length_decimals;
     let axis = revolve_axis(app, d);
     if matches!(d.kind, Kind::Revolve { .. }) {
         if let Some(axis) = axis {
@@ -616,7 +628,22 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         // While its text does not evaluate (cleared, or a `-` typed first) there is no arrow,
         // but the box stays below the base so the typing can be finished there.
         let ts = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite()).and_then(|l2| {
-            drag_arrow(&app.session.doc, ui, painter, proj, base, bs, n2, l2, true, egui::Id::unique("sc_manipulator2"), half_height, 0.0, distance2)
+            drag_arrow(
+                &app.session.doc,
+                ui,
+                painter,
+                proj,
+                base,
+                bs,
+                n2,
+                l2,
+                true,
+                egui::Id::unique("sc_manipulator2"),
+                half_height,
+                0.0,
+                decimals,
+                distance2,
+            )
         });
         value_box_in(
             ui,
@@ -634,7 +661,22 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     if let (Kind::Fillet { distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)
         && let Some(l2) = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
-        drag_arrow(&app.session.doc, ui, painter, proj, base, bs, t2, l2, false, egui::Id::unique("sc_manipulator2"), half_height, 0.0, distance2);
+        drag_arrow(
+            &app.session.doc,
+            ui,
+            painter,
+            proj,
+            base,
+            bs,
+            t2,
+            l2,
+            false,
+            egui::Id::unique("sc_manipulator2"),
+            half_height,
+            0.0,
+            decimals,
+            distance2,
+        );
     }
     // A rectangular pattern's second direction gets its own arrow for Spacing 2 (#2462), as the
     // first direction's arrow sets Spacing.
@@ -646,7 +688,22 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         if let Some(spacing2) = spacing2
             && let Some(l2) = crate::length_input::eval(&app.session.doc, spacing2, ValueKind::Length).ok().filter(|v| v.is_finite())
         {
-            drag_arrow(&app.session.doc, ui, painter, proj, base, bs, n2, l2, true, egui::Id::unique("sc_manipulator2"), half_height, 0.0, spacing2);
+            drag_arrow(
+                &app.session.doc,
+                ui,
+                painter,
+                proj,
+                base,
+                bs,
+                n2,
+                l2,
+                true,
+                egui::Id::unique("sc_manipulator2"),
+                half_height,
+                0.0,
+                decimals,
+                spacing2,
+            );
         }
     }
     // An offset plane shows where it will be: at the distance, or through the picked point.
@@ -704,7 +761,22 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             crate::length_input::eval(&app.session.doc, depth, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0)
         };
         let before = depth.clone();
-        drag_arrow(&app.session.doc, ui, painter, proj, base, bs, -n, l, false, egui::Id::unique("sc_manipulator_depth"), half_height, 0.0, depth);
+        drag_arrow(
+            &app.session.doc,
+            ui,
+            painter,
+            proj,
+            base,
+            bs,
+            -n,
+            l,
+            false,
+            egui::Id::unique("sc_manipulator_depth"),
+            half_height,
+            0.0,
+            decimals,
+            depth,
+        );
         // Dragging the depth turns "through all" into a distance.
         if *depth != before {
             opts.all = false;
@@ -742,6 +814,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             egui::Id::unique("sc_manipulator_offset2"),
             half_height,
             0.0,
+            decimals,
             distance2,
         ) {
             // Its own area and field, so it does not share Distance's focus or text.
@@ -794,6 +867,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             arrow_id,
             half_height,
             &stops,
+            decimals,
             dragged,
         );
         if let Some((_, Some(stop))) = &drawn {
@@ -805,7 +879,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 && shown_value != original_shown
                 && let Ok(v) = crate::length_input::eval(&app.session.doc, &shown_value, ValueKind::Length)
             {
-                *value = format_len(&app.session.doc, (v - baseline) / symmetric_scale);
+                let step = snap_step(half_height);
+                *value = format_len_drag(&app.session.doc, (v - baseline) / symmetric_scale, step, decimals);
             }
             if symmetric && let Some(bt) = proj.to_screen(base - n * half) {
                 arrow(painter, bs, bt, t.manipulator);
@@ -1094,10 +1169,11 @@ fn drag_arrow(
     id: egui::Id,
     half_height: f64,
     clear_px: f32,
+    decimals: u8,
     value: &mut String,
 ) -> Option<Pos2> {
     let line = ArrowLine { base, bs, n, l, signed, clear_px };
-    drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], value).map(|(ts, _)| ts)
+    drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, value).map(|(ts, _)| ts)
 }
 
 /// Where a drag arrow stands: from `base` (on screen `bs`) along `n`, showing `l`; `signed` lets
@@ -1125,6 +1201,7 @@ fn drag_arrow_to(
     id: egui::Id,
     half_height: f64,
     stops: &[crate::extrude_face_snap::Stop],
+    decimals: u8,
     value: &mut String,
 ) -> Option<(Pos2, Option<crate::extrude_face_snap::Stop>)> {
     let ArrowLine { base, bs, n, l, signed, clear_px } = line;
@@ -1179,7 +1256,8 @@ fn drag_arrow_to(
         if !signed {
             v = v.max(if free { 1e-3 } else { step });
         }
-        *value = format_len(doc, v);
+        // A stop on a face keeps its exact depth, not a rounded one.
+        *value = if free || stopped.is_some() { format_len(doc, v) } else { format_len_drag(doc, v, step, decimals) };
         ts = tip(v)?;
     }
     // Paint the value just read from this frame's pointer, including the value box anchor.
@@ -1207,7 +1285,8 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
     use serde_json::{Value, json};
     use solidcraft_engine::doc::kernel::RadiusSpline;
     enum Edit {
-        Set(usize, f64),
+        /// Control index, radius mm, free (Alt) drag, snap step used when not free.
+        Set(usize, f64, bool, f64),
         Insert(f64),
         Remove(usize),
     }
@@ -1296,6 +1375,7 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
         painter.add(egui::Shape::line(e.curve.iter().map(|c| c.1).collect(), Stroke::new(1.5, t.manipulator)));
     }
     let Some(base) = base.filter(|_| !drawn.is_empty()) else { return false };
+    let decimals = app.preferences.length_decimals;
     let mut edit = None;
     // Double-clicking the curve adds a control radius at the nearest position along it. Under
     // the handles, which are registered after it and so take the pointer first.
@@ -1368,26 +1448,27 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
                 } else {
                     step
                 };
-                edit = Some(Edit::Set(k, v.max(floor)));
+                edit = Some(Edit::Set(k, v.max(floor), free, step));
             }
         }
     }
     // A dragged radius on a spline fillet changes its own expression; anything else writes the
     // whole spline (inserting or removing a knot moves its neighbours too).
     let whole = match edit {
-        Some(Edit::Set(k, v)) if !taper => {
+        Some(Edit::Set(k, v, free, step)) if !taper => {
+            let text = if free { format_len(&app.session.doc, v) } else { format_len_drag(&app.session.doc, v, step, decimals) };
             if k == 0 {
                 if let Kind::Fillet { radius, .. } = &mut d.kind {
-                    *radius = format_len(&app.session.doc, v);
+                    *radius = text;
                 }
             } else if let Some(Value::Array(rs)) = d.extra.get_mut("radii")
                 && let Some(slot) = rs.get_mut(k - 1)
             {
-                *slot = json!(format_len(&app.session.doc, v));
+                *slot = json!(text);
             }
             None
         }
-        Some(Edit::Set(k, v)) => {
+        Some(Edit::Set(k, v, ..)) => {
             let mut law = base.clone();
             if let Some(r) = law.radii.get_mut(k) {
                 *r = v;
@@ -2165,6 +2246,11 @@ mod tests {
         assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), 12.0), "12 mm");
         assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), -2.5), "-2.5 mm");
         assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), -0.0001), "-0.0001 mm");
+        // Snapped drag residue and Length decimals (#9035, #9036).
+        let noisy = (1.2_f64 / 0.2).round() * 0.2;
+        assert_ne!(format!("{noisy}"), "1.2");
+        assert_eq!(format_len_drag(&solidcraft_engine::doc::Document::default(), noisy, 0.2, 2), "1.20 mm");
+        assert_eq!(format_len_drag(&solidcraft_engine::doc::Document::default(), noisy, 0.2, 1), "1.2 mm");
     }
 
     /// #6608: a canvas value box never covers the command window: it moves out of it.

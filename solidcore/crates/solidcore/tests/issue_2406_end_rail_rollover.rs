@@ -784,3 +784,17 @@ fn the_size_the_collapsed_offset_names_builds() {
     check_top_end(&k, &b, fit, 1e-8);
     profile::write_profile(&k);
 }
+
+/// The round's ball touching the R2 round on T lies short of P (at the angle
+/// asin(2 / (21 + r)) about A, short of V's asin(2 / 21)) for every r: part of the round lies
+/// between the edge's ends, so it is not refused as rolling past an end (#14846's refusal of
+/// a ball every position of which lies past an end): it builds, and the body is clean.
+#[test]
+fn the_middle_edge_r1_9_is_not_refused_as_rolling_past_an_end() {
+    let r: f64 = 1.9;
+    assert!((2.0 / (21.0 + r)).asin() < (2.0_f64 / 21.0).asin());
+    let mut k = all_fixes();
+    let mut b = front_rounded(&mut k);
+    round(&mut k, &mut b, MIDDLE, r).unwrap();
+    clean(&mut k, &mut b);
+}

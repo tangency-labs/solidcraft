@@ -102,6 +102,28 @@ pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep,
     Ok((brep.try_clone().map_err(|e| KernelError::smlib("SMLib", e))?, numbering(body.record(), &brep)))
 }
 
+/// `body` in SMLib as a boolean's operand with the solids it keeps apart where they touch along
+/// an edge sharing that edge again, with its numbering as [`smlib_body_ordered`] gives it. The
+/// record keeps one copy of such an edge and its vertices per solid; SMLib gets them shared, as
+/// its own boolean made them (`solidcraft_smlib::Brep::from_record_touching`). As copies, a third
+/// body's one edge or vertex there could not be related to both, and the boolean failed
+/// (#14419). `None` where the record has no such copies, or SMLib refuses them shared (logged):
+/// [`smlib_body_ordered`] is then the operand.
+pub(crate) fn smlib_shared_operand_ordered(body: &Body) -> Result<Option<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)>> {
+    body.require_brep("a boolean")?;
+    match solidcraft_smlib::Brep::from_record_touching(body.record(), true) {
+        Ok(Some(brep)) => {
+            let order = numbering(body.record(), &brep);
+            Ok(Some((brep, order)))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => {
+            log::debug!(target: "smlib", "touching solids not shared for a boolean: {e}");
+            Ok(None)
+        }
+    }
+}
+
 /// `record` in SMLib, imported as given (SMLib's own form; a record it refuses is an error that
 /// names why), with where each of SMLib's faces and edges is in the record's order.
 pub(crate) fn smlib_record_ordered(
@@ -224,9 +246,9 @@ fn same_cycle(x: &[solidcore_record::brep::OrientedEdge], y: &[solidcore_record:
 }
 
 /// The kernel's checks of a saved body's record that the file's own structural checks leave to
-/// it ([`solidcraft_geom::brep::check::geometry`]: frames, planes, placements).
+/// it ([`solidcore_ops::record_check::geometry`]: frames, planes, placements).
 fn check(saved: &Saved) -> Result<()> {
-    solidcraft_geom::brep::check::geometry(&saved.solid).map_err(invalid)
+    solidcore_ops::record_check::geometry(&saved.solid).map_err(invalid)
 }
 
 /// How many values `v` is (a collection and each of its items): [`file::MAX_VALUES`] at most.
@@ -331,7 +353,8 @@ mod tests {
         let extruded = crate::extrude(&Plane::XY, &[region], 0., 5.).unwrap().remove(0);
         assert!(extruded.face_sources().is_some_and(|s| s.iter().any(Option::is_some)), "an extrusion carries its face sources");
         assert!(cut.history().is_some(), "a cut carries its history");
-        let paint = crate::Paint { opacity: 0.5, faces: vec![crate::FacePaint { face: 1, color: [0.9, 0.1, 0.2], opacity: 0.75 }] };
+        let paint =
+            crate::Paint { opacity: 0.5, faces: vec![crate::FacePaint { face: 1, color: [0.9, 0.1, 0.2], opacity: 0.75, name: None }], name: None };
         let painted = cube.clone().with_color(Some([0.1, 0.5, 0.9])).with_paint(Some(paint));
         let top = (0..cube.face_count()).find(|f| cube.planar_face(*f).is_some_and(|p| p.normal().z > 0.5 && p.origin.z > 9.)).unwrap();
         let split =
@@ -452,9 +475,11 @@ mod tests {
 
     #[test]
     fn native_preserves_face_appearance_and_authored_boundaries() {
-        let mut body = crate::box_solid(Vec3::new(1., 2., 3.), Vec3::new(10., 20., 30.))
-            .unwrap()
-            .with_paint(Some(crate::Paint { opacity: 0.7, faces: vec![crate::FacePaint { face: 2, color: [0.25, 0.5, 0.75], opacity: 0.6 }] }));
+        let mut body = crate::box_solid(Vec3::new(1., 2., 3.), Vec3::new(10., 20., 30.)).unwrap().with_paint(Some(crate::Paint {
+            opacity: 0.7,
+            faces: vec![crate::FacePaint { face: 2, color: [0.25, 0.5, 0.75], opacity: 0.6, name: None }],
+            name: None,
+        }));
         body.splits = Some(Arc::new(vec![vec![Vec3::new(1., 2., 3.), Vec3::new(11., 2., 3.)]]));
         body.regularization_protected = true;
         let restored = decode_native_body(&encode_native_body(&body).unwrap()).unwrap();

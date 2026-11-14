@@ -14,9 +14,10 @@
 //! linear cross section and bevel corners, at the default fixes.
 //!
 //! One half edge alone (the issue's pick: offsets from setbacks 1 on the cut face and 2
-//! down the wall, as the fork's `sides_offsets` derives them) is refused with 1001. The
-//! whole chain, both halves in one session, builds a closed solid (4 faces to 6), so a
-//! caller chamfers the whole tangent chain.
+//! down the wall, as the fork's `sides_offsets` derives them) builds a closed solid with a
+//! clean check (4 faces to 7), since the generic blend's sections and checks are the
+//! default (WR-685 addendum 2026-11-06); main's default kernel refused it with 1001. The
+//! whole chain, both halves in one session, builds a closed solid (4 faces to 6).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -32,10 +33,12 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_curves::create_arc;
 use solidcore::primitive::api_primitives::create_box;
+use solidcore::surface::surface::p2::SurfaceKind;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, transform, StitchAndOrientOptions};
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId, EdgeuseId};
 use solidcore::{Brep, Kernel};
 
@@ -154,4 +157,179 @@ fn issue_880_whole_rim_chamfers() {
             "offsets {offsets:?}: {outcome:?}"
         );
     }
+}
+
+/// The issue's own pick: one rim half chamfered by the offsets of setbacks 1 on the cut face
+/// and 2 down the wall builds a closed solid (4 faces to 7) that SMLib's check passes.
+#[test]
+fn issue_880_one_half_chamfers() {
+    let mut k = Kernel::default();
+    let mut b = cut_cylinder(&mut k);
+    let before = p1::faces(&b, None).unwrap().len();
+    let e = rims(&k, &b)[0];
+    let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
+    chamfer(&mut k, &mut b, &[(e, u)], (1.0, 2.0)).unwrap();
+    assert_eq!(finish(&mut k, &mut b, before), (4, 7, true));
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+}
+
+/// The volume of `b`, by the mass integrator.
+fn volume(k: &Kernel, b: &mut Brep) -> f64 {
+    use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+    use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    brep_volume(k, b, 1e-7, &attrs).unwrap()
+}
+
+/// The first rim half chamfered by the equal offsets the setbacks 1 and 1 give
+/// (1.4437..., the goldens' `issue-880-half-arc-rim-0-setbacks-1-1`) builds a closed solid
+/// (4 faces to 7) that the check passes, as the setbacks 1 and 2 do. It was refused with
+/// 1001: at the half's End on the seam line through (6.78, 4.09, 10), the rail on the wall
+/// crossed the End's plane off the wall by more than its zone and less than the rail's
+/// tolerance, so the rail end read as off its face (#15906). The End is capped there; at
+/// the other seam vertex the chamfer runs on past the vertex and leaves the part through the
+/// rim (the global merge cuts it). The material removed lies between two wedges of the same
+/// chamfer (constant offsets d from the cut face and the wall), integrated independently in
+/// the planes square to the chamfer's spine (converged to 2e-6): the half's wedge between the
+/// End planes at both seam vertices (11.609075), which the chamfer contains, and the wedge
+/// from the capped End to the plane square to the rim where the run-on leaves the part
+/// (19.620616), which contains it, its run-on rising from the chamfer to the rim.
+#[test]
+fn issue_880_one_half_chamfers_at_equal_setbacks() {
+    let d = 1.443_730_684_954_035_7;
+    let mut k = Kernel::default();
+    let mut b = cut_cylinder(&mut k);
+    let before = volume(&k, &mut b);
+    let originals = p1::faces(&b, None).unwrap();
+    let e = rims(&k, &b)[0];
+    // the rim half's start (where the chamfer runs on) and middle, and its wall
+    let (v1, mid) = {
+        let curve = edge::curve(&b, e).unwrap().unwrap();
+        let ivl = edge::interval(&b, e).unwrap();
+        (
+            curve.evaluate_point(&k, ivl.min()).unwrap(),
+            curve.evaluate_point(&k, ivl.evaluate(0.5)).unwrap(),
+        )
+    };
+    let wall = edge::faces(&b, e, None)
+        .unwrap()
+        .into_iter()
+        .find(|&f| {
+            matches!(
+                b.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                SurfaceKind::SurfOfExtrusion(_)
+            )
+        })
+        .unwrap();
+    let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
+    chamfer(&mut k, &mut b, &[(e, u)], (d, d)).unwrap();
+    assert_eq!(finish(&mut k, &mut b, originals.len()), (4, 7, true));
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    // The chamfer's rails, on their closed forms. The ball of radius d touching both faces
+    // has its centre d inside the wall (5 - d from the axis, the line through (0, 0, -10)
+    // along (1, 0, 2)) and d below the cut face (z = 10 - d). A rail point p on the wall is a
+    // centre's foot there, so (p - d rho(p)).z = 10 - d (rho the wall's outward normal); one
+    // on the cut face is p = centre + d z, so p - d z lies 5 - d from the axis. A rail is an
+    // edge between the chamfer (a face that is neither planar nor a wall's extrusion) and the
+    // wall or the cut face (not the End's new planar cap).
+    let s5 = 5.0_f64.sqrt();
+    let axis = Vec3::new(1.0 / s5, 0.0, 2.0 / s5);
+    let origin = Point3::new(0.0, 0.0, -10.0);
+    let radial = |q: Point3| {
+        let w = q - origin;
+        w - axis * w.dot(axis)
+    };
+    let kind = |f| b.face(f).unwrap().surface.as_ref().unwrap().kind().clone();
+    let samples = |edge_id| {
+        let curve = edge::curve(&b, edge_id).unwrap().unwrap();
+        let ivl = edge::interval(&b, edge_id).unwrap();
+        (0..=64)
+            .map(|i| {
+                curve
+                    .evaluate_point(&k, ivl.evaluate(f64::from(i) / 64.0))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+    };
+    // each rail with whether it lies on the cut face
+    let mut rails = Vec::new();
+    for edge_id in p1::edges(&b, None).unwrap() {
+        let faces = edge::faces(&b, edge_id, None).unwrap();
+        let chamfer_face = |f: &solidcore::topology::FaceId| {
+            !matches!(
+                kind(*f),
+                SurfaceKind::Plane(_) | SurfaceKind::SurfOfExtrusion(_)
+            )
+        };
+        let Some(other) = faces.iter().find(|f| !chamfer_face(f)) else {
+            continue;
+        };
+        if faces.iter().any(chamfer_face) {
+            match kind(*other) {
+                SurfaceKind::SurfOfExtrusion(_) => rails.push((edge_id, false)),
+                SurfaceKind::Plane(_) if originals.contains(other) => rails.push((edge_id, true)),
+                _ => {}
+            }
+        }
+    }
+    // Past the rim half's start the chamfer runs on and leaves the part through the rim, off
+    // the ball's closed form. Its last section is the plane through the centre of the wall
+    // rail's end on the seam line there, square to the spine (spanned by z and rho): every
+    // rail point on the half's side of it is checked, the wall rail on the half's own wall
+    // (which ends there, nearest the start) the whole length.
+    let start = rails
+        .iter()
+        .filter(|&&(edge_id, on_cut)| {
+            !on_cut && edge::faces(&b, edge_id, None).unwrap().contains(&wall)
+        })
+        .flat_map(|&(edge_id, _)| {
+            let ends = samples(edge_id);
+            [ends[0], ends[64]]
+        })
+        .min_by(|p, q| (*p - v1).length().total_cmp(&(*q - v1).length()))
+        .unwrap();
+    let rho = radial(start).unitize_or_z();
+    let centre = start - rho * d;
+    let mut normal = Vec3::new(0.0, 0.0, 1.0).cross(rho);
+    if (mid - centre).dot(normal) < 0.0 {
+        normal = -normal;
+    }
+    let (mut on_wall, mut on_cut_face) = (0, 0);
+    for &(edge_id, on_cut) in &rails {
+        for p in samples(edge_id) {
+            if (p - centre).dot(normal) < -1e-9 {
+                continue;
+            }
+            let off = if on_cut {
+                on_cut_face += 1;
+                (radial(p - Vec3::new(0.0, 0.0, d)).length() - (5.0 - d)).abs()
+            } else {
+                on_wall += 1;
+                ((p - radial(p).unitize_or_z() * d).z - (10.0 - d)).abs()
+            };
+            assert!(
+                off <= 4e-5,
+                "rail {edge_id:?} off its closed form by {off} at {p:?}"
+            );
+        }
+    }
+    assert!(
+        on_wall >= 65 && on_cut_face >= 65,
+        "{on_wall} {on_cut_face}"
+    );
+    let removed = before - volume(&k, &mut b);
+    assert!(
+        removed > 11.609_075 && removed < 19.620_616,
+        "removed {removed}"
+    );
 }

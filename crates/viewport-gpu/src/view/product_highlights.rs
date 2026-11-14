@@ -161,7 +161,7 @@ impl Renderer {
             return;
         }
         if self.product_depth.is_none() {
-            self.product_depth = Some(DepthPipelines::new(device, &self.uniform_bgl, self.target));
+            self.product_depth = Some(DepthPipelines::new(device, &self.uniform_bgl.layout, self.target));
         }
         if !self.prepare_product_geometry(device, queue, frame) {
             return;
@@ -207,9 +207,14 @@ impl Renderer {
         triangles(pass, &depth.built, &model.open_tris);
         triangles(pass, &depth.pbr, &model.pbr);
         for key in &model.block_order {
-            if let Some(block) = model.blocks.get(key).filter(|block| block.class(TriClass::Opaque).is_some()) {
-                pass.set_pipeline(&depth.built);
-                block.draw(pass, TriClass::Opaque, tally);
+            let Some(block) = model.blocks.get(key) else { continue };
+            // PBR triangles are built into the same blocks (the product preview's): they occlude
+            // feedback too, in the block vertex layout the depth pipeline takes.
+            for class in [TriClass::Opaque, TriClass::Pbr] {
+                if block.class(class).is_some() {
+                    pass.set_pipeline(&depth.built);
+                    block.draw(pass, class, tally);
+                }
             }
         }
         for draw in model.planned.iter().filter(|draw| draw.class == TriClass::Opaque) {
@@ -220,7 +225,8 @@ impl Renderer {
             pass.draw_indexed(0..draw.mesh.index_count, 0, 0..1);
             tally.triangles(draw.mesh.index_count, 1);
         }
-        for draw in model.instanced.iter().filter(|draw| draw.look == InstanceLook::Opaque) {
+        // PBR placements are opaque too: they occlude feedback as the built ones do.
+        for draw in model.instanced.iter().filter(|draw| matches!(draw.look, InstanceLook::Opaque | InstanceLook::Pbr)) {
             draw.draw(pass, &depth.instanced, &depth.instanced, tally);
         }
         // Render's build_highlight emits self-contained mesh triangles/edges, including

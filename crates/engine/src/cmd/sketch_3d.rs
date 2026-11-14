@@ -131,7 +131,7 @@ fn line3d(s: &mut Session, p: &Value) -> Result<Value> {
         needs_3d(sk, cmd)?;
         pts.windows(2).map(|w| sk.add_drawn_wire_in(w, WireSpace::Component).map_err(Into::into)).collect::<Result<Vec<String>>>()
     })?;
-    reply(cmd, Curves3dResult { curves: ids, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, Curves3dResult { curves: ids, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 fn spline3d(s: &mut Session, p: &Value) -> Result<Value> {
@@ -142,7 +142,7 @@ fn spline3d(s: &mut Session, p: &Value) -> Result<Value> {
         needs_3d(sk, cmd)?;
         Ok(sk.add_drawn_wire_in(&pts, WireSpace::Component)?)
     })?;
-    reply(cmd, Curves3dResult { curves: vec![id], sketch: info, param_warnings: Vec::new() })
+    reply(cmd, Curves3dResult { curves: vec![id], sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 fn arc3d(s: &mut Session, p: &Value) -> Result<Value> {
@@ -170,7 +170,7 @@ fn point3d(s: &mut Session, p: &Value) -> Result<Value> {
         needs_3d(sk, cmd)?;
         Ok(sk.add_drawn_wire_in(&[at], WireSpace::Component)?)
     })?;
-    reply(cmd, Point3dResult { point: id, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, Point3dResult { point: id, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 fn move3d(s: &mut Session, p: &Value) -> Result<Value> {

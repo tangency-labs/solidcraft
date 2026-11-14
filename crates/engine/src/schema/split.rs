@@ -64,6 +64,11 @@ pub struct SplitFaceParams {
     /// `tool` is given.
     #[serde(default)]
     pub sketch: Option<SketchRef>,
+    /// With `sketch`: true joins its curves end to end first, so a closed loop of lines and arcs
+    /// splits the faces along the loop only. Default: false, each curve on its own, an open one
+    /// extended past its ends.
+    #[serde(default)]
+    pub loops: Option<bool>,
     /// The plane to split along. Read when neither `tool` nor `sketch` is given; then it is
     /// required.
     #[serde(default)]

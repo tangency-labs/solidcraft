@@ -347,8 +347,9 @@ that every file came back signed. Without the secret (forks) the jobs build unsi
 - **Test-sign without publishing:** `gh workflow run release.yml -R tangency-labs/solidcraft --ref
   <branch> -f draft=false`, then check the Windows jobs' summaries and the `release-assets`
   artifact.
-- SignPath only signs runs whose jobs all ran on GitHub-hosted runners, so keep the `version`,
-  `icons` and `windows` jobs off self-hosted runners.
+- SignPath only signs runs whose jobs all ran on GitHub-hosted runners. Every release job now
+  runs on Blacksmith, so SignPath stays off (`WINDOWS_SIGNING=off`) until Azure Artifact Signing
+  replaces it.
 
 ## Homebrew tap
 

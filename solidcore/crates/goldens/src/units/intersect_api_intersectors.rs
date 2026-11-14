@@ -450,7 +450,9 @@ fn build_body(k: &mut Kernel, b: &BodyIn) -> SolidResult<Brep> {
 /// The status code of a failed call (as the shim records it: `SM_SUCCESS` is `1000`).
 fn status(e: &SolidError) -> Option<f64> {
     match e {
-        SolidError::Upstream { code, .. } => Some(f64::from(*code)),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            solidcore::error::upstream_status(e).map(f64::from)
+        }
         SolidError::InvalidInput { .. } => Some(1007.),
         _ => None,
     }

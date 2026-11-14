@@ -139,7 +139,7 @@ fn output(raw: &[f64]) -> Result<Output, HarnessError> {
 /// The status code of a wrapper error (`SM_SUCCESS` is `0`).
 fn status(e: &SolidError) -> Option<f64> {
     match e {
-        SolidError::Upstream { code, .. } => Some(f64::from(*code)),
+        up_err if solidcore::error::upstream_status(up_err).is_some() => Some(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
         SolidError::InvalidInput { .. } => Some(1007.),
         _ => None,
     }

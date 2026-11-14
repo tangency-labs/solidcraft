@@ -1,7 +1,6 @@
 //! The SolidCraft fork's tangency-labs/smlib@d305e69 (#2273, smlib#79 step 5): the top edge
 //! of #851's arc wall rounded and chamfered into the wall's tip, the knife edge where the
-//! wall runs out tangent into the back face, builds (`BandCutsThePart`, aac4288, on
-//! `fixes.fillet_gn_section_generator`, WR-696). Near the tip the part is thinner than the
+//! wall runs out tangent into the back face, builds (`BandCutsThePart`, aac4288, WR-696). Near the tip the part is thinner than the
 //! blend's band, so the blend takes all of the part between its rails there and ends: the
 //! part is not cut in two, the tip is blended away.
 //!
@@ -15,8 +14,8 @@
 //!
 //! How this test drives the kernel differs from the capi: the edges are picked as the
 //! nearest within 0.1 of the capi's points, and the blend is `fillet_edges` with the
-//! neighbouring step 5 tests' fixes (`wr696_band_cuts`, `wr696_fit_sizes`: every fix, with
-//! `fillet_gn_section_generator`) and their continuity 2.
+//! neighbouring step 5 tests' fixes (`wr696_band_cuts`, `wr696_fit_sizes`: every fix) and
+//! their continuity 2.
 
 #![allow(
     clippy::unwrap_used,
@@ -44,13 +43,12 @@ use solidcore::topology::face::p2 as face;
 use solidcore::topology::EdgeId;
 use solidcore::{Brep, Kernel, SolidError};
 
-/// Every fix, with `fillet_gn_section_generator`.
+/// Every fix.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_gn_section_generator = true;
-    k.fixes = fixes;
-    k
+    Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    }
 }
 
 fn pick(k: &Kernel, b: &Brep, q: Point3) -> EdgeId {

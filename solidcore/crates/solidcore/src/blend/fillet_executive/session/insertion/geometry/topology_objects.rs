@@ -192,7 +192,7 @@ impl TopologyObjects<FilletObject> for InsertionGeometry<'_> {
     fn face_surface(&self, face: FilletObject) -> Result<FilletObject> {
         InsertionGeometry::face_surface(self, face)
             .ok_or_else(|| invalid("not an actual Face handle"))?
-            .ok_or_else(|| SolidError::null_pointer(super::OP))
+            .ok_or_else(|| SolidError::blend_missing(super::OP, "the face's surface"))
     }
     fn surface(&self, object: FilletObject) -> Result<&Surface> {
         if let FilletObject::Surface(binding) = object {

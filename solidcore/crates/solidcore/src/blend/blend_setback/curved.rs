@@ -79,8 +79,9 @@ use super::qp::{dual_qp_source, QpOutcome, QpStats};
 use super::spring::spring_curve;
 use super::{
     affine_solutions, along_line, axpy, bern_elevate, bern_mul, binomial, el, el_mut, el_ref,
-    least_squares, monomials, over_patch, round_jets, second, sm_err, smax, smax_usize, smin, Bern,
-    Face, FaceKind, Fill, FillStats, Hom, Net, Refusal, Round, RoundJets, Tensor, GW, GX, HOM_ZERO,
+    least_squares, monomials, over_patch, round_jets, row_middle, second, sm_err, smax, smax_usize,
+    smin, Bern, Face, FaceKind, Fill, FillStats, Hom, Net, Refusal, Round, RoundJets, Tensor, GW,
+    GX, HOM_ZERO,
 };
 use crate::blend::fillet_exact::{
     classify_blend_spine, BlendQuadric, BlendSpine, ExactBlend, QuadricKind,
@@ -101,16 +102,6 @@ fn comp_of(v: &[Hom], c: usize) -> Result<Bern> {
     v.iter().map(|h| el(h, c)).collect()
 }
 
-/// The Bernstein mean of a row: its point at the middle, `sum_j C(q, j) / 2^q H_j`.
-fn row_middle(row: &[Hom]) -> Result<Hom> {
-    let q = row.len().checked_sub(1).ok_or_else(sm_err)?;
-    let mut m = HOM_ZERO;
-    for (j, h) in row.iter().enumerate() {
-        m = axpy(&m, binomial(q, j)? / 2.0_f64.powf(q as f64), h);
-    }
-    Ok(m)
-}
-
 /// The circumcentre of three points (`B + ((b |a|^2 - a |b|^2) x (a x b)) / 2 |a x b|^2`,
 /// `a = A - B'`, `b = M - B'` about the third), `None` where they are collinear.
 fn circumcentre(a: Vec3, m: Vec3, b: Vec3) -> Option<Vec3> {
@@ -125,7 +116,7 @@ fn circumcentre(a: Vec3, m: Vec3, b: Vec3) -> Option<Vec3> {
 }
 
 /// A net's four components as polynomials.
-fn comps(net: &Net) -> Result<[Tensor; 4]> {
+pub(super) fn comps(net: &Net) -> Result<[Tensor; 4]> {
     let mk = |c: usize| -> Result<Tensor> {
         let mut t = t_make(net.p, net.q);
         for (i, ti) in t.c.iter_mut().enumerate() {

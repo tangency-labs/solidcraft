@@ -7,7 +7,7 @@
 //! | Rust                                         | Upstream                                  |
 //! |----------------------------------------------|-------------------------------------------|
 //! | [`compute_loop_orientation`], [`compute_loop_orientation_3d`] | `SmFace::ComputeLoopOrientation` |
-//! | [`create_composites`]                        | `SmFace::CreateComposites`                |
+//! | [`create_composites`], [`create_composites_with_edges`] | `SmFace::CreateComposites` |
 //! | [`create_uv_trim_curves`], [`create_uv_trim_curves_notified`], [`UvTrimCurveGaps`] | `SmFace::CreateUVTrimCurves` |
 //! | [`face_intersect`], [`FaceIntersectOptions`], [`FaceIntersection`], [`IntersectObject`] | `SmFace::FaceIntersect` |
 //! | [`notify`]                                   | `SmFace::Notify`                          |
@@ -34,8 +34,14 @@
 //!   `topology_traverser::face_edges`; `GetEdges(.., TRUE)` (outer loop only),
 //!   `GetUpwardLoopuses`, `GetUpwardEdgeuses`, `GetUpwardVertexuses` (default arguments)
 //!   and `GetBrep` call `topology::face::p4`.
-//! - **Statuses.** `ComputeProjectedLoopOrientation`'s status is checked as upstream (a
-//!   failure falls through to the 3D walk); `sm_AreConnected` and `IsDegenerate` of a
+//! - **The UV loop's orientation** (not upstream; #15107). `ComputeLoopOrientation`'s
+//!   UV path decides from the sign of the trims' loop's certified signed area
+//!   ([`crate::mass::loop_area`]), not from `ComputeProjectedLoopOrientation`'s sampled
+//!   polygon area against its box (a thin loop far from the origin, whose area is far
+//!   below its box's, came out zero area). An undecided sign, a failure, or a trim with
+//!   no NURBS form falls through to the 3D walk, as upstream's `Unknown` and failures
+//!   do; on this path `uv_bounds` still receives the samples of upstream's walk.
+//! - **Statuses.** `sm_AreConnected` and `IsDegenerate` of a
 //!   curve return values; ignored as upstream: the `Trim`, `EvaluatePoint` and
 //!   `Point3DClassify` calls of `FaceIntersect`, the `NormalizedEvaluate` /
 //!   `Evaluate1stDerivatives` / `PointClassify` of the quick check and the
@@ -96,12 +102,14 @@
 //!   (upstream's own bound) within a budget of 65536 samples; every other loop is over
 //!   B-rep arrays or a fixed sample count.
 
+use crate::blend::fillet_section::certificate::NurbsCurve;
 use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::curve::p2::CRV_ON_SURF_TYPE;
 use crate::curve::curve::Curve;
 use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
+use crate::geom::extent3d::Extent3d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, MAX_TREES};
 use crate::geom::tol::xsect_tol_3d_from_zones;
@@ -114,6 +122,7 @@ use crate::intersect::point_class::{
     ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
 };
 use crate::kernel::Kernel;
+use crate::mass::loop_area::{loop_area_sign, LoopAreaSign};
 use crate::math::{Point3, Vec3, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -469,7 +478,23 @@ pub fn notify(
         N::PostEdit | N::SplitInBrep | N::ChangeGeometry | N::Split => {
             // pass the notify call along to all Vertexuses, Edgeuses, and
             // Edgeuse->Vertexuses so that those can clean up their cached gaps
-            let eus = upward_edgeuses(b, f)?;
+            //
+            // (not upstream, #14329) An edge use's `PostEdit` changes nothing of it and
+            // no record or attribute (`SmTopology` and `SmAObject` act on other
+            // operations only), so with no notify callback in the context to see it,
+            // the walk over the face's edge uses is skipped. It ran once per edge added
+            // to a face, over every edge use of that face: building the cap of an
+            // outline of N lines cost O(N²).
+            let listened = env.context.as_deref().is_some_and(|c| {
+                c.user_notify_callback().is_some() || c.sys_notify_callback().is_some()
+            });
+            let eus = if operation == N::PostEdit && !listened {
+                Vec::new()
+            } else {
+                #[cfg(test)]
+                tests::EDGE_USE_WALKS.with(|n| n.set(n.get() + 1));
+                upward_edgeuses(b, f)?
+            };
             let vus = upward_vertexuses(b, f)?;
             for eu in eus {
                 let this = (env.key_of)(EntityRef::Edgeuse(eu));
@@ -529,18 +554,37 @@ pub fn notify(
 /// edge loops); [`SolidError::InvalidInput`] when the loop counts exceed the curves or
 /// orientations returned (upstream reads past them).
 pub fn create_composites(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<CompositeCurve>> {
+    Ok(create_composites_with_edges(k, b, f)?
+        .into_iter()
+        .map(|(composite, _)| composite)
+        .collect())
+}
+
+/// [`create_composites`], each composite with the edge of each of its segments, in
+/// segment order (not upstream: the skin's face sources, tangency-labs/solidcore#3139).
+///
+/// # Errors
+///
+/// Those of [`create_composites`].
+pub fn create_composites_with_edges(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+) -> Result<Vec<(CompositeCurve, Vec<EdgeId>)>> {
     // init output
     let mut composites = Vec::new();
 
     // Create List of Curves from Face Loops
     let fc = face2::create_curves_from_face(k, b, f, OrientType::Same, true, false)?;
     let mut curves = fc.curves_3d.unwrap_or_default().into_iter();
+    let mut edges = fc.edges.into_iter();
 
     // for every loop
     let mut count = 0usize;
     for &num_crv in &fc.curve_loops {
         let mut senses = Vec::new();
         let mut loop_curves = Vec::new();
+        let mut loop_edges = Vec::new();
 
         // for every edge in the loop
         for _ in 0..num_crv {
@@ -557,16 +601,15 @@ pub fn create_composites(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<Comp
             // build Curve and Senses array
             loop_curves.push(curve);
             senses.push(orient != OrientType::Opposite);
+            // (the edges add no failure: a caller checks there is one per segment)
+            loop_edges.extend(edges.next());
         }
 
         // build CompositeCurve
-        composites.push(CompositeCurve::with_curves(
-            3,
-            loop_curves,
-            true,
-            Some(&senses),
-            None,
-        )?);
+        composites.push((
+            CompositeCurve::with_curves(3, loop_curves, true, Some(&senses), None)?,
+            loop_edges,
+        ));
     }
 
     // all done
@@ -776,10 +819,56 @@ impl LoopOrientationSampler<'_> {
     }
 }
 
+/// The orientation of the closed UV loop of `uv_curves` (curve `i` taken backwards where
+/// `senses[i]` is false) from the sign of its certified signed area
+/// ([`loop_area_sign`]): `Same` above 0, `Opposite` below, `Unknown` where the enclosure
+/// holds 0 or a curve has no NURBS form. With `bounds`, it receives the samples of
+/// upstream's `ComputeProjectedLoopOrientation` walk, as before (the box only; its
+/// orientation is not used).
+fn uv_loop_orientation(
+    k: &Kernel,
+    uv_curves: &[Curve],
+    senses: &[bool],
+    bounds: Option<&mut Extent2d>,
+) -> Result<OrientType> {
+    if let Some(b) = bounds {
+        let normal = Vec3::new(0.0, 0.0, 1.0);
+        match CompositeCurve::compute_projected_loop_orientation(
+            k,
+            uv_curves,
+            senses,
+            normal,
+            Some(b),
+        ) {
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            _ => {}
+        }
+    }
+    let mut nurbs = Vec::new();
+    for c in uv_curves {
+        let Some(bs) = c.b_spline_base() else {
+            return Ok(OrientType::Unknown);
+        };
+        nurbs.push(NurbsCurve::of(bs)?);
+    }
+    if senses.len() < nurbs.len() {
+        return Err(null("ComputeLoopOrientation: fewer senses than curves"));
+    }
+    let lp: Vec<(&NurbsCurve, bool)> = nurbs.iter().zip(senses.iter().copied()).collect();
+    Ok(match loop_area_sign(k, &lp)? {
+        LoopAreaSign::Positive(_) => OrientType::Same,
+        LoopAreaSign::Negative(_) => OrientType::Opposite,
+        LoopAreaSign::Undecided(_) => OrientType::Unknown,
+    })
+}
+
 /// `ComputeLoopOrientation`: the orientation of loop `l` on the face: `Same` (counter-
 /// clockwise in UV), `Opposite` (clockwise) or `Unknown`. A vertex loop is `Opposite`
 /// without measuring an area. Without `do_3d_loop_computation`, the edge uses' existing
-/// or generated UV trim curves decide when they form a connected loop. Otherwise (or
+/// or generated UV trim curves decide when they form a connected loop, by the sign of the
+/// loop's certified signed area (not upstream: upstream compares a sampled polygon's area
+/// with its box's, which takes a thin loop far from the origin for zero area; #15107);
+/// an undecided sign goes on to the 3D walk. Otherwise (or
 /// when they do not decide) the defining 3D curves are sampled in passes of decreasing
 /// angle tolerance (10, 1, 0.1 degrees), keeping every knot and tessellating each span
 /// separately; the samples are dropped onto a copy of the surface and their signed UV
@@ -870,18 +959,13 @@ pub fn compute_loop_orientation(
 
     // when all the UVTrimCurves are available, connected, and form a closed loop
     if uv_curves_ok {
-        // walk all UVTrimCurves to determine if this is a CCW or CW loop
-        let normal = Vec3::new(0.0, 0.0, 1.0);
-        match CompositeCurve::compute_projected_loop_orientation(
-            k,
-            &uv_curves,
-            &senses,
-            normal,
-            uv_bounds.as_deref_mut(),
-        ) {
+        // Not upstream (#15107): the sign of the loop's certified signed area, not a
+        // sampled polygon's area against its box (a thin loop far from the origin has an
+        // area far below its box's and came out zero area).
+        match uv_loop_orientation(k, &uv_curves, &senses, uv_bounds.as_deref_mut()) {
             Ok(o) if o != OrientType::Unknown => return Ok(o),
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            // a failure or an unknown orientation falls through to the 3D walk
+            // a failure or an undecided sign falls through to the 3D walk
             _ => {}
         }
     }
@@ -1055,22 +1139,16 @@ fn loop_orientation_3d(
             return Ok(OrientType::Unknown);
         }
         sampler.area += sampler.signed_area(&previous, &first);
-        // Not upstream (fork tangency-labs/smlib 54ca3e0, WR-561, opt-in): the floor is
-        // relative to the loop's own bounding box (dimensionless too), so a small hole in
-        // a large face is oriented as a large one is; a box with no width or no height
-        // bounds no area.
-        let floor = if k.fixes.loop_orientation_floor_from_loop_box {
-            let box_u = sampler.bounds.x_length() / sampler.width;
-            let box_v = sampler.bounds.y_length() / sampler.height;
-            let bounds_area = box_u > EFF_ZERO && box_v > EFF_ZERO;
-            if !bounds_area {
-                angle /= 10.0;
-                continue;
-            }
-            area_floor * box_u * box_v
-        } else {
-            area_floor
-        };
+        // Not upstream (fork tangency-labs/smlib 54ca3e0, WR-561): the floor is relative to
+        // the loop's own bounding box (dimensionless too), so a small hole in a large face
+        // is oriented as a large one is; a box with no width or no height bounds no area.
+        let box_u = sampler.bounds.x_length() / sampler.width;
+        let box_v = sampler.bounds.y_length() / sampler.height;
+        if !(box_u > EFF_ZERO && box_v > EFF_ZERO) {
+            angle /= 10.0;
+            continue;
+        }
+        let floor = area_floor * box_u * box_v;
         if sampler.area.abs() > 8.0 * sampler.error + floor {
             return Ok(if sampler.area > 0.0 {
                 OrientType::Same
@@ -2520,8 +2598,26 @@ pub fn face_intersect_breps_cached(
     let mut have_curves = false;
     if are_coincident && coinc_dist < approx_tol_3d {
         have_curves = true;
-        'faces: for (fb, face) in [(b, f), (ob, other)] {
+        // (not upstream) an edge whose box lies apart from the other face's box lies inside
+        // no part of it, and its classification on both faces keeps nothing: it is left out.
+        // Upstream classifies every edge of each face on both, the other face's edges again
+        // for each face it is paired with, so a 2D boolean of one face of n edges against m
+        // small faces classified n·m curves, each against all n edges. A box that cannot be
+        // computed, or holds nothing, rules nothing out.
+        let reach = smos_max(approx_tol_3d, zone_tol);
+        let face_box = |fb: &Brep, face: FaceId| {
+            crate::query::face::p1::calculate_bounding_box(k, fb, face, false)
+                .ok()
+                .filter(|x| !x.has_negative_volume())
+        };
+        let boxes = [face_box(ob, other), face_box(b, f)];
+        'faces: for ((fb, face), apart_from) in [(b, f), (ob, other)].into_iter().zip(boxes) {
             for e in face_edges(fb, face)? {
+                if let Some(far) = &apart_from {
+                    if edge_box(k, fb, e).is_some_and(|x| x.are_disjoint(far, reach)) {
+                        continue;
+                    }
+                }
                 let edge_crv = edge_curve(fb, e)?;
                 if edge_crv.is_degenerate(k, EFF_ZERO, None)? {
                     continue;
@@ -2541,6 +2637,7 @@ pub fn face_intersect_breps_cached(
                 uv_curves1.push(None);
                 uv_curves2.push(None);
                 curve_types.push(TsectCurveType::RegionBoundary);
+                k.work_counters.add_coincident_curve_classified();
             }
         }
     }
@@ -2771,4 +2868,104 @@ pub fn face_intersect_breps_cached(
         out.cc_other_uv_curves = Some(uv_curves2);
     }
     Ok(out)
+}
+
+/// The axis aligned box of edge `e`'s curve over its interval, grown by the edge's tolerance;
+/// `None` when it cannot be computed or holds nothing.
+fn edge_box(k: &Kernel, b: &Brep, e: EdgeId) -> Option<Extent3d> {
+    let request = crate::nurbs::b_spline_curve::p2::BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+    let mut x = crate::query::edge::calculate_bounding_box(k, b, e, request, false)
+        .ok()?
+        .normal
+        .filter(|x| !x.has_negative_volume())?;
+    x.expand_absolute(edge::tolerance(b, e).ok()?);
+    Some(x)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use crate::curve::curve::Curve;
+    use crate::error::EntityRef;
+    use crate::geom::attribute::AttributeStore;
+    use crate::geom::context::{Context, NotifyCallback};
+    use crate::geom::object::{NotifyOperation, ObjectRef};
+    use crate::kernel::Kernel;
+    use crate::primitive::api_curves::create_line_segment;
+    use crate::primitive::api_trim_ops::create_planar_faces;
+    use crate::topology::edge::NotifyEnv;
+    use crate::topology::loopuse::notify_ref;
+    use crate::topology::topology::NotifyRecords;
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+
+    thread_local! {
+        /// Walks over a face's edge uses for its notifications ([`super::notify`]).
+        pub(super) static EDGE_USE_WALKS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    #[derive(Debug)]
+    struct Listener(Arc<AtomicU64>);
+    impl NotifyCallback for Listener {
+        fn execute(
+            &mut self,
+            _: NotifyOperation,
+            _: ObjectRef,
+            _: Option<ObjectRef>,
+            _: Option<ObjectRef>,
+            _: Option<ObjectRef>,
+        ) -> crate::Result<()> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    /// A face's edit notification walks the face's edge uses only for someone to hear
+    /// it (#14329). An edge use's `PostEdit` changes nothing of it and no record or
+    /// attribute; only a notify callback sees it. Each edge added to a face notifies the
+    /// face, so building the cap of an outline of N lines walked O(N²) edge uses. Other
+    /// operations, which clear the edge uses' UV trims and gaps, still walk them.
+    #[test]
+    fn an_unheard_face_edit_does_not_walk_the_edge_uses() {
+        let n = 24;
+        let point = |i: usize| {
+            let t = core::f64::consts::TAU * i as f64 / n as f64;
+            crate::math::Vec3::new(30.0 * t.cos(), 30.0 * t.sin(), 0.0)
+        };
+        let curves: Vec<Curve> = (0..n)
+            .map(|i| Curve::from(create_line_segment(point(i), point(i + 1)).unwrap()))
+            .collect();
+        let mut k = Kernel::default();
+        let mut b = create_planar_faces(&mut k, &curves).unwrap();
+        let face = b.faces().ids().next().unwrap();
+        let key_of = |e: EntityRef| notify_ref(e);
+        let heard = Arc::new(AtomicU64::new(0));
+        let mut notify = |operation, context: Option<&mut Context>| {
+            let mut records = NotifyRecords::new();
+            let mut attributes = AttributeStore::default();
+            let mut env = NotifyEnv {
+                records: &mut records,
+                attributes: &mut attributes,
+                context,
+                key_of: &key_of,
+            };
+            EDGE_USE_WALKS.with(|w| w.set(0));
+            super::notify(&mut b, face, &mut env, None, operation, [None; 3]).unwrap();
+            EDGE_USE_WALKS.with(Cell::get)
+        };
+        let mut quiet = Context::default();
+        let mut listened = Context::default();
+        listened.set_user_notify_callback(Some(Box::new(Listener(heard.clone()))));
+        assert_eq!(notify(NotifyOperation::PostEdit, None), 0);
+        assert_eq!(notify(NotifyOperation::PostEdit, Some(&mut quiet)), 0);
+        assert_eq!(notify(NotifyOperation::PostEdit, Some(&mut listened)), 1);
+        // the face, each of its edge uses and each of its vertex uses
+        assert!(heard.load(Ordering::Relaxed) > 2 * n as u64);
+        assert_eq!(notify(NotifyOperation::ChangeGeometry, Some(&mut quiet)), 1);
+    }
 }

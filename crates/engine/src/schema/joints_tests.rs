@@ -3,10 +3,11 @@ use solidcore_record::Vec3;
 use solidcraft_doc::joints::JointKind;
 
 use super::{
-    AsBuiltJointParams, CamParams, CamResult, CouplingResult, CreateJointParams, DeleteJointParams, DeleteJointResult, DriveJointParams,
-    DriveJointResult, EditJointParams, GearParams, InspectJointParams, InspectJointResult, JointAddedResult, JointKindName, JointLimitsParams,
-    ListJointsParams, ListJointsResult, MakeJointOriginParams, MakeJointOriginResult, MotionLinkParams, RackPinionParams, ReachParams, ReachResult,
-    RigidGroupParams, RigidGroupResult, ScrewParams, SolveJointsParams, SolveResult,
+    AsBuiltJointParams, CamParams, CamResult, CouplingResult, CreateConstraintParams, CreateJointParams, DeleteJointParams, DeleteJointResult,
+    DriveJointParams, DriveJointResult, EditConstraintParams, EditJointParams, EditJointResult, GearParams, InspectJointParams, InspectJointResult,
+    JointAddedResult, JointKindName, JointLimitsParams, ListJointsParams, ListJointsResult, MakeJointOriginParams, MakeJointOriginResult,
+    MotionLinkParams, MotionLinkResult, RackPinionParams, ReachParams, ReachResult, RigidGroupParams, RigidGroupResult, ScrewParams,
+    SolveJointsParams, SolveResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -19,8 +20,10 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<CreateJointParams>(),
         &["a", "angle", "b", "flip", "limits", "name", "offset", "quiet", "type", "value", "values"],
     );
+    assert_keys(input_schema_for::<EditConstraintParams>(), &["angle", "constraint", "flip", "name", "offset", "quiet", "suppressed", "type"]);
+    assert_keys(input_schema_for::<CreateConstraintParams>(), &["a", "angle", "b", "flip", "name", "offset", "quiet", "type"]);
     assert_keys(input_schema_for::<AsBuiltJointParams>(), &["a", "at", "b", "limits", "name", "quiet", "type", "value", "values"]);
-    assert_keys(input_schema_for::<DriveJointParams>(), &["continuous", "index", "joint", "quiet", "value", "values"]);
+    assert_keys(input_schema_for::<DriveJointParams>(), &["continuous", "index", "joint", "quiet", "stop_at_budget", "value", "values"]);
     assert_keys(input_schema_for::<JointLimitsParams>(), &["index", "joint", "max", "min", "quiet"]);
     assert_keys(input_schema_for::<DeleteJointParams>(), &["joint", "link", "origin", "quiet"]);
     assert_keys(input_schema_for::<ListJointsParams>(), &["quiet"]);
@@ -28,11 +31,11 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<SolveJointsParams>(), &["quiet"]);
     assert_keys(
         input_schema_for::<MakeJointOriginParams>(),
-        &["body", "circle", "corner", "edge", "end", "face", "frame", "name", "occurrence", "on", "point", "x", "z"],
+        &["axis", "body", "circle", "corner", "edge", "end", "face", "frame", "name", "occurrence", "on", "path", "plane", "point", "x", "z"],
     );
     assert_keys(input_schema_for::<RigidGroupParams>(), &["occurrences"]);
     assert_keys(input_schema_for::<ReachParams>(), &["at", "axis", "continuous", "joints", "occurrence", "point", "quiet", "z"]);
-    assert_keys(input_schema_for::<MotionLinkParams>(), &["a", "b", "ia", "ib", "offset", "quiet", "ratio"]);
+    assert_keys(input_schema_for::<MotionLinkParams>(), &["a", "b", "ia", "ib", "link", "offset", "quiet", "ratio"]);
     assert_keys(input_schema_for::<GearParams>(), &["a", "b", "internal", "link", "quiet", "ra", "rb", "reverse"]);
     assert_keys(input_schema_for::<RackPinionParams>(), &["a", "b", "link", "quiet", "radius", "reverse"]);
     assert_keys(input_schema_for::<ScrewParams>(), &["a", "b", "joint", "link", "pitch", "quiet", "reverse"]);
@@ -42,6 +45,8 @@ fn schemas_and_the_key_check_agree() {
 #[test]
 fn the_commands_publish_their_schemas() {
     for id in [
+        "assembly.constraint.create",
+        "assembly.constraint.edit",
         "joint.create",
         "joint.as_built",
         "joint.drive",
@@ -164,6 +169,8 @@ fn strict_keeps_todays_errors() {
         ("joint.origin", json!({"circle": [0, 0, 0], "occurrence": 0, "z": "up"})),
         ("joint.origin", json!({"edge": [0, 0, 0], "occurrence": 0, "z": 5})),
         ("joint.origin", json!({"frame": {"origin": [0, 0, 0]}, "occurrence": 0})),
+        ("joint.origin", json!({"plane": 5})),
+        ("joint.origin", json!({"axis": true})),
         // joint.rigid_group
         ("joint.rigid_group", json!({})),
         ("joint.rigid_group", json!({"occurrences": null})),
@@ -202,6 +209,17 @@ fn strict_keeps_todays_errors() {
         ("joint.screw", json!({"a": true, "b": 1, "pitch": 1})),
         ("joint.cam", json!({})),
         ("joint.cam", json!({"a": false, "b": 1})),
+        ("assembly.constraint.edit", json!({})),
+        ("assembly.constraint.edit", json!({"constraint": true})),
+        ("assembly.constraint.edit", json!({"constraint": null})),
+        ("assembly.constraint.edit", json!({"constraint": [1]})),
+        ("assembly.constraint.create", json!({})),
+        ("assembly.constraint.create", json!({"type": "weld"})),
+        ("assembly.constraint.create", json!({"type": 5})),
+        ("assembly.constraint.create", json!({"type": "mate"})),
+        ("assembly.constraint.create", json!({"type": "mate", "a": 5, "b": at(0, 1.0)})),
+        ("assembly.constraint.create", json!({"type": "mate", "a": {}, "b": at(0, 1.0)})),
+        ("assembly.constraint.create", json!({"type": "mate", "a": at(0, 0.0), "b": at(0, 1.0), "offset": true})),
     ]);
 }
 
@@ -292,12 +310,16 @@ fn the_types_read_each_key_as_the_handlers_do() {
         json!({"edge": {"x": 0, "y": 0, "z": 0}, "z": [0, 0, 1]}),
         json!({"point": [1, 2, 3], "x": [1, 0, 0]}),
         json!({"frame": {"origin": [0, 0, 0], "z": [0, 0, 1]}}),
+        json!({"plane": "XY"}),
+        json!({"plane": "o:2/origin/XY"}),
+        json!({"axis": "Z"}),
+        json!({"axis": "o:2/origin/X"}),
     ] {
         assert_eq!(create(json!({"a": side})), none(), "{side}");
     }
     assert_eq!(issues("joint.create", json!({"type": "rigid"})), none());
-    let why = "a joint origin needs face, circle, edge, point or frame [x, y, z], or a face's name";
-    for side in [json!(5), json!(null), json!([1, 2, 3]), json!({}), json!({"face": [1, 2]}), json!({"face": 7})] {
+    let why = "a joint origin needs face, circle, edge, point, plane, axis or frame [x, y, z], or a face's name";
+    for side in [json!(5), json!(null), json!([1, 2, 3]), json!({}), json!({"face": [1, 2]}), json!({"face": 7}), json!({"plane": 5})] {
         assert_eq!(create(json!({"a": side})), [why], "{side}");
     }
     assert_eq!(create(json!({"b": {"frame": {"z": [0, 0, 1]}}})), ["`frame` needs origin and z"]);
@@ -504,6 +526,30 @@ fn the_schemas_take_what_the_handlers_read() {
         input_schema_for::<InspectJointParams>(),
         &[(json!({}), true), (json!({"joint": "J"}), true), (json!({"joint": 4}), true), (json!({"joint": true}), false)],
     );
+    takes(
+        input_schema_for::<CreateConstraintParams>(),
+        &[
+            (json!({"type": "mate", "a": {"face": [0, 0, 0]}, "b": "Origin"}), true),
+            (json!({"type": "distance", "a": {"face": [0, 0, 0]}, "b": {"point": [1, 2, 3]}, "offset": "gap"}), true),
+            (json!({"type": "angle", "a": "A", "b": "B", "angle": 30}), true),
+            (json!({"a": "A", "b": "B"}), false),
+            (json!({"type": 5, "a": "A", "b": "B"}), false),
+            (json!({"type": "mate", "a": "A", "b": "B", "flip": 1}), false),
+            (json!({"type": "mate", "a": "A", "b": "B", "values": [1]}), false),
+        ],
+    );
+    takes(
+        input_schema_for::<EditConstraintParams>(),
+        &[
+            (json!({"constraint": "Mate1"}), true),
+            (json!({"constraint": 4, "type": "flush", "offset": "gap", "flip": true}), true),
+            (json!({"constraint": "Mate1", "angle": 30, "name": "M", "suppressed": false, "quiet": true}), true),
+            (json!({}), false),
+            (json!({"constraint": "Mate1", "type": 5}), false),
+            (json!({"constraint": "Mate1", "flip": 1}), false),
+            (json!({"constraint": "Mate1", "joint": "Mate1"}), false),
+        ],
+    );
     takes(input_schema_for::<ListJointsParams>(), &[(json!({}), true), (json!({"quiet": false}), true), (json!({"quiet": 1}), false)]);
     takes(input_schema_for::<SolveJointsParams>(), &[(json!({}), true), (json!({"quiet": false}), true), (json!({"quiet": 1}), false)]);
 }
@@ -549,6 +595,25 @@ fn replies_match_the_output_schema() {
         json!({"type": "rigid", "a": "Top", "b": {"occurrence": "LeafC", "face": [20, 15, 0]}, "name": "Stack", "offset": "0 mm", "angle": 0}),
     );
     matches(output_schema_for::<JointAddedResult>(), "joint.create", &by_origin);
+    // assembly.constraint.create answers as joint.create does.
+    let rule = run(
+        "assembly.constraint.create",
+        json!({"type": "parallel", "a": {"occurrence": "LeafA", "face": [20, 15, 3]}, "b": {"occurrence": "LeafE", "face": [20, 15, 3]}, "name": "Rule"}),
+    );
+    matches(output_schema_for::<JointAddedResult>(), "assembly.constraint.create", &rule);
+    // Listed and inspected with the rule it was made as.
+    let list = run("joint.list", json!({}));
+    matches(output_schema_for::<ListJointsResult>(), "joint.list", &list);
+    assert!(list["joints"].as_array().is_some_and(|j| j.iter().any(|j| j["constraint"] == "parallel")), "{list}");
+    let inspected = run("joint.inspect", json!({"joint": "Rule"}));
+    matches(output_schema_for::<InspectJointResult>(), "joint.inspect", &inspected);
+    assert_eq!(inspected["joints"][0]["constraint"], "parallel", "{inspected}");
+    // assembly.constraint.edit answers as joint.edit does.
+    let edited = run("assembly.constraint.edit", json!({"constraint": "Rule", "type": "perpendicular"}));
+    matches(output_schema_for::<EditJointResult>(), "assembly.constraint.edit", &edited);
+    let edited = run("assembly.constraint.edit", json!({"constraint": "Rule", "suppressed": true, "quiet": true}));
+    matches(output_schema_for::<EditJointResult>(), "assembly.constraint.edit", &edited);
+    run("joint.delete", json!({"joint": "Rule"}));
     let built = run("joint.as_built", json!({"type": "slider", "a": "LeafB", "b": "LeafC", "name": "Slide", "limits": [[0, 10]], "quiet": false}));
     matches(output_schema_for::<JointAddedResult>(), "joint.as_built", &built);
     let at = run("joint.as_built", json!({"type": "rigid", "a": "LeafA", "b": "LeafD", "at": {"point": [0, 0, 0]}, "values": [1]}));
@@ -975,7 +1040,9 @@ fn strict_keeps_todays_errors_for_the_cam() {
 #[test]
 fn the_remaining_types_read_each_key_as_the_handlers_do() {
     let none = Vec::<String>::new;
-    let why = "a joint origin needs face, circle, edge, point or frame [x, y, z], or a face's name";
+    let why = "a joint origin needs face, circle, edge, point, plane, axis or frame [x, y, z], or a face's name";
+    let plane_form = "`plane` must be a plane name (e.g. \"XY\", \"o:2/origin/XY\", \"Plane1\") or a plane definition object";
+    let axis_form = "`axis` must be an axis name (e.g. \"Z\", \"o:2/origin/X\", \"Axis1\") or an axis definition object";
     let x_form = "`x` is a direction [x, y, z], a face's name, or {face: [x, y, z]}";
     let end_name = "`end` is the name of a face a round end lies on";
     let end_round = "`end` is for a round origin (`circle`)";
@@ -1011,6 +1078,11 @@ fn the_remaining_types_read_each_key_as_the_handlers_do() {
         json!({"face": [1, 2], "point": [1, 2, 3]}),
         json!({"face": [1, 2, 3], "circle": "C", "end": "E"}),
         json!({"face": null, "circle": null, "point": [1, 2, 3]}),
+        // The datum forms: a plane or axis by name or key, as plane_origin and axis_origin read them.
+        json!({"plane": "XY"}),
+        json!({"plane": "o:2/origin/XY"}),
+        json!({"axis": "Z"}),
+        json!({"axis": "o:2/origin/X"}),
     ] {
         assert_eq!(origin(p.clone()), none(), "{p}");
     }
@@ -1061,6 +1133,9 @@ fn the_remaining_types_read_each_key_as_the_handlers_do() {
         (json!({"point": [1, 2, 3], "x": 5}), "a point origin's `x` is a direction [x, y, z]"),
         (json!({"point": [1, 2, 3], "x": "F"}), "a point origin's `x` is a direction [x, y, z]"),
         (json!({"point": [1, 2, 3], "name": 5}), "`name` must be text"),
+        // A datum side's value: a name or key, or a definition object, as the handler reads it.
+        (json!({"plane": 5}), plane_form),
+        (json!({"axis": true}), axis_form),
     ];
     for (p, message) in refused {
         assert_eq!(origin(p.clone()), [message], "{p}");
@@ -1272,12 +1347,18 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
         input_schema_for::<MakeJointOriginParams>(),
         &[
             (json!({"face": [1, 2, 3]}), true),
+            (json!({"face": [1, 2, 3], "occurrence": 4, "path": [6, 4]}), true),
             (json!({"face": "F1", "x": "F2", "name": "Top", "body": "B", "occurrence": "A"}), true),
             (json!({"circle": "F1", "end": "F2", "x": {"face": [1, 2, 3]}}), true),
             (json!({"circle": [1, 2, 3], "z": [0, 0, 1], "x": null}), true),
             (json!({"edge": [1, 2, 3], "on": [0, 0, 0], "corner": {"x": 1, "y": 2, "z": 3}, "z": [1, 0, 0]}), true),
             (json!({"point": [1, 2, 3], "z": [0, 0, 1], "x": [1, 0, 0]}), true),
             (json!({"frame": {"origin": [0, 0, 0], "z": [0, 0, 1], "x": [1, 0, 0]}}), true),
+            (json!({"plane": "XY"}), true),
+            (json!({"plane": "o:2/origin/XY"}), true),
+            (json!({"axis": "Z"}), true),
+            (json!({"plane": 5}), false),
+            (json!({"axis": true}), false),
             (json!({}), false),
             (json!({"name": "N"}), false),
             (json!({"face": [1, 2]}), false),
@@ -1285,6 +1366,11 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
             (json!({"frame": {"origin": [0, 0, 0]}}), false),
             (json!({"point": [1, 2, 3], "x": 5}), false),
             (json!({"point": [1, 2, 3], "nme": "N"}), false),
+            (json!({"face": [1, 2, 3], "path": "6/4"}), false),
+            (json!({"face": [1, 2, 3], "path": [6, -4]}), false),
+            (json!({"face": [1, 2, 3], "path": null}), true),
+            (json!({"face": [1, 2, 3], "path": []}), false),
+            (json!({"face": [1, 2, 3], "path": (0..65).collect::<Vec<u64>>()}), false),
         ],
     );
     takes(
@@ -1385,7 +1471,8 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
     let screw = input_schema_for::<ScrewParams>();
     assert_eq!(screw.as_value()["anyOf"], json!([{"required": ["joint"]}, {"required": ["a", "b"]}]));
     assert_eq!(input_schema_for::<ReachParams>().as_value()["dependentRequired"], json!({"axis": ["z"]}));
-    assert_eq!(input_schema_for::<MakeJointOriginParams>().as_value()["anyOf"].as_array().map(Vec::len), Some(5));
+    // face, circle, edge, point, plane, axis and frame: the forms the handler reads.
+    assert_eq!(input_schema_for::<MakeJointOriginParams>().as_value()["anyOf"].as_array().map(Vec::len), Some(7));
 }
 
 /// A design with the pieces the couplings join, and a tray with a hole for the joint origins by
@@ -1483,9 +1570,9 @@ fn replies_of_the_rest_match_the_output_schema() {
     let apart = coupled(&mut s, "joint.screw", json!({"a": "K", "b": "Slide2", "pitch": 3}));
     assert_eq!(apart["link"], 3, "{apart}");
     let linked = put(&mut s, "joint.motion_link", json!({"a": "G1", "b": "X", "ratio": 2}));
-    ok(output_schema_for::<SolveResult>(), "joint.motion_link", &linked);
+    ok(output_schema_for::<MotionLinkResult>(), "joint.motion_link", &linked);
     let quiet = put(&mut s, "joint.motion_link", json!({"a": "G1", "b": "K", "ratio": 1, "offset": "5 deg", "ia": 0, "ib": 0, "quiet": true}));
-    ok(output_schema_for::<SolveResult>(), "joint.motion_link", &quiet);
+    ok(output_schema_for::<MotionLinkResult>(), "joint.motion_link", &quiet);
     assert!(quiet.get("dof").is_none() && quiet.get("fixed").is_none(), "{quiet}");
     let list = put(&mut s, "joint.list", json!({}));
     assert!(list["links"].as_array().is_some_and(|l| l.len() == 6), "{list}");

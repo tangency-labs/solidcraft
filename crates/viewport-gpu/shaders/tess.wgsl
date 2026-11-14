@@ -97,6 +97,10 @@ fn span_of(k0: u32, p: u32, n: u32, t: f32) -> u32 {
     return lo;
 }
 
+// Every loop here is a `while` with its counter stepped by hand, not a `for`: on an OpenCore Legacy
+// Patcher Mac (AMD Radeon R9 M370X, Intel Iris Pro) the `for` forms hang the GPU and the machine
+// restarts to the login window, while the same loops as `while` run (#3080).
+//
 // The arrays below are one-dimensional locals, written by loop counters and returned whole:
 // D3D12's older shader compiler (FXC) must unroll a loop that writes an array inside a struct
 // (or a two-dimensional one) by a counter, and it cannot unroll loops whose trip count is only
@@ -106,9 +110,11 @@ fn span_of(k0: u32, p: u32, n: u32, t: f32) -> u32 {
 fn basis_funs(k0: u32, span: u32, p: u32, t: f32) -> array<f32, W> {
     var n: array<f32, W>;
     n[0] = 1.0;
-    for (var j = 1u; j <= p; j = j + 1u) {
+    var j = 1u;
+    while (j <= p) {
         var saved = 0.0;
-        for (var r = 0u; r < j; r = r + 1u) {
+        var r = 0u;
+        while (r < j) {
             // right[r + 1] and left[j - r] of A2.2 (span ≥ p ≥ j, so no underflow).
             let right = data[k0 + span + r + 1u] - t;
             let left = t - data[k0 + span + 1u + r - j];
@@ -119,8 +125,10 @@ fn basis_funs(k0: u32, span: u32, p: u32, t: f32) -> array<f32, W> {
             }
             n[r] = saved + right * temp;
             saved = left * temp;
+            r = r + 1u;
         }
         n[j] = saved;
+        j = j + 1u;
     }
     return n;
 }
@@ -132,7 +140,8 @@ fn basis_ders(k0: u32, span: u32, p: u32, t: f32) -> array<f32, W> {
         return d;
     }
     let lower = basis_funs(k0, span, p - 1u, t);
-    for (var r = 0u; r <= p; r = r + 1u) {
+    var r = 0u;
+    while (r <= p) {
         var x = 0.0;
         if (r >= 1u) {
             let den = data[k0 + span + r] - data[k0 + span + r - p];
@@ -147,6 +156,7 @@ fn basis_ders(k0: u32, span: u32, p: u32, t: f32) -> array<f32, W> {
             }
         }
         d[r] = x * f32(p);
+        r = r + 1u;
     }
     return d;
 }
@@ -183,13 +193,17 @@ fn nurbs(s: Surface, u_in: f32, v_in: f32) -> Derivs {
     var a = vec4<f32>(0.0);
     var au = vec4<f32>(0.0);
     var av = vec4<f32>(0.0);
-    for (var j = 0u; j <= s.pv; j = j + 1u) {
-        for (var i = 0u; i <= s.pu; i = i + 1u) {
+    var j = 0u;
+    while (j <= s.pv) {
+        var i = 0u;
+        while (i <= s.pu) {
             let c = ctrl_at(s.ctrl + 4u * ((sv + j - s.pv) * s.nu + su + i - s.pu));
             a = a + bu0[i] * bv0[j] * c;
             au = au + bu1[i] * bv0[j] * c;
             av = av + bu0[i] * bv1[j] * c;
+            i = i + 1u;
         }
+        j = j + 1u;
     }
     r.ok = abs(a.w) > 0.0;
     if (r.ok) {
@@ -219,10 +233,12 @@ fn revolved(s: Surface, u: f32, v: f32) -> Derivs {
     let b1 = basis_ders(s.knots_u, span, s.pu, t);
     var c = vec4<f32>(0.0);
     var dc = vec4<f32>(0.0);
-    for (var i = 0u; i <= s.pu; i = i + 1u) {
+    var i = 0u;
+    while (i <= s.pu) {
         let h = ctrl_at(s.ctrl + 4u * (span + i - s.pu));
         c = c + b0[i] * h;
         dc = dc + b1[i] * h;
+        i = i + 1u;
     }
     r.ok = abs(c.w) > 0.0;
     if (!r.ok) {
@@ -276,6 +292,47 @@ fn oriented(s: Surface, n: vec3<f32>) -> vec3<f32> {
     return n;
 }
 
+// Whether `(u, v)` is within the surface's parameter range: a step from a pole must stay on
+// the surface, as the CPU evaluator's step inside does, or an extrapolated normal (the wrong
+// side of a sphere's pole) is drawn.
+fn inside(s: Surface, u: f32, v: f32) -> bool {
+    if (s.kind == PLANE) {
+        return true;
+    }
+    if (s.kind == NURBS) {
+        let u0 = data[s.knots_u + s.pu];
+        let u1 = data[s.knots_u + s.nu];
+        let v0 = data[s.knots_v + s.pv];
+        let v1 = data[s.knots_v + s.nv];
+        return u >= u0 && u <= u1 && v >= v0 && v <= v1;
+    }
+    // Revolved: the profile parameter is bounded; the angle is not.
+    let t = select(u, v, s.swap != 0u);
+    let t0 = data[s.knots_u + s.pu];
+    let t1 = data[s.knots_u + s.nu];
+    return t >= t0 && t <= t1;
+}
+
+// Whether `(u, v)` is on a parameter boundary of the surface: a pole, a seam or a trim edge.
+// The first partials there are the ones f32 cancellation makes least reliable, so the normal is
+// taken from a step inside even when the cross product does not look degenerate.
+fn on_boundary(s: Surface, u: f32, v: f32) -> bool {
+    if (s.kind == PLANE) {
+        return false;
+    }
+    if (s.kind == NURBS) {
+        let u0 = data[s.knots_u + s.pu];
+        let u1 = data[s.knots_u + s.nu];
+        let v0 = data[s.knots_v + s.pv];
+        let v1 = data[s.knots_v + s.nv];
+        return u <= u0 || u >= u1 || v <= v0 || v >= v1;
+    }
+    let t = select(u, v, s.swap != 0u);
+    let t0 = data[s.knots_u + s.pu];
+    let t1 = data[s.knots_u + s.nu];
+    return t <= t0 || t >= t1;
+}
+
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.x;
@@ -287,19 +344,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let d = derivs(s, vert.u, vert.v);
     var n = oriented(s, cross(d.du, d.dv));
     let scale = length(d.du) * length(d.dv);
-    if (!(length(n) > 1e-6 * scale) || !d.ok) {
+    if (!(length(n) > 1e-6 * scale) || !d.ok || on_boundary(s, vert.u, vert.v)) {
         // A degenerate point (a pole): the normal from a step inside.
         let h = 1e-4 * (1.0 + max(abs(vert.u), abs(vert.v)));
         // Steps (h, h), (-h, h), (h, -h), (-h, -h), without an array indexed by k (FXC).
-        for (var k = 0u; k < 4u; k = k + 1u) {
+        var k = 0u;
+        var searching = true;
+        while (searching && k < 4u) {
             let du = select(h, -h, (k & 1u) != 0u);
             let dv = select(h, -h, (k & 2u) != 0u);
             let e = derivs(s, vert.u + du, vert.v + dv);
             let m = oriented(s, cross(e.du, e.dv));
-            if (e.ok && length(m) > 0.0) {
+            if (e.ok && inside(s, vert.u + du, vert.v + dv) && length(m) > 0.0) {
                 n = m;
-                break;
+                searching = false;
             }
+            k = k + 1u;
         }
     }
     var nn = vec3<f32>(0.0, 0.0, 1.0);

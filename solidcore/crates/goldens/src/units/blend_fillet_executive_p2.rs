@@ -1222,9 +1222,6 @@ impl ExecutiveAccess<Handle> for Access {
         }
         Ok(b.edges().ids().map(Handle::Edge).collect())
     }
-    fn edge_is_manifold(&self, _: Handle) -> SolidResult<bool> {
-        missing()
-    }
     fn vertices(&self, handle: Handle) -> SolidResult<Vec<Handle>> {
         if !self.brep(handle)?.vertices().is_empty() {
             return missing();
@@ -1416,14 +1413,26 @@ impl ExecutiveAccess<Handle> for Access {
 /// `-2`).
 const OP_P2: &str = "blend::fillet_executive::p2: ";
 
+/// The p2 module's operation: its null objects, typed, are `Missing` blend failures of it.
+const P2_OP: &str = "blend::fillet_executive::p2";
+
 /// The `SmStatus` of a Rust error.
 fn status_of(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream {
             operation, code, ..
         } if *code == SM_ERR_NULL_POINTER && operation.starts_with(OP_P2) => NULL_DEREF,
-        SolidError::Upstream { code, .. } => f64::from(*code),
-        _ => -9.0,
+        // the p2 module's own null objects, typed (#13790): a `Missing` blend failure of
+        // the module's operation
+        e if e.operation() == P2_OP
+            && matches!(
+                e.blend_failure(),
+                Some(solidcore::error::blend::BlendFailure::Missing(_))
+            ) =>
+        {
+            NULL_DEREF
+        }
+        e => crate::output::blend_status(e).map_or(-9.0, f64::from),
     }
 }
 
@@ -1563,7 +1572,6 @@ fn executive(target: Option<Handle>) -> FilletExecutive<Handle> {
         vertex_corner_map: BTreeMap::new(),
         edgeuse_solver_map: BTreeMap::new(),
         self_intersection_handler: None,
-        blend_curve_at_thirds: false,
         mark_corner_patches: false,
         cliff_overflow: false,
         open_ends: Vec::new(),
@@ -1578,6 +1586,7 @@ fn executive(target: Option<Handle>) -> FilletExecutive<Handle> {
         fit_edge: None,
         fit_kind: solidcore::blend::fillet_executive::FitKind::Radius,
         fit_setback: -1.0,
+        rollover_adjusting: false,
     };
     executive.intersector.ignore_tangency = true;
     executive

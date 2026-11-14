@@ -27,6 +27,56 @@ fn open(h: &mut Harness) {
 }
 
 #[test]
+fn clearing_edited_extrude_offset_keeps_the_field_available_for_replacement() {
+    for params in [json!({"start_offset":"5 mm"}), json!({"start_offset":"0 mm"}), json!({"from":[0,0,5],"start_offset":"5 mm"})] {
+        let mut h = make(params);
+        let original = extent(&h);
+        let undo = h.app.session.undo.len();
+        open(&mut h);
+        h.step(&json!({"click":{"handle":"dialog:Offset"}})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"key":"Backspace"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("dialog:Offset").is_some(), "clearing a value must keep its field visible");
+        h.step(&json!({"text":"7 mm"})).unwrap();
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert_eq!(extent(&h).start_offset.as_deref(), Some("7 mm"));
+        assert_eq!(extent(&h).from, original.from);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(extent(&h), original);
+    }
+}
+
+#[test]
+fn new_extrude_keeps_empty_offset_until_profile_plane_is_selected() {
+    let mut h = make(json!({}));
+    h.app.run("timeline.delete", json!({"feature":"Depth"})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+    h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    h.app.start("solid.extrude");
+    h.frames(8);
+    h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Start"}})).unwrap();
+    h.step(&json!({"widget":"Offset"})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Offset"}})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"key":"Backspace"})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::handle_at("dialog:Offset").is_some());
+    h.step(&json!({"text":"3 mm"})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Start"}})).unwrap();
+    h.step(&json!({"widget":"Profile Plane"})).unwrap();
+    assert!(crate::scenario::handle_at("dialog:Offset").is_none());
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    let FeatureKind::Extrude { extent, .. } = &h.app.session.doc.features.last().unwrap().kind else { panic!("extrude") };
+    assert!(extent.start_offset.is_none());
+    assert!(extent.from.is_none());
+}
+
+#[test]
 fn undoing_the_edited_feature_closes_its_editor_and_preserves_redo() {
     let mut h = make(json!({}));
     let feature = h.app.session.doc.find_feature("Depth").unwrap().id;
@@ -388,8 +438,11 @@ fn dragging_to_update_value_reselects_whole_value_box_text() {
     assert_eq!(selection(&h), (0, 4), "the pick selects all of \"4 mm\"");
     h.step(&json!({"drag":[{"handle":"arrow"},{"world":[5,5,15]}]})).unwrap();
     let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { distance, .. }, .. }) = &h.app.dialog else { panic!("extrude dialog") };
-    assert_eq!(distance, "15 mm");
-    assert_eq!(selection(&h), (0, 5), "the drag grew the text length; the selection must cover all of it");
+    // Snapped drag writes Length decimals (and enough places for the snap step) (#9035).
+    assert!(distance.starts_with("15"), "{distance}");
+    assert!(distance.ends_with(" mm"), "{distance}");
+    assert_ne!(distance, "15 mm", "snapped drag pads to Length decimals: {distance}");
+    assert_eq!(selection(&h), (0, distance.len()), "the drag grew the text length; the selection must cover all of it ({distance})");
 }
 
 #[test]
@@ -822,4 +875,101 @@ fn without_face_stops_the_extrude_arrow_moves_in_round_steps() {
     let step = crate::canvas::snap_step(h.app.cam.half_height());
     assert!(((d / step).round() * step - d).abs() < 1e-9, "{d} is not a multiple of the {step} mm step");
     let_go(&mut h);
+}
+
+/// The extrude "Depth" (a 10 x 10 x 10 block) and a later box "Pad" beside it, both in view.
+fn two_features() -> Harness {
+    let mut h = make(json!({}));
+    h.app.run("solid.box", json!({"corner":[30,0,0],"length":8,"width":8,"height":4,"name":"Pad"})).unwrap();
+    h.app.animate_fit_all();
+    h.frames(30);
+    h
+}
+
+fn editing_feature(h: &Harness) -> Option<u64> {
+    h.app.dialog.as_ref().and_then(|d| d.editing).map(|(id, _)| id)
+}
+
+fn feature_id(h: &Harness, name: &str) -> u64 {
+    h.app.session.doc.find_feature(name).unwrap().id
+}
+
+// Double-clicking a body's face in the view opens the editor of the feature that made the face,
+// as a double-click on that feature's row does (#10989).
+#[test]
+fn double_clicking_a_face_edits_the_feature_that_made_it() {
+    let mut h = two_features();
+    h.step(&json!({"click":{"world":[5,5,10]},"double":true})).unwrap();
+    h.frames(8);
+    assert!(h.app.dialog.is_some(), "the extrude's editor opens");
+    assert_eq!(editing_feature(&h), Some(feature_id(&h, "Depth")));
+    h.step(&json!({"widget":"Cancel"})).unwrap();
+    h.settle();
+    h.frames(30);
+    assert!(h.app.dialog.is_none());
+    // A face of the later feature opens that feature, not the extrude.
+    h.step(&json!({"click":{"world":[34,4,4]},"double":true})).unwrap();
+    h.frames(8);
+    assert_eq!(editing_feature(&h), Some(feature_id(&h, "Pad")));
+}
+
+// It is the same editor the timeline row opens.
+#[test]
+fn double_clicking_a_face_opens_what_the_timeline_row_opens() {
+    let mut h = two_features();
+    open(&mut h);
+    let from_row = h.app.dialog.as_ref().map(|d| (format!("{:?}", d.kind), d.editing.map(|e| e.0)));
+    h.step(&json!({"widget":"Cancel"})).unwrap();
+    h.settle();
+    h.frames(30);
+    h.step(&json!({"click":{"world":[5,5,10]},"double":true})).unwrap();
+    h.frames(8);
+    assert_eq!(h.app.dialog.as_ref().map(|d| (format!("{:?}", d.kind), d.editing.map(|e| e.0))), from_row);
+}
+
+// A single click only selects the face, and a double-click with Shift held is left to the selection.
+#[test]
+fn a_single_click_on_a_face_only_selects_it() {
+    let mut h = two_features();
+    h.step(&json!({"click":{"world":[5,5,10]}})).unwrap();
+    h.frames(30);
+    assert!(h.app.dialog.is_none() && h.app.pending_feature_edit.is_none());
+    assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::Face { .. })), "{:?}", h.app.session.selection);
+    h.step(&json!({"click":{"world":[5,5,10]},"double":true,"shift":true})).unwrap();
+    h.frames(8);
+    assert!(h.app.dialog.is_none(), "a double-click with a modifier is left to the selection");
+}
+
+// Inside a dialog or tool the double-click does what it did: it does not swap the dialog.
+#[test]
+fn double_clicking_a_face_inside_an_open_dialog_leaves_it() {
+    let mut h = two_features();
+    h.app.start("solid.box");
+    h.frames(4);
+    let primitive = |h: &Harness| h.app.dialog.as_ref().is_some_and(|d| format!("{:?}", d.kind).starts_with("Primitive { cmd: \"solid.box\""));
+    assert!(primitive(&h));
+    h.step(&json!({"click":{"world":[5,5,10]},"double":true})).unwrap();
+    h.frames(8);
+    assert!(primitive(&h), "the Box dialog stays open");
+    assert_eq!(editing_feature(&h), None);
+    assert!(h.app.pending_feature_edit.is_none());
+}
+
+// In a component placed away from the origin the face is found in the component's own frame,
+// so a later feature beside it is not opened instead: placed for good, or moved and not captured.
+#[test]
+fn double_clicking_a_face_of_a_moved_component_edits_its_feature() {
+    for capture in [true, false] {
+        let mut h = make(json!({}));
+        let part = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+        let occurrence = part["occurrence"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"corner":[0,0,0],"length":4,"width":4,"height":4,"name":"Inner"})).unwrap();
+        h.app.run("solid.box", json!({"corner":[20,0,0],"length":4,"width":4,"height":4,"name":"Later"})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[40,0,0],"capture":capture})).unwrap();
+        h.app.animate_fit_all();
+        h.frames(30);
+        h.step(&json!({"click":{"world":[42,2,4]},"double":true})).unwrap();
+        h.frames(8);
+        assert_eq!(editing_feature(&h), Some(feature_id(&h, "Inner")), "capture: {capture}");
+    }
 }

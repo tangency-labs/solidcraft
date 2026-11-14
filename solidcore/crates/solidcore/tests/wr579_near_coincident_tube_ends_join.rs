@@ -243,12 +243,15 @@ fn wr575_tube_ends_join_adds_no_check_failure_at_any_gap() {
     // circle's half-turn knot, so both pieces' short end spans fail `SmEllipse` #1/#2
     // (1.8e-6 and 1.2e-6; one piece, 1.5e-6, before): WR-575's defect, which its flag
     // clears, as the flag-on rows show.
+    // Face test 36 is gone from every row since #13295: it named the joined tube's seam
+    // edge ending at a vertex a few micrometres across the seam, inside the vertex's own
+    // tolerance, with no edge beside the seam there: a corner, not a sliver.
     let rows = [
-        (1e-5, false, report(2, 2, 2)),
-        (1e-6, false, report(0, 1, 1)),
-        (1e-7, false, report(0, 0, 1)),
-        (1e-5, true, report(0, 2, 2)),
-        (1e-7, true, report(0, 0, 1)),
+        (1e-5, false, report(2, 2, 0)),
+        (1e-6, false, report(0, 1, 0)),
+        (1e-7, false, report(0, 0, 0)),
+        (1e-5, true, report(0, 2, 0)),
+        (1e-7, true, report(0, 0, 0)),
     ];
     let failures: Vec<String> = rows
         .iter()
@@ -264,7 +267,8 @@ fn wr575_tube_ends_join_adds_no_check_failure_at_any_gap() {
 /// `SmBSplineCurve` #15 (tangency-labs/solidcore#2427).
 #[test]
 fn wr575_every_fix_at_1e_6_adds_no_check_failure() {
-    let failures = flag_row(1e-6, true, &report(0, 1, 1));
+    // (face test 36 gone since #13295, as in the rows above)
+    let failures = flag_row(1e-6, true, &report(0, 1, 0));
     assert!(failures.is_empty(), "{failures:#?}");
 }
 

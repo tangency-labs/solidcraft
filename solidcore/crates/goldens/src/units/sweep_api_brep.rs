@@ -356,6 +356,7 @@ fn options_of(o: Option<[bool; 5]>) -> Option<SweepOptions> {
         orient_profile_perpendicular_to_path: d,
         move_to_profile: e,
         profile_at_path_start: false,
+        up: None,
     })
 }
 
@@ -363,7 +364,9 @@ fn options_of(o: Option<[bool; 5]>) -> Option<SweepOptions> {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }

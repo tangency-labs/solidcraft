@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use solidcore::Vec3;
 
-use super::size::Turn;
+use super::size::{SizeAt, Turn};
 use spade::handles::FixedVertexHandle;
 use spade::{AngleLimit, ConstrainedDelaunayTriangulation, Point2, PositionInTriangulation, RefinementParameters, Triangulation};
 
@@ -24,6 +24,14 @@ const LONG: f64 = 1.5;
 /// Seeds closer than this fraction of the side length to the boundary are left out (the
 /// boundary nodes are already there; a seed beside them makes a sliver).
 const CLEARANCE: f64 = 0.5;
+
+/// The smallest triangle (mm²) shaping still splits, for the chord tolerance `tol`: a side a
+/// thousandth of the tolerance (as [`super::sag`] stops), squared. Round a corner sharper than the
+/// angle aimed for, refinement would otherwise crowd points ever closer to it, down to triangles
+/// with no area; a larger floor leaves the slivers of flat faces with no size unshaped.
+pub(crate) fn smallest_area(tol: f64) -> f64 {
+    if tol.is_finite() && tol > 0.0 { (1e-3 * tol).powi(2) } else { 0.0 }
+}
 
 /// Rounds of sag refinement.
 const SAG_ROUNDS: usize = 16;
@@ -55,12 +63,33 @@ pub(crate) struct Fill<'a> {
     /// resort for a face whose boundary crosses itself in (u, v), so the display has no hole
     /// (the planner names the face in its stats as a defect upstream).
     pub lenient: bool,
+    /// A flat face with no size asked of it (no `refine`): Ruppert refinement for shape alone.
+    /// The boundary is kept as it is, so the neighbours' shared nodes are untouched.
+    pub flat: Option<Flat>,
+}
+
+/// How a flat face with no size asked of it is shaped ([`Fill::flat`]).
+pub(crate) struct Flat {
+    /// The smallest angle (degrees) its triangles keep, where its boundary allows.
+    pub min_angle: f64,
+    /// The most interior points that may take.
+    pub max_points: usize,
+    /// Triangles smaller than this (mm²) are left as they are ([`smallest_area`]).
+    pub min_area: f64,
 }
 
 /// Triangulate the region bounded by `loops` (ranges of `boundary`, each closed). Boundary
 /// vertices keep their indices; added points follow. Triangles are counter-clockwise in
 /// (u, v). `None` when a loop cannot be kept as constraints (it crosses itself or another).
 pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], fill: Fill) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
+    triangulate_impl(boundary, loops, fill, false)
+}
+
+pub(crate) fn triangulate_clipped(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], fill: Fill) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
+    triangulate_impl(boundary, loops, fill, true)
+}
+
+fn triangulate_impl(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], fill: Fill, clipped: bool) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
     if boundary.iter().flatten().any(|x| !x.is_finite()) {
         return None;
     }
@@ -68,16 +97,135 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
         Some((sag, _)) if sag.scale.iter().all(|k| k.is_finite() && *k > 0.0) => sag.scale,
         _ => [1.0, 1.0],
     };
+    let from = |p: Point2<f64>| [p.x / scale[0], p.y / scale[1]];
+    let Bounded { mut cdt, index, slits } = bounded(boundary, loops, scale, fill.lenient, clipped)?;
+    for s in fill.seeds {
+        if s.iter().all(|x| x.is_finite()) {
+            let _ = cdt.insert(to(s, scale));
+        }
+    }
+    if let (None, Some(flat)) = (&fill.refine, &fill.flat) {
+        let constraints = cdt.num_constraints();
+        let params = RefinementParameters::<f64>::new()
+            .keep_constraint_edges()
+            .exclude_outer_faces(true)
+            .with_angle_limit(AngleLimit::from_deg(flat.min_angle))
+            .with_min_required_area(flat.min_area)
+            .with_max_additional_vertices(flat.max_points);
+        cdt.refine(params);
+        if cdt.num_constraints() != constraints {
+            return None;
+        }
+    }
+    if let Some((sag, budget)) = &fill.refine {
+        let constraints = cdt.num_constraints();
+        let (added, _) = refine_sag(&mut cdt, sag, None, *budget, &from, &slits);
+        if fill.shape {
+            let params = RefinementParameters::<f64>::new()
+                .keep_constraint_edges()
+                .exclude_outer_faces(true)
+                .with_angle_limit(AngleLimit::from_deg(MIN_ANGLE_DEG))
+                // Around a corner sharper than the angle (where two pieces' cuts meet) the
+                // refinement would crowd points ever closer to it, down to triangles with no area.
+                .with_min_required_area(smallest_area(sag.tol))
+                .with_max_additional_vertices(budget.saturating_sub(added));
+            let before = cdt.num_vertices();
+            cdt.refine(params);
+            let shaped = cdt.num_vertices().saturating_sub(before);
+            // Shaping flips sides and adds points of its own; the triangles it leaves may
+            // sag again (a long strip round a cylinder), so the sag is checked once more.
+            if shaped > 0 {
+                refine_sag(&mut cdt, sag, None, budget.saturating_sub(added + shaped), &from, &slits);
+            }
+        }
+        // A split constraint would put a point on the boundary the neighbour does not have.
+        if cdt.num_constraints() != constraints {
+            return None;
+        }
+    }
+    collect(&cdt, index, boundary, loops, &slits, &from, clipped)
+}
+
+/// A face's triangles as [`mesh`] made them.
+pub(crate) struct Meshed {
+    /// The points it added, after the boundary's.
+    pub extra: Vec<[f64; 2]>,
+    /// The triangles, counter-clockwise in (u, v).
+    pub triangles: Vec<[u32; 3]>,
+    /// Its refinement stopped at its bound of points, or its rounds, with a triangle still off
+    /// the surface or longer than asked.
+    pub capped: bool,
+}
+
+/// The mesh path's start ([`super::Purpose::Mesh`]) on the region bounded by `loops` (as
+/// [`triangulate`]): constrained Delaunay of the boundary with the lattice `seeds`, refined where
+/// a triangle sags off the surface, has a side longer than [`LONG`] times the side asked at its
+/// middle (`sag.h`, or less where `size_at` asks for less) or turns more than the facet angle,
+/// adding at most `budget` points. Constraint edges are never split, so the boundary stays the
+/// shared edge nodes; the triangles are shaped after, in 3D ([`super::shape`]). `None` when a loop
+/// cannot be kept as constraints. Nothing is filled leniently.
+pub(crate) fn mesh(
+    boundary: &[[f64; 2]],
+    loops: &[std::ops::Range<usize>],
+    seeds: &[[f64; 2]],
+    sag: &Sag,
+    size_at: Option<SizeAt<'_>>,
+    budget: usize,
+) -> Option<Meshed> {
+    if boundary.iter().flatten().any(|x| !x.is_finite()) {
+        return None;
+    }
+    let scale = if sag.scale.iter().all(|k| k.is_finite() && *k > 0.0) { sag.scale } else { [1.0, 1.0] };
+    let from = |p: Point2<f64>| [p.x / scale[0], p.y / scale[1]];
+    let Bounded { mut cdt, index, slits } = bounded(boundary, loops, scale, false, false)?;
+    for s in seeds {
+        if s.iter().all(|x| x.is_finite()) {
+            let _ = cdt.insert(to(s, scale));
+        }
+    }
+    let constraints = cdt.num_constraints();
+    let (_, settled) = refine_sag(&mut cdt, sag, size_at, budget, &from, &slits);
+    // A split constraint would put a point on the boundary the neighbour does not have.
+    if cdt.num_constraints() != constraints {
+        return None;
+    }
+    let (extra, triangles) = collect(&cdt, index, boundary, loops, &slits, &from, false)?;
+    Some(Meshed { extra, triangles, capped: !settled })
+}
+
+/// A point of (u, v) in the triangulation's metric `scale`.
+fn to(p: &[f64; 2], scale: [f64; 2]) -> Point2<f64> {
     // spade refuses coordinates below about 1e-43 in magnitude (other than zero), which
     // projection leaves where a parameter is zero in exact arithmetic.
-    let to = |p: &[f64; 2]| spade::mitigate_underflow(Point2::new(p[0] * scale[0], p[1] * scale[1]));
-    let from = |p: Point2<f64>| [p.x / scale[0], p.y / scale[1]];
+    spade::mitigate_underflow(Point2::new(p[0] * scale[0], p[1] * scale[1]))
+}
+
+/// A face's boundary loops triangulated with their sides as constraints, before it is filled.
+struct Bounded {
+    cdt: Cdt,
+    /// Each vertex's index in the output, by its handle's index (dense in spade).
+    index: Vec<Option<u32>>,
+    /// The sides the loops run along both ways ([`slits`]).
+    slits: std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)>,
+}
+
+/// The constrained Delaunay triangulation of `boundary`'s points in the metric `scale` with the
+/// sides of `loops` as constraints. `None` when a side crosses one already kept, unless
+/// `lenient` (see [`Fill::lenient`]): then it is left out, or unless `clipped`: then the two sides
+/// are split where they cross and both are kept, which is how a display fill takes outlines that
+/// cross each other (a drill through a pour's edge).
+fn bounded(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], scale: [f64; 2], lenient: bool, clipped: bool) -> Option<Bounded> {
     let mut cdt = Cdt::new();
-    let mut index: HashMap<FixedVertexHandle, u32> = HashMap::new();
+    let mut index: Vec<Option<u32>> = Vec::with_capacity(boundary.len());
     let mut handles: Vec<FixedVertexHandle> = Vec::with_capacity(boundary.len());
     for (i, p) in boundary.iter().enumerate() {
-        let h = cdt.insert(to(p)).ok()?;
-        index.entry(h).or_insert(u32::try_from(i).ok()?);
+        let h = cdt.insert(to(p, scale)).ok()?;
+        if index.len() <= h.index() {
+            index.resize(h.index() + 1, None);
+        }
+        if let Some(slot @ None) = index.get_mut(h.index()) {
+            *slot = Some(u32::try_from(i).ok()?);
+        }
         handles.push(h);
     }
     // A side the loops run along both ways (a slit, where a face's boundary goes out along a
@@ -98,7 +246,14 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
                 continue;
             }
             if !cdt.can_add_constraint(a, b) {
-                if fill.lenient {
+                if clipped {
+                    cdt.add_constraint_and_split(a, b, |point| point);
+                    if cdt.num_vertices() > 500_000 {
+                        return None;
+                    }
+                    continue;
+                }
+                if lenient {
                     continue;
                 }
                 return None;
@@ -106,37 +261,26 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
             cdt.add_constraint(a, b);
         }
     }
-    for s in fill.seeds {
-        if s.iter().all(|x| x.is_finite()) {
-            let _ = cdt.insert(to(s));
-        }
-    }
-    if let Some((sag, budget)) = &fill.refine {
-        let constraints = cdt.num_constraints();
-        let added = refine_sag(&mut cdt, sag, *budget, &from, &slits);
-        if fill.shape {
-            let params = RefinementParameters::<f64>::new()
-                .keep_constraint_edges()
-                .exclude_outer_faces(true)
-                .with_angle_limit(AngleLimit::from_deg(MIN_ANGLE_DEG))
-                .with_max_additional_vertices(budget.saturating_sub(added));
-            let before = cdt.num_vertices();
-            cdt.refine(params);
-            let shaped = cdt.num_vertices().saturating_sub(before);
-            // Shaping flips sides and adds points of its own; the triangles it leaves may
-            // sag again (a long strip round a cylinder), so the sag is checked once more.
-            if shaped > 0 {
-                refine_sag(&mut cdt, sag, budget.saturating_sub(added + shaped), &from, &slits);
-            }
-        }
-        // A split constraint would put a point on the boundary the neighbour does not have.
-        if cdt.num_constraints() != constraints {
-            return None;
-        }
-    }
+    Some(Bounded { cdt, index, slits })
+}
+
+/// The triangles of `cdt` inside the region its constraints bound (see [`region`]), with the
+/// points added after `boundary`'s in the order the triangles first use them, each back in
+/// (u, v) by `from`. `index`: each boundary vertex's index, by its handle's. A `clipped`
+/// triangulation keeps every face inside the region of its `loops` rather than trusting the
+/// constraint crossing that was split ([`clipped_region`]).
+fn collect(
+    cdt: &Cdt,
+    mut index: Vec<Option<u32>>,
+    boundary: &[[f64; 2]],
+    loops: &[std::ops::Range<usize>],
+    slits: &std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)>,
+    from: &dyn Fn(Point2<f64>) -> [f64; 2],
+    clipped: bool,
+) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
     let mut uv: Vec<[f64; 2]> = boundary.to_vec();
     let mut tris = Vec::new();
-    let region = region(&cdt, &slits);
+    let region = if clipped { clipped_region(cdt, boundary, loops) } else { region(cdt, slits) };
     for face in cdt.inner_faces() {
         if !region.get(face.index()).copied().unwrap_or(false) {
             continue;
@@ -144,12 +288,18 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
         let vs = face.vertices();
         let mut t = [0u32; 3];
         for (slot, v) in t.iter_mut().zip(vs) {
-            *slot = match index.get(&v.fix()) {
-                Some(&i) => i,
+            let k = v.fix().index();
+            *slot = match index.get(k).copied().flatten() {
+                Some(i) => i,
                 None => {
                     let i = u32::try_from(uv.len()).ok()?;
                     uv.push(from(v.position()));
-                    index.insert(v.fix(), i);
+                    if index.len() <= k {
+                        index.resize(k + 1, None);
+                    }
+                    if let Some(s) = index.get_mut(k) {
+                        *s = Some(i);
+                    }
                     i
                 }
             };
@@ -158,6 +308,211 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
     }
     let extra = uv.split_off(boundary.len());
     Some((extra, tris))
+}
+
+fn clipped_region(cdt: &Cdt, boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>]) -> Vec<bool> {
+    let polygons: Vec<&[[f64; 2]]> = loops.iter().filter_map(|range| boundary.get(range.clone())).collect();
+    let contains = |polygon: &[[f64; 2]], point: [f64; 2]| {
+        let mut inside = false;
+        for (first, second) in polygon.iter().zip(polygon.iter().cycle().skip(1)).take(polygon.len()) {
+            if (first[1] > point[1]) != (second[1] > point[1])
+                && point[0] < first[0] + (point[1] - first[1]) * (second[0] - first[0]) / (second[1] - first[1])
+            {
+                inside = !inside;
+            }
+        }
+        inside
+    };
+    // The outer boundary is the largest loop: whatever order the caller names them in, and
+    // whichever way each runs, a region's holes lie inside it and cannot be larger than it (a
+    // shape mirrored by a y flip names the two the other way round).
+    let area = |polygon: &[[f64; 2]]| {
+        polygon.iter().zip(polygon.iter().cycle().skip(1)).take(polygon.len()).map(|(a, b)| a[0] * b[1] - b[0] * a[1]).sum::<f64>().abs()
+    };
+    let outer = polygons.iter().enumerate().max_by(|(_, a), (_, b)| area(a).total_cmp(&area(b))).map(|(index, _)| index);
+    let inside = |point: [f64; 2]| match outer {
+        Some(outer) => {
+            polygons.get(outer).is_some_and(|polygon| contains(polygon, point))
+                && !polygons.iter().enumerate().any(|(index, hole)| index != outer && contains(hole, point))
+        }
+        None => false,
+    };
+    let mut classified = vec![None; cdt.num_all_faces()];
+    for face in cdt.inner_faces() {
+        if classified.get(face.index()).is_some_and(Option::is_some) {
+            continue;
+        }
+        let vertices = face.vertices().map(|vertex| vertex.position());
+        let point = [(vertices[0].x + vertices[1].x + vertices[2].x) / 3.0, (vertices[0].y + vertices[1].y + vertices[2].y) / 3.0];
+        let inside = inside(point);
+        let mut pending = vec![face.fix()];
+        while let Some(handle) = pending.pop() {
+            match classified.get_mut(handle.index()) {
+                Some(slot @ None) => *slot = Some(inside),
+                _ => continue,
+            }
+            for edge in cdt.face(handle).adjacent_edges() {
+                if !edge.is_constraint_edge()
+                    && let Some(next) = edge.rev().face().as_inner()
+                {
+                    pending.push(next.fix());
+                }
+            }
+        }
+    }
+    classified.into_iter().map(|inside| inside.unwrap_or(false)).collect()
+}
+
+/// The union of planar regions, triangulated as one surface: `loops` are the regions' boundaries
+/// (ranges of `boundary`) and `region_of` names each loop's region. A face is material when it
+/// lies inside some region, so regions that overlap or abut come back as one surface with no edge
+/// between them — which is what a copper layer is, and what keeps it manifold.
+pub(crate) fn triangulate_union(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], region_of: &[usize]) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
+    if boundary.iter().flatten().any(|x| !x.is_finite()) {
+        return None;
+    }
+    let mut cdt = Cdt::new();
+    let mut index: Vec<Option<u32>> = Vec::with_capacity(boundary.len());
+    let mut handles: Vec<FixedVertexHandle> = Vec::with_capacity(boundary.len());
+    for (i, p) in boundary.iter().enumerate() {
+        let h = cdt.insert(spade::mitigate_underflow(Point2::new(p[0], p[1]))).ok()?;
+        if index.len() <= h.index() {
+            index.resize(h.index() + 1, None);
+        }
+        if let Some(slot @ None) = index.get_mut(h.index()) {
+            *slot = Some(u32::try_from(i).ok()?);
+        }
+        handles.push(h);
+    }
+    for r in loops {
+        let n = r.len();
+        for k in 0..n {
+            let (a, b) = (*handles.get(r.start + k)?, *handles.get(r.start + (k + 1) % n)?);
+            if a == b || cdt.exists_constraint(a, b) {
+                continue;
+            }
+            if !cdt.can_add_constraint(a, b) {
+                // Two items crossing: the crossing point becomes a vertex, so the union's boundary
+                // runs through it.
+                cdt.add_constraint_and_split(a, b, |point| point);
+                if cdt.num_vertices() > 500_000 {
+                    return None;
+                }
+                continue;
+            }
+            cdt.add_constraint(a, b);
+        }
+    }
+    let region = union_region(&cdt, boundary, loops, region_of);
+    let mut uv: Vec<[f64; 2]> = boundary.to_vec();
+    let mut tris = Vec::new();
+    for face in cdt.inner_faces() {
+        if !region.get(face.index()).copied().unwrap_or(false) {
+            continue;
+        }
+        let vs = face.vertices();
+        let mut t = [0u32; 3];
+        for (slot, v) in t.iter_mut().zip(vs) {
+            let k = v.fix().index();
+            *slot = match index.get(k).copied().flatten() {
+                Some(i) => i,
+                None => {
+                    let i = u32::try_from(uv.len()).ok()?;
+                    uv.push([v.position().x, v.position().y]);
+                    if index.len() <= k {
+                        index.resize(k + 1, None);
+                    }
+                    if let Some(s) = index.get_mut(k) {
+                        *s = Some(i);
+                    }
+                    i
+                }
+            };
+        }
+        tris.push(t);
+    }
+    let extra = uv.split_off(boundary.len());
+    Some((extra, tris))
+}
+
+/// Which faces of the arrangement are inside the union ([`triangulate_union`]). Every item's
+/// boundary is a constraint, so a face and its neighbour across a free edge are the same side of
+/// every item: one test per piece, then a flood fill.
+fn union_region(cdt: &Cdt, boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], region_of: &[usize]) -> Vec<bool> {
+    let polygons: Vec<&[[f64; 2]]> = loops.iter().filter_map(|range| boundary.get(range.clone())).collect();
+    let contains = |polygon: &[[f64; 2]], point: [f64; 2]| {
+        let mut inside = false;
+        for (first, second) in polygon.iter().zip(polygon.iter().cycle().skip(1)).take(polygon.len()) {
+            if (first[1] > point[1]) != (second[1] > point[1])
+                && point[0] < first[0] + (point[1] - first[1]) * (second[0] - first[0]) / (second[1] - first[1])
+            {
+                inside = !inside;
+            }
+        }
+        inside
+    };
+    let area = |polygon: &[[f64; 2]]| {
+        polygon.iter().zip(polygon.iter().cycle().skip(1)).take(polygon.len()).map(|(a, b)| a[0] * b[1] - b[0] * a[1]).sum::<f64>().abs()
+    };
+    // A region's outline is its largest loop: whatever order they arrive in, and whichever way
+    // each runs, its holes lie inside it and cannot be larger (a shape mirrored by a y flip names
+    // the two the other way round).
+    let count = region_of.iter().copied().max().map_or(0usize, |region| region.saturating_add(1));
+    let mut members: Vec<Vec<usize>> = vec![Vec::new(); count];
+    for (index, &region) in region_of.iter().enumerate() {
+        if let Some(list) = members.get_mut(region) {
+            list.push(index);
+        }
+    }
+    let outlines: Vec<Option<(usize, [f64; 4])>> = members
+        .iter()
+        .map(|list| {
+            let polygon = |index: &usize| polygons.get(*index).copied().unwrap_or(&[] as &[[f64; 2]]);
+            let best = list.iter().copied().max_by(|a, b| area(polygon(a)).total_cmp(&area(polygon(b))))?;
+            let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+            for p in polygon(&best) {
+                b = [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])];
+            }
+            Some((best, b))
+        })
+        .collect();
+    let inside = |point: [f64; 2]| -> bool {
+        members.iter().enumerate().any(|(region, list)| {
+            let Some((outline, b)) = outlines.get(region).copied().flatten() else { return false };
+            if point[0] < b[0] || point[0] > b[2] || point[1] < b[1] || point[1] > b[3] {
+                return false;
+            }
+            let Some(outer) = polygons.get(outline) else { return false };
+            if !contains(outer, point) {
+                return false;
+            }
+            !list.iter().copied().any(|hole| hole != outline && polygons.get(hole).is_some_and(|polygon| contains(polygon, point)))
+        })
+    };
+    let mut classified = vec![None; cdt.num_all_faces()];
+    for face in cdt.inner_faces() {
+        if classified.get(face.index()).is_some_and(Option::is_some) {
+            continue;
+        }
+        let vertices = face.vertices().map(|vertex| vertex.position());
+        let point = [(vertices[0].x + vertices[1].x + vertices[2].x) / 3.0, (vertices[0].y + vertices[1].y + vertices[2].y) / 3.0];
+        let inside = inside(point);
+        let mut pending = vec![face.fix()];
+        while let Some(handle) = pending.pop() {
+            match classified.get_mut(handle.index()) {
+                Some(slot @ None) => *slot = Some(inside),
+                _ => continue,
+            }
+            for edge in cdt.face(handle).adjacent_edges() {
+                if !edge.is_constraint_edge()
+                    && let Some(next) = edge.rev().face().as_inner()
+                {
+                    pending.push(next.fix());
+                }
+            }
+        }
+    }
+    classified.into_iter().map(|inside| inside.unwrap_or(false)).collect()
 }
 
 /// The band between a face's boundary `loops` (ranges of the first `n` points of `points`) and
@@ -228,15 +583,18 @@ pub(crate) fn band(points: &[[f64; 2]], n: usize, loops: &[std::ops::Range<usize
 /// Insert the parameters of the surface point under every triangle centre that lies more than
 /// the tolerance from the triangle or whose corner normals turn more than the facet angle, and
 /// under the middle of every non-constraint side that sags more than the tolerance or is
-/// longer than [`LONG`] times `h`, until none does or `budget` points were added. Returns the points added.
+/// longer than [`LONG`] times `h` (or than the size function `size_at` asks at its middle, where
+/// it asks for less), until none does or `budget` points were added. Returns the points added,
+/// and whether it settled: a round found nothing to add (not stopped by its budget or rounds).
 /// `slits`: constraint sides the loops run along both ways, inside the region on both sides.
 fn refine_sag(
     cdt: &mut Cdt,
     sag: &Sag,
+    size_at: Option<SizeAt<'_>>,
     budget: usize,
     from: &dyn Fn(Point2<f64>) -> [f64; 2],
     slits: &std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)>,
-) -> usize {
+) -> (usize, bool) {
     let mut added = 0;
     let mut cache: HashMap<FixedVertexHandle, Option<(Vec3, Option<Vec3>)>> = HashMap::new();
     // The widest turn between two corner normals.
@@ -295,19 +653,19 @@ fn refine_sag(
                 }
                 let [p, q] = e.positions();
                 let m = Point2::new(0.5 * (p.x + q.x), 0.5 * (p.y + q.y));
-                if pa.dist(pb) > LONG * sag.h || off(m, (pa + pb) * 0.5) {
+                if pa.dist(pb) > LONG * super::size::local(sag.h, size_at, (pa + pb) * 0.5) || off(m, (pa + pb) * 0.5) {
                     todo.push(m);
                 }
             }
         }
         if todo.is_empty() {
-            break;
+            return (added, true);
         }
         todo.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
         todo.dedup();
         for p in todo {
             if added >= budget {
-                return added;
+                return (added, false);
             }
             // The boundary's nodes are its edges', shared with the neighbouring face: a point that
             // lands on the boundary (a sliver's middle on a nearly straight stretch, on the chord to
@@ -321,19 +679,20 @@ fn refine_sag(
             }
         }
     }
-    added
+    (added, false)
 }
 
 /// The sides a boundary runs along an even number of times (a slit: out along a line and back),
 /// each as its vertices in index order: the region lies on both sides of them.
 fn slits(sides: &[(FixedVertexHandle, FixedVertexHandle)]) -> std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)> {
-    let mut runs: HashMap<(FixedVertexHandle, FixedVertexHandle), usize> = HashMap::new();
-    for &(a, b) in sides {
-        if a != b {
-            *runs.entry(if a.index() < b.index() { (a, b) } else { (b, a) }).or_insert(0) += 1;
-        }
-    }
-    runs.into_iter().filter(|(_, n)| n % 2 == 0).map(|(e, _)| e).collect()
+    // Sorted, each side's runs are together: counted without hashing every side of the face.
+    let mut keyed: Vec<(usize, usize, (FixedVertexHandle, FixedVertexHandle))> = sides
+        .iter()
+        .filter(|(a, b)| a != b)
+        .map(|&(a, b)| if a.index() < b.index() { (a.index(), b.index(), (a, b)) } else { (b.index(), a.index(), (b, a)) })
+        .collect();
+    keyed.sort_unstable_by_key(|k| (k.0, k.1));
+    keyed.chunk_by(|x, y| (x.0, x.1) == (y.0, y.1)).filter(|run| run.len() % 2 == 0).filter_map(|run| run.first().map(|k| k.2)).collect()
 }
 
 /// Per face (by index): inside the region the constraint loops bound. A flood fill from the
@@ -344,7 +703,7 @@ fn region(cdt: &Cdt, slits: &std::collections::HashSet<(FixedVertexHandle, Fixed
     use spade::handles::{FixedFaceHandle, InnerTag};
     let counts = |e: spade::handles::DirectedEdgeHandle<'_, _, _, _, _>| {
         let [a, b] = e.vertices().map(|v| v.fix());
-        e.is_constraint_edge() && !slits.contains(&if a.index() < b.index() { (a, b) } else { (b, a) })
+        e.is_constraint_edge() && (slits.is_empty() || !slits.contains(&if a.index() < b.index() { (a, b) } else { (b, a) }))
     };
     let mut parity: Vec<Option<bool>> = vec![None; cdt.num_all_faces()];
     let mut todo: Vec<(FixedFaceHandle<InnerTag>, bool)> = Vec::new();
@@ -375,12 +734,18 @@ fn region(cdt: &Cdt, slits: &std::collections::HashSet<(FixedVertexHandle, Fixed
 /// step), keeping the points inside the region bounded by the loops (even–odd, so holes are
 /// out) and at least [`CLEARANCE`] of a side from the boundary in the metric `scale`.
 pub(crate) fn lattice(bbox: [(f64, f64); 2], step: [f64; 2], polys: &[&[[f64; 2]]], scale: [f64; 2]) -> Vec<[f64; 2]> {
+    lattice_scanned(bbox, step, polys, scale).0
+}
+
+/// [`lattice`], and whether it was looked through: `false` (and no seeds) when it is more than
+/// [`MAX_SEEDS`] points, or its box or step is not finite.
+pub(crate) fn lattice_scanned(bbox: [(f64, f64); 2], step: [f64; 2], polys: &[&[[f64; 2]]], scale: [f64; 2]) -> (Vec<[f64; 2]>, bool) {
     let mut out = Vec::new();
-    scan(bbox, step, polys, scale, &mut |q| {
+    let whole = scan(bbox, step, polys, scale, &mut |q| {
         out.push(q);
         true
     });
-    out
+    (out, whole)
 }
 
 /// Whether the face has room for a seed of [`lattice`]: somewhere inside it lies a lattice point
@@ -520,7 +885,7 @@ mod tests {
         for refine in [false, true] {
             let refine = refine.then_some((Sag { eval: &flat, tol: 1e-3, h: 0.1, turn: None, scale: [2.0, 1.0] }, 2000));
             let label = refine.is_some();
-            let Some((extra, tris)) = triangulate(&b, &loops, Fill { seeds: &[[0.2, 0.2], [0.5, 0.5]], refine, shape: true, lenient: false }) else {
+            let Some((extra, tris)) = triangulate(&b, &loops, Fill { seeds: &[[0.2, 0.2], [0.5, 0.5]], refine, shape: true, lenient: false, flat: None }) else {
                 panic!("meshes")
             };
             let mut uv = b.clone();
@@ -543,12 +908,51 @@ mod tests {
     fn crossing_loops_are_refused_unless_lenient() {
         let b = [[0.0, 0.0], [1.0, 1.0], [1.0, 0.0], [0.0, 1.0]];
         let whole = std::slice::from_ref(&(0..4));
-        assert!(triangulate(&b, whole, Fill { seeds: &[], refine: None, shape: false, lenient: false }).is_none());
+        assert!(triangulate(&b, whole, Fill { seeds: &[], refine: None, shape: false, lenient: false, flat: None }).is_none());
         // Lenient, the crossing side is left out and what the rest encloses is filled.
-        let Some((_, tris)) = triangulate(&b, whole, Fill { seeds: &[], refine: None, shape: false, lenient: true }) else {
+        let Some((_, tris)) = triangulate(&b, whole, Fill { seeds: &[], refine: None, shape: false, lenient: true, flat: None }) else {
             panic!("a lenient fill")
         };
         assert!(!tris.is_empty());
+    }
+
+    /// The smallest angle of each triangle, in degrees.
+    fn smallest_angles(uv: &[[f64; 2]], tris: &[[u32; 3]]) -> Vec<f64> {
+        tris.iter()
+            .map(|t| {
+                let p = t.map(|i| uv[i as usize]);
+                (0..3)
+                    .map(|k| {
+                        let (a, b, c) = (p[k], p[(k + 1) % 3], p[(k + 2) % 3]);
+                        let (u, v) = ([b[0] - a[0], b[1] - a[1]], [c[0] - a[0], c[1] - a[1]]);
+                        (u[0] * v[1] - u[1] * v[0]).abs().atan2(u[0] * v[0] + u[1] * v[1]).to_degrees()
+                    })
+                    .fold(180.0, f64::min)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_flat_disc_keeps_its_rim_and_has_no_slivers() {
+        // A disc's rim alone triangulates into fans of slivers; shaped, every triangle keeps the
+        // angle, the rim stays whole and the points added stay within the bound.
+        let n = 128;
+        let rim: Vec<[f64; 2]> = (0..n).map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos()).map(|(s, c)| [10.0 * c, 10.0 * s]).collect();
+        let whole = std::iter::once(0..n).collect::<Vec<_>>();
+        let bare = triangulate(&rim, &whole, Fill { seeds: &[], refine: None, shape: false, lenient: false, flat: None });
+        let Some((_, bare)) = bare else { panic!("meshes") };
+        assert!(smallest_angles(&rim, &bare).iter().any(|a| *a < 5.0), "the rim alone makes slivers");
+        let flat = Flat { min_angle: 15.0, max_points: n, min_area: 1e-6 };
+        let Some((extra, tris)) = triangulate(&rim, &whole, Fill { seeds: &[], refine: None, shape: false, lenient: false, flat: Some(flat) }) else {
+            panic!("meshes")
+        };
+        assert!(extra.len() <= n);
+        let mut uv = rim.clone();
+        uv.extend(extra);
+        let exact = 0.5 * n as f64 * 100.0 * (std::f64::consts::TAU / n as f64).sin();
+        assert!((area(&uv, &tris) - exact).abs() < 1e-9);
+        let worst = smallest_angles(&uv, &tris).into_iter().fold(180.0, f64::min);
+        assert!(worst >= 15.0 - 1e-9, "smallest angle {worst}");
     }
 
     #[test]
@@ -572,7 +976,7 @@ mod tests {
         // A parameter that is zero in exact arithmetic, left at 1e-300 by projection.
         let b = [[1e-300, 0.0], [1.0, -1e-310], [1.0, 1.0], [0.0, 1.0]];
         let whole = std::slice::from_ref(&(0..4));
-        let Some((extra, tris)) = triangulate(&b, whole, Fill { seeds: &[], refine: None, shape: false, lenient: false }) else { panic!("meshes") };
+        let Some((extra, tris)) = triangulate(&b, whole, Fill { seeds: &[], refine: None, shape: false, lenient: false, flat: None }) else { panic!("meshes") };
         assert!(extra.is_empty());
         assert_eq!(tris.len(), 2);
     }

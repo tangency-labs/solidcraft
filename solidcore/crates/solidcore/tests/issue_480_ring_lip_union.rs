@@ -25,7 +25,7 @@ use solidcore::math::Vec3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::{Brep, Kernel};
 
 fn volume(k: &Kernel, b: &mut Brep) -> solidcore::Result<f64> {
     let store = AttributeStore::default();
@@ -117,7 +117,7 @@ fn issue_480_ring_lip_union_with_the_seam_at_the_crossing_fails_by_default() {
         let mut k = Kernel::default();
         let r = ring_and_lip_body(&mut k, e, 90.0).map(|_| ());
         assert!(
-            matches!(r, Err(SolidError::Upstream { code: 1001, .. })),
+            matches!(&r, Err(e) if e.sm_status() == Some(1001)),
             "e = {e}: {r:?}"
         );
     }

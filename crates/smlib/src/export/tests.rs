@@ -27,8 +27,8 @@ mod native_tests {
             let v = b.mass_properties(MEASURE_ACCURACY).unwrap().volume;
             assert!((v - exact).abs() < 1e-6 * exact, "{name}: SMLib volume {v}, closed form {exact}");
             let (native, report) = b.to_native_report().unwrap_or_else(|e| panic!("{name}: {e}"));
-            solidcraft_geom::brep::check::validate(&native).unwrap();
-            solidcraft_geom::brep::geometry::check(&native).unwrap_or_else(|e| panic!("{name}: {e}"));
+            solidcore_ops::record_check::validate(&native).unwrap();
+            solidcore_ops::record_check::agreement(&native).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(report, Report { nurbs_edges: report.nurbs_edges, ..Report::default() }, "{name}: every face agrees");
             let [f, e, n] = b.counts().unwrap();
             assert_eq!((native.faces.len(), native.edges.len(), native.vertices.len()), (f, e, n), "{name}");
@@ -63,7 +63,7 @@ mod native_tests {
         let mids: Vec<[f64; 3]> = [(0.0, 0.0), (a, 0.0), (0.0, a), (a, a)].iter().flat_map(|&(p, q)| [[h, p, q], [p, h, q], [p, q, h]]).collect();
         let f = Brep::make_box([0.0; 3], [a; 3]).unwrap().fillet(&mids, 0.1, r).unwrap();
         let record = f.to_native().unwrap();
-        solidcraft_geom::brep::check::validate(&record).unwrap();
+        solidcore_ops::record_check::validate(&record).unwrap();
         let corners: Vec<([f64; 3], f64)> = record
             .faces
             .iter()
@@ -143,7 +143,7 @@ mod native_tests {
                 assert!((p - Vec3::new(q[0], q[1], q[2])).len() < 1e-9, "{:?} at {t}", e.curve);
             }
             if let b::Curve::Circle { radius, .. } = e.curve {
-                let [a, z] = solidcraft_geom::brep::label::edge_curve_interval(e).unwrap();
+                let [a, z] = solidcore_ops::label::edge_curve_interval(e).unwrap();
                 assert!((radius - 5.0).abs() < 1e-12 && (z - a - TAU).abs() < 1e-9);
             }
         }
@@ -160,7 +160,7 @@ mod native_tests {
         let near = Brep::make_cone([0.0; 3], 4.0, 4.0 - 1e-12, 10.0).unwrap().to_native().unwrap();
         assert!(near.faces.iter().any(|f| matches!(f.surface, b::Surface::Cylinder { .. })));
         assert!(!near.faces.iter().any(|f| matches!(f.surface, b::Surface::Cone { .. })));
-        solidcraft_geom::brep::check::validate(&near).unwrap();
+        solidcore_ops::record_check::validate(&near).unwrap();
     }
 
     /// A hole tangent to the block's outline from inside: the material touches itself along the
@@ -179,7 +179,7 @@ mod native_tests {
         assert_eq!((record.faces.len(), record.edges.len(), record.vertices.len()), (f, e + 1, v));
         assert_eq!((record.shells.len(), record.regions.len()), (1, 2));
         assert!(record.edges.iter().all(|e| e.uses.len() == 2));
-        solidcraft_geom::brep::geometry::check(&record).unwrap();
+        solidcore_ops::record_check::agreement(&record).unwrap();
         let on_line = |e: &b::Edge| {
             e.vertices.iter().all(|v| {
                 let p = record.vertices[*v as usize].point;
@@ -227,7 +227,7 @@ mod native_tests {
         let r = block.boolean(&hole, crate::BooleanOp::Subtract).unwrap().unwrap();
         let (record, _) = r.to_native_ordered().unwrap();
         assert!(record.edges.iter().all(|e| e.uses.len() == 2));
-        solidcraft_geom::brep::geometry::check(&record).unwrap();
+        solidcore_ops::record_check::agreement(&record).unwrap();
         let on_line = |e: &b::Edge| {
             e.vertices.iter().all(|v| {
                 let p = record.vertices[*v as usize].point;
@@ -279,7 +279,7 @@ mod native_tests {
         assert_eq!(record.regions.len(), 3);
         assert!(record.regions.iter().all(|g| !g.void));
         assert_eq!(record.regions[0].shells.len(), 2, "the infinite region lists both solids");
-        solidcraft_geom::brep::geometry::check(&record).unwrap();
+        solidcore_ops::record_check::agreement(&record).unwrap();
         // V = 180000 - h/6 (A0 + 4 Am + A1), h = 9, Am = 55 x 35.
         let want = 180000.0 - 9.0 / 6.0 * (100.0 + 4.0 * 55.0 * 35.0 + 6000.0);
         let back = Brep::from_record(&record, true).unwrap();
@@ -327,10 +327,10 @@ mod native_tests {
             a
         };
         let (record, _) = native(&shifted(7e-15)).unwrap();
-        solidcraft_geom::brep::check::validate(&record).unwrap();
+        solidcore_ops::record_check::validate(&record).unwrap();
         assert!(record.edges.iter().any(|x| x.interval[0] == first && x.interval[1] <= last), "an interval on the NURBS's first knot");
         assert!(
-            native(&shifted(1e-3)).map(|(r, _)| solidcraft_geom::brep::check::validate(&r)).map_or(true, |v| v.is_err()),
+            native(&shifted(1e-3)).map(|(r, _)| solidcore_ops::record_check::validate(&r)).map_or(true, |v| v.is_err()),
             "a real overshoot is not moved"
         );
     }
@@ -450,6 +450,209 @@ mod native_tests {
                 f.reals.get_mut(&id).unwrap().iter_mut().for_each(|v| *v = x);
                 let _ = native(&f);
             }
+        }
+    }
+}
+
+/// `mapped`: SMLib's UV trim moved onto the edge record's parameter (solidcraft#12365).
+mod mapped_tests {
+    use super::*;
+    use solidcore_ops::pcurve::eval;
+    use solidcore_record::brep::{Budget, check_curve2};
+
+    /// A cubic trim on [3, 5]: clamped, one interior knot.
+    fn base() -> b::Curve2 {
+        b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5]],
+        }
+    }
+
+    fn same_curve_on(a: &b::Curve2, want: &b::Curve2, [t0, t1]: [f64; 2]) {
+        for i in 0..=8 {
+            let t = t0 + (t1 - t0) * f64::from(i) / 8.0;
+            let (p, q) = (eval(a, t).unwrap(), eval(want, t).unwrap());
+            assert!((p[0] - q[0]).abs() < 1e-9 && (p[1] - q[1]).abs() < 1e-9, "at {t}: {p:?} vs {q:?}");
+        }
+    }
+
+    /// The trim SMLib hands over can end a rounding past the edge record's interval with a dead
+    /// span there (its last span 3e-11 long after the edge's end, knots `5 x4, 5.00000000003 x4`:
+    /// the slot of a sloped bar, solidcraft#12365). Moving its end knots onto the edge's end
+    /// used to leave a run of 8 at 5, which the record refuses as "knot multiplicity", and the
+    /// body was lost. The remap drops the dead span: the record is valid and the curve on the
+    /// edge is unchanged.
+    #[test]
+    fn a_trim_ending_a_dead_span_past_the_edges_end_is_cut_to_the_edge() {
+        let e = 3e-11;
+        let trim = b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0, 5.0 + e, 5.0 + e, 5.0 + e, 5.0 + e],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5]],
+        };
+        let out = mapped(&trim, true, [1.0, 0.0], [3.0, 5.0], &|_, _| false).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some([3.0, 5.0]));
+        same_curve_on(&out, &base(), [3.0, 5.0]);
+    }
+
+    /// The other form seen in solidcraft#12365: the last interior knot run a rounding past the
+    /// end knots (`3.0000000000000004 x3, 3 x4`), an unordered knot vector by one ulp. Knots past
+    /// an end by rounding are that end, and the dead span they leave is dropped.
+    #[test]
+    fn a_trims_interior_knots_a_rounding_past_its_end_are_the_end() {
+        let u = 3.0 + 4e-16;
+        let trim = b::Curve2::Spline {
+            knots: vec![1.0, 1.0, 1.0, 1.0, 2.0, u, u, u, 3.0, 3.0, 3.0, 3.0],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5]],
+        };
+        let want = b::Curve2::Spline {
+            knots: vec![1.0, 1.0, 1.0, 1.0, 2.0, 3.0, 3.0, 3.0, 3.0],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5]],
+        };
+        let out = mapped(&trim, true, [1.0, 0.0], [1.0, 3.0], &|_, _| false).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some([1.0, 3.0]));
+        same_curve_on(&out, &want, [1.0, 3.0]);
+    }
+
+    /// The same dead span on an edgeuse that runs against its edge: `mapped` reverses the trim
+    /// about its own ends first, so the dead span is at the start (`3 x4, 3.00000000003 x4`, a
+    /// run that is a rounding inside the edge's start), and the start-side drop runs. The dead
+    /// span's control points are distinct here, so a drop at the wrong end would show.
+    #[test]
+    fn a_reversed_trim_with_a_dead_span_is_cut_at_the_edges_start() {
+        let e = 3e-11;
+        let trim = b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0, 5.0 + e, 5.0 + e, 5.0 + e, 5.0 + e],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5], [6.0, 1.0], [7.0, 2.0], [8.0, 3.0], [9.0, 4.0]],
+        };
+        let out = mapped(&trim, false, [1.0, 0.0], [3.0, 5.0], &|_, _| false).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some([3.0, 5.0]));
+        let want = b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0],
+            points: vec![[5.0, 0.5], [3.5, 1.0], [2.0, -1.0], [1.0, 2.0], [0.0, 0.0]],
+        };
+        let b::Curve2::Spline { points, .. } = &out else { panic!("{out:?}") };
+        assert_eq!(points, &vec![[5.0, 0.5], [3.5, 1.0], [2.0, -1.0], [1.0, 2.0], [0.0, 0.0]]);
+        same_curve_on(&out, &want, [3.0, 5.0]);
+    }
+
+    /// A 1.26 µm edge at the start of a straight Bézier whose knots span 1.02e-7 (Siemens NX
+    /// writes both, solidcraft#15065) lies on [0, 6.4e-12], and the rest of the curve's edge
+    /// starts there, its trim a rounding before it (SMLib's, as handed over). A floor of 1 on the
+    /// rounding (10⁻⁹ absolute) snapped every knot of the micro edge's trim onto its start, an
+    /// empty domain the record refuses, and the solid was lost. Each trim maps onto its edge as
+    /// a valid record, unchanged on it.
+    #[test]
+    fn a_micro_edges_trim_on_a_tiny_interval_keeps_its_span() {
+        let (t, end) = (6.430814112915728e-12, 1.020781457822e-7);
+        let line = |a: f64, b: f64| b::Curve2::Spline { knots: vec![a, a, b, b], points: vec![[a, 0.0], [b, 0.0]] };
+        for (trim, edge) in [(line(0.0, t), [0.0, t]), (line(6.430814112910789e-12, end), [t, end])] {
+            let out = mapped(&trim, true, [1.0, 0.0], edge, &|_, _| false).unwrap();
+            check_curve2(&out, &mut Budget::input()).unwrap();
+            assert_eq!(out.interval(), Some(edge));
+            let at = |c: &b::Curve2, s: f64| eval(c, s).unwrap()[0];
+            for s in edge {
+                assert!((at(&out, s) - s).abs() <= 1e-9 * edge[1], "{out:?} at {s}");
+            }
+        }
+        // A trim genuinely off that edge is still refused, even where the caller finds its ends
+        // on the edge: SMLib's [0, 1] (the issue's message), and one on [0, 5e-10], which the
+        // floor took for a rounding of [0, 6.4e-12].
+        for z in [1.0, 5e-10] {
+            assert!(mapped(&line(0.0, z), true, [1.0, 0.0], [0.0, t], &|_, _| true).is_err(), "[0, {z}]");
+        }
+    }
+
+    /// An edge on an interval of at most `SM_EFF_ZERO` (10⁻¹²) is below SMLib's knot resolution:
+    /// SMLib's check takes its trim's end knots for one ("Bad Knot Count") and its mass properties
+    /// find a trim of fewer than two knots. Such a trim is refused, its interval named, even when
+    /// it lies exactly on the edge (a 1.283 nm edge on solidcraft#15065's Bézier, [0, 6.549e-15]);
+    /// an interval just above the resolution maps.
+    #[test]
+    fn a_trim_on_an_interval_below_smlibs_knot_resolution_is_refused() {
+        let line = |b: f64| b::Curve2::Spline { knots: vec![0.0, 0.0, b, b], points: vec![[0.0, 0.0], [b, 0.0]] };
+        for t in [6.5490500023792094e-15, 1e-12] {
+            let e = mapped(&line(t), true, [1.0, 0.0], [0.0, t], &|_, _| true).unwrap_err();
+            assert!(e.to_string().contains(&format!("its edge on [0, {t}]")), "{e}");
+        }
+        let out = mapped(&line(2e-12), true, [1.0, 0.0], [0.0, 2e-12], &|_, _| false).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+    }
+
+    /// A trim already on its edge is left as it is.
+    #[test]
+    fn a_trim_on_its_edge_is_unchanged() {
+        let out = mapped(&base(), true, [1.0, 0.0], [3.0, 5.0], &|_, _| false).unwrap();
+        assert_eq!(out, base());
+    }
+
+    /// A circle's edge on its NURBS form (a whole turn of four quarters, knots 0 to 4) whose end
+    /// lies a rounding past the quarter line SMLib's trim stops on: the edge ends at 1.00000012,
+    /// the trim at 1, 1.2e-7 of the form's parameter apart, as a file's quarter arc measures once
+    /// its end angle is converted. On a 50 mm circle the two parameters are 0.01 µm apart, one
+    /// point of the edge within its tolerance, so the trim's end is the edge's and the face is
+    /// kept; the engine block and cylinder head of an assembly were lost whole on it.
+    #[test]
+    fn a_trim_ending_on_the_quarter_line_its_circle_edge_ends_a_rounding_past_is_the_edges() {
+        let r = 50.0;
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        // The NURBS form of a circle of radius r about z: four rational quadratic quarters.
+        let corners = [[r, 0.0], [r, r], [0.0, r], [-r, r], [-r, 0.0], [-r, -r], [0.0, -r], [r, -r], [r, 0.0]];
+        let circle = b::Curve::RationalSpline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0],
+            homogeneous: corners
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let k = if i % 2 == 1 { w } else { 1.0 };
+                    [p[0] * k, p[1] * k, 0.0, k]
+                })
+                .collect(),
+        };
+        let end = 1.0 + 1.2e-7;
+        let (p, q) = (point3(&circle, 1.0).unwrap(), point3(&circle, end).unwrap());
+        assert!(((p[0] - 0.0).abs() + (p[1] - r).abs()) < 1e-9, "{p:?}");
+        let gap = (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt();
+        assert!(gap > 1e-9 && gap < 1e-4, "{gap}");
+        let tolerance = 1e-3;
+        let on_edge = |s: f64, t: f64| match (point3(&circle, s), point3(&circle, t)) {
+            (Some(p), Some(q)) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= tolerance,
+            _ => false,
+        };
+        // SMLib's trim of the quarter arc in the face's (u, v), on [0, 1].
+        let trim = b::Curve2::Spline { knots: vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0], points: vec![[0.0, 0.0], [0.3, 0.1], [0.7, 0.2], [1.0, 0.4]] };
+        let out = mapped(&trim, true, [1.0, 0.0], [0.0, end], &on_edge).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some([0.0, end]));
+        assert_eq!(eval(&out, end), eval(&trim, 1.0));
+        // The same gap where the edge's points there are farther apart than its tolerance is
+        // not the edge's end: the trim is refused, as one a quarter short would be.
+        assert!(mapped(&trim, true, [1.0, 0.0], [0.0, end], &|_, _| false).is_err());
+        assert!(mapped(&trim, true, [1.0, 0.0], [0.0, 1.5], &on_edge).is_err());
+    }
+
+    /// A trim that runs past its edge's end by more than a rounding but within the edge's
+    /// tolerance has its overhang dropped, and an interior knot inside the edge's interval
+    /// nearer its end than the overhang stays where it is: the curve on the edge is unchanged.
+    #[test]
+    fn a_trim_past_its_edge_within_tolerance_keeps_its_interior_knots() {
+        let g = 1e-7;
+        // Interior knot 5 − g/2 (inside the edge, nearer its end than the overhang), end at 5 + g.
+        let trim = b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 5.0 - 0.5 * g, 5.0 + g, 5.0 + g, 5.0 + g, 5.0 + g],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5]],
+        };
+        let out = mapped(&trim, true, [1.0, 0.0], [3.0, 5.0], &|_, _| true).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some([3.0, 5.0]));
+        let b::Curve2::Spline { knots, .. } = &out else { panic!("{out:?}") };
+        assert!(knots.contains(&(5.0 - 0.5 * g)), "{knots:?}");
+        for i in 0..=8 {
+            let t = 3.0 + 2.0 * f64::from(i) / 8.0 * (1.0 - 1e-6);
+            let (p, q) = (eval(&out, t).unwrap(), eval(&trim, t).unwrap());
+            assert!((p[0] - q[0]).abs() < 1e-5 && (p[1] - q[1]).abs() < 1e-5, "at {t}: {p:?} vs {q:?}");
         }
     }
 }
