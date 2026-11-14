@@ -366,3 +366,86 @@ pub struct MeshDeviation {
     /// How many scan points were measured.
     pub probes: usize,
 }
+
+/// Read a scanned or sculpted mesh as a run of silhouettes and loft a solid through them: the
+/// path for a shape that is not a stack of layers and never will be.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MeshLoftParams {
+    /// The mesh body, by name. The selected mesh body when left out.
+    pub body: Option<String>,
+    /// The directions to cut across, each read and lofted on its own, then intersected. `x`, `y`,
+    /// `z` or a `[x, y, z]` direction; `["z"]` when left out. One direction loses every
+    /// concavity that faces along it, which is what more than one is for: a waist is caught by a
+    /// cut across it and invisible to a cut along it.
+    pub axes: Option<Vec<AxisName>>,
+    /// How many cuts to take along each direction (16 by default, between 2 and 50).
+    pub sections: Option<usize>,
+    /// How far apart the cuts sit instead, as a length. Overrides `sections`.
+    pub spacing: Option<LengthExpr>,
+    /// How many points each profile is resampled to (60 by default, between 12 and 500). Every
+    /// profile gets the same number: a loft between profiles of different sizes has to guess how
+    /// they correspond.
+    pub points: Option<usize>,
+    /// How far in from each tip of the shape to start cutting (1.5 mm by default). A cut at the
+    /// very tip catches a sliver of noise or nothing at all. It is never trimmed so far that
+    /// nothing is left to read.
+    pub margin: Option<LengthExpr>,
+    /// Take the convex hull at every cut, whether or not the outline closes (false by default).
+    /// Slower to lose detail but impossible to trip up, which is what a badly broken scan wants.
+    pub hull: Option<bool>,
+    /// Report the plan and the commands it would run, and change nothing (false by default).
+    pub plan_only: Option<bool>,
+    /// A name for the first loft.
+    pub name: Option<String>,
+}
+
+/// A direction to read along: `x`, `y`, `z`, or one given outright.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum AxisName {
+    Named(String),
+    Given([f64; 3]),
+}
+
+/// What `mesh.loft` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MeshLoftResult {
+    /// The mesh body that was read.
+    pub body: String,
+    /// One reading per direction, in the order they were asked for.
+    pub along: Vec<MeshLoftAxis>,
+    /// Triangles the shape was read from, after welding.
+    pub triangles: usize,
+    /// The mesh's area (mm^2).
+    pub area: f64,
+    /// Points in every profile.
+    pub points: usize,
+    /// The bodies the lofts make, in order. With several directions the first is the one the
+    /// others are intersected into, and it is the body left at the end.
+    pub bodies: Vec<String>,
+    /// The commands the loft runs, in order.
+    pub steps: Vec<MeshStep>,
+    /// The features built, unless `plan_only`.
+    pub features: Vec<String>,
+}
+
+/// One direction's reading.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MeshLoftAxis {
+    /// The direction the cuts are square to, and the profiles' own axes.
+    pub axis: [f64; 3],
+    pub x_dir: [f64; 3],
+    pub y_dir: [f64; 3],
+    /// Where each cut sits along the axis (mm), lowest first.
+    pub heights: Vec<f64>,
+    /// What each cut's profile encloses (mm^2), in the same order.
+    pub areas: Vec<f64>,
+    /// How many cuts fell back to the convex hull because the outline would not close. Every
+    /// concavity at those heights is lost, so a reading with many of them is a rough one.
+    pub hulled: usize,
+    /// Where the shape starts and ends along the axis (mm), before the margin is trimmed.
+    pub reach: [f64; 2],
+    /// How far the profiles reach along `x_dir` and `y_dir` (mm).
+    pub across: [f64; 2],
+}

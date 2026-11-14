@@ -5,15 +5,19 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::Kind;
-use solidcraft_kernel::{Outline, Part as SlabPart, Prismatic, SlabOptions, SlabStack, Surface, Symmetry, prismatic_plan, recognize_mesh, slab_plan};
+use solidcraft_kernel::{
+    MAX_POINTS, MAX_SECTIONS, MIN_POINTS, Outline, Part as SlabPart, Prismatic, SilhouetteOptions, Silhouetted, SlabOptions, SlabStack, Surface,
+    Symmetry, prismatic_plan, recognize_mesh, silhouettes, slab_plan,
+};
 
 use super::{
     CommandSpec,
     features::{add_feature, check_expr},
 };
 use crate::schema::mesh::{
-    MeshAxis, MeshBore, MeshBoss, MeshCorner, MeshDeviation, MeshLoop, MeshMirror, MeshParameter, MeshPatch, MeshRebuildParams, MeshRebuildResult,
-    MeshRecognizeParams, MeshRecognizeResult, MeshReconstructParams, MeshReconstructResult, MeshSlab, MeshStep, MeshUnused,
+    MeshAxis, MeshBore, MeshBoss, MeshCorner, MeshDeviation, MeshLoftAxis, MeshLoftParams, MeshLoftResult, MeshLoop, MeshMirror, MeshParameter,
+    MeshPatch, MeshRebuildParams, MeshRebuildResult, MeshRecognizeParams, MeshRecognizeResult, MeshReconstructParams, MeshReconstructResult,
+    MeshSlab, MeshStep, MeshUnused,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{
@@ -24,6 +28,7 @@ use crate::{
 const RECOGNIZE_CONTRACT: TypedContract<MeshRecognizeParams> = TypedContract::new();
 const REBUILD_CONTRACT: TypedContract<MeshRebuildParams> = TypedContract::new();
 const RECONSTRUCT_CONTRACT: TypedContract<MeshReconstructParams> = TypedContract::new();
+const LOFT_CONTRACT: TypedContract<MeshLoftParams> = TypedContract::new();
 
 /// How far a surface's axis may lean from the build axis, in degrees, when a call does not say.
 const DEFAULT_ALIGN: f64 = 2.;
@@ -55,6 +60,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&RECONSTRUCT_CONTRACT)
         .output(output_schema_for::<MeshReconstructResult>)
         .params("body?: mesh body name (default: the selected mesh body); tolerance?: length expression (default 0.25 mm, between 0.001 and 10 mm: the scan's own noise, and so how close a line or arc must come to count as fitting); grid?: length expression (default 0.1 mm, at most 10: round finished dimensions to this step; 0 leaves them as measured); symmetry?: auto|x|y|off (default auto); snap_angle?: degrees (default 15: square up an edge already within three degrees of a multiple); min_thickness?: length expression (default 0.6 mm: the thinnest layer kept); axis?: [x,y,z] (the direction to stack along; default: the direction the most facet area lies square to); parameters?: bool (default true: name each layer thickness and circle diameter as a user parameter); prefix?: those parameters' name before `_layer_1_thickness` (default: from the body name); plan_only?: bool (default false); name?: a name for the first extrusion: read a scanned or noisy mesh as the stack of extruded layers it was modelled from and build it again as ordinary parametric features -- a sketch per level whose outline is fitted with lines, arcs and circles, squared up, with matching dimensions equalised, mirrored features averaged and sizes rounded to a grid. Unlike mesh.rebuild it never needs a surface to certify, so it reads scans; it always has an answer, and `deviation` is how far that answer sits from the scan -> body, origin, axis, x_dir, y_dir, levels, size, slabs: [{from, to, loops: [{lines, arcs, circle, area, deviation, fitted}]}], mirrors: [{across, at, mismatch, paired}], triangles, area, deviation: {mean, p95, max, probes}, traced (outlines kept as polygons because nothing fitted), parameters, steps, features"),
+    CommandSpec::new("mesh.loft", "Loft Mesh Silhouettes", crate::checked!("mesh.loft", loft))
+        .icon("loft")
+        .contract(&LOFT_CONTRACT)
+        .output(output_schema_for::<MeshLoftResult>)
+        .params("body?: mesh body name (default: the selected mesh body); axes?: [x|y|z|[x,y,z]] (default [\"z\"]: each direction is read and lofted on its own, then they are intersected, because one direction loses every concavity that faces along it); sections?: 2 to 50 cuts per direction (default 16); spacing?: length expression between cuts instead; points?: 12 to 500 per profile (default 60); margin?: length expression (default 1.5 mm: how far in from each tip to start cutting, never trimmed so far that nothing is left); hull?: bool (default false: take the convex hull at every cut whether or not the outline closes -- rougher, but impossible to trip up on a badly broken scan); plan_only?: bool (default false); name?: a name for the first loft: read a mesh as the silhouettes it casts along one or more directions and loft a solid through them. This is the path for a shape that is not a stack of layers -- a scan, a casting, a generated shape -- where mesh.reconstruct would force it into slabs and mesh.rebuild would refuse it. What comes out is not a dimensioned part: it is a solid with the shape's own silhouette, which booleans, measures, fillets and prints where the mesh could not. A cut that will not close into one outline falls back to the convex hull at that height and says so in `hulled`, because a hull loses every concavity there -> body, along: [{axis, x_dir, y_dir, heights, areas, hulled, reach, across}], triangles, area, points, bodies, steps, features"),
 ];
 
 /// The mesh body to convert: `body`, else the one selected body.
@@ -679,4 +689,153 @@ fn draw_loop(s: &Session, outline: &solidcraft_kernel::Loop, layer: usize, which
     if run.len() >= 2 {
         build.push(step("sketch.line", json!({"points": run})));
     }
+}
+
+/// How a shape is read as silhouettes when a call does not say.
+const DEFAULT_SECTIONS: usize = 16;
+const DEFAULT_PROFILE_POINTS: usize = 60;
+const DEFAULT_MARGIN: &str = "1.5 mm";
+
+/// The directions to read along, from what the call asked for.
+fn loft_axes(p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
+    let Some(given) = p.get("axes").filter(|v| !v.is_null()) else { return Ok(vec![Vec3::Z]) };
+    let list = given.as_array().ok_or_else(|| bad(cmd, "axes: a list of x, y, z or [x, y, z]"))?;
+    let mut out = Vec::with_capacity(list.len());
+    for entry in list {
+        let axis = match entry.as_str() {
+            Some("x" | "X") => Vec3::X,
+            Some("y" | "Y") => Vec3::Y,
+            Some("z" | "Z") => Vec3::Z,
+            Some(other) => return Err(bad(cmd, format!("axes: x, y, z or [x, y, z], not `{other}`"))),
+            None => vec3(entry).ok_or_else(|| bad(cmd, "axes: x, y, z or [x, y, z]"))?,
+        };
+        out.push(axis);
+    }
+    Ok(out)
+}
+
+/// How a shape should be read, from what the call asked for.
+fn loft_options(s: &mut Session, p: &Value, cmd: &str) -> Result<SilhouetteOptions> {
+    let length = |s: &mut Session, field: &str, default: &str| -> Result<f64> {
+        let text = expr(p, field).unwrap_or_else(|| default.into());
+        check_expr(s, &text, Kind::Length, cmd, field)?;
+        s.doc.eval(&text, Kind::Length).map_err(|err| bad(cmd, format!("{field}: {err}")))
+    };
+    let whole = |field: &str, default: usize, range: std::ops::RangeInclusive<usize>| -> Result<usize> {
+        match num(p, field) {
+            None => Ok(default),
+            Some(n) if n.fract() == 0. && n >= 0. && range.contains(&(n as usize)) => Ok(n as usize),
+            Some(_) => Err(bad(cmd, format!("{field}: a whole number between {} and {}", range.start(), range.end()))),
+        }
+    };
+    let spacing = match expr(p, "spacing") {
+        None => None,
+        Some(_) => Some(length(s, "spacing", "5 mm")?),
+    };
+    Ok(SilhouetteOptions {
+        axes: loft_axes(p, cmd)?,
+        spacing,
+        count: whole("sections", DEFAULT_SECTIONS, 2..=MAX_SECTIONS)?,
+        points: whole("points", DEFAULT_PROFILE_POINTS, MIN_POINTS..=MAX_POINTS)?,
+        margin: length(s, "margin", DEFAULT_MARGIN)?,
+        hull: bool_(p, "hull").unwrap_or(false),
+    })
+}
+
+/// `mesh.loft`: read a shape as the silhouettes it casts along one or more directions, and loft a
+/// solid through them.
+///
+/// This is the path for a mesh that is not a stack of layers and never will be: a scanned handle,
+/// a cast housing, a shape a generator produced. `mesh.reconstruct` would force it into slabs and
+/// report a large deviation for its trouble; `mesh.rebuild` would refuse it outright. What comes
+/// out here is not a dimensioned part and does not pretend to be one. It is a solid with the
+/// shape's own silhouette, which booleans, measures, fillets and prints where the mesh could not.
+fn loft(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "mesh.loft";
+    let options = loft_options(s, p, cmd)?;
+    let body = target(s, p, cmd)?;
+    let found = {
+        let state = s.model.state();
+        let source = state.body(&body).ok_or_else(|| bad(cmd, format!("no body `{body}`")))?;
+        if !source.body.is_mesh() {
+            return Err(bad(cmd, "select a mesh body"));
+        }
+        silhouettes(&source.body, &options)?
+    };
+    let prefix = identifier(str_(p, "prefix").unwrap_or(&body));
+    let (steps, bodies) = loft_steps(p, &found, &body, &prefix);
+    let features = if bool_(p, "plan_only").unwrap_or(false) { Vec::new() } else { run_steps(s, &steps, cmd)? };
+    let out = MeshLoftResult {
+        body,
+        along: found
+            .along
+            .iter()
+            .map(|along| MeshLoftAxis {
+                axis: at3(along.axis),
+                x_dir: at3(along.x_dir),
+                y_dir: at3(along.y_dir),
+                heights: along.sections.iter().map(|section| round(section.at)).collect(),
+                areas: along.sections.iter().map(|section| round(section.area)).collect(),
+                hulled: along.hulled,
+                reach: [round(along.reach[0]), round(along.reach[1])],
+                across: {
+                    let [u, v] = solidcraft_kernel::across(along);
+                    [round(u), round(v)]
+                },
+            })
+            .collect(),
+        triangles: found.triangles,
+        area: round(found.area),
+        points: options.points,
+        bodies,
+        steps,
+        features,
+    };
+    serde_json::to_value(out).map_err(|err| crate::EngineError::Other(err.to_string()))
+}
+
+/// The commands that build the lofts, in order: every section's sketch, then the loft through
+/// them, then — where more than one direction was read — the intersection that keeps only what
+/// all of them agreed was material.
+fn loft_steps(p: &Value, found: &Silhouetted, body: &str, prefix: &str) -> (Vec<MeshStep>, Vec<String>) {
+    let step = |command: &str, params: Value| MeshStep { command: command.to_owned(), params };
+    let mut steps = Vec::new();
+    let mut bodies = Vec::new();
+    for (which, along) in found.along.iter().enumerate() {
+        let made = match which {
+            0 => format!("{body} lofted"),
+            _ => format!("{body} along {}", which + 1),
+        };
+        let mut sections = Vec::new();
+        for (at, section) in along.sections.iter().enumerate() {
+            // Each section's sketch is named, because a loft has to name the sketches it runs
+            // through and cannot fall back on whichever one was drawn last.
+            let sketch = format!("{prefix}_{}_{}", which + 1, at + 1);
+            let origin = along.axis * section.at;
+            steps.push(step(
+                "sketch.create",
+                json!({"plane": {"origin": at3(origin), "x_dir": at3(along.x_dir), "y_dir": at3(along.y_dir)}, "name": sketch}),
+            ));
+            let points: Vec<[String; 2]> = section.points.iter().map(|q| [fixed(q[0]), fixed(q[1])]).collect();
+            steps.push(step("sketch.spline.fit_point", json!({"points": points, "periodic": true})));
+            steps.push(step("sketch.finish", json!({})));
+            sections.push(json!({"sketch": sketch}));
+        }
+        let mut loft = json!({"sections": sections, "operation": "new", "body_name": made});
+        if which == 0
+            && let (Some(name), Some(fields)) = (str_(p, "name"), loft.as_object_mut())
+        {
+            fields.insert("name".into(), name.into());
+        }
+        steps.push(step("solid.loft", loft));
+        bodies.push(made);
+    }
+    // What every direction agreed was material is the shape; what only one of them claimed is a
+    // concavity another direction could see and it could not.
+    if let Some((first, rest)) = bodies.split_first()
+        && !rest.is_empty()
+    {
+        steps.push(step("solid.combine", json!({"targets": [first], "tools": rest, "operation": "intersect"})));
+    }
+    (steps, bodies)
 }

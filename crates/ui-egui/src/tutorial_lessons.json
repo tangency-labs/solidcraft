@@ -7233,6 +7233,33 @@
    ]
   },
   {
+   "command": "mesh.loft",
+   "setup": "mesh",
+   "about": "Cuts a mesh into silhouettes along a direction and lofts a solid through them, for a shape that is no stack of layers.",
+   "demo": [
+    [
+     "component.activate",
+     {
+      "component": "Scan"
+     }
+    ],
+    [
+     "mesh.loft",
+     {
+      "body": "Scan",
+      "sections": 6,
+      "points": 24
+     }
+    ],
+    [
+     "component.activate",
+     {
+      "component": "root"
+     }
+    ]
+   ]
+  },
+  {
    "command": "mesh.recognize",
    "setup": "mesh",
    "about": "Reads a mesh as the surfaces it stands for: planes, cylinders, cones, spheres and tori, each certified against the mesh itself. Nothing is changed.",

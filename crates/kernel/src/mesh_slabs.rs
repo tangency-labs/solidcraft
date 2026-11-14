@@ -250,15 +250,15 @@ fn checked(o: &SlabOptions) -> Result<SlabOptions> {
 
 /// Per-triangle facts the whole pipeline works from: the unit normal, the area and the centroid.
 /// Read once, because every stage below wants all three and a scan has millions of triangles.
-struct Facets {
-    normals: Vec<Vec3>,
-    areas: Vec<f64>,
-    centres: Vec<Vec3>,
-    total: f64,
+pub(crate) struct Facets {
+    pub(crate) normals: Vec<Vec3>,
+    pub(crate) areas: Vec<f64>,
+    pub(crate) centres: Vec<Vec3>,
+    pub(crate) total: f64,
 }
 
 impl Facets {
-    fn read(mesh: &TriMesh) -> Result<Facets> {
+    pub(crate) fn read(mesh: &TriMesh) -> Result<Facets> {
         let mut out = Facets { normals: Vec::new(), areas: Vec::new(), centres: Vec::new(), total: 0. };
         out.normals.reserve(mesh.triangles.len());
         out.areas.reserve(mesh.triangles.len());
@@ -286,7 +286,7 @@ impl Facets {
         Ok(out)
     }
 
-    fn count(&self) -> usize {
+    pub(crate) fn count(&self) -> usize {
         self.areas.len()
     }
 }
@@ -449,7 +449,7 @@ fn wall_direction(f: &Facets, w: Vec3, e1: Vec3, e2: Vec3) -> Vec3 {
 }
 
 /// How far a set of numbers reaches, highest less lowest.
-fn spread(values: impl Iterator<Item = f64>) -> f64 {
+pub(crate) fn spread(values: impl Iterator<Item = f64>) -> f64 {
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for v in values {
         lo = lo.min(v);
@@ -473,7 +473,7 @@ fn plan_in(mesh: &TriMesh, f: &Facets, frame: &Frame, o: &SlabOptions) -> Result
     let mut measured: Vec<(f64, f64, Vec<Vec<[f64; 2]>>)> = Vec::new();
     for pair in levels.windows(2) {
         let (Some(&z0), Some(&z1)) = (pair.first(), pair.get(1)) else { continue };
-        let loops = section(&local, &mesh.triangles, 0.5 * (z0 + z1), min_area);
+        let (loops, _) = section(&local, &mesh.triangles, 0.5 * (z0 + z1), min_area);
         if !loops.is_empty() {
             measured.push((z0, z1, loops));
         }
@@ -635,7 +635,7 @@ fn cluster(values: &mut [(f64, f64)], tol: f64) -> Vec<(f64, f64)> {
 /// crosses. Keying each crossing by the edge it sits on, rather than by its coordinates, is what
 /// makes the chaining exact: two triangles sharing an edge give the same crossing, so the loops
 /// close without a tolerance to tune.
-fn section(local: &[[f64; 3]], triangles: &[[u32; 3]], z: f64, min_area: f64) -> Vec<Vec<[f64; 2]>> {
+pub(crate) fn section(local: &[[f64; 3]], triangles: &[[u32; 3]], z: f64, min_area: f64) -> (Vec<Vec<[f64; 2]>>, Vec<[f64; 2]>) {
     use std::collections::HashMap;
     let mut points: Vec<[f64; 2]> = Vec::new();
     let mut at: HashMap<(u32, u32), u32> = HashMap::new();
@@ -707,7 +707,7 @@ fn section(local: &[[f64; 3]], triangles: &[[u32; 3]], z: f64, min_area: f64) ->
             out.push(loop_);
         }
     }
-    orient(out)
+    (orient(out), points)
 }
 
 /// Turn every outline the way its nesting says it should go: an outer one counter-clockwise, a
@@ -758,7 +758,7 @@ fn orient(mut loops: Vec<Vec<[f64; 2]>>) -> Vec<Vec<[f64; 2]>> {
 }
 
 /// The signed area a closed polygon encloses; positive turns counter-clockwise.
-fn signed_area(points: &[[f64; 2]]) -> f64 {
+pub(crate) fn signed_area(points: &[[f64; 2]]) -> f64 {
     let mut sum = 0.;
     for (i, p) in points.iter().enumerate() {
         let Some(q) = points.get((i + 1) % points.len()) else { continue };
@@ -824,7 +824,7 @@ fn fit_loop(points: &[[f64; 2]], tol: f64, step: f64) -> Vec<Piece> {
 
 /// Resample a closed outline to points about `step` apart along it, so that a fit is not pulled by
 /// whichever stretch the scanner happened to sample densely.
-fn resample(points: &[[f64; 2]], step: f64) -> Vec<[f64; 2]> {
+pub(crate) fn resample(points: &[[f64; 2]], step: f64) -> Vec<[f64; 2]> {
     let mut lengths = vec![0.];
     let mut total = 0.;
     for i in 0..points.len() {
@@ -1155,7 +1155,7 @@ fn sweep(run: &[[f64; 2]], centre: [f64; 2]) -> Option<(f64, bool)> {
     Some((total.abs(), !(up && down)))
 }
 
-fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {
+pub(crate) fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
 }
 

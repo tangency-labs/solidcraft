@@ -141,7 +141,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "SURFACE",
         panel: "CONVERT",
         promoted: 2,
-        ids: &["surface.thicken", "mesh.convert", "mesh.rebuild", "mesh.reconstruct", "mesh.recognize"],
+        ids: &["surface.thicken", "mesh.convert", "mesh.rebuild", "mesh.reconstruct", "mesh.loft", "mesh.recognize"],
     },
     Section {
         tab: "ASSEMBLE",

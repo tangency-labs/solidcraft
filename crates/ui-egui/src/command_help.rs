@@ -103,6 +103,7 @@ pub const DOCUMENTED: &[&str] = &[
     "material.assign",
     "material.properties.validate",
     "mesh.convert",
+    "mesh.loft",
     "mesh.rebuild",
     "mesh.recognize",
     "mesh.reconstruct",

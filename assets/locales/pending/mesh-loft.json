@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "cmd.mesh.loft": "لوفت مخططات الشبكة",
+    "help.mesh.loft": "يقطع جسمًا شبكيًا عند سلسلة من الارتفاعات بامتداد اتجاه واحد أو أكثر، ويأخذ المخطط الذي يتركه كل قطع، ثم يبني جسمًا يمر عبرها جميعًا. استخدمه مع مسح أو شكل منحوت ليس كومة طبقات، حيث لا تفعل إعادة بناء الشبكة الممسوحة سوى حشره في طبقات."
+  },
+  "de": {
+    "cmd.mesh.loft": "Netzsilhouetten loften",
+    "help.mesh.loft": "Schneidet einen Netzkörper auf einer Reihe von Höhen entlang einer oder mehrerer Richtungen, nimmt den Umriss jedes Schnitts und loftet einen Körper durch sie hindurch. Nehmen Sie es für einen Scan oder eine modellierte Form, die kein Stapel von Ebenen ist und die Gescanntes Netz rekonstruieren nur in Scheiben pressen würde."
+  },
+  "en": {
+    "cmd.mesh.loft": "Loft Mesh Silhouettes",
+    "help.mesh.loft": "Cuts a mesh body at a run of heights along one or more directions, takes the outline each cut leaves, and lofts a solid through them. Use it on a scan or a sculpted shape that is no stack of layers, where Reconstruct Scanned Mesh would only force it into slabs."
+  },
+  "he": {
+    "cmd.mesh.loft": "לופט של מתארי רשת",
+    "help.mesh.loft": "חותך גוף רשת בשורה של גבהים לאורך כיוון אחד או כמה, לוקח את המתאר שכל חתך מותיר, ובונה בלופט גוף שעובר דרכם. מתאים לסריקה או לצורה מפוסלת שאינה ערימת שכבות, שבה שחזור רשת סרוקה רק היה כופה עליה שכבות."
+  },
+  "ja": {
+    "cmd.mesh.loft": "メッシュ断面をロフト",
+    "help.mesh.loft": "メッシュボディを、一つまたは複数の方向に沿った一連の高さで切り、各断面に現れる輪郭を取って、それらを通るソリッドをロフトします。層の積み重ねではないスキャンや造形された形状、つまりスキャンメッシュを再構成では無理に層にしてしまうものに使います。"
+  },
+  "ko": {
+    "cmd.mesh.loft": "메시 단면 로프트",
+    "help.mesh.loft": "메시 본체를 한 방향 또는 여러 방향을 따라 여러 높이에서 자르고, 각 단면이 남기는 윤곽을 가져와 그것들을 지나는 솔리드를 로프트합니다. 층의 더미가 아닌 스캔이나 조형된 형상, 곧 스캔 메시 재구성이 억지로 층으로 만들어 버리는 것에 사용합니다."
+  },
+  "vi": {
+    "cmd.mesh.loft": "Loft đường bao lưới",
+    "help.mesh.loft": "Cắt một thân lưới tại một loạt độ cao dọc theo một hay nhiều hướng, lấy đường bao mà mỗi lát cắt để lại, rồi loft một khối đi qua chúng. Dùng cho bản quét hay hình khối tạo tác không phải là chồng lớp, nơi Dựng lại lưới quét chỉ ép nó thành từng lớp."
+  },
+  "zh": {
+    "cmd.mesh.loft": "放样网格轮廓",
+    "help.mesh.loft": "沿一个或多个方向在一系列高度上剖切网格实体，取每个剖面留下的轮廓，再放样出穿过它们的实体。用于并非层叠结构的扫描件或造型形状，这类情形下重构扫描网格只会把它硬压成层。"
+  }
+}
