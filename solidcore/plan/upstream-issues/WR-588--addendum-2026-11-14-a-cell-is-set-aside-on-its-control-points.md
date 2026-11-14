@@ -23,11 +23,15 @@ Updates: WR-588
 - **Fix:** a cell with control points (its subpatch, `cell_patch`) is decided on them, as
   Moore–Skelboe branch and bound (Skelboe, BIT 14 (1974) 87–95) discards a box only on a bound
   of it: 1. on their greatest (the convex hull property of a B-spline with positive weights,
-  Piegl and Tiller §4.4), a value in the face only raising best (2.); 3. on their least, less
-  the subpatch's rounding (`sub_patch_rounding`); a cell at the limits counts with its own
-  bound (`unsolved_cell_top`). The subpatch's net closes on the surface quadratically as the
-  cell shrinks (Dahmen, J. Comp. Appl. Math. 16 (1986) 145–158), so the search ends near the
-  extreme. A cell without control points (an analytic surface, one closed in u or v) keeps the
-  fork's rules. Regression test:
-  `a_dip_the_whole_domain_solve_misses_is_inside_the_box`
-  (`crates/solidcore/tests/issue_1799_tight_box_divides_at_knots.rs`, face L as a sheet).
+  Piegl and Tiller §4.4), a value at a point inside the face only raising best (2.); 3. on
+  their least, less the subpatch's rounding (`sub_patch_rounding`), above best by the face's
+  zone tolerance, with every solution classified outside; a cell at the limits counts with its
+  own bound (`unsolved_cell_top`). The subpatch's net closes on the surface quadratically as
+  the cell shrinks (Dahmen, J. Comp. Appl. Math. 16 (1986) 145–158). A way along which a
+  cell's control values are level is not halved, since its halves keep its hull: a greatest
+  value along a line inside a face (a cylinder's) would otherwise double its cells at every
+  depth to the cell limit. The search asks for cancellation at every cell. A face without
+  control points (an analytic surface, one closed in u or v) keeps the fork's rules.
+  Regression tests: `a_dip_the_whole_domain_solve_misses_is_inside_the_box` (face L as a
+  sheet) and `a_ridge_along_a_face_is_divided_only_across_it`
+  (`crates/solidcore/tests/issue_1799_tight_box_divides_at_knots.rs`).
