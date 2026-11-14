@@ -526,9 +526,10 @@ pub fn crash_draft(report: &serde_json::Value) -> Draft {
     } else {
         ""
     };
+    let shared = solidcraft_engine::crash_share::for_draft(report);
+    let shown_message = if report.get("message").is_some() { shared.message.clone() } else { "?".into() };
     let command = report.get("command").and_then(|c| c.get("command")).and_then(serde_json::Value::as_str);
-    let frames: Vec<&str> =
-        report.get("backtrace").and_then(serde_json::Value::as_array).into_iter().flatten().filter_map(serde_json::Value::as_str).take(25).collect();
+    let frames = shared.backtrace;
     let recent: Vec<String> = report
         .get("recent_commands")
         .and_then(serde_json::Value::as_array)
@@ -545,13 +546,16 @@ pub fn crash_draft(report: &serde_json::Value) -> Draft {
     let mut body = format!(
         "## What happened\n{what}{}.{detection}\n\nMessage: {}\nLocation: {}\nThread: {}\nRecorded {} time(s), first recorded {}\n\n## Backtrace\n{}\n## Command\n{}\n## Recent commands\n{}\n\n## Reproduction\nCrash report `{}` on the reporter's computer holds {}. Replay it with `solidcraft-cli crashes replay {}`.\nOnly attach the design if it can be shared publicly.\n\n## Environment\n{}\n",
         command.map(|c| format!(" while running `{c}`")).unwrap_or_default(),
-        limited(&s("message"), 2000),
-        s("location"),
+        limited(&shown_message, 2000),
+        if report.get("location").is_some() { shared.location } else { "?".into() },
         s("thread"),
         report.get("count").and_then(serde_json::Value::as_u64).unwrap_or(1),
         s("first_seen"),
         block(&frames.join("\n")),
-        block(&json_context(&report.get("command"), 4000)),
+        block(&{
+            let command = json_context(&shared.command, 4000);
+            if shared.replaced.is_empty() { command } else { format!("{command}\n{}", shared.replaced) }
+        }),
         if recent.is_empty() { "(none recorded)".to_string() } else { recent.join(", ") },
         s("id"),
         match (report.get("design_path").is_some(), report.get("replay_path").is_some()) {
@@ -574,7 +578,7 @@ pub fn crash_draft(report: &serde_json::Value) -> Draft {
         truncate(&mut body, MAX_BODY - 32);
         body.push_str("\n[report context truncated]\n");
     }
-    let mut title = format!("Crash: {}", s("message").lines().next().unwrap_or_default());
+    let mut title = format!("Crash: {}", shown_message.lines().next().unwrap_or_default());
     truncate(&mut title, 160);
     let mut draft = Draft::new(title, body, 0);
     draft.origin = Origin::Crash;

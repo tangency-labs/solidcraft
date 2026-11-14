@@ -16,6 +16,7 @@ pub mod control_auth;
 pub mod control_pending;
 pub mod cosmetic_threads;
 pub mod crash;
+pub mod crash_share;
 pub mod easyprint;
 pub mod frames;
 pub mod fuzz;
