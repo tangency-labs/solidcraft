@@ -1,3 +1,5 @@
+use solidcraft_ui_registry as registry;
+
 use crate::test_support::*;
 use crate::*;
 
@@ -127,4 +129,116 @@ fn first_letter_respects_disabled_buttons() {
     assert_eq!(prompt_frame(&ctx, letter("s"), false, labels), Action::None, "Save is disabled while inputs are invalid");
     assert_eq!(prompt_frame(&ctx, vec![], false, labels), Action::None, "the swallowed letter did not linger");
     assert_eq!(prompt_frame(&ctx, letter("c"), false, labels), Action::Cancel, "Cancel is always live");
+}
+
+/// Saving work can disable both destructive answers while Cancel remains usable.
+#[test]
+fn confirm_left_enabled_controls_pointer_keyboard_and_accessibility() {
+    for enabled in [false, true] {
+        let ctx = crate::test_support::context();
+        ctx.enable_accesskit();
+        set_dialog_mnemonics(true);
+        let action = std::cell::Cell::new(Action::None);
+        let run = |events: Vec<egui::Event>| {
+            registry::clear_handles();
+            raw_frame(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0))),
+                    events,
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| {
+                    action.set(
+                        Confirm::new(egui::Id::unique("waiting_save"), "save", "Save changes to 2 designs?")
+                            .actions("Save Selected", "Cancel", Some("Don't Save"))
+                            .secondary_left()
+                            .left_enabled(enabled)
+                            .show(ui.ctx(), false, |_| {})
+                            .1,
+                    );
+                },
+            )
+        };
+        run(vec![]);
+        let output = run(vec![]);
+        let tree = output.platform_output.accesskit_update.as_ref().unwrap();
+        let button = tree.nodes.iter().find(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some("Don't Save"));
+        assert_eq!(button.unwrap().1.is_disabled(), !enabled, "the left button reports its own enabled state");
+        let cancel = tree.nodes.iter().find(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some("Cancel"));
+        assert!(!cancel.unwrap().1.is_disabled(), "Cancel stays available while Save Selected waits");
+        assert_eq!(registry::count_of("dialog:apply:enabled"), Some(f64::from(enabled)));
+        let left = registry::handle_at("dialog:apply").unwrap();
+        run(pointer(left, true));
+        run(pointer(left, false));
+        assert_eq!(action.get(), if enabled { Action::Apply } else { Action::None }, "left click");
+        // Existing mnemonics yield whenever a widget owns keyboard focus.
+        ctx.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+        run(letter("d"));
+        assert_eq!(action.get(), if enabled { Action::Apply } else { Action::None }, "left accelerator");
+        let mut focused = Vec::new();
+        ctx.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+        for _ in 0..6 {
+            for event in run(key(egui::Key::Tab)).platform_output.events {
+                if let egui::output::OutputEvent::FocusGained(info) = event {
+                    focused.push(info.label.unwrap_or_default());
+                }
+            }
+        }
+        assert_eq!(focused.iter().any(|label| label == "Don't Save"), enabled, "Tab skips a disabled answer: {focused:?}");
+        assert!(focused.iter().any(|label| label == "Cancel"), "Tab reaches Cancel: {focused:?}");
+        ctx.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+        run(letter("c"));
+        assert_eq!(action.get(), Action::Cancel, "Cancel's accelerator remains live");
+        run(key(egui::Key::Escape));
+        assert_eq!(action.get(), Action::Cancel, "Escape still cancels");
+        let cancel = registry::handle_at("dialog:cancel").unwrap();
+        run(pointer(cancel, true));
+        run(pointer(cancel, false));
+        assert_eq!(action.get(), Action::Cancel, "Cancel's pointer answer remains live");
+    }
+}
+
+#[test]
+fn confirm_disabled_left_answer_cannot_be_selected_with_enter() {
+    let ctx = crate::test_support::context();
+    let mut action = Action::None;
+    let mut draw = |ui: &mut Ui| {
+        action = Confirm::new(ui.scope_id().with("disabled_selection"), "save", "Save changes?")
+            .actions("Save", "Cancel", Some("Don't Save"))
+            .selected(Action::Apply)
+            .left_enabled(false)
+            .show(ui.ctx(), true, |_| {})
+            .1;
+    };
+    frame(&ctx, vec![], &mut draw);
+    frame(&ctx, key(egui::Key::Enter), &mut draw);
+    assert_eq!(action, Action::None);
+}
+
+/// A modal's name is the complete visible title, so opening it announces the count.
+#[test]
+fn confirm_modal_accessible_name_includes_the_title_count() {
+    let ctx = crate::test_support::context();
+    ctx.enable_accesskit();
+    let draw = |ui: &mut Ui| {
+        Confirm::new(egui::Id::unique("named_prompt"), "save", "Save changes to 3 designs?").show(ui.ctx(), true, |_| {});
+    };
+    frame(&ctx, vec![], draw);
+    let output = raw_frame(&ctx, egui::RawInput { focused: true, ..Default::default() }, draw);
+    let tree = output.platform_output.accesskit_update.as_ref().unwrap();
+    assert!(tree.nodes.iter().any(|(_, node)| node.role() == egui::accesskit::Role::Dialog && node.label() == Some("Save changes to 3 designs?")));
 }

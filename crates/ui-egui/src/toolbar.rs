@@ -603,6 +603,12 @@ pub fn save(app: &mut SolveApp) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
         return;
     }
+    if let Some(path) = crate::documents::requested_save_path(app)
+        && (app.session.path.as_deref() != Some(path.as_str()) || app.session.read_only)
+    {
+        crate::save_job::start(app, "file.save_as", json!({"path": path}));
+        return;
+    }
     if app.session.path.is_some() {
         // Read-only, or changed on disk since it was opened: Save As, or a question, instead.
         if crate::open_elsewhere::check_save(app) {
@@ -634,6 +640,9 @@ pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
     // captured yet (#9736).
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::save_as_question(name, extension));
+        return;
+    }
+    if crate::documents::close_save_as(app, name, extension) {
         return;
     }
     let name = format!("{name}.{extension}");

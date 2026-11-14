@@ -1055,6 +1055,12 @@ impl<'a> Window<'a> {
         self
     }
 
+    /// Opt into a card width; the surface still fits within the available screen.
+    pub fn width(mut self, width: f32) -> Self {
+        self.width = width;
+        self
+    }
+
     /// The primary and closing actions, and an optional third one between them. An empty `ok`
     /// leaves the primary action out.
     pub fn actions(mut self, ok: &'a str, cancel: &'a str, apply: Option<&'a str>) -> Self {
@@ -1287,6 +1293,7 @@ impl<'a> Window<'a> {
         if modal {
             let shown = super::Container::new(ctx, super::Surface::Window)
                 .modal(self.id)
+                .accessible_name(self.title)
                 .backdrop_color(Tokens::get().tab_on_fill_dark.gamma_multiply(0.35))
                 .frame(frame)
                 .show(ctx, |ui| {

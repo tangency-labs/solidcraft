@@ -21,6 +21,7 @@ pub mod browser_canvas;
 pub mod browser_prompts;
 pub mod canvas;
 pub mod cli_link;
+mod close_model;
 #[cfg(test)]
 mod colour_tokens_tests;
 #[cfg(test)]

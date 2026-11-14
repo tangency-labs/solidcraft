@@ -890,7 +890,7 @@ no box selection.
 | `ui.render` | `path`, `width?`, `height?`, `grid?`, `axes?` | Render of the model with the current camera (no window needed), drawn on the app's GPU device with the viewport's pipelines (the reply's `renderer`: `gpu`, or `gpu-software` on a software adapter), in the window's theme (light or dark; `solidcraft-cli snapshot` keeps the light colours); cut by the section the viewport shows (`inspect.section`, an open Section Analysis dialog's preview, a sketch's Slice), with the cut face capped. The ground grid and the origin's axes are drawn as the window shows them (`ui.set` `showGrid` and `showOrigin`, `hiddenOrigin`); `grid` and `axes` (booleans) say otherwise for this render |
 | `ui.confirm` | `accept?`: bool | answers the Delete confirmation (shown when a delete takes other features with it or makes some fail); without `accept`, what it lists |
 | `ui.messages` | `clear?`: `true` (empty the list), `open?`: bool (show or hide the Messages window) | every status message of this run, oldest first (the last 200; a message repeated in a row is one entry with a `count`): `messages` `[{text, error, at, count}]` (`at` in ms since the Unix epoch), and whether the window is `open` (#2763) |
-| `ui.documents` | `action?`: `new`, `switch`, `close`, `close_all`, `close_others`, `move`, `quit`; `index?`; `from?`, `to?` (move); `save_indices?`: array of tab indices to tick in the grouped save prompt; `save_row?`, `discard_row?`: tab index to save or discard and close in that prompt; `force?` (close without asking); `answer?`: `save`, `dont_save`, `cancel` (answers "save changes?"); `open_elsewhere?`: `read_only`, `anyway`, `cancel` (answers "open elsewhere" for the first Open waiting); `changed_on_disk?`: `save_copy`, `overwrite`, `cancel` (answers "changed on disk" before a Save) | the open designs (tabs): names, unsaved flags, the active one, a pending "save changes?" prompt, `save_prompt` (null or rows with `index`, `name`, `path` (null if never saved), `selected`), whether a quit is asking, whether the active design is `read_only`, the Opens waiting for "open elsewhere" (`open_elsewhere`) and a waiting "changed on disk" (`changed_on_disk`) |
+| `ui.documents` | `action?`: `new`, `switch`, `close`, `close_all`, `close_others`, `move`, `quit`; `index?`; `from?`, `to?` (move); `save_indices?`: array of tab indices to tick in the grouped save prompt; `save_row?`, `discard_row?`: tab index to save or discard and close in that prompt; `force?` (close without asking); `answer?`: `save`, `dont_save`, `cancel` (answers "save changes?"); `open_elsewhere?`: `read_only`, `anyway`, `cancel` (answers "open elsewhere" for the first Open waiting); `changed_on_disk?`: `save_copy`, `overwrite`, `cancel` (answers "changed on disk" before a Save) | the open designs (tabs): names, unsaved flags, the active one, a pending "save changes?" prompt, `save_prompt` (null or rows with `index`, `name`, `path` (null if never saved), `selected`, `state` (`unsaved`, `saving`, `saved`), `note` (null or `{kind,text}`), `read_only`), whether a quit is asking, whether the active design is `read_only`, the Opens waiting for "open elsewhere" (`open_elsewhere`) and a waiting "changed on disk" (`changed_on_disk`) |
 | `ui.operations` | `cancel?`: an operation's `key` | the operations under way, newest first, as the view's operations panel shows them: `key`, `label`, `steps` (`{done, total}` when the work counts them; `percent`: they are bytes, a file read or written), `queued`, `cancelling`, `cancellable`, `next` (on the row of an agent batch: the names of its steps still to come, at most 12, which the row shows as a tooltip); each design change held behind the agent's running one is a queued row of its own, which the X cancels (it is answered as cancelled and never runs); those that ended in the last minute (`finished`, newest first, at most 16): `key`, `label`, `outcome` (`done`, `failed` with its `error`, or `cancelled`) and `ms_ago` (one done within the app's wait was never under way, and isn't listed); and whether the panel is `shown`. With `cancel`: cancels that operation as its X does (its work stops at its next check and nothing of it is applied; operations queued behind it go on); a save stops unless it is already replacing its file, and leaves the file, its backup and the design's unsaved changes as they were (it then ends `cancelled`); an error when no such operation is under way or it can't be cancelled (an opened design's bodies being meshed) |
 | `ui.file` | `path`; `insert?`: bool | starts an interactive background Open or Insert; poll `ui.inspect.file_busy` for completion; the window stays responsive |
 | `ui.home` | `open?`: bool; `sample?`: index | the start page: show or hide it, open a built-in sample (once built); returns `open` and the recent designs |
@@ -1251,20 +1251,29 @@ or `quit`) returns one `save_prompt` list when more than one target design has u
 changes. Only tabs in the addressed window participate. Each row starts selected.
 Read with `ui.documents {}`; change all ticks and answer in one call:
 `ui.documents {"save_indices":[0,2],"answer":"save"}`. Indices must belong to the
-pending list; invalid lists return an error without answering. An empty list saves
+pending list; invalid lists return an error without answering. An invalid `index` returns an error without targeting another tab. An empty list saves
 nothing and still closes every target, discarding their unsaved changes. Without `save_indices`, `answer:"save"` saves the current ticks.
 
 Answer an individual row with `ui.documents {"save_row":0}` or
 `ui.documents {"discard_row":0}`, using its current tab `index` from `save_prompt`.
 Save asks for a location if needed and closes only that tab after a successful write;
-a cancelled picker or failed save leaves the row and prompt unchanged. Discard closes
+a cancelled picker or failed save keeps the row and prompt open, with a reason on the row. Discard closes
 only that tab without saving. Remaining tab indices shift after a tab closes, so read
 the returned list before answering another row. The grouped prompt stays open even
 with one row left; answering the last row completes the pending close or quit.
 
 Selected designs save in tab order through the existing interactive save flow;
-never-saved designs ask for a location. Cancelling a picker or failing a save stops
-the close and keeps every remaining tab open, including tabs already saved successfully.
+never-saved designs and designs whose original file is unavailable or read-only ask for a location.
+A failed save still tries the other selected designs. A cancelled picker stops the run.
+Both keep the list and every remaining tab open, including designs already saved successfully.
+`read_only` also marks an original path that is no longer available.
+Saved rows remain visible with `state:"saved"`, unselected and with their answering controls disabled.
+Failed rows report the save error's words in `note:{kind:"failed",text:...}`; a cancelled
+picker reports `note:{kind:"cancelled",text:null}` (the window supplies translated wording).
+Never-saved duplicate names are numbered in row order. Designs changed during the run
+remain unsaved and keep the list open; a previously clean target that changes joins the list.
+During a save, answering controls wait and `answer:"cancel"` cancels further saves and
+requests cancellation of the current write. It keeps every remaining tab open.
 `answer:"dont_save"` discards all target changes and completes the close;
 `answer:"cancel"` keeps every remaining tab open. This is an explicit UI workflow;
 `engine.execute` save commands continue to require paths and never open pickers.
