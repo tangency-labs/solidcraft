@@ -35,6 +35,7 @@ pub use assert_valid::{
 pub use coincidence::{contains_coincident_topology, CoincidenceResult};
 pub(crate) use pointers::validate_geometry;
 pub use pointers::validate_pointers;
+pub(crate) use pointers::validate_pointers_excluding;
 pub(crate) use soundness::lost_manifold;
 pub use soundness::{soundness, standing, volume_sign, Soundness, Standing};
 pub use wide_vertices::update_tolerances_after_boolean;

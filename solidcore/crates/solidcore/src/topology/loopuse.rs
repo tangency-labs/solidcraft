@@ -87,7 +87,8 @@
 //! - **Prepared queries.** The shared UV-corner walk can also borrow prepared topology
 //!   without mutation. It reports [`SolidError::Unported`] only if a trim curve needs
 //!   creating at the point where the mutable walk would create it.
-//! - **Local vertex zones.** `IsClosed3d` includes the uncertainty of a shared
+//! - **Local vertex zones.** With the opt-in `Kernel::fixes.check_loop_vertex_tolerance`,
+//!   `IsClosed3d` includes the uncertainty of a shared
 //!   junction vertex when both curve ends meet that vertex within their own zones.
 //!   An unrelated vertex or an endpoint outside those bounds cannot close a gap.
 //! - **UV-corner failures (WR-262, #521).** `GetUVCornerBoundaries` does as the fork
@@ -742,7 +743,8 @@ pub(crate) fn junction_tolerance(
 
 /// `IsClosed3d`: whether every gap between an edge use's end and its CCW neighbour's
 /// start is within their cross-section tolerance (`ZoneTol3d + ZoneTol3d`), with the
-/// gap reported; `true` for a vertex loop use (outputs zero). The local vertex
+/// gap reported; `true` for a vertex loop use (outputs zero). With the opt-in
+/// `Kernel::fixes.check_loop_vertex_tolerance` the local vertex
 /// zone also bounds a junction when both ends meet the same vertex
 /// within their individual edge and vertex zones. No stored tolerance is changed.
 /// By default the over-tolerance test is upstream's `XSectTol3d - Gap > 0`, which never fires and so
@@ -799,14 +801,20 @@ pub fn is_closed_3d(k: &Kernel, b: &Brep, lu: LoopuseId, check_all_gaps: bool) -
 
         // The triangle inequality bounds a shared junction by both edge zones
         // plus twice the vertex zone, provided each endpoint meets that vertex.
-        let xsect_tol_3d = junction_tolerance(
-            k,
-            b,
-            this_eu,
-            next_eu,
-            [this_end_point, next_start_point],
-            [this_zone_tol_3d, next_zone_tol_3d],
-        )?;
+        // Only with the opt-in `Kernel::fixes.check_loop_vertex_tolerance` (as `CheckLoop`);
+        // by default the edge/edge limit alone, so the query's output is unchanged.
+        let xsect_tol_3d = if k.fixes.check_loop_vertex_tolerance {
+            junction_tolerance(
+                k,
+                b,
+                this_eu,
+                next_eu,
+                [this_end_point, next_start_point],
+                [this_zone_tol_3d, next_zone_tol_3d],
+            )?
+        } else {
+            tol::xsect_tol_3d_from_zones(k, this_zone_tol_3d, next_zone_tol_3d)
+        };
         let xsect_tol_3d_sq = tol::tol3d(xsect_tol_3d * xsect_tol_3d);
 
         // When Gap is largest - save maxGap values
@@ -1900,6 +1908,7 @@ mod tests {
     fn local_vertex_zone_closes_only_a_shared_bounded_junction() {
         let mut k = Kernel::default();
         k.fixes.loop_use_reports_open_gaps = true;
+        k.fixes.check_loop_vertex_tolerance = true;
         let corner = VertexId::from_index(2);
         let mut b = square(3e-4);
         assert!(!is_closed_3d(&k, &b, lu(0), true).unwrap().closed);

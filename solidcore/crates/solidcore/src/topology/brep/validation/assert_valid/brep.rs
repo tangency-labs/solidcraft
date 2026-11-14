@@ -49,10 +49,14 @@ pub(super) fn brep(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, walk: bool) ->
     }
 
     // Old style checks: ValidatePointers() and ValidateAndUpdateTolerances().
-    let status = super::validate_pointers(k, b, cx.rep.array.as_deref_mut(), 0, walk, cx.keys)?;
+    let (status, exclusion_failed) =
+        super::validate_pointers_excluding(k, b, cx.rep.array.as_deref_mut(), 0, walk, cx.keys)?;
     if status != super::SUCCESS {
         return Ok(false);
     }
+    // Test #82 refused a vertex whose ball reaches other topology: reported above, and the
+    // body is not valid (the walk below still runs, so its reports are not cut short).
+    rtn &= !exclusion_failed;
 
     // old style ValidateAndUpdateTolerances check (no updating is done)
     let status = tolerances(k, b, cx)?;

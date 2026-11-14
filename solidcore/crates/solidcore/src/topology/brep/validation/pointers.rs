@@ -370,6 +370,20 @@ pub fn validate_pointers(
     walk: bool,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
 ) -> Result<i32> {
+    Ok(validate_pointers_excluding(k, b, reports, level, walk, keys)?.0)
+}
+
+/// [`validate_pointers`], also saying whether the geometric vertex exclusion (Test #82 for a
+/// vertex at or past the ratio) failed. With a report array that failure is only a report and
+/// the status stays success; `AssertValid` needs it to agree with the reports it carries.
+pub(crate) fn validate_pointers_excluding(
+    k: &Kernel,
+    b: &mut Brep,
+    reports: Option<&mut AssertArray>,
+    level: u8,
+    walk: bool,
+    keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
+) -> Result<(i32, bool)> {
     if level > 4 {
         return Err(invalid("invalid assert test level"));
     }
@@ -380,7 +394,7 @@ pub fn validate_pointers(
     };
     let mut cache = Lists::new(b);
     if !preflight(b, &mut r, &mut cache)? {
-        return Ok(ERROR);
+        return Ok((ERROR, false));
     }
     r.check(
         b,
@@ -412,7 +426,7 @@ pub fn validate_pointers(
             };
             if !ok {
                 r.check(b, 98, false, EntityRef::Edgeuse(eu))?;
-                return Ok(ERROR);
+                return Ok((ERROR, false));
             }
         }
     }
@@ -767,14 +781,16 @@ pub fn validate_pointers(
         }
     }
     // Geometry queries need intact topology, including when reports are omitted.
+    let mut exclusion_failed = false;
     if !r.failed {
         check_vertex_exclusion(k, b, &mut r)?;
+        exclusion_failed = r.failed;
         // Without a report array the status is the caller's only refusal signal.
         if r.failed && r.array.is_none() {
-            return Ok(ERROR);
+            return Ok((ERROR, true));
         }
     }
-    Ok(SUCCESS)
+    Ok((SUCCESS, exclusion_failed))
 }
 
 fn check_edges(
