@@ -1580,7 +1580,8 @@ fn edge_ends_at(
 
 /// Whether vertex `v` may move to `target`: by no more than the smallest of its own
 /// tolerance and those of the edges it bounds, and every end at `v` of each of those
-/// edges, as it will be ([`edge_ends_at`]), within that distance of `target`.
+/// edges, as it will be ([`edge_ends_at`]), within that distance of `target`. A NaN
+/// tolerance or distance does not fit.
 fn vertex_move_fits(
     k: &Kernel,
     b: &Brep,
@@ -1590,21 +1591,43 @@ fn vertex_move_fits(
     kept: &[bool],
 ) -> Result<bool> {
     let edges = crate::topology::vertex::edges(b, v, None)?;
-    let mut allowed = crate::topology::vertex::tolerance(b, v)?;
+    let mut tolerances = vec![crate::topology::vertex::tolerance(b, v)?];
     for &e in &edges {
-        allowed = allowed.min(topo_edge::tolerance(b, e)?);
+        tolerances.push(topo_edge::tolerance(b, e)?);
     }
-    if distance(b.vertex(v)?.point, target) > allowed {
+    let Some(allowed) = smallest_tolerance(&tolerances) else {
+        return Ok(false);
+    };
+    if !move_within(distance(b.vertex(v)?.point, target), allowed) {
         return Ok(false);
     }
     for &e in &edges {
         for end in edge_ends_at(k, b, e, v, exact, kept)? {
-            if distance(end, target) > allowed {
+            if !move_within(distance(end, target), allowed) {
                 return Ok(false);
             }
         }
     }
     Ok(true)
+}
+
+/// The smallest of `tolerances`, or `None` when any is NaN (`f64::min` would skip it) or
+/// there are none.
+fn smallest_tolerance(tolerances: &[f64]) -> Option<f64> {
+    let mut smallest: Option<f64> = None;
+    for &t in tolerances {
+        if t.is_nan() {
+            return None;
+        }
+        smallest = Some(smallest.map_or(t, |s| s.min(t)));
+    }
+    smallest
+}
+
+/// Whether a move of `distance` stays within `allowed`: written so that a NaN on either
+/// side refuses.
+fn move_within(distance: f64, allowed: f64) -> bool {
+    distance <= allowed
 }
 
 /// The fork's `SmOffsetGeometryCreation::MakeEdgesOnAnalyticsExact`
@@ -6353,6 +6376,21 @@ impl<O: ClassObject + SolutionObject> LocalOperationGeometryCreation<O> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A vertex move with a NaN distance or a NaN tolerance does not fit.
+    #[test]
+    fn a_vertex_move_with_a_nan_does_not_fit() {
+        assert!(move_within(1e-6, 1e-5));
+        assert!(move_within(1e-5, 1e-5));
+        assert!(!move_within(2e-5, 1e-5));
+        assert!(!move_within(f64::NAN, 1e-5));
+        assert!(!move_within(1e-6, f64::NAN));
+        assert!(!move_within(f64::NAN, f64::NAN));
+        assert_eq!(smallest_tolerance(&[1e-5, 2e-6, 1e-4]), Some(2e-6));
+        assert_eq!(smallest_tolerance(&[f64::NAN, 1e-5]), None);
+        assert_eq!(smallest_tolerance(&[1e-5, f64::NAN]), None);
+        assert_eq!(smallest_tolerance(&[]), None);
+    }
 
     #[test]
     fn coaxial_cones_have_only_one_physical_meeting_circle() {
