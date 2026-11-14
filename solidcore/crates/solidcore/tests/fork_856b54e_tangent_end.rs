@@ -106,7 +106,6 @@ fn kernel() -> Kernel {
     k.fixes.fillet_nx1_opposite_continuation_side_edge = true;
     k.fixes.fillet_nx1_tangent_corner_edge = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.fillet_run_on_past_far_end_only = true;
     k.fixes.fillet_run_on_bspline_trims = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;

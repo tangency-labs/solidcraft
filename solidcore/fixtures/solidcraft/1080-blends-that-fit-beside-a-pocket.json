@@ -398,8 +398,6 @@
    "name": "chamfer_6_runs_into_the_pocket",
    "note": "Chamfer 6 on the same edge, past the pocket's rim: SolidCraft refuses it as too large (the largest that fits is 4). With the cliff overflow it is built as if the faces went on and only what lies in the body is removed: the 6 mm triangle along the 20 mm edge less its part over the pocket. Without the flags the pinned SMLib returns success with nothing removed and a body that is not a manifold solid.",
    "fixes": [
-    "fillet_refuse_rails_leaving_faces",
-    "fillet_cliff_overflow"
    ],
    "steps": [
     {
@@ -464,8 +462,6 @@
    "name": "fillet_5_runs_into_the_pocket",
    "note": "Round 5 on the same edge, past the pocket's rim: SolidCraft refuses it (the largest that fits is 4). With the cliff overflow the round is built as if the faces went on and only what lies in the body is removed. Without the flags the pinned SMLib returns success with nothing removed and a non-manifold body.",
    "fixes": [
-    "fillet_refuse_rails_leaving_faces",
-    "fillet_cliff_overflow"
    ],
    "steps": [
     {

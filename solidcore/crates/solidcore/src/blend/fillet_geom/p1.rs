@@ -309,8 +309,8 @@ pub enum FilletErrorType {
     /// overflow whose removal region cannot be closed exactly (a boundary edge on no single
     /// face's surface, a side edge that is not a line). The fork numbers it 9 (and
     /// `SM_FILERR_CORNER_UNSUPPORTED` 10); this port, whose code 9 is already
-    /// [`FilletErrorType::CornerUnsupported`], gives it 10. Only `fixes.fillet_cliff_overflow`
-    /// records it.
+    /// [`FilletErrorType::CornerUnsupported`], gives it 10. Only the cliff
+    /// overflow records it.
     NotExact = 10,
     /// `SM_FILERR_OVERFLOW_FIRST` (SolidCraft change, tangency-labs/smlib@241f7ba, WR-634):
     /// `CreateFilletBrep` stopped after classifying the rails, building nothing

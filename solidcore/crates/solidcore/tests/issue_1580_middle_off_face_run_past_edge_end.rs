@@ -1,4 +1,4 @@
-//! #1580: with `fillet_refuse_rails_leaving_faces` (WR-302), a round whose extended rail
+//! #1580: with the refusal of rails leaving their faces (WR-302), a round whose extended rail
 //! leaves its face past an end of the filleted edge, comes back onto it and leaves again
 //! was refused with `NoRoom`: `RailsFitTheirFaces` tried `LeavesPastAnEnd` only for the
 //! first and the last off-face run, so the middle run (past the end, between the two
@@ -110,9 +110,8 @@ enum Outcome {
 }
 
 /// The front top edge of the body `make` builds rounded 2.
-fn round_front_edge(refuse_rails_leaving_faces: bool, make: fn(&mut Kernel) -> Brep) -> Outcome {
+fn round_front_edge(make: fn(&mut Kernel) -> Brep) -> Outcome {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = refuse_rails_leaving_faces;
     let mut b = make(&mut k);
     let before = volume(&k, &mut b);
     let e = front_top_edge(&k, &b);
@@ -136,30 +135,28 @@ fn round_front_edge(refuse_rails_leaving_faces: bool, make: fn(&mut Kernel) -> B
 }
 
 /// The round of 2 removes (1 - pi/4) 2^2 40 = 34.336294: it ends flush on the wall
-/// x = 40 and the spur is beyond it. Without the flag SMLib (and the pinned C++) builds
-/// it; with it, it is now built too (before the fix: `NoRoom`), the same body.
+/// x = 40 and the spur is beyond it. SMLib (and the pinned C++), which has no such
+/// refusal, builds it; it is now built here too (before the fix: `NoRoom`), the same body.
 #[test]
 fn middle_off_face_run_past_the_edge_end_is_not_refused() {
     let analytic = (1.0 - std::f64::consts::FRAC_PI_4) * 4.0 * 40.0;
     assert!((analytic - 34.336294).abs() < 1e-6);
-    for on in [false, true] {
-        let outcome = round_front_edge(on, |k| spur_prism(k, 1.5));
-        let Outcome::Built { removed, manifold } = outcome else {
-            panic!("flag {on}: {outcome:?}");
-        };
-        assert!(
-            manifold && (removed - analytic).abs() <= 1e-6,
-            "flag {on}: removed {removed}, expected {analytic}"
-        );
-    }
+    let outcome = round_front_edge(|k| spur_prism(k, 1.5));
+    let Outcome::Built { removed, manifold } = outcome else {
+        panic!("{outcome:?}");
+    };
+    assert!(
+        manifold && (removed - analytic).abs() <= 1e-6,
+        "removed {removed}, expected {analytic}"
+    );
 }
 
 /// A middle off-face run that leaves the face between the edge's ends (the rail y = 2
-/// crosses the notch at x = 20) is still refused with the flag.
+/// crosses the notch at x = 20) is still refused.
 #[test]
 fn middle_off_face_run_inside_the_edge_span_is_refused() {
     assert_eq!(
-        round_front_edge(true, |k| notched_block(k, 1.5)),
+        round_front_edge(|k| notched_block(k, 1.5)),
         Outcome::Refused {
             code: FilletErrorType::NoRoom as i32
         }

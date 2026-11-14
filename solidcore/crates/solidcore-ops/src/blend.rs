@@ -291,11 +291,6 @@ fn room_reason(r: NoRoomReason) -> Option<RoomReason> {
     })
 }
 
-/// Without `fixes.fillet_cliff_overflow` the kernel refuses every blend whose rail leaves its
-/// face, where with it it decides between building it over the cliff and refusing it.
-const RAIL_LEAVES_FACE: &str =
-    "a blend whose rail leaves its face, refused without the cliff overflow fix";
-
 /// What a fillet session was doing when it failed, for [`session_refusal`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SessionCall {
@@ -343,9 +338,6 @@ pub enum Refusal {
     NoRoom,
     /// [`Error::CornerUnsupported`]: a vertex no corner kind handles.
     CornerUnsupported,
-    /// [`Error::Unsupported`]: a blend whose rail leaves its face, refused without the cliff
-    /// overflow fix (its reason).
-    RailLeavesFace(&'static str),
 }
 
 impl From<Refusal> for Error {
@@ -375,7 +367,6 @@ impl From<Refusal> for Error {
             },
             Refusal::NoRoom => Error::NoRoom,
             Refusal::CornerUnsupported => Error::CornerUnsupported,
-            Refusal::RailLeavesFace(why) => Error::Unsupported(why),
         }
     }
 }
@@ -428,14 +419,13 @@ impl SessionRefusal {
 ///   vertex), since a size or corner noted before it is not what failed.
 /// - A blend too large that the kernel sizes (`SolidError::FilletRefused`, or the session's
 ///   fit under `SM_FILERR_NO_ROOM`) is [`Error::TooLarge`] with the size, what it sizes, and
-///   the kernel's reason ([`RoomReason`]), unless the corners step noted an unsupported vertex
-///   or the rail leaves its face; a chamfer's fit by radius whose offsets are equal as its
+///   the kernel's reason ([`RoomReason`]), unless the corners step noted an unsupported
+///   vertex; a chamfer's fit by radius whose offsets are equal as its
 ///   distance ([`FilletSession::chamfer_fit`], a knife edge's included), or [`Error::NoRoom`]
 ///   where it cannot be read so.
 /// - Otherwise, a vertex no corner kind handles (noted by the corners step, `call.corner`, or
-///   by the failing step) is [`Error::CornerUnsupported`]; a blend whose
-///   rail leaves its face without the cliff overflow fix is [`Error::Unsupported`]; any other
-///   blend too large is [`Error::NoRoom`].
+///   by the failing step) is [`Error::CornerUnsupported`]; any other blend too large is
+///   [`Error::NoRoom`].
 ///
 /// # Errors
 /// `e` back, for a failure that is no refusal of the blend's size or corners: a kernel failure
@@ -482,11 +472,7 @@ pub fn session_refusal(
         return Err(e);
     }
     if let Some(fit) = fit {
-        if !call.corner
-            && info.no_room_reason() != Some(NoRoomReason::RailLeavesFace)
-            && fit.size.is_finite()
-            && fit.size > 0.0
-        {
+        if !call.corner && fit.size.is_finite() && fit.size > 0.0 {
             let kind = match fit.kind {
                 KernelFit::Radius => FitKind::Radius,
                 KernelFit::Scale => FitKind::Scale,
@@ -596,8 +582,6 @@ fn blend_failure_unsized(
         Ok(Refusal::CornerUnsupported)
     } else if info.code != FilletErrorType::NoRoom as i32 {
         Err(e)
-    } else if info.no_room_reason() == Some(NoRoomReason::RailLeavesFace) {
-        Ok(Refusal::RailLeavesFace(RAIL_LEAVES_FACE))
     } else {
         Ok(Refusal::NoRoom)
     }

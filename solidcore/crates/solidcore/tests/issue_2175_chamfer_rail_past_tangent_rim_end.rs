@@ -1,6 +1,6 @@
 //! tangency-labs/solidcore#2175: a chamfer whose rail leaves its face before the end of
 //! the filleted edge, where the edge meets the face's side edge tangentially, was not
-//! refused with `fillet_refuse_rails_leaving_faces` (WR-302): `do_filleting` returned
+//! refused by the check of rails leaving their faces (WR-302): `do_filleting` returned
 //! `Ok` with an open body.
 //!
 //! The body is a block with an arc side (17.5 high) less a ball r 5 at (2.5, 22.5, 5).
@@ -179,6 +179,5 @@ fn chamfer_past_the_bottom_is_refused_with_the_blend_corner() {
 #[test]
 fn chamfer_past_the_bottom_is_no_room_with_the_flag() {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     assert_eq!(chamfer(&mut k), Err(FilletErrorType::NoRoom as i32));
 }

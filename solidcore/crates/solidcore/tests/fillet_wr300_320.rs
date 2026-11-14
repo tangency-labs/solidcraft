@@ -169,7 +169,7 @@ const NO_ROOM: i32 = FilletErrorType::NoRoom as i32;
 fn blends_larger_than_their_faces_are_refused() {
     for xsect in [0, 1] {
         for size in [6.0, 9.0] {
-            let mut k = kernel(|f| f.fillet_refuse_rails_leaving_faces = true);
+            let mut k = Kernel::default();
             assert_eq!(
                 holed_cube_blend(&mut k, size, xsect),
                 Outcome::Refused { code: NO_ROOM },
@@ -178,7 +178,7 @@ fn blends_larger_than_their_faces_are_refused() {
         }
         let mut k = Kernel::default();
         let off = holed_cube_blend(&mut k, 4.0, xsect);
-        let mut k = kernel(|f| f.fillet_refuse_rails_leaving_faces = true);
+        let mut k = Kernel::default();
         assert_eq!(holed_cube_blend(&mut k, 4.0, xsect), off);
     }
 }
@@ -266,7 +266,7 @@ fn no_room_reason(
 /// cube's chamfer of 5, once refused under another code (WR-301's rollover), builds.
 #[test]
 fn no_room_refusals_are_named() {
-    let mut k = kernel(|f| f.fillet_refuse_rails_leaving_faces = true);
+    let mut k = Kernel::default();
     let mut b = holed_cube(&mut k);
     let e = edge_between(&k, &b, [0.0, 0.0, 20.0], [20.0, 0.0, 20.0]);
     assert_eq!(

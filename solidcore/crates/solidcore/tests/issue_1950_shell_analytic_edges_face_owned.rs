@@ -77,7 +77,6 @@ fn drilled(k: &mut Kernel) -> Brep {
 /// SolidCraft's `core::fixes()` (as `issue_1476_swept_bar_shell.rs` lists them).
 fn solidcraft_fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
-    f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_corner_ball_patch = true;
     f.fillet_chamfer_cone_on_arc = true;

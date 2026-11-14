@@ -27,10 +27,7 @@ use solidcore::{Brep, Kernel};
 
 fn kernel(gap: bool) -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
     k.fixes.fillet_mitre_gap_patch = gap;
     k

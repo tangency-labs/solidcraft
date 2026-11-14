@@ -100,7 +100,9 @@ pub enum NoRoomReason {
     /// fork's 410dfe1, WR-696).
     BallDoesNotFit,
     /// A rail leaves the face it rolls on between its ends (the fork's
-    /// `RailsFitTheirFaces`; `fixes.fillet_refuse_rails_leaving_faces`, WR-302).
+    /// `RailsFitTheirFaces`; WR-302). The executive no longer notes it: a blend whose rail
+    /// leaves its face is built as a cliff overflow or refused with the overflow's own
+    /// reason ([`Self::ConcaveOverflow`] and the others).
     RailLeavesFace,
     /// The blends take the whole of a face they roll on, some at an angle to it (the fork's
     /// `FacesOutlastTheirBlends`; `fixes.fillet_refuse_face_consuming_blends`, WR-320).
@@ -109,7 +111,7 @@ pub enum NoRoomReason {
     /// fork's `BandsClearOtherRails`; `fixes.fillet_refuse_overlapping_bands`, WR-542).
     BandsOverlap,
     /// A concave blend (one that adds material) whose rail leaves its face (the fork's cliff
-    /// overflow choice; `fixes.fillet_cliff_overflow`, WR-631).
+    /// overflow choice; WR-631).
     ConcaveOverflow,
     /// A round or curvature-continuous blend whose rail leaves its face into the body's
     /// material, beyond a wall (WR-631).
@@ -705,8 +707,7 @@ pub struct FilletExecutive<O> {
     /// `m_bCliffOverflow` (the fork's, WR-631, tangency-labs/smlib@8ba4667; `FALSE` from
     /// the constructor and `SetFilletParameters`): a convex blend's rail leaves its face
     /// across a cliff; the blend is built on its faces' continuations and the material it
-    /// removes is subtracted from the target. Set only with
-    /// `fixes.fillet_cliff_overflow`.
+    /// removes is subtracted from the target.
     pub cliff_overflow: bool,
     /// `m_vOpenEnds` (the fork's, WR-631): the fillet's ends the Nx1 corner there left
     /// uncut, in a cliff overflow.
@@ -716,9 +717,7 @@ pub struct FilletExecutive<O> {
     /// overflow across cliffs (and none of the cliff overflow's refusals applies),
     /// `CreateFilletBrep` stops after classifying the rails, building nothing, with
     /// `FilletErrorType::OverflowFirst` and [`Self::overflow_edges`]: the caller blends
-    /// the edges that overflow on their own first, then what is left of the others. Acts
-    /// only with `fixes.fillet_refuse_rails_leaving_faces` and `fixes.fillet_cliff_overflow`
-    /// (the fork's rail classification).
+    /// the edges that overflow on their own first, then what is left of the others.
     pub overflow_first: bool,
     /// `m_bClassifyOnly` (the fork's, WR-634; `FALSE` from the constructor, kept by
     /// `SetFilletParameters`): `CreateFilletBrep` always stops after classifying the
@@ -2622,28 +2621,10 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         let _ = corner;
         Ok(None)
     }
-    /// The fork's `SmFilletSolver::RailsFitTheirFaces` for `solver` (not upstream; opt-in
-    /// `fixes.fillet_refuse_rails_leaving_faces`, WR-302): whether every rail of its
-    /// untrimmed fillet stays on the face it rolls on. Only an accessor with a live
-    /// pseudo-B-rep can tell.
-    ///
-    /// # Errors
-    /// [`SolidError::Unported`] without live context; the classification's errors.
-    fn geometry_rails_fit(
-        &mut self,
-        k: &mut Kernel,
-        solver: O,
-        executive: &FilletExecutive<O>,
-    ) -> Result<bool> {
-        let _ = (k, solver, executive);
-        Err(SolidError::unported(
-            "SmFilletSolver::RailsFitTheirFaces (fork)",
-            "blend.fillet_executive_p3",
-        ))
-    }
     /// The fork's `RailsFitTheirFaces(rbFit, rbRollsOver, rbIntoMaterial)` for `solver`
-    /// (WR-631, `fixes.fillet_cliff_overflow`): as [`Self::geometry_rails_fit`], and
-    /// whether a rail rolls over a tangent edge or runs on into the body's material.
+    /// (not upstream; WR-302, WR-631): whether every rail of its untrimmed fillet stays on
+    /// the face it rolls on, whether a rail rolls over a tangent edge, and whether one runs
+    /// on into the body's material. Only an accessor with a live pseudo-B-rep can tell.
     ///
     /// # Errors
     /// [`SolidError::Unported`] without live context; the classification's errors.
@@ -2660,7 +2641,7 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
     /// The fork's `SmFilletSolver::EndSectionsFitTheirFaces` for `solver` (WR-631,
-    /// `fixes.fillet_cliff_overflow`; tangency-labs/smlib `a307480`): whether its fillet's
+    /// tangency-labs/smlib `a307480`): whether its fillet's
     /// end section at each Nx1 end lies on its end face.
     ///
     /// # Errors
@@ -2970,12 +2951,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
-    /// Refuse blends whose rails leave the faces they roll on, after every solver's fillet
-    /// geometry exists (not upstream; the fork's check in `CreateFilletBrep`, opt-in
-    /// `fixes.fillet_refuse_rails_leaving_faces`, WR-302, tangency-labs/solidcore#841 and
-    /// #1024): a solver whose rail leaves the face it rolls on between its ends
-    /// (`SmFilletSolver::RailsFitTheirFaces`). Fails with `FilletErrorType::NoRoom` (8, not
-    /// an upstream code).
+    /// Judge blends whose rails leave the faces they roll on, after every solver's fillet
+    /// geometry exists (not upstream; the fork's check in `CreateFilletBrep`, WR-302,
+    /// tangency-labs/solidcore#841 and #1024, and its cliff-overflow choice, WR-631): a
+    /// solver whose rail leaves the face it rolls on between its ends
+    /// (`SmFilletSolver::RailsFitTheirFaces`) is built as a cliff overflow or refused with
+    /// `FilletErrorType::NoRoom` (8, not an upstream code), as `choose_cliff_overflow`
+    /// decides.
     ///
     /// # Errors
     /// The refusal as `SM_ERR`, noted in the error info; those of the check.
@@ -2985,26 +2967,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::executive::refuse_blends_larger_than_faces");
-        if k.fixes.fillet_refuse_rails_leaving_faces && k.fixes.fillet_cliff_overflow {
-            return self.choose_cliff_overflow(k, access);
-        }
-        if k.fixes.fillet_refuse_rails_leaving_faces {
-            let mut index = 0;
-            while let Some(solver) = self.solvers.get(index).copied() {
-                if !access.geometry_rails_fit(k, solver, self)? {
-                    return self.record_no_room(
-                        NoRoomReason::RailLeavesFace,
-                        "Fillet Error: a rail leaves the face it rolls on (the blend is larger than the faces allow)",
-                    );
-                }
-                index += 1;
-            }
-        }
-        Ok(())
+        self.choose_cliff_overflow(k, access)
     }
 
-    /// The fork's choice in `CreateFilletBrep` (WR-631, tangency-labs/smlib@8ba4667; opt-in
-    /// `fixes.fillet_cliff_overflow` with `fixes.fillet_refuse_rails_leaving_faces`): a
+    /// The fork's choice in `CreateFilletBrep` (WR-631, tangency-labs/smlib@8ba4667): a
     /// blend whose rails leave the faces they roll on between its ends is larger than
     /// those faces. A convex blend (one that removes material) whose rails leave them
     /// across cliffs is a cliff overflow ([`FilletExecutive::cliff_overflow`]). Refused

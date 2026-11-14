@@ -3,8 +3,7 @@
 //!
 //! Not upstream (SMLib 1.0.1 has neither): the fork's check, tangency-labs/smlib
 //! `fc43974` (refusal), `967f7ab` (`LeavesPastAnEnd`) and `518566f` (a run of off-face
-//! intervals is judged once, WR-302, tangency-labs/solidcore#841 and #1024). Used only
-//! with the opt-in `Kernel::fixes.fillet_refuse_rails_leaving_faces`.
+//! intervals is judged once, WR-302, tangency-labs/solidcore#841 and #1024).
 //!
 //! Deviations: a run of off-face intervals between two stretches on the face is skipped
 //! when it both leaves and returns on or beyond the cross section at the same end of the
@@ -14,14 +13,12 @@
 //! end where the filleted edge is closed and the run lies beyond the plane on which the
 //! corner at its vertex cuts the rail ([`past_closed_corner`], #2498): the fork takes the
 //! top rail of a teardrop's rim, which crosses the rim itself just past the tip, for a
-//! cliff overflow. The fork's later cliff-overflow construction (`SmFilletCliffOverflow.cpp`,
-//! which builds a convex blend over a cliff and subtracts what it removes) is not
-//! ported, so every blend that leaves its face between its ends is refused, as in
-//! `fc43974`. With the opt-in `Kernel::fixes.fillet_cliff_overflow` (WR-631, the fork's
-//! `8ba4667` at rev `68fb9162`) the check also tells whether a rail rolls over a tangent
-//! edge and whether a rail that leaves its face runs on into the body's material
-//! ([`RailsFit`], `IsConcaveEdge`, `sm_InsideMaterial`), for the executive's choice
-//! between a refusal and a cliff overflow; those judgements run only with that flag. The
+//! cliff overflow. As the fork's `8ba4667` at rev `68fb9162` (WR-631), the check also
+//! tells whether a rail rolls over a tangent edge and whether a rail that leaves its
+//! face runs on into the body's material ([`RailsFit`], `IsConcaveEdge`,
+//! `sm_InsideMaterial`), for the executive's choice between a refusal and a cliff
+//! overflow (a convex blend built over a cliff, the material it removes taken from the
+//! body: `crate::blend::fillet_cliff_overflow`). The
 //! fork's `IsKnifeEdge` ([`is_knife_edge`], `e418750`, WR-665) is here too, used by
 //! `SmFilletCorner::Create` with `fixes.fillet_corner_per_vertex_fan`. The
 //! nearest-edge search of `sm_InsideMaterial` keeps the first of equally near edges, in

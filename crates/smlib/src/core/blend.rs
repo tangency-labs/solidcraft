@@ -332,7 +332,6 @@ fn refusal(r: Refusal) -> Error {
         Refusal::SetbackTooShort { least, at, builds, .. } => Error::SetbackTooShort { least, at, builds },
         Refusal::NoRoom => Error::NoRoom,
         Refusal::CornerUnsupported => Error::CornerUnsupported,
-        Refusal::RailLeavesFace(_) => Error::Unsupported,
     }
 }
 

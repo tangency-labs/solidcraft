@@ -104,10 +104,7 @@
    "name": "disc_top_rounded_past_its_height",
    "note": "The disc's top circle rounded r 2.5, taller than the 2 mm wall, which SolidCraft refuses. With the cliff overflow and the rail fixes it needs, the round is built as if the wall went on below the bottom and only what lies in the disc is removed. The pinned SMLib refuses it.",
    "fixes": [
-    "fillet_refuse_rails_leaving_faces",
     "fillet_trace_reaches_rails",
-    "fillet_rail_end_on_continued_surface",
-    "fillet_cliff_overflow",
     "fillet_run_on_bspline_trims"
    ],
    "steps": [
@@ -151,10 +148,7 @@
    "name": "disc_top_rounded_just_past_its_height",
    "note": "r 2.001: the round's crease on the bottom face runs 2.5e-7 inside the bottom edge, within the trim's tolerance. The overflow trim at creases (fork 5e8c9c1 too) drops that crease as not inside the face and refuses at the sewing (tangency-labs/solidcore#2385); fillet_overflow_crease_along_edge takes the crease as the bottom edge.",
    "fixes": [
-    "fillet_refuse_rails_leaving_faces",
     "fillet_trace_reaches_rails",
-    "fillet_rail_end_on_continued_surface",
-    "fillet_cliff_overflow",
     "fillet_run_on_bspline_trims",
     "fillet_overflow_trim_at_creases",
     "fillet_overflow_crease_along_edge"

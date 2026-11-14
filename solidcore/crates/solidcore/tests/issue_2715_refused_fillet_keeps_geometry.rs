@@ -131,10 +131,7 @@ fn edge_between(k: &Kernel, b: &Brep, p: Point3, q: Point3) -> EdgeId {
 /// the trim at the creases.
 fn cliff_kernel(trim: bool) -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_overflow_trim_at_creases = trim;
     k
 }
@@ -221,8 +218,6 @@ fn a_refused_trim_at_creases_leaves_a_body_that_saves_its_surfaces() {
 fn keep_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut fixes = UpstreamFixes::default();
-    fixes.fillet_refuse_rails_leaving_faces = true;
-    fixes.fillet_cliff_overflow = true;
     fixes.fillet_overflow_trim_at_creases = true;
     fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes = fixes;

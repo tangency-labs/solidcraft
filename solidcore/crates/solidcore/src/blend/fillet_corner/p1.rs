@@ -1627,7 +1627,7 @@ impl FilletCorner {
 
     /// The start of the fork's `SmFilletNx1Corner::CalcCornerEdgeGeom` (not upstream; opt-in
     /// `fixes.fillet_nx1_end_rib_global_merge`, WR-303, tangency-labs/solidcore#841;
-    /// tangency-labs/smlib `967f7ab`; in a cliff overflow, `fixes.fillet_cliff_overflow`,
+    /// tangency-labs/smlib `967f7ab`; in a cliff overflow,
     /// WR-631, tangency-labs/smlib `8ba4667` and `3f22e97`). At a corner of at most three
     /// edges the one corner edge is the end rib, from one rail's end on its side edge to
     /// the other's. When one rail missed its side edge (`SM_FV_NO_INT_RAIL_EU`) because
