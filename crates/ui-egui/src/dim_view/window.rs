@@ -309,7 +309,8 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
         crate::prefs::format_length(step_mm, &app.session.doc.units, app.preferences.length_decimals)
     };
     let last = ctx.memory(|m| m.area_rect(area));
-    let width = t.space_24 * 8.0;
+    let arrows = 2.0 * (t.form_close_size - t.space_4) + t.space_2;
+    let width = window_width(ctx, &e.expr, !rows.is_empty(), arrows);
     let guess = egui::vec2(width + t.space_6 * 2.0, t.control_height * 2.0 + t.space_6 * 3.0);
     let anchor = place(app, ctx, &e.param, at, last.map_or(guess, |r| r.size()));
     // A click on the window (an arrow) takes the keyboard from its field, as any click away does;
@@ -341,7 +342,6 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 }
                 // The value, with its arrows at its right (the kit's own up and down arrows).
                 let (row, _) = ui.allocate_exact_size(egui::vec2(width, t.control_height), egui::Sense::hover());
-                let arrows = 2.0 * (t.form_close_size - t.space_4) + t.space_2;
                 let (r, up, down) = ui
                     .scope_builder(egui::UiBuilder::new().max_rect(row).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
                         ui.spacing_mut().item_spacing.x = t.space_2;
@@ -448,6 +448,21 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
         forget();
     }
     (answer, escaped)
+}
+
+/// The window's inner width. With parameter rows under the value it widens, up to twice its
+/// usual width, so the value's whole expression shows instead of scrolling; without rows it
+/// keeps its usual width.
+fn window_width(ctx: &egui::Context, expr: &str, rows: bool, arrows: f32) -> f32 {
+    let t = Tokens::get();
+    let usual = t.space_24 * 8.0;
+    if !rows {
+        return usual;
+    }
+    let font = egui::FontId::monospace(t.font_label);
+    let text = ctx.layer_painter(egui::LayerId::background()).layout_no_wrap(expr.to_owned(), font, egui::Color32::PLACEHOLDER).size().x;
+    let needed = text + 2.0 * t.form_inset + t.space_4 + arrows + t.space_2;
+    if needed.is_finite() { needed.ceil().clamp(usual, usual * 2.0) } else { usual }
 }
 
 /// How the parameter rows' fields stand this frame.

@@ -452,7 +452,8 @@ fn a_parameter_row_writes_a_bare_number_in_the_parameter_s_unit() {
 }
 
 /// Each user parameter the expression names gets one row, in the order they first appear; a
-/// dimension's own parameter (`d2`) and a plain number get none. Cancel drops a row's change.
+/// dimension's own parameter (`d2`) and a plain number get none. With rows the window widens so a
+/// long expression shows whole. Cancel drops a row's change.
 #[test]
 fn the_dimension_window_lists_the_user_parameters_its_expression_names() {
     let mut h = parameter_window("corner_r * 2 - foot");
@@ -461,9 +462,13 @@ fn the_dimension_window_lists_the_user_parameters_its_expression_names() {
     type_value(&mut h, "foot + corner_r + foot + d2");
     h.frames(2);
     assert_eq!(parameter_rows(), ["foot", "corner_r"], "the rows follow what is typed, each once, without d2");
+    let width = || crate::scenario::rect_of("dimwin").map_or(0.0, |r| r.width());
+    let wide = width();
     type_value(&mut h, "20");
     h.frames(2);
     assert!(parameter_rows().is_empty(), "a plain number has no parameter rows");
+    let usual = width();
+    assert!(wide > usual + 1.0, "with rows the window widens to show a long expression whole ({wide} vs {usual})");
     type_value(&mut h, "foot * 3");
     h.frames(2);
     let before = h.app.session.doc.to_json();
