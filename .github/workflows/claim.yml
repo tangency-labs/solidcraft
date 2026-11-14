@@ -1,15 +1,18 @@
 # `/claim` and `/unclaim` on issues (CONTRIBUTING.md, "Sending a change"), and a daily sweep that
 # frees claims nobody is working on. A pull request that references an issue (`<summary> (#N)`,
-# `Fixes #N`) claims it too. The logic is in scripts/claim/claim.js (tested in ci.yml).
+# `Fixes #N`) claims it too. When that PR closes, the issue is free again at once if it is still
+# open (merged as "Part of #N", or closed unmerged); the sweep catches any this misses.
+# The logic is in scripts/claim/claim.js (tested in ci.yml).
 name: Claim
 
 on:
   issue_comment:
     types: [created]
   # pull_request_target so PRs from forks can label and assign. It runs the base branch's
-  # scripts/claim and only reads the PR's title, body and author; the PR's code is never checked out.
+  # scripts/claim and only reads the PR's title, body, author and merge state; the PR's code is
+  # never checked out.
   pull_request_target:
-    types: [opened, reopened]
+    types: [opened, reopened, closed]
   schedule:
     - cron: '17 5 * * *'
   workflow_dispatch:
@@ -43,6 +46,9 @@ jobs:
             const claim = require('./scripts/claim/claim.js');
             if (context.eventName === 'issue_comment') {
               await claim.handleComment({ github, context });
+            } else if (context.eventName === 'pull_request_target' && context.payload.action === 'closed') {
+              const released = await claim.handlePullClosed({ github, context });
+              core.info(`Released: ${released.join(', ') || 'none'}`);
             } else if (context.eventName === 'pull_request_target') {
               const claimed = await claim.handlePull({ github, context });
               core.info(`Claimed: ${claimed.join(', ') || 'none'}`);

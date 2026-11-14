@@ -25,7 +25,7 @@ function fake(world = {}) {
         },
         getCommit: async () => ({ data: { commit: { committer: { date: world.pushed || ago(H) } } } }),
       },
-      pulls: { get: async () => ({ data: { head: { sha: 'abc' } } }) },
+      pulls: { get: async ({ pull_number }) => ({ data: { head: { sha: 'abc' }, ...((world.pulls || {})[pull_number] || {}) } }) },
       reactions: { createForIssueComment: rec('react') },
       issues: {
         getLabel: async () => {
@@ -40,7 +40,10 @@ function fake(world = {}) {
         createComment: rec('comment'),
         listForRepo: async () => ({ data: world.issues || [] }),
         get: async ({ issue_number }) => {
-          const found = (world.byNumber || {})[issue_number];
+          const seq = (world.gets || {})[issue_number];
+          const found = (seq && seq.length ? seq.shift() : null) ||
+            (world.byNumber || {})[issue_number] ||
+            (world.issues || []).find((i) => i.number === issue_number);
           if (!found) throw Object.assign(new Error('nf'), { status: 404 });
           return { data: found };
         },
@@ -388,4 +391,134 @@ test('PRs from bots, references to PRs, closed and missing issues are ignored', 
   bot.payload.pull_request.user = { login: 'dependabot[bot]', type: 'Bot' };
   assert.deepEqual(await claim.handlePull({ github: w.github, context: bot }), []);
   assert.equal(w.calls.length, 0);
+});
+
+// A claim recorded through PR #50 whose PR then merged "as part of" the issue or closed (#16544).
+const claimedThrough50 = [labeled(ago(10 * H)), said('Claimed by @alice through #50. The claim lapses after 14 days without pushes.')];
+const closedCtx = (title, body, merged) => ({
+  repo,
+  payload: { pull_request: { number: 50, state: 'closed', merged, title, body, user: { login: 'alice', type: 'User' } } },
+});
+
+test('recordedClaim names the claimant and the PR the claim went through', () => {
+  assert.deepEqual(claim.recordedClaim(claimedThrough50), { who: 'alice', pr: 50 });
+  assert.deepEqual(claim.recordedClaim([said('Claimed by @bob. Please open a draft PR referencing #7 within 72 h.')]), { who: 'bob', pr: null });
+  assert.equal(claim.recordedClaim([...claimedThrough50, { event: 'unlabeled', label: { name: 'in progress' } }]), null);
+});
+
+test('a PR merged as part of an issue frees the rest of it at once', async () => {
+  const { github, calls } = fake({
+    byNumber: { 7: openIssue(7, ['alice'], ['in progress']) },
+    timeline: [...claimedThrough50, pr(50, 'alice', 'closed', { title: 'Tight box', body: 'Part of #7' })],
+  });
+  const released = await claim.handlePullClosed({ github, context: closedCtx('Tight box', 'Part of #7 (the tight box half)', true) });
+  assert.deepEqual(released, [7]);
+  assert.equal(find(calls, 'removeLabel')[1].issue_number, 7);
+  assert.deepEqual(find(calls, 'removeAssignees')[1].assignees, ['alice']);
+  const c = find(calls, 'comment')[1];
+  assert.equal(c.issue_number, 7);
+  assert.match(c.body, /^#50 merged as part of this issue but didn't close it, so the rest is free again\. If nothing is left, it can be closed\./);
+});
+
+test('a claiming PR closed without merging frees the issue', async () => {
+  const { github, calls } = fake({ byNumber: { 7: openIssue(7, ['alice'], ['in progress']) }, timeline: claimedThrough50 });
+  assert.deepEqual(await claim.handlePullClosed({ github, context: closedCtx('Thing (#7)', 'Fixes #7', false) }), [7]);
+  assert.match(find(calls, 'comment')[1].body, /^#50 was closed without merging, so this one is free again\. Anyone can `\/claim` it\.$/);
+});
+
+test('a merged PR leaves the issues it closes by keyword to GitHub', async () => {
+  // Already auto-closed, and still open (auto-close pending): neither gets a comment.
+  for (const state of ['closed', 'open']) {
+    const { github, calls } = fake({ byNumber: { 7: { ...openIssue(7, ['alice'], ['in progress']), state } }, timeline: claimedThrough50 });
+    assert.deepEqual(await claim.handlePullClosed({ github, context: closedCtx('Thing (#7)', 'Fixes #7', true) }), []);
+    assert.equal(find(calls, 'comment'), undefined);
+    assert.equal(find(calls, 'removeLabel'), undefined);
+  }
+});
+
+test('a closed PR does not free an issue another open PR still claims, or one it never claimed', async () => {
+  let w = fake({
+    byNumber: { 7: openIssue(7, ['alice'], ['in progress']) },
+    timeline: [...claimedThrough50, pr(50, 'alice', 'open'), pr(61, 'alice', 'open', { title: 'The other half (#7)' })],
+  });
+  assert.deepEqual(await claim.handlePullClosed({ github: w.github, context: closedCtx('Tight box', 'Part of #7', true) }), []);
+  assert.equal(find(w.calls, 'removeLabel'), undefined);
+  w = fake({
+    byNumber: { 7: openIssue(7, ['bob'], ['in progress']) },
+    timeline: [labeled(ago(10 * H)), said('Claimed by @bob through #42. The claim lapses after 14 days without pushes.')],
+  });
+  assert.deepEqual(await claim.handlePullClosed({ github: w.github, context: closedCtx('Tight box', 'Part of #7', true) }), []);
+  w = fake({ byNumber: { 7: openIssue(7, ['carol'], ['in progress']) }, timeline: claimedThrough50, perms: { carol: 'write' } });
+  assert.deepEqual(await claim.handlePullClosed({ github: w.github, context: closedCtx('Tight box', 'Part of #7', true) }), []);
+  assert.equal(w.calls.length, 0);
+});
+
+test('sweep frees a claim whose PR merged as part of the issue before 72 h, with the merged message', async () => {
+  const w = fake({
+    issues: [issue(7, ['alice'])],
+    timeline: [...claimedThrough50, pr(50, 'alice', 'closed', { title: 'Tight box', body: 'Part of #7' })],
+    pulls: { 50: { state: 'closed', merged: true, merged_at: ago(8 * H) } },
+  });
+  assert.deepEqual(await claim.sweep({ github: w.github, context: { repo }, now: NOW }), [7]); // labelled 10 h ago
+  assert.match(find(w.calls, 'comment')[1].body, /^#50 merged as part of this issue but didn't close it/);
+});
+
+test('sweep keeps a claim whose recorded PR is open but only says "Part of"', async () => {
+  const w = fake({
+    issues: [issue(7, ['alice'])],
+    timeline: [labeled(ago(100 * H)), said('Claimed by @alice through #50.'), pr(50, 'alice', 'open', { title: 'Tight box', body: 'Part of #7' })],
+    pulls: { 50: { state: 'open' } },
+    pushed: ago(2 * H),
+  });
+  assert.deepEqual(await claim.sweep({ github: w.github, context: { repo }, now: NOW }), []);
+});
+
+test('sweep still says no draft PR showed up for a claim that never recorded one', async () => {
+  const w = fake({ issues: [issue(7)], timeline: [labeled(ago(80 * H)), said('Claimed by @bob. Please open a draft PR referencing #7 within 72 h; the claim lapses otherwise.')] });
+  assert.deepEqual(await claim.sweep({ github: w.github, context: { repo }, now: NOW }), [7]);
+  assert.equal(find(w.calls, 'comment')[1].body, 'No draft PR showed up within 72 h, so this one is free again. Anyone can `/claim` it.');
+});
+
+test('a closed PR frees nothing once someone else holds the issue or the label is already off', async () => {
+  // A /claim or a maintainer reassignment while the PR was open: the live assignee isn't the claimant.
+  let w = fake({ byNumber: { 7: openIssue(7, ['dave'], ['in progress']) }, timeline: claimedThrough50 });
+  assert.deepEqual(await claim.handlePullClosed({ github: w.github, context: closedCtx('Tight box', 'Part of #7', true) }), []);
+  assert.equal(find(w.calls, 'removeLabel'), undefined);
+  // Reassigned between the first read and the release.
+  w = fake({ gets: { 7: [openIssue(7, ['alice'], ['in progress']), openIssue(7, ['alice', 'dave'], ['in progress'])] }, timeline: claimedThrough50 });
+  assert.deepEqual(await claim.handlePullClosed({ github: w.github, context: closedCtx('Tight box', 'Part of #7', true) }), []);
+  // Another run (the sweep) released it between the first read and the release: no second comment.
+  w = fake({ gets: { 7: [openIssue(7, ['alice'], ['in progress']), openIssue(7, [], [])] }, timeline: claimedThrough50 });
+  assert.deepEqual(await claim.handlePullClosed({ github: w.github, context: closedCtx('Tight box', 'Part of #7', true) }), []);
+  assert.equal(find(w.calls, 'comment'), undefined);
+  // An unassigned claimant (the bot couldn't assign them) is still freed.
+  w = fake({ byNumber: { 7: openIssue(7, [], ['in progress']) }, timeline: claimedThrough50 });
+  assert.deepEqual(await claim.handlePullClosed({ github: w.github, context: closedCtx('Tight box', 'Part of #7', true) }), [7]);
+});
+
+test('the sweep does not comment on an issue another run released meanwhile', async () => {
+  const w = fake({ issues: [issue(7)], timeline: [labeled(ago(80 * H))], gets: { 7: [{ ...issue(7, []), labels: [] }] } });
+  assert.deepEqual(await claim.sweep({ github: w.github, context: { repo }, now: NOW }), []);
+  assert.equal(find(w.calls, 'comment'), undefined);
+});
+
+test('a closing keyword in a merged PR\'s title is left to GitHub too', async () => {
+  const { github, calls } = fake({ byNumber: { 7: openIssue(7, ['alice'], ['in progress']) }, timeline: claimedThrough50 });
+  assert.deepEqual(await claim.handlePullClosed({ github, context: closedCtx('Fixes #7: tight box', 'The whole thing.', true) }), []);
+  assert.equal(find(calls, 'comment'), undefined);
+});
+
+test('the claimant\'s own open "Part of" PR keeps the claim; someone else\'s does not', async () => {
+  const rest = (login) => pr(61, login, 'open', { title: 'Mass properties', body: 'Part of #7 (the other half)' });
+  let w = fake({ byNumber: { 7: openIssue(7, ['alice'], ['in progress']) }, timeline: [...claimedThrough50, rest('alice')] });
+  assert.deepEqual(await claim.handlePullClosed({ github: w.github, context: closedCtx('Tight box', 'Part of #7', true) }), []);
+  w = fake({
+    issues: [issue(7, ['alice'])],
+    timeline: [...claimedThrough50, rest('alice')],
+    pulls: { 50: { state: 'closed', merged: true } },
+    pushed: ago(2 * H),
+  });
+  assert.deepEqual(await claim.sweep({ github: w.github, context: { repo }, now: NOW }), []);
+  w = fake({ byNumber: { 7: openIssue(7, ['alice'], ['in progress']) }, timeline: [...claimedThrough50, rest('bob')] });
+  assert.deepEqual(await claim.handlePullClosed({ github: w.github, context: closedCtx('Tight box', 'Part of #7', true) }), [7]);
 });
