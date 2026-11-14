@@ -5,7 +5,6 @@
 
 use solidcore_record::Vec3;
 use solidcraft_geom::brep::eval::CurveEval;
-use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::splitface::{SplitTool, ToolSide};
@@ -118,18 +117,19 @@ fn face_sides(body: &Body, side: &ToolSide) -> Result<Vec<f64>> {
 
 /// For each point, the face of `body` nearest it (over one tessellation).
 fn nearest_faces(body: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
-    let m = body.mesh(&crate::MeshTolerance::chord(body.size() * 2e-3))?;
-    at.iter()
-        .map(|p| {
-            let mut best: Option<(f64, u32)> = None;
-            for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-                let Some([a, b, c]) = m.tri(t) else { continue };
-                let d = ((a + b + c) / 3.0).dist(*p).min(a.dist(*p)).min(b.dist(*p)).min(c.dist(*p));
-                if best.is_none_or(|(x, _)| d < x) {
-                    best = Some((d, *f));
-                }
-            }
-            best.map(|(_, f)| f as usize).ok_or_else(|| KernelError::Invalid("no face there".into()))
+    let (ops, order) = body.ops_body().ok_or_else(|| KernelError::Invalid("no face there".into()))?;
+    let reach = body.size().max(1.0) * 100.0;
+    let pts: Vec<[f64; 3]> = at.iter().map(|p| [p.x, p.y, p.z]).collect();
+    let dists = ops.face_distances_within(order, &pts, reach).map_err(|e| KernelError::Invalid(e.to_string()))?;
+    (0..at.len())
+        .map(|pi| {
+            dists
+                .iter()
+                .enumerate()
+                .filter_map(|(f, row)| Some((row.get(pi).copied().flatten()?, f)))
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .map(|(_, f)| f)
+                .ok_or_else(|| KernelError::Invalid("no face there".into()))
         })
         .collect()
 }
