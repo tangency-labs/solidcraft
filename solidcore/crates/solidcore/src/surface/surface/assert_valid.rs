@@ -3238,18 +3238,11 @@ mod tests {
         expect(&cone(-1.0), 2, &[radius, pole]);
         // SM_LEVEL_GIVEN skips the base classes' checks
         expect(&cone(-1.0), LEVEL_GIVEN, &[radius, pole]);
-        // with the NURB form, no point of it evaluates (its uv cannot be mapped to the
-        // cone's: "the polar curve of the surface of revolution" is missing), so its
-        // closure is not shown (WR-663) and its seam's boundaries are compared. SMLib
-        // compares unset points, shows it closed in u and in v (its ends are 3 apart in
-        // z), and reads its control net, as closed, doubling back: B-spline test 5.
-        let seam = (
-            SURFACE_TYPE,
-            6,
-            "Bad Surf Coincidence at Seam",
-            "Open surface has partially coincident boundaries",
-        );
-        expect(&with_nurb(cone(-1.0)), 2, &[seam, radius, pole]);
+        // with the NURB form the same two: it evaluates everywhere (u80), is closed in u
+        // (its turn) and open in v, and its net, read so, does not double back. (Before
+        // u80 none of its points evaluated; SMLib, comparing unset points, took it closed
+        // in v too and its net as doubling back, B-spline test 5.)
+        expect(&with_nurb(cone(-1.0)), 2, &[radius, pole]);
     }
 
     /// A ring of radial width 2.65 a hair off flat (heights 1.3e-5 and 2.1e-5, a revolved

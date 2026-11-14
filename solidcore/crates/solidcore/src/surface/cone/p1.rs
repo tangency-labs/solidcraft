@@ -432,12 +432,30 @@ pub(crate) fn cone_iso_curve(
         let radius_max = end_vec.length();
         let radius = (radius_min + radius_mid + radius_max) / 3.0;
 
+        // Not upstream (u80): past a cone's apex its radius is negative, and the point at
+        // the cone's angle a lies at a + 180 degrees on the circle. Where the circle is
+        // parameterized by the cone's angle (no domain), its axes are then turned by a half
+        // turn, so that the circle at a is the cone's point at a; upstream keeps the cone's
+        // axes, its circle runs half a turn off the iso curve, every such circle is taken
+        // as degenerate, and a cone through its apex gets no polar conversion (no point of
+        // it evaluates).
+        let past_apex = domain.is_none() && {
+            let a = anal_interval.min() * PI / 180.0;
+            let along = cone_x_axis * a.cos() + cone_y_axis * a.sin();
+            start_vec.dot(along) < 0.0
+        };
+        let (circle_x, circle_y) = if past_apex {
+            (-cone_x_axis, -cone_y_axis)
+        } else {
+            (cone_x_axis, cone_y_axis)
+        };
+
         // create the circle using the isoCurve parameterization
         let circle = Ellipse::new_circle(
             k,
             center,
-            cone_x_axis,
-            cone_y_axis,
+            circle_x,
+            circle_y,
             anal_interval,
             radius,
             &EllipseOptions {
@@ -2189,6 +2207,47 @@ mod tests {
         a.distance(b) < 1e-12
     }
 
+    /// u80: a full-turn cone through its apex, radius -1 at the bottom and 1 at the top 3
+    /// up (the apex at mid-height, a double cone), made bounded as the primitives make cones
+    /// and as a surface asks for its NURB: every point of its natural domain evaluates, on
+    /// the cone (`|xy| = |z / 1.5 - 1|`), and it is closed in u (its turn) and not in v (its
+    /// ends are 3 apart).
+    #[test]
+    fn a_full_turn_cone_through_its_apex_evaluates_everywhere_and_is_closed_in_u_only() {
+        use crate::surface::surface::Surface;
+        let k = k();
+        let cone = Surface::from(Cone::new_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            -1.0,
+            1.0,
+            0.0,
+            360.0,
+            3.0,
+            false,
+            false,
+            false,
+        ));
+        cone.kind_with_nurb(&k).unwrap();
+        let d = cone.natural_uv_domain_with_nurb(&k).unwrap();
+        for i in 0..=8 {
+            for j in 0..=12 {
+                let uv = d.evaluate(f64::from(i) / 8.0, f64::from(j) / 12.0);
+                let p = cone
+                    .evaluate_point(&k, uv)
+                    .unwrap_or_else(|e| panic!("{uv:?}: {e}"));
+                let want = (p.z / 1.5 - 1.0).abs();
+                let got = (p.x * p.x + p.y * p.y).sqrt();
+                assert!((got - want).abs() < 1e-9, "{uv:?}: {p:?}");
+                assert!((-1e-9..=3.0 + 1e-9).contains(&p.z), "{uv:?}: {p:?}");
+            }
+        }
+        let closed = |param| cone.is_closed(&k, &d, param, None, false).unwrap().0;
+        assert!(closed(SurfParamType::U));
+        assert!(!closed(SurfParamType::V));
+    }
+
     #[test]
     fn canonical_cone_shape() {
         let c = cone123();
@@ -2392,9 +2451,15 @@ mod tests {
         assert!(cone.approx_eq(&cone.clone()));
     }
 
+    /// u80: a cylinder of negative radius (its generator on the far side of the axis at
+    /// angle 0) has its polar conversion: its iso circles run with the cone's angle, so
+    /// its parameters convert both ways and its point at angle a is on the far side, at
+    /// a + 180 degrees (before u80 the rebuild of its converter failed, MakeNurb ignored
+    /// that, and no parameter converted).
     #[test]
-    fn negative_radius_cylinder_has_no_polar_curve() {
-        // MakeNurb ignores the polar converter rebuild's failure (a negative radius)
+    fn negative_radius_cylinder_has_its_polar_curve() {
+        use crate::surface::surface::Surface;
+        let k = k();
         let mut c = Cone::new_cylinder_bounded(
             Vec3::ZERO,
             Vec3::X,
@@ -2407,18 +2472,20 @@ mod tests {
             false,
             false,
         );
-        c.make_nurb(&k()).unwrap();
-        assert!(c.rev().polar_curve().is_none());
-        assert_eq!(c.height(&k()).unwrap(), 0.0);
-        assert!(c
-            .convert_uv_from_step_to_nurbs(&k(), Point2::new(10.0, 1.0))
-            .is_err());
-        let e = c
-            .convert_uv_from_nurbs_to_step(&k(), Point2::new(0.5, 0.5))
-            .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
-        assert_eq!(e.operation(), OP_TO_STEP);
-        assert_eq!(e.kind(), crate::error::ErrorKind::Missing);
+        c.make_nurb(&k).unwrap();
+        assert!(c.rev().polar_curve().is_some());
+        assert!((c.height(&k).unwrap() - 4.3).abs() < 1e-12);
+        let step = Point2::new(10.0, 1.0);
+        let nurbs = c.convert_uv_from_step_to_nurbs(&k, step).unwrap();
+        let back = c.convert_uv_from_nurbs_to_step(&k, nurbs).unwrap();
+        assert!(
+            (back.x - step.x).abs() < 1e-9 && (back.y - step.y).abs() < 1e-9,
+            "{back:?}"
+        );
+        let p = Surface::from(c).evaluate_point(&k, nurbs).unwrap();
+        let a = 190.0_f64.to_radians();
+        let want = Vec3::new(1.8 * a.cos(), 1.8 * a.sin(), 1.0);
+        assert!(p.distance(want) < 1e-9, "{p:?} {want:?}");
     }
 
     #[test]
