@@ -3344,15 +3344,8 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             }
         } else {
             // WR-674: a round's end where its edge runs on tangentially is left open too.
-            let tangent_ends = k.fixes.fillet_round_ends_at_tangent_continuation;
-            let dropped = corner.drop_end_rib(
-                k,
-                target,
-                pseudo,
-                cliff_overflow,
-                tangent_ends,
-                &mut note_open_end,
-            )?;
+            let dropped =
+                corner.drop_end_rib(k, target, pseudo, cliff_overflow, true, &mut note_open_end)?;
             executive.open_ends.append(&mut open_ends);
             if dropped == EndRibDrop::GlobalMerge {
                 executive.options.global_merge = true;

@@ -58,9 +58,8 @@
 //!   plus one step, past which the port returns [`SolidError::InvalidInput`].
 //! - **Law evaluation status.** `SmTemporaryRadiusChange::SetUp` ignores the status of
 //!   `SmFilletLaw::Evaluate` and reads its first value, uninitialised after a failure;
-//!   the port propagates the error before reading that value (UB-252). Constructors
-//!   retain pinned status handling by default; `new_with_fixes` and the matching
-//!   scope helper opt into reporting setup errors before entering the body (#458).
+//!   the port propagates the error before reading that value (UB-252). The constructors
+//!   and the scope helpers report setup errors before entering the body (#458).
 //! - The upstream debug drawing (`SM_GFX_CODE`) is omitted.
 //! - Calls into units that are not ported return [`SolidError::Unported`] through the
 //!   adapter defaults of [`ExecutiveAccess`].
@@ -1681,8 +1680,7 @@ pub struct TemporaryRadiusChange<O> {
 
 impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
     /// The constructor: records the solver, rail and side edge use and runs
-    /// [`TemporaryRadiusChange::set_up`], ignoring ordinary statuses as upstream.
-    /// Use [`Self::new_with_fixes`] to opt into reporting setup failure.
+    /// [`TemporaryRadiusChange::set_up`], reporting its failure (upstream ignores it).
     ///
     /// # Errors
     ///
@@ -1700,10 +1698,8 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
         )
     }
 
-    /// Constructs a radius change with the caller's opt-in upstream policy.
-    /// `temporary_radius_setup_errors` reports a failed setup before the caller
-    /// starts filleting; the original constructor keeps its default call shape.
-    /// Unported dependencies still propagate under either policy.
+    /// Constructs a radius change with the caller's upstream fixes. A failed setup is
+    /// reported before the caller starts filleting (UB-252).
     pub fn new_with_fixes<A>(
         access: &mut A,
         fs: O,
@@ -1722,14 +1718,9 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
             fs,
             rail_idx: rail_index,
         };
-        // fork 873c7c9 SERs inside SetUp (its constructor still cannot report, so the
-        // status reaches the caller only with temporary_radius_setup_errors)
-        let setup = change.set_up_with(access, fixes.fillet_statuses_pass_on);
-        if fixes.temporary_radius_setup_errors {
-            setup?;
-        } else {
-            ignored(setup)?;
-        }
+        // fork 873c7c9 SERs inside SetUp (its constructor still cannot report; here the
+        // status reaches the caller)
+        change.set_up_with(access, fixes.fillet_statuses_pass_on)?;
         Ok(change)
     }
 
@@ -1957,7 +1948,7 @@ where
 }
 
 /// Runs a temporary radius scope using the caller's upstream fix policy.
-/// With `temporary_radius_setup_errors`, a setup failure returns before `body`.
+/// A setup failure returns before `body`.
 /// A completed setup is reverted even when `body` fails.
 pub fn with_temporary_radius_change_with_fixes<O, A, T>(
     access: &mut A,

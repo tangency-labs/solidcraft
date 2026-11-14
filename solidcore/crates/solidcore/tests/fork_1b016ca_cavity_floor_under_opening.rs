@@ -81,10 +81,9 @@ fn shell(fixes: &UpstreamFixes, inset: f64) -> solidcore::Result<(bool, f64)> {
     Ok((manifold, volume(&k, &mut wall)?))
 }
 
-fn crossing(walls_touch: bool) -> UpstreamFixes {
+fn crossing() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
     f.offset_resolve_crossing_loops = true;
-    f.offset_walls_touch_refused = walls_touch;
     f
 }
 
@@ -158,22 +157,20 @@ fn default_fixes_refuse_the_open_cavity_and_retain_the_input() {
     assert!((v - 2144.0).abs() <= 1e-9 * 2144.0, "{v}");
 }
 
-/// The floor under the opening is kept: the shell is the closed form (with and without
-/// a759622's touch refusal, which this case does not reach).
+/// The floor under the opening is kept: the shell is the closed form (a759622's touch
+/// refusal does not reach this case).
 #[test]
 fn floor_under_the_opening_is_kept() {
-    for walls_touch in [false, true] {
-        let (manifold, v) = shell(&crossing(walls_touch), 0.15).unwrap();
-        assert!(manifold, "{walls_touch}");
-        assert!((v - 587.5).abs() <= 1e-9 * 587.5, "{walls_touch}: {v}");
-    }
+    let (manifold, v) = shell(&crossing(), 0.15).unwrap();
+    assert!(manifold);
+    assert!((v - 587.5).abs() <= 1e-9 * 587.5, "{v}");
 }
 
 /// Control: the rib 0.6 in, past the moved wall, has loops that do not cross; the shell
 /// has the same closed form.
 #[test]
 fn rib_past_the_moved_wall_is_unchanged() {
-    let (manifold, v) = shell(&crossing(false), 0.6).unwrap();
+    let (manifold, v) = shell(&crossing(), 0.6).unwrap();
     assert!(manifold);
     assert!((v - 587.5).abs() <= 1e-9 * 587.5, "{v}");
 }
