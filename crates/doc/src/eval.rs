@@ -5712,6 +5712,19 @@ fn off_the_ends(mb: &ModelBody, edge: usize, p: Vec3) -> Vec3 {
     p
 }
 
+/// Whether blend `kind` runs along its edges' tangent chains. The kernel blends exactly the edges
+/// given: the feature adds each one's tangent chain when it asks for it. A radius law runs along
+/// one edge, so a variable or spline round takes its edge alone.
+fn blends_tangent_chain(kind: &FeatureKind) -> bool {
+    match kind {
+        FeatureKind::Fillet { tangent_chain, style, .. } => {
+            *tangent_chain && !matches!(style, crate::FilletStyle::Variable { .. } | crate::FilletStyle::Spline { .. })
+        }
+        FeatureKind::Chamfer { tangent_chain, .. } => *tangent_chain,
+        _ => false,
+    }
+}
+
 /// The edges a tapered fillet tapered (a point on each, with its taper).
 type Tapered = Vec<(Vec3, kernel::Taper)>;
 
@@ -8836,6 +8849,7 @@ fn replay(
             // The edges the feature blended in this evaluation (found by name), falling back to
             // its picked points.
             let found = st.blend_edges.get(&src.id).cloned().unwrap_or_else(|| crate::plain(edges));
+            let chain = blends_tangent_chain(&src.kind);
             for m in mats {
                 let moved_all: Vec<Vec3> = found.iter().map(|p| crate::apply_point(m, *p)).collect();
                 // The copies of a blend over several bodies blend each body's own edges.
@@ -8853,12 +8867,20 @@ fn replay(
                 for (ti, idx) in groups {
                     let moved: Vec<Vec3> = idx.iter().filter_map(|i| moved_all.get(*i).copied()).collect();
                     let Some(mb) = st.bodies.get(ti).cloned() else { continue };
+                    // Each copy runs along its edges' tangent chains as the source did. The moved
+                    // points alone can miss a piece: a pick where the two halves of a split edge
+                    // meet can take, at a copy, the half the source's chain added, not its own.
+                    let moved = if chain { kernel::tangent_chain(&mb.body, &moved)? } else { moved };
                     let nb = match &src.kind {
                         FeatureKind::Chamfer { distance2, angle, flip, .. } => chamfer_with(vals, &mb.body, &moved, r, distance2, angle, *flip)?,
                         // A copy is congruent to the original: the radius it was reduced to first.
                         FeatureKind::Fillet { fit, turn, .. } => match st.fitted.get(&src.id) {
                             Some(used) => {
-                                let used: Vec<f64> = idx.iter().map(|i| used.get(*i).copied().unwrap_or(r)).collect();
+                                let mut used: Vec<f64> = idx.iter().map(|i| used.get(*i).copied().unwrap_or(r)).collect();
+                                // A piece the chain added continues one of the picked edges: it
+                                // takes the smallest radius they were reduced to.
+                                let least = used.iter().copied().fold(r, f64::min);
+                                used.resize(moved.len(), least);
                                 kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?
                             }
                             None => fillet_fitted(&mb.body, &moved, r, *fit, turn.kernel())?.0,
@@ -10136,16 +10158,7 @@ fn eval_feature(
             }
             let (mut found, mut notes, mut fitted, mut tapered_all) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
             let mut reduced = false;
-            // The kernel blends exactly the edges given: the feature adds each one's tangent
-            // chain when it asks for it. A radius law runs along one edge, so a variable or
-            // spline round takes its edge alone.
-            let chain = match &f.kind {
-                FeatureKind::Fillet { tangent_chain, style, .. } => {
-                    *tangent_chain && !matches!(style, crate::FilletStyle::Variable { .. } | crate::FilletStyle::Spline { .. })
-                }
-                FeatureKind::Chamfer { tangent_chain, .. } => *tangent_chain,
-                _ => false,
-            };
+            let chain = blends_tangent_chain(&f.kind);
             let mut blended = Vec::new();
             for (ti, idx) in &groups {
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };

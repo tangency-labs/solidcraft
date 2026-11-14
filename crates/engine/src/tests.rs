@@ -5367,6 +5367,52 @@ fn a_pattern_of_a_reduced_fillet_rounds_each_copy_alike() {
 }
 
 #[test]
+fn a_circular_pattern_of_a_fillet_rounds_the_whole_of_each_copys_split_edge() {
+    // A tilted round groove cut into a tapered ten-sided node, its rims rounded, and the groove
+    // and the round patterned five times about Z. The groove's top rim is split in two at the
+    // revolve's seam, and the round was picked where the halves meet: the fillet runs along
+    // both (its tangent chain). The copies repeated only the edges found on the original, and
+    // at some copies the moved meeting point took the half the chain had already added, so the
+    // other half stayed sharp and the part lost its symmetry. Patterning the groove alone and
+    // rounding every copy's rims in one fillet gives the part the pattern must match.
+    let picks = [[1.6583, -12.388, 13.0], [-1.6583, -12.388, 13.0], [0.0, -8.682, 16.0], [0.0, -15.388, 9.294]];
+    let (n, step) = (5usize, 2.0 * PI / 5.0);
+    let node = |copy_round: bool| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Plan"}));
+        run(&mut s, "sketch.polygon.inscribed", json!({"center": [0, 0], "radius": 5.0 / 18f64.to_radians().sin(), "sides": 10, "angle": 0}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Plan", "distance": 10, "name": "Prism", "body_name": "Node"}));
+        run(&mut s, "solid.extrude", json!({"face": [0, 0, 10], "distance": 6, "taper": "-45 deg", "operation": "join", "name": "Top"}));
+        run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "GrooveSketch"}));
+        let groove = [[0.0, 28.92395], [-31.36774, -2.44379], [-33.48906, -0.32247], [-2.12132, 31.04527]];
+        run(&mut s, "sketch.line", json!({"closed": true, "points": groove}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"sketch": "GrooveSketch", "axis": "l1", "operation": "cut", "targets": ["Node"], "name": "Groove"}));
+        if copy_round {
+            run(&mut s, "solid.fillet", json!({"edges": picks, "radius": 1, "name": "GrooveRounds"}));
+            run(&mut s, "solid.pattern.circular", json!({"features": ["Groove", "GrooveRounds"], "axis": "Z", "count": n}));
+        } else {
+            run(&mut s, "solid.pattern.circular", json!({"features": ["Groove"], "axis": "Z", "count": n}));
+            let all: Vec<[f64; 3]> = (0..n)
+                .flat_map(|k| {
+                    let (sin, cos) = (k as f64 * step).sin_cos();
+                    picks.iter().map(move |p| [p[0] * cos - p[1] * sin, p[0] * sin + p[1] * cos, p[2]])
+                })
+                .collect();
+            run(&mut s, "solid.fillet", json!({"edges": all, "radius": 1, "name": "GrooveRounds"}));
+        }
+        let m = run(&mut s, "inspect.measure", json!({}));
+        let com = &m["bodies"][0]["center_of_mass"];
+        (m["total"]["volume_mm3"].as_f64().unwrap(), com[0].as_f64().unwrap(), com[1].as_f64().unwrap())
+    };
+    let (want, _, _) = node(false);
+    let (got, x, y) = node(true);
+    assert!(rel(got, want) < 1e-9, "{got} vs {want}");
+    assert!(x.hypot(y) < 1e-8, "the centre of mass is off the axis: [{x}, {y}]");
+}
+
+#[test]
 fn extrude_taper_help_explains_both_signs() {
     let mut s = Session::default();
     let help = run(&mut s, "engine.describe", json!({"command": "solid.extrude"}));
