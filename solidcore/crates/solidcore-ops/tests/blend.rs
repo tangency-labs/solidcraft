@@ -2122,3 +2122,86 @@ fn an_oversized_ledge_chain_keeps_its_refusal() {
     }
     assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
 }
+
+/// The stair twin with its riser notched beside the wall (the box [0, 0.95] x [0, 10] x
+/// [0.9, 10] taken away): E1 rounded at 1 first, then its concave chain at 1. E2's remainder
+/// (x >= 1) keeps its rail on the riser's front (z = 1 under the height 10), but E1's end arc
+/// at V rolls its rail (the circle of radius 2 about E1's axis on y = 0) above the notch's
+/// floor z = 0.9 for 0.38 < x < 0.95: it leaves the riser's front across the notch's edges,
+/// away from the cliff's rim at V. That concave overflow is not the Roll-over's, so the second
+/// pass refuses it and the call keeps the first call's refusal (too large, its rail leaving
+/// the face), the body as it was.
+#[test]
+fn a_ledge_chain_whose_arc_overflows_away_from_the_cliff_keeps_its_refusal() {
+    rig_fixes();
+    let notch = make_box([0.0, 0.0, 0.9], [0.95, 10.0, 9.1]).unwrap();
+    let b =
+        solidcore_ops::boolean::boolean(stair_twin(), notch, solidcore_ops::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+    let e1 = nearest_edge(&b, [0.0, -5.0, 0.0]);
+    blend(&b, Blend::Round, &[e1], &[1.0], &[], Corners::Filled).unwrap();
+    let before = b.volume(1e-12).unwrap();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let chain = [
+        nearest_edge(&b, [5.0, 0.0, 0.0]),
+        nearest_edge(&b, [1.0 - s, 0.0, -1.0 + s]),
+    ];
+    let got = blend(&b, Blend::Round, &chain, &[1.0], &[], Corners::Filled);
+    match got {
+        Err(Error::TooLarge {
+            size,
+            kind: FitKind::Radius,
+            why: Some(solidcore_ops::RoomReason::RailLeavesFace),
+            ..
+        }) => assert!(size > 0.0 && size < 1.0, "{size}"),
+        other => panic!("not the too-large refusal: {other:?}"),
+    }
+    assert_eq!(b.volume(1e-12).unwrap().to_bits(), before.to_bits());
+}
+
+/// The kernel's decision itself, in the Roll-over's second pass: the stair twin's chain
+/// overflows the riser's front only across the cliff's rim at V, so its concave overflow is
+/// the event's (the session builds); the notched twin's arc, though its edge ends at
+/// V, leaves the front across the notch's edges, away from the rim, so its overflow is refused
+/// as a `ConcaveOverflow`, as on main.
+#[test]
+fn only_an_overflow_across_the_cliffs_rim_at_v_is_the_roll_overs() {
+    use solidcore::blend::blend_corner::rollover::concave_chain_ends;
+    use solidcore::blend::fillet_executive::p3::NoRoomReason;
+    use solidcore::blend::fillet_executive::session::FilletSession;
+    rig_fixes();
+    let notched = {
+        let notch = make_box([0.0, 0.0, 0.9], [0.95, 10.0, 9.1]).unwrap();
+        solidcore_ops::boolean::boolean(stair_twin(), notch, solidcore_ops::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+    };
+    let mut reasons = Vec::new();
+    for b in [stair_twin(), notched] {
+        let e1 = nearest_edge(&b, [0.0, -5.0, 0.0]);
+        blend(&b, Blend::Round, &[e1], &[1.0], &[], Corners::Filled).unwrap();
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let picks = [
+            nearest_edge(&b, [5.0, 0.0, 0.0]),
+            nearest_edge(&b, [1.0 - s, 0.0, -1.0 + s]),
+        ];
+        let (mut k, mut brep) = kernel_copy(&b);
+        let chain: Vec<EdgeId> = picks.iter().map(|&i| brep.edge_list()[i]).collect();
+        let ends = concave_chain_ends(&k, &mut brep, &chain).unwrap();
+        assert_eq!(ends.len(), 1);
+        let mut session = FilletSession::new(&mut k, &mut brep).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &chain, 1.0, 1, 1, 1.0)
+            .unwrap();
+        session.set_roll_over_pass(ends);
+        let done = session.do_fillet(&mut k);
+        reasons.push((done.is_ok(), session.error_info().no_room_reason()));
+    }
+    assert_eq!(reasons[0], (true, None), "{reasons:?}");
+    assert_eq!(
+        reasons[1],
+        (false, Some(NoRoomReason::ConcaveOverflow)),
+        "{reasons:?}"
+    );
+}

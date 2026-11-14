@@ -261,9 +261,10 @@ impl Profile {
                     let toward = sub2(self.seam, centre);
                     let sign = if dot2(toward, perp) >= 0.0 { 1.0 } else { -1.0 };
                     let sin_a = (1.0 - cos_a * cos_a).max(0.0).sqrt() * sign;
+                    // the cosine is from the direction away from the axis, `-to_a`
                     let u = [
-                        to_a[0] * cos_a + perp[0] * sin_a,
-                        to_a[1] * cos_a + perp[1] * sin_a,
+                        -to_a[0] * cos_a + perp[0] * sin_a,
+                        -to_a[1] * cos_a + perp[1] * sin_a,
                     ];
                     add2(centre, u, radius)
                 }
@@ -590,6 +591,7 @@ fn face_pieces(
     tol: f64,
 ) -> Option<(Vec<Piece>, [f64; 2], f64)> {
     let (r1, big_r) = (frame.radii.r1, frame.radii.major());
+    // a plane's normal square to the axis, to `tol` (its cosine)
     let parallel = |d: Vec3| d.dot(frame.axis).abs() <= tol * d.length();
     match face.kind() {
         SurfaceKind::Plane(p) => {
@@ -656,7 +658,10 @@ fn face_pieces(
         }
         SurfaceKind::Cone(c) if c.is_cylinder() => {
             let rev = c.rev().position();
-            if !parallel(rev.z_axis()) {
+            // the cylinder's axis along the torus's, to `tol` (its sine)
+            let z = rev.z_axis();
+            let along = z.cross(frame.axis).length() <= tol * z.length();
+            if !along {
                 return None;
             }
             let radius = c.radius(0.0);
@@ -692,10 +697,12 @@ fn face_pieces(
             let perp = [-to_a[1], to_a[0]];
             let sin_a = (1.0 - cos_a * cos_a).max(0.0).sqrt();
             let mut pieces = Vec::new();
+            // `cos_a` is the angle's cosine from the direction away from the axis (`toward`):
+            // `|c + radius u|^2 = d^2 + radius^2 + 2 d radius (toward . u) = R^2`
             for side in [1.0, -1.0] {
                 let u = [
-                    to_a[0] * cos_a + perp[0] * sin_a * side,
-                    to_a[1] * cos_a + perp[1] * sin_a * side,
+                    toward[0] * cos_a + perp[0] * sin_a * side,
+                    toward[1] * cos_a + perp[1] * sin_a * side,
                 ];
                 let from = add2(centre, u, radius);
                 let ua = to_a;
@@ -909,6 +916,40 @@ mod tests {
         }
         let steep = torus_creases(&k, &torus, &tilted_wall(1e-7, 30.0), 1e-6, target).unwrap();
         assert!(steep.is_none());
+    }
+
+    /// A cylinder of radius 2 along the axis (y), its axis at x = -2, z = -1 (3 from the
+    /// round's axis: touching the round's circle from outside at (0, -1)), placed at y = 50:
+    /// its two arcs from the tangent point to the rim, on each side of the centre plane,
+    /// lie on the cylinder (to rounding) and within the target of the torus.
+    #[test]
+    fn a_cylinder_touching_the_round_has_certified_arc_creases() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::surface::cone::Cone;
+        let k = Kernel::default();
+        let torus = planar_torus(&k);
+        let frame = Axis2Placement::new(
+            Point3::new(-2.0, 50.0, -1.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+        );
+        let wall = Surface::from(Cone::create_canonical_cylinder(&k, &frame, 2.0).unwrap());
+        let target = 1e-8;
+        let curves = torus_creases(&k, &torus, &wall, 1e-9, target)
+            .unwrap()
+            .unwrap();
+        assert_eq!(curves.len(), 4);
+        for c in &curves {
+            let ivl = c.natural_interval();
+            for i in 0..=64 {
+                let p = c
+                    .evaluate_point(&k, ivl.evaluate(f64::from(i) / 64.0))
+                    .unwrap();
+                let (dx, dz) = (p.x + 2.0, p.z + 1.0);
+                assert!(((dx * dx + dz * dz).sqrt() - 2.0).abs() < 1e-12, "{p:?}");
+                assert!(off_torus(p) <= target, "{p:?} {}", off_torus(p));
+            }
+        }
     }
 
     /// A wall just clear of the round's circle, past the touching tolerance (x = -2 tol, so

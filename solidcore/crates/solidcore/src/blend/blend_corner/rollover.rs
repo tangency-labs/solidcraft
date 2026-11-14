@@ -18,6 +18,7 @@
 //! | [`concave_chain`] | the second pass's edges: B2's remainder and B1's end arc on E |
 //! | [`is_concave_chain`] | whether edges asked of one round are such a chain (the event's second pass asked as a feature of its own) |
 //! | [`concave_chain_ends`] | the second pass's V: where each end arc of B1 in the chain meets the cliff |
+//! | [`cliff_rim`] | the cliff's rim at V: the edges a second pass's concave overflow may leave across |
 //!
 //! The event runs in two passes of one blend (the caller's, `solidcore-ops`): B1 and the
 //! session's other rounds first, then B2's remainder with B1's end arc on E as one concave
@@ -347,6 +348,67 @@ fn meets_cliff(
         }
     }
     Ok(smooth && rim)
+}
+
+/// The cliff's rim at the second pass's vertex V (`arc` B1's end arc there): the edges at V,
+/// other than `arc`, that are sharp (their faces not tangential at V) and convex, and the edges
+/// each continues into G1 across its far vertex while they stay sharp and convex and share a
+/// face with it (the rim E3 run on across a seam's vertex). A concave overflow of the
+/// second pass is the Roll-over's only where its rails leave their faces across these
+/// edges. The walk takes each edge once, so it ends within the body's edge count.
+///
+/// # Errors
+/// Those of the topology walks, the convexity and the tangency tests.
+pub fn cliff_rim(k: &Kernel, b: &mut Brep, v: VertexId, arc: EdgeId) -> Result<Vec<EdgeId>> {
+    let tol_deg = k.tolerances.ang_tol_deg;
+    let mut rim: Vec<(EdgeId, VertexId)> = Vec::new();
+    for x in crate::topology::vertex::edges(b, v, None)? {
+        if x == arc || edge::is_closed(b, x)? {
+            continue;
+        }
+        if !tangential_at(k, b, x, v, tol_deg)? && !is_concave_edge(k, b, x)? {
+            rim.push((x, v));
+        }
+    }
+    let mut next = 0;
+    let bound = b.edge_list().len();
+    while let Some(&(at, from)) = rim.get(next) {
+        next += 1;
+        if rim.len() > bound {
+            break;
+        }
+        let far = if edge::start_vertex(b, at)? == Some(from) {
+            edge::end_vertex(b, at)?
+        } else {
+            edge::start_vertex(b, at)?
+        };
+        let Some(far) = far else {
+            continue;
+        };
+        let faces = edge::faces(b, at, None)?;
+        for y in crate::topology::vertex::edges(b, far, None)? {
+            if y == arc || rim.iter().any(|&(e, _)| e == y) || edge::is_closed(b, y)? {
+                continue;
+            }
+            let shares = edge::faces(b, y, None)?.iter().any(|f| faces.contains(f));
+            if !shares || tangential_at(k, b, y, far, tol_deg)? || is_concave_edge(k, b, y)? {
+                continue;
+            }
+            let g1 = crate::blend::fillet_corner::p1::test_g1_continuity(
+                k,
+                b,
+                Some(far),
+                Some(at),
+                Some(y),
+                tol_deg,
+            )?
+            .0;
+            if g1 {
+                rim.push((y, far));
+            }
+        }
+    }
+    Ok(rim.into_iter().map(|(e, _)| e).collect())
 }
 
 /// Whether `edges` (asked of one round) are the Roll-over's concave chain once B1 is rounded:

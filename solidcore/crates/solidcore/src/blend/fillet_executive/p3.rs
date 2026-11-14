@@ -2595,14 +2595,21 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
     fn geometry_overflow_edge(&self, solver: O) -> Result<Option<O>> {
         self.geometry_edge(solver).map(Some)
     }
-    /// Not upstream (#10876): whether `solver`'s edge ends at a vertex V of the blend
-    /// corner's Roll-over's second pass (where its concave chain meets the cliff), whose
-    /// concave overflow there is the event's. `false` by default (no second pass).
+    /// Not upstream (#10876): whether `solver`'s overflow is the blend corner's Roll-over's
+    /// (its second pass): its edge ends at a vertex V where the concave chain meets the
+    /// cliff, and every run of its rails off their faces leaves across an edge of the
+    /// cliff's rim at that V (`left_across`, from the judged rails fit; at least one).
+    /// `false` by default (no second pass).
     ///
     /// # Errors
-    /// Missing actual solver topology.
-    fn geometry_ends_at_roll_over(&self, solver: O) -> Result<bool> {
-        let _ = solver;
+    /// Missing actual solver topology; those of the rim's tests.
+    fn geometry_overflows_at_roll_over(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        left_across: &[Option<crate::topology::EdgeId>],
+    ) -> Result<bool> {
+        let _ = (k, solver, left_across);
         Ok(false)
     }
     /// The fork's mitred-pair test of the overflow-first stop (WR-634,
@@ -3047,7 +3054,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 overflowing.push(edge);
             }
             if access.geometry_blend_adds_material(k, solver)? {
-                if self.roll_over_pass && access.geometry_ends_at_roll_over(solver)? {
+                if self.roll_over_pass
+                    && access.geometry_overflows_at_roll_over(k, solver, &judged.left_across)?
+                {
                     rolled_overflow = true;
                 } else {
                     concave_overflow = true;

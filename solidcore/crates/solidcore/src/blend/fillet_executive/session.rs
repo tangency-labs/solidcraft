@@ -5502,8 +5502,13 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             EntityRef::Edge(edge),
         )))
     }
-    fn geometry_ends_at_roll_over(&self, solver: FilletObject) -> Result<bool> {
-        if self.roll_over_ends.is_empty() {
+    fn geometry_overflows_at_roll_over(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+        left_across: &[Option<EdgeId>],
+    ) -> Result<bool> {
+        if self.roll_over_ends.is_empty() || left_across.is_empty() {
             return Ok(false);
         }
         let FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge)) =
@@ -5515,10 +5520,24 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             crate::topology::edge::start_vertex(self.target, edge)?,
             crate::topology::edge::end_vertex(self.target, edge)?,
         ];
-        Ok(ends
+        let at: Vec<VertexId> = ends
             .iter()
             .flatten()
-            .any(|v| self.roll_over_ends.contains(v)))
+            .copied()
+            .filter(|v| self.roll_over_ends.contains(v))
+            .collect();
+        let mut rim = Vec::new();
+        for v in at {
+            rim.extend(crate::blend::blend_corner::rollover::cliff_rim(
+                k,
+                self.target,
+                v,
+                edge,
+            )?);
+        }
+        Ok(left_across
+            .iter()
+            .all(|side| side.is_some_and(|e| rim.contains(&e))))
     }
     fn geometry_mitred_corner_edges(
         &self,
