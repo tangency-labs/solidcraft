@@ -130,3 +130,105 @@ fn a_vertex_far_from_its_edges_refuses_its_region() {
         bodies.failures
     );
 }
+
+/// The side a record surface keeps against CADIR's: a sphere or torus whose (tube) radius is
+/// negative has CADIR's normal pointing inward, so the record (with the radius's magnitude,
+/// whose natural normal points out) is reversed against it; with a positive radius it is not.
+/// Both signs are checked, so a reversal applied to both could not pass.
+#[test]
+fn a_negative_radius_turns_the_surface_side_and_a_positive_one_does_not() {
+    use cadmpeg_ir::geometry::analytic::{SphereSurface, TorusSurface};
+    use solidcore_record::brep::Surface as BSurface;
+    let (c, z, x) = (
+        Point3::new(1.0, 2.0, 3.0),
+        Vector3::new(0.0, 0.0, 1.0),
+        Vector3::new(1.0, 0.0, 0.0),
+    );
+    for r in [5.0, -5.0] {
+        let g = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Sphere(
+            SphereSurface::try_new(c, z, x, r).unwrap(),
+        ));
+        let (s, reversed) = geometry::surface(&g).unwrap();
+        assert!(
+            matches!(s, BSurface::Sphere { radius, .. } if radius == 5.0),
+            "{s:?}"
+        );
+        assert_eq!(reversed, r < 0.0, "sphere radius {r}");
+        let g = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Torus(
+            TorusSurface::try_new(c, z, x, 20.0, r).unwrap(),
+        ));
+        let (s, reversed) = geometry::surface(&g).unwrap();
+        assert!(
+            matches!(s, BSurface::Torus { minor_radius, major_radius, .. } if minor_radius == 5.0 && major_radius == 20.0),
+            "{s:?}"
+        );
+        assert_eq!(reversed, r < 0.0, "torus tube radius {r}");
+    }
+}
+
+/// A NURBS surface CADIR marks `normal_reversed` is reversed against its record, whose natural
+/// normal is `Pu × Pv`; one not marked is not.
+#[test]
+fn a_nurbs_surface_marked_normal_reversed_turns_the_side() {
+    use cadmpeg_ir::geometry::nurbs::{NurbsPoleGrid, NurbsSurface, NurbsSurfaceAxis};
+    for flag in [false, true] {
+        let axis = || NurbsSurfaceAxis::new(1, vec![0.0, 0.0, 1.0, 1.0], false);
+        let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+        let poles = NurbsPoleGrid::Polynomial {
+            rows: vec![
+                vec![p(0.0, 0.0), p(0.0, 1.0)],
+                vec![p(1.0, 0.0), p(1.0, 1.0)],
+            ],
+        };
+        let g = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Nurbs(
+            NurbsSurface::new(axis(), axis(), poles, flag).unwrap(),
+        ));
+        let (_, reversed) = geometry::surface(&g).unwrap();
+        assert_eq!(reversed, flag);
+    }
+}
+
+/// A polyline whose parameters decrease along its samples is the same map from parameter to
+/// point: the point at each parameter is the sample given with it.
+#[test]
+fn a_polyline_with_decreasing_parameters_keeps_its_parameters() {
+    use cadmpeg_ir::geometry::sampled::{PolylineCurve, PolylineSamples, PolylineVertex};
+    use cadmpeg_ir::geometry::{CurveGeometry, SolvedCurveGeometry};
+    let at = |t: f64, x: f64| PolylineVertex {
+        parameter: t,
+        point: Point3::new(x, 0.0, 0.0),
+    };
+    let samples = PolylineSamples::Parameterized {
+        vertices: vec![at(2.0, 0.0), at(1.0, 4.0), at(0.0, 5.0)]
+            .try_into()
+            .unwrap(),
+    };
+    let g = CurveGeometry::Solved(SolvedCurveGeometry::Polyline(
+        PolylineCurve::new(samples, 0.0).unwrap(),
+    ));
+    let Some(solidcore_record::brep::Curve::Spline { knots, points }) =
+        geometry::curve(&g).unwrap()
+    else {
+        panic!("not a spline")
+    };
+    assert_eq!(knots, vec![0.0, 0.0, 1.0, 2.0, 2.0]);
+    assert_eq!(
+        points,
+        vec![[5.0, 0.0, 0.0], [4.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+    );
+}
+
+/// A placement that scales unevenly, by however little more than rounding, is refused; a
+/// rotation is taken.
+#[test]
+fn a_placement_scaling_unevenly_is_refused() {
+    let uneven = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0 + 5e-10, 0.0],
+    ];
+    assert!(geometry::Similarity::of(uneven).is_err());
+    let (c, s) = (0.6, 0.8);
+    let turned = [[c, -s, 0.0, 3.0], [s, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+    assert!(geometry::Similarity::of(turned).is_ok());
+}

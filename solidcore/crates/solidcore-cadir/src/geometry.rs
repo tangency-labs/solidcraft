@@ -35,8 +35,11 @@ pub(crate) type R<T> = Result<T, String>;
 /// Deepest chain of placed carriers followed (CADIR caps its own nesting too).
 const MAX_PLACEMENTS: usize = 16;
 /// How far a placement's columns may be from one length and from square to each other, relative
-/// to their length, for it to be taken as a rotation and a uniform scale.
-const SIMILARITY: f64 = 1e-9;
+/// to their length, for it to be taken as a rotation and a uniform scale: the rounding of an
+/// orthonormal matrix written to double precision (a few units in the last place of each of its
+/// dot products), not a modelling tolerance, so a placement that really scales unevenly by as
+/// little as 1e-12 is refused.
+const SIMILARITY: f64 = 64.0 * f64::EPSILON;
 
 fn unsupported(what: impl std::fmt::Display) -> String {
     format!("not supported yet: {what}")
@@ -305,15 +308,24 @@ fn solved_curve(g: &SolvedCurveGeometry, depth: usize) -> R<Option<BCurve>> {
             )?
         }
         SolvedCurveGeometry::Polyline(p) => {
-            let points: Vec<[f64; 3]> = p.points().map(|q| point(q.get())).collect();
-            let params: Vec<f64> = match p.parameters() {
+            let mut points: Vec<[f64; 3]> = p.points().map(|q| point(q.get())).collect();
+            let mut params: Vec<f64> = match p.parameters() {
                 Some(t) => t.map(|t| t.get()).collect(),
                 None => (0..points.len()).map(|i| i as f64).collect(),
             };
+            // CADIR admits parameters that decrease along the samples: the same map from
+            // parameter to point, read with both lists the other way round.
+            if params.windows(2).all(|w| matches!(w, [x, y] if x > y)) {
+                points.reverse();
+                params.reverse();
+            }
             if params.len() != points.len()
                 || params.windows(2).any(|w| !matches!(w, [x, y] if x < y))
             {
-                return Err("a polyline whose parameters do not increase with its points".into());
+                return Err(
+                    "a polyline whose parameters do not change monotonically with its points"
+                        .into(),
+                );
             }
             let (Some(first), Some(last)) = (params.first(), params.last()) else {
                 return Err("an empty polyline".into());

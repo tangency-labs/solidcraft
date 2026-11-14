@@ -49,15 +49,20 @@ pub struct Read {
 /// A body region that could not be read, and why.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Failure {
+    /// The body's id in the model.
     pub body: String,
+    /// Which of the body's regions this is, in its order (from 0).
     pub region: usize,
+    /// Why the region was not read.
     pub message: String,
 }
 
 /// Every body region of a model: those read and those refused.
 #[derive(Clone, Debug, Default)]
 pub struct Bodies {
+    /// The regions read into records, in the model's order.
     pub read: Vec<Read>,
+    /// The regions that could not be read, with why.
     pub failures: Vec<Failure>,
 }
 
@@ -173,6 +178,7 @@ impl<'a> Model<'a> {
             edges: HashMap::new(),
         };
         let mut shells = Vec::new();
+        let mut left_out = 0usize;
         for s in &region.shells {
             if shells.len() >= solidcore_record::brep::MAX_SHELLS {
                 return Err(format!(
@@ -184,6 +190,8 @@ impl<'a> Model<'a> {
                 .shells
                 .get(s.as_str())
                 .ok_or_else(|| format!("missing shell {s}"))?;
+            // A shell's wire edges and free vertices have no place in a record of faces yet.
+            left_out += shell.wire_edges().len() + shell.free_vertices().len();
             let mut faces = Vec::new();
             for f in shell.faces() {
                 if faces.len() >= MAX_FACES {
@@ -196,7 +204,13 @@ impl<'a> Model<'a> {
             }
             shells.push(faces);
         }
-        b.asm.finish(0, name, shells, kind)
+        let mut solid = b.asm.finish(0, name, shells, kind)?;
+        if left_out > 0 {
+            solid.notes.push(format!(
+                "{left_out} wire edges and free vertices of its shells left out"
+            ));
+        }
+        Ok(solid)
     }
 }
 
