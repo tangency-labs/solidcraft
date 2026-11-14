@@ -5494,6 +5494,71 @@ fn a_tool_card_shows_its_summary_and_keeps_the_json_behind_details() {
     assert!(h.widget("Result").is_some() && h.widget(output).is_some(), "and what it returned");
 }
 
+#[test]
+fn tool_details_copy_complete_arguments_and_results() {
+    use solidcraft_ui_registry::handle_at;
+    for status in [ToolStatus::Completed, ToolStatus::Failed] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1280, "height": 1100}));
+        h.call("ui.agent_chat", json!({"features": true, "open": true, "picker": false, "width": 400}));
+        h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"})).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": "Cube"}]})).unwrap();
+        let input = json!({"notes": format!("{}ARGUMENT_END", "日本語 dimensions\n".repeat(700))});
+        let pretty = serde_json::to_string_pretty(&input).unwrap();
+        let output = format!("{}RESULT_END", "Measured: 20 mm³\n".repeat(700));
+        h.app.agent_chat.items = vec![Item::Tool {
+            id: "copy-details".into(),
+            title: "inspect_design".into(),
+            kind: String::new(),
+            status: Some(status),
+            input: Some(input),
+            output: Some(output.clone()),
+        }];
+        h.frames(4);
+        assert!(handle_at("agent_chat:tool:0:copy:arguments").is_none(), "collapsed details have no Copy action");
+        let card = handle_at("agent_chat:tool:0").expect("tool card");
+        click_at(&mut h, card, egui::PointerButton::Primary);
+        h.frames(4);
+        let undo = h.app.session.undo.len();
+        for (field, expected) in [("arguments", &pretty), ("result", &output)] {
+            let at = handle_at(&format!("agent_chat:tool:0:copy:{field}")).expect("each tool field has a Copy action");
+            assert!(solidcraft_ui_registry::rect_of("agent_chat:conversation").unwrap().contains(at), "Copy remains visible");
+            click_at(&mut h, at, egui::PointerButton::Primary);
+            assert_eq!(copied_text(&h).as_ref(), Some(expected), "copy the full field, including its undisplayed Unicode tail");
+        }
+        assert!(h.app.copied_bodies.is_empty(), "copying tool text does not copy the selected CAD body");
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
+}
+
+#[test]
+fn tool_details_copy_only_present_fields_including_an_empty_result() {
+    use solidcraft_ui_registry::handle_at;
+    for (input, output, field, expected) in [(Some(json!(null)), None, "arguments", "null"), (None, Some(String::new()), "result", "")] {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.agent_chat", json!({"features": true, "open": true}));
+        h.app.agent_chat.items = vec![Item::Tool {
+            id: "optional-details".into(),
+            title: "inspect_design".into(),
+            kind: String::new(),
+            status: Some(ToolStatus::InProgress),
+            input,
+            output,
+        }];
+        h.frames(4);
+        let card = handle_at("agent_chat:tool:0").expect("tool card");
+        click_at(&mut h, card, egui::PointerButton::Primary);
+        h.frames(4);
+        let absent = if field == "arguments" { "result" } else { "arguments" };
+        assert!(handle_at(&format!("agent_chat:tool:0:copy:{absent}")).is_none(), "an absent field has no Copy action");
+        let at = handle_at(&format!("agent_chat:tool:0:copy:{field}")).expect("a present field has a Copy action");
+        click_at(&mut h, at, egui::PointerButton::Primary);
+        assert_eq!(copied_text(&h).as_deref(), Some(expected));
+    }
+}
+
 /// The card says "Screenshot"; the full temp path is only under Details.
 #[test]
 fn a_screenshot_card_hides_the_path_until_details() {
