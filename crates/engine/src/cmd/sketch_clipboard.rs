@@ -1,9 +1,12 @@
 //! Copy and paste of sketch geometry (#1480). `sketch.copy` keeps the chosen curves and points
 //! with the constraints and dimensions that lie wholly among them (a dimension keeps its
-//! expression); `sketch.paste` adds an independent copy to the sketch being edited, at a point or
-//! offset from the original, as one undo step, and selects it. Constraints that reach outside
-//! the copied geometry (to the origin, to projected edges, to other curves) are left behind, as
-//! are fixes, so the pasted geometry can be moved straight away.
+//! expression), plus `Equal` constraints referencing curves left behind in the same sketch;
+//! `sketch.paste` adds an independent copy to the sketch being edited, at a point or offset from
+//! the original, as one undo step, and selects it. Positional constraints that reach outside the
+//! copied geometry (to the origin, to projected edges, to other curves) are left behind, as are
+//! fixes, so the pasted geometry can be moved straight away. External `Equal` constraints are
+//! dropped when pasting into another sketch or design, or if the referenced curve no longer
+//! exists.
 
 use std::collections::BTreeMap;
 
@@ -32,7 +35,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&COPY_CONTRACT)
         .output(output_schema_for::<Copied>)
-        .params("entities?: [curve or point ids] (default: the selected sketch geometry); the constraints and dimensions among them come along"),
+        .params("entities?: [curve or point ids] (default: the selected sketch geometry); the constraints and dimensions among them (and `Equal` constraints to other curves in the same sketch) come along"),
     CommandSpec::new("sketch.cut", "Cut Sketch Entities", crate::checked!("sketch.cut", cut)).icon("cut")
         .enabled(in_sketch)
         .contract(&CUT_CONTRACT)
@@ -75,14 +78,32 @@ pub struct ClipConstraint {
     pub text: Option<Vec2>,
 }
 
+/// An `Equal` constraint between a clipboard curve and an uncopied curve left behind in
+/// [`SketchClip::source_sketch`]. Re-attached on paste back into that sketch while the external
+/// curve still exists by id; dropped on paste into another sketch or design.
+#[derive(Clone, Debug)]
+pub struct ClipExternalEqual {
+    /// Index into [`SketchClip::curves`] for the copied curve.
+    pub copied: usize,
+    /// Id of the uncopied curve in [`SketchClip::source_sketch`].
+    pub external_id: String,
+    /// `true` when the external curve was `a` in `Equal { a, b }`, `false` when it was `b`.
+    pub external_first: bool,
+}
+
 /// Sketch geometry copied with `sketch.copy`, in the sketch coordinates it was copied from.
 #[derive(Clone, Debug, Default)]
 pub struct SketchClip {
-    /// The sketch it was copied from.
+    /// The sketch it was copied from (`u64::MAX` after `sketch.cut` or for another design, so a
+    /// paste does not offset from the original).
     pub sketch: u64,
+    /// Original sketch feature id for re-attaching [`Self::external_equals`] (`None` for
+    /// whole-sketch copies or copies from another design).
+    pub source_sketch: Option<u64>,
     pub points: Vec<Vec2>,
     pub curves: Vec<ClipCurve>,
     pub constraints: Vec<ClipConstraint>,
+    pub external_equals: Vec<ClipExternalEqual>,
     /// Text sources (their outlines are made again on paste). A path, when kept, is the index of
     /// a clipboard curve.
     pub texts: Vec<(LinkSource, Option<usize>)>,
@@ -111,6 +132,8 @@ impl SketchClip {
     pub fn for_another_design(&self) -> SketchClip {
         let mut clip = self.clone();
         clip.sketch = u64::MAX;
+        clip.source_sketch = None;
+        clip.external_equals.clear();
         clip.pastes = 0;
         for c in &mut clip.constraints {
             let Some((expr, unit)) = c.param.as_mut() else { continue };
@@ -166,6 +189,16 @@ fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, out)
 }
 
+fn external_equal(cmap: &BTreeMap<usize, usize>, sk: &Sketch, a: usize, b: usize) -> Option<ClipExternalEqual> {
+    let (copied, ext_idx, external_first) = match (cmap.get(&a).copied(), cmap.get(&b).copied()) {
+        (Some(copied), None) => (copied, b, false),
+        (None, Some(copied)) => (copied, a, true),
+        _ => return None,
+    };
+    let external_id = sk.curves.get(ext_idx)?.id.clone();
+    Some(ClipExternalEqual { copied, external_id, external_first })
+}
+
 /// The clipboard copy of the entities `ids` of sketch `id` (`sk`, in `doc`), and what it holds.
 /// `whole` is a copy of the whole sketch for [`replace`]: its fixes come along, its constraints to
 /// the origin stay tied to the origin of the sketch it goes to, and an empty sketch is a copy too.
@@ -190,7 +223,7 @@ fn clip_of(doc: &Document, sk: &Sketch, id: u64, ids: &[String], whole: bool, cm
             return Err(bad(cmd, format!("unknown sketch entity `{e}`")));
         }
     }
-    let mut clip = SketchClip { sketch: id, ..Default::default() };
+    let mut clip = SketchClip { sketch: id, source_sketch: (!whole).then_some(id), ..Default::default() };
     // Points: those of the copied curves, then the lone ones, each once.
     let mut pmap: BTreeMap<usize, usize> = BTreeMap::new();
     if whole && let Some(o) = sk.points.iter().position(|q| q.id == ORIGIN) {
@@ -230,6 +263,12 @@ fn clip_of(doc: &Document, sk: &Sketch, id: u64, ids: &[String], whole: bool, cm
         }
         let mut kind = c.kind.clone();
         if !kind.remap(&|q| pmap.get(&q).copied(), &|k| cmap.get(&k).copied()) {
+            if !whole
+                && let ConstraintKind::Equal { a, b } = c.kind
+                && let Some(eq) = external_equal(&cmap, sk, a, b)
+            {
+                clip.external_equals.push(eq);
+            }
             continue;
         }
         let param = c.param.as_ref().map(|name| match doc.param(name) {
@@ -274,7 +313,7 @@ fn clip_of(doc: &Document, sk: &Sketch, id: u64, ids: &[String], whole: bool, cm
         curves: clip.curves.len() + texts.iter().map(|t| sk.link_curves(t).len()).sum::<usize>(),
         points: clip.lone.len(),
         texts: texts.len(),
-        constraints: clip.constraints.len(),
+        constraints: clip.constraints.len() + clip.external_equals.len(),
         center: [clip.center.x, clip.center.y],
         param_warnings: Vec::new(),
     };
@@ -340,7 +379,8 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut p = p.clone();
     p["sketch"] = json!(target);
-    let ((curves, lone, constraints), info) = edit(s, &p, cmd, false, |sk, doc| paste_clip(sk, doc, &clip, t))?;
+    let same_sketch = clip.source_sketch == Some(target);
+    let ((curves, lone, constraints), info) = edit(s, &p, cmd, false, |sk, doc| paste_clip(sk, doc, &clip, t, same_sketch))?;
     if !positioned
         && target == clip.sketch
         && let Some(c) = s.sketch_clipboard.as_mut()
@@ -439,7 +479,7 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         *sk = fresh;
-        paste_clip(sk, doc, &clip, Vec2::ZERO)
+        paste_clip(sk, doc, &clip, Vec2::ZERO, false)
     })?;
     if s.active_sketch == Some(target) {
         s.selection.clear();
@@ -454,8 +494,10 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
 /// The ids of what a paste added: curves (those of texts included), lone points, constraints.
 type PastedIds = (Vec<String>, Vec<String>, Vec<String>);
 
-/// Add a copy of `clip`, moved by `t`, to `sk`.
-fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2) -> Result<PastedIds> {
+/// Add a copy of `clip`, moved by `t`, to `sk`. When `same_sketch` is `true`, `Equal`
+/// constraints referencing curves left behind in the source sketch are re-attached where those
+/// curves still exist by id.
+fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2, same_sketch: bool) -> Result<PastedIds> {
     if sk.curves.len().saturating_add(clip.curves.len()) > solidcraft_sketch::limits::max_curves() {
         return Err(solidcraft_sketch::SketchError::TooLarge.into());
     }
@@ -494,6 +536,14 @@ fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2) -
             nc.text = c.text;
         }
         cons.push(id);
+    }
+    if same_sketch {
+        for eq in &clip.external_equals {
+            let Some(&copied_idx) = made.get(eq.copied) else { continue };
+            let Some(ext_idx) = sk.curve_index(&eq.external_id) else { continue };
+            let (a, b) = if eq.external_first { (ext_idx, copied_idx) } else { (copied_idx, ext_idx) };
+            cons.push(sk.add_constraint(ConstraintKind::Equal { a, b }, None)?);
+        }
     }
     let mut curve_ids: Vec<String> = made.iter().filter_map(|i| sk.curves.get(*i).map(|c| c.id.clone())).collect();
     for (src, path) in &clip.texts {
