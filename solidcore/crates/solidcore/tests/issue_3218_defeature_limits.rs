@@ -143,29 +143,38 @@ fn an_extension_by_nothing_is_refused_as_the_extension_s() {
     assert_eq!(l, DefeatureFailure::ExtensionRefused { distance: 0.0 });
 }
 
-/// `fillet1019` defeatured by the features of `faces` (each a list of face indices, added
-/// in turn; a list that makes no feature is skipped, as the goldens' runner does): no
-/// feature kept. Returns the body.
-fn defeatured(k: &mut Kernel, faces: &[&[usize]]) -> Option<Brep> {
+/// `fillet1019` defeatured as the goldens' `blend.feature_executive` rows run it (the base
+/// rebuilt by extending its surfaces, the feature from the other B-rep), one feature per
+/// list of face indices in `faces`, added in turn: `made` says which make a feature. No
+/// feature kept. Returns the base and the feature B-reps.
+fn defeatured(
+    k: &mut Kernel,
+    faces: &[&[usize]],
+    made: &[bool],
+) -> Option<(Brep, Vec<Option<Brep>>)> {
     let mut b = read(k, "Fillet/fillet1019.smb")?;
     let all = bp1::faces(&b, None).unwrap();
-    {
+    let features = {
         let mut ex = FeatureExecutive::new(k, &mut b).unwrap();
+        let mut got = Vec::new();
         for set in faces {
             let fs: Vec<_> = set.iter().map(|&i| all[i]).collect();
-            let _ = ex
+            let f = ex
                 .add_feature(
                     k,
                     &fs,
                     RebuildBrepType::ExtendSurface,
-                    RebuildBrepType::ExtendSurface,
+                    RebuildBrepType::FromOtherBrep,
                 )
                 .unwrap();
+            got.push(f.is_some());
         }
+        assert_eq!(got, made, "{faces:?}");
         let kept = ex.do_defeature(k).unwrap();
         assert!(kept.is_empty(), "{faces:?}: {kept:?}");
-    }
-    Some(b)
+        ex.into_feature_breps()
+    };
+    Some((b, features))
 }
 
 /// #3218 first asked that `fillet1019`'s bottom fillet (face 3), which ends on the corner
@@ -174,39 +183,46 @@ fn defeatured(k: &mut Kernel, faces: &[&[usize]]) -> Option<Brep> {
 /// so nothing bounded it. That reading came from #15247's misclassification: the boolean
 /// took a point outside the round's extension's hole for outside that face, which left the
 /// patch open. Classified correctly, the patch closes and the fillet comes off, so this
-/// test now proves the body it builds is the right one ([`certify`]): the frustum with the
-/// top fillet and the corner round, the round carried down to the bottom by its own
-/// cylinder.
+/// test now proves the bodies it builds are the right ones, with the inputs of the goldens'
+/// `single_face_fillet1019_3` row: the base ([`certify`]: the frustum with the top fillet and
+/// the corner round, the round carried down to the bottom by its own cylinder) and the
+/// feature B-rep ([`certify_feature`]: the fillet's gap).
 #[test]
 fn a_fillet_ending_on_a_tangent_fillet_comes_off_to_the_rolling_ball_body() {
     let mut k = Kernel::default();
-    let Some(mut b) = defeatured(&mut k, &[&[3]]) else {
+    let Some((mut b, features)) = defeatured(&mut k, &[&[3]], &[true]) else {
         return;
     };
     certify(&mut k, &mut b, Removed::Bottom);
+    certify_feature(&mut k, features, Removed::Bottom);
 }
 
 /// The top fillet (face 8), which ends on the corner round at the top, comes off the same
-/// way: the frustum with the bottom fillet and the corner round ([`certify`]).
+/// way (the goldens' `single_face_fillet1019_8`): the frustum with the bottom fillet and the
+/// corner round ([`certify`]), and the fillet's gap as the feature B-rep
+/// ([`certify_feature`]).
 #[test]
 fn a_top_fillet_ending_on_a_tangent_fillet_comes_off_to_the_rolling_ball_body() {
     let mut k = Kernel::default();
-    let Some(mut b) = defeatured(&mut k, &[&[8]]) else {
+    let Some((mut b, features)) = defeatured(&mut k, &[&[8]], &[true]) else {
         return;
     };
     certify(&mut k, &mut b, Removed::Top);
+    certify_feature(&mut k, features, Removed::Top);
 }
 
 /// One feature per fillet face (the goldens' `fillet_each_fillet1019`): only the bottom
 /// fillet makes a feature (the round and the top fillet, which touch it, make none), so the
-/// body is the bottom fillet's ([`certify`]).
+/// bodies are the bottom fillet's ([`certify`], [`certify_feature`]).
 #[test]
 fn a_feature_per_fillet_of_fillet1019_takes_off_the_bottom_fillet() {
     let mut k = Kernel::default();
-    let Some(mut b) = defeatured(&mut k, &[&[3], &[6], &[8]]) else {
+    let Some((mut b, features)) = defeatured(&mut k, &[&[3], &[6], &[8]], &[true, false, false])
+    else {
         return;
     };
     certify(&mut k, &mut b, Removed::Bottom);
+    certify_feature(&mut k, features, Removed::Bottom);
 }
 
 #[test]
@@ -605,6 +621,8 @@ struct Expected {
     base: I,
     without_bottom: I,
     without_top: I,
+    gap_bottom: I,
+    gap_top: I,
 }
 
 fn expected(m: &Model, n: usize) -> Expected {
@@ -623,6 +641,8 @@ fn expected(m: &Model, n: usize) -> Expected {
         base: v_f - v3 - v6 - v8 + v36 + v68,
         without_bottom: v_f - v6 - v8 + v68,
         without_top: v_f - v3 - v6 + v36,
+        gap_bottom: v3 - v36,
+        gap_top: v8 - v68,
     }
 }
 
@@ -813,55 +833,42 @@ enum Removed {
     Top,
 }
 
-/// The proof that `b` is `fillet1019` with the `removed` round taken off.
-///
-/// 1. The model is `fillet1019`: every face of the file lies on one of the model's surfaces
-///    ([`model_supports`]: the frustum's planes, rolling-ball cylinders of radius 5.08 tangent
-///    to their two planes) within `delta` (an interval bound, under 1e-9), and the file's
-///    certified volume enclosure holds the model's ([`expected`]: the frustum less the three
-///    rounds' gaps, their overlaps added back, each a one-dimensional integral enclosed
-///    with outward rounding).
-/// 2. `b` is sound (manifold, its Level 2 check only the curve warnings the file has too) and
-///    every face of it lies on a model surface within 1e-9, none on the removed round's: the
-///    walls and the bottom (top) extended, the corner round carried on by its own cylinder.
-/// 3. `b`'s certified volume enclosure holds the model's volume without the removed round's
-///    gap (that gap less its overlap with the corner round's), widened by the surface area
-///    bound times `delta`: the two volumes differ by at most the enclosure's width (0.2).
-fn certify(k: &mut Kernel, b: &mut Brep, removed: Removed) {
+/// The surfaces bound (the faces' bound, [`bound`]) holds for points within `R0` = 50 of the
+/// origin: every face's box lies within 45 of it.
+fn assert_within_r0(k: &Kernel, b: &Brep) {
+    for f in bp1::faces(b, None).unwrap() {
+        let bx = solidcore::query::face::p1::calculate_bounding_box(k, b, f, false).unwrap();
+        for i in 0..3 {
+            assert!(
+                bx.min_at(i).abs() <= 45.0 && bx.max_at(i).abs() <= 45.0,
+                "{bx:?}"
+            );
+        }
+        let corner = (0..3)
+            .map(|i| bx.min_at(i).abs().max(bx.max_at(i).abs()).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!(corner <= 45.0, "{bx:?}");
+    }
+}
+
+/// `b` is sound (manifold, its Level 2 errors no more of each kind than the file's; the rest
+/// are warnings), within `R0`, and its faces lie on the model's surfaces within 1e-9, named
+/// exactly as `names` (name, count; the copied patch faces beside the faces they extend
+/// count apart). Returns the faces' largest bound.
+fn sound_on_model(
+    k: &mut Kernel,
+    b: &mut Brep,
+    named: &[(&'static str, Sup)],
+    names: &[(&str, usize)],
+    what: &str,
+) -> f64 {
     const ON: f64 = 1e-9;
-    const WIDTH: f64 = 0.2;
-    // a bound on the area of every surface of these bodies (the frustum's is about 9700 mm^2)
-    const AREA: f64 = 2e4;
-    let m = Model::new(25.4, 25.4, 23.177787946441534, 5.08);
-    let named = model_supports(&m);
-    let e = expected(&m, 100_000);
-
-    // 1. the model is the file
-    let mut base = read(k, "Fillet/fillet1019.smb").unwrap();
-    let base_match = match_supports(k, &base, &named);
-    let delta = base_match.iter().map(|p| p.1).fold(0.0, f64::max);
-    assert!(delta <= ON, "the file is off the model: {base_match:?}");
-    let mut names: Vec<_> = base_match.iter().map(|p| p.0).collect();
-    names.sort_unstable();
-    names.dedup();
-    assert_eq!(names.len(), 9, "{base_match:?}");
-    let grow = |x: I| I::new(down(x.lo - AREA * delta), up(x.hi + AREA * delta));
-    let kb = enclose_volume(k, &mut base, WIDTH).unwrap();
-    let kb = I::new(kb.lo, kb.hi);
-    assert!(kb.width() <= WIDTH, "{kb:?}");
-    assert!(
-        kb.contains(grow(e.base)),
-        "base: model {:?}, file {kb:?}",
-        e.base
-    );
-
-    // 2. sound, and on the model's surfaces less the removed round
     let mut fresh = read(k, "Fillet/fillet1019.smb").unwrap();
-    let base_lines = validation::soundness(k, &mut fresh).unwrap().check.lines();
+    let file_lines = validation::soundness(k, &mut fresh).unwrap().check.lines();
     let snd = validation::soundness(k, b).unwrap();
-    assert!(snd.manifold);
-    // its check: warnings, and no more of each error than the file has (an error's kind is
-    // its text before the measured values)
+    assert!(snd.manifold, "{what}");
+    // an error's kind is its text before the measured values
     let kind = |l: &String| l.split(" (offset").next().unwrap_or(l).to_string();
     let errors = |lines: &[String]| {
         let mut v: Vec<String> = lines
@@ -872,31 +879,161 @@ fn certify(k: &mut Kernel, b: &mut Brep, removed: Removed) {
         v.sort();
         v
     };
-    let (built_errors, file_errors) = (errors(&snd.check.lines()), errors(&base_lines));
-    for e in &built_errors {
+    let (built, file) = (errors(&snd.check.lines()), errors(&file_lines));
+    for e in &built {
         let n = |v: &[String]| v.iter().filter(|x| *x == e).count();
-        assert!(n(&built_errors) <= n(&file_errors), "{removed:?}: {e}");
+        assert!(n(&built) <= n(&file), "{what}: {e}");
     }
-    let (gone, want) = match removed {
-        Removed::Bottom => ("bottom round", e.without_bottom),
-        Removed::Top => ("top round", e.without_top),
-    };
-    let faces = match_supports(k, b, &named);
+    assert_within_r0(k, b);
+    let faces = match_supports(k, b, named);
+    let mut got: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
     for (name, d) in &faces {
-        assert!(*d <= ON, "{faces:?}");
-        assert_ne!(*name, gone, "{faces:?}");
+        assert!(*d <= ON, "{what}: {faces:?}");
+        *got.entry(name).or_default() += 1;
     }
+    let want: std::collections::BTreeMap<&str, usize> = names.iter().copied().collect();
+    assert_eq!(got, want, "{what}: {faces:?}");
+    faces.iter().map(|p| p.1).fold(0.0, f64::max)
+}
+
+/// `x` widened by the volume a surface moved by at most `delta` can sweep over `AREA`, a bound
+/// on these bodies' surface area (the frustum's is about 9700 mm^2).
+fn grow(x: I, delta: f64) -> I {
+    const AREA: f64 = 2e4;
+    I::new(down(x.lo - AREA * delta), up(x.hi + AREA * delta))
+}
+
+/// `b`'s certified volume enclosure, asked to 0.2: it must hold `model` grown by `delta`.
+fn holds_volume(k: &Kernel, b: &mut Brep, model: I, delta: f64, what: &str) -> I {
+    const WIDTH: f64 = 0.2;
+    let v = enclose_volume(k, b, WIDTH).unwrap();
+    let v = I::new(v.lo, v.hi);
+    assert!(v.width() <= WIDTH, "{what}: {v:?}");
+    assert!(
+        v.contains(grow(model, delta)),
+        "{what}: model {model:?}, built {v:?}"
+    );
+    v
+}
+
+/// The proof that `b` is `fillet1019` with the `removed` round taken off.
+///
+/// 1. The model is `fillet1019`: every face of the file lies on one of the model's surfaces
+///    ([`model_supports`]: the frustum's planes, rolling-ball cylinders of radius 5.08 tangent
+///    to their two planes) within `delta` (an interval bound, under 1e-9), each of the nine
+///    surfaces carrying a face, and the file's certified volume enclosure holds the model's
+///    ([`expected`]: the frustum less the three rounds' gaps, their overlaps added back, each
+///    a one-dimensional integral enclosed with outward rounding).
+/// 2. `b` is sound and lies on the model's surfaces ([`sound_on_model`]), its faces named
+///    exactly: the removed round's cylinder carries none, the walls and the bottom (top) are
+///    extended and the corner round is carried on by its own cylinder.
+/// 3. `b`'s certified volume enclosure holds the model's volume without the removed round's
+///    gap (that gap less its overlap with the corner round's), widened by the area bound
+///    times `b`'s own surface bound: the two volumes differ by at most the enclosure's width
+///    (0.2).
+fn certify(k: &mut Kernel, b: &mut Brep, removed: Removed) {
+    let m = Model::new(25.4, 25.4, 23.177787946441534, 5.08);
+    let named = model_supports(&m);
+    let e = expected(&m, 100_000);
+
+    // 1. the model is the file
+    let mut base = read(k, "Fillet/fillet1019.smb").unwrap();
+    let file_names = [
+        ("bottom", 1),
+        ("top", 1),
+        ("wall x-", 1),
+        ("wall x+", 1),
+        ("wall y-", 1),
+        ("wall y+", 1),
+        ("bottom round", 1),
+        ("top round", 1),
+        ("corner round", 1),
+    ];
+    let delta = sound_on_model(
+        k,
+        &mut base.clone_standing_for_self().unwrap(),
+        &named,
+        &file_names,
+        "file",
+    );
+    let kb = holds_volume(k, &mut base, e.base, delta, "file");
+
+    // 2. sound, and on the model's surfaces less the removed round
+    let (names, want): (&[(&str, usize)], I) = match removed {
+        Removed::Bottom => (
+            &[
+                ("bottom", 3),
+                ("top", 1),
+                ("wall x-", 2),
+                ("wall x+", 1),
+                ("wall y-", 2),
+                ("wall y+", 2),
+                ("top round", 1),
+                ("corner round", 2),
+            ],
+            e.without_bottom,
+        ),
+        Removed::Top => (
+            &[
+                ("bottom", 1),
+                ("top", 2),
+                ("wall x-", 2),
+                ("wall x+", 1),
+                ("wall y-", 1),
+                ("wall y+", 2),
+                ("bottom round", 1),
+                ("corner round", 2),
+            ],
+            e.without_top,
+        ),
+    };
+    let what = format!("{removed:?} base");
+    let built_delta = sound_on_model(k, b, &named, names, &what);
 
     // 3. the volume
-    let kv = enclose_volume(k, b, WIDTH).unwrap();
-    let kv = I::new(kv.lo, kv.hi);
-    assert!(kv.width() <= WIDTH, "{kv:?}");
-    assert!(
-        kv.contains(grow(want)),
-        "{removed:?}: model {want:?}, built {kv:?}"
-    );
+    let kv = holds_volume(k, b, want, built_delta, &what);
     eprintln!(
-        "{removed:?}: delta {delta:e}; base model {:?} file {kb:?}; model {want:?} built {kv:?}; faces {faces:?}",
+        "{what}: file delta {delta:e}, model {:?} file {kb:?}; delta {built_delta:e}, model {want:?} built {kv:?}",
         e.base
     );
+}
+
+/// The feature B-rep of the one feature made (the goldens' `feature0`): the removed round's
+/// gap as a solid, proved as [`certify`] proves the base. Sound and on the model's surfaces
+/// (the round, the planes along it extended, the corner round's extension, the y walls
+/// closing its ends), and its certified volume enclosure holds the gap's model volume (the
+/// gap prism less its overlap with the corner round's).
+fn certify_feature(k: &mut Kernel, features: Vec<Option<Brep>>, removed: Removed) {
+    let m = Model::new(25.4, 25.4, 23.177787946441534, 5.08);
+    let named = model_supports(&m);
+    let e = expected(&m, 100_000);
+    assert_eq!(features.iter().filter(|f| f.is_some()).count(), 1);
+    let mut fb = features.into_iter().flatten().next().unwrap();
+    let (names, gap): (&[(&str, usize)], I) = match removed {
+        Removed::Bottom => (
+            &[
+                ("bottom round", 1),
+                ("bottom", 2),
+                ("wall x-", 1),
+                ("wall y-", 1),
+                ("wall y+", 1),
+                ("corner round", 1),
+            ],
+            e.gap_bottom,
+        ),
+        Removed::Top => (
+            &[
+                ("top round", 1),
+                ("top", 1),
+                ("wall x-", 1),
+                ("wall y+", 1),
+                ("corner round", 1),
+            ],
+            e.gap_top,
+        ),
+    };
+    let what = format!("{removed:?} feature");
+    let delta = sound_on_model(k, &mut fb, &named, names, &what);
+    let kv = holds_volume(k, &mut fb, gap, delta, &what);
+    eprintln!("{what}: delta {delta:e}, model {gap:?} built {kv:?}");
 }

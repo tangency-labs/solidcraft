@@ -3949,8 +3949,6 @@ mod tests {
         assert_eq!(ClassifyProblem::UnresolvedClassification as i32, 7);
     }
 
-    /// (The probes avoid the circles' centres, which `ContainsUVPoint` reads as on the
-    /// boundary.)
     /// A face on `surface` over `dom` made by `MakeFaceWithCurves` from UV loops: an outer
     /// rectangle `outer` (fractions of `dom`, counter-clockwise) and clockwise circles
     /// `holes` (`(u, v, r)` in fractions, `r` of the shorter side).
@@ -4032,7 +4030,8 @@ mod tests {
         (b, made.face.unwrap())
     }
 
-    /// The loop of `f` that winds `uv` clockwise: the hole around it.
+    /// The loop of `f` that winds `uv` clockwise: the hole around it. (The probes avoid the
+    /// circles' centres, which `ContainsUVPoint` reads as on the boundary.)
     fn hole_around(k: &Kernel, b: &mut Brep, f: FaceId, uv: Point2) -> LoopId {
         for l in crate::topology::face::p2::loops(b, f, false, None).unwrap() {
             let c = contains_uv_point(k, b, l, None, uv, 1e-6).unwrap();
@@ -4079,11 +4078,13 @@ mod tests {
         assert!(holds(&mut b, 0.8, 0.8));
     }
 
-    /// #15247: on a cylinder, points one period away from where the loops' trims lie are
-    /// read in each loop's period: the point at -0.05 of the period (the copy of 0.95 that a
-    /// drop onto the closed surface may return) lies in the hole at 0.94 and is not held,
-    /// though the hole does not wind it where it is; the point at -0.5 lies in the face and
-    /// is held, though the outer loop does not wind it where it is.
+    /// #15247: on a cylinder, points are read in each loop's period. A second hole's trims
+    /// lie a period past the face's domain (centred at 1.1 of the period): the point at 0.11,
+    /// in that hole on the cylinder, is not held, though the hole winds it only at 1.11, so
+    /// the test fails if inner loops are not moved. The point at -0.05 (the copy of 0.95 a
+    /// drop onto the closed surface may return) lies in the hole at 0.94 and is not held; the
+    /// point at -0.5 lies in the face and is held, though the outer loop winds it only at
+    /// 0.5, so that fails if the outer loop is not moved.
     #[test]
     fn a_point_a_period_away_is_read_in_each_loops_period() {
         use crate::geom::axis2_placement::Axis2Placement;
@@ -4100,13 +4101,41 @@ mod tests {
             surface,
             &dom,
             [0.0, 0.05, 1.0, 0.95],
-            &[(0.94, 0.5, 0.05)],
+            &[(0.94, 0.5, 0.05), (0.1, 0.3, 0.04)],
         );
         let u = |a: f64| natural.min().x + a * period;
         let hole = hole_around(&k, &mut b, f, Point2::new(u(0.95), 0.51 * period));
         let holds = |b: &mut Brep, a: f64| {
             holds_point_beside_hole(&k, b, f, hole, Point2::new(u(a), 0.51 * period), 1e-6).unwrap()
         };
+        // the second hole's trim stored a period on (the circle about 1.1 of the period): read
+        // where it is, the point at 0.11 is outside it, and it is moved there
+        let beyond = hole_around(&k, &mut b, f, Point2::new(u(0.11), 0.31 * period));
+        {
+            use crate::geom::axis2_placement::Axis2Placement as Frame;
+            use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+            let eu = loopuse::loop_edgeuses(&b, beyond).unwrap()[0];
+            let mut frame = Frame::default();
+            frame
+                .set_canonical(Point3::new(u(1.1), 0.3 * period, 0.0), Vec3::X, Vec3::Y)
+                .unwrap();
+            let circle = BSplineCurve::create_circle_segment(
+                2,
+                &frame,
+                0.04 * period,
+                0.0,
+                360.0,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap();
+            b.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(Curve::from(circle));
+        }
+        let at = Point2::new(u(0.11), 0.31 * period);
+        let c = contains_uv_point(&k, &mut b, beyond, None, at, 1e-6).unwrap();
+        assert_eq!(c.containment, PointContainment::Outside);
+        let moved = into_loop_period(&k, &b, beyond, at, (Some(period), None)).unwrap();
+        assert!((moved.x - u(1.11)).abs() < 1e-9, "{moved:?}");
+        assert!(!holds_point_beside_hole(&k, &mut b, f, hole, at, 1e-6).unwrap());
         assert!(!holds(&mut b, -0.05));
         assert!(holds(&mut b, 0.5));
         // a point of the face one period away is held: each loop reads it in its period
