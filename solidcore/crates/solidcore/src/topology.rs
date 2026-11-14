@@ -1162,12 +1162,20 @@ impl Brep {
         for (id, face) in self.faces.iter() {
             if let (Some(original), Ok(face_copy)) = (face.surface.as_ref(), copy.face_mut(id)) {
                 if let Some(surface) = face_copy.surface.as_mut() {
-                    surface.share_cache_slot_of(original);
-                    face::p2::RescueSurfaceOwner::new(original).restore(surface);
+                    Self::stand_surface_for(surface, original);
                 }
             }
         }
         copy
+    }
+
+    /// Makes `copy`, a copy ([`Clone`]) of the face surface `original`, stand for it as the
+    /// face surfaces of [`Brep::clone_sharing_surface_caches`] do: it shares `original`'s
+    /// cache slot and keeps its owner. What a query makes on the copy from `&self` (a NURB
+    /// a cone makes on first use) stays on the copy.
+    pub(crate) fn stand_surface_for(copy: &mut Surface, original: &Surface) {
+        copy.share_cache_slot_of(original);
+        face::p2::RescueSurfaceOwner::new(original).restore(copy);
     }
 
     /// A private copy of this B-rep that stands for the B-rep itself where upstream
