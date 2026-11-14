@@ -87,6 +87,28 @@ mod tests {
         assert!(offset_surface(&c, &side, -10.5, 0.01).is_err());
     }
 
+    /// Outward is the body's outside, whichever side of its surface a face is on: a tube's bore
+    /// (a cylinder whose natural normal points away from the axis, used from inside) moved by
+    /// +1 goes into the bore, radius 17; by -1 into the wall, radius 19. A box's bottom moved
+    /// by +5 goes down.
+    #[test]
+    fn a_face_used_from_its_surfaces_back_moves_out_of_the_body() {
+        let outer = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 20.0).unwrap();
+        let hole = cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 18.0, 22.0).unwrap();
+        let tube = crate::boolean(&outer, &hole, crate::BoolOp::Cut).unwrap().unwrap();
+        let d = 18.0 / 2f64.sqrt();
+        let bore = [face_at(&tube, Vec3::new(d, d, 10.0))];
+        for (dist, r) in [(1.0, 17.0), (-1.0, 19.0)] {
+            let m = measure(&offset_surface(&tube, &bore, dist, 0.01).unwrap()).unwrap();
+            let want = 2.0 * std::f64::consts::PI * r * 20.0;
+            assert!(rel(m.area, want) < 1e-3 && (m.bbox.max.x - r).abs() < 1e-3, "{dist}: {m:?} vs radius {r}"); // (measured on meshes)
+        }
+        let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let bottom = face_at(&b, Vec3::new(5.0, 5.0, 0.0));
+        let m = measure(&offset_surface(&b, &[bottom], 5.0, 0.01).unwrap()).unwrap();
+        assert!((m.bbox.min.z + 5.0).abs() < 1e-9 && (m.bbox.max.z + 5.0).abs() < 1e-9, "{m:?}");
+    }
+
     /// A sphere (fitted faces) moved out by 2: area 4π·12², within the tolerance; moved in to
     /// its centre, refused.
     #[test]

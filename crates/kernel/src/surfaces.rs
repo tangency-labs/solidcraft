@@ -792,7 +792,14 @@ pub(crate) fn offset_faces(body: &Body, picked: &[usize], distance: f64, toleran
     if distance == 0.0 {
         return taken(body, r, &picked.iter().map(|f| (*f, false)).collect::<Vec<_>>());
     }
-    let moved = picked.iter().map(|f| imp::offset_face(r, *f, distance)).collect::<Result<Vec<_>>>()?;
+    // SMLib offsets a sheet along its surface's normal (the face's NURBS form, which a shell's
+    // `forward` is about); a face the body uses from that surface's back moves the other way to
+    // go out of the body.
+    let sides = face_sides(r);
+    let moved = picked
+        .iter()
+        .map(|f| imp::offset_face(r, *f, if sides.get(*f).copied().unwrap_or(true) { distance } else { -distance }))
+        .collect::<Result<Vec<_>>>()?;
     let (parts, offsets) = Parts::joined(&moved.iter().collect::<Vec<_>>())?;
     let c = parts.canonical()?;
     let (result, h) = imp::stitched(&c.brep, tolerance.max(c.brep.tolerance))?;
