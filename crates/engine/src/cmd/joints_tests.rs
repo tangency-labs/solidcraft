@@ -3596,8 +3596,11 @@ fn a_rigid_joint_with_a_lost_origin_still_holds_its_part() {
         json!({"type": "rigid", "name": "Fix", "flip": true, "angle": 30, "offset": 2, "a": {"occurrence": "Base", "face": [20, 20, 10]}, "b": {"occurrence": "Pin", "circle": [105, 0, 20]}}),
     );
     // Its flip, angle and offset have placed the part; those are its saved pose.
-    let (at, corner) = (Vec3::new(100.0, 0.0, 0.0), Vec3::new(105.0, 0.0, 20.0));
-    let (saved, saved_corner) = (place(&s, "Pin", at), place(&s, "Pin", corner));
+    // The part's whole transform, every entry: three points could miss a turn about their line.
+    let pose = |s: &Session| solidcraft_doc::joints::occurrence_world(&s.doc, occ(s, "Pin"));
+    let same = |a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]| a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() < 1e-6);
+    let at = Vec3::new(100.0, 0.0, 0.0);
+    let saved = pose(&s);
     part(&mut s, "Leaf", [300.0, 0.0, 0.0]);
     // The face the rigid joint is made from goes: its name no longer resolves.
     run(&mut s, "sketch.edit", json!({"sketch": "PinSketch"}));
@@ -3609,18 +3612,15 @@ fn a_rigid_joint_with_a_lost_origin_still_holds_its_part() {
     let leaf_at = Vec3::new(301.0, 1.0, 1.0);
     let (pin0, leaf0) = (place(&s, "Pin", at), place(&s, "Leaf", leaf_at));
     // The lost origin does not apply the joint's flip, angle or offset a second time.
-    assert!(near(pin0, saved) && near(place(&s, "Pin", corner), saved_corner), "exact saved pose: {pin0:?} {saved:?}");
+    assert!(same(&pose(&s), &saved), "exact saved pose: {:?} {saved:?}", pose(&s));
     pin(&mut s, "revolute", "Turn", "Pin", "Leaf", pin0 + Vec3::new(0.0, 0.0, 30.0), Vec3::Y);
     // The part keeps its relative pose to the base, and the revolute turns only the leaf.
     let r = run(&mut s, "joint.drive", json!({"joint": "Turn", "value": 40, "quiet": true}));
     assert_eq!(r["moved"], true, "{r}");
     assert!(r["reason"].is_null(), "{r}");
-    assert!(
-        near(place(&s, "Pin", at), saved) && near(place(&s, "Pin", corner), saved_corner),
-        "the held part stays: {:?} {saved:?}",
-        place(&s, "Pin", at)
-    );
+    assert!(same(&pose(&s), &saved), "the held part stays: {:?} {saved:?}", pose(&s));
     assert!(!near(place(&s, "Leaf", leaf_at), leaf0), "the leaf turns");
     let fix = run(&mut s, "joint.inspect", json!({"joint": "Fix"}))["joints"][0].clone();
     assert!(!fix["errors"].as_array().is_none_or(Vec::is_empty), "{fix}");
+    assert!(same(&pose(&s), &saved), "and after the drive: {:?}", pose(&s));
 }
