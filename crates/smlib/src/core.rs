@@ -199,7 +199,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.drop_curve_v_domain_degeneracy = true;
     f.mirror_curve_keeps_euclidean_control_points = true;
     f.dupin_bottom_hyperbola_axis = true;
-    f.twist_simple_duw_sign = true;
     f.offset_swap_uv_extended_distance = true;
     f.validation_does_not_make_uv_trims = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
