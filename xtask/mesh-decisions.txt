@@ -33,7 +33,7 @@ crates/doc/src/eval_more.rs:rib_tool runs a rib to the body by the display mesh
 crates/doc/src/eval_more.rs:rib_tool_normal runs a rib to the body by the display mesh
 crates/doc/src/eval_more.rs:sheet_eval places sheet-metal features by a mesh
 crates/doc/src/hole_reference.rs:on_reference_face decides whether a point lies on a hole's reference face by the display mesh
-crates/doc/src/hole_reference.rs:reference_frame finds a hole's reference edges on the display mesh
+crates/doc/src/hole_reference.rs:reference_frame_of finds a hole's reference edges on the display mesh
 crates/doc/src/joints_cam.rs:default_reverse picks a cam follower's side by the display mesh
 crates/doc/src/joints_cam.rs:profile_points samples a cam profile's edges from a mesh
 crates/doc/src/joints_edge.rs:edge_frame places an edge snap by the display mesh

@@ -1212,9 +1212,10 @@ impl Dialog {
             }
             // A sketch line drawn over a body edge is what a click there picks; a command that
             // takes edges and no sketch curves takes it as that edge (#8927).
-            let as_edge = (!d.inputs.iter().any(|i| fits(i.accept, sel)) && d.inputs.iter().any(|i| i.accept & EDGES != 0))
-                .then(|| sketch_curve_edge(s, sel))
-                .flatten();
+            let as_edge = (!d.inputs.iter().any(|i| fits(i.accept, sel) && !crate::hole_refs::refuses(&d, i, sel))
+                && d.inputs.iter().any(|i| i.accept & EDGES != 0))
+            .then(|| sketch_curve_edge(s, sel))
+            .flatten();
             let sel = as_edge.as_ref().unwrap_or(sel);
             if matches!(d.kind, Kind::Align { components: true, .. }) {
                 let occ = match sel {
@@ -1285,8 +1286,11 @@ impl Dialog {
                 Sel::Face { body, index, .. } => planar_face(s, body, *index).is_some(),
                 _ => true,
             };
+            // A reference input that refuses a sketch line refuses it preselected too (#10877).
+            let refused: Vec<&'static str> = d.inputs.iter().filter(|i| crate::hole_refs::refuses(&d, i, sel)).map(|i| i.label).collect();
             let takes = |i: &SelInput| {
                 fits(i.accept, sel)
+                    && !refused.contains(&i.label)
                     && (i.multi || i.items.is_empty())
                     && (planar_ok || i.accept & FACES != 0 || !matches!(sel, Sel::Face { .. }))
                     && (i.accept != AXIS_PICKS || takes_as_axis(s, sel))
@@ -1739,7 +1743,7 @@ impl Dialog {
         let sel = inp.accepts(h, s.active_sketch, |body, face| {
             snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some())
         })?;
-        if inp.rejects(&sel) {
+        if inp.rejects(&sel) || crate::hole_refs::refuses(self, inp, &sel) {
             return None;
         }
         (inp.accept != AXIS_PICKS || takes_as_axis(s, &sel)).then_some(sel)
@@ -9380,6 +9384,30 @@ mod preselected_sketch_line_tests {
             h.frames(2);
             let made = h.app.session.doc.features.iter().filter(|f| format!("{:?}", f.kind).starts_with(kind.trim_end_matches("Feature"))).count();
             assert_eq!(made, 1, "{command} runs on the edge");
+        }
+    }
+
+    /// A Hole's reference inputs take construction planes and axes but refuse sketch lines
+    /// (#10877): a preselected sketch line over a body edge still becomes that edge.
+    #[test]
+    fn a_preselected_sketch_line_on_an_edge_is_a_hole_reference_edge() {
+        // As a click on the shown sketch picks it, and as the sketch's own line (a Browser pick).
+        for line in [Sel::ExternalSketchCurve { sketch: 1, id: "l1".into() }, Sel::SketchCurve { sketch: Some(1), id: "l1".into() }] {
+            let mut h = Harness::new();
+            box_under_its_sketch(&mut h);
+            h.step(&json!({"click": {"world": [20, 0, 10]}})).unwrap(); // the top front edge
+            h.frames(2);
+            assert_eq!(h.app.session.selection, vec![Sel::ExternalSketchCurve { sketch: 1, id: "l1".into() }], "the click picks the line");
+            h.app.session.selection = vec![line.clone()];
+            h.step(&json!({"start": "solid.hole"})).unwrap();
+            h.frames(2);
+            let d = h.app.dialog.as_ref().expect("the dialog opens");
+            let reference = d.inputs.iter().find(|i| i.label == "Reference 1").expect("a Reference 1 input");
+            assert!(
+                matches!(reference.items.first(), Some(Sel::Edge { point, .. }) if point.dist(Vec3::new(20.0, 0.0, 10.0)) < 1e-6),
+                "{line:?} is the reference edge under it: {:?}",
+                d.inputs.iter().map(|i| (i.label, &i.items)).collect::<Vec<_>>()
+            );
         }
     }
 }
