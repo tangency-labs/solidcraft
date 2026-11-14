@@ -199,6 +199,11 @@ fn boolean_2d_coincident_edges_keep_both_sources() {
         let Boolean2dOutcome::Result(result) = boolean_2d(&mut k, a, b, op).unwrap() else {
             panic!("no result")
         };
+        assert_eq!(
+            result.edge_list().len(),
+            4,
+            "{op:?}: expected four boundary edges"
+        );
         for &edge in result.edge_list() {
             let attrs = result.entity_attributes(EntityRef::Edge(edge));
             assert_eq!(
