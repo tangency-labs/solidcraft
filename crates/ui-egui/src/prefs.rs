@@ -1203,6 +1203,9 @@ preference_settings! {
     /// Draw reference geometry such as inactive sketches and datum planes through shaded bodies.
     /// Off by default to preserve the depth-tested viewport behaviour.
     reference_geometry_through_bodies: bool = false, PAGE_GRAPHICS => check_id("prefs.graphics_page.reference_geometry_through_bodies");
+    /// Each origin plane wears the colour of the axis normal to it: XY blue, YZ red, XZ green
+    /// (#3722). Off by default: the three planes keep the neutral origin-plane colour.
+    color_origin_planes_by_axis: bool = false, PAGE_GRAPHICS => check_id("prefs.color_origin_planes_by_axis");
     /// A small dot at every vertex wherever edges are drawn (#7834). Off by default: the viewport
     /// draws edges only, as it always has.
     vertex_markers: bool = false;

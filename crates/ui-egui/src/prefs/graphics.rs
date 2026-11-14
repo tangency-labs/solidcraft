@@ -362,6 +362,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let reference =
                 setting::reference_geometry_through_bodies(app, ui).backing_on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
             crate::scenario::publish_target("dialog:Show reference geometry through bodies", reference.rect);
+            let axis_planes = setting::color_origin_planes_by_axis(app, ui).backing_on_hover_text(app.tr("prefs.color_origin_planes_by_axis_help"));
+            crate::scenario::publish_target("prefs:color_origin_planes_by_axis", axis_planes.rect);
             ui.add_enabled_ui(app.ui.show_grid, |ui| {
                 setting::grid_follows_view(app, ui).backing_on_hover_text(app.tr("ui.grid_follows_view_hint"));
             });
