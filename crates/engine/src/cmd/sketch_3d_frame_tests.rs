@@ -604,3 +604,64 @@ fn lines_through_a_lifted_corner_stay_joined() {
         "{fits:?}"
     );
 }
+
+/// Off the identity frame: on XZ at offset 5 the plane point (10,0) is world (10,5,0). A line's
+/// end lifted `by` [0,0,4] lands at world (10,5,4); the other line keeps its far end at (10,5,-5).
+#[test]
+fn a_plane_point_lift_on_xz_offset_by_is_world() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XZ","offset":5,"name":"Lifted XZ"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0],[10,5]]}));
+    let lines: Vec<String> = s.doc.sketch(sketch).unwrap().curves.iter().map(|c| c.id.clone()).collect();
+    let r = run(&mut s, "sketch.move3d", json!({"point": format!("{}.end", lines[0]), "by":[0,0,4]}));
+    assert_eq!(r["moved"], 2, "{r}");
+    let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    let sk = s.doc.sketch(sketch).unwrap();
+    let fit = |id: &str| sk.wires[sk.wire_index(id).unwrap()].fit.clone();
+    let (a, b) = (fit(&made[0]), fit(&made[1]));
+    near(a[0], Vec3::new(0.0, 5.0, 0.0));
+    near(a[1], Vec3::new(10.0, 5.0, 4.0));
+    near(b[0], Vec3::new(10.0, 5.0, 4.0));
+    near(b[1], Vec3::new(10.0, 5.0, -5.0));
+}
+
+/// The same on XZ offset 5, lifted `to` a world point: the drawn fit point is that point.
+#[test]
+fn a_plane_point_lift_on_xz_offset_to_is_world() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XZ","offset":5,"name":"Lifted XZ to"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0],[10,5]]}));
+    let lines: Vec<String> = s.doc.sketch(sketch).unwrap().curves.iter().map(|c| c.id.clone()).collect();
+    let r = run(&mut s, "sketch.move3d", json!({"point": format!("{}.end", lines[0]), "to":[12,5,3]}));
+    let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    let sk = s.doc.sketch(sketch).unwrap();
+    let fit = |id: &str| sk.wires[sk.wire_index(id).unwrap()].fit.clone();
+    let (a, b) = (fit(&made[0]), fit(&made[1]));
+    near(a[0], Vec3::new(0.0, 5.0, 0.0));
+    near(a[1], Vec3::new(12.0, 5.0, 3.0));
+    near(b[0], Vec3::new(12.0, 5.0, 3.0));
+    near(b[1], Vec3::new(10.0, 5.0, -5.0));
+}
+
+/// Inside a moved, turned component: the plane point (10,0,0) of the moved occurrence is world
+/// (20,40,40). Lifted `to` world (20,40,44), the drawn fit point is (20,40,44) in world and
+/// (10,0,4) in the component's own coordinates (the inverse of the occurrence move).
+#[test]
+fn a_plane_point_lift_to_world_inside_a_moved_component() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0],[10,5]]}));
+    let lines: Vec<String> = s.doc.sketch(sketch).unwrap().curves.iter().map(|c| c.id.clone()).collect();
+    let r = run(&mut s, "sketch.move3d", json!({"point": format!("{}.end", lines[0]), "to":[20,40,44]}));
+    let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    let sk = s.doc.sketch(sketch).unwrap();
+    near(sk.wires[sk.wire_index(&made[0]).unwrap()].fit[1], Vec3::new(10.0, 0.0, 4.0));
+    let world = s.world_state().unwrap();
+    let ws = &world.sketch(sketch).unwrap().sketch;
+    near(ws.wires[ws.wire_index(&made[0]).unwrap()].fit[1], Vec3::new(20.0, 40.0, 44.0));
+    near(ws.wires[ws.wire_index(&made[1]).unwrap()].fit[0], Vec3::new(20.0, 40.0, 44.0));
+}
