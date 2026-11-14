@@ -884,7 +884,7 @@ impl<O: ClassObject> CurveClassification<O> {
             }
             _ => return Ok(false),
         };
-        native_curve_in_strip(other, origin, across, threshold)
+        Ok(native_curve_in_strip(other, origin, across, threshold))
     }
 
     /// Whether an edge at the vertex end `pc` other than the curve's own edges runs beside
@@ -2941,7 +2941,7 @@ fn same_native_surface(a: &Surface, b: &Surface) -> bool {
 }
 
 /// Exact algebraic identity of the constant coordinate, including rational
-/// controls: P_i.axis = fixed * w_i. Positive basis weights then give that same
+/// controls: `P_i.axis = fixed * w_i`. Positive basis weights then give that same
 /// coordinate for every parameter. No midpoint or fitted curve enters the proof.
 fn same_iso_support(source: &Curve, trim: &Curve) -> bool {
     let CurveKind::Line(line) = source.kind() else {
@@ -3525,8 +3525,8 @@ fn ruling_frame(
     )))
 }
 
-/// Convex-hull strip bound. For Q(t) = sum alpha_i(t) Q_i, alpha_i >= 0,
-/// sum alpha_i = 1, |(Q(t)-O).A|/|A| <= max_i |(Q_i-O).A|/|A|.
+/// Convex-hull strip bound. For `Q(t) = sum alpha_i(t) Q_i`, `alpha_i >= 0`,
+/// `sum alpha_i = 1`: `|(Q(t)-O).A|/|A| <= max_i |(Q_i-O).A|/|A|`.
 /// Every arithmetic operation is rounded outward, including rational division
 /// and the direction's length. Only native polynomial/rational definitions qualify.
 fn native_curve_in_strip(
@@ -3534,10 +3534,10 @@ fn native_curve_in_strip(
     origin: [Ivl; 3],
     across: [Ivl; 3],
     threshold: f64,
-) -> Result<bool> {
+) -> bool {
     let length = interval_dot(across, across).sqrt();
     if !(length.lo > 0.0 && length.hi.is_finite()) {
-        return Ok(false);
+        return false;
     }
     let in_strip = |point: [Ivl; 3]| {
         let [px, py, pz] = point;
@@ -3548,16 +3548,14 @@ fn native_curve_in_strip(
     match curve.kind() {
         CurveKind::Line(_) => {
             let Some(line) = of_line(curve, curve.natural_interval()) else {
-                return Ok(false);
+                return false;
             };
-            Ok(
-                in_strip(line.jet_over(Ivl::from(curve.natural_interval().min())).0)
-                    && in_strip(line.jet_over(Ivl::from(curve.natural_interval().max())).0),
-            )
+            in_strip(line.jet_over(Ivl::from(curve.natural_interval().min())).0)
+                && in_strip(line.jet_over(Ivl::from(curve.natural_interval().max())).0)
         }
         CurveKind::BSpline(spline) => {
             let Some(net) = convex_native_net(spline) else {
-                return Ok(false);
+                return false;
             };
             for cp in net.cpts() {
                 let w = if cp.w == crate::nurbs::math::NOW {
@@ -3566,7 +3564,7 @@ fn native_curve_in_strip(
                     cp.w
                 };
                 if !(w > 0.0 && w.is_finite()) {
-                    return Ok(false);
+                    return false;
                 }
                 let z = if cp.z == crate::nurbs::math::NOZ {
                     0.0
@@ -3574,12 +3572,12 @@ fn native_curve_in_strip(
                     cp.z
                 };
                 if !in_strip([cp.x, cp.y, z].map(|v| Ivl::from(v) / Ivl::from(w))) {
-                    return Ok(false);
+                    return false;
                 }
             }
-            Ok(!net.cpts().is_empty())
+            !net.cpts().is_empty()
         }
-        _ => Ok(false),
+        _ => false,
     }
 }
 
