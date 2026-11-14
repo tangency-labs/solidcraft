@@ -84,7 +84,6 @@ crates/doc/src/project3d.rs:tris reads mesh triangles for 3D projections
 crates/doc/src/sheet_convert.rs:behind finds the face behind a planar face by mesh triangles
 crates/doc/src/sheet_convert.rs:bend_edge_names names bend edges by the display mesh
 crates/doc/src/sheet_convert.rs:convert_body converts a body to sheet metal by the display mesh
-crates/doc/src/sheet_face_names.rs:body_sheet_face_names names sheet faces by the display mesh
 crates/engine/src/cmd/clearance.rs:clearance measures clearances between B-rep bodies on display meshes
 crates/engine/src/cmd/clearance.rs:measure_pair measures a pair's overlap or distance on display meshes
 crates/engine/src/cmd/compare.rs:compare_bodies compares two B-rep bodies by meshes
