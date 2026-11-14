@@ -394,6 +394,16 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     let near = |d: f64| d.signum() * (d.abs() * 0.5).min(START_PROBE_MM);
     let into = |d: f64| inside(base + n * near(d)) || inside(base + n * (d * 0.5));
     if symmetric {
+        let symmetric_offset = bool_(p, "symmetric_offset").unwrap_or(false) && start.abs() > 1e-9;
+        if symmetric_offset {
+            let gap = start.abs();
+            let half = d.abs() * 0.5;
+            let plane_base = base - n * start;
+            let pos_base = plane_base + n * gap;
+            let neg_base = plane_base - n * gap;
+            let probe = |b: Vec3, dir: f64| inside(b + n * (dir * near(half))) || inside(b + n * (dir * half * 0.5));
+            return Some(if probe(pos_base, 1.0) || probe(neg_base, -1.0) { "cut" } else { "join" });
+        }
         return Some(if into(d.abs()) || into(-d.abs()) { "cut" } else { "join" });
     }
     if into(d) {
