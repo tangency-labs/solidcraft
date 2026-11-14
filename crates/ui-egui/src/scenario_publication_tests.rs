@@ -42,6 +42,21 @@ fn widget_lookup_prefers_click_targets_to_same_text_tooltips_in_either_node_orde
 }
 
 #[test]
+fn row_lookup_anchors_on_the_label_not_a_field_named_after_its_row_in_either_node_order() {
+    use egui::accesskit::{Action, NodeId, Role};
+    let mut label = widget_node(Role::Label, "Targets", 10.0);
+    label.add_action(Action::Click);
+    let mut field = widget_node(Role::Button, "Targets", 100.0);
+    field.set_value("Select");
+    field.add_action(Action::Click);
+    let mut nodes = vec![(NodeId(1), label), (NodeId(2), field)];
+    for _ in 0..2 {
+        assert_eq!(widget_near_in(&nodes, "Select", "Targets"), Some([110.0, 20.0]));
+        nodes.reverse();
+    }
+}
+
+#[test]
 fn widget_lookup_keeps_labels_values_and_shortcut_fallbacks() {
     use egui::accesskit::{NodeId, Role};
     let label = widget_node(Role::Label, "Type", 10.0);
