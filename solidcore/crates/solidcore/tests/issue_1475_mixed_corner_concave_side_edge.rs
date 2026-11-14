@@ -255,7 +255,10 @@ fn concave(a: Vec3, b: Vec3, upper: BoxSpec) -> bool {
             }
         }
     }
-    assert!(inside == 1 || inside == 3, "{a:?} {b:?}: {inside} quadrants");
+    assert!(
+        inside == 1 || inside == 3,
+        "{a:?} {b:?}: {inside} quadrants"
+    );
     inside == 3
 }
 
