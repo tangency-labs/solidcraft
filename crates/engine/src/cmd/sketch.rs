@@ -3303,6 +3303,18 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
                 add_c(sk, ConstraintKind::Fix { p: q })?;
                 n += 1;
             } else if !fix && (own || has) {
+                // An equation curve's fit points are placed by its formulas at every solve.
+                if let Some(eq) =
+                    sk.equations.iter().find(|e| sk.curve_index(&e.curve).and_then(|ci| sk.curves.get(ci)).is_some_and(|c| c.kind.uses(q)))
+                {
+                    return Err(bad(
+                        cmd,
+                        format!(
+                            "point `{}` is placed by the equation of curve `{}`, so it cannot be released; edit or delete the equation curve",
+                            pt.id, eq.curve
+                        ),
+                    ));
+                }
                 if let Some(pt) = sk.points.get_mut(q) {
                     pt.fixed = false;
                     pt.exprs = None;

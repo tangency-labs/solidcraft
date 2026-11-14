@@ -1911,4 +1911,13 @@ fn a_point_placed_by_an_expression_says_so_unfixes_and_refuses_a_move() {
         let r = run(&mut s, "sketch.move_points", json!({"moves": [{"point": "p1", "to": [25, 0]}]}));
         assert_eq!(r["moved"][0]["reached"], true, "{r}");
     }
+    // An equation curve's fit points come from its formulas at every solve: unfixing one is refused.
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "t * t", "start": -2, "end": 2}));
+    let curve = r["curve"].as_str().unwrap_or_default().to_string();
+    let before = serde_json::to_value(sketch(&s)).unwrap();
+    let pt = sketch(&s).points.iter().find(|p| p.fixed && p.id != "origin").map(|p| p.id.clone()).unwrap();
+    let e = s.execute("sketch.constraint.fix", &json!({"entities": [pt], "fixed": false})).unwrap_err().to_string();
+    assert!(e.contains("equation") && e.contains(&curve), "{e}");
+    assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "the sketch does not change");
 }
