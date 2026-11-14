@@ -319,13 +319,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.find_or_create_proto_vertex_crossing(k, geometry, pc1, pc2, None)
     }
 
-    /// [`ProtoTopologyManager::find_or_create_proto_vertex_pcs`] for a point that a curve
-    /// fixes on an edge: `crossing` is the edge's unit direction there and the sine of the
-    /// angle at which the curve crosses it. Not upstream: the point's uncertainty region
-    /// ([`DeclaredContact::of_crossing`]) reaches its tolerance over that sine along the
-    /// edge, and a proto vertex is found where the regions are not proved apart. With no
-    /// `crossing`, two classifications onto edges take the angle between the two edges;
-    /// any other point is known to its tolerance alone.
+    /// [`ProtoTopologyManager::find_or_create_proto_vertex_pcs`] for an end of a curve
+    /// interval: `crossing` is the interval's curve and its parameter at that end. Not
+    /// upstream: where the point lies on an edge, its uncertainty region reaches along the
+    /// edge as far as the curve's crossing of the edge is known ([`crossing_region`]), and
+    /// a proto vertex is found where the regions are not proved apart. With no `crossing`,
+    /// two classifications onto edges are the crossing of those two edges; any other point
+    /// is known to its tolerance alone.
     ///
     /// # Errors
     ///
@@ -336,7 +336,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         geometry: &impl ProtoBrep<O>,
         pc1: &mut PointClassification<O>,
         pc2: &mut PointClassification<O>,
-        crossing: Option<(Vec3, f64)>,
+        crossing: Option<(O, f64)>,
     ) -> Result<(Option<ProtoVertexId>, bool)> {
         // Skip PtXSects that don't classify to Region, Face, Edge, or Vertex in both Breps
         if !can_imprint(pc1.point_class()) {
@@ -395,18 +395,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // vertex made of it would get)
         let deviation = found_position.map_or(f64::NAN, |p| p.deviation);
         let point_tol = self.proto_vertex_tolerance_of_pcs(k, geometry, deviation, pc1, pc2)?;
-        let crossing = match crossing {
-            Some(c) => Some(c),
-            None => edges_crossing(k, geometry, pc1, pc2)?,
-        };
         let point_tol = zone_tol3d(k, point_tol);
-        let region = match crossing {
-            Some((along, sine)) => {
-                let limit = crate::query::face::p2::proto_vertex_capture_distance(self);
-                DeclaredContact::of_crossing(position, point_tol, along, sine, limit)
-            }
-            None => DeclaredContact::of_point(position, point_tol),
-        };
+        let limit = crate::query::face::p2::proto_vertex_capture_distance(self);
+        let region = crossing_region(k, geometry, crossing, pc1, pc2, position, point_tol, limit)?;
         let found = self.find_proto_vertex_within(k, position, point_tol, Some(&region))?;
 
         // when nearby PV exists
@@ -484,15 +475,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let mut start_pv = None;
         let mut end_pv = None;
         if can_imprint(ci1.start.point_class()) && can_imprint(ci2.start.point_class()) {
-            let crossing = end_crossing(
-                k,
-                &*geometry,
-                classification1,
-                ci1,
-                classification2,
-                ci2,
-                false,
-            )?;
+            // (the curve the interval lies on, and its parameter at this end)
+            let crossing = classification1.curve().map(|c| (c, ci1.interval.min()));
             start_pv = ignore_soft(self.find_or_create_proto_vertex_crossing(
                 k,
                 geometry,
@@ -516,15 +500,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             }
         }
         if can_imprint(ci1.end.point_class()) && can_imprint(ci2.end.point_class()) {
-            let crossing = end_crossing(
-                k,
-                &*geometry,
-                classification1,
-                ci1,
-                classification2,
-                ci2,
-                true,
-            )?;
+            // (the curve the interval lies on, and its parameter at this end)
+            let crossing = classification1.curve().map(|c| (c, ci1.interval.max()));
             end_pv = ignore_soft(self.find_or_create_proto_vertex_crossing(
                 k,
                 geometry,
@@ -2124,57 +2101,75 @@ fn edge_direction<O: ClassObject>(
     }))
 }
 
-/// Not upstream: for two classifications onto edges, the direction of the first edge and
-/// the sine of the angle between the two edges at the point (the crossing of two edges is
-/// fixed along them to its tolerance over that sine); `None` for any other pair.
-fn edges_crossing<O: ClassObject>(
+/// Not upstream: the uncertainty region of a point at `position`, known to `tolerance`,
+/// that the classifications `pc1`, `pc2` name (docs/booleans.md, "One point or two").
+/// Where the point lies on an edge and a curve fixes it there (`crossing`: the curve of
+/// the interval it ends, with its parameter there; or, for two classifications onto
+/// edges, the other edge), the crossing is known along that edge only to the tolerance
+/// over the sine of the angle between the two, the angle enclosed over the whole reach
+/// ([`Curve::crossing_reach`]): the region is that reach either way along the edge's
+/// tangent, widened by the tolerance and by how far the edge strays from its tangent
+/// within the reach. Where no reach is proved (the curves may run along each other within
+/// it, or have no hull) the region reaches `limit`, the capture distance: as far as proto
+/// vertices are looked for at all. Of several crossings the one known worst counts. Any
+/// other point has the ball of its tolerance.
+#[allow(clippy::too_many_arguments)] // the point, what fixes it and how well
+fn crossing_region<O: ClassObject>(
     k: &Kernel,
     geometry: &impl ProtoBrep<O>,
+    crossing: Option<(O, f64)>,
     pc1: &PointClassification<O>,
     pc2: &PointClassification<O>,
-) -> Result<Option<(Vec3, f64)>> {
-    let (Some(a), Some(b)) = (
-        edge_direction(k, geometry, pc1)?,
-        edge_direction(k, geometry, pc2)?,
-    ) else {
-        return Ok(None);
+    position: Vec3,
+    tolerance: f64,
+    limit: f64,
+) -> Result<DeclaredContact> {
+    let edge_of = |pc: &PointClassification<O>| {
+        (pc.point_class() == PointClassType::Edge && pc.are_parameters_set())
+            .then(|| pc.edge_object())
+            .flatten()
+            .and_then(|e| geometry.edge_curve(e))
+            .flatten()
+            .and_then(|c| geometry.curve(c))
+            .map(|c| (c, pc.t_param()))
     };
-    Ok(Some((a, a.cross(b).length())))
-}
-
-/// Not upstream: the crossing that fixes one end (`at_end`, else the start) of the curve
-/// interval pair `ci1`, `ci2` on an edge: the direction of the edge the curve crosses at
-/// the shallower angle, and that angle's sine ([`edge_crossing_sine`]); `None` when the
-/// end lies on no edge.
-fn end_crossing<O: ClassObject>(
-    k: &Kernel,
-    geometry: &impl ProtoBrep<O>,
-    classification1: &CurveClassification<O>,
-    ci1: &CurveInterval<O>,
-    classification2: &CurveClassification<O>,
-    ci2: &CurveInterval<O>,
-    at_end: bool,
-) -> Result<Option<(Vec3, f64)>> {
-    let pick = |ci: &CurveInterval<O>| if at_end { ci.end } else { ci.start };
-    let mut best: Option<(Vec3, f64)> = None;
-    for (classification, ci) in [(classification1, ci1), (classification2, ci2)] {
-        let pc = pick(ci);
-        let sine = edge_crossing_sine(
-            k,
-            geometry,
-            classification.curve(),
-            ci.interval,
-            &pc,
-            at_end,
-        )?;
-        let Some(dir) = edge_direction(k, geometry, &pc)? else {
-            continue;
-        };
-        if sine >= 0.0 && best.is_none_or(|(_, s)| sine < s) {
-            best = Some((dir, sine));
+    let (edge1, edge2) = (edge_of(pc1), edge_of(pc2));
+    // (the crossing curve and its parameter, the edge and its parameter, the edge's
+    // classification)
+    let mut crossings = Vec::new();
+    match crossing.and_then(|(c, t)| geometry.curve(c).map(|c| (c, t))) {
+        Some((curve, t)) => {
+            for (edge, pc) in [(edge1, pc1), (edge2, pc2)] {
+                if let Some((e, s)) = edge {
+                    crossings.push((curve, t, e, s, pc));
+                }
+            }
+        }
+        None => {
+            if let (Some((a, t)), Some((e, s))) = (edge1, edge2) {
+                crossings.push((a, t, e, s, pc2));
+            }
         }
     }
-    Ok(best)
+    let mut worst: Option<(Vec3, Option<(f64, f64)>)> = None;
+    for (curve, t, edge, s, pc) in crossings {
+        let Some(along) = edge_direction(k, geometry, pc)? else {
+            continue;
+        };
+        let reach = curve.crossing_reach(k, t, edge, s, position, tolerance)?;
+        let farther = match (&worst, reach) {
+            (None, _) | (Some((_, Some(_))), None) => true,
+            (Some((_, Some((old, _)))), Some((new, _))) => new > *old,
+            (Some((_, None)), _) => false,
+        };
+        if farther {
+            worst = Some((along, reach));
+        }
+    }
+    Ok(worst.map_or_else(
+        || DeclaredContact::of_point(position, tolerance),
+        |(along, reach)| DeclaredContact::of_crossing(position, tolerance, along, reach, limit),
+    ))
 }
 
 /// Not upstream (WR-410; the SolidCraft fork's `sm_CrossingSine`): the sine of the angle

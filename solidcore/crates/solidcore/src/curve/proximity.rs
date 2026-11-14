@@ -65,6 +65,9 @@ const OP: &str = "curve::proximity::proved_within";
 /// How many times a piece is halved at most.
 pub const DEPTH: usize = 32;
 
+/// How many windows, each four times the last, [`Curve::crossing_reach`] tries.
+pub const CROSSING_WINDOWS: usize = 8;
+
 /// The most pieces tried for one bound.
 pub const MAX_PIECES: usize = 4096;
 
@@ -190,7 +193,198 @@ impl Form<'_> {
     }
 }
 
+/// A cone that holds every tangent direction of a curve piece, and the piece's two ends.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TangentCone {
+    /// The cone's unit axis (the direction of the piece's chord).
+    pub(crate) axis: Vec3,
+    /// Its half angle in radians, rounding included.
+    pub(crate) half_angle: f64,
+    /// The piece's ends, each within `rounding` of the exact one.
+    pub(crate) ends: [Vec3; 2],
+    /// The rounding bound of the ends (a length).
+    pub(crate) rounding: f64,
+}
+
+/// The angle between `a` and `b`, by `atan2` of the cross and the dot products.
+fn angle(a: Vec3, b: Vec3) -> f64 {
+    a.cross(b).length().atan2(a.dot(b))
+}
+
 impl Curve {
+    /// A cone holding every tangent direction of this curve over `[a, b]` (`a < b`), from
+    /// its control points: a line's direction; for a B-spline (and a conic by its rational
+    /// B-spline) the tangent of a Bezier piece with positive weights is a combination with
+    /// non-negative coefficients of the differences `P_j - P_i`, `i < j`, of its control
+    /// points (Floater, "Derivatives of rational Bezier curves", CAGD 9, 1992), so the cone
+    /// about the chord that holds those differences, each widened by the `asin` of its
+    /// points' rounding over its length, holds the tangent. `None` for a kind without a
+    /// hull, a piece of no length, a difference no longer than its rounding (its direction
+    /// is not known), or a cone of a quarter turn or more.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's cancellation.
+    pub(crate) fn tangent_cone(&self, a: f64, b: f64) -> Result<Option<TangentCone>> {
+        if !(a.is_finite() && b.is_finite() && a < b) {
+            return Ok(None);
+        }
+        let Some(form) = form(self) else {
+            return Ok(None);
+        };
+        let sqrt3 = 3.0_f64.sqrt();
+        // the pieces' control points, each piece with the rounding of its points
+        let mut pieces: Vec<(Vec<Vec3>, f64)> = Vec::new();
+        match &form {
+            Form::Line(l) => {
+                let Some([(p, ep), (q, eq)]) = l.segment_over(&Extent1d::from_min_max(a, b)) else {
+                    return Ok(None);
+                };
+                pieces.push((vec![p, q], ep.max(eq)));
+            }
+            Form::Spline(c) => {
+                let Some(cuts) = soft(spline_breaks(c, a, b))? else {
+                    return Ok(None);
+                };
+                for w in cuts.windows(2) {
+                    let [x, y] = *w else { continue };
+                    if y <= x {
+                        continue;
+                    }
+                    let Some(hull) =
+                        soft(Span::of(c, 0.5 * (x + y)))?.and_then(|span| span.hull(x, y))
+                    else {
+                        return Ok(None);
+                    };
+                    pieces.push(hull);
+                }
+            }
+        }
+        let (Some(first), Some(last)) = (
+            pieces.first().and_then(|(p, _)| p.first().copied()),
+            pieces.last().and_then(|(p, _)| p.last().copied()),
+        ) else {
+            return Ok(None);
+        };
+        let rounding = pieces.iter().fold(0.0_f64, |m, (_, e)| m.max(*e)) * sqrt3;
+        let chord = last - first;
+        let length = chord.length();
+        if length.is_nan() || length <= 2.0 * rounding {
+            return Ok(None);
+        }
+        let axis = chord / length;
+        // the chord's own direction to its rounding
+        let mut half_angle = (2.0 * rounding / length).min(1.0).asin();
+        let own = half_angle;
+        for (points, _) in &pieces {
+            for (i, &p) in points.iter().enumerate() {
+                for &q in points.iter().skip(i + 1) {
+                    let d = q - p;
+                    let len = d.length();
+                    if len.is_nan() || len <= 2.0 * rounding {
+                        return Ok(None);
+                    }
+                    let wide = angle(axis, d) + (2.0 * rounding / len).min(1.0).asin() + own;
+                    half_angle = half_angle.max(wide * (1.0 + gamma(8)));
+                }
+            }
+        }
+        if half_angle.is_nan() || half_angle >= 0.5 * std::f64::consts::PI {
+            return Ok(None);
+        }
+        Ok(Some(TangentCone {
+            axis,
+            half_angle,
+            ends: [first, last],
+            rounding,
+        }))
+    }
+
+    /// How far along `edge` the crossing of this curve with it is known, enclosed: this
+    /// curve at parameter `t` and `edge` at `s` meet at `p`, each known to `tolerance`
+    /// across itself. Over a stretch about `p` on which every tangent of this curve makes
+    /// at least the angle `theta` with every tangent of `edge`, a curve moved by
+    /// `tolerance` moves the crossing by at most `tolerance / sin theta` along the edge.
+    /// The stretch is a parameter window about `t` and `s`, widened until the reach
+    /// `tolerance / sin theta` lies inside what both windows cover (a curve whose tangents
+    /// stay in a cone of half angle `alpha` about an axis leaves its window no nearer `p`
+    /// than its window's end times `cos alpha`; an end of the curve's own domain covers
+    /// everything). `theta` is the angle between the two cones' axes (as lines) less both
+    /// half angles ([`Curve::tangent_cone`]). Returns the reach and how far `edge` strays
+    /// from its tangent line at `p` within it (the reach times the tangent of the edge's
+    /// half angle); `None` where no window proves a reach: the curves may run along each
+    /// other, or have no hull.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's cancellation.
+    pub(crate) fn crossing_reach(
+        &self,
+        k: &Kernel,
+        t: f64,
+        edge: &Self,
+        s: f64,
+        p: Vec3,
+        tolerance: f64,
+    ) -> Result<Option<(f64, f64)>> {
+        if !(tolerance > 0.0 && tolerance.is_finite() && t.is_finite() && s.is_finite()) {
+            return Ok(None);
+        }
+        let domains = [self.natural_interval(), edge.natural_interval()];
+        // the window's first half width on each curve: a few tolerances of length
+        let speed = |c: &Self, at: f64| -> Result<Option<f64>> {
+            Ok(soft(c.evaluate(k, at, 1, true, false))?
+                .and_then(|d| d.get(1).map(|v| v.length()))
+                .filter(|v| v.is_finite() && *v > 0.0))
+        };
+        let (Some(v_c), Some(v_e)) = (speed(self, t)?, speed(edge, s)?) else {
+            return Ok(None);
+        };
+        let mut width = 4.0 * tolerance;
+        for _ in 0..CROSSING_WINDOWS {
+            k.check_cancelled(OP)?;
+            let mut cones = Vec::new();
+            for (c, at, v, domain) in [(self, t, v_c, domains[0]), (edge, s, v_e, domains[1])] {
+                let h = width / v;
+                let (lo, hi) = ((at - h).max(domain.min()), (at + h).min(domain.max()));
+                let Some(cone) = c.tangent_cone(lo, hi)? else {
+                    return Ok(None);
+                };
+                // how far from `p` the window is sure to hold the curve
+                let cos = cone.half_angle.cos();
+                let mut covered = f64::INFINITY;
+                for (end, limit, bound) in [
+                    (cone.ends[0], lo, domain.min()),
+                    (cone.ends[1], hi, domain.max()),
+                ] {
+                    if (limit - bound).abs() > 0.0 {
+                        let reach = ((end - p).length() - cone.rounding) * cos * (1.0 - gamma(8));
+                        covered = covered.min(reach);
+                    }
+                }
+                cones.push((cone, covered));
+            }
+            let [(cone_c, covered_c), (cone_e, covered_e)] = cones.as_slice() else {
+                return Ok(None);
+            };
+            // the angle between the two axes as lines, less both cones
+            let between = angle(cone_c.axis, cone_e.axis);
+            let acute = between.min(std::f64::consts::PI - between);
+            let theta = acute * (1.0 - gamma(8)) - cone_c.half_angle - cone_e.half_angle;
+            if theta > 0.0 {
+                let reach = tolerance / theta.sin() * (1.0 + gamma(8));
+                if reach <= covered_c.min(*covered_e) {
+                    return Ok(Some((
+                        reach,
+                        reach * cone_e.half_angle.tan() * (1.0 + gamma(4)),
+                    )));
+                }
+            }
+            width *= 4.0;
+        }
+        Ok(None)
+    }
+
     /// Whether every point of this curve over `interval` is proved to lie within `radius`
     /// of `other` over `other_interval`, or within one of the balls `ends` (a centre and a
     /// radius each: the vertices `other` runs between, with their tolerances, which hold
@@ -425,5 +619,31 @@ mod tests {
         assert!(!within(&[]));
         assert!(within(&balls(0.11)));
         assert!(!within(&balls(0.04)));
+    }
+
+    /// A line across a circle of radius 2 at the origin: the crossing's reach along the
+    /// circle is the tolerance over the sine of the angle, enclosed. At 30 degrees it is
+    /// within a hair of `1e-5 / sin 30`; at 0.16 degrees (sine 0.0028), where the first
+    /// order gives 3.6e-3, the circle turns by more than that angle within the reach and
+    /// nothing is proved; a line along the tangent proves nothing either.
+    #[test]
+    fn a_crossing_s_reach_is_enclosed_and_a_grazing_one_has_none() {
+        let k = Kernel::default();
+        let circle = ellipse(&k, Point3::new(0.0, 0.0, 0.0), 2.0, 2.0);
+        // the circle's top, away from its seam: tangent along x
+        let p = Point3::new(0.0, 2.0, 0.0);
+        let s = at(&k, &circle, p);
+        let reach = |degrees: f64| {
+            let (sin, cos) = degrees.to_radians().sin_cos();
+            let d = Vec3::new(cos, sin, 0.0);
+            let line = Curve::from(Line::from_points(p - d, p + d, 3));
+            let t = at(&k, &line, p);
+            line.crossing_reach(&k, t, &circle, s, p, 1e-5).unwrap()
+        };
+        let (steep, stray) = reach(30.0).unwrap();
+        assert!((2e-5..2.001e-5).contains(&steep), "{steep}");
+        assert!(stray < 1e-9, "{stray}");
+        assert_eq!(reach(0.16), None);
+        assert_eq!(reach(0.0), None);
     }
 }

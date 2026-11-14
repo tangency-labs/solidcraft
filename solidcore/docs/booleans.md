@@ -249,10 +249,15 @@ A point's tolerance is how well it is known across the curves that fix it. Along
 curve crosses at angle θ, the crossing is known only to tolerance / sin θ: a curve moved by the
 tolerance moves its crossing that far along the edge (the bound of the near-coincident strips
 above). So a point that a curve fixes on an edge has an uncertainty region, the segment tolerance /
-sin θ either way along the edge, widened by the tolerance (`DeclaredContact::of_crossing`; θ from
-the curve's and the edge's tangents at the point, the sine at its lower rounding bound; for two
-edges crossing, the angle between them; a curve running along its edge reaches as far as the
-capture distance looks). A point with no crossing angle has the ball of its tolerance. Two points
+sin θ either way along the edge, widened by the tolerance (`DeclaredContact::of_crossing`). θ is
+enclosed over the whole reach, not read at the point (`Curve::crossing_reach`, `curve/proximity.rs`):
+the tangents of a curve piece lie in the cone of the differences of its Bézier control points, so
+over a parameter window about the point θ is at least the angle between the two curves' cones'
+axes less both half angles, and the window is widened until tolerance / sin θ lies inside what
+both windows cover. For two edges crossing, the two curves are the edges. Where no window proves a
+reach (a curve grazing or running along its edge: an arc of radius 2 crossing at 0.16° turns by
+more than that within its first-order reach of 3.6e-3) the region reaches as far as the capture
+distance looks. A point with no crossing angle has the ball of its tolerance. Two points
 are one when their regions are not proved apart (`DeclaredContact::overlaps`, the distance shrunk by
 its rounding), and each proto vertex keeps the regions of the points it holds. A wall/round curve
 along a slab's edge at 5° and a rod/round curve across it at 40° end 9.3e-5 apart at 1e-5: one

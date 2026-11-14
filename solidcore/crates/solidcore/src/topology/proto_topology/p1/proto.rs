@@ -2145,26 +2145,29 @@ pub struct DeclaredContact {
 
 impl DeclaredContact {
     /// The uncertainty region of a point `p` known to `tolerance` that a curve fixes on an
-    /// edge of unit direction `along` which it crosses at an angle of sine `sine`
-    /// (docs/booleans.md, "One point or two"): across the edge the point is known to
-    /// `tolerance`, along it only to `tolerance / sine`, so the region is the segment that
-    /// far either way along the edge, widened by `tolerance`. The sine is taken at its
-    /// lower rounding bound (`gamma_8` of a cross product over two norms); at or below
-    /// zero, and for a NaN, the curve runs along the edge and the region reaches `limit`
-    /// (the capture distance: how far proto vertices are looked for at all).
+    /// edge of unit direction `along` there (docs/booleans.md, "One point or two"): across
+    /// the edge the point is known to `tolerance`, along it only to the enclosed `reach`
+    /// (the tolerance over the sine of the crossing angle, with how far the edge strays
+    /// from its tangent within it: [`crate::curve::curve::Curve::crossing_reach`]), so the
+    /// region is the segment that far either way along the edge, widened by the tolerance
+    /// and the stray. With no reach proved, or one past `limit` (the capture distance: how
+    /// far proto vertices are looked for at all), the region reaches `limit`.
     #[must_use]
-    pub fn of_crossing(p: Point3, tolerance: f64, along: Vec3, sine: f64, limit: f64) -> Self {
-        let sine_lo = sine * (1.0 - gamma(8)) - gamma(8);
-        let reach = if sine_lo > 0.0 {
-            (tolerance / sine_lo * (1.0 + gamma(2))).min(limit)
-        } else {
-            limit
+    pub fn of_crossing(
+        p: Point3,
+        tolerance: f64,
+        along: Vec3,
+        reach: Option<(f64, f64)>,
+        limit: f64,
+    ) -> Self {
+        let (reach, stray) = match reach {
+            Some((reach, stray)) if reach <= limit => (reach, stray),
+            _ => (limit, 0.0),
         };
-        let reach = if reach.is_nan() { limit } else { reach };
         Self {
             a: p - along * reach,
             b: p + along * reach,
-            radius: tolerance,
+            radius: tolerance + stray,
         }
     }
 
