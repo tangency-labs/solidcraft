@@ -26,7 +26,7 @@ $G --list                                     # registered units and their case 
 $G --unit nlib.knots --goldens                # one unit against its golden
 $G --unit 'nlib.*' --goldens                  # globs (`*`, `?`) over the registered units
 $G --all --goldens --jobs 0                   # every unit, one child process per core (CI)
-$G --unit nlib.knots --bless                  # rewrite the unit's golden from this run
+$G --unit nlib.knots --bless                  # rewrite the unit's changed and added cases from this run
 nice -n 10 cargo test -p goldens              # the harness's and the runners' own tests
 ```
 
@@ -38,7 +38,7 @@ nice -n 10 cargo test -p goldens              # the harness's and the runners' o
 | `--unit <id>` | one unit (repeatable; `*` and `?` match several registered units) |
 | `--all` | every registered unit |
 | `--goldens` | check each unit against `expected/<unit>.jsonl` |
-| `--bless` | rewrite each unit's golden from this run (with `--filter`, only the cases it ran); a unit with a broken case is never blessed |
+| `--bless` | rewrite each unit's golden from this run: changed cases are rewritten, added ones added, unchanged ones keep their old line (with `--filter`, only the cases it ran); a unit with a broken case is never blessed |
 | `--reverse` | run each unit's cases in reverse order: a result that depends on what ran before shows as a change |
 | `--goldens-dir <dir>` | read and write goldens there instead of `expected/` |
 | `--filter S` | only cases whose name contains `S` |
@@ -74,7 +74,11 @@ blessed), `1` any failure, `2` usage or setup error.
   (`--unit <id> --bless`) and commits the golden with its reason: the commit message and
   the pull request list the cases that changed with their old and new values, why the new
   ones are right, and, for geometry, pictures before and after drawn from the same view.
-  A golden change without that justification is not reviewed. A bless never hides a
+  A golden change without that justification is not reviewed. A bless rewrites only the
+  cases the check reports as changed and adds the added ones; a case whose output still
+  agrees with its golden line (the agreement rule above) keeps that line byte for byte, so
+  float noise never reaches the diff. An unfiltered bless drops the cases the run no longer
+  produces; a bless with `--filter` keeps every case it did not run. A bless never hides a
   broken case: a unit with one is refused.
 * **Known failures.** A case whose result is wrong is never blessed. It is listed in
   `expected/known_failing.json` (`{"<unit>": {"<case>": "<issue>: <what is wrong>"}}`)

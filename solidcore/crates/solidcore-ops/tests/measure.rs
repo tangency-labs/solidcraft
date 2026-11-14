@@ -215,3 +215,41 @@ fn a_ray_beside_a_box_is_nearest_the_edge_it_passes() {
         Err(solidcore_ops::Error::Argument)
     );
 }
+
+#[test]
+fn a_box_face_holds_the_points_on_it_and_no_others() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [30.0, 20.0, 10.0]).unwrap();
+    let (record, order) = b.to_record().unwrap();
+    let top = (0..record.faces.len())
+        .find(|&f| {
+            b.point_on_face(&order, f, [15.0, 10.0, 10.0], 1e-6)
+                .unwrap()
+                .is_some()
+        })
+        .unwrap();
+    let on = b
+        .point_on_face(&order, top, [15.0, 10.0, 10.0], 1e-6)
+        .unwrap()
+        .unwrap();
+    assert!(
+        on.iter()
+            .zip([15.0, 10.0, 10.0])
+            .all(|(a, e)| (a - e).abs() < 1e-6),
+        "{on:?}"
+    );
+    // in the face's plane but off its trim, and off its plane
+    assert_eq!(
+        b.point_on_face(&order, top, [45.0, 10.0, 10.0], 1e-6)
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        b.point_on_face(&order, top, [15.0, 10.0, 12.0], 1e-6)
+            .unwrap(),
+        None
+    );
+    assert!(b
+        .point_on_face(&order, record.faces.len(), [15.0, 10.0, 10.0], 1e-6)
+        .is_err());
+}

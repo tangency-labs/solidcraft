@@ -119,7 +119,10 @@ fn at_most(c: ContinuityType, limit: ContinuityType) -> bool {
 /// The leaf span of `node` in `tree` (`(SmBezierSpan*)pNode->m_pData`, `NER`).
 fn leaf_span<O: Copy + PartialEq>(tree: &Tree<O>, node: &TreeNode<O>) -> Result<BezierSpan> {
     if matches!(node.data, NodeData::None) {
-        return Err(SolidError::null_pointer(OP_CCI));
+        return Err(SolidError::curve_stage_failed(
+            OP_CCI,
+            crate::error::SM_ERR_NULL_POINTER,
+        ));
     }
     Ok(*tree.curve_span(node)?)
 }
@@ -1146,9 +1149,19 @@ impl Curve {
         let cache = match make_curve_cache::<O>(k, self, opts.handle) {
             Ok(c) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::null_pointer(OP_GPA)),
+            Err(e) => {
+                return Err(crate::error::Failure::new(
+                    OP_GPA,
+                    crate::error::curve::CurveFailure::StageFailed,
+                )
+                .with_status(crate::error::SM_ERR_NULL_POINTER)
+                .caused_by(e)
+                .into_error())
+            }
         };
-        let curve_tree = cache.tree().ok_or(SolidError::null_pointer(OP_GPA))?;
+        let curve_tree = cache.tree().ok_or_else(|| {
+            SolidError::curve_stage_failed(OP_GPA, crate::error::SM_ERR_NULL_POINTER)
+        })?;
 
         // special case SM_CP_PERPENDICULAR_TO_VECTOR
         // quit when curve is a line or when curve is in plane perp to target vector
@@ -1628,6 +1641,18 @@ mod tests {
     }
 
     #[test]
+    fn a_leaf_without_a_span_is_a_stage_failure() {
+        let tree: Tree<()> = Tree::from_point(Vec3::ZERO, 1.0, false);
+        let e = leaf_span(&tree, &TreeNode::new()).unwrap_err();
+        assert_eq!(
+            e.curve_failure(),
+            Some(&crate::error::curve::CurveFailure::StageFailed)
+        );
+        assert!(e.is_defect());
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+    }
+
+    #[test]
     fn plane_intersection_and_classification() {
         let k = Kernel::default();
         // a parabola-like arc crossing y = 0.25 twice
@@ -1700,5 +1725,34 @@ mod tests {
             )
             .unwrap();
         assert!(r.solutions.is_empty());
+    }
+
+    #[test]
+    fn property_analysis_keeps_the_cache_build_error_as_its_cause() {
+        let k = Kernel::default();
+        // a B-spline with no NURB: its cache cannot be built
+        let c = Curve::from(crate::nurbs::b_spline_curve::BSplineCurve::new(3));
+        let built = make_curve_cache::<Obj>(&k, &c, Some(Obj(0))).unwrap_err();
+        let opts = PropertyAnalysisOptions::<Obj> {
+            property_value: None,
+            opt_vectors: &[],
+            want_comb: false,
+            handle: Some(Obj(0)),
+        };
+        let e = c
+            .global_property_analysis(
+                &k,
+                &Extent1d::from_raw(0.0, 1.0),
+                CurvePropertyType::InflectionPoints,
+                1e-6,
+                &opts,
+            )
+            .unwrap_err();
+        assert_eq!(
+            e.curve_failure(),
+            Some(&crate::error::curve::CurveFailure::StageFailed)
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.cause(), Some(&built));
     }
 }
