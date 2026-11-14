@@ -11,13 +11,14 @@ use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
+use crate::schema::inspect::{BodiesDetail, DocumentBodies, TimelineDetail, TimelineRow};
 use crate::schema::inspect::{
     BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox, CommandEntry,
     CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail, DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentSketch,
     FaceCylinder, KernelCounts, ListedMaterial, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams,
     MeasureResult, MeasureTotal, Measured, MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces,
     ModelThread, ModelThreads, ModelThreadsParams, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile,
-    SketchWire, TimelineEntry, WireArcInfo,
+    SketchWire, SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -49,16 +50,20 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "INSPECT")
         .icon("measure")
         .key("I")
-        .noundo()
+        .noundo().read_only()
         .contract(&MEASURE_CONTRACT)
         .output(output_schema_for::<MeasureResult>)
-        .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, point; index optional) → length/area/volume; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
+        .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
     CommandSpec::new("document.inspect", "Inspect Design", crate::checked!("document.inspect", inspect))
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&DOCUMENT_INSPECT_CONTRACT)
         .output(output_schema_for::<DocumentInspectResult>)
-        .params("measure?: bool (include body measurements); sketch_counts?: bool (each sketch also gives its plane and its number of points and constraints)"),
+        .params(
+            "measure?: bool (include body measurements); sketch_counts?: bool (each sketch also gives its plane and its number of points and constraints); \
+             timeline?: true (default) | \"summary\" (each feature as id, name, type, with error, warning, suppressed and rolled_back only when set) | false (left out); \
+             bodies?: true (default) | \"names\" (only the body names, nothing measured) | false (left out)",
+        ),
     CommandSpec::new("document.revision", "Design Revision", revision).icon("inspect").noundo().params(
         "→ document_id (this open design's id: kept while it stays open, another for each design started or opened), \
          revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
@@ -67,19 +72,19 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.inspect", "Inspect Sketch", crate::checked!("sketch.inspect", sketch_inspect))
         .at("SKETCH", "INSPECT")
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&SKETCH_INSPECT_CONTRACT)
         .output(output_schema_for::<SketchInspected>)
         .params("sketch?: id|name (default active)"),
     CommandSpec::new("model.edges", "List Edges", crate::checked!("model.edges", model_edges))
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&BODY_LIST_CONTRACT)
         .output(output_schema_for::<ModelEdges>)
         .params("body: name"),
     CommandSpec::new("model.faces", "List Faces", crate::checked!("model.faces", model_faces))
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&BODY_LIST_CONTRACT)
         .output(output_schema_for::<ModelFaces>)
         .params(
@@ -355,12 +360,27 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
                 CurveKind::Ellipse { c: cc, m, r } => {
                     CurveShape::Ellipse { center: pid(cc), major: pid(m), center_at: at(cc), major_at: at(m), minor_radius: r }
                 }
-                CurveKind::Spline { ref pts, control, degree, periodic, ref nurbs } => CurveShape::Spline {
+                CurveKind::Spline { ref pts, control, degree, periodic, ref nurbs, ref handles } => CurveShape::Spline {
                     points: pts.iter().map(|q| pid(*q)).collect(),
                     points_at: pts.iter().map(|q| at(*q)).collect(),
                     control,
                     degree,
                     periodic,
+                    tangent_handles: handles
+                        .iter()
+                        .map(|&point| SplineTangentHandle {
+                            point: pid(point),
+                            at: at(point),
+                            curve: sk
+                                .curves
+                                .iter()
+                                .find(|candidate| {
+                                    candidate.spline_handle_of.as_deref() == Some(c.id.as_str())
+                                        && matches!(candidate.kind, CurveKind::Line { a, b } if a == point || b == point)
+                                })
+                                .map(|candidate| candidate.id.clone()),
+                        })
+                        .collect(),
                     // A control spline with its own knots (a projected free-form edge) says them.
                     knots: nurbs.as_ref().map(|n| n.knots.clone()),
                     weights: nurbs.as_ref().filter(|n| !n.weights.is_empty()).map(|n| n.weights.clone()),
@@ -428,6 +448,23 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
             holes: p.hole_curves.iter().map(|h| solidcraft_sketch::distinct_curves(h)).collect(),
         })
         .collect();
+    // Planar loops the 3D sketch curves close in planes of their own (#741): the plane is given
+    // as an origin and a unit normal, and the centroid is in the same frame as the sketch plane.
+    let profiles_3d: Vec<Value> = ss
+        .profiles_3d
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            json!({
+                "index": i,
+                "area_mm2": p.area,
+                "plane": { "origin": p.plane.origin, "normal": p.plane.normal() },
+                "centroid": p.centroid,
+                "curves": p.outer_curves,
+                "holes": p.hole_curves,
+            })
+        })
+        .collect();
     let wires = sk
         .wires
         .iter()
@@ -458,6 +495,7 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
         points,
         constraints,
         profiles,
+        profiles_3d,
         links: serde_json::to_value(&sk.links).unwrap_or_default(),
         wires,
         visible: crate::view::sketch_shown(s, id),
@@ -526,6 +564,8 @@ fn revision(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
+    let timeline_detail = TimelineDetail::read(p.get("timeline")).map_err(|e| bad("document.inspect", e))?;
+    let bodies_detail = BodiesDetail::read(p.get("bodies")).map_err(|e| bad("document.inspect", e))?;
     let st = s.model.state();
     let (vals, perr) = s.doc.param_values();
     let params: Vec<DocumentParam> = s
@@ -543,27 +583,41 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .collect();
     let marker = s.doc.marker.unwrap_or(s.doc.features.len());
-    let timeline: Vec<TimelineEntry> = s
-        .doc
-        .features
-        .iter()
-        .enumerate()
-        .map(|(i, f)| {
-            let r = s.model.result(f.id);
-            TimelineEntry {
-                id: f.id,
-                name: f.name.clone(),
-                kind: f.kind.type_name().to_string(),
-                suppressed: f.suppressed,
-                rolled_back: i >= marker,
-                error: r.and_then(|r| r.error.clone()),
-                warning: r.and_then(|r| r.warning.clone()),
-                ms: r.map(|r| r.ms),
-            }
-        })
-        .collect();
+    let timeline: Option<Vec<TimelineRow>> = (timeline_detail != TimelineDetail::Left).then(|| {
+        s.doc
+            .features
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let r = s.model.result(f.id);
+                let (error, warning) = (r.and_then(|r| r.error.clone()), r.and_then(|r| r.warning.clone()));
+                if timeline_detail == TimelineDetail::Summary {
+                    return TimelineRow::Summary(TimelineSummary {
+                        id: f.id,
+                        name: f.name.clone(),
+                        kind: f.kind.type_name().to_string(),
+                        error,
+                        warning,
+                        suppressed: f.suppressed.then_some(true),
+                        rolled_back: (i >= marker).then_some(true),
+                    });
+                }
+                TimelineRow::Full(TimelineEntry {
+                    id: f.id,
+                    name: f.name.clone(),
+                    kind: f.kind.type_name().to_string(),
+                    suppressed: f.suppressed,
+                    rolled_back: i >= marker,
+                    error,
+                    warning,
+                    ms: r.map(|r| r.ms),
+                })
+            })
+            .collect()
+    });
     let definitions = s.model.state();
-    let with_measure = bool_(p, "measure").unwrap_or(false);
+    // Only bodies given in full are measured.
+    let with_measure = bool_(p, "measure").unwrap_or(false) && bodies_detail == BodiesDetail::Full;
     let with_counts = bool_(p, "sketch_counts").unwrap_or(false);
     // Each body is measured on its own: on all cores, in body order (as `inspect.measure`).
     let mut measured =
@@ -583,6 +637,11 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             DocumentBody { detail, visible: s.body_visible(&b.name), removed_later: s.body_removed_later(&b.name).then_some(true) }
         })
         .collect();
+    let bodies = match bodies_detail {
+        BodiesDetail::Full => Some(DocumentBodies::Full(bodies)),
+        BodiesDetail::Names => Some(DocumentBodies::Names(st.bodies.iter().map(|b| b.name.clone()).collect())),
+        BodiesDetail::Left => None,
+    };
     let sketches: Vec<DocumentSketch> = st
         .sketches
         .iter()
@@ -703,8 +762,11 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
 const DESCRIBE_CONTRACT: crate::schema::TypedContract<crate::schema::inspect::DescribeParams> = crate::schema::TypedContract::new();
 
 /// A command's prose documentation and, for converted commands, its schemas.
-fn describe(_s: &mut Session, p: &Value) -> Result<Value> {
+fn describe(s: &mut Session, p: &Value) -> Result<Value> {
     let id = p.get("command").and_then(Value::as_str).ok_or_else(|| crate::params::bad("engine.describe", "`command` must be a command id"))?;
+    if let Some(entry) = crate::plugin::describe_entry(s, id)? {
+        return Ok(entry);
+    }
     let spec = super::find_command(id).ok_or_else(|| crate::EngineError::UnknownCommand(id.to_string()))?;
     let reply = crate::schema::inspect::DescribeResult {
         id: spec.id.to_string(),
@@ -718,7 +780,27 @@ fn describe(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn commands(s: &mut Session, _p: &Value) -> Result<Value> {
-    let list: Vec<CommandEntry> = crate::command_specs().iter().map(|c| c.info(s).into()).collect();
+    let mut list: Vec<CommandEntry> = crate::command_specs().iter().map(|c| c.info(s).into()).collect();
+    for (package_id, path) in &s.plugin_state.packages {
+        if let Ok(package) = crate::plugin::read_package(path)
+            && let Some(runtime) = package.manifest.runtime
+        {
+            for entry in runtime.entries {
+                list.push(CommandEntry {
+                    id: format!("{package_id}.{}", entry.name),
+                    label: entry.name,
+                    tab: String::new(),
+                    panel: String::new(),
+                    icon: "play".into(),
+                    shortcut: None,
+                    params: "approval, params: declared entry inputs (engine.describe)".into(),
+                    enabled: !s.disabled_plugins.contains(package_id),
+                    disabled_reason: s.disabled_plugins.contains(package_id).then(|| "plugin is disabled".into()),
+                    planned: None,
+                });
+            }
+        }
+    }
     typed_reply("engine.commands", list)
 }
 
@@ -803,7 +885,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut comps: Vec<u64> = Vec::new();
     for c in string_list(cmd, p, "components")? {
-        let id = s.component_or_placement(&c).ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
+        let id = s.component_or_placement(&c).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
         comps.push(id);
     }
     if bodies.is_empty() && faces.is_empty() && comps.is_empty() {
@@ -945,7 +1027,7 @@ pub(super) fn appearance_look(cmd: &str, p: &Value) -> Result<Option<solidcraft_
 }
 
 fn dist_to(b: &solidcraft_doc::ModelBody, p: solidcore_record::Vec3) -> f64 {
-    let bb = b.mesh().bounds();
+    let bb = b.body.exact_bounds().unwrap_or_else(|_| b.outline_bounds());
     let c = solidcore_record::Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
     c.dist(p)
 }

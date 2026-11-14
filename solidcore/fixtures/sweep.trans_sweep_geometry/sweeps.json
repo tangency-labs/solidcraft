@@ -1,0 +1,2598 @@
+{
+  "cases": [
+    {
+      "name": "upstream_translate_0",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1
+      },
+      "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:1370"
+    },
+    {
+      "name": "upstream_translate_1",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1
+      },
+      "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:1370"
+    },
+    {
+      "name": "upstream_translate_2",
+      "inputs": {
+        "op": 2,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1
+      },
+      "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:1370"
+    },
+    {
+      "name": "upstream_translate_3",
+      "inputs": {
+        "op": 3,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1
+      },
+      "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:1370"
+    },
+    {
+      "name": "upstream_translate_4",
+      "inputs": {
+        "op": 4,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1
+      },
+      "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:1370"
+    },
+    {
+      "name": "upstream_translate_5",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1
+      },
+      "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:1370"
+    },
+    {
+      "name": "upstream_translate_6",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 0
+      },
+      "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:1370"
+    },
+    {
+      "name": "upstream_translate_7",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1
+      },
+      "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:1370"
+    },
+    {
+      "name": "upstream_translate_8",
+      "inputs": {
+        "op": 8,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1
+      },
+      "upstream_ref": "tests/prog_test/src/smSweepTest.cpp:1370"
+    },
+    {
+      "name": "length_boundary_0_0",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          0,
+          0,
+          0
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_0_1.999999999e-05",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          0,
+          0,
+          1.999999999e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_0_2e-05",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          0,
+          0,
+          2e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_0_2.000000001e-05",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          0,
+          0,
+          2.000000001e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_1_0",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          0,
+          0,
+          0
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_1_1.999999999e-05",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          0,
+          0,
+          1.999999999e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_1_2e-05",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          0,
+          0,
+          2e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_1_2.000000001e-05",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          0,
+          0,
+          2.000000001e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_2_0",
+      "inputs": {
+        "op": 2,
+        "sweep": [
+          0,
+          0,
+          0
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_2_1.999999999e-05",
+      "inputs": {
+        "op": 2,
+        "sweep": [
+          0,
+          0,
+          1.999999999e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_2_2e-05",
+      "inputs": {
+        "op": 2,
+        "sweep": [
+          0,
+          0,
+          2e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_2_2.000000001e-05",
+      "inputs": {
+        "op": 2,
+        "sweep": [
+          0,
+          0,
+          2.000000001e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_3_0",
+      "inputs": {
+        "op": 3,
+        "sweep": [
+          0,
+          0,
+          0
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_3_1.999999999e-05",
+      "inputs": {
+        "op": 3,
+        "sweep": [
+          0,
+          0,
+          1.999999999e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_3_2e-05",
+      "inputs": {
+        "op": 3,
+        "sweep": [
+          0,
+          0,
+          2e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_3_2.000000001e-05",
+      "inputs": {
+        "op": 3,
+        "sweep": [
+          0,
+          0,
+          2.000000001e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_4_0",
+      "inputs": {
+        "op": 4,
+        "sweep": [
+          0,
+          0,
+          0
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_4_1.999999999e-05",
+      "inputs": {
+        "op": 4,
+        "sweep": [
+          0,
+          0,
+          1.999999999e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_4_2e-05",
+      "inputs": {
+        "op": 4,
+        "sweep": [
+          0,
+          0,
+          2e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_4_2.000000001e-05",
+      "inputs": {
+        "op": 4,
+        "sweep": [
+          0,
+          0,
+          2.000000001e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_6_0",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          0
+        ],
+        "kind": 0
+      }
+    },
+    {
+      "name": "length_boundary_6_1.999999999e-05",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          1.999999999e-05
+        ],
+        "kind": 0
+      }
+    },
+    {
+      "name": "length_boundary_6_2e-05",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          2e-05
+        ],
+        "kind": 0
+      }
+    },
+    {
+      "name": "length_boundary_6_2.000000001e-05",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          2.000000001e-05
+        ],
+        "kind": 0
+      }
+    },
+    {
+      "name": "length_boundary_7_0",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          0
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_7_1.999999999e-05",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          1.999999999e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_7_2e-05",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          2e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_7_2.000000001e-05",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          2.000000001e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_8_0",
+      "inputs": {
+        "op": 8,
+        "sweep": [
+          0,
+          0,
+          0
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_8_1.999999999e-05",
+      "inputs": {
+        "op": 8,
+        "sweep": [
+          0,
+          0,
+          1.999999999e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_8_2e-05",
+      "inputs": {
+        "op": 8,
+        "sweep": [
+          0,
+          0,
+          2e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "length_boundary_8_2.000000001e-05",
+      "inputs": {
+        "op": 8,
+        "sweep": [
+          0,
+          0,
+          2.000000001e-05
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "frame_0_(1, 0, 0)",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          1,
+          0,
+          0
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_1_(1, 0, 0)",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          1,
+          0,
+          0
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_0_(0, 1, 0)",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          0,
+          1,
+          0
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_1_(0, 1, 0)",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          0,
+          1,
+          0
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_0_(0, 0, 1)",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_1_(0, 0, 1)",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_0_(1, 1, 1)",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          1,
+          1,
+          1
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_1_(1, 1, 1)",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          1,
+          1,
+          1
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_0_(1, 2, 3)",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          1,
+          2,
+          3
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_1_(1, 2, 3)",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          1,
+          2,
+          3
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_0_(-1, -2, -3)",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          -1,
+          -2,
+          -3
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_1_(-1, -2, -3)",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          -1,
+          -2,
+          -3
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_0_(1e-15, 0, 0)",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          1e-15,
+          0,
+          0
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_1_(1e-15, 0, 0)",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          1e-15,
+          0,
+          0
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_0_(1e-13, 0, 0)",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          1e-13,
+          0,
+          0
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "frame_1_(1e-13, 0, 0)",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          1e-13,
+          0,
+          0
+        ],
+        "point": [
+          1,
+          -2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "geometry_0_5_False_False",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 0,
+        "analytics": false,
+        "swap": false,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_0_5_False_True",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 0,
+        "analytics": false,
+        "swap": true,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_0_5_True_False",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 0,
+        "analytics": true,
+        "swap": false,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_0_5_True_True",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 0,
+        "analytics": true,
+        "swap": true,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_0_6_False_False",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 0,
+        "analytics": false,
+        "swap": false,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_0_6_False_True",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 0,
+        "analytics": false,
+        "swap": true,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_0_6_True_False",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 0,
+        "analytics": true,
+        "swap": false,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_0_6_True_True",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 0,
+        "analytics": true,
+        "swap": true,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_0_7_False_False",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 0,
+        "analytics": false,
+        "swap": false,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_0_7_False_True",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 0,
+        "analytics": false,
+        "swap": true,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_0_7_True_False",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 0,
+        "analytics": true,
+        "swap": false,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_0_7_True_True",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 0,
+        "analytics": true,
+        "swap": true,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_1_5_False_False",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1,
+        "analytics": false,
+        "swap": false,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_1_5_False_True",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1,
+        "analytics": false,
+        "swap": true,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_1_5_True_False",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1,
+        "analytics": true,
+        "swap": false,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_1_5_True_True",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1,
+        "analytics": true,
+        "swap": true,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_1_6_False_False",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1,
+        "analytics": false,
+        "swap": false,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_1_6_False_True",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1,
+        "analytics": false,
+        "swap": true,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_1_6_True_False",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1,
+        "analytics": true,
+        "swap": false,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_1_6_True_True",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1,
+        "analytics": true,
+        "swap": true,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_1_7_False_False",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1,
+        "analytics": false,
+        "swap": false,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_1_7_False_True",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1,
+        "analytics": false,
+        "swap": true,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_1_7_True_False",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1,
+        "analytics": true,
+        "swap": false,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_1_7_True_True",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 1,
+        "analytics": true,
+        "swap": true,
+        "interval": [
+          0.2,
+          0.8
+        ]
+      }
+    },
+    {
+      "name": "geometry_2_5_False_False",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 2,
+        "analytics": false,
+        "swap": false,
+        "interval": [
+          0,
+          1
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:373"
+    },
+    {
+      "name": "geometry_2_5_False_True",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 2,
+        "analytics": false,
+        "swap": true,
+        "interval": [
+          0,
+          1
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:373"
+    },
+    {
+      "name": "geometry_2_5_True_False",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 2,
+        "analytics": true,
+        "swap": false,
+        "interval": [
+          0,
+          1
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:373"
+    },
+    {
+      "name": "geometry_2_5_True_True",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 2,
+        "analytics": true,
+        "swap": true,
+        "interval": [
+          0,
+          1
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:373"
+    },
+    {
+      "name": "geometry_2_6_False_False",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 2,
+        "analytics": false,
+        "swap": false,
+        "interval": [
+          0,
+          1
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:373"
+    },
+    {
+      "name": "geometry_2_6_False_True",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 2,
+        "analytics": false,
+        "swap": true,
+        "interval": [
+          0,
+          1
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:373"
+    },
+    {
+      "name": "geometry_2_6_True_False",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 2,
+        "analytics": true,
+        "swap": false,
+        "interval": [
+          0,
+          1
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:373"
+    },
+    {
+      "name": "geometry_2_6_True_True",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 2,
+        "analytics": true,
+        "swap": true,
+        "interval": [
+          0,
+          1
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:373"
+    },
+    {
+      "name": "geometry_2_7_False_False",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 2,
+        "analytics": false,
+        "swap": false,
+        "interval": [
+          0,
+          1
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:373"
+    },
+    {
+      "name": "geometry_2_7_False_True",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 2,
+        "analytics": false,
+        "swap": true,
+        "interval": [
+          0,
+          1
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:373"
+    },
+    {
+      "name": "geometry_2_7_True_False",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 2,
+        "analytics": true,
+        "swap": false,
+        "interval": [
+          0,
+          1
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:373"
+    },
+    {
+      "name": "geometry_2_7_True_True",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 2,
+        "analytics": true,
+        "swap": true,
+        "interval": [
+          0,
+          1
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            10
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      },
+      "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:373"
+    },
+    {
+      "name": "parallel_5_0",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          10,
+          0,
+          0
+        ],
+        "kind": 0
+      }
+    },
+    {
+      "name": "parallel_5_1",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          10,
+          0,
+          0
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "parallel_7_0",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          10,
+          0,
+          0
+        ],
+        "kind": 0
+      }
+    },
+    {
+      "name": "parallel_7_1",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          10,
+          0,
+          0
+        ],
+        "kind": 1
+      }
+    },
+    {
+      "name": "distinct_tolerances_6_False",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "tolerances": [
+          1e-06,
+          3e-06,
+          5e-06,
+          1e-05
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "distinct_tolerances_6_True",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "tolerances": [
+          1e-06,
+          3e-06,
+          5e-06,
+          1e-05
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "distinct_tolerances_7_False",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "tolerances": [
+          1e-06,
+          3e-06,
+          5e-06,
+          1e-05
+        ],
+        "swap": false
+      }
+    },
+    {
+      "name": "distinct_tolerances_7_True",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "tolerances": [
+          1e-06,
+          3e-06,
+          5e-06,
+          1e-05
+        ],
+        "swap": true
+      }
+    },
+    {
+      "name": "curved_surface_7_False",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "analytics": false,
+        "face_kind": 1,
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1,
+            2,
+            1,
+            1
+          ],
+          [
+            3,
+            1,
+            0,
+            1
+          ],
+          [
+            4,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "curved_surface_7_True",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "analytics": true,
+        "face_kind": 1,
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1,
+            2,
+            1,
+            1
+          ],
+          [
+            3,
+            1,
+            0,
+            1
+          ],
+          [
+            4,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "curved_surface_8_False",
+      "inputs": {
+        "op": 8,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "analytics": false,
+        "face_kind": 1,
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1,
+            2,
+            1,
+            1
+          ],
+          [
+            3,
+            1,
+            0,
+            1
+          ],
+          [
+            4,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "curved_surface_8_True",
+      "inputs": {
+        "op": 8,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "analytics": true,
+        "face_kind": 1,
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1,
+            2,
+            1,
+            1
+          ],
+          [
+            3,
+            1,
+            0,
+            1
+          ],
+          [
+            4,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "closed_cubic_5",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1,
+            2,
+            0,
+            1
+          ],
+          [
+            -1,
+            2,
+            0,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "rational_cubic_5",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            0.5,
+            1,
+            0.5,
+            0.5
+          ],
+          [
+            6,
+            2,
+            0,
+            2
+          ],
+          [
+            4,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.9
+        ]
+      }
+    },
+    {
+      "name": "closed_cubic_6",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1,
+            2,
+            0,
+            1
+          ],
+          [
+            -1,
+            2,
+            0,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "rational_cubic_6",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            0.5,
+            1,
+            0.5,
+            0.5
+          ],
+          [
+            6,
+            2,
+            0,
+            2
+          ],
+          [
+            4,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.9
+        ]
+      }
+    },
+    {
+      "name": "closed_cubic_7",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1,
+            2,
+            0,
+            1
+          ],
+          [
+            -1,
+            2,
+            0,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "rational_cubic_7",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            0.5,
+            1,
+            0.5,
+            0.5
+          ],
+          [
+            6,
+            2,
+            0,
+            2
+          ],
+          [
+            4,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.9
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e-99_0",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          1e-99,
+          2e-99,
+          3e-99
+        ],
+        "point": [
+          -1e-99,
+          1e-99,
+          0
+        ],
+        "tolerances": [
+          1e-105,
+          1e-105,
+          1e-105,
+          1e-105
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e-99_1",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          1e-99,
+          2e-99,
+          3e-99
+        ],
+        "point": [
+          -1e-99,
+          1e-99,
+          0
+        ],
+        "tolerances": [
+          1e-105,
+          1e-105,
+          1e-105,
+          1e-105
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e-99_2",
+      "inputs": {
+        "op": 2,
+        "sweep": [
+          1e-99,
+          2e-99,
+          3e-99
+        ],
+        "point": [
+          -1e-99,
+          1e-99,
+          0
+        ],
+        "tolerances": [
+          1e-105,
+          1e-105,
+          1e-105,
+          1e-105
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e-99_3",
+      "inputs": {
+        "op": 3,
+        "sweep": [
+          1e-99,
+          2e-99,
+          3e-99
+        ],
+        "point": [
+          -1e-99,
+          1e-99,
+          0
+        ],
+        "tolerances": [
+          1e-105,
+          1e-105,
+          1e-105,
+          1e-105
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e-99_4",
+      "inputs": {
+        "op": 4,
+        "sweep": [
+          1e-99,
+          2e-99,
+          3e-99
+        ],
+        "point": [
+          -1e-99,
+          1e-99,
+          0
+        ],
+        "tolerances": [
+          1e-105,
+          1e-105,
+          1e-105,
+          1e-105
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e+99_0",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          1e+99,
+          2e+99,
+          2.9999999999999997e+99
+        ],
+        "point": [
+          -1e+99,
+          1e+99,
+          0
+        ],
+        "tolerances": [
+          9.999999999999999e+92,
+          9.999999999999999e+92,
+          9.999999999999999e+92,
+          9.999999999999999e+92
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e+99_1",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          1e+99,
+          2e+99,
+          2.9999999999999997e+99
+        ],
+        "point": [
+          -1e+99,
+          1e+99,
+          0
+        ],
+        "tolerances": [
+          9.999999999999999e+92,
+          9.999999999999999e+92,
+          9.999999999999999e+92,
+          9.999999999999999e+92
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e+99_2",
+      "inputs": {
+        "op": 2,
+        "sweep": [
+          1e+99,
+          2e+99,
+          2.9999999999999997e+99
+        ],
+        "point": [
+          -1e+99,
+          1e+99,
+          0
+        ],
+        "tolerances": [
+          9.999999999999999e+92,
+          9.999999999999999e+92,
+          9.999999999999999e+92,
+          9.999999999999999e+92
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e+99_3",
+      "inputs": {
+        "op": 3,
+        "sweep": [
+          1e+99,
+          2e+99,
+          2.9999999999999997e+99
+        ],
+        "point": [
+          -1e+99,
+          1e+99,
+          0
+        ],
+        "tolerances": [
+          9.999999999999999e+92,
+          9.999999999999999e+92,
+          9.999999999999999e+92,
+          9.999999999999999e+92
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e+99_4",
+      "inputs": {
+        "op": 4,
+        "sweep": [
+          1e+99,
+          2e+99,
+          2.9999999999999997e+99
+        ],
+        "point": [
+          -1e+99,
+          1e+99,
+          0
+        ],
+        "tolerances": [
+          9.999999999999999e+92,
+          9.999999999999999e+92,
+          9.999999999999999e+92,
+          9.999999999999999e+92
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e+150_0",
+      "inputs": {
+        "op": 0,
+        "sweep": [
+          1e+150,
+          2e+150,
+          2.9999999999999998e+150
+        ],
+        "point": [
+          -1e+150,
+          1e+150,
+          0
+        ],
+        "tolerances": [
+          9.999999999999999e+143,
+          9.999999999999999e+143,
+          9.999999999999999e+143,
+          9.999999999999999e+143
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e+150_1",
+      "inputs": {
+        "op": 1,
+        "sweep": [
+          1e+150,
+          2e+150,
+          2.9999999999999998e+150
+        ],
+        "point": [
+          -1e+150,
+          1e+150,
+          0
+        ],
+        "tolerances": [
+          9.999999999999999e+143,
+          9.999999999999999e+143,
+          9.999999999999999e+143,
+          9.999999999999999e+143
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e+150_2",
+      "inputs": {
+        "op": 2,
+        "sweep": [
+          1e+150,
+          2e+150,
+          2.9999999999999998e+150
+        ],
+        "point": [
+          -1e+150,
+          1e+150,
+          0
+        ],
+        "tolerances": [
+          9.999999999999999e+143,
+          9.999999999999999e+143,
+          9.999999999999999e+143,
+          9.999999999999999e+143
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e+150_3",
+      "inputs": {
+        "op": 3,
+        "sweep": [
+          1e+150,
+          2e+150,
+          2.9999999999999998e+150
+        ],
+        "point": [
+          -1e+150,
+          1e+150,
+          0
+        ],
+        "tolerances": [
+          9.999999999999999e+143,
+          9.999999999999999e+143,
+          9.999999999999999e+143,
+          9.999999999999999e+143
+        ]
+      }
+    },
+    {
+      "name": "extreme_scale_1e+150_4",
+      "inputs": {
+        "op": 4,
+        "sweep": [
+          1e+150,
+          2e+150,
+          2.9999999999999998e+150
+        ],
+        "point": [
+          -1e+150,
+          1e+150,
+          0
+        ],
+        "tolerances": [
+          9.999999999999999e+143,
+          9.999999999999999e+143,
+          9.999999999999999e+143,
+          9.999999999999999e+143
+        ]
+      }
+    },
+    {
+      "name": "check_interval_[0.5, 0.5]",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "interval": [
+          0.5,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "check_interval_[-0.1, 1.1]",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "interval": [
+          -0.1,
+          1.1
+        ]
+      }
+    },
+    {
+      "name": "check_interval_[0.0, 1e-14]",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "interval": [
+          0.0,
+          1e-14
+        ]
+      }
+    },
+    {
+      "name": "wire_glue_threshold_6",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:2289",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          1
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-05,
+            0,
+            0,
+            1
+          ]
+        ],
+        "tolerances": [
+          1e-06,
+          3e-06,
+          1e-05,
+          1e-05
+        ]
+      }
+    },
+    {
+      "name": "wire_glue_threshold_7",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:2289",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          1
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-05,
+            0,
+            0,
+            1
+          ]
+        ],
+        "tolerances": [
+          1e-06,
+          3e-06,
+          1e-05,
+          1e-05
+        ]
+      }
+    },
+    {
+      "name": "hermite_dispatch_5",
+      "inputs": {
+        "op": 5,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 3
+      }
+    },
+    {
+      "name": "hermite_dispatch_6",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 3
+      }
+    },
+    {
+      "name": "hermite_dispatch_7",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 3
+      }
+    },
+    {
+      "name": "planar_curve_dimension_6",
+      "inputs": {
+        "op": 6,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 4
+      }
+    },
+    {
+      "name": "planar_curve_dimension_7",
+      "inputs": {
+        "op": 7,
+        "sweep": [
+          0,
+          0,
+          10
+        ],
+        "kind": 4
+      }
+    }
+  ]
+}

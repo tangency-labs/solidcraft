@@ -1,0 +1,354 @@
+{
+  "area": "ladder/04-spline-profiles",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "nurbs": {
+              "degree": 3,
+              "knots": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "points": [
+                [
+                  20.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  20.0,
+                  6.790532384504622,
+                  0.0,
+                  1.0
+                ],
+                [
+                  15.939341149657764,
+                  13.581064769009243,
+                  0.0,
+                  1.0
+                ],
+                [
+                  10.0,
+                  17.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            }
+          },
+          {
+            "nurbs": {
+              "degree": 3,
+              "knots": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "points": [
+                [
+                  10.0,
+                  17.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  3.977268997194696,
+                  20.466937947057957,
+                  0.0,
+                  1.0
+                ],
+                [
+                  -3.977268997194696,
+                  20.466937947057957,
+                  0.0,
+                  1.0
+                ],
+                [
+                  -10.0,
+                  17.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            }
+          },
+          {
+            "nurbs": {
+              "degree": 3,
+              "knots": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "points": [
+                [
+                  -10.0,
+                  17.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  -15.939341149657764,
+                  13.581064769009243,
+                  0.0,
+                  1.0
+                ],
+                [
+                  -20.0,
+                  6.790532384504622,
+                  0.0,
+                  1.0
+                ],
+                [
+                  -20.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            }
+          },
+          {
+            "nurbs": {
+              "degree": 3,
+              "knots": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "points": [
+                [
+                  -20.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  -20.0,
+                  -6.790532384504622,
+                  0.0,
+                  1.0
+                ],
+                [
+                  -15.939341149657764,
+                  -13.581064769009243,
+                  0.0,
+                  1.0
+                ],
+                [
+                  -10.0,
+                  -17.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            }
+          },
+          {
+            "nurbs": {
+              "degree": 3,
+              "knots": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "points": [
+                [
+                  -10.0,
+                  -17.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  -3.977268997194696,
+                  -20.466937947057957,
+                  0.0,
+                  1.0
+                ],
+                [
+                  3.977268997194696,
+                  -20.466937947057957,
+                  0.0,
+                  1.0
+                ],
+                [
+                  10.0,
+                  -17.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            }
+          },
+          {
+            "nurbs": {
+              "degree": 3,
+              "knots": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "points": [
+                [
+                  10.0,
+                  -17.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  15.939341149657764,
+                  -13.581064769009243,
+                  0.0,
+                  1.0
+                ],
+                [
+                  20.0,
+                  -6.790532384504622,
+                  0.0,
+                  1.0
+                ],
+                [
+                  20.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "009-extrude-periodic-fit-spline",
+  "expected": {
+    "area_mm2": 3698.602434791,
+    "bbox": {
+      "max": [
+        20,
+        19.600203460293468,
+        10
+      ],
+      "min": [
+        -20,
+        -19.600203460293468,
+        0
+      ]
+    },
+    "body_count": 1,
+    "center_of_mass": [
+      0,
+      0,
+      5
+    ],
+    "edges": 18,
+    "faces": 8,
+    "method": "a periodic fit spline is the cyclic C2 cubic through its points with chord-length knots (crates/sketch/src/periodic.rs); A = 1/2 loop int (x y' - y x') over its six spans (Gauss, exact on the polynomials) = 1228.101202178, its length L by Gauss = 124.240003044; V = 10 A, area 2 A + 10 L. Faces: one side face per span + the caps; edges 6 + 6 + 6 vertical; vertices 12. The points are symmetric about both axes, so the curve is: x reaches 20 at (+-20, 0) (vertical tangent there), y reaches 19.600203460 between (10, 17) and (-10, 17); centre of mass (0, 0, 5)",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.00001
+    },
+    "vertices": 12,
+    "volume_mm3": 12281.012021778,
+    "what": "a closed periodic fit-point spline through 6 points, extruded 10"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 3698.602434788986,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12,
+      "volume_mm3": 12281.012021766748
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3698.602434788986,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12,
+      "volume_mm3": 12281.012021766748
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "a closed periodic fit-point spline through 6 points, extruded 10",
+  "why_not": []
+}

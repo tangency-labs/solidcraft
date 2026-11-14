@@ -234,6 +234,17 @@ impl Writer {
         if let Some(look) = &b.imported {
             let faces: Vec<Json> = look.faces.iter().map(|(name, (color, opacity))| json!([name, color, opacity])).collect();
             r["imported"] = json!({"color": look.color, "opacity": look.opacity, "faces": faces});
+            if look.name.is_some() || !look.face_names.is_empty() {
+                r["imported"]["name"] = json!(look.name);
+                r["imported"]["face_names"] = json!(look.face_names);
+            }
+        }
+        // The kernel body's own encoding keeps no colour names: the file's names for its paint.
+        if let Some(paint) = b.body.paint() {
+            let faces: Vec<Json> = paint.faces.iter().filter_map(|f| Some(json!([f.face, f.name.as_ref()?]))).collect();
+            if paint.name.is_some() || !faces.is_empty() {
+                r["paint_names"] = json!({"body": paint.name, "faces": faces});
+            }
         }
         r["body"] = json!(self.body(&b.body));
         self.model_bodies.push(r);
@@ -409,12 +420,14 @@ impl SavedModel {
         let mut sketches = Vec::new();
         for s in list("sketches")? {
             let sketch: solidcraft_sketch::Sketch = serde_json::from_value(parse(s.get("sketch"))?).map_err(|_| bad("saved model: sketch"))?;
+            let plane: Plane = serde_json::from_value(parse(s.get("plane"))?).map_err(|_| bad("saved model: sketch"))?;
             sketches.push(Arc::new(SolvedSketch {
                 feature: s.get("feature").and_then(Json::as_u64).ok_or_else(|| bad("saved model: sketch"))?,
                 name: text(s.get("name"))?,
-                plane: serde_json::from_value(parse(s.get("plane"))?).map_err(|_| bad("saved model: sketch"))?,
+                plane,
                 report: serde_json::from_value(parse(s.get("report"))?).map_err(|_| bad("saved model: sketch"))?,
                 profiles: find_profiles(&sketch),
+                profiles_3d: solidcraft_sketch::find_planar_3d_profiles(&sketch, plane),
                 ends: solidcraft_sketch::loose_ends(&sketch),
                 sketch,
             }));
@@ -445,11 +458,33 @@ impl SavedModel {
             b.bytes = b.body.retained_bytes();
             if let Some(look) = r.get("imported") {
                 let faces: Vec<(String, [f32; 3], f32)> = serde_json::from_value(parse(look.get("faces"))?).map_err(|_| bad("saved model: look"))?;
+                let colour_name = |v: Option<&Json>| -> Result<Option<String>> {
+                    let name: Option<String> = serde_json::from_value(v.cloned().unwrap_or(Json::Null)).map_err(|_| bad("saved model: look"))?;
+                    Ok(name.as_deref().and_then(solidcraft_kernel::colour_name))
+                };
+                let face_names: BTreeMap<String, String> =
+                    serde_json::from_value(look.get("face_names").cloned().unwrap_or_else(|| json!({}))).map_err(|_| bad("saved model: look"))?;
                 b.imported = Some(Arc::new(crate::appearance::ImportedLook {
                     color: serde_json::from_value(parse(look.get("color"))?).map_err(|_| bad("saved model: look"))?,
                     opacity: serde_json::from_value(parse(look.get("opacity"))?).map_err(|_| bad("saved model: look"))?,
                     faces: faces.into_iter().map(|(name, color, opacity)| (name, (color, opacity))).collect(),
+                    name: colour_name(look.get("name"))?,
+                    face_names: face_names.into_iter().filter_map(|(face, name)| Some((face, solidcraft_kernel::colour_name(&name)?))).collect(),
                 }));
+            }
+            if let Some(names) = r.get("paint_names")
+                && let Some(paint) = b.body.paint()
+            {
+                let body: Option<String> =
+                    serde_json::from_value(names.get("body").cloned().unwrap_or(Json::Null)).map_err(|_| bad("saved model: paint"))?;
+                let faces: Vec<(usize, String)> =
+                    serde_json::from_value(names.get("faces").cloned().unwrap_or_else(|| json!([]))).map_err(|_| bad("saved model: paint"))?;
+                let mut paint = paint.clone();
+                paint.name = body.as_deref().and_then(solidcraft_kernel::colour_name);
+                for f in &mut paint.faces {
+                    f.name = faces.iter().rfind(|(face, _)| *face == f.face).and_then(|(_, name)| solidcraft_kernel::colour_name(name));
+                }
+                b.body = b.body.clone().with_paint(Some(paint));
             }
             model_bodies.push(b);
         }
@@ -917,7 +952,10 @@ impl Model {
         }
         let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, ..Model::default() };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
-        if unkept > 0 {
+        // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
+        // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139).
+        let posed = doc.features.iter().zip(&model.results).any(|(f, r)| !r.skipped && pose_only(f));
+        if unkept > 0 || posed {
             // The features whose state the file did not keep, each evaluated again from the state
             // before it: nothing else in the model is missing then.
             model.evaluate(doc);
@@ -933,8 +971,16 @@ impl Model {
         let mut before = Arc::new(ModelState::default());
         if let Ok(mut cache) = model.cache.lock() {
             for (f, r) in doc.features.iter().zip(&model.results).filter(|(_, r)| !r.skipped && r.error.is_none()) {
-                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests) ^ placement_digest(doc, f, Some(&before));
-                cache.put(
+                // A pose-only feature's fingerprint leaves its pose out, so its saved result may be
+                // from another pose than `doc`'s: it is no result for `doc`'s key (#12139).
+                if pose_only(f) {
+                    before = r.state.clone();
+                    continue;
+                }
+                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests)
+                    ^ placement_digest(doc, f, Some(&before))
+                    ^ construct_digest(doc, &vals, f, Some(&before));
+                cache.states.put(
                     cache_key(f, r.fingerprint, local, ctx, &before),
                     CachedEval {
                         error: None,
@@ -942,9 +988,10 @@ impl Model {
                         import_report: r.import_report.clone(),
                         repair: r.repair.clone(),
                         ms: r.ms,
-                        bytes: r.state.retained_bytes(),
                         state: r.state.clone(),
                     },
+                    r.state.retained_bytes(),
+                    r.ms,
                 );
                 before = r.state.clone();
             }

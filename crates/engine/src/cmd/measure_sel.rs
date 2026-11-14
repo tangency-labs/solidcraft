@@ -6,6 +6,7 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_geom::mesh_distance::TriangleSet;
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Mesh, UnitVec3};
 
@@ -18,27 +19,6 @@ use crate::{Result, Sel, Session};
 enum Geo {
     Points(Vec<Vec3>),
     Tris(Vec<[Vec3; 3]>),
-}
-
-/// Caps that keep a measurement interactive on big meshes.
-const MAX_POINTS: usize = 4000;
-const MAX_TRIS: usize = 20000;
-
-fn closest_on_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
-    let n = (b - a).cross(c - a);
-    if let Some(nn) = n.normalized() {
-        let q = p - nn * (p - a).dot(nn);
-        if [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= -1e-12) {
-            return q;
-        }
-    }
-    let on_seg = |u: Vec3, v: Vec3| {
-        let d = v - u;
-        let l2 = d.dot(d);
-        let t = if l2 > 0.0 { ((p - u).dot(d) / l2).clamp(0.0, 1.0) } else { 0.0 };
-        u + d * t
-    };
-    [on_seg(a, b), on_seg(b, c), on_seg(c, a)].into_iter().min_by(|x, y| x.dist(p).total_cmp(&y.dist(p))).unwrap_or(a)
 }
 
 fn polyline_len(pts: &[Vec3]) -> f64 {
@@ -110,8 +90,18 @@ fn fit_circle(pts: &[Vec3], tol: f64) -> Option<(Vec3, UnitVec3, f64)> {
 /// is the same edge (its ends on the polyline), else fitted to the polyline's points; and
 /// whether it is the exact one.
 fn edge_round(b: &solidcraft_doc::ModelBody, m: &Mesh, index: usize, whole: bool) -> Option<(Shape, bool)> {
+    edge_round_within(b, m, index, whole, edge_tolerance(m))
+}
+
+/// How far a point may lie from an exact curve and still count as on it, for mesh `m`.
+fn edge_tolerance(m: &Mesh) -> f64 {
+    (m.bounds().diagonal().max(1.0) * 1e-6).max(1e-9)
+}
+
+/// [`edge_round`] with the mesh's tolerance already worked out: finding it reads every vertex of
+/// the mesh, which a caller going through many edges should do once.
+fn edge_round_within(b: &solidcraft_doc::ModelBody, m: &Mesh, index: usize, whole: bool, tol: f64) -> Option<(Shape, bool)> {
     let pts = m.edges.get(index)?;
-    let tol = (m.bounds().diagonal().max(1.0) * 1e-6).max(1e-9);
     let exact = solidcraft_kernel::edge_circle(&b.body, index).filter(|c| {
         let ends = [pts.first(), pts.last()].into_iter().flatten().all(|p| p.dist(c.start).min(p.dist(c.end)) <= tol * 10.0);
         let on = pts.iter().all(|p| (p.dist(c.center) - c.radius).abs() <= tol * 10.0);
@@ -156,7 +146,7 @@ fn arc_points(center: Vec3, axis: UnitVec3, start: Vec3, angle: f64) -> Vec<Vec3
 
 /// The solved sketch holding a picked curve or point: `sketch` when given, else the active
 /// sketch, else the last sketch with that id.
-fn sketch_of<'a>(
+pub(super) fn sketch_of<'a>(
     s: &Session,
     st: &'a solidcraft_doc::ModelState,
     sketch: Option<u64>,
@@ -174,7 +164,8 @@ fn sketch_of<'a>(
 fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
     use solidcraft_sketch::CurveKind;
     let sk = &ss.sketch;
-    let c = sk.curves.get(sk.curve_index(id)?)?;
+    let Some(index) = sk.curve_index(id) else { return sketch_wire(sk, id) };
+    let c = sk.curves.get(index)?;
     let at = |i: usize| sk.points.get(i).map(|p| ss.plane.to_world(p.pos));
     let normal = ss.plane.normal().unit()?;
     let (shape, pts) = match c.kind {
@@ -214,6 +205,38 @@ fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
         }
     };
     Some(Item { geo: Geo::Points(pts), dir, json, shape, slot: None })
+}
+
+/// A curve drawn in a 3D sketch, or a linked 3D curve (a wire, #14051), whose points are in world
+/// coordinates: a line measures as a line, an exact arc as its circle, and any other curve along
+/// its points. A single point is not a curve.
+fn sketch_wire(sk: &solidcraft_sketch::Sketch, id: &str) -> Option<Item> {
+    let w = sk.wires.get(sk.wire_index(id)?)?;
+    let mut json = json!({"type": "sketch_curve", "id": id});
+    if let Some(arc) = w.arc {
+        let axis = arc.normal.unit()?;
+        let (x, y) = ((arc.start - arc.center).normalized()?, axis.cross((arc.start - arc.center).normalized()?));
+        let mut angle = (arc.end - arc.center).dot(y).atan2((arc.end - arc.center).dot(x));
+        if angle <= 0.0 {
+            angle += std::f64::consts::TAU;
+        }
+        let shape = Shape::Round { center: arc.center, axis, radius: arc.radius, angle, planar: true, lo: 0.0, hi: 0.0 };
+        json["length_mm"] = json!(curve_len(&shape, true, 0.0));
+        add_round(&mut json, &shape);
+        let pts = arc_points(arc.center, axis, arc.start, angle);
+        return Some(Item { geo: Geo::Points(pts), dir: None, json, shape, slot: None });
+    }
+    match w.pts.as_slice() {
+        [] | [_] => None,
+        [a, b] => {
+            json["length_mm"] = json!(a.dist(*b));
+            Some(Item { geo: Geo::Points(densify(&[*a, *b])), dir: (*b - *a).normalized(), json, shape: Shape::Line { a: *a, b: *b }, slot: None })
+        }
+        pts => {
+            json["length_mm"] = json!(polyline_len(pts));
+            Some(Item { geo: Geo::Points(pts.to_vec()), dir: None, json, shape: Shape::Other, slot: None })
+        }
+    }
 }
 
 /// A profile (closed region of a sketch): its area, and when it is a circle or a slot, its
@@ -359,6 +382,19 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             let normals: Vec<UnitVec3> = tris.iter().filter_map(|[a, b, c]| (*b - *a).cross(*c - *a).unit()).collect();
             let planar = normals.first().copied().filter(|n0| normals.iter().all(|n| n.dot(*n0) > 1.0 - 1e-6));
             let mut json = json!({"type": "face", "area_mm2": area, "planar": planar.is_some()});
+            // Each border edge counts for what Measure shows for that edge on its own.
+            let tol = edge_tolerance(&m);
+            let edge_len = |edge: usize| {
+                let polyline = m.edges.get(edge).map_or(0.0, |pts| polyline_len(pts));
+                edge_round_within(b, &m, edge, false, tol).map_or(polyline, |(shape, exact)| curve_len(&shape, exact, polyline))
+            };
+            if let Some(perimeter) = super::measure_exact::patch_perimeter(&m, &patch, planar.is_some(), edge_len) {
+                json["perimeter_mm"] = json!(perimeter.total);
+                if let Some((outer, inner)) = perimeter.outer_inner {
+                    json["outer_perimeter_mm"] = json!(outer);
+                    json["inner_perimeter_mm"] = json!(inner);
+                }
+            }
             let verts: Vec<Vec3> = tris.iter().flat_map(|t| t.iter().copied()).collect();
             let surface = solidcraft_kernel::face_surface(&b.body, *index);
             let shape = match surface {
@@ -393,7 +429,9 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             };
             plain(Geo::Tris(tris), None, json!({"type": "body", "name": name, "closed": closed, "volume_mm3": closed.then_some(v)}))
         }
-        Sel::SketchCurve { id, sketch } => sketch_curve(sketch_of(s, st, *sketch, |sk| sk.curve_index(id).is_some())?, id),
+        Sel::SketchCurve { id, sketch } => {
+            sketch_curve(sketch_of(s, st, *sketch, |sk| sk.curve_index(id).is_some() || sk.wire_index(id).is_some())?, id)
+        }
         Sel::ExternalSketchCurve { sketch, id } => sketch_curve(sketch_of(s, st, Some(*sketch), |_| true)?, id),
         Sel::SketchPoint { id } | Sel::ExternalSketchPoint { id, .. } => {
             let given = match sel {
@@ -431,14 +469,30 @@ pub(crate) fn shape_of(s: &Session, sel: &Sel) -> Option<(Shape, Vec<Vec3>, Vec<
     })
 }
 
+/// What `selection.get` reports of a picked item beyond its identity: the measurement
+/// `inspect.measure` gives it (length, area, volume, radius…), its direction where it has one
+/// (a planar face's normal, a straight edge's direction) and, for an edge, whether it is a line,
+/// a circle, an arc or another curve.
+pub(super) fn resolve(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<(Value, Option<Vec3>)> {
+    let item = describe(s, st, sel)?;
+    let mut json = item.json;
+    if matches!(sel, Sel::Edge { .. }) {
+        json["curve"] = match item.shape {
+            Shape::Line { .. } => json!("line"),
+            Shape::Round { .. } => json.get("round").cloned().unwrap_or_else(|| json!("arc")),
+            _ => json!("other"),
+        };
+    }
+    Some((json, item.dir))
+}
+
 fn sample<T: Copy>(v: &[T], max: usize) -> Vec<T> {
     let step = v.len().div_ceil(max).max(1);
     v.iter().step_by(step).copied().collect()
 }
 
-/// Closest pair of points between two pieces of geometry.
 /// An origin plane (XY, XZ, YZ) or a construction plane's point and normal.
-fn plane_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
+pub(super) fn plane_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
     match name {
         "XY" => Some((Vec3::ZERO, Vec3::Z)),
         "XZ" => Some((Vec3::ZERO, Vec3::Y)),
@@ -448,7 +502,7 @@ fn plane_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
 }
 
 /// An origin axis (X, Y, Z) or a construction axis's point and unit direction.
-fn axis_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
+pub(super) fn axis_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
     match name {
         "X" => Some((Vec3::ZERO, Vec3::X)),
         "Y" => Some((Vec3::ZERO, Vec3::Y)),
@@ -457,133 +511,58 @@ fn axis_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
     }
 }
 
-/// The closest points of two exact shapes, where the sampled points would be wrong: a plane or
-/// an axis runs on, so a point set of it is not the object. `anchor` is a point of `a` to
-/// measure from where any point would do (two parallel planes); `unbounded` says whether `a`
-/// and `b` run on for ever (datum planes and axes) rather than ending (faces and edges).
+/// The closest points of a datum plane and another item, which its sampled point can't give:
+/// the plane runs on for ever. `anchor` is a point of `a` to measure from where any point would
+/// do (two parallel planes); `unbounded` says whether `a` and `b` run on for ever (datum planes
+/// and axes) rather than ending (faces and edges). A face's plane gives nothing here: the face
+/// ends, and [`closest`] measures it.
 fn exact_min(a: &Shape, b: &Shape, anchor: Option<Vec3>, unbounded: (bool, bool)) -> Option<(f64, Vec3, Vec3)> {
     use Shape::*;
-    let to_plane = |p: Vec3, point: Vec3, normal: UnitVec3| {
+    // From an item to a plane that runs on for ever: a segment that crosses it meets it, one
+    // that doesn't comes nearest at its nearer end.
+    let to_plane = |x: &Shape, point: Vec3, normal: UnitVec3| {
         let n = normal.vec();
-        let h = (p - point).dot(n);
-        (h.abs(), p, p - n * h)
-    };
-    let to_line = |p: Vec3, a: Vec3, b: Vec3| {
-        let d = b - a;
-        let t = if d.len() > 1e-12 { ((p - a).dot(d) / d.dot(d)).clamp(0.0, 1.0) } else { 0.0 };
-        let q = a + d * t;
-        (p.dist(q), p, q)
+        let (p, q) = match *x {
+            Point(p) => (p, p),
+            Line { a, b } => (a, b),
+            _ => return None,
+        };
+        let (hp, hq) = ((p - point).dot(n), (q - point).dot(n));
+        if hp * hq <= 0.0 && hp != hq {
+            let x = p.lerp(q, hp / (hp - hq));
+            return Some((0.0, x, x));
+        }
+        let (p, h) = if hq.abs() < hp.abs() { (q, hq) } else { (p, hp) };
+        Some((h.abs(), p, p - n * h))
     };
     match (a, b) {
-        (Point(p), Plane { point, normal }) => Some(to_plane(*p, *point, *normal)),
-        (Plane { point, normal }, Point(p)) => {
-            let (d, f, t) = to_plane(*p, *point, *normal);
-            Some((d, t, f))
-        }
-        (Point(p), Line { a: la, b: lb }) => Some(to_line(*p, *la, *lb)),
-        (Line { a: la, b: lb }, Point(p)) => {
-            let (d, f, t) = to_line(*p, *la, *lb);
-            Some((d, t, f))
-        }
-        (Point(p), Point(q)) => Some((p.dist(*q), *p, *q)),
-        (Plane { point: p1, normal: n1 }, Plane { point: p2, normal: n2 }) => {
+        (Plane { point: p1, normal: n1 }, Plane { point: p2, normal: n2 }) if unbounded.0 || unbounded.1 => {
             super::measure_shape::plane_plane(*p1, *n1, *p2, *n2, anchor.unwrap_or(*p1), unbounded.0 && unbounded.1)
         }
-        (Plane { point, normal }, Line { a: la, b: lb }) => {
-            let d = *lb - *la;
-            let den = d.dot(normal.vec());
-            if den.abs() < 1e-9 {
-                let (dist, _, q) = {
-                    let h = (*la - *point).dot(normal.vec());
-                    (h.abs(), *la, *la - normal.vec() * h)
-                };
-                Some((dist, q, *la))
-            } else {
-                let t = (*point - *la).dot(normal.vec()) / den;
-                let p = *la + d * t;
-                Some((0.0, p, p))
-            }
-        }
-        (Line { a: la, b: lb }, Plane { point, normal }) => {
-            let d = *lb - *la;
-            let den = d.dot(normal.vec());
-            if den.abs() < 1e-9 {
-                let h = (*la - *point).dot(normal.vec());
-                Some((h.abs(), *la, *la - normal.vec() * h))
-            } else {
-                let t = (*point - *la).dot(normal.vec()) / den;
-                let p = *la + d * t;
-                Some((0.0, p, p))
-            }
-        }
-        (Line { a: a1, b: b1 }, Line { a: a2, b: b2 }) => {
-            let (d1, d2) = (*b1 - *a1, *b2 - *a2);
-            let n = d1.cross(d2);
-            if n.len() < 1e-9 {
-                let (dist, _, q) = {
-                    let dd = d1;
-                    let t = if dd.len() > 1e-12 { ((*a2 - *a1).dot(dd) / dd.dot(dd)).clamp(0.0, 1.0) } else { 0.0 };
-                    let q = *a1 + dd * t;
-                    ((*a2).dist(q), *a2, q)
-                };
-                Some((dist, q, *a2))
-            } else {
-                let w = *a1 - *a2;
-                let a = d1.dot(d1);
-                let b = d1.dot(d2);
-                let c = d2.dot(d2);
-                let d = d1.dot(w);
-                let e = d2.dot(w);
-                let den = a * c - b * b;
-                let (t, s) = if den.abs() < 1e-12 { (0.0, e / c) } else { ((b * e - c * d) / den, (a * e - b * d) / den) };
-                let p = *a1 + d1 * t;
-                let q = *a2 + d2 * s;
-                Some((p.dist(q), p, q))
-            }
-        }
+        (Plane { point, normal }, x) if unbounded.0 => to_plane(x, *point, *normal).map(|(d, p, q)| (d, q, p)),
+        (x, Plane { point, normal }) if unbounded.1 => to_plane(x, *point, *normal),
         _ => None,
     }
 }
 
-fn closest(a: &Geo, b: &Geo) -> Option<(Vec3, Vec3)> {
-    let pts_to_tris = |pts: &[Vec3], tris: &[[Vec3; 3]]| -> Option<(Vec3, Vec3)> {
-        let pts = sample(pts, MAX_POINTS);
-        let tris = sample(tris, MAX_TRIS);
-        let mut best: Option<(f64, Vec3, Vec3)> = None;
-        for p in &pts {
-            for [x, y, z] in &tris {
-                let q = closest_on_triangle(*p, *x, *y, *z);
-                let d = p.dist(q);
-                if best.is_none_or(|(bd, _, _)| d < bd) {
-                    best = Some((d, *p, q));
-                }
-            }
-        }
-        best.map(|(_, p, q)| (p, q))
+/// An item's geometry as triangles for [`TriangleSet::closest`]: a straight edge or axis is one
+/// flat triangle along it, so it is measured as the whole segment, and a point is a triangle with
+/// all three corners at it.
+fn triangle_set(item: &Item) -> TriangleSet {
+    let tris: Vec<[Vec3; 3]> = match (&item.geo, item.shape) {
+        (Geo::Tris(t), _) => t.clone(),
+        (Geo::Points(_), Shape::Line { a, b }) => vec![[a, b, b]],
+        (Geo::Points(p), _) => p.iter().map(|&p| [p, p, p]).collect(),
     };
-    let verts = |tris: &[[Vec3; 3]]| -> Vec<Vec3> { tris.iter().flat_map(|t| t.iter().copied()).collect() };
-    match (a, b) {
-        (Geo::Points(p), Geo::Points(q)) => {
-            let (p, q) = (sample(p, MAX_POINTS), sample(q, MAX_POINTS));
-            let mut best: Option<(f64, Vec3, Vec3)> = None;
-            for x in &p {
-                for y in &q {
-                    let d = x.dist(*y);
-                    if best.is_none_or(|(bd, _, _)| d < bd) {
-                        best = Some((d, *x, *y));
-                    }
-                }
-            }
-            best.map(|(_, x, y)| (x, y))
-        }
-        (Geo::Points(p), Geo::Tris(t)) => pts_to_tris(p, t),
-        (Geo::Tris(t), Geo::Points(p)) => pts_to_tris(p, t).map(|(x, y)| (y, x)),
-        (Geo::Tris(t1), Geo::Tris(t2)) => {
-            let ab = pts_to_tris(&verts(t1), t2);
-            let ba = pts_to_tris(&verts(t2), t1).map(|(x, y)| (y, x));
-            [ab, ba].into_iter().flatten().min_by(|x, y| x.0.dist(x.1).total_cmp(&y.0.dist(y.1)))
-        }
-    }
+    let positions: Vec<Vec3> = tris.iter().flatten().copied().collect();
+    let triangles = (0..tris.len() as u32).map(|i| [3 * i, 3 * i + 1, 3 * i + 2]).collect();
+    TriangleSet::new(&Mesh { positions, triangles, ..Mesh::default() })
+}
+
+/// Closest pair of points between two items: triangles against triangles, so faces that cross
+/// meet and an edge of one face can come nearest an edge of the other.
+fn closest(a: &Item, b: &Item) -> Option<(Vec3, Vec3)> {
+    triangle_set(a).closest(&triangle_set(b), f64::INFINITY).map(|m| (m.a, m.b))
 }
 
 /// Two straight edges sharing exactly one end define rays away from that corner. Their
@@ -600,12 +579,14 @@ fn corner_cos(a: Shape, b: Shape) -> Option<f64> {
     Some((end_a - p).normalized()?.dot((end_b - q).normalized()?))
 }
 
-/// A face or edge as `inspect.measure` takes it: the body and a point on the item; `index` is
-/// optional (the point finds the item).
+/// A face or edge as `inspect.measure` takes it: the body and a point on the item, its index, or
+/// both (the point finds the item without an index; an index alone names it, as `model.faces`
+/// and `model.edges` list it, even after a joint has moved the body) (#14011).
 #[derive(serde::Deserialize)]
 struct Pick {
     body: String,
-    point: Vec3,
+    #[serde(default)]
+    point: Option<Vec3>,
     #[serde(default)]
     index: Option<usize>,
 }
@@ -616,6 +597,12 @@ fn resolve_pick(st: &solidcraft_doc::ModelState, face: bool, value: &Value) -> s
     let Pick { body, point, index } = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
     let b = st.body(&body).ok_or_else(|| format!("no body named '{body}'"))?;
     let m = b.mesh();
+    let point = match (point, index) {
+        (Some(p), _) => p,
+        (None, Some(i)) if face => face_tris(&m, i).first().map(|t| t[0]).ok_or_else(|| format!("'{body}' has no face {i}"))?,
+        (None, Some(i)) => m.edges.get(i).and_then(|e| e.get(e.len() / 2).copied()).ok_or_else(|| format!("'{body}' has no edge {i}"))?,
+        (None, None) => return Err("give a `point` on the item or its `index`".into()),
+    };
     if face {
         let index = match index {
             Some(i) => i,
@@ -683,7 +670,7 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
         }
     }
     if let [a, b] = described.as_slice() {
-        let near = closest(&a.geo, &b.geo);
+        let near = closest(a, b);
         let far = farthest(&a.geo, &b.geo);
         let c = centre(&a.shape, &b.shape);
         // An exact closest or farthest distance stands only where the mesh agrees with it to

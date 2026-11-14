@@ -1,0 +1,89 @@
+{
+  "area": "fillets",
+  "bodies": {},
+  "calls": [],
+  "case": "477-fillet-cube-corner-rounds-as-wide-as-faces-refused",
+  "expected": {
+    "method": "at r = 20 each round uses both its faces up and the corner's ball would be the cube's far corner: no edge is left to end the rounds on. Refused as too large, so a fit can reduce it.",
+    "outcome": "refused",
+    "refusal": "the largest radius that fits is",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#477"
+    ],
+    "what": "the three edges at a 20 mm cube's corner rounded R20, as wide as their faces: refused as too large, naming the largest radius that fits"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 2 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow, at the edge at (10.000, 0.000, 0.000): its corners take the whole of the edge; the largest radius that fits is 19.99 mm",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 2 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow, at the edge at (10.000, 0.000, 0.000): its corners take the whole of the edge; the largest radius that fits is 19.99 mm",
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#477"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "the three edges at a 20 mm cube's corner rounded R20, as wide as their faces: refused as too large, naming the largest radius that fits",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow, at the edge at (10.000, 0.000, 0.000): its corners take the whole of the edge; the largest radius that fits is 19.99 mm"
+  ]
+}

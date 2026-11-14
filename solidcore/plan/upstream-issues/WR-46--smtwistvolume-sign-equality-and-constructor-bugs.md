@@ -1,0 +1,13 @@
+#### WR-46. `SmTwistVolume` sign, equality and constructor bugs
+- **Severity:** Wrong result
+- **Area:** Surfaces and volumes
+- **Location:**
+  - `SmTwistVolume.cpp:1045` `EvaluateSimple`: `Duw` is `(-per sin a, -per cos a, 0)`, but the header and `Evaluate` use `(-per sin a, per cos a, 0)`.
+  - `:210`-`211` `operator==`: the minimum comparison overwrites the period comparison.
+  - `:38`/`:132` constructors: compare `Unitize`'s `SM_ERR_INVALID_INPUT` with `SM_ERR`, so a zero axis skips the intended repair. A too-small period becomes `|dPeriodMinDist|`.
+- **What happens:** Wrong mixed derivatives; twists that differ only in period compare equal.
+- **Trigger:** Two twist volumes differing only in period: `==` is TRUE.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** wrong result.
+- **Rust port:** Ported as written.

@@ -1,5 +1,6 @@
 //! Contracts and result types for the commands in `cmd/sketch_canvas.rs`: `canvas.insert`,
-//! `canvas.decal`, `canvas.edit`, `canvas.calibrate` and `canvas.delete`.
+//! `canvas.decal`, `canvas.edit`, `canvas.calibrate`, `canvas.straighten` and `canvas.delete`, and
+//! for `canvas.to_sketch` in `cmd/canvas_sketch.rs`.
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether an image can be read, a canvas exists
@@ -15,6 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 
 use super::check::whole;
+use super::frame::SketchSolve;
 use super::motion::require;
 use super::types::{LengthExpr, Point2, Point3};
 use crate::params;
@@ -177,6 +179,58 @@ pub struct CanvasCalibrateParams {
     pub distance: Option<Distance>,
 }
 
+/// Turn a canvas so that a line drawn on its image, from `a` to `b`, gets the direction `angle`:
+/// 0 makes it horizontal, 90 vertical. The image turns about `a`, the shorter way (a line has no
+/// arrow, so the turn is at most 90 degrees either way and the image stays the right way up). Its
+/// size does not change. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = straighten_required)]
+pub struct CanvasStraightenParams {
+    /// The canvas, by id or name.
+    // Optional in the types and required in the schema, as `face` above.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "CanvasRef")]
+    pub canvas: Option<CanvasRef>,
+    /// A point on the canvas's plane, in mm, [x, y], on the line: the one the image turns about.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "CalibrationPoint")]
+    pub a: Option<CalibrationPoint>,
+    /// Another point on the line, in mm, [x, y], not the same as `a`.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "CalibrationPoint")]
+    pub b: Option<CalibrationPoint>,
+    /// The direction the line should have on the plane, in degrees from the plane's x axis,
+    /// counter-clockwise: 0 horizontal, 90 vertical. Default: 0.
+    #[serde(default)]
+    pub angle: Option<StraightenAngle>,
+}
+
+/// `canvas.straighten`'s `angle`: a finite number of degrees, below 1e9 in size.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StraightenAngle(pub f64);
+
+impl<'de> Deserialize<'de> for StraightenAngle {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let n = match Value::deserialize(d)? {
+            Value::Number(n) => n.as_f64().and_then(params::finite),
+            _ => None,
+        };
+        n.map(StraightenAngle).ok_or_else(|| D::Error::custom("must be a number of degrees"))
+    }
+}
+
+impl JsonSchema for StraightenAngle {
+    fn schema_name() -> Cow<'static, str> {
+        "StraightenAngle".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A direction in degrees from the plane's x axis, counter-clockwise: 0 horizontal, 90 vertical (below 1 000 000 000 in size).",
+            "type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9
+        })
+    }
+}
+
 /// Remove a canvas or decal from the design. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = canvas_required)]
@@ -186,6 +240,32 @@ pub struct CanvasDeleteParams {
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "CanvasRef")]
     pub canvas: Option<CanvasRef>,
+}
+
+/// Trace a canvas or decal image into a new sketch lying exactly on its plane: the drawing is
+/// told from the background, its outlines become lines and cubic splines, and its holes stay
+/// holes. The picture is read at up to 512 pixels on a side, at most 40 megapixels.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CanvasToSketchParams {
+    /// The canvas, by id or name. Default: the last canvas in the design.
+    // `null` is the same as leaving it out, as `pick` in `cmd/canvas_sketch.rs` reads it, so the
+    // schema says so too.
+    #[serde(default, deserialize_with = "absent_or", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "canvas_or_absent")]
+    pub canvas: Option<CanvasRef>,
+    /// The new sketch's name. Default: `<the canvas's name> sketch`.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// A key that is left out, `null`, or parses as `T`: `null` is the same as leaving it out, as
+/// `pick` in `cmd/canvas_sketch.rs` reads a canvas.
+fn absent_or<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        given => T::deserialize(given).map(Some).map_err(D::Error::custom),
+    }
 }
 
 /// A key that, once given (`null` included), must parse as `T`, as the handlers read it.
@@ -214,6 +294,14 @@ impl JsonSchema for CanvasRef {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({"description": "A canvas's id (a number) or its name.", "type": ["number", "string"]})
     }
+}
+
+/// `canvas.to_sketch`'s `canvas`: a canvas reference, or `null` for the last canvas of the design.
+fn canvas_or_absent(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "A canvas's id (a number) or its name; null is the last canvas in the design.",
+        "type": ["number", "string", "null"]
+    })
 }
 
 /// An image width in mm: above 0 and below 1e7, as `cmd/sketch_canvas.rs` requires.
@@ -406,6 +494,12 @@ fn canvas_required(schema: &mut Schema) {
     require(schema, "canvas");
 }
 
+fn straighten_required(schema: &mut Schema) {
+    for key in ["canvas", "a", "b"] {
+        require(schema, key);
+    }
+}
+
 fn calibrate_required(schema: &mut Schema) {
     for key in ["canvas", "a", "b", "distance"] {
         require(schema, key);
@@ -448,11 +542,47 @@ pub struct CanvasCalibrated {
     pub param_warnings: Vec<String>,
 }
 
+/// What `canvas.straighten` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CanvasStraightened {
+    /// The canvas's id.
+    pub canvas: u64,
+    /// Its rotation on the plane now, in degrees: above -180, at most 180.
+    pub angle: f64,
+    /// How far it turned, in degrees, counter-clockwise; above -90, at most 90.
+    pub turned: f64,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `canvas.delete` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct CanvasDeleted {
     /// The id the canvas had.
     pub deleted: u64,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `canvas.to_sketch` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CanvasTraced {
+    /// The new sketch's feature id.
+    pub sketch: u64,
+    /// Its name.
+    pub name: String,
+    /// The canvas that was traced, by id.
+    pub canvas: u64,
+    /// How many curves the sketch was given.
+    pub curves: usize,
+    /// How many outlines the image held.
+    pub outlines: usize,
+    /// How many of them were holes.
+    pub holes: usize,
+    /// The sketch's solve: `{solved, dof}`; null when it was not solved again.
+    pub info: Option<SketchSolve>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

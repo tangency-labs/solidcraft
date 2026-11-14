@@ -1,0 +1,275 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/5562",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/5812",
+ "test": "crates/engine/src/boolean_regression_tests.rs: revolve_cut_round_a_box_corner_does_not_panic",
+ "summary": "A 360-degree revolve cut on a plain box panicked in truck's intersection-curve code (intersection_curve.rs:133, unwrap on None). The box is 20.4 x 12 x 10 (x -5.4..15, y -5..7, z 0..10, from a rectangle (-5.4, 7)..(15, -5) extruded 10 mm). The profile is a circle of radius r = sqrt(21.76) = 4.664761515876241 centred on the corner (15, -5, 0) of the side face y = -5 (the script's p3), sliced to that face: a quarter disc, revolved 360 degrees about the face's vertical edge x = 15, y = -5 (the script's l4). The tool is a half ball above z = 0 whose pole lies on that edge, and the box must lose the eighth of the ball inside it, pi*r^3/6 = 53.148 mm^3. #5812 fixed only the panic: on SolidCraft's kernel the cut still failed with an ordinary error and left the box whole (the PR test accepts that outcome); the pole on the edge was left as kernel work. The controls move the same quarter disc and its vertical axis so the pole lies on the face y = -5 (the box loses a quarter ball) or inside the box (a half ball). All turns are full, so the sweep's sense does not matter. The tolerance is 0.01 mm^3, as in the other boolean cases.",
+ "cases": [
+  {
+   "name": "pole_inside_box",
+   "note": "Control: the axis through (5, 1, 0), the middle of the bottom face. The half ball lies wholly in the box, its pole at (5, 1, r) inside it.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -5.4,
+      -5.0,
+      0.0
+     ],
+     "size": [
+      20.4,
+      12.0,
+      10.0
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "ball",
+     "plane": "xz",
+     "origin": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "axis_point": [
+      5.0,
+      1.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        5.0,
+        0.0
+       ],
+       "to": [
+        5.0,
+        4.664761515876241
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        5.0,
+        0.0
+       ],
+       "radius": 4.664761515876241,
+       "start_deg": 90.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        0.33523848412375923,
+        0.0
+       ],
+       "to": [
+        5.0,
+        0.0
+       ]
+      }
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "ball"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2235.407984082408,
+     "tol": 0.01,
+     "formula": "20.4*12*10 - 1/2*4/3*pi*r^3, r = sqrt(21.76) = 4.664761515876241 (the box less the part of the half ball inside it, 212.59201591759202)"
+    }
+   }
+  },
+  {
+   "name": "pole_on_side_face",
+   "note": "Control: the axis through (5, -5, 0), on the side face y = -5. The pole lies on that face, and the box keeps the half of the half ball with y >= -5.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -5.4,
+      -5.0,
+      0.0
+     ],
+     "size": [
+      20.4,
+      12.0,
+      10.0
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "ball",
+     "plane": "xz",
+     "origin": [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     "axis_point": [
+      5.0,
+      -5.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        5.0,
+        0.0
+       ],
+       "to": [
+        5.0,
+        4.664761515876241
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        5.0,
+        0.0
+       ],
+       "radius": 4.664761515876241,
+       "start_deg": 90.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        0.33523848412375923,
+        0.0
+       ],
+       "to": [
+        5.0,
+        0.0
+       ]
+      }
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "ball"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2341.703992041204,
+     "tol": 0.01,
+     "formula": "20.4*12*10 - 1/4*4/3*pi*r^3, r = sqrt(21.76) = 4.664761515876241 (the box less the part of the half ball inside it, 106.29600795879601)"
+    }
+   }
+  },
+  {
+   "name": "pole_on_box_edge",
+   "note": "#5562: the axis is the box's vertical edge x = 15, y = -5. The pole lies on that edge, and the box keeps the quarter of the half ball with x <= 15, y >= -5.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -5.4,
+      -5.0,
+      0.0
+     ],
+     "size": [
+      20.4,
+      12.0,
+      10.0
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "ball",
+     "plane": "xz",
+     "origin": [
+      0.0,
+      -5.0,
+      0.0
+     ],
+     "axis_point": [
+      15.0,
+      -5.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        15.0,
+        0.0
+       ],
+       "to": [
+        15.0,
+        4.664761515876241
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        15.0,
+        0.0
+       ],
+       "radius": 4.664761515876241,
+       "start_deg": 90.0,
+       "end_deg": 180.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        10.33523848412376,
+        0.0
+       ],
+       "to": [
+        15.0,
+        0.0
+       ]
+      }
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "ball"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2394.851996020602,
+     "tol": 0.01,
+     "formula": "20.4*12*10 - 1/8*4/3*pi*r^3, r = sqrt(21.76) = 4.664761515876241 (the box less the part of the half ball inside it, 53.148003979398005)"
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,14 @@
+#### WR-621. `GetBlendEdgeuse` takes a crease of 0.5 to 2 degrees for a smooth edge, so it cannot be rounded
+- **Severity:** Wrong result
+- **Area:** Blends
+- **Location:** `source/SMLib/src/SmEdge.cpp:6817`, `SmEdge::GetBlendEdgeuse` (def. `:6746`).
+- **What happens:** `GetBlendEdgeuse` takes two faces for tangent when either face's normal is within 2 degrees of perpendicular to the other's binormal (`dMaxDotValue = cos 88°`), which makes the edge between them smooth, with nothing to round. A crease of 0.5 to 2 degrees is an edge the model means, such as a draft meeting a flat or a roof crease, but the fillet refuses it (`SM_ERR_INVALID_INPUT`).
+- **Trigger:** rounding the crease of a block whose top rises to a ridge, each half sloping half a degree (a 1 degree turn), at r 2 or r 20.
+- **How found:** the SolidCraft fork (tangency-labs/smlib@2e8758b on branch replay/1.0.1, not yet merged in the fork's main, capi test `crease_rounds_from_half_a_degree`), SolidCraft issue #1808.
+- **Confirmed:** by the port's test below. By default (pinned behaviour) the 1 degree crease is refused.
+- **Fix:** tangency-labs/smlib@2e8758b. The limit is half a degree (`cos 89.5°`), SolidCraft's one angle for a smooth edge. A 0.3 degree crease is still smooth.
+- **Rust port:** behaves as upstream by default. `Kernel::fixes.fillet_half_degree_crease` ports the fork's limit in `topology::edge::blend_edgeuse`.
+- **Tests:** `crates/solidcore/tests/wr_621_half_degree_crease_rounds.rs`:
+  - with the opt-in, the 1 and 3 degree creases round at r 2 and r 20, a manifold solid with `20 r^2 (tan(d/2) - d/2)` removed (within 1e-6, as the fork asserts), and a 0.3 degree crease is refused;
+  - without the opt-in, the 1 degree crease is refused and the 3 degree crease rounds the same.
+- **Difftest:** no change on the default path.

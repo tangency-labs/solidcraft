@@ -1,0 +1,214 @@
+{
+  "area": "ladder/07-fillets",
+  "bodies": {
+    "b82": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b82"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b83"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b83"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b84"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b84"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b85"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b85"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b86"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  23.0,
+                  15.0,
+                  20.0
+                ],
+                [
+                  23.0,
+                  15.0,
+                  20.0
+                ]
+              ],
+              "index": 34
+            }
+          ],
+          "points": [
+            [
+              7.000000000000002,
+              14.999999999999993,
+              20.0
+            ]
+          ],
+          "tolerance": 4.00880488547035
+        },
+        "kind": "round",
+        "sizes": [
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "017-part-rounds",
+  "expected": {
+    "body_count": 1,
+    "faces": 24,
+    "method": "removed 2 (1-pi/4) 25 20 + (1-pi/4) 9 60; the concave r1 at the boss adds (1-pi/4) 1 2 pi (8 + (10-3pi)/(12-3pi)); none of them reaches a hole, the slot or the window",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 53151.022090693,
+    "what": "the running part: r5 on the front vertical edges, r3 on the back wall's top front edge, r1 where the boss meets the top"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 12905.663645296445,
+      "body_count": 1,
+      "edges": 59,
+      "faces": 24,
+      "vertices": 39,
+      "volume_mm3": 53151.022090711645
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 59,
+      "faces": 24,
+      "vertices": 39
+    }
+  },
+  "records": "017-part-rounds.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b86"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 12905.663645296445,
+      "body_count": 1,
+      "edges": 59,
+      "faces": 24,
+      "vertices": 39,
+      "volume_mm3": 53151.022090711645
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "the running part: r5 on the front vertical edges, r3 on the back wall's top front edge, r1 where the boss meets the top",
+  "why_not": []
+}

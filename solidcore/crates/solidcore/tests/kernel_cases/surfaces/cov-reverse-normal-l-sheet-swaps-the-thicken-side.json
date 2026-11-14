@@ -1,0 +1,120 @@
+{
+  "area": "surfaces",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "thicken",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "symmetric": false,
+        "thickness": -2.0
+      }
+    }
+  ],
+  "case": "cov-reverse-normal-l-sheet-swaps-the-thicken-side",
+  "expected": {
+    "bbox": {
+      "max": [
+        30,
+        20,
+        20
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 8,
+    "method": "kernel-cases/shell/5326: -2 is the inside of this sheet's corner; with every normal reversed +2 is. Each wall offset 2 toward the other, the slabs overlap in 2 x 2: V = (30*2 + 20*2 - 2*2) 20 = 1920, an L prism of 8 faces",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 1920.0,
+    "what": "the L sheet of two walls (30 and 20, 20 deep) turned over, then thickened +2: the side -2 took before, into the inside corner"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12
+    }
+  },
+  "records": "cov-reverse-normal-l-sheet-swaps-the-thicken-side.bodies.json.gz",
+  "result": [
+    {
+      "body": "Wall",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2191.9999999999995,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12,
+      "volume_mm3": 1919.9999999999927
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "thicken"
+  ],
+  "ungraded": [],
+  "what": "the L sheet of two walls (30 and 20, 20 deep) turned over, then thickened +2: the side -2 took before, into the inside corner",
+  "why_not": []
+}

@@ -1,0 +1,5908 @@
+{
+  "cases": [
+    {
+      "name": "region_filter_0",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_1",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_2",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_3",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_4",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_5",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_6",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_7",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_8",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_9",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_10",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_11",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_12",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_13",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_14",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_15",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_16",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_17",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_18",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_19",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_20",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_21",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_22",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_23",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_24",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_25",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_26",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_27",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_28",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_29",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_30",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_31",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_32",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_33",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_34",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_35",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_36",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_37",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_38",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_39",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_40",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_41",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_42",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_43",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_44",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_45",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_46",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_47",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_48",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_49",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_50",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_51",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_52",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_53",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_54",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_55",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_56",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_57",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_58",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_59",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_60",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_61",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_62",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_63",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_64",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_65",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_66",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_67",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_68",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_69",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_70",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_71",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_72",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_73",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_74",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_75",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_76",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_77",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_78",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_79",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_80",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_81",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_82",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_83",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_84",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_85",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_86",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_87",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_88",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_89",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_90",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_91",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_92",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_93",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_94",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_95",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_96",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_97",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_98",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_99",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_100",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_101",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_102",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_103",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_104",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_105",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_106",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_107",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_108",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_109",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_110",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_111",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_112",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_113",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_114",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_115",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_116",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_117",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_118",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_119",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_120",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_121",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_122",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_123",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_124",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_125",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_126",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_127",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_128",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_129",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_130",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_131",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_132",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_133",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_134",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_135",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_136",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_137",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_138",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_139",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_140",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_141",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_142",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_143",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_144",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_145",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_146",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_147",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_148",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_149",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 0,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_150",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_151",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_152",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_153",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_154",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_155",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9999,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_156",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_157",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_158",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_159",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_160",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_161",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 9007199254740993,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_162",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_163",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_164",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": false,
+          "pattern": 2
+        }
+      }
+    },
+    {
+      "name": "region_filter_165",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 0
+        }
+      }
+    },
+    {
+      "name": "region_filter_166",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 1
+        }
+      }
+    },
+    {
+      "name": "region_filter_167",
+      "upstream_ref": "SmRegion.h:157 GetShells attribute filtering; actual SmLongAttribute and SmAObject::FindAttribute",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_filter": {
+          "attribute_id": 18446744073709551615,
+          "enabled": true,
+          "pattern": 2
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+#### WR-254. `SmFilletCorner::MakeAnalyticCornerSurface` reports its `SER` / `NER` failures as `TRUE`
+- **Severity:** Wrong result
+- **Area:**
+- **Location:** `source/SMLib/src/SmFilletCorner.cpp:3379`-`3680` (`SmFilletCorner::MakeAnalyticCornerSurface`, returns `SmBoolean`): `SER(SM_ERR)` for a fillet edge whose curve is not an `SmBSplineCurve` (`:3462`), and in the chamfer branch `SER(SM_ERR)` (`:3537`), `NER(pOrigFace)`, `NER(pFilletSurface)` and `SER(sm_SrfSrfIntersection(..))` (`:3586`). Its caller `SmFilletCorner::CreateCornerPatch` tests `if (!bSuccess)`.
+- **What happens:** As WR-52, the non-zero status reads as `TRUE` ("an analytic surface was made") although no surface was added to `m_vSurfaces`. `CreateCornerPatch` then skips the Coons patch and calls `MakeFaceBrep` with fewer surfaces (none: it returns `SM_SUCCESS` without a face). In the chamfer branch the edge's curve has already been deleted (`SetCurve(NULL, TRUE)`) when `NER(pOrigFace)` / `NER(pFilletSurface)` or a failed intersection returns, so the corner keeps a fillet edge without curve.
+- **Trigger:** a corner with three or four fillet edges, one of them without curve (or with a curve that is not a B-spline); or a chamfer corner whose non-linear rail-rail interpolating edge has no original face, a face without surface, or no intersection with the corner plane.
+- **How found:** source reading while porting `MakeAnalyticCornerSurface` (`blend.fillet_corner_p2`, PR #641); the difftest's `analytic` cases with a curveless edge return `1` on both sides with no surface.
+- **Confirmed:** yes, on the C++ build (`c9c5979`, the `blend.fillet_corner_p2` difftest: `MakeAnalyticCornerSurface` returns non-zero with `m_vSurfaces` empty).
+- **Severity:** a corner without a corner face where a Coons patch would have filled it (a fillet result with a hole, or a failure later).
+- **Rust port:** `FilletCorner::make_analytic_corner_surface` (`crates/solidcore/src/blend/fillet_corner/p2.rs`) reproduces it: those exits are `Ok(true)` (documented deviation note in the module header).

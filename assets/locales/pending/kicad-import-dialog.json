@@ -1,0 +1,80 @@
+{
+    "en":  {
+               "Open KiCad PCB":  "Open KiCad PCB",
+               "Import options":  "Import options",
+               "Include components":  "Include components",
+               "Copper (traces, vias, zones, pads)":  "Copper (traces, vias, zones, pads)",
+               "Overlay on the board":  "Overlay on the board",
+               "Modelled":  "Modelled",
+               "Include silkscreen":  "Include silkscreen",
+               "Board colour":  "Board colour",
+               "Board thickness":  "Board thickness",
+               "Importing KiCad board":  "Importing KiCad board",
+               "Board thickness must be greater than 0 and at most 1000 mm.":  "Board thickness must be greater than 0 and at most 1000 mm."
+           },
+    "ar":  {
+               "Open KiCad PCB":  "Open KiCad PCB",
+               "Import options":  "Import options",
+               "Include components":  "Include components",
+               "Copper (traces, vias, zones, pads)":  "Copper (traces, vias, zones, pads)",
+               "Overlay on the board":  "Overlay on the board",
+               "Modelled":  "Modelled",
+               "Include silkscreen":  "Include silkscreen",
+               "Board colour":  "Board colour",
+               "Board thickness":  "Board thickness",
+               "Importing KiCad board":  "Importing KiCad board",
+               "Board thickness must be greater than 0 and at most 1000 mm.":  "Board thickness must be greater than 0 and at most 1000 mm."
+           },
+    "he":  {
+               "Open KiCad PCB":  "Open KiCad PCB",
+               "Import options":  "Import options",
+               "Include components":  "Include components",
+               "Copper (traces, vias, zones, pads)":  "Copper (traces, vias, zones, pads)",
+               "Overlay on the board":  "Overlay on the board",
+               "Modelled":  "Modelled",
+               "Include silkscreen":  "Include silkscreen",
+               "Board colour":  "Board colour",
+               "Board thickness":  "Board thickness",
+               "Importing KiCad board":  "Importing KiCad board",
+               "Board thickness must be greater than 0 and at most 1000 mm.":  "Board thickness must be greater than 0 and at most 1000 mm."
+           },
+    "ja":  {
+               "Open KiCad PCB":  "Open KiCad PCB",
+               "Import options":  "Import options",
+               "Include components":  "Include components",
+               "Copper (traces, vias, zones, pads)":  "Copper (traces, vias, zones, pads)",
+               "Overlay on the board":  "Overlay on the board",
+               "Modelled":  "Modelled",
+               "Include silkscreen":  "Include silkscreen",
+               "Board colour":  "Board colour",
+               "Board thickness":  "Board thickness",
+               "Importing KiCad board":  "Importing KiCad board",
+               "Board thickness must be greater than 0 and at most 1000 mm.":  "Board thickness must be greater than 0 and at most 1000 mm."
+           },
+    "vi":  {
+               "Open KiCad PCB":  "Open KiCad PCB",
+               "Import options":  "Import options",
+               "Include components":  "Include components",
+               "Copper (traces, vias, zones, pads)":  "Copper (traces, vias, zones, pads)",
+               "Overlay on the board":  "Overlay on the board",
+               "Modelled":  "Modelled",
+               "Include silkscreen":  "Include silkscreen",
+               "Board colour":  "Board colour",
+               "Board thickness":  "Board thickness",
+               "Importing KiCad board":  "Importing KiCad board",
+               "Board thickness must be greater than 0 and at most 1000 mm.":  "Board thickness must be greater than 0 and at most 1000 mm."
+           },
+    "zh":  {
+               "Open KiCad PCB":  "Open KiCad PCB",
+               "Import options":  "Import options",
+               "Include components":  "Include components",
+               "Copper (traces, vias, zones, pads)":  "Copper (traces, vias, zones, pads)",
+               "Overlay on the board":  "Overlay on the board",
+               "Modelled":  "Modelled",
+               "Include silkscreen":  "Include silkscreen",
+               "Board colour":  "Board colour",
+               "Board thickness":  "Board thickness",
+               "Importing KiCad board":  "Importing KiCad board",
+               "Board thickness must be greater than 0 and at most 1000 mm.":  "Board thickness must be greater than 0 and at most 1000 mm."
+           }
+}

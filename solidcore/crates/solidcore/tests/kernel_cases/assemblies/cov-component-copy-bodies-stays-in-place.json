@@ -1,0 +1,230 @@
+{
+  "area": "assemblies",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                10.0,
+                -10.0,
+                -10.0
+              ],
+              "start": [
+                -10.0,
+                -10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                10.0,
+                -10.0
+              ],
+              "start": [
+                10.0,
+                -10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                10.0,
+                -10.0
+              ],
+              "start": [
+                10.0,
+                10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                -10.0,
+                -10.0
+              ],
+              "start": [
+                -10.0,
+                10.0,
+                -10.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                40.0,
+                -5.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                -5.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                40.0,
+                5.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                -5.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                5.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                5.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                -5.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                5.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-component-copy-bodies-stays-in-place",
+  "expected": {
+    "body_count": 3,
+    "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); a copy stays where its body is: Base then holds 4000 at (0,0,-5) and 4000 at (20,0,5): 8000, centre (10,0,0); the world has 3 bodies, 12000",
+    "results": [
+      {
+        "json": {
+          "total": {
+            "center_of_mass": [
+              10.0,
+              0.0,
+              0.0
+            ],
+            "volume_mm3": 8000.0
+          }
+        },
+        "step": 9
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 12000.0,
+    "what": "the arm's body copied into the base's component"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 18,
+      "vertices": 24
+    }
+  },
+  "result": [
+    {
+      "body": "BaseBox",
+      "made": "b1"
+    },
+    {
+      "body": "ArmBox (2)",
+      "made": "b2"
+    },
+    {
+      "body": "ArmBox",
+      "made": "b2"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5200.0,
+      "body_count": 3,
+      "edges": 36,
+      "faces": 18,
+      "vertices": 24,
+      "volume_mm3": 12000.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "the arm's body copied into the base's component",
+  "why_not": []
+}

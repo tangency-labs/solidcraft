@@ -2,12 +2,12 @@
 //!
 //! Everything SolidCraft does with solids goes through this crate: building bodies from planar
 //! regions (extrude, revolve) and primitives, booleans, fillets and chamfers, tessellation,
-//! measurement and STEP export and import. The implementation uses the `truck` crates (Apache-2.0; see
-//! `plan/adr/0001-geometry-kernel.md`) plus our own local operations (edge fillets and
-//! chamfers in `blend.rs`), but no truck type appears in the public API, so the kernel can be
-//! replaced without touching the rest of the workspace.
+//! measurement and STEP export and import. The implementation uses the vendored `solidcore`
+//! kernel (Apache-2.0, `solidcore`) plus our own local operations (edge fillets and
+//! chamfers in `blend.rs`), but no solidcore type appears in the public API, so the kernel can
+//! be replaced without touching the rest of the workspace.
 //!
-//! Every call into the third-party kernel runs under [`guard`]: a panic inside it becomes a
+//! Every call into the vendored kernel runs under [`guard`]: a panic inside it becomes a
 //! [`KernelError::Internal`] instead of taking the application down.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
@@ -59,6 +59,8 @@ mod issue_1038_tests;
 #[cfg(test)]
 mod issue_1080_tests;
 #[cfg(test)]
+mod issue_12126_tests;
+#[cfg(test)]
 mod issue_1510_tests;
 #[cfg(test)]
 mod issue_2005_tests;
@@ -98,6 +100,8 @@ mod ops;
 mod outline_tests;
 mod par;
 pub use par::{KERNEL_STACK, for_each_on_threads, kernel_thread, map_on_threads, map_with_local_pools};
+#[cfg(test)]
+mod display_plan_tests;
 #[cfg(test)]
 mod pinch_tests;
 #[cfg(test)]
@@ -140,7 +144,6 @@ mod sweep_path;
 #[cfg(test)]
 mod sweep_rails_tests;
 mod tangent_edge;
-mod tess;
 #[cfg(test)]
 mod thin_face_tests;
 #[cfg(test)]
@@ -156,15 +159,16 @@ mod validity;
 pub mod watch;
 
 pub use blend::{
-    ChamferSide, FilletTurn, SETBACK_AT_LEAST, blend_edges, chamfer, chamfer_max, chamfer_sides, fillet, fillet_each, fillet_g2, fillet_g2_corners,
-    fillet_g2_with_g2_corners, fillet_least_setback, fillet_max, fillet_max_each, fillet_removing, fillet_setback, largest_fit_note,
-    names_largest_fit, tangent_chain, with_fit_note,
+    ChamferSide, FilletTurn, FitSearch, SETBACK_AT_LEAST, blend_edges, chamfer, chamfer_carrying_face, chamfer_max, chamfer_max_why, chamfer_sides,
+    chamfer_sides_carrying_face, fillet, fillet_each, fillet_g2, fillet_g2_corners, fillet_g2_with_g2_corners, fillet_least_setback, fillet_max,
+    fillet_max_each, fillet_max_why, fillet_removing, fillet_setback, largest_fit_note, named_fit, names_largest_fit, tangent_chain,
+    tangent_chain_edges, with_fit_note, without_fit_note,
 };
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
 pub use body::{
-    Body, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MeshTolerance, Paint, PointClass, Refusal,
-    SurfaceKind,
+    Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MeshTolerance, Paint, PointClass,
+    Refusal, SurfaceKind, colour_name,
 };
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
@@ -179,7 +183,7 @@ pub use continuity::{
 };
 pub use continuity_order::{Construction, Continuity};
 pub use corner_g2::{CURVATURE_SHARE, DEFAULT_SETBACK_FACTOR};
-pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_near, edge_comb, iso_comb};
+pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_near, edge_comb, edge_distance, iso_comb};
 pub use delete_face::delete_faces;
 pub use distance::{BodyDistance, DistanceShape, body_distance};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
@@ -199,7 +203,7 @@ pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
 pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
 pub use mesh_convert::convert_prismatic_mesh;
-pub use meshbody::{MAX_TRIANGLES, mesh_body};
+pub use meshbody::{MAX_TRIANGLES, mesh_body, mesh_body_with_normals};
 pub use native::{body_from_smlib, smlib_body};
 pub use native::{brep_record, decode_native_body, encode_native_body, native_preview_mesh};
 pub use offset::with_same_surface;
@@ -220,13 +224,15 @@ pub use solidcraft_smlib::stop::Stop;
 pub use solidcraft_smlib::trace as smlib_trace;
 pub use splitface::{SplitTool, split_body, split_faces, split_faces_with_map};
 pub use step::step_export;
+/// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
+pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
 pub use step_in::{
     ImportIssue, ImportReport, ImportedBody, IssueKind, StepImport, StepNode, StepReading, step_cache_alive, step_import, step_import_shared,
     step_orientation_errors, step_validate,
 };
 pub use step_out::{ExportBody, ExportProduct, StepHeader, step_export_bodies, step_export_products};
 pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface};
-pub use surface_kind::{EdgeCircle, FaceSurface, edge_circle, face_surface};
+pub use surface_kind::{EdgeCircle, FaceSurface, edge_circle, face_edge_indices, face_surface};
 pub use surface_offset::offset_surface;
 pub use surface_ruled::{Ruled, RuledCorners, RuledMode, ruled_far_handles, ruled_surface, ruled_surface_with};
 pub use surface_trim::{TrimKeep, mutual_trim, trim, trim_keep};
@@ -237,9 +243,9 @@ pub use surfaces::{
 };
 pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_path_with};
 pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
-pub use topo::{TopoCounts, merged_topology, seam_flags};
+pub use topo::{TopoCounts, merged_topology, seam_flags, whole_edge};
 pub use tspline::tspline_sheet;
-pub use validation::{Validation, check_kept, validating};
+pub use validation::{KeptCheck, Validation, check_kept, detach_kept, validating};
 pub use validity::{SmlibCheck, Validity, smlib_dump_dir, validity};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -252,12 +258,23 @@ pub enum KernelError {
     /// shown like any feature that isn't supported yet.
     #[error("the operation failed: not supported yet: {0}")]
     TooLarge(String),
-    /// The third-party kernel panicked; the model is unchanged.
+    /// The vendored kernel panicked; the model is unchanged.
     #[error("kernel internal error: {0}")]
     Internal(String),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
+
+/// The mesher's error as the kernel's: the same words.
+impl From<solidcore_tess::TessError> for KernelError {
+    fn from(e: solidcore_tess::TessError) -> KernelError {
+        match e {
+            solidcore_tess::TessError::Invalid(m) => KernelError::Invalid(m),
+            solidcore_tess::TessError::Failed(m) => KernelError::Failed(m),
+            solidcore_tess::TessError::Internal(m) => KernelError::Internal(m),
+        }
+    }
+}
 
 /// Why a kernel step failed: a message, or an error of the solidcore wrapper, which may be a
 /// panic the wrapper caught ([`solidcraft_smlib::Error::Internal`]).
@@ -282,7 +299,7 @@ impl Cause for String {}
 impl Cause for solidcraft_smlib::CheckReport {}
 impl Cause for solidcraft_smlib::export::ExportError {}
 impl Cause for solidcore_record::brep::history::Failed {}
-impl Cause for solidcraft_geom::brep::pcurve::Error {}
+impl Cause for solidcore_ops::pcurve::Error {}
 impl<T: Cause + ?Sized> Cause for &T {
     fn panic(&self) -> Option<&str> {
         (**self).panic()
@@ -322,7 +339,77 @@ pub fn crash_test() -> Result<()> {
     solidcraft_smlib::crash_test().map_err(|e| KernelError::smlib("crash test", e))
 }
 
-/// Run third-party kernel code, converting a panic into an error.
+/// Is this thread a Rayon pool thread?
+///
+/// Pool workers do not inherit the calling thread's [`guarded`] flag. Crash reports use this so
+/// a panic there during a command is held with that command, instead of being written at once.
+/// The browser build has no pool.
+pub fn on_pool_thread() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        rayon::current_thread_index().is_some()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+}
+
+/// Panic on a Rayon worker and catch it here, as parallel meshing does: the worker runs the
+/// panic hook, then the panic resumes on this thread inside [`guard`] and becomes
+/// [`KernelError::Internal`].
+///
+/// `diagnostics.crash_test` mode `worker` uses this. Not a modelling operation.
+#[doc(hidden)]
+pub fn crash_test_worker_panic(message: &str) -> Result<()> {
+    let caught = catch_worker_panic(message)?;
+    guard("crash test", || match caught {
+        Ok(()) => Ok(()),
+        Err(payload) => std::panic::resume_unwind(payload),
+    })
+}
+
+/// Panic on a Rayon worker and resume that panic on this thread, outside [`guard`].
+///
+/// `diagnostics.crash_test` mode `worker_raw` uses this. Not a modelling operation.
+#[doc(hidden)]
+pub fn crash_test_worker_panic_raw(message: &str) -> Result<()> {
+    let caught = catch_worker_panic(message)?;
+    match caught {
+        Ok(()) => Ok(()),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+/// Run `message` as a panic on a private one-thread pool and return what the worker caught.
+/// The panic hook runs on that worker before this returns.
+#[allow(clippy::panic)]
+fn catch_worker_panic(message: &str) -> Result<std::thread::Result<()>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = message;
+        Err(KernelError::Failed("no worker pool in this build".into()))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let message = message.to_string();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .thread_name(|i| format!("solidcraft-kernel-{i}"))
+            .build()
+            .map_err(|e| KernelError::Failed(format!("cannot start worker: {e}")))?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        pool.spawn(move || {
+            let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                std::panic::panic_any(message);
+            }));
+            let _ = tx.send(caught);
+        });
+        rx.recv().map_err(|_| KernelError::Failed("worker ended without a result".into()))
+    }
+}
+
+/// Run vendored kernel code, converting a panic into an error.
 pub fn guard<T>(what: &str, f: impl FnOnce() -> Result<T>) -> Result<T> {
     struct Depth;
     impl Drop for Depth {

@@ -1,0 +1,9 @@
+#### WR-539. `SmTorus::AssertValid` fails every spindle torus with a whole turn of U, with no report
+- **Severity:** Wrong result (validation: a false failure with no report, and a missed one)
+- **Area:** Surfaces (tori)
+- **Location:** `source/SMLib/src/SmTorus.cpp`, `SmTorus::AssertValid` (def. `:1661`): the self-intersection branch (`m_dMajorRadius < m_dMinorRadius`).
+- **What happens:** The branch clears `bRtn` with no report, so a failing torus gives `FALSE` with nothing to show. Its test is also wrong in two ways. The minor circles cross the axis where `R + r cos(V) = 0`, at `V = ±(90 + asin(R/r))`, but the test uses `90 + acos(R/r)`. It also tests the U (major) interval against that V range. So every spindle torus with a whole turn of U fails, including its outer sheet alone.
+- **Trigger:** spindle torus R 1, r 2 (apexes at ±120): V [0, 360], V [-120, 150], V [-120, 120] (the outer sheet) and V [120, 240] (the inner sheet) all fail with no report.
+- **How found:** SolidCraft; the fork's fix is tangency-labs/smlib@daba678 ("the torus check reports a spindle torus running through its apex"), which is not merged upstream.
+- **Confirmed:** by reading the pinned source (`3fd5b95`). The port's `torus_assert_valid` reproduces it.
+- **Rust port:** behaves as upstream by default. With `Kernel::fixes.torus_check_spindle_apex`, each apex is tested as `SmSphere`'s poles are (its tests 4 and 5). An apex may bound the V interval but not lie inside it, and an apex inside is reported as test 5, "Self Intersection", with the distance to the nearer V bound. The report's label comes from `labels::TORUS_WITH_SPINDLE_APEX`, the torus table with the fork's sixth entry. `SM_GetAssertLabelList` (`assert_label_list`) keeps upstream's five-entry `TORUS`, as the pinned C++ does. Test: `wr_539_spindle_torus_reports_an_apex_inside` in `surface/surface/assert_valid.rs`.

@@ -1,0 +1,1 @@
+| tests/step-regressions/cylinder_rim_off_its_wall.step | SolidCraft contributors | written entity by entity from formulas (a cylinder whose upper rim lies 0.2 um outside its wall); import regression fixture | MIT OR Apache-2.0 |

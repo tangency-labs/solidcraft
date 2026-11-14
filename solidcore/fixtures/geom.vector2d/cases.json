@@ -1,0 +1,1024 @@
+{
+ "cases": [
+  {
+   "name": "ctor_set_uninit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1762",
+   "inputs": {
+    "op": "uninitialized",
+    "a": [
+     0.5,
+     1.2
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "is_initialized_undef",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1767",
+   "inputs": {
+    "op": "is_initialized",
+    "a": [
+     1.23456e-61,
+     1.23456e-61
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "is_initialized_ok",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1762",
+   "inputs": {
+    "op": "is_initialized",
+    "a": [
+     0.5,
+     1.2
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "ctor_array_copy",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1771",
+   "inputs": {
+    "op": "copy",
+    "a": [
+     1.0,
+     2.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "length_squared_1_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1774",
+   "inputs": {
+    "op": "length_squared",
+    "a": [
+     1.0,
+     2.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "length_3_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1779",
+   "inputs": {
+    "op": "length",
+    "a": [
+     3.0,
+     4.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "neg_3_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1783",
+   "inputs": {
+    "op": "neg",
+    "a": [
+     3.0,
+     4.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "add_assign_zero",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1790",
+   "inputs": {
+    "op": "add_assign",
+    "a": [
+     3.0,
+     4.0
+    ],
+    "b": [
+     -3.0,
+     -4.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "unitize_1_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1794",
+   "inputs": {
+    "op": "unitize",
+    "a": [
+     1.0,
+     2.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "dot_unit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1798",
+   "inputs": {
+    "op": "dot",
+    "a": [
+     0.4472135954999579,
+     0.8944271909999159
+    ],
+    "b": [
+     0.4472135954999579,
+     0.8944271909999159
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "distance_v8_v9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1803",
+   "inputs": {
+    "op": "distance",
+    "a": [
+     5.0,
+     1.0
+    ],
+    "b": [
+     1.0,
+     4.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "angle_v8_v9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1808",
+   "inputs": {
+    "op": "angle",
+    "a": [
+     5.0,
+     1.0
+    ],
+    "b": [
+     1.0,
+     4.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "ccw_angle_v9_v8",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1812",
+   "inputs": {
+    "op": "ccw_angle",
+    "a": [
+     1.0,
+     4.0
+    ],
+    "b": [
+     5.0,
+     1.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "distance_squared_v8_v4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1819",
+   "inputs": {
+    "op": "distance_squared",
+    "a": [
+     5.0,
+     1.0
+    ],
+    "b": [
+     -3.0,
+     -4.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "closer_than_v8_v9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1822",
+   "inputs": {
+    "op": "closer_than",
+    "a": [
+     5.0,
+     1.0
+    ],
+    "b": [
+     1.0,
+     4.0
+    ],
+    "s": 1.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "max_dimension_v8",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1827",
+   "inputs": {
+    "op": "max_dimension",
+    "a": [
+     5.0,
+     1.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "add_v10_v8",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1833",
+   "inputs": {
+    "op": "add",
+    "a": [
+     -5.0,
+     -1.0
+    ],
+    "b": [
+     5.0,
+     1.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "sub_v8_v8",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1837",
+   "inputs": {
+    "op": "sub",
+    "a": [
+     5.0,
+     1.0
+    ],
+    "b": [
+     5.0,
+     1.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "mul_v8_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1841",
+   "inputs": {
+    "op": "mul",
+    "a": [
+     5.0,
+     1.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 2.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "mul_assign_3",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1845",
+   "inputs": {
+    "op": "mul_assign",
+    "a": [
+     10.0,
+     2.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 3.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "div_v8_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1849",
+   "inputs": {
+    "op": "div",
+    "a": [
+     5.0,
+     1.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 2.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "index_v8_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1866",
+   "inputs": {
+    "op": "index",
+    "a": [
+     5.0,
+     1.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "index_set_v11_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1869",
+   "inputs": {
+    "op": "index_set",
+    "a": [
+     15.0,
+     3.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 6.0,
+    "idx": 1
+   }
+  },
+  {
+   "name": "rotate_v5_halfpi",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1872",
+   "inputs": {
+    "op": "rotate",
+    "a": [
+     3.0,
+     4.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 1.5707963267948966,
+    "idx": 0
+   }
+  },
+  {
+   "name": "unitize_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unitize",
+    "a": [
+     0.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "unitize_below_eff_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unitize",
+    "a": [
+     9e-13,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "unitize_at_eff_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unitize",
+    "a": [
+     1e-12,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "unitize_already_unit",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "unitize",
+    "a": [
+     0.6,
+     0.8
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "angle_zero_vector",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "angle",
+    "a": [
+     0.0,
+     0.0
+    ],
+    "b": [
+     1.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "angle_tiny_vector",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "angle",
+    "a": [
+     1e-12,
+     0.0
+    ],
+    "b": [
+     1.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "angle_parallel",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "angle",
+    "a": [
+     2.0,
+     3.0
+    ],
+    "b": [
+     4.0,
+     6.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "angle_antiparallel",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "angle",
+    "a": [
+     2.0,
+     3.0
+    ],
+    "b": [
+     -4.0,
+     -6.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "angle_perpendicular",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "angle",
+    "a": [
+     2.0,
+     3.0
+    ],
+    "b": [
+     -3.0,
+     2.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "angle_dot_sq_081",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "angle",
+    "a": [
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.9,
+     0.4358898943540674
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "ccw_same",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "ccw_angle",
+    "a": [
+     1.0,
+     0.0
+    ],
+    "b": [
+     1.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "ccw_tiny_negative_cross",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "ccw_angle",
+    "a": [
+     1.0,
+     0.0
+    ],
+    "b": [
+     1.0,
+     -1e-13
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "ccw_tiny_negative_cross_anti",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "ccw_angle",
+    "a": [
+     1.0,
+     0.0
+    ],
+    "b": [
+     -1.0,
+     -1e-13
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "ccw_negative_cross_threshold",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "ccw_angle",
+    "a": [
+     1.0,
+     0.0
+    ],
+    "b": [
+     1.0,
+     -4e-12
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "ccw_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "ccw_angle",
+    "a": [
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "ccw_quarter_cw",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "ccw_angle",
+    "a": [
+     0.0,
+     2.0
+    ],
+    "b": [
+     1.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "div_zero_by_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "div",
+    "a": [
+     0.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "div_guard_x",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "div",
+    "a": [
+     1.0,
+     2.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 1e-13,
+    "idx": 0
+   }
+  },
+  {
+   "name": "div_by_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "div",
+    "a": [
+     1.0,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "eq_close",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eq",
+    "a": [
+     1.0,
+     2.0
+    ],
+    "b": [
+     1.0000000000001,
+     2.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "ne_close",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "ne",
+    "a": [
+     1.0,
+     2.0
+    ],
+    "b": [
+     1.0000000000001,
+     2.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "ne_far",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "ne",
+    "a": [
+     1.0,
+     2.0
+    ],
+    "b": [
+     1.0000000001,
+     2.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "eq_asymmetric",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eq",
+    "a": [
+     1000000.0,
+     0.0
+    ],
+    "b": [
+     1000000.0000005,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "closer_than_equal",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "closer_than",
+    "a": [
+     0.0,
+     0.0
+    ],
+    "b": [
+     3.0,
+     4.0
+    ],
+    "s": 5.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "closer_than_negative",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "closer_than",
+    "a": [
+     1.0,
+     1.0
+    ],
+    "b": [
+     1.0,
+     1.0
+    ],
+    "s": -1.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "is_zero_default_tol",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "is_zero",
+    "a": [
+     1e-13,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 1e-12,
+    "idx": 0
+   }
+  },
+  {
+   "name": "is_zero_boundary",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "is_zero",
+    "a": [
+     1e-12,
+     0.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 1e-12,
+    "idx": 0
+   }
+  },
+  {
+   "name": "from_vec3",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "from_vec3",
+    "a": [
+     1.5,
+     -2.5
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 7.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "swap_xy",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "swap_xy",
+    "a": [
+     1.5,
+     -2.5
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "lmul",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "lmul",
+    "a": [
+     1.5,
+     -2.5
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": -3.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "sub_assign",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "sub_assign",
+    "a": [
+     1.5,
+     -2.5
+    ],
+    "b": [
+     0.25,
+     0.5
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "index_1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "index",
+    "a": [
+     1.5,
+     -2.5
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 1
+   }
+  },
+  {
+   "name": "rotate_big_angle",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "rotate",
+    "a": [
+     1.5,
+     -2.5
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 1000000.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "length_huge",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "length",
+    "a": [
+     1e+200,
+     1e+200
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "length_tiny",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "length",
+    "a": [
+     1e-200,
+     1e-200
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  },
+  {
+   "name": "max_dimension_tie",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "max_dimension",
+    "a": [
+     -3.0,
+     3.0
+    ],
+    "b": [
+     0.0,
+     0.0
+    ],
+    "s": 0.0,
+    "idx": 0
+   }
+  }
+ ]
+}

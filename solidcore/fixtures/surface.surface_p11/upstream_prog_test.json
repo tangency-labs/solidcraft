@@ -1,0 +1,112 @@
+{
+  "cases": [
+    {
+      "name": "lift_crv1_short_iso_large_aspect",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:2394 my_test_drop_curve: short isoParameter curve lift on very large aspect ratio surface; pSurface->LiftCurve(ctx, GetNaturalUVDomain(), *pCurve, GetNaturalInterval(), 0.01, dMaxDistToSurf, p3DCurve)",
+      "inputs": {
+        "op": 2,
+        "surface": {
+          "file": {
+            "$upstream_file": "Drop/PS_LiftCrv_Srf1.dat"
+          }
+        },
+        "curve": {
+          "file": {
+            "$upstream_file": "Drop/PS_LiftCrv_Crv1.dat"
+          }
+        },
+        "tol": 0.01
+      }
+    },
+    {
+      "name": "lift_crv2_internal_normal_surface",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:2442 my_test_drop_curve: internal curve lift from normal surface; pSurface->LiftCurve(ctx, GetNaturalUVDomain(), *pCurve, GetNaturalInterval(), 0.005, dMaxDistToSurf, p3DCurve)",
+      "inputs": {
+        "op": 2,
+        "surface": {
+          "file": {
+            "$upstream_file": "Drop/PS_LiftCrv_Srf2.dat"
+          }
+        },
+        "curve": {
+          "file": {
+            "$upstream_file": "Drop/PS_LiftCrv_Crv2.dat"
+          }
+        },
+        "tol": 0.005
+      }
+    },
+    {
+      "name": "lift_crv3_internal_large_aspect",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:2490 my_test_drop_curve: internal curve lift from large aspect surface; pSurface->LiftCurve(ctx, GetNaturalUVDomain(), *pCurve, GetNaturalInterval(), 0.005, dMaxDistToSurf, p3DCurve)",
+      "inputs": {
+        "op": 2,
+        "surface": {
+          "file": {
+            "$upstream_file": "Drop/PS_LiftCrv_Srf3.dat"
+          }
+        },
+        "curve": {
+          "file": {
+            "$upstream_file": "Drop/PS_LiftCrv_Crv3.dat"
+          }
+        },
+        "tol": 0.005
+      }
+    },
+    {
+      "name": "lift_crv4_nonlinear_normal_surface",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:2538 my_test_drop_curve: non linear curve lift from normal surface; pSurface->LiftCurve(ctx, GetNaturalUVDomain(), *pCurve, GetNaturalInterval(), 0.005, dMaxDistToSurf, p3DCurve)",
+      "inputs": {
+        "op": 2,
+        "surface": {
+          "file": {
+            "$upstream_file": "Drop/PS_LiftCrv_Srf4.dat"
+          }
+        },
+        "curve": {
+          "file": {
+            "$upstream_file": "Drop/PS_LiftCrv_Crv4.dat"
+          }
+        },
+        "tol": 0.005
+      }
+    },
+    {
+      "name": "lift_crv2_kinked_uv_trim_curve",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:2587 my_test_drop_curve: lifting a kinked UVTrimCurve to a kinked 3d curve; pSurface->LiftCurve(ctx, GetNaturalUVDomain(), *pCurve, GetNaturalInterval(), 0.01, dMaxDistToSurf, p3DCurve)",
+      "inputs": {
+        "op": 2,
+        "surface": {
+          "file": {
+            "$upstream_file": "Drop/PS_lift_srf2.dat"
+          }
+        },
+        "curve": {
+          "file": {
+            "$upstream_file": "Drop/PS_lift_crv2.dat"
+          }
+        },
+        "tol": 0.01
+      }
+    },
+    {
+      "name": "lift_crv1_iso_segment_swept",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:2636 my_test_drop_curve: isoparam segment curve on large aspect ratio swept surface with dramatic turns; pSurface->LiftCurve(ctx, GetNaturalUVDomain(), *pCurve, GetNaturalInterval(), 0.01, dMaxDistToSurf, p3DCurve)",
+      "inputs": {
+        "op": 2,
+        "surface": {
+          "file": {
+            "$upstream_file": "Drop/PS_lift_srf1.dat"
+          }
+        },
+        "curve": {
+          "file": {
+            "$upstream_file": "Drop/PS_lift_crv1.dat"
+          }
+        },
+        "tol": 0.01
+      }
+    }
+  ]
+}

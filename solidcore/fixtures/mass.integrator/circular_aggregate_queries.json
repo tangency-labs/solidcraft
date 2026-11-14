@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "name": "disk_face_area_eps1e-06",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp: SmApiFaceComputeArea over the disk SmBrep::CreateFacesWithCurves builds (shim mass_integrator.cpp: face kind 1)",
+      "inputs": {"geometry": {"op": "face", "kind": 1, "parameters": [0, 0, 0, 1, 1, -1.5, -1.5, 1.5, 1.5, 0, 0, 0, 1e-6, 0, 0, 1], "query": 2}}
+    },
+    {
+      "name": "disk_face_centroid_eps1e-06",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp: SmApiFaceComputeCentroid over the disk SmBrep::CreateFacesWithCurves builds (shim mass_integrator.cpp: face kind 1)",
+      "inputs": {"geometry": {"op": "face", "kind": 1, "parameters": [0, 0, 0, 1, 1, -1.5, -1.5, 1.5, 1.5, 0, 0, 0, 1e-6, 0, 0, 1], "query": 3}}
+    },
+    {
+      "name": "disk_brep_area_eps1e-06",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp: SmApiBrepComputeArea over the disk SmBrep::CreateFacesWithCurves builds (shim mass_integrator.cpp: face kind 1)",
+      "inputs": {"geometry": {"op": "face", "kind": 1, "parameters": [0, 0, 0, 1, 1, -1.5, -1.5, 1.5, 1.5, 0, 0, 0, 1e-6, 0, 0, 1], "query": 4}}
+    },
+    {
+      "name": "disk_brep_volume_eps1e-06",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp: SmApiBrepComputeVolume over the sheet disk SmBrep::CreateFacesWithCurves builds (shim mass_integrator.cpp: face kind 1)",
+      "inputs": {"geometry": {"op": "face", "kind": 1, "parameters": [0, 0, 0, 1, 1, -1.5, -1.5, 1.5, 1.5, 0, 0, 0, 1e-6, 0, 0, 1], "query": 5}}
+    },
+    {
+      "name": "disk_brep_mass_properties_eps1e-06",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp: SmApiBrepComputeMassProperties over the sheet disk SmBrep::CreateFacesWithCurves builds (shim mass_integrator.cpp: face kind 1)",
+      "inputs": {"geometry": {"op": "face", "kind": 1, "parameters": [0, 0, 0, 1, 1, -1.5, -1.5, 1.5, 1.5, 0, 0, 0, 1e-6, 0, 0, 1], "query": 6}}
+    },
+    {
+      "name": "annulus_face_area_eps1e-06",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp: SmApiFaceComputeArea over the annulus SmBrep::CreateFacesWithCurves builds (shim mass_integrator.cpp: face kind 2)",
+      "inputs": {"geometry": {"op": "face", "kind": 2, "parameters": [0, 0, 0, 1, 1, -1.5, -1.5, 1.5, 1.5, 0, 0, 0, 1e-6, 0, 0, 1], "query": 2}}
+    },
+    {
+      "name": "annulus_face_centroid_eps1e-06",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp: SmApiFaceComputeCentroid over the annulus SmBrep::CreateFacesWithCurves builds (shim mass_integrator.cpp: face kind 2)",
+      "inputs": {"geometry": {"op": "face", "kind": 2, "parameters": [0, 0, 0, 1, 1, -1.5, -1.5, 1.5, 1.5, 0, 0, 0, 1e-6, 0, 0, 1], "query": 3}}
+    },
+    {
+      "name": "annulus_brep_area_eps1e-06",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp: SmApiBrepComputeArea over the annulus SmBrep::CreateFacesWithCurves builds (shim mass_integrator.cpp: face kind 2)",
+      "inputs": {"geometry": {"op": "face", "kind": 2, "parameters": [0, 0, 0, 1, 1, -1.5, -1.5, 1.5, 1.5, 0, 0, 0, 1e-6, 0, 0, 1], "query": 4}}
+    },
+    {
+      "name": "annulus_brep_volume_eps1e-06",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp: SmApiBrepComputeVolume over the sheet annulus SmBrep::CreateFacesWithCurves builds (shim mass_integrator.cpp: face kind 2)",
+      "inputs": {"geometry": {"op": "face", "kind": 2, "parameters": [0, 0, 0, 1, 1, -1.5, -1.5, 1.5, 1.5, 0, 0, 0, 1e-6, 0, 0, 1], "query": 5}}
+    },
+    {
+      "name": "annulus_brep_mass_properties_eps1e-06",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp: SmApiBrepComputeMassProperties over the sheet annulus SmBrep::CreateFacesWithCurves builds (shim mass_integrator.cpp: face kind 2)",
+      "inputs": {"geometry": {"op": "face", "kind": 2, "parameters": [0, 0, 0, 1, 1, -1.5, -1.5, 1.5, 1.5, 0, 0, 0, 1e-6, 0, 0, 1], "query": 6}}
+    },
+    {
+      "name": "disk_translated_face_area_eps1e-08",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp: SmApiFaceComputeArea over a translated disk from SmBrep::CreateFacesWithCurves (shim mass_integrator.cpp: face kind 1)",
+      "inputs": {"geometry": {"op": "face", "kind": 1, "parameters": [2.5, -1.25, 3.75, 1, 1, -1.5, -1.5, 1.5, 1.5, 0, 0, 0, 1e-8, 0, 0, 1], "query": 2}}
+    },
+    {
+      "name": "disk_translated_face_centroid_eps1e-08",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp: SmApiFaceComputeCentroid over a translated disk from SmBrep::CreateFacesWithCurves (shim mass_integrator.cpp: face kind 1)",
+      "inputs": {"geometry": {"op": "face", "kind": 1, "parameters": [2.5, -1.25, 3.75, 1, 1, -1.5, -1.5, 1.5, 1.5, 0, 0, 0, 1e-8, 0, 0, 1], "query": 3}}
+    },
+    {
+      "name": "annulus_translated_face_area_eps1e-08",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp: SmApiFaceComputeArea over a translated annulus from SmBrep::CreateFacesWithCurves (shim mass_integrator.cpp: face kind 2)",
+      "inputs": {"geometry": {"op": "face", "kind": 2, "parameters": [2.5, -1.25, 3.75, 1, 1, -1.5, -1.5, 1.5, 1.5, 0, 0, 0, 1e-8, 0, 0, 1], "query": 2}}
+    },
+    {
+      "name": "annulus_translated_face_centroid_eps1e-08",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp: SmApiFaceComputeCentroid over a translated annulus from SmBrep::CreateFacesWithCurves (shim mass_integrator.cpp: face kind 2)",
+      "inputs": {"geometry": {"op": "face", "kind": 2, "parameters": [2.5, -1.25, 3.75, 1, 1, -1.5, -1.5, 1.5, 1.5, 0, 0, 0, 1e-8, 0, 0, 1], "query": 3}}
+    }
+  ]
+}

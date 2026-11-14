@@ -1,0 +1,1 @@
+#2572: a sweep scaled along its path (a scale curve) has sections that are no rigid images of its profile; the frame rule and the bound of slice 2 do not cover it, so its wall keeps no sweep definition yet.

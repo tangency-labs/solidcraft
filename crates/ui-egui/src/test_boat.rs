@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 
 use egui::{Pos2, Rect, pos2};
 use solidcore_record::Vec3;
-use solidcraft_engine::render::Camera;
+use solidcraft_viewport::Camera;
 
 use crate::space_mouse::DeviceMotion;
 use solidcraft_theme::Tokens;

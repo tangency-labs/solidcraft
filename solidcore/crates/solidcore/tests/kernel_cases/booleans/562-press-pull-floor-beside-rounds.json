@@ -1,0 +1,155 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b11": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b8": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b10"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b11"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b12"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b14"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b14",
+        "b15"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "562-press-pull-floor-beside-rounds",
+  "expected": {
+    "body_count": 1,
+    "method": "60x40x10 box with four vertical edges rounded r3: floor area 2400 - 4*(1-pi/4)*9 = 2400 - 9*(4-pi) = 2392.274. Pulling the floor 1 mm outward adds a prism of the floor's outline: V = 2392.274 * 11 = 26315.018",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#562"
+    ],
+    "volume_mm3": 26315.017672705388,
+    "what": "Press Pull of a floor whose neighbours are rounds (vertical corner fillets): 'a neighbouring edge is not straight'"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16
+    }
+  },
+  "records": "562-press-pull-floor-beside-rounds.bodies.json.gz",
+  "result": [
+    {
+      "body": "Case",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6927.893782923162,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16,
+      "volume_mm3": 26315.017672834765
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#562"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "Press Pull of a floor whose neighbours are rounds (vertical corner fillets): 'a neighbouring edge is not straight'",
+  "why_not": []
+}

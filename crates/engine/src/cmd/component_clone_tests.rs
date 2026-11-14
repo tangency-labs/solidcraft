@@ -749,3 +749,51 @@ fn paste_new_of_a_mesh_import_with_one_label_on_all_objects_moves_the_copy_of_ea
     assert_eq!(corners(&s, part), lifted());
     assert_eq!(corners(&s, copied), lifted(), "{:?}", body_names(&s));
 }
+
+/// A construction axis through a nested placement's origin datum is copied with its datum path
+/// rebuilt through the copy (the source's ancestors are not in the occurrence map); an axis
+/// whose datum names a placement outside the copied tree refuses the copy - the reference could
+/// not follow, and a dangling one would resolve against whatever then sits at those ids.
+#[test]
+fn cloned_datum_references_follow_the_copy() {
+    let mut s = Session::default();
+    let parent = component(&mut s, "Parent");
+    run(&mut s, "component.create", json!({"name": "Child", "parent": "Parent"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "operation": "new"}));
+    let parent_occ = s.doc.occurrence_of(parent).unwrap().id;
+    let child_occ = s.doc.occurrences.iter().find(|o| o.parent == parent).unwrap().id;
+    run(&mut s, "component.activate", json!({"component": "Parent"}));
+    run(
+        &mut s,
+        "construct.axis.two_points",
+        json!({"a": format!("o:{parent_occ}/{child_occ}/origin/O"), "b": {"point": [12, 0, 0]}, "name": "DatumAxis"}),
+    );
+    let r = copy(&mut s, parent);
+    let new_comp = r["component"].as_u64().unwrap();
+    let new_parent_occ = r["occurrence"].as_u64().unwrap();
+    let new_child_occ = s.doc.occurrences.iter().find(|o| o.parent == new_comp).unwrap().id;
+    let axis =
+        s.doc.features.iter().find(|f| f.component == new_comp && matches!(f.kind, solidcraft_doc::FeatureKind::ConstructionAxis { .. })).unwrap();
+    let solidcraft_doc::FeatureKind::ConstructionAxis { def } = &axis.kind else { panic!("expected a construction axis: {:?}", axis.kind) };
+    let solidcraft_doc::construct::AxisDef::TwoPoints { a, .. } = def else { panic!("expected a two-points axis: {def:?}") };
+    match a {
+        solidcraft_doc::construct::GeoRef::Datum { datum } => {
+            assert_eq!(datum.path, vec![new_parent_occ, new_child_occ], "the datum names the copy's own nested placement");
+        }
+        other => panic!("expected a datum reference, got {other:?}"),
+    }
+    // An axis whose datum names a placement outside the copied tree refuses the copy. Outside is
+    // made at the root: `component.create` places under the active component (the paste left
+    // Parent active), and a datum key names its placement from the root, so a placement inside
+    // Parent would be unreachable to the resolver and inside the copy's map at once.
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let outside = component(&mut s, "Outside");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "operation": "new"}));
+    let outside_occ = s.doc.occurrence_of(outside).unwrap().id;
+    run(&mut s, "component.activate", json!({"component": "Parent"}));
+    run(&mut s, "construct.axis.two_points", json!({"a": format!("o:{outside_occ}/origin/O"), "b": {"point": [12, 0, 0]}, "name": "OutsideAxis"}));
+    assert!(
+        s.execute("component.paste_new", &json!({"component": parent, "translate": [40, 0, 0]})).is_err(),
+        "a datum into another tree cannot follow the copy"
+    );
+}

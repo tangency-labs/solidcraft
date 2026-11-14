@@ -1,0 +1,6892 @@
+{
+  "cases": [
+    {
+      "name": "face_tail_d0.25_equal_solid_noext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_noext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_noext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_noext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_noext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_noext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_noext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_noext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_noext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_noext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_noext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_noext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_ext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_ext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_ext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_ext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_ext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_ext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_ext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_ext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_ext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_ext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_ext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_solid_ext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_noext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_noext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_noext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_noext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_noext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_noext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_noext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_noext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_noext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_noext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_noext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_noext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_ext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_ext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_ext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_ext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_ext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_ext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_ext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_ext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_ext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_ext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_ext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_equal_local_ext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_noext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_noext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_noext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_noext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_noext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_noext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_noext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_noext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_noext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_noext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_noext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_noext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_ext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_ext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_ext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_ext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_ext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_ext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_ext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_ext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_ext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_ext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_ext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_solid_ext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_noext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_noext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_noext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_noext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_noext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_noext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_noext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_noext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_noext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_noext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_noext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_noext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_ext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_ext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_ext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_ext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_ext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_ext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_ext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_ext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_ext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_ext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_ext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_larger_local_ext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_noext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_noext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_noext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_noext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_noext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_noext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_noext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_noext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_noext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_noext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_noext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_noext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_ext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_ext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_ext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_ext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_ext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_ext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_ext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_ext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_ext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_ext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_ext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_solid_ext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_noext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_noext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_noext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_noext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_noext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_noext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_noext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_noext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_noext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_noext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_noext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_noext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_ext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_ext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_ext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_ext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_ext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_ext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_ext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_ext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_ext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_ext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_ext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d0.25_smaller_local_ext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_noext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_noext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_noext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_noext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_noext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_noext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_noext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_noext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_noext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_noext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_noext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_noext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_ext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_ext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_ext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_ext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_ext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_ext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_ext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_ext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_ext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_ext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_ext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_solid_ext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_noext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_noext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_noext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_noext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_noext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_noext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_noext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_noext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_noext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_noext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_noext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_noext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_ext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_ext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_ext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_ext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_ext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_ext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_ext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_ext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_ext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_ext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_ext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_equal_local_ext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_noext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_noext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_noext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_noext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_noext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_noext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_noext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_noext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_noext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_noext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_noext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_noext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_ext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_ext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_ext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_ext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_ext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_ext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_ext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_ext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_ext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_ext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_ext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_solid_ext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_noext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_noext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_noext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_noext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_noext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_noext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_noext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_noext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_noext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_noext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_noext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_noext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_ext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_ext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_ext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_ext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_ext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_ext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_ext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_ext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_ext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_ext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_ext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_larger_local_ext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          -1.0,
+          -1.0,
+          2.0,
+          2.0
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_noext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_noext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_noext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_noext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_noext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_noext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_noext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_noext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_noext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_noext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_noext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_noext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_ext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_ext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_ext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_ext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_ext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_ext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_ext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_ext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_ext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_ext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_ext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_solid_ext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_noext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_noext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_noext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_noext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_noext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_noext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_noext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_noext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_noext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_noext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_noext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_noext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_ext_nomerge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_ext_nomerge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_ext_nomerge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_ext_nomerge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_ext_nomerge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_ext_nomerge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_ext_merge_up_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_ext_merge_up_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_ext_merge_up_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_ext_merge_down_none",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_ext_merge_down_inner",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_d3.0_smaller_local_ext_merge_down_crossing",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 3.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "local": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": true,
+        "self_intersection": [
+          0.0,
+          0.5,
+          1.0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "face_tail_tiny_noext",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 1e-09,
+        "approx_tol": 1e-12,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_tiny_ext",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 1e-09,
+        "approx_tol": 1e-12,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_huge_noext",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 1000000.0,
+        "approx_tol": 0.001,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_huge_ext",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 1000000.0,
+        "approx_tol": 0.001,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_zero_noext",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_zero_ext",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.0,
+        "approx_tol": 1e-06,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_tol_exceeds_half_noext",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 0.2,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_tol_exceeds_half_ext",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 0.2,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_zero_tol_noext",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 0.0,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "face_tail_zero_tol_ext",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 0.0,
+        "domain": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "merge2_inner_parallel_up",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.4,
+          0.75,
+          0.4
+        ],
+        "second_uv": [
+          0.25,
+          0.6,
+          0.75,
+          0.6
+        ]
+      }
+    },
+    {
+      "name": "merge2_crossing_parallel_up",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0,
+          0.4,
+          1,
+          0.4
+        ],
+        "second_uv": [
+          0,
+          0.6,
+          1,
+          0.6
+        ]
+      }
+    },
+    {
+      "name": "merge2_crossing_perpendicular_up",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0,
+          0.5,
+          1,
+          0.5
+        ],
+        "second_uv": [
+          0.5,
+          0,
+          0.5,
+          1
+        ]
+      }
+    },
+    {
+      "name": "merge2_inner_perpendicular_up",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ],
+        "second_uv": [
+          0.5,
+          0.25,
+          0.5,
+          0.75
+        ]
+      }
+    },
+    {
+      "name": "merge2_crossing_subsegment_up",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0,
+          0.5,
+          1,
+          0.5
+        ],
+        "second_uv": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "merge2_crossing_reversed_up",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0,
+          0.5,
+          1,
+          0.5
+        ],
+        "second_uv": [
+          1,
+          0.5,
+          0,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "merge2_crossing_near_identical_up",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0,
+          0.5,
+          1,
+          0.5
+        ],
+        "second_uv": [
+          0,
+          0.5000001,
+          1,
+          0.5000001
+        ]
+      }
+    },
+    {
+      "name": "merge2_inner_near_identical_up",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ],
+        "second_uv": [
+          0.25,
+          0.5000001,
+          0.75,
+          0.5000001
+        ]
+      }
+    },
+    {
+      "name": "merge2_inner_touching_ends_up",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+        ],
+        "second_uv": [
+          0.25,
+          0.5,
+          0.75,
+          0.6
+        ]
+      }
+    },
+    {
+      "name": "merge2_crossing_diagonal_up",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": 1e-06,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "local": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "mate": false,
+        "self_intersection": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "second_uv": [
+          0,
+          1,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "negative_tol_lamina_delete_solid_up",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": -1.0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "negative_tol_lamina_delete_solid_down",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": -1.0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "local": false,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "negative_tol_lamina_delete_local_up",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": -1.0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "negative_tol_lamina_delete_local_down",
+      "inputs": {
+        "op": "face_tail",
+        "offset_distance": 0.25,
+        "approx_tol": -1.0,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "local": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "mate": true
+      }
+    }
+  ]
+}

@@ -14,7 +14,7 @@ People trust SolidCraft with their designs. This outranks feature work.
   - Windows only: `apps/solidcraft/src/native_crash.rs` (the exception filter that records crashes inside native code such as graphics drivers), `apps/solidcraft/src/native_frame.rs` (the window procedure that answers the resize-border hit test of the window without OS decorations, and gives its class the icon the taskbar falls back on) and `apps/solidcraft/src/space_mouse/windows_hid.rs` (asks Plug and Play which HID interfaces are 3D mice, so no other device is sent anything)
 - Errors are `Result<T, E>` through the crate's error type and `?`. An unfinished feature returns an error ("not supported yet: ..."); it never panics.
 - Input-derived numbers are hostile (command parameters, design files, control-channel input): `get()` not `[i]`, finite checks, caps on sizes and loop counts.
-- Everything that calls `truck` goes through `solidcraft_kernel::guard`, which turns a panic into `KernelError::Internal`. Only `crates/kernel` may use `truck`.
+- Everything that calls `solidcore` is caught in `crates/smlib` and becomes `Error::Internal`. Only `crates/smlib` may use `solidcore`.
 - Last resort: `Session::execute` runs every command under `catch_unwind`; an escaped panic restores the design and reports `EngineError::Internal`. Do not rely on it.
 - Files are written with `crates/io/src/safe_write.rs` (temporary file, flush, one rename), so a crash leaves the old file or the new one.
 
@@ -27,4 +27,4 @@ The desktop app writes every panic and every unclean exit to a local crash folde
 - `solidcraft-cli crashes`, `solidcraft-cli crashes show <id>`, `solidcraft-cli crashes replay <id>`
 - the `diagnostics.crash_reports` command, or the MCP `crash_reports` tool
 
-Crashes and data loss are taken as issues even while kernel work is paused (CONTRIBUTING.md, "Kernel work is paused").
+Crashes and data loss are taken first, including in kernel code, which lives in `solidcore/` (CONTRIBUTING.md, "Kernel work goes in solidcore/").

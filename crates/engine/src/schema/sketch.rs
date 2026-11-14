@@ -26,11 +26,53 @@ use super::types::{IdOrName, Point3, present};
 #[schemars(deny_unknown_fields)]
 pub struct EditParams {
     pub sketch: IdOrName,
-    /// When present, temporarily roll to this sketch and restore this position when the edit
-    /// ends. Null means the end of the timeline; omission leaves the timeline in place.
-    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<usize>")]
-    pub restore_marker: Option<Option<usize>>,
+    /// A position (or null, the end of the timeline): temporarily roll to this sketch and
+    /// restore that position when the edit ends. Left out, a sketch with features after it is
+    /// rolled to and the current position restored, so those features rebuild once, when the
+    /// edit ends (#14010). `false` leaves the timeline in place, rebuilding them after every
+    /// sketch command.
+    #[serde(default, deserialize_with = "present")]
+    pub restore_marker: Option<EditMarker>,
+}
+
+/// `sketch.edit`'s `restore_marker`: where the timeline goes back to when the edit ends, or
+/// `false` to edit with the timeline left in place.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EditMarker {
+    /// Roll to the sketch; restore this position (`None`: the end) when the edit ends.
+    Restore(Option<usize>),
+    /// Leave the timeline in place.
+    InPlace,
+}
+
+impl EditMarker {
+    pub(crate) fn read(v: &Value) -> Option<Self> {
+        match v {
+            Value::Null => Some(Self::Restore(None)),
+            Value::Bool(false) => Some(Self::InPlace),
+            Value::Number(n) => n.as_u64().and_then(|m| usize::try_from(m).ok()).map(|m| Self::Restore(Some(m))),
+            _ => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for EditMarker {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        Self::read(&v).ok_or_else(|| D::Error::custom("`restore_marker` must be a nonnegative timeline position, null or false"))
+    }
+}
+
+impl JsonSchema for EditMarker {
+    fn schema_name() -> Cow<'static, str> {
+        "EditMarker".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A timeline position to restore when the edit ends (null: the end), or false to leave the timeline in place.",
+            "anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}, {"const": false}]
+        })
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

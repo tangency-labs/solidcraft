@@ -225,6 +225,19 @@ A dimension can drive the sketch, or be driven by it and only show the value.
 - **Elsewhere:** dimension, dimensional constraint, driving dimension.
 - **For translators:** not a drawing dimension and not a measured value.
 
+### end cap
+
+A plate that closes the open end of a frame member, shaped like the member profile's outer outline
+and set in from its edge.
+
+An end cap is a separate body named after its member. Compare a mounting plate, which is
+rectangular or round and need not follow the profile.
+
+- **In SolidCraft:** `frame.end_cap`; the `frame_end_cap` design-file key.
+- **Don't use:** plug, lid, blank (for the plate).
+- **Elsewhere:** end cap, end plate, cap plate.
+- **For translators:** a closing plate on a tube's end, not a cap of a sketch or surface.
+
 ### equation curve
 
 A sketch curve whose shape comes from formulas over a range of one variable.
@@ -335,6 +348,21 @@ Indirect diffuse and specular illumination computed by tracing finite light path
 - **In SolidCraft:** optional CPU `job.options.path` / runtime `raytrace.path`, enabled explicitly in Sampling.
 - **Don't use:** ambient occlusion, glass, full optical parity.
 - **For translators:** this describes light transport; it is unrelated to a modelling path or physical material density.
+
+### operations panel
+
+The panel in the view's bottom-right corner that lists each long operation under way, with its
+progress and a button that cancels it.
+
+An operation is work that takes long enough to run beside the window: opening or inserting a file,
+a feature dialog's OK computing, an undo or a history marker move recomputing the timeline, an
+agent's command. A new one goes on top; one that ends fades out.
+
+- **In SolidCraft:** the `ui.operations` control method; the `operations_panel` preference.
+- **Don't use:** job, task, activity.
+- **Elsewhere:** progress panel, background tasks.
+- **For translators:** an operation is work under way, not a feature's *operation* (join, cut,
+  intersect).
 
 ### part number
 
@@ -470,6 +498,20 @@ a standard size.
 - **Elsewhere:** standard part, library part, fastener, catalogue part.
 - **For translators:** see *Words with more than one meaning*, "part".
 
+### standard steel size
+
+A named steel section from a published standard, such as the channel `RSC 203x89` or the hollow
+section `SHS 100x100x5`, that a frame member can be made of without typing its dimensions.
+
+Its frame profile carries the standard's dimensions; a taper flange channel's flanges slope by its
+flange slope.
+
+- **In SolidCraft:** `frame.profile.list` (`sizes`), `profile: {"size": …}` in `frame.member`,
+  `frame.profile.properties` and `frame.profile.insert`; a channel's `flange_slope`.
+- **Don't use:** catalogue profile, library profile (for the size).
+- **Elsewhere:** standard section, section size, section designation.
+- **For translators:** a steel section's size by name, not a dimension and not a standard part.
+
 ### thin-film interference
 
 Interference between coherent optical waves reflected at the interfaces of a thin layer.
@@ -546,6 +588,9 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
+| | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
+| Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
+| | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |
 | | a hem that lies flat on the sheet | flat hem | the Hem dialog's type |
 | Round | a round relief or corner shape | round (shape) | relief shapes, plastic rests, ruled surface corners |

@@ -90,6 +90,12 @@ pub(crate) fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: crate::C
     imp::sides(body, edges, d1, side, flip)
 }
 
+/// [`chamfer_sides`] with `d1` back along the face whose outward normal at the middle of its edge
+/// leans most along `first` (the first of the edge's two faces where they lean alike).
+pub(crate) fn chamfer_sides_along(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, first: Vec3) -> Result<Body> {
+    imp::sides_along(body, edges, d1, side, first)
+}
+
 /// One edge rounded with the radius `spline` (checked by the caller) along it from the end
 /// nearest `start` ([`crate::fillet_variable_spline`]).
 pub(crate) fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, spline: &RadiusSpline) -> Result<Body> {
@@ -394,6 +400,10 @@ mod imp {
     }
 
     pub(super) fn sides(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, flip: bool) -> Result<Body> {
+        sides_along(body, edges, d1, side, Vec3::new(0.0, 0.0, if flip { -1.0 } else { 1.0 }))
+    }
+
+    pub(super) fn sides_along(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, first: Vec3) -> Result<Body> {
         body.require_brep("chamfer")?;
         sizes_ok("chamfer", &vec![d1; edges.len()])?;
         let picked = resolve(body, edges)?;
@@ -402,9 +412,8 @@ mod imp {
             crate::ChamferSide::Distance(d) => ChamferSecond::Distance(d),
             crate::ChamferSide::Angle(a) => ChamferSecond::Angle(a),
         };
-        let up = if flip { [0.0, 0.0, -1.0] } else { [0.0, 0.0, 1.0] };
         let tol = pick_tolerance(body);
-        run(body, "chamfer", &picked.edges, |b| b.chamfer_sides(&picked.points, tol, d1, second, up))
+        run(body, "chamfer", &picked.edges, |b| b.chamfer_sides(&picked.points, tol, d1, second, [first.x, first.y, first.z]))
             .map_err(|e| crate::blend::with_continuation(e, next))
     }
 
@@ -481,6 +490,18 @@ mod imp {
                     KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow{beside}; {fits}"))
                 }
                 SmError::Unported(why) => KernelError::Invalid(format!("not supported yet: {why}")),
+                // Not too large: a longer setback. Named as building only where solidcore's fill
+                // is the corner; where another patch replaces it (a G2 corner) it is what
+                // solidcore's corner needs, which that patch may not fit.
+                SmError::SetbackTooShort { least, at, builds } => {
+                    let at = at.map(|[x, y, z]| format!(" at ({x:.3}, {y:.3}, {z:.3})")).unwrap_or_default();
+                    let least = crate::blend::trimmed_mm(least);
+                    KernelError::Invalid(if builds {
+                        format!("the setback{at} of the {what} is too short for its corner's fill; {}{least} mm", crate::blend::SETBACK_AT_LEAST)
+                    } else {
+                        format!("the setback{at} of the {what} is too short for its corner's fill: solidcore's corner needs a setback of at least {least} mm")
+                    })
+                }
                 e => failed(what, "operation", e),
             })?;
             // Checked here unless the evaluation's validation mode leaves it to the feature's end

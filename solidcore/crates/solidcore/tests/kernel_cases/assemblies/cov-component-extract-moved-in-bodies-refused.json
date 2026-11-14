@@ -1,0 +1,38 @@
+{
+  "area": "assemblies",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-component-extract-moved-in-bodies-refused",
+  "expected": {
+    "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Arm's body came in by component.move_bodies, a feature outside it: its history can't move to a design of its own, so extract is refused",
+    "outcome": "refused",
+    "refusal": "moves bodies into or out of Arm",
+    "source": "analytic",
+    "sources": [],
+    "what": "component.extract of a component whose body was moved in from the root"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 8 (component.extract): invalid parameters for `component.extract`: BodyTransfer2 moves bodies into or out of Arm",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 8 (component.extract): invalid parameters for `component.extract`: BodyTransfer2 moves bodies into or out of Arm",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "component.extract of a component whose body was moved in from the root",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 8 (component.extract): invalid parameters for `component.extract`: BodyTransfer2 moves bodies into or out of Arm"
+  ]
+}

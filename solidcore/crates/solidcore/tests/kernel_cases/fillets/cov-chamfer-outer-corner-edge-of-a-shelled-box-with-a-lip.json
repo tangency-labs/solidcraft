@@ -1,0 +1,141 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  50.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  50.0,
+                  30.0
+                ]
+              ],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              0.0,
+              50.0,
+              15.0
+            ]
+          ],
+          "tolerance": 4.981963762164909
+        },
+        "kind": "chamfer",
+        "sizes": [
+          3.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-chamfer-outer-corner-edge-of-a-shelled-box-with-a-lip",
+  "expected": {
+    "body_count": 1,
+    "method": "shelled: 80*50*30 - 76*46*28 = 22112; the lip is the band along the rim's inner edge (76 x 46 to 78 x 48), raised 2: 496 (as cov-lip-inside-on-a-shelled-box): V0 = 22608. The chamfer's plane x + (50 - y) = 3 stays clear of the inside corner (2, 48), where x + 50 - y = 4, so its triangle (legs 3, area 4.5) lies in the wall and floor all the way up: it takes 4.5 x 30 = 135. At the top the triangle reaches under the lip's corner, whose part x + 50 - y < 3 (the half square (1, 48), (1, 49), (2, 49), 0.5 x 2 = 1) goes or stays by where the chamfer ends on the lip's walls: V = 22473 or 22472, graded as 22472.5 (both within 1e-3)",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 22472.5,
+    "what": "a vertical outer corner edge of an 80 x 50 x 30 box shelled 2 mm open at the top with a 1 x 2 lip raised on its rim, chamfered 3: wider than the wall but clear of the inside corner, its top end on the lip (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): corpus/modern-plastic, Body1 F1:+y|F1:-x edge.chamfer)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 51,
+      "faces": 22,
+      "vertices": 32
+    }
+  },
+  "records": "cov-chamfer-outer-corner-edge-of-a-shelled-box-with-a-lip.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 23563.27922061358,
+      "body_count": 1,
+      "edges": 43,
+      "faces": 18,
+      "vertices": 28,
+      "volume_mm3": 22473.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "shell",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "a vertical outer corner edge of an 80 x 50 x 30 box shelled 2 mm open at the top with a 1 x 2 lip raised on its rim, chamfered 3: wider than the wall but clear of the inside corner, its top end on the lip (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): corpus/modern-plastic, Body1 F1:+y|F1:-x edge.chamfer)",
+  "why_not": []
+}
