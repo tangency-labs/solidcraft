@@ -808,6 +808,8 @@ fn the_stitch_scope_refuses_a_gap_whose_ball_reaches_other_topology() {
     let mut k = Kernel::default();
     let (mut clear, sewed) = lifted_sheets(&mut k, 0.004, 1e-4, 0.02);
     assert_eq!(sewed, 1);
+    let body0 = solidcore::topology::brep::validation::check_brep(&mut k, &mut clear, CheckLevel::Level2).unwrap();
+    eprintln!("BODY0 {:?}", body0.lines());
     let alone =
         check_brep_scoped(&mut k, &mut clear, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
     assert!(alone.is_valid(), "{:?}", alone.lines());
