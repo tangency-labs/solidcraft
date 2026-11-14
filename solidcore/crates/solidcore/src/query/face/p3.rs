@@ -69,6 +69,14 @@
 //!   tight box does, so the two differ only where those calls fail outright. A failed solve
 //!   in the trimmed-face search gives a cell with no solution, which counts with its loose
 //!   box, so the box only grows (safer than the fork's SER, which would fail the box).
+//! - **A hole's outside is the face.** `SectorClassifyCurveOn`'s loop-containment retry
+//!   takes a stepped-off point that its loop does not wind around for outside the face
+//!   only when the loop runs counter-clockwise
+//!   ([`compute_loop_orientation`](crate::topology::face::p3::compute_loop_orientation));
+//!   outside a clockwise loop (a hole) it is inside the face, and with the orientation
+//!   unknown the doubtful classification stands. Upstream reads every such point as
+//!   outside, so a curve leaving a vertex of a hole into the face, tangent to the hole's
+//!   boundary there, was classified out of the face.
 //! - **Same curve on two edges.** `SectorClassifyCurveOn` compares the curve pointers
 //!   of two different edges; an edge owns its curve in the port, so two edges never
 //!   share one (`bSingleCurveOnEdges` is always false), as in `query::edge`.
@@ -2952,6 +2960,33 @@ pub fn sector_classify_curve_on(
             res.problem = ClassifyProblem::None;
             return Ok(res);
         } else if cont == PointContainment::Outside {
+            // The face lies on the left of its loops: inside a counter-clockwise loop,
+            // outside a clockwise one (a hole). A point the loop does not wind around
+            // (`ContainsUVPoint` gives no orientation then) is in the face exactly when
+            // the loop is clockwise, so that reading is decided by the loop's own
+            // orientation. Upstream takes every such point for outside the face, so a
+            // curve leaving a vertex of a hole into the face was classified out of it.
+            // A loop whose orientation is unknown decides nothing: the doubtful
+            // classification of the steps above stands, marked as a possible problem.
+            if c.orientation != OrientType::Opposite {
+                let loop_orientation = match crate::topology::face::p3::compute_loop_orientation(
+                    k, b, f, loop1, None, false,
+                ) {
+                    Ok(o) => o,
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                    Err(_) => OrientType::Unknown,
+                };
+                match loop_orientation {
+                    OrientType::Opposite => {
+                        res.inside = true;
+                        res.possible_problem = false;
+                        res.problem = ClassifyProblem::None;
+                        return Ok(res);
+                    }
+                    OrientType::Same => {}
+                    _ => return Ok(res),
+                }
+            }
             res.inside = false;
             res.possible_problem = false;
             res.problem = ClassifyProblem::None;

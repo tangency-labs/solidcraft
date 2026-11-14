@@ -1332,3 +1332,182 @@ fn two_solids_touching_along_an_edge_survive_a_round_trip_and_booleans() {
         }
     }
 }
+
+/// An 80 x 75 x 48 block (x from 0, y from -75, z from 0) less a stadium through it along y:
+/// two half circles of radius 16 centred at x = 21 and 59, joined by flat sides 32 apart, its
+/// bottom side at z = `bottom`. The stadium's flat bottom meets each half circle at a vertex
+/// where the two are tangent.
+fn block_less_stadium(bottom: f64) -> Body {
+    let (low, high, centre) = (bottom, bottom + 32.0, bottom + 16.0);
+    let arc = |x: f64, start: f64| Curve::Arc {
+        center: [x, 5.0, centre],
+        axis: [0.0, -1.0, 0.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: 16.0,
+        start,
+        end: start + PI,
+    };
+    let profile = [
+        arc(21.0, PI / 2.0),
+        Curve::Line {
+            start: [21.0, 5.0, low],
+            end: [59.0, 5.0, low],
+        },
+        arc(59.0, -PI / 2.0),
+        Curve::Line {
+            start: [59.0, 5.0, high],
+            end: [21.0, 5.0, high],
+        },
+    ];
+    let stadium = extrude(
+        &profile,
+        [0.0, -1.0, 0.0],
+        85.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let block = make_box([0.0, -75.0, 0.0], [80.0, 75.0, 48.0]).unwrap();
+    boolean(block, stadium, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// The stadium's area, 38 x 32 + pi 16^2.
+fn stadium_area() -> f64 {
+    38.0 * 32.0 + PI * 16.0 * 16.0
+}
+
+/// The block less the stadium whose bottom lies `h` below z = 12, less the rest of the block
+/// from z = 12 up over y from -65 to 0: the stadium's part above z = 12 is its area less the
+/// strip 38 h of its flat side and the two half segments of depth h of its circles, one whole
+/// segment r^2 acos((r - h) / r) - (r - h) sqrt(2 r h - h^2).
+fn block_less_stadium_and_cut(h: f64) -> f64 {
+    let r = 16.0;
+    let segment = r * r * ((r - h) / r).acos() - (r - h) * (2.0 * r * h - h * h).sqrt();
+    let above = stadium_area() - 38.0 * h - segment;
+    80.0 * 75.0 * 48.0 - 75.0 * stadium_area() - 65.0 * (80.0 * 36.0 - above)
+}
+
+fn one_valid_solid_of_volume(r: &Body, counts: [usize; 3], want: f64, rel: f64) {
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    assert_eq!(r.counts().unwrap(), counts);
+    let v = r.volume(1e-11).unwrap();
+    assert!(
+        (v - want).abs() <= rel * want,
+        "volume {v}, closed form {want}"
+    );
+}
+
+/// A box cut from z = 12 up, its bottom face on the stadium's flat bottom, which lies 3.756e-11
+/// below it (as a sketch solve leaves it, #16237), and its back face flush with the block's. The
+/// line where the box's bottom meets the block's back face runs along the stadium's bottom edge
+/// and leaves it at the vertices where the edge and the half circles are tangent, into the back
+/// face. The classification of that line against the back face stepped along it to settle the
+/// tangency and read the stepped point against the stadium's loop, a hole: a point outside a
+/// hole was taken for outside the face, the line was not imprinted there, and the merge failed
+/// ("no radial edge use classifies the face's edge use"). A box past every side of the block
+/// cut nothing instead, a valid body of the wrong volume. Both leave the closed form.
+#[test]
+fn a_cut_whose_bottom_is_a_hair_above_a_stadium_holes_flat_side_removes_the_rest() {
+    all_fixes();
+    let h = 3.756e-11;
+    let want = block_less_stadium_and_cut(h);
+    let flush = make_box([0.0, -65.0, 12.0], [80.0, 65.0, 36.0]).unwrap();
+    let r = boolean(block_less_stadium(12.0 - h), flush, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [11, 30, 20], want, 1e-9);
+    let past = make_box([-5.0, -65.0, 12.0], [90.0, 70.0, 40.0]).unwrap();
+    let r = boolean(block_less_stadium(12.0 - h), past, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [11, 30, 20], want, 1e-9);
+}
+
+/// The real defect beside it: a cylinder through the stadium whose circle is tangent to the
+/// stadium's flat bottom and its half circle at their common vertex, of a smaller radius, so it
+/// bends into the hole there. It lies in the hole and cuts nothing: the classification still
+/// takes the curves leaving that vertex into the hole for outside the back face.
+#[test]
+fn a_cylinder_in_a_stadium_hole_tangent_at_its_vertex_cuts_nothing() {
+    all_fixes();
+    let h = 3.756e-11;
+    let want = 80.0 * 75.0 * 48.0 - 75.0 * stadium_area();
+    for r in [15.0, 15.9, 15.99] {
+        let circle = [Curve::Arc {
+            center: [59.0, 0.0, 12.0 - h + r],
+            axis: [0.0, -1.0, 0.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: r,
+            start: 0.0,
+            end: TAU,
+        }];
+        let cylinder = extrude(
+            &circle,
+            [0.0, -1.0, 0.0],
+            65.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        let cut = boolean(block_less_stadium(12.0 - h), cylinder, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        one_valid_solid_of_volume(&cut, [10, 24, 16], want, 1e-9);
+    }
+}
+
+/// The operand records of one of SolidCraft's failing cuts (`data/<name>.bodies.json.gz`), by
+/// name.
+fn traced_operands(name: &str) -> impl Fn(&str) -> Body {
+    let path = format!(
+        "{}/tests/data/{name}.bodies.json.gz",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let records: Value = serde_json::from_str(&text).unwrap();
+    move |key: &str| {
+        let record: Record = serde_json::from_value(records[key].clone()).unwrap();
+        Body::from_record(&record, true).unwrap().0
+    }
+}
+
+/// #16237's cut as SolidCraft passed it: the block less a stadium sketched with its bottom
+/// 3.756e-11 below z = 12, less the rectangle cut from z = 12 up, flush with the block's top and
+/// back. It failed in the merge; it is the closed form of the block, the stadium and the cut.
+#[test]
+fn a_traced_cut_flush_with_an_earlier_stadium_cut_is_its_closed_form() {
+    all_fixes();
+    let body = traced_operands("issue_16237_cut_flush_with_earlier_cut");
+    let r = boolean(body("target"), body("tool"), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(
+        &r,
+        [11, 30, 20],
+        block_less_stadium_and_cut(3.756e-11),
+        1e-9,
+    );
+}
+
+/// #15247's second cut as SolidCraft passed it: a plate already cut by one half of a 0.8 mm
+/// outline wall around an arrow, less the other half, which meets the faces the first cut left.
+/// It failed in the merge. The tool lies inside the plate, so the cut removes exactly its volume.
+#[test]
+fn a_traced_cut_meeting_an_earlier_cut_removes_its_tool() {
+    all_fixes();
+    let body = traced_operands("issue_15247_cut_arrow_outline");
+    let want = body("target").volume(1e-11).unwrap() - body("tool").volume(1e-11).unwrap();
+    let r = boolean(body("target"), body("tool"), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [46, 132, 88], want, 1e-9);
+}
