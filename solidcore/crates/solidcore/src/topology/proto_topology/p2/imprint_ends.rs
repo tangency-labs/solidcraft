@@ -37,7 +37,9 @@
 use super::{curve_of, dangling, ignore_soft, EdgeDefId, ProtoBrep, ProtoTopologyManager};
 use super::{ProtoVertexId, Result};
 use crate::curve::curve::p2::{Curve, CurveKind};
+use crate::error::SolidError;
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::{SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::tol::are_same;
 use crate::intersect::point_class::{ClassObject, ClassObjectKind, PointClassType};
@@ -46,6 +48,7 @@ use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::surface::surface::p4::NoObject;
 
 /// How far ahead of a curve's end, as a fraction of the interval, a proto vertex may lie
 /// for the curve to be continued to it.
@@ -53,6 +56,9 @@ const MAX_EXTENSION_FRACTION: f64 = 0.05;
 
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
 const ANALYTIC_TOL_SCALE: f64 = 100.0;
+
+/// The operation path of the end continuation's refusal.
+const OP_EXTEND: &str = "topology::proto_topology::p2::imprint_ends::extend_end_to_proto_vertex";
 
 impl<O: ClassObject> ProtoTopologyManager<O> {
     /// The block at the top of the fork's `SmEdgeDefinition::Imprint`: for each end of the
@@ -99,6 +105,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     v.final_vertex(1) == Some(vtx1) && v.final_vertex(2) == Some(vtx2)
                 });
             }
+            let pv_tol = proto.raw_tolerance();
             let pv_pos = if one_vertex {
                 proto.position()
             } else {
@@ -125,6 +132,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             if !(gap > EFF_ZERO * (1.0 + end_pt.max_dimension())) {
                 continue;
             }
+            if one_vertex
+                && self.move_end_to_pole(k, brep, ed, at_end, pv_pos, gap, pv_tol)?
+            {
+                continue;
+            }
             if k.fixes.imprint_extends_edge_to_proto_vertex
                 && self.extend_end_to_proto_vertex(k, brep, ed, at_end, pv_pos, end_pt, gap)?
             {
@@ -133,6 +145,136 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             self.trim_end_to_proto_vertex(k, brep, ed, at_end, pv_pos, gap)?;
         }
         Ok(())
+    }
+
+    /// Not upstream (#16637): moves an end that stops short of its proto vertex onto it
+    /// where that vertex is a pole of one of the definition's faces, by replacing the end
+    /// control point of the 3d curve with the vertex's position and that of each UV curve
+    /// with the vertex's parameters: on the face whose surface collapses there, the end's
+    /// parameter along the degenerate side with the side's own across it (the end on the
+    /// pole, inside the domain); on the other face, the vertex's foot (a local point solve
+    /// from the end's parameters, within the vertex's tolerance of it).
+    ///
+    /// It applies when the gap is within the proto vertex's tolerance, which for a vertex
+    /// that absorbed definitions is their certified distance from it (`resolve_proto_vertex`):
+    /// the end is then a point the vertex stands for. Each curve is clamped, so its end is
+    /// its end control point, and moving that point by `Δ` moves every point of the curve by
+    /// at most `|Δ|` (the basis functions are a partition of unity, at most 1): the 3d curve
+    /// stays within the gap of where it was, PROVEN. A continuation past the end instead
+    /// (`extend_end_to_proto_vertex`) follows the end span's polynomial, which near a pole
+    /// runs out of the face's UV domain. Returns whether the curves were replaced.
+    #[allow(clippy::too_many_arguments)]
+    fn move_end_to_pole(
+        &mut self,
+        k: &Kernel,
+        brep: &mut impl ProtoBrep<O>,
+        ed: EdgeDefId,
+        at_end: bool,
+        pv_pos: Point3,
+        gap: f64,
+        pv_tol: f64,
+    ) -> Result<bool> {
+        // (written to accept: a NaN gap or tolerance moves nothing)
+        if !(gap <= pv_tol) {
+            return Ok(false);
+        }
+        let d = self.ed_ref(ed)?;
+        let interval = d.xsect_interval();
+        let end_param = if at_end {
+            interval.max()
+        } else {
+            interval.min()
+        };
+        let curve = curve_of(&*brep, d.xsect_curve_3d())?;
+        let natural = curve.natural_interval();
+        if !are_same(end_param, if at_end { natural.max() } else { natural.min() }) {
+            return Ok(false);
+        }
+        let zero = EFF_ZERO * (1.0 + pv_pos.max_dimension());
+        let mut new_uv: [Option<Curve>; 2] = [None, None];
+        let mut on_pole = false;
+        for (slot, which) in new_uv.iter_mut().zip([1, 2]) {
+            let Some(h) = d.xsect_uv_curve(which) else {
+                continue;
+            };
+            let uv_curve = curve_of(&*brep, Some(h))?;
+            let face = d
+                .src_topo(which)
+                .filter(|_| d.src_topo_type(which) == PointClassType::Face)
+                .filter(|o| o.class_kind() == ClassObjectKind::Face);
+            let Some(surface) = face
+                .and_then(|f| brep.face_surface(f))
+                .flatten()
+                .and_then(|s| brep.surface(s))
+            else {
+                return Ok(false);
+            };
+            let Some(e) = ignore_soft(uv_curve.evaluate_point(k, end_param))? else {
+                return Ok(false);
+            };
+            let Some(dom) = ignore_soft(surface.natural_uv_domain_with_nurb(k))? else {
+                return Ok(false);
+            };
+            let sides = ignore_soft(surface.get_singularities(k, false, false))?
+                .map_or(0, |r| r.singular);
+            // the end on each pole side of this surface
+            let mut target = None;
+            for (bit, uv) in [
+                (SS_UMIN, Point2::new(dom.min().x, e.y)),
+                (SS_UMAX, Point2::new(dom.max().x, e.y)),
+                (SS_VMIN, Point2::new(e.x, dom.min().y)),
+                (SS_VMAX, Point2::new(e.x, dom.max().y)),
+            ] {
+                if sides & bit == 0 || target.is_some() {
+                    continue;
+                }
+                let Some(p) = ignore_soft(surface.evaluate_point(k, uv))? else {
+                    continue;
+                };
+                if p.distance(pv_pos) <= zero {
+                    target = Some(uv);
+                }
+            }
+            let uv = if let Some(uv) = target {
+                on_pole = true;
+                uv
+            } else {
+                let solved = ignore_soft(surface.local_point_solve::<NoObject>(
+                    k,
+                    &dom,
+                    SolverOperation::Minimize,
+                    pv_pos,
+                    Point2::new(e.x, e.y),
+                ))?;
+                let Some(r) = solved.filter(|r| r.found) else {
+                    return Ok(false);
+                };
+                let (Ok(u), Ok(v)) = (r.solution.start.param(0), r.solution.start.param(1)) else {
+                    return Ok(false);
+                };
+                let uv = Point2::new(u, v);
+                let Some(p) = ignore_soft(surface.evaluate_point(k, uv))? else {
+                    return Ok(false);
+                };
+                if !(p.distance(pv_pos) <= pv_tol) {
+                    return Ok(false);
+                }
+                uv
+            };
+            let Some(c) = curve_with_end_point(uv_curve, at_end, Vec3::new(uv.x, uv.y, 0.0))
+            else {
+                return Ok(false);
+            };
+            *slot = Some(c);
+        }
+        if !on_pole {
+            return Ok(false);
+        }
+        let Some(new_3d) = curve_with_end_point(curve, at_end, pv_pos) else {
+            return Ok(false);
+        };
+        self.install_end_fit(brep, ed, Some(new_3d), new_uv, interval)?;
+        Ok(true)
     }
 
     /// WR-452 (b43876f): moves the interval end to the curve's point nearest `pv_pos`
@@ -361,6 +503,19 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             if !(on_face.distance(new_end_pt) <= tol) {
                 return Ok(false);
             }
+            // Not upstream (#16637): a continued UV curve whose end leaves its surface's
+            // domain is no trim of the face (near a pole the polynomial continuation runs
+            // across the seam); refused, never installed
+            let Some(dom) = ignore_soft(surface.natural_uv_domain_with_nurb(k))? else {
+                return Ok(false);
+            };
+            let uv_zero = EFF_ZERO * (1.0 + dom.max_dimension());
+            if !dom.contains_point(Point2::new(p.x, p.y), uv_zero) {
+                return Err(SolidError::topology_failed(
+                    OP_EXTEND,
+                    "the continued UV curve leaves its face's domain",
+                ));
+            }
         }
 
         let mut ivl = interval;
@@ -408,6 +563,42 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         d.set_xsect_interval(interval);
         Ok(())
     }
+}
+
+/// Not upstream (#16637): a copy of the clamped B-spline curve `curve` whose end (or
+/// start) control point, its end point, is `point` (a rational curve keeps that point's
+/// weight). `None` for another curve kind or an unclamped curve.
+fn curve_with_end_point(curve: &Curve, at_end: bool, point: Vec3) -> Option<Curve> {
+    let CurveKind::BSpline(src) = curve.kind() else {
+        return None;
+    };
+    let degree = src.degree().ok()?;
+    let (knots, mults) = src.knots(None).ok()?;
+    if degree < 1
+        || knots.len() < 2
+        || mults.len() != knots.len()
+        || mults.first() != Some(&(degree + 1))
+        || mults.last() != Some(&(degree + 1))
+    {
+        return None;
+    }
+    let (mut pts, wts) = src.control_polygon().ok()?;
+    let rational = !wts.is_empty();
+    let slot = if at_end { pts.len().checked_sub(1)? } else { 0 };
+    *pts.get_mut(slot)? = point;
+    let moved = BSplineCurve::create_canonical(&CanonicalData {
+        dim: src.dim(),
+        degree,
+        control_points: &pts,
+        form: BSplineCurveForm::Unspecified,
+        knot_multiplicities: &mults,
+        knots: &knots,
+        knot_type: KnotType::Unspecified,
+        weights: rational.then_some(wts.as_slice()),
+        trim: None,
+    })
+    .ok()?;
+    Some(Curve::from(moved))
 }
 
 /// `sm_CreateExactlyExtendedCurve` (a8caccd): a copy of a clamped B-spline curve whose end
