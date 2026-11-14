@@ -416,13 +416,14 @@ fn point_distance(x: Vec3, c: &Exact) -> Option<f64> {
 }
 
 /// How two planes beside an edge meet, decided once for the whole edge from the planes
-/// alone (the thresholds of [`meeting_near`]).
+/// alone (the thresholds of [`meeting_near`]); two parallel quadrics are one or apart in the
+/// same sense ([`quadric_pair`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PlanePair {
     /// On a line.
     Line,
-    /// They are one plane (within the tangency tolerance of parallel, within the B-rep's
-    /// tolerance apart).
+    /// They are one surface (two planes within the tangency tolerance of parallel and within
+    /// the B-rep's tolerance apart; two quadrics as [`quadric_pair`] decides).
     One,
     /// Parallel and apart: they meet nowhere.
     Apart,
@@ -436,6 +437,93 @@ fn plane_pair(a: Tangent, b: Tangent, tangent_sine: f64, tolerance: f64) -> Plan
         PlanePair::One
     } else {
         PlanePair::Apart
+    }
+}
+
+/// How two quadrics beside an edge meet where they are parallel surfaces, decided once for
+/// the whole edge from the quadrics alone, as [`plane_pair`] decides two planes: two spheres
+/// about one centre, or two cones (cylinders) on one axis direction (the same, or its exact
+/// negation) with one slope along it, exactly. Their radii then differ by one radial gap `g`
+/// at every height (a cone's taken at one height on the first's axis), and the second's
+/// centre or axis lies `e` off the first's, so the surfaces lie between `|g| / √(1 + t²)
+/// − e` and `|g| + e` apart along their normals (`t` the slope along the axis line): one
+/// surface ([`PlanePair::One`]) where `|g| + e ≤ tolerance`, apart ([`PlanePair::Apart`])
+/// where `|g| / √(1 + t²) > tolerance + e`, each on outward enclosures of `g` and `e`. `None`
+/// for any other pair, a gap between those bounds, or `e` past the tolerance:
+/// [`quadric::meet`] decides it. Not within the tangency tolerance, as two planes are:
+/// coaxial quadrics a small angle apart (a cylinder's half drafted 0.3 degrees beside the half
+/// it was split from) meet on the edge.
+fn quadric_pair(a: &Implicit, b: &Implicit, tolerance: f64) -> Option<PlanePair> {
+    let i = Ivl::from;
+    let enclosed = |p: Vec3| [i(p.x), i(p.y), i(p.z)];
+    let dot = |x: [Ivl; 3], y: [Ivl; 3]| x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+    let minus = |x: [Ivl; 3], y: [Ivl; 3]| [x[0] - y[0], x[1] - y[1], x[2] - y[2]];
+    // the radial gap, the normals' scale √(1 + t²) and the offset, enclosed
+    let (gap, scale, off) = match (*a, *b) {
+        (
+            Implicit::Sphere {
+                centre: ca,
+                radius: ra,
+            },
+            Implicit::Sphere {
+                centre: cb,
+                radius: rb,
+            },
+        ) => {
+            let v = minus(enclosed(cb), enclosed(ca));
+            (i(rb) - i(ra), i(1.0), dot(v, v).sqrt())
+        }
+        (
+            Implicit::Cone {
+                origin: oa,
+                axis: aa,
+                radius: ra,
+                tan_angle: ta,
+            },
+            Implicit::Cone {
+                origin: ob,
+                axis: ab,
+                radius: rb,
+                tan_angle: tb,
+            },
+        ) => {
+            // one axis direction and one slope along it: the second's height is the first's
+            // less `z`, in the first's sense
+            let sense = if ab == aa {
+                1.0
+            } else if ab == -aa {
+                -1.0
+            } else {
+                return None;
+            };
+            if tb * sense != ta {
+                return None;
+            }
+            let axis = enclosed(aa);
+            let v = minus(enclosed(ob), enclosed(oa));
+            let z = dot(v, axis);
+            let perp = minus(v, [axis[0] * z, axis[1] * z, axis[2] * z]);
+            // at height h on the first's axis the radii are ra + ta h and rb + ta (h − z)
+            let slope = i(ta) * i(ta) * dot(axis, axis);
+            (
+                i(rb) - i(ta) * z - i(ra),
+                (i(1.0) + slope).sqrt(),
+                dot(perp, perp).sqrt(),
+            )
+        }
+        _ => return None,
+    };
+    let e = off.hi;
+    // a centre or axis not proved within the tolerance (or not a number): not one axis
+    if !(e.is_finite() && gap.lo.is_finite() && gap.hi.is_finite()) || e > tolerance {
+        return None;
+    }
+    if round_up(gap.mag() + e) <= tolerance {
+        Some(PlanePair::One)
+    } else if (i(gap.mig()) / scale).lo > round_up(tolerance + e) {
+        Some(PlanePair::Apart)
+    } else {
+        None
     }
 }
 
@@ -2072,7 +2160,12 @@ fn kept_straight_edge_corner(
 /// the edge, even where its faces
 /// were tangent in the input, and the edge is listed in [`LocalReach::crossing`].
 ///
-/// Two quadrics: [`quadric_pair_piece`] proves a root of both implicit equations and
+/// Two quadrics: two spheres about one centre, or two cones (cylinders) about one axis at one
+/// angle, are parallel surfaces, decided once for the edge from the quadrics as two planes
+/// are ([`quadric_pair`]): one surface, met as far as the edge is from it (a quadric's
+/// distance, as for the move below); or apart, listed and adding nothing (a piece of a
+/// split cylinder or sphere moved off the piece it was split from: a step's wall closes the
+/// gap). Any other two: [`quadric_pair_piece`] proves a root of both implicit equations and
 /// the normal-section plane, uniformly over each edge piece, with a displacement box
 /// certified by Krawczyk's operator ([`quadric::meet`]). Both cones' positive-radius
 /// sides are checked on the root box. Only a section Jacobian whose determinant excludes
@@ -2090,8 +2183,9 @@ fn kept_straight_edge_corner(
 /// planes meet at [`corner_of`]; two planes and a quadric where the planes' line meets it
 /// ([`corner_with_quadric`]); where they meet in no one point, the edges' meetings stand.
 /// A plane and two quadrics meet by the same three-equation certificate, on the
-/// plane at the vertex ([`quadric::meet`]). Where two quadrics are kept and share a straight
-/// edge at the vertex (a round drawn as two faces split along a ruling, or two surfaces
+/// plane at the vertex ([`quadric::meet`]); a plane and two parallel quadrics
+/// ([`quadric_pair`]) meet in no one point, and the edges' meetings stand. Where two
+/// quadrics are kept and share a straight edge at the vertex (a round drawn as two faces split along a ruling, or two surfaces
 /// crossing along a line), and the third's new surface a plane: faces that keep their
 /// surfaces keep their edges, so the three meet where that edge's line crosses the plane
 /// ([`kept_straight_edge_corner`]). A surface at the vertex moved adds its distance from the
@@ -2309,7 +2403,6 @@ pub fn local_extension_reach(
                     pieces(&piece, bounds, pair, None)?
                 }
                 (Exact::Quadric(a), Exact::Quadric(c)) => {
-                    let piece = |over, mid, dt| quadric_pair_piece(k, over, mid, dt, a, c);
                     let pair =
                         EdgeQuantity::Meeting(own_face.min(other_face), own_face.max(other_face));
                     let (first, second) = if own_face <= other_face {
@@ -2321,7 +2414,26 @@ pub fn local_extension_reach(
                         a.extend(c);
                         a
                     });
-                    pieces(&piece, bounds, pair, surfaces.as_deref())?
+                    // decided on the faces in id order: the same from either face
+                    let (q, r) = if own_face <= other_face {
+                        (a, c)
+                    } else {
+                        (c, a)
+                    };
+                    match quadric_pair(q, r, tolerance) {
+                        Some(PlanePair::Apart) => (0.0, true, false),
+                        // one surface: met where it stands, as far as it is from the edge
+                        Some(PlanePair::One) => {
+                            let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
+                                Ok(quadric_distance_piece(over.0, mid.0, dt, q))
+                            };
+                            pieces(&piece, bounds, pair, surfaces.as_deref())?
+                        }
+                        _ => {
+                            let piece = |over, mid, dt| quadric_pair_piece(k, over, mid, dt, a, c);
+                            pieces(&piece, bounds, pair, surfaces.as_deref())?
+                        }
+                    }
                 }
                 (Exact::Quadric(_) | Exact::Net(_), Exact::Quadric(_) | Exact::Net(_)) => {
                     return Err(uncertified())
@@ -2356,7 +2468,7 @@ struct Corner {
 /// there moves, every face there must be of a class (`class_of`), and the meetings of the
 /// face's surface with every two others (three planes; two planes and a quadric or a net; a
 /// plane, a quadric and a net; a plane and two nets; a plane and two quadrics, on a kept
-/// straight edge where present, otherwise by [`quadric::meet`];
+/// straight edge where present, nowhere for parallel quadrics, otherwise by [`quadric::meet`];
 /// anything else, or a meeting with a net not proved, is `refuse`d), and each moved
 /// surface's distance from the vertex (a moved net's: the farthest meeting found on it
 /// there), are taken into `found`.
@@ -2452,6 +2564,15 @@ fn corner(
                         Some(CornerMeeting::Nowhere) => None,
                         Some(CornerMeeting::Uncertified) => return Err(refuse()),
                         None => match (planes.as_slice(), quadrics.as_slice()) {
+                            // parallel quadrics and a plane meet in no one point, as three
+                            // planes two of which are parallel: the edges' meetings stand
+                            // (parallel taken either way round: the same from every face)
+                            (&[_], [a, c])
+                                if quadric_pair(a, c, at.tolerance).is_some()
+                                    && quadric_pair(c, a, at.tolerance).is_some() =>
+                            {
+                                None
+                            }
                             (&[plane], [a, c]) => {
                                 let section = quadric::Section::corner(p, plane.point, plane.raw);
                                 let meeting =
@@ -2555,8 +2676,10 @@ pub struct LocalReach {
     pub reach: f64,
     /// How far the surfaces beside the face moved from its edges and vertices.
     pub shift: f64,
-    /// The edges whose two new surfaces are parallel planes apart: no extension makes them
-    /// meet, and they add nothing to the reach.
+    /// The edges whose two new surfaces never meet across them, along the whole edge or a
+    /// piece of it: parallel planes or parallel quadrics apart, or a plane whose trace passes
+    /// a quadric beyond the tolerance (a plane moved off a round). No extension makes them
+    /// meet there, and they add nothing to the reach.
     pub apart: Vec<crate::topology::EdgeId>,
     /// The edges where a plane and a quadric, the two new surfaces, are certified to cross
     /// in every normal section ([`Plan::Roots`] on every piece): they meet at an angle, even
@@ -4172,5 +4295,122 @@ mod tests {
         assert!(meeting.distance.hi >= expected - 1e-8);
         assert!(meeting.distance.hi - meeting.distance.lo < 1e-8);
         assert!(meeting.transverse);
+    }
+
+    /// Two quadrics that are parallel surfaces are decided from the quadrics, as two planes
+    /// are: spheres about one centre, and cones or cylinders about one axis at one angle
+    /// (either axis sense, the origin anywhere along it), are one
+    /// surface within the tolerance of each other, apart beyond it, with the axis's or
+    /// centre's offset counted on either side. A cone beside a cylinder on its
+    /// axis (3 degrees, or 0.3, within the tangency tolerance), a tilted or shifted axis, or
+    /// spheres about two centres are left to [`quadric::meet`].
+    #[test]
+    fn parallel_quadrics_are_one_or_apart() {
+        let tol = 1e-3;
+        let cone = |origin: Vec3, axis: Vec3, radius: f64, tan_angle: f64| Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        };
+        let ball = |centre: Vec3, radius: f64| Implicit::Sphere { centre, radius };
+        let on_z = |z: f64| Vec3::new(0.0, 0.0, z);
+        let pair = |a: &Implicit, b: &Implicit| (quadric_pair(a, b, tol), quadric_pair(b, a, tol));
+        let both = |p: Option<PlanePair>| (p, p);
+        let r50 = cone(Vec3::ZERO, Vec3::Z, 50.0, 0.0);
+        // a split cylinder's half moved out 4, and the moved half against itself
+        assert_eq!(
+            pair(&r50, &cone(Vec3::ZERO, Vec3::Z, 54.0, 0.0)),
+            both(Some(PlanePair::Apart))
+        );
+        assert_eq!(
+            pair(&r50, &cone(on_z(100.0), -Vec3::Z, 54.0, 0.0)),
+            both(Some(PlanePair::Apart))
+        );
+        assert_eq!(
+            pair(&r50, &cone(on_z(7.0), Vec3::Z, 50.0 + 1e-4, 0.0)),
+            both(Some(PlanePair::One))
+        );
+        // an axis e off within the tolerance: one where |gap| + e is within it, apart where
+        // |gap| exceeds it by more than e, else left to the proof
+        let off = |e: f64, r: f64| cone(Vec3::new(e, 0.0, 0.0), Vec3::Z, r, 0.0);
+        assert_eq!(pair(&r50, &off(0.0, 50.0015)), both(Some(PlanePair::Apart)));
+        assert_eq!(pair(&r50, &off(8e-4, 50.0015)), both(None));
+        assert_eq!(pair(&r50, &off(8e-4, 50.0005)), both(None));
+        assert_eq!(pair(&r50, &off(1e-4, 50.0001)), both(Some(PlanePair::One)));
+        assert_eq!(pair(&r50, &off(8e-4, 54.0)), both(Some(PlanePair::Apart)));
+        // an axis a rounding off (1.44e-13 rad), or a slope: no longer one axis or one slope
+        let rounded = Vec3::new(1.44e-13, 0.0, 1.0);
+        assert_eq!(
+            pair(&r50, &cone(Vec3::ZERO, rounded, 54.0, 0.0)),
+            both(None)
+        );
+        assert_eq!(
+            pair(&r50, &cone(Vec3::ZERO, Vec3::Z, 54.0, 1e-15)),
+            both(None)
+        );
+        // far along the axis the radial gap's rounding is enclosed: radii 2^40 apart at
+        // heights 2^40 apart, a slope just over 1, leave a gap below a rounding of either
+        let (t, z) = (1.0 + 2.0_f64.powi(-27), 2.0_f64.powi(40) + 2.0_f64.powi(13));
+        let near = cone(
+            on_z(z),
+            Vec3::Z,
+            2.0_f64.powi(40) + 2.0_f64.powi(14) + 1.0,
+            t,
+        );
+        assert_ne!(
+            quadric_pair(&cone(Vec3::ZERO, Vec3::Z, 1.0, t), &near, 1e-6),
+            Some(PlanePair::One)
+        );
+        // a cone offset 4 along its normals, and the cone itself from another origin and sense
+        let t = 0.1;
+        let slope = sqrt(1.0 + t * t);
+        let c10 = cone(Vec3::ZERO, Vec3::Z, 10.0, t);
+        assert_eq!(
+            pair(&c10, &cone(Vec3::ZERO, Vec3::Z, 10.0 + 4.0 * slope, t)),
+            both(Some(PlanePair::Apart))
+        );
+        assert_eq!(
+            pair(&c10, &cone(on_z(5.0), Vec3::Z, 10.5, t)),
+            both(Some(PlanePair::One))
+        );
+        assert_eq!(
+            pair(&c10, &cone(on_z(5.0), -Vec3::Z, 10.5, -t)),
+            both(Some(PlanePair::One))
+        );
+        assert_eq!(pair(&c10, &cone(on_z(5.0), -Vec3::Z, 10.5, t)), both(None));
+        // a drafted half beside the half not drafted, a tilted and a shifted axis
+        let r10 = cone(Vec3::ZERO, Vec3::Z, 10.0, 0.0);
+        for degrees in [3.0_f64, 0.3] {
+            let drafted = cone(on_z(10.0), Vec3::Z, 10.0, -degrees.to_radians().tan());
+            assert_eq!(pair(&r10, &drafted), both(None), "{degrees}");
+        }
+        let tilted = Vec3::new(
+            (0.3_f64).to_radians().sin(),
+            0.0,
+            (0.3_f64).to_radians().cos(),
+        );
+        assert_eq!(pair(&r50, &cone(Vec3::ZERO, tilted, 54.0, 0.0)), both(None));
+        assert_eq!(
+            pair(&r50, &cone(Vec3::new(0.01, 0.0, 0.0), Vec3::Z, 54.0, 0.0)),
+            both(None)
+        );
+        // a sphere's cap moved out 4, the cap against itself, and two centres
+        let b50 = ball(Vec3::ZERO, 50.0);
+        assert_eq!(
+            pair(&b50, &ball(Vec3::ZERO, 54.0)),
+            both(Some(PlanePair::Apart))
+        );
+        assert_eq!(
+            pair(&b50, &ball(Vec3::new(0.0, 1e-4, 0.0), 50.0)),
+            both(Some(PlanePair::One))
+        );
+        assert_eq!(
+            pair(&b50, &ball(on_z(8e-4), 54.0)),
+            both(Some(PlanePair::Apart))
+        );
+        assert_eq!(pair(&b50, &ball(on_z(8e-4), 50.0015)), both(None));
+        assert_eq!(pair(&b50, &ball(on_z(0.01), 54.0)), both(None));
+        assert_eq!(pair(&b50, &r50), both(None));
     }
 }

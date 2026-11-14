@@ -196,6 +196,191 @@ fn the_top_moves_out() {
     assert!(rel(volume(&b), ABC + 2.0 * 600.0) < 1e-9);
 }
 
+/// `body` with its face through `at` split by the plane `z = height`.
+fn split_at_height(body: &Body, at: [f64; 3], height: f64) -> Body {
+    let plane = ([0.0, 0.0, height], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    split_by_plane(body, at, plane)
+}
+
+/// `body` with its face through `at` split by the plane through `origin` along `u` and `v`.
+fn split_by_plane(
+    body: &Body,
+    at: [f64; 3],
+    (origin, u, v): ([f64; 3], [f64; 3], [f64; 3]),
+) -> Body {
+    let o = order(body);
+    let tool = crate::split::Tool {
+        surface: solidcore_record::brep::Surface::Plane {
+            origin,
+            u_axis: u,
+            v_axis: v,
+        },
+        domain: [[-200.0, 200.0], [-200.0, 200.0]],
+    };
+    let (split, _) = crate::split::split_faces(body, &o, &[through(body, &o, at)], &[tool])
+        .unwrap()
+        .unwrap();
+    split
+}
+
+/// The record index (through `o`) of the one face of `b` through `p`.
+fn through(b: &Body, o: &Order, p: [f64; 3]) -> usize {
+    let hits: Vec<usize> = (0..o.faces.len())
+        .filter(|&i| b.face_distances(o, i, &[p]).unwrap()[0].is_some_and(|d| d < 1e-9))
+        .collect();
+    assert_eq!(hits.len(), 1, "faces through {p:?}: {hits:?}");
+    hits[0]
+}
+
+/// The faces of `b` through `points` (each once) moved `d`: one closed, sound solid of `expected` volume,
+/// with `counts` faces, edges and vertices.
+fn moved_to(b: &Body, points: &[[f64; 3]], d: f64, expected: f64, counts: [usize; 3]) {
+    let o = order(b);
+    let mut faces: Vec<usize> = points.iter().map(|&p| through(b, &o, p)).collect();
+    faces.sort_unstable();
+    faces.dedup();
+    offset_faces(b, &o, &faces, d).unwrap();
+    let measured = volume(b);
+    assert!(rel(measured, expected) < 1e-9, "{measured} vs {expected}");
+    assert_eq!(b.counts().unwrap(), counts);
+    assert!(b.is_manifold_solid().unwrap());
+    b.check_solid().unwrap();
+    let report = b.check(crate::CheckLevel::All).unwrap();
+    assert_eq!(report.failures, 0, "{}", report.text);
+}
+
+/// The upper half of a cylinder's side (r 50, z 0 to 100, split at z = 50) moved out 4:
+/// the cylinder r 54 beside the cylinder r 50 never meets it, and the annulus at z = 50
+/// closes the step. V = 2500 pi 100 + (54² - 50²) pi 50 = 850743.291. The step is one face
+/// with a seam of its own beside the sides' seams: 5 faces, 7 edges (a circle at z = 0 and
+/// at z = 100, two at z = 50, three seams), 4 vertices.
+#[test]
+fn half_a_cylinders_side_moves_out_over_a_step() {
+    all_fixes();
+    let b = split_at_height(
+        &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
+        [50.0, 0.0, 25.0],
+        50.0,
+    );
+    let v = PI * 2500.0 * 100.0 + PI * (54.0 * 54.0 - 2500.0) * 50.0;
+    moved_to(&b, &[[50.0, 0.0, 75.0]], 4.0, v, [5, 7, 4]);
+}
+
+/// Both halves of that side moved out 4 together: one cylinder r 54, V = 2916 pi 100, with
+/// the split's 4 faces, 5 edges and 3 vertices.
+#[test]
+fn both_halves_of_a_cylinders_side_move_out_as_one() {
+    all_fixes();
+    let b = split_at_height(
+        &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
+        [50.0, 0.0, 25.0],
+        50.0,
+    );
+    let both = [[50.0, 0.0, 25.0], [50.0, 0.0, 75.0]];
+    moved_to(&b, &both, 4.0, PI * 2916.0 * 100.0, [4, 5, 3]);
+}
+
+/// A sphere r 50's cap above z = 20 moved out 4: the sphere r 54 beside the sphere r 50
+/// never meets it, and the cone of normals through the cap's rim closes the step. The
+/// added shell sector is (2 pi / 3)(54³ - 50³)(1 - 20 / 50), so
+/// V = (4 pi / 3) 50³ + (2 pi / 3)(54³ - 50³) 0.6 = 564394.241. The split leaves the rim as
+/// two edges, and each closes with a face of that cone: 4 faces, 8 edges (the rim's two on
+/// each sphere, two lines between the cone's faces, a seam on each sphere), 6 vertices.
+#[test]
+fn a_spheres_cap_moves_out_over_a_step() {
+    all_fixes();
+    let b = split_at_height(
+        &make_sphere([0.0; 3], 50.0).unwrap(),
+        [0.0, 0.0, 50.0],
+        20.0,
+    );
+    let v = 4.0 * PI / 3.0 * 125_000.0 + 2.0 * PI / 3.0 * (157_464.0 - 125_000.0) * 0.6;
+    moved_to(&b, &[[0.0, 0.0, 50.0]], 4.0, v, [4, 8, 6]);
+}
+
+/// The upper half of a frustum's side (r 50 at z = 0 to r 30 at z = 100, split at z = 50)
+/// moved out 4: the cone 4 out beside the cone it came from never meets it, and the cone of
+/// normals through the split circle closes the step. In a half-plane through the axis the
+/// added region is A = (40, 50), B = A + 4 n, C = (30 + 4 √1.04, 100), D = (30, 100),
+/// n = (1, 0.2) / √1.04 the side's normal, and V = 4900 pi 100 / 3 + 2 pi ∫∫ r dr dz over
+/// it. Its faces, edges and vertices are the cylinder's.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn half_a_cones_side_moves_out_over_a_step() {
+    all_fixes();
+    let b = split_at_height(
+        &crate::make_cone([0.0; 3], 50.0, 30.0, 100.0).unwrap(),
+        [45.0, 0.0, 25.0],
+        50.0,
+    );
+    let w = 1.04_f64.sqrt();
+    let region = [
+        (40.0, 50.0),
+        (40.0 + 4.0 / w, 50.0 + 0.8 / w),
+        (30.0 + 4.0 * w, 100.0),
+        (30.0, 100.0),
+    ];
+    // ∫∫ r dr dz over the polygon, by Green's theorem
+    let moment: f64 = (0..4)
+        .map(|i| {
+            let ((r0, z0), (r1, z1)) = (region[i], region[(i + 1) % 4]);
+            (r0 + r1) * (r0 * z1 - r1 * z0) / 6.0
+        })
+        .sum();
+    let v = PI * 4900.0 * 100.0 / 3.0 + 2.0 * PI * moment.abs();
+    moved_to(&b, &[[35.0, 0.0, 75.0]], 4.0, v, [5, 7, 4]);
+}
+
+/// A cylinder's side (r 50, z 0 to 100) split along its rulings by the plane x = 0, with the
+/// half at x > 0 moved out 4. At each end of a ruling a cap, the cylinder r 54 and the
+/// cylinder r 50 meet in no one point; the caps run on to the moved half, and a strip of the
+/// plane x = 0 closes each step. V = 2500 pi 100 + (pi / 2)(54² - 50²) 100. The side's seam
+/// at x = 50 splits the moved half in two: 7 faces (two caps, the kept half, two moved
+/// quarters, two strips), 15 edges (five on each cap, five up the side), 10 vertices.
+#[test]
+fn half_a_cylinders_side_split_along_its_rulings_moves_out_over_steps() {
+    all_fixes();
+    let b = split_by_plane(
+        &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
+        [0.0, 50.0, 50.0],
+        ([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+    );
+    let v = PI * 2500.0 * 100.0 + PI / 2.0 * (54.0 * 54.0 - 2500.0) * 100.0;
+    // on either side of the side's seam, at x = 50
+    let half = [[30.0, 40.0, 50.0], [30.0, -40.0, 50.0]];
+    moved_to(&b, &half, 4.0, v, [7, 15, 10]);
+}
+
+/// The upper half of that cylinder's side (split at z = 50) moved in 4: the cylinder r 46
+/// inside the cylinder r 50, the annulus at z = 50 facing up.
+/// V = 2500 pi 100 - (50² - 46²) pi 50, with the outward move's 5 faces, 7 edges, 4 vertices.
+#[test]
+fn half_a_cylinders_side_moves_in_under_a_step() {
+    all_fixes();
+    let b = split_at_height(
+        &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
+        [50.0, 0.0, 25.0],
+        50.0,
+    );
+    let v = PI * 2500.0 * 100.0 - PI * (2500.0 - 46.0 * 46.0) * 50.0;
+    moved_to(&b, &[[50.0, 0.0, 75.0]], -4.0, v, [5, 7, 4]);
+}
+
+/// A cylinder's side split along its rulings (a round stored as two halves, the half at
+/// x > 0 in two by the seam) moved out 4 whole: one cylinder r 54, V = 2916 pi 100, with
+/// the split's 5 faces, 9 edges (three arcs on each cap, three rulings), 6 vertices.
+#[test]
+fn a_cylinders_side_split_along_its_rulings_moves_out_as_one() {
+    all_fixes();
+    let b = split_by_plane(
+        &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
+        [0.0, 50.0, 50.0],
+        ([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+    );
+    let all = [[-50.0, 0.0, 50.0], [30.0, 40.0, 50.0], [30.0, -40.0, 50.0]];
+    moved_to(&b, &all, 4.0, PI * 2916.0 * 100.0, [5, 9, 6]);
+}
+
 #[test]
 fn hostile_arguments_are_refused() {
     all_fixes();
