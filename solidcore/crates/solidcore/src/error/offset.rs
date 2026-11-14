@@ -910,6 +910,44 @@ mod tests {
         }
     }
 
+    /// A body whose edge or vertex tolerance grew past its certificate's bound is refused
+    /// naming that entity and both numbers (#15035); the reasons without an entity name none.
+    #[test]
+    fn an_unsound_body_names_the_entity_its_check_names() {
+        let edge = EntityRef::Edge(EdgeId::from_index(4));
+        let grown = OffsetFailure::Unsound {
+            what: Unsoundness::ToleranceBeyondBound {
+                entity: edge,
+                tolerance: 2e-4,
+                bound: 1e-5,
+            },
+        };
+        assert_eq!(grown.entity(), Some(edge));
+        assert_eq!(grown.kind(), ErrorKind::Unsupported);
+        assert_eq!(
+            grown.to_string(),
+            "the tolerance of edge 4 grew to 0.0002, past the 0.00001 its certificate allows: \
+             refused, the input unchanged"
+        );
+        for (what, says) in [
+            (
+                Unsoundness::LoopOrientationUndecided,
+                "a loop of the body built has a certified area that leaves its orientation \
+                 undecided",
+            ),
+            (
+                Unsoundness::LoopGapNotClosable,
+                "a gap in a loop of the body built cannot be closed within the tolerances its \
+                 certificates allow",
+            ),
+        ] {
+            let o = OffsetFailure::Unsound { what };
+            assert_eq!(what.entity(), None);
+            assert_eq!(o.entity(), None);
+            assert_eq!(o.to_string(), format!("{says}: refused, the input unchanged"));
+        }
+    }
+
     /// The offset routines describe their failures: their library code builds no bare
     /// `Upstream` status, except the files listed (with the bare sites each may still
     /// hold) whose conversion waits on other open work.
