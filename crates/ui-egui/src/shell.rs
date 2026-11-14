@@ -50,12 +50,24 @@ pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
 /// Actual persistent workspace footprints for the shared host. Transient menus
 /// remain input shields, without becoming targets for framing or control placement.
 pub(crate) fn host_usable(app: &SolveApp) -> solidcraft_engine::panels::PanelResult<crate::panel_runtime::HostUsableRegion> {
+    host_usable_with(app, true)
+}
+
+/// The usable region the view's own controls (the navigator, the corner OK and Cancel) are
+/// placed in: floating windows such as a feature dialog float over the view and never move
+/// them, so opening Move does not shift the navigator.
+pub(crate) fn host_usable_for_controls(app: &SolveApp) -> solidcraft_engine::panels::PanelResult<crate::panel_runtime::HostUsableRegion> {
+    host_usable_with(app, false)
+}
+
+fn host_usable_with(app: &SolveApp, with_windows: bool) -> solidcraft_engine::panels::PanelResult<crate::panel_runtime::HostUsableRegion> {
     use crate::panel_runtime::{MAX_USABLE_OBSTACLES, egui_rect, logical_rect, resolve_usable_region};
     use solidcraft_engine::panels::{Rule, error};
     let frame = app.universal_panel_frame().ok_or_else(|| error(Rule::Lifecycle, "universal host geometry is unavailable"))?;
     let windows = app.viewport.host_windows.as_ref().ok_or_else(|| error(Rule::CollectionLimit, "persistent window footprint limit"))?;
+    let windows = windows.iter().copied().filter(|_| with_windows);
     let mut obstacles = frame.layout.usable.obstacles.clone();
-    for bounds in occluding_rects(app, true, false, false).into_iter().chain(windows.iter().copied()).chain(app.viewport.host_confirm) {
+    for bounds in occluding_rects(app, true, false, false).into_iter().chain(windows).chain(app.viewport.host_confirm) {
         if !bounds.is_positive() || !bounds.is_finite() || !bounds.intersect(egui_rect(frame.layout.render_domain)).is_positive() {
             continue;
         }

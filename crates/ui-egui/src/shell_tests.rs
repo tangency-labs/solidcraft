@@ -143,11 +143,13 @@ fn assert_host_legacy_window(h: &Harness, bounds: egui::Rect) {
     assert!(usable.obstacles.contains(&logical_rect(bounds)));
     let controls = h.app.viewport.layout.as_ref().unwrap();
     assert!(controls.usable.as_ref().unwrap().obstacles.contains(&logical_rect(bounds)));
-    for control in [controls.navigation, controls.axis_view] {
-        if control.is_positive() {
-            assert!(!control.intersect(bounds).is_positive(), "same-pass controls avoid the real editor");
-        }
+    // The navigation bar avoids the real editor; the navigator stays in its corner, under a window
+    // that floats over it, rather than moving whenever a dialog opens (#16980).
+    if controls.navigation.is_positive() {
+        assert!(!controls.navigation.intersect(bounds).is_positive(), "same-pass controls avoid the real editor");
     }
+    let without_windows = crate::shell::host_usable_for_controls(&h.app).unwrap();
+    assert!(!without_windows.obstacles.contains(&logical_rect(bounds)), "windows never place the navigator");
 }
 
 fn assert_host_legacy_windows_closed(h: &Harness) {

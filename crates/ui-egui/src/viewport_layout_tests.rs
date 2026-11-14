@@ -896,6 +896,28 @@ fn the_corner_pair_takes_the_top_right_and_the_view_navigator_moves_below_it() {
     assert!(roomy.confirm.is_positive() && roomy.axis_view.is_positive(), "{roomy:?}");
 }
 
+/// A feature dialog floats over the view: opening it never moves the navigator out of its corner,
+/// docked or floating (#16980).
+#[test]
+fn opening_a_dialog_leaves_the_navigator_in_its_corner() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        let mut h = Harness::new();
+        h.call("ui.set", json!({"layout":mode}));
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        h.settle();
+        let axis = crate::scenario::rect_of("axis_view:outer").unwrap();
+        for command in ["solid.move", "solid.fillet"] {
+            h.app.start(command);
+            h.settle();
+            assert!(h.app.dialog.is_some(), "{mode:?}: {command} opens its dialog");
+            assert_eq!(crate::scenario::rect_of("axis_view:outer"), Some(axis), "{mode:?}: {command} leaves the navigator in place");
+            h.app.dialog = None;
+            h.settle();
+            assert_eq!(crate::scenario::rect_of("axis_view:outer"), Some(axis), "{mode:?}: still there after {command}");
+        }
+    }
+}
+
 /// The pair in the running app: shown only with the preference and while a dialog is open, the
 /// axis view clear of it, and the pointer over it reaching neither picking nor navigation.
 #[test]

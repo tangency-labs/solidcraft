@@ -201,6 +201,20 @@ impl Layout {
         Self { viewport, drawable, middle, content: viewport, axis_view, navigation, confirm, usable: region }
     }
 
+    /// The same controls, with the room left for the model taken from `usable` (which may count
+    /// more obstacles, such as floating windows, than the controls were placed around).
+    pub(crate) fn framed_within(mut self, usable: &crate::panel_runtime::HostUsableRegion) -> Self {
+        use crate::panel_runtime::{logical_rect, resolve_usable_region};
+        let mut obstacles = usable.obstacles.clone();
+        for control in [self.navigation, self.confirm, self.axis_view] {
+            if control.is_positive() && control.is_finite() && !obstacles.contains(&logical_rect(control)) {
+                obstacles.push(logical_rect(control));
+            }
+        }
+        self.usable = resolve_usable_region(usable.domain, &obstacles).ok();
+        self
+    }
+
     /// `corner` is the size of the OK and Cancel pair (#6709; zero while it is not shown): it is
     /// held in the top right corner of the content, and the axis view moves down below it.
     /// `navigation` is the measured rectangle of the navigation bar (nothing while it is hidden).

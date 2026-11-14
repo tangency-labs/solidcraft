@@ -8148,7 +8148,7 @@ pub(crate) fn scene_palette(dark: bool, mode: solidcraft_theme::ColorVision) -> 
 pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(rect) = app.viewport.rect {
         if app.universal_panel_frame().is_some() {
-            let Ok(usable) = crate::shell::host_usable(app) else {
+            let Ok(usable) = crate::shell::host_usable_for_controls(app) else {
                 // Refuse new control placement without inventing an occupied
                 // viewport. An early pair already painted remains authoritative.
                 app.viewport.layout = Some(crate::viewport_layout::Layout {
@@ -8165,7 +8165,8 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
             };
             let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, rect).rect } else { Rect::NOTHING };
             let orbit = crate::navigation_bar_view::canvas_caps(app).orbit;
-            app.viewport.layout = Some(if let Some(confirm) = app.viewport.host_confirm {
+            let framing = crate::shell::host_usable(app).ok();
+            let layout = if let Some(confirm) = app.viewport.host_confirm {
                 crate::viewport_layout::Layout::host_with_retained_confirm(rect, &usable, app.preferences.navigator_style, confirm, navigation, orbit)
             } else if orbit {
                 crate::viewport_layout::Layout::host(rect, &usable, app.preferences.navigator_style, crate::view_confirm::size(app), navigation)
@@ -8178,6 +8179,11 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
                     navigation,
                     false,
                 )
+            };
+            // Framing still keeps the model clear of floating windows; only the controls ignore them.
+            app.viewport.layout = Some(match framing {
+                Some(framing) => layout.framed_within(&framing),
+                None => layout,
             });
             return;
         }
