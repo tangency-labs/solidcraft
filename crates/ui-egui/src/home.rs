@@ -427,19 +427,28 @@ fn read_pictures(keys: Vec<String>, tx: &std::sync::mpsc::Sender<Made>) -> Optio
     Some(cold)
 }
 
+/// Send the pictures already there, then `sweep` the old ones ([`clean_old_pictures`]): reading a
+/// picture marks it as in use, so the recent designs' pictures are kept even after a month without
+/// a launch, and only those of designs that went cold are rebuilt. Returns those designs.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_then_sweep(mut keys: Vec<String>, tx: &std::sync::mpsc::Sender<Made>, sweep: impl FnOnce()) -> Option<Vec<String>> {
+    // Prefer local PNGs; even the metadata checks belong off the window thread.
+    keys.sort_by_key(|k| !cache_path(k).is_some_and(|p| p.exists()));
+    let cold = read_pictures(keys, tx);
+    sweep();
+    cold
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn start_jobs(h: &mut HomeState) {
     if h.rx.is_some() || h.queued.is_empty() {
         return;
     }
-    let mut keys = std::mem::take(&mut h.queued);
+    let keys = std::mem::take(&mut h.queued);
     let (tx, rx) = std::sync::mpsc::channel();
     let stop = h.stop.clone();
     let spawned = std::thread::Builder::new().name("thumbnails".into()).spawn(move || {
-        clean_old_pictures();
-        // Prefer local PNGs; even the metadata checks belong off the window thread.
-        keys.sort_by_key(|k| !cache_path(k).is_some_and(|p| p.exists()));
-        let Some(cold) = read_pictures(keys, &tx) else { return };
+        let Some(cold) = read_then_sweep(keys, &tx, clean_old_pictures) else { return };
         for k in cold {
             if stop.is_cancelled() {
                 return;
@@ -1398,6 +1407,36 @@ mod tests {
         make_old(&png);
         sweep();
         assert!(!png.exists(), "a picture nothing read for a month goes");
+        std::fs::remove_file(design).unwrap();
+        std::fs::remove_dir_all(own).unwrap();
+        TEST_PICTURES.with(|d| *d.borrow_mut() = None);
+    }
+
+    /// Home reads the recent designs' pictures before it sweeps the old ones: after a month without
+    /// a launch, the pictures it is about to show are still there, not rebuilt from the designs.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_first_pass_reads_the_pictures_before_sweeping_old_ones() {
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let own = std::env::temp_dir().join(format!("solidcraft-swept-pictures-{}-{nonce}", std::process::id()));
+        TEST_PICTURES.with(|d| *d.borrow_mut() = Some(own.clone()));
+        let design = std::env::temp_dir().join(format!("solidcraft-swept-thumb-{}-{nonce}.sc", std::process::id()));
+        std::fs::write(&design, b"design").unwrap();
+        let key = design.to_string_lossy().into_owned();
+        let png = cache_path(&key).unwrap();
+        std::fs::create_dir_all(png.parent().unwrap()).unwrap();
+        let rgba = vec![128u8; THUMB[0] * THUMB[1] * 4];
+        std::fs::write(&png, solidcraft_viewport::png(THUMB[0], THUMB[1], rgba).unwrap()).unwrap();
+        let then = std::time::SystemTime::now() - 2 * KEEP_PICTURES;
+        std::fs::File::options().write(true).open(&png).unwrap().set_modified(then).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sweep = || {
+            solidcraft_engine::slicer_files::sweep(png.parent().unwrap(), std::time::SystemTime::now(), KEEP_PICTURES);
+        };
+        let cold = read_then_sweep(vec![key.clone()], &tx, sweep).unwrap();
+        assert!(cold.is_empty(), "the picture was there: nothing to rebuild");
+        assert!(rx.try_iter().any(|(k, img, _)| k == key && img.is_some()));
+        assert!(png.exists(), "the sweep keeps the picture just read");
         std::fs::remove_file(design).unwrap();
         std::fs::remove_dir_all(own).unwrap();
         TEST_PICTURES.with(|d| *d.borrow_mut() = None);
