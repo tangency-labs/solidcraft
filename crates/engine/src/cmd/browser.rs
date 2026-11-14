@@ -69,7 +69,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane")
         .contract(&REDEFINE_SKETCH_CONTRACT)
         .output(output_schema_for::<RedefineSketchResult>)
-        .params("sketch: id or name; plane: as sketch.create; frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names"),
+        .params("sketch: id or name; plane: as sketch.create; frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names; a construction plane later in the timeline that the sketch can't use where it is moves the sketch to just after that plane in the same step (note says so), refused with why when the plane uses the sketch or the move breaks a feature"),
     CommandSpec::new("browser.group", "New Group", crate::checked!("browser.group", group))
         .icon("folder")
         .contract(&GROUP_CONTRACT)
@@ -1604,6 +1604,80 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("plane").is_none() {
         return Err(bad(cmd, "`plane` is required"));
     }
+    let later = later_plane(s, id, p, cmd)?;
+    let out = match redefine_in_place(s, id, p, cmd) {
+        Ok(out) => out,
+        // A construction plane made after the sketch may be built from features that come after
+        // the sketch too, which redefine can't see where the sketch is (#14675). The sketch moves
+        // to just after the plane first, in the same step.
+        Err(error) => match later {
+            Some(plane) => redefine_after(s, id, plane, p, cmd)?,
+            None => return Err(error),
+        },
+    };
+    reply(cmd, out)
+}
+
+/// The construction plane `p` names, as its feature id, when it comes after sketch `id` in the
+/// timeline.
+fn later_plane(s: &Session, id: u64, p: &Value, cmd: &str) -> Result<Option<u64>> {
+    let Some(v @ (Value::String(_) | Value::Number(_))) = p.get("plane") else { return Ok(None) };
+    let solidcraft_doc::PlaneRef::Construction { feature } = super::features::plane_param(s, Some(v), cmd)? else { return Ok(None) };
+    let sketch = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "sketch disappeared"))?;
+    Ok(s.doc.feature_index(feature.0).filter(|at| *at > sketch).map(|_| feature.0))
+}
+
+/// Redefine sketch `id` onto construction plane `plane`, which comes after it: the sketch moves to
+/// just after the plane in the timeline, then goes on it. Refused, with why, when the plane uses
+/// the sketch or the move breaks a feature that worked.
+fn redefine_after(s: &mut Session, id: u64, plane: u64, p: &Value, cmd: &str) -> Result<RedefineSketchResult> {
+    let name = |s: &Session, id: u64| s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+    let (sketch, plane_name) = (name(s, id), name(s, plane));
+    let to = s.doc.feature_index(plane).ok_or_else(|| bad(cmd, "plane disappeared"))?;
+    let from = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "sketch disappeared"))?;
+    let later = format!("{plane_name} comes after {sketch} in the timeline");
+    if s.doc.marker.is_some_and(|marker| from < marker && to >= marker) {
+        return Err(bad(cmd, format!("{later} and after the history marker: move the marker past {plane_name} first")));
+    }
+    let mut moved = s.scratch();
+    super::edit::reorder(&mut moved, &json!({"feature": id, "position": to, "allow_errors": true}))
+        .map_err(|error| bad(cmd, format!("{later}, and {sketch} can't move after it: {error}")))?;
+    // Over the whole history: a feature behind the history marker that the move breaks counts too,
+    // and one that failed before the move doesn't.
+    let broken: Vec<(String, String)> = super::edit::newly_broken_in_history(&s.doc, &s.model, &moved.doc, &moved.model)
+        .into_iter()
+        // The sketch itself gets its new plane next.
+        .filter(|(feature, _)| *feature != sketch)
+        .collect();
+    if broken.iter().any(|(feature, _)| *feature == plane_name) {
+        return Err(bad(
+            cmd,
+            format!("{plane_name} uses {sketch}, directly or through a feature made from it, so {sketch} can't go on {plane_name}"),
+        ));
+    }
+    if !broken.is_empty() {
+        let list: Vec<String> = broken.iter().map(|(feature, error)| format!("{feature} ({error})")).collect();
+        return Err(bad(
+            cmd,
+            format!(
+                "{later}, so {sketch} would have to move after {plane_name}, and that breaks {}; move those features after {plane_name} first",
+                list.join("; ")
+            ),
+        ));
+    }
+    let mut out = redefine_in_place(&mut moved, id, p, cmd)?;
+    s.doc = moved.doc;
+    s.pending_moves = moved.pending_moves;
+    let note = format!("{sketch} moved after {plane_name} in the timeline, because {later}");
+    out.note = Some(match out.note.take() {
+        Some(frame) => format!("{note}; {frame}"),
+        None => note,
+    });
+    Ok(out)
+}
+
+/// Redefine sketch `id` where it is in the timeline: its new plane may only use what comes before it.
+fn redefine_in_place(s: &mut Session, id: u64, p: &Value, cmd: &str) -> Result<RedefineSketchResult> {
     let feature = s.doc.feature(id).ok_or_else(|| bad(cmd, "sketch disappeared"))?;
     let component = feature.component;
     let index = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "sketch disappeared"))?;
@@ -1697,7 +1771,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     });
     let note = frame.and_then(|f| super::sketch::frame_note(Some(f), &placement)).map(str::to_string);
     let frame = frame.and_then(PlaneFrame::from_name);
-    reply(cmd, RedefineSketchResult { sketch: id, attachment, frame, note, created: None, param_warnings: Vec::new() })
+    Ok(RedefineSketchResult { sketch: id, attachment, frame, note, created: None, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]
@@ -2573,6 +2647,116 @@ mod tests {
         assert!((ymin + 20.0).abs() < 1e-6);
         assert!(s.execute("sketch.redefine", &json!({"sketch": sk, "plane": "nope"})).is_err());
         assert!(s.execute("sketch.redefine", &json!({"sketch": 999, "plane": "XY"})).is_err());
+    }
+
+    /// The names of the design's features in timeline order.
+    fn order(s: &Session) -> Vec<String> {
+        s.doc.features.iter().map(|f| f.name.clone()).collect()
+    }
+
+    /// A sketch named `name` on `plane` holding one line from `a` to `b`; returns the line's id.
+    fn line_sketch(s: &mut Session, name: &str, plane: Value, a: [f64; 2], b: [f64; 2]) -> String {
+        run(s, "sketch.create", json!({"plane": plane, "name": name}));
+        let line = run(s, "sketch.line", json!({"points": [a, b]}))["curves"][0].as_str().unwrap().to_string();
+        run(s, "sketch.finish", json!({}));
+        line
+    }
+
+    #[test]
+    fn redefine_onto_a_plane_built_from_a_later_sketch_moves_the_sketch_after_that_plane() {
+        // #14675: Plane5 is a plane along a line of Sketch5, which comes after Sketch4. Redefine
+        // used to fail with "unknown sketch <id of Sketch5>"; it now moves Sketch4 after Plane5.
+        let mut s = Session::default();
+        line_sketch(&mut s, "Sketch4", json!("XY"), [0.0, 0.0], [10.0, 0.0]);
+        let path = line_sketch(&mut s, "Sketch5", json!("XZ"), [0.0, 0.0], [0.0, 40.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch5", "curve": path}, "t": 0.5, "name": "Plane5"}));
+        let before = order(&s);
+        assert_eq!(before, ["Sketch4", "Sketch5", "Plane5"]);
+        let out = run(&mut s, "sketch.redefine", json!({"sketch": "Sketch4", "plane": "Plane5"}));
+        assert_eq!(order(&s), ["Sketch5", "Plane5", "Sketch4"]);
+        let note = out["note"].as_str().unwrap_or_default();
+        assert!(note.contains("Sketch4 moved after Plane5"), "{out}");
+        let plane = s.doc.find_feature("Plane5").unwrap().id;
+        let solidcraft_doc::FeatureKind::Sketch { plane: on, .. } = &s.doc.find_feature("Sketch4").unwrap().kind else { panic!("a sketch") };
+        assert_eq!(*on, solidcraft_doc::PlaneRef::Construction { feature: plane.into() });
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "every feature builds");
+        // One undo puts both the order and the plane back.
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(order(&s), before);
+        assert!(matches!(
+            &s.doc.find_feature("Sketch4").unwrap().kind,
+            solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Origin { .. }, .. }
+        ));
+        // A later plane the sketch can use where it is (built from nothing in the model) moves
+        // nothing, as before.
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 25, "name": "Shelf"}));
+        let before = order(&s);
+        let out = run(&mut s, "sketch.redefine", json!({"sketch": "Sketch4", "plane": "Shelf"}));
+        assert_eq!(order(&s), before);
+        assert!(out["note"].is_null(), "{out}");
+    }
+
+    #[test]
+    fn redefine_onto_a_later_plane_that_uses_the_sketch_says_why_it_cannot() {
+        // A plane along the sketch's own line: the sketch can't come after it.
+        let mut s = Session::default();
+        let own = line_sketch(&mut s, "Sketch4", json!("XY"), [0.0, 0.0], [10.0, 0.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch4", "curve": own}, "t": 0.5, "name": "Plane5"}));
+        let before = order(&s);
+        let e = s.execute("sketch.redefine", &json!({"sketch": "Sketch4", "plane": "Plane5"})).unwrap_err().to_string();
+        assert!(e.contains("Plane5") && e.contains("uses Sketch4") && !e.contains("unknown sketch"), "{e}");
+        assert_eq!(order(&s), before, "nothing moved");
+        // A feature after the sketch that the move would break is named.
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sketch4"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Sketch4", "distance": 5, "name": "Extrude1"}));
+        let path = line_sketch(&mut s, "Sketch5", json!("XZ"), [0.0, 0.0], [0.0, 40.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch5", "curve": path}, "t": 0.5, "name": "Plane5"}));
+        let before = order(&s);
+        let e = s.execute("sketch.redefine", &json!({"sketch": "Sketch4", "plane": "Plane5"})).unwrap_err().to_string();
+        assert!(e.contains("Plane5") && e.contains("comes after Sketch4") && e.contains("Extrude1"), "{e}");
+        assert_eq!(order(&s), before, "nothing moved");
+    }
+
+    #[test]
+    fn redefine_onto_a_later_plane_ignores_features_that_failed_before_and_keeps_the_history_marker() {
+        // A feature that already failed before the redefine is not one the move breaks.
+        let mut s = Session::default();
+        line_sketch(&mut s, "Sketch4", json!("XY"), [0.0, 0.0], [10.0, 0.0]);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SketchA"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [50, 0], "p1": [60, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "SketchA", "distance": 5, "name": "ExtrudeA"}));
+        run(&mut s, "timeline.reorder", json!({"feature": "ExtrudeA", "position": 1, "allow_errors": true}));
+        let path = line_sketch(&mut s, "Sketch5", json!("XZ"), [0.0, 0.0], [0.0, 40.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch5", "curve": path}, "t": 0.5, "name": "Plane5"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-60, 0, 0], "name": "Box"}));
+        assert_eq!(order(&s), ["Sketch4", "ExtrudeA", "SketchA", "Sketch5", "Plane5", "Box"]);
+        let failed = |s: &Session| -> Vec<String> { s.model.results.iter().filter(|r| r.error.is_some()).map(|r| r.name.clone()).collect() };
+        assert_eq!(failed(&s), ["ExtrudeA"]);
+        // The history marker before Box stays there: Box is still rolled back afterwards.
+        run(&mut s, "timeline.rollback", json!({"position": 5}));
+        run(&mut s, "sketch.redefine", json!({"sketch": "Sketch4", "plane": "Plane5"}));
+        assert_eq!(order(&s), ["ExtrudeA", "SketchA", "Sketch5", "Plane5", "Sketch4", "Box"]);
+        assert_eq!(s.doc.marker, Some(5));
+        assert_eq!(failed(&s), ["ExtrudeA"]);
+        // With the sketch and the plane both rolled back, a rolled-back feature the move would
+        // break still refuses the move.
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sketch4"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Sketch4", "distance": 5, "name": "Extrude1"}));
+        let path = line_sketch(&mut s, "Sketch5", json!("XZ"), [0.0, 0.0], [0.0, 40.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch5", "curve": path}, "t": 0.5, "name": "Plane5"}));
+        run(&mut s, "timeline.rollback", json!({"position": 0}));
+        let before = order(&s);
+        let e = s.execute("sketch.redefine", &json!({"sketch": "Sketch4", "plane": "Plane5"})).unwrap_err().to_string();
+        assert!(e.contains("Extrude1"), "{e}");
+        assert_eq!(order(&s), before, "nothing moved");
+        assert_eq!(s.doc.marker, Some(0));
     }
 
     #[test]

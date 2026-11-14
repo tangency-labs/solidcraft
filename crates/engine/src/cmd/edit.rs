@@ -1740,7 +1740,7 @@ fn only_constraints_changed(
     })
 }
 
-fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.reorder";
     let id = feature_id(s, p.get("feature"), cmd)?;
     let n = s.doc.features.len();
