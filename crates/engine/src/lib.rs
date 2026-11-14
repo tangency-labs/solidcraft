@@ -1395,6 +1395,8 @@ impl Session {
                 self.evaluations = self.evaluations.saturating_add(1);
             }
         }
+        // Mirrored occurrences follow their sources, where the joints left them.
+        cmd::follow_mirrors(self);
         cmd::motion::associative::refresh(self);
         if let Some(id) = self.active_sketch
             && self.doc.feature(id).is_none()

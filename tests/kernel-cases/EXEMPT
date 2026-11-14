@@ -48,6 +48,7 @@ component.links                   component links
 component.list                    a listing
 component.metadata                component metadata
 component.metadata.set            component metadata
+component.mirror                  assemblies: occurrences placed at a part's mirror image (crates/engine/src/cmd/occurrence_tests.rs)
 component.paste_from_design       pastes the app's clipboard from another window, which no command fills (engine tests place it)
 component.properties              component properties
 component.relink                  component links

@@ -6,10 +6,10 @@ use serde_json::{Value, json};
 use super::{
     ActivateParams, ActivateResult, CapturePositionParams, CapturePositionResult, CopyParams, CopyResult, CreateParams, CreateResult, DeleteParams,
     DeleteResult, DragParams, DragResult, EditInPlaceParams, FinishEditParams, FromBodiesParams, FromBodiesResult, GroundParams, GroundResult,
-    ListParams, ListResult, MoveBodiesParams, MoveBodiesResult, MoveFeaturesParams, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult,
-    MoveSketchesToPartsParams, OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams, OccurrencePropertiesResult, PasteNewParams,
-    PasteNewResult, PropertiesParams, PropertiesResult, RenameParams, RenameResult, ReparentItemsParams, RevertPositionParams, RevertPositionResult,
-    UnlockParams, UnlockResult,
+    ListParams, ListResult, MirrorComponentsParams, MirrorComponentsResult, MoveBodiesParams, MoveBodiesResult, MoveFeaturesParams, MoveParams,
+    MoveResult, MoveSketchesParams, MoveSketchesResult, MoveSketchesToPartsParams, OccurrenceAlignParams, OccurrenceAlignResult,
+    OccurrencePropertiesParams, OccurrencePropertiesResult, PasteNewParams, PasteNewResult, PropertiesParams, PropertiesResult, RenameParams,
+    RenameResult, ReparentItemsParams, RevertPositionParams, RevertPositionResult, UnlockParams, UnlockResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -19,6 +19,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<EditInPlaceParams>(), &["component", "path"]);
     assert_keys(input_schema_for::<FinishEditParams>(), &[]);
+    assert_keys(input_schema_for::<MirrorComponentsParams>(), &["as", "components", "follow", "plane", "symmetry"]);
     assert_keys(
         input_schema_for::<OccurrenceAlignParams>(),
         &[
@@ -131,6 +132,9 @@ fn strict_keeps_todays_errors() {
         ("component.unlock", json!({})),
         ("component.unlock", json!({"component": [0]})),
         ("component.unlock", json!({"component": 0})),
+        ("component.mirror", json!({"components": ["Part"], "plane": "YZ", "as": "sideways"})),
+        ("component.mirror", json!({"components": ["Part"], "plane": "YZ", "as": 3})),
+        ("component.mirror", json!({"components": ["Part"], "plane": "YZ", "symmetry": "W"})),
     ]);
 }
 
@@ -449,6 +453,43 @@ fn replies_match_the_output_schema() {
         .unwrap_or_else(|e| panic!("{e}"));
     assert!(r2.get("param_warnings").is_some(), "{r2}");
     assert!(conforms(schema, schema, &r2), "{r2} doesn't match {schema}");
+}
+
+#[test]
+fn mirror_replies_match_the_output_schema() {
+    let schema = output_schema_for::<MirrorComponentsResult>();
+    let schema = schema.as_value();
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 4, "corner": [20, 0, 0]})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    for p in [
+        json!({"components": ["Part"], "plane": "YZ"}),
+        json!({"components": "Part:1", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0]}, "symmetry": "auto", "follow": false}),
+        json!({"components": ["Part"], "plane": "XZ", "as": "opposite_hand", "symmetry": "Z"}),
+        json!({"components": ["Part"], "plane": "XY", "as": "instance", "follow": true}),
+    ] {
+        let r = s.execute("component.mirror", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert_eq!(r.get("param_warnings"), None, "{r}");
+    }
+    assert!(!conforms(schema, schema, &json!({"occurrences": "1"})));
+}
+
+/// A mirror plane placed by a parameter shows in `parameters.users` as the output schema says.
+#[test]
+fn a_mirror_plane_user_matches_the_parameter_users_schema() {
+    let schema = output_schema_for::<crate::schema::parameters::ParamUsersResult>();
+    let schema = schema.as_value();
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 4, "corner": [20, 0, 0]})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    s.execute("parameters.add", &json!({"name": "gap", "expression": "5 mm"})).unwrap();
+    s.execute("component.mirror", &json!({"components": ["Part"], "plane": {"origin": ["gap", 0, 0], "normal": [1, 0, 0]}})).unwrap();
+    let users = s.execute("parameters.users", &json!({"name": "gap"})).unwrap();
+    assert_eq!(users["users"][0]["type"], "mirror", "{users}");
+    assert!(conforms(schema, schema, &users), "{users} doesn't match {schema}");
 }
 
 fn sketch_square(s: &mut Session) {
