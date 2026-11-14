@@ -2639,11 +2639,13 @@ fn list_height(items: &[Item]) -> f32 {
 /// Where the list goes next to a ring centred at `c`: below it when it fits, otherwise beside
 /// it (right, else left), kept on screen.
 fn list_place(c: Pos2, h: f32, screen: Rect) -> Pos2 {
+    // A degenerate screen rect (a 0-size frame while the menu is open, as X11 sends) must not
+    // panic: every clamp's upper bound stays at or above its lower bound (#12269).
     let below = c.y + RY + 12.0;
     if below + h <= screen.bottom() - 4.0 {
-        return pos2((c.x - LIST_W / 2.0).clamp(screen.left() + 4.0, (screen.right() - LIST_W - 4.0).max(screen.left())), below);
+        return pos2((c.x - LIST_W / 2.0).clamp(screen.left() + 4.0, (screen.right() - LIST_W - 4.0).max(screen.left() + 4.0)), below);
     }
-    let y = (c.y - h / 2.0).clamp(screen.top() + 4.0, (screen.bottom() - h - 4.0).max(screen.top()));
+    let y = (c.y - h / 2.0).clamp(screen.top() + 4.0, (screen.bottom() - h - 4.0).max(screen.top() + 4.0));
     let right = c.x + RX + 12.0;
     if right + LIST_W <= screen.right() - 4.0 {
         return pos2(right, y);
@@ -3557,6 +3559,30 @@ mod tests {
         assert!(!h.app.menu.radial, "browser menus remain lists when radial menus are enabled");
     }
 
+    /// #12269: with the Inventor mapping (a right drag orbits) and the radial context menu
+    /// on, a right-click on a solid body crashed the app. A still click must open the menu,
+    /// and so must the press-hold flick.
+    #[test]
+    fn inventor_right_click_on_a_body_opens_the_radial_menu() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.cylinder", json!({"diameter":30,"height":20})).unwrap();
+        h.app.preferences.nav = "inventor".into();
+        h.call("ui.prefs", json!({"radial_context_menu": true}));
+        h.settle();
+        let side = h.at(&json!({"world":[15,0,10]})).unwrap();
+        h.step(&json!({"click":side,"button":"right"})).unwrap();
+        assert!(h.app.viewport.context_menu.is_some(), "a still right-click on a body opens the menu");
+        assert_eq!(describe(&h.app)["radial"].as_array().unwrap().len(), DIRS);
+        close(&mut h.app);
+        // The scenario `hold` step is a left-button hold (Select Other); a right press-hold
+        // goes through ui.drag with the button held still.
+        let (sx, sy) = (side[0], side[1]);
+        h.call("ui.drag", json!({"x0":sx,"y0":sy,"x1":sx,"y1":sy,"button":"right","steps":1,"hold":40}));
+        assert!(h.app.viewport.context_menu.is_some(), "holding the right button still opens the radial menu");
+        assert!(h.app.menu.radial);
+    }
+
     #[test]
     fn disabled_radial_menu_does_not_capture_right_button_hold() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
@@ -3607,6 +3633,18 @@ mod tests {
             assert!(screen.contains_rect(r), "{at:?}: {r:?}");
             let ring = Rect::from_center_size(c, vec2(2.0 * RX, 2.0 * RY));
             assert!(!ring.intersects(r), "{at:?}: list {r:?} over ring {ring:?}");
+        }
+    }
+
+    /// #12269: a 0-size frame (as X11 sends while a grab or resize is in flight) leaves the
+    /// content rect degenerate; the radial menu's list placement must not panic on it.
+    #[test]
+    fn list_place_tolerates_a_degenerate_screen() {
+        for screen in [Rect::ZERO, Rect::from_min_size(Pos2::ZERO, vec2(100.0, 20.0)), Rect::from_min_size(pos2(30.0, 30.0), vec2(0.0, 500.0))] {
+            for h in [0.0, 300.0, 3000.0] {
+                let p = list_place(radial_center(pos2(50.0, 50.0), screen), h, screen);
+                assert!(p.x.is_finite() && p.y.is_finite(), "{screen:?} h={h}: {p:?}");
+            }
         }
     }
 
