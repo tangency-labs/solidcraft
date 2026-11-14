@@ -759,6 +759,23 @@ fn a_long_thin_elliptic_prism_faces_out_and_cuts_a_block() {
         api::create_box(&mut k, Point3::new(-20.0, -20.0, -2.0), 40.0, 200.0, 22.0).unwrap();
     let mut cut = boolean_difference(&mut k, block, prism).unwrap();
     let got = volume_of(&k, &mut cut);
+    let check = check_brep(&mut k, &mut cut, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "{:?}", check.lines());
+    // The block's six faces (the bottom one with a hole), the groove's wall and its ceiling: eight
+    // faces; the block's twelve edges, the hole's rim, the ceiling's rim and the wall's seam:
+    // fifteen; the block's eight corners and the two ends of the rims' loops: ten.
+    let counts = [
+        solidcore::topology::brep::p1::faces(&cut, None)
+            .unwrap()
+            .len(),
+        solidcore::topology::brep::p1::edges(&cut, None)
+            .unwrap()
+            .len(),
+        solidcore::topology::brep::p1::vertices(&cut, None)
+            .unwrap()
+            .len(),
+    ];
+    assert_eq!(counts, [8, 15, 10], "faces, edges, vertices");
     let want = 40.0 * 200.0 * 22.0 - PI * a * b * 2.0;
     assert!(
         (got - want).abs() < 1e-4 * want,

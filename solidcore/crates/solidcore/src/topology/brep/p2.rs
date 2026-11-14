@@ -1806,8 +1806,9 @@ fn shared_boundary_of_faces(
     face: FaceId,
     others: &[FaceId],
     point: Point3,
-    tolerance: f64,
 ) -> Result<Option<SharedBoundary>> {
+    // The point is on an edge only within the edge's own tolerance (the body's linear tolerance
+    // at least), not within the distance by which two face hits count as tied.
     let mut nearest: Option<(f64, EdgeId, f64)> = None;
     for e in crate::topology::topology_traverser::face_edges(b, face)? {
         let faces = edge::faces(b, e, None)?;
@@ -1818,6 +1819,7 @@ fn shared_boundary_of_faces(
         let Some(curve) = record.curve.as_ref() else {
             continue;
         };
+        let tolerance = record.tolerance.max(b.tolerance());
         let dropped = curve.drop_point(
             k,
             &record.interval,
@@ -1839,6 +1841,7 @@ fn shared_boundary_of_faces(
     };
     // At an end of the edge the point is at its vertex, which the faces around it classify.
     let record = b.edge(e)?;
+    let tolerance = record.tolerance.max(b.tolerance());
     let curve = record
         .curve
         .as_ref()
@@ -2075,14 +2078,7 @@ pub(crate) fn ray_fire_with_bbox_and_solver(
             .collect();
         if !others.is_empty() {
             let point = start + best.start.solution_value * ray;
-            if let Some(found) = shared_boundary_of_faces(
-                k,
-                b,
-                face,
-                &others,
-                point,
-                scaled_zero.max(ray_zone_tol_3d),
-            )? {
+            if let Some(found) = shared_boundary_of_faces(k, b, face, &others, point)? {
                 intersection.set_class_object(found.class, Some(found.object));
                 intersection.set_gap_3d(best.start.solution_value);
                 intersection.set_t_param(found.parameter, false);
