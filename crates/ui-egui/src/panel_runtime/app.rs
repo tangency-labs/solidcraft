@@ -1367,8 +1367,7 @@ impl crate::SolveApp {
         self.shell.workspace_panels.clear();
         self.publish_tab_accent(ui.ctx());
         crate::browser::publish_row_prefs(self, ui.ctx());
-        // The drawing's properties panel takes its side of the room before the host lays out.
-        if crate::drawing_workspace::active(self) {
+        if crate::drawing_workspace::active(self) && self.preferences.drawing_sheets_visibility == "legacy" {
             crate::drawing_workspace::panel(self, ui);
         }
         let prepared = self.prepare_workspace_panels(ui, render_domain, true);
