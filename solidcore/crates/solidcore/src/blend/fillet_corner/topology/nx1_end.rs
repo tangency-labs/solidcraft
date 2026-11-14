@@ -540,9 +540,51 @@ impl FilletCorner {
             } else {
                 crate::surface::extend::Continuity::Tangent
             };
-            let new_surface = surface
-                .extended_sides(k, &crate::surface::side::BoxSide::ALL, extension, ext_dist)?
-                .surface;
+            // Keep a successful continuation's local chart. If its circular span has
+            // insufficient natural reach, a certified cylinder supplies the same support
+            // without continuing that span through its finite parameter limit.
+            let new_surface = match surface.extended_sides(
+                k,
+                &crate::surface::side::BoxSide::ALL,
+                extension,
+                ext_dist,
+            ) {
+                Ok(extended) => extended.surface,
+                Err(error)
+                    if extension == crate::surface::extend::Continuity::Natural
+                        && matches!(
+                            error.root_cause(),
+                            SolidError::ExtendRefused {
+                                refusal: crate::surface::extend::ExtendRefusal::NotExact,
+                                ..
+                            }
+                        ) =>
+                {
+                    let carrier = match surface.kind() {
+                        crate::surface::surface::SurfaceKind::ProceduralBlend(round) => {
+                            match crate::surface::procedural_blend::exact::cylinder_support(
+                                k,
+                                round,
+                                self.approx_tol_3d,
+                            ) {
+                                Ok(carrier) => carrier,
+                                Err(error) if error.is_unported_or_cancelled() => {
+                                    return Err(error)
+                                }
+                                // A failed alternate certificate retains the original
+                                // exact-extension refusal and its geometric limit.
+                                Err(_) => None,
+                            }
+                        }
+                        _ => None,
+                    };
+                    match carrier {
+                        Some(carrier) => carrier,
+                        None => return Err(error),
+                    }
+                }
+                Err(error) => return Err(error),
+            };
             // Copy pNewSurface, when possible as an analytic surface
             let new_extend_surface = new_surface.copy_and_add_analytics(k)?;
             // If AddExtendedOriginalSurface() deleted pNewExtendSurface, then

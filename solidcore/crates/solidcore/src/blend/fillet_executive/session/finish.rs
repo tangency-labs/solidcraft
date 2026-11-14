@@ -73,11 +73,16 @@ fn failure(what: &'static str) -> SolidError {
     SolidError::blend_failed(OP, what)
 }
 
-/// Ordinary statuses become `None`; deferrals propagate.
+/// Ordinary statuses become `None`; deferrals and exact-extension refusals propagate.
 fn ignore<T>(result: Result<T>) -> Result<Option<T>> {
     match result {
         Ok(value) => Ok(Some(value)),
-        Err(error) if error.is_unported_or_cancelled() => Err(error),
+        Err(error)
+            if error.is_unported_or_cancelled()
+                || matches!(error.root_cause(), SolidError::ExtendRefused { .. }) =>
+        {
+            Err(error)
+        }
         Err(_) => Ok(None),
     }
 }
@@ -1148,6 +1153,27 @@ mod ball_fit_tests {
         let (code, result) = end_round(2.0);
         result.unwrap();
         assert_ne!(code, NO_ROOM);
+    }
+
+    #[test]
+    fn an_exact_extension_refusal_is_not_replaced_by_body_not_built() {
+        use crate::surface::extend::ExtendRefusal;
+
+        let error = SolidError::ExtendRefused {
+            operation: "surface::extend",
+            refusal: ExtendRefusal::NotExact,
+            distance: Some(1.0),
+        };
+        let kept = ignore::<()>(Err(error)).unwrap_err();
+        assert!(matches!(
+            kept,
+            SolidError::ExtendRefused {
+                refusal: ExtendRefusal::NotExact,
+                distance: Some(1.0),
+                ..
+            }
+        ));
+        assert_eq!(refusable(&kept), None);
     }
 
     /// The executive's generic failure (`FILEXEC_ERR`) is a typed failure with the status,
