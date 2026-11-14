@@ -760,10 +760,7 @@ fn a_countersink_meets_its_bore_on_one_circle_edge() {
         assert_eq!((body.face_count(), body.edge_count(), body.vertex_count()), (8, 17, 11), "{position:?} {direction:?}");
         assert!(body.validity().is_empty(), "{position:?}: {:?}", body.validity());
     }
-    for (kind, fev) in [
-        (json!({"type": "counterbore", "cb_diameter": 12, "cb_depth": 3.5}), (9, 18, 12)),
-        (json!({"type": "simple"}), (7, 15, 10)),
-    ] {
+    for (kind, fev) in [(json!({"type": "counterbore", "cb_diameter": 12, "cb_depth": 3.5}), (9, 18, 12)), (json!({"type": "simple"}), (7, 15, 10))] {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "A"}));
         let mut p = json!({"position": [10, 10, 10], "diameter": 5, "targets": ["A"]});

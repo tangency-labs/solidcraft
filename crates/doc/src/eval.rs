@@ -6619,10 +6619,10 @@ fn hole_tools_and_prisms(
                     .into_iter()
                     .map(|tool| (crate::lineage::part_tool(tool, "csink"), None)),
             );
-            // The revolve's seam lies along `side`: the bore's circle starts there too, the angle
-            // of `side` in the bore's plane, so the circle where the cone meets the bore has one
-            // vertex rather than one from each seam (#14424).
-            let at = side.dot(plane.y).atan2(side.dot(plane.x));
+            // The revolve's seam lies along `side`: the bore's circle starts there too, at the
+            // angle of `side` in the bore's plane (whose origin is `position`), so the circle
+            // where the cone meets the bore has one vertex rather than one from each seam (#14424).
+            let at = plane.to_local(*position + side).angle();
             tools.extend(bore(tip_angle.as_ref(), Some(at))?);
         }
     }
