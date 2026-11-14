@@ -2527,7 +2527,10 @@ mod tests {
         let (trimmed, natural) = ellipse_on_a_trimmed_cylinder();
         assert!((natural - 360.0).abs() < 1e-9);
         let total = trimmed.iter().map(Extent1d::length).sum::<f64>();
-        assert!((total - ellipse_part_above_v30()).abs() < 1e-9, "{trimmed:?}");
+        assert!(
+            (total - ellipse_part_above_v30()).abs() < 1e-9,
+            "{trimmed:?}"
+        );
         // z = 50 - 30 cos t = 30 at t = acos(2/3): the one interval between those angles
         let edge = (2.0_f64 / 3.0).acos().to_degrees();
         let [only] = trimmed.as_slice() else {

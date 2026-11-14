@@ -88,7 +88,7 @@ fn issue_1463_inside_out_nurb_cylinder_keeps_its_axis() {
 
     // the cylinder it was given (upstream reverses the axis from the bottom-knot
     // circle, z = 22, so its STEP and NURB forms are a height apart)
-    let r =Cone::is_nurb_surface_cylinder(&k, c.rev().base(), 1.0)
+    let r = Cone::is_nurb_surface_cylinder(&k, c.rev().base(), 1.0)
         .unwrap()
         .unwrap();
     let can = r.canonical();
