@@ -113,7 +113,8 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
     }
 }
 
-/// Find a saved Sketch Project edge in its body. Older designs can name the edge between
+/// Find a saved edge in its body when it may be named with numbered pieces: a Sketch Project edge, or
+/// the edge of a fillet or chamfer (#16535). Older designs can name the edge between
 /// numbered pieces of faces that now evaluate whole (`F4:side:l6#2|F4:side:l7#2`, now
 /// `F4:side:l6|F4:side:l7`). Recover it only when the faces it separates are whole, the saved
 /// point lies on it, and its name is exact. Other edge references still require the stored

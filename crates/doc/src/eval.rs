@@ -5527,7 +5527,7 @@ fn named_body(st: &ModelState, name: &str, p: Vec3) -> Option<usize> {
         if b.body.is_mesh() || token.is_some_and(|t| !crate::naming::face_names(b).iter().any(|n| n.contains(t))) {
             continue;
         }
-        let Ok(hit) = crate::naming::locate_edge(b, name, p) else { continue };
+        let Ok(hit) = crate::name_lookup::locate_projected_edge(b, name, p) else { continue };
         let score = (hit.on_point, -hit.point.dist(p));
         if best.as_ref().is_none_or(|(_, s)| score.partial_cmp(s).is_some_and(|o| o.is_gt())) {
             best = Some((i, score));
@@ -5629,8 +5629,9 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
             }
             continue;
         };
-        let hit =
-            trusted_edge_name(f, i, p).and_then(|n| crate::naming::locate_edge(mb, n, p).ok()).ok_or_else(|| DocError::reselect(stored.as_str()))?;
+        let hit = trusted_edge_name(f, i, p)
+            .and_then(|n| crate::name_lookup::locate_projected_edge(mb, n, p).ok())
+            .ok_or_else(|| DocError::reselect(stored.as_str()))?;
         if let Some(note) = hit.note(stored) {
             notes.push(note);
         }

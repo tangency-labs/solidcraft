@@ -223,3 +223,11 @@ two such cases, and only where that point decides exactly one edge:
 Tests: `a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone`,
 `a_chamfer_saved_under_a_top_faces_old_neighbours_is_found_at_its_pick`,
 `a_chamfer_whose_old_name_and_pick_fit_two_edges_asks_again` (`crates/engine/src/face_name_tests.rs`).
+
+Numbered pieces (#16535): 0.30.1 split a round face into numbered pieces (`F302:side#1`), and a
+design saved then can still name a fillet or chamfer edge that way, though the kernel now builds
+the face whole. The edge is found when the name without its piece numbers names exactly one edge
+whose faces are each whole, and the saved pick lies on that edge. A pick on another edge, or a
+face still in several pieces, asks to be picked again. Test:
+`a_chamfer_saved_under_numbered_side_pieces_of_a_peg_is_found_at_its_pick`
+(`crates/engine/src/face_name_tests.rs`).

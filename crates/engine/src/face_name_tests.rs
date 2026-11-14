@@ -429,3 +429,44 @@ fn a_chamfer_whose_old_name_and_pick_fit_two_edges_asks_again() {
     let result = reopened.model.result(reopened.doc.features[bevel].id).unwrap();
     assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{:?}", result.error);
 }
+
+/// A design saved by 0.30.1 numbered the pieces of each peg's round side (`F3:side#1`, `F4:side#2`),
+/// which the kernel now builds whole. A chamfer on the pegs' top edges saved under those names is
+/// found again on the edge each pick lies on (#16535): the same edges the chamfer had when picked,
+/// and a pick on the other peg is not that name's edge, so it asks again.
+#[test]
+fn a_chamfer_saved_under_numbered_side_pieces_of_a_peg_is_found_at_its_pick() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"base": [10, 10, 10], "radius": 2, "height": 6, "operation": "join", "name": "PegW"}));
+    run(&mut s, "solid.cylinder", json!({"base": [30, 10, 10], "radius": 2, "height": 6, "operation": "join", "name": "PegE"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[12, 10, 16], [32, 10, 16]], "distance": 0.5, "name": "LeadIn"}));
+    let lead_in = s.doc.features.iter().position(|f| f.name == "LeadIn").unwrap();
+    let id = |name: &str| s.doc.features.iter().find(|f| f.name == name).map(|f| f.id).unwrap();
+    let (west, east) = (id("PegW"), id("PegE"));
+    assert_eq!(s.doc.features[lead_in].edge_names, vec![format!("F{west}:side|F{west}:top"), format!("F{east}:side|F{east}:top")]);
+    let (chamfered, chamfered_faces) = (volume(&mut s, "Plate"), faces(&mut s, "Plate"));
+
+    let mut saved = (*s.doc).clone();
+    saved.features[lead_in].edge_names = vec![format!("F{west}:side#1|F{west}:top"), format!("F{east}:side#2|F{east}:top")];
+    let mut reopened = Session::opened_at(saved.clone(), None, None);
+    let result = reopened.model.result(reopened.doc.features[lead_in].id).unwrap();
+    assert!(!result.skipped && result.error.is_none(), "{:?}", result.error);
+    assert!((volume(&mut reopened, "Plate") - chamfered).abs() < 1e-6);
+    let names = |all: Vec<Value>| {
+        let mut n: Vec<String> = all.iter().filter_map(|f| f["name"].as_str().map(str::to_owned)).collect();
+        n.sort();
+        n
+    };
+    // The same faces by name: the chamfer's two cone faces and everything around them.
+    assert_eq!(names(faces(&mut reopened, "Plate")), names(chamfered_faces));
+
+    // The first name with its pick on the other peg's top edge is not that peg's edge: it asks again.
+    let mut off = saved;
+    if let solidcraft_doc::FeatureKind::Chamfer { edges, .. } = &mut off.features[lead_in].kind {
+        edges[0].0 = Vec3::new(32.0, 10.0, 16.0);
+    }
+    let reopened = Session::opened_at(off, None, None);
+    let result = reopened.model.result(reopened.doc.features[lead_in].id).unwrap();
+    assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{:?}", result.error);
+}
