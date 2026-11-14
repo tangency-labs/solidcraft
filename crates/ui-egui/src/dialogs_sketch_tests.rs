@@ -1028,3 +1028,47 @@ fn project_box_beside_the_model_still_takes_curves_of_other_sketches_14927() {
     h.step(&json!({"drag": [{"world": [55, 35, 0]}, {"world": [85, 45, 0]}]})).unwrap();
     assert_eq!(external_curves(&h, first), vec![lone], "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
 }
+
+/// Project's Geometry filter offers Tangent chain: ticked, one pick of a rounded block's top edge
+/// brings its whole smooth outline, and OK projects all of it. The Bodies filter has no edges to
+/// chain, so it shows no switch, and going back to Geometry starts unticked.
+#[test]
+fn project_tangent_chain_projects_the_smooth_outline() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "B"})).unwrap();
+    h.app.run("solid.fillet", json!({"edges": [[0, 0, 5], [40, 0, 5], [0, 20, 5], [40, 20, 5]], "radius": 4, "tangent_chain": false})).unwrap();
+    let world = crate::open_meshing::session_world(&h.app.session);
+    let b = world.body("B").unwrap();
+    // The straight top front edge: every point of it at y = 0, z = 10.
+    let index = b.mesh().edges.iter().position(|e| e.len() > 1 && e.iter().all(|p| p.y.abs() < 1e-6 && (p.z - 10.0).abs() < 1e-6)).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "offset": 30})).unwrap();
+    h.settle();
+    h.app.start("sketch.project");
+    h.frames(3);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].chain, Some(false), "Geometry offers the switch, off");
+    let pick = Sel::Edge { body: "B".into(), index, point: solidcore_record::Vec3::new(20.0, 0.0, 10.0) };
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, pick.clone());
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 8, "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
+    // Bodies: no switch; back to Geometry: the switch again, unticked and empty.
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter:Bodies"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].chain, None);
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter:Geometry"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].chain, Some(false));
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty());
+    // Ticked again, one pick, OK: the sketch gets the whole outline.
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, pick);
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 8);
+    h.app.status = None;
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none());
+    let (text, _, error) = h.app.status.clone().expect("Project says what it added");
+    assert!(!error && text.contains("8 curves"), "{text}");
+}

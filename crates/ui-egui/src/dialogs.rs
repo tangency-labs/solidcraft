@@ -944,7 +944,11 @@ impl Dialog {
                 let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
                 Dialog::new(
                     Kind::SketchProject { bodies, projection_link: true },
-                    vec![SelInput::new("ui.sketch_project_geometry", if bodies { BODIES } else { PROJECT_GEOMETRY }, true)],
+                    vec![if bodies {
+                        SelInput::new("ui.sketch_project_geometry", BODIES, true)
+                    } else {
+                        SelInput::new("ui.sketch_project_geometry", PROJECT_GEOMETRY, true).chains()
+                    }],
                 )
             }
             "solid.extrude" => Dialog::new(

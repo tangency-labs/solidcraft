@@ -468,6 +468,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 *bodies = selected == 1;
                 input.accept = if *bodies { BODIES } else { super::PROJECT_GEOMETRY };
                 input.items.clear();
+                // Geometry offers Tangent chain for edges; bodies have no edges to chain.
+                input.chain = (!*bodies).then_some(false);
+                input.chain_seeds.clear();
+                input.chain_written.clear();
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
         }
