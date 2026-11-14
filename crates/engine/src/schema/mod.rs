@@ -70,6 +70,7 @@ pub mod delete;
 pub mod diagnostics;
 pub mod drawing;
 pub mod drawing_balloon;
+pub mod drawing_break;
 pub mod drawing_check;
 pub mod drawing_dimension;
 pub mod drawing_export;

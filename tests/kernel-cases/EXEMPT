@@ -79,6 +79,7 @@ drawing.balloon.add               a drawing: its tests in crates/engine/src/cmd/
 drawing.balloon.edit              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.inspect           a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.repair            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.break.preview             read-only drawing preview: crates/engine/src/cmd/drawing_break_tests.rs and crates/ui-egui/src/broken_view_preview_tests.rs
 drawing.check                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.close                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.create                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
