@@ -210,7 +210,7 @@ pub(crate) fn curve_pick(id: &str, sketch: u64, active: Option<u64>) -> Sel {
     Sel::SketchCurve { id: id.to_string(), sketch: (active != Some(sketch)).then_some(sketch) }
 }
 
-/// Projections preserve pick order and repetitions; callers own any deduplication or frames.
+/// Projections preserve pick order; profile identities occur once, other picks retain repetitions.
 pub(crate) trait SelectionExt {
     fn body_names(&self) -> Vec<String>;
     fn curve_ids(&self) -> Vec<String>;
@@ -234,7 +234,11 @@ impl SelectionExt for [Sel] {
         named.all(|k| k == Some(first)).then_some(first)
     }
     fn profiles(&self) -> Vec<(u64, usize)> {
-        self.iter().filter_map(|x| if let Sel::Profile { sketch, index } = x { Some((*sketch, *index)) } else { None }).collect()
+        let mut seen = std::collections::BTreeSet::new();
+        self.iter()
+            .filter_map(|x| if let Sel::Profile { sketch, index } = x { Some((*sketch, *index)) } else { None })
+            .filter(|profile| seen.insert(*profile))
+            .collect()
     }
     fn edge_points(&self) -> Vec<Vec3> {
         self.iter().filter_map(|x| if let Sel::Edge { point, .. } = x { Some(*point) } else { None }).collect()
