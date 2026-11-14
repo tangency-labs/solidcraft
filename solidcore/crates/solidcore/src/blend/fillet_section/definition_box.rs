@@ -678,37 +678,55 @@ mod tests {
     use super::super::station::{knot, span};
     use super::*;
 
-    /// tangency-labs/solidcraft#14284: `wr698`'s `circle_root` (a pipe of radius 10 lying
-    /// along a 60 x 40 x 10 plate 4 degrees off x, its root rounded r 2 as its definition)
-    /// ends where the pipe ends, so at the round's u end a foot lies on the pipe's net's v end.
-    /// Over a box at that end the definition's feet box crosses the pipe's domain end: without
-    /// a support continued it is refused `FootPastDomainEnd` (what it was, as `SM_ERR`, before);
-    /// with the pipe continued along its axis (a cylinder's line) it is enclosed: `|S_u x S_v|`
-    /// over the box is finite, away from 0, and holds the definition's own value at the box's
-    /// ends and middle.
+    /// tangency-labs/solidcraft#14284: a round ending flush with the support it rolls on, so
+    /// at the round's u end a foot lies on that support's net's v end. Over a box at that end
+    /// the definition's feet box crosses the support's domain end: without a support continued
+    /// it is refused `FootPastDomainEnd`; with the support continued along the direction its
+    /// kind is a line in, it is enclosed: `|S_u x S_v|` over the box is finite, away from 0, and
+    /// holds the definition's own value at the box's ends and middle.
+    ///
+    /// The case: a 60 x 40 x 10 plate with a ridge on it, the ridge an extrusion of a freeform
+    /// (cubic Bezier) profile 4 degrees off y, as long as the plate is wide, its root rounded
+    /// r 2. (The pipe this case first had made the root round an exact round class, a plane
+    /// against a cylinder, whose definition is not this one.) An extrusion continues along its
+    /// direction, as the pipe's cylinder did along its lines.
     #[test]
     #[allow(clippy::unwrap_used, clippy::expect_used)]
-    fn a_round_ending_flush_with_its_pipe_is_enclosed_at_its_end() {
+    fn a_round_ending_flush_with_its_support_is_enclosed_at_its_end() {
         use crate::blend::fillet_executive::api::fillet_edges;
         use crate::boolean::api_brep::boolean_union;
-        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::curve::curve::Curve;
         use crate::math::{Point3, Vec3};
-        use crate::primitive::api_primitives::{create_box, create_cylinder};
+        use crate::primitive::api_curves::{create_curve, create_line_segment};
+        use crate::primitive::api_primitives::create_box;
         use crate::query::api_queries::{edge_closest_point, get_edges};
+        use crate::sweep::api_brep::create_linear_sweep;
         use crate::topology::face;
         let mut k = Kernel::default();
         k.fixes.fillet_round_as_definition = true;
         let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
-        let mut pipe = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
+        // the ridge's profile in y = 0 on the plate's top: its base, and a freeform arch over it
+        let p = |x: f64, z: f64| Point3::new(x, 0.0, z);
+        let profile = [
+            Curve::from(create_line_segment(p(20.0, 10.0), p(40.0, 10.0)).unwrap()),
+            Curve::from(
+                create_curve(&[p(40.0, 10.0), p(37.0, 19.0), p(24.0, 16.0), p(20.0, 10.0)])
+                    .unwrap(),
+            ),
+        ];
+        let refs: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
         let phi = 4.0_f64.to_radians();
-        let place = Axis2Placement::new(
-            Point3::new(0.0, 20.0, 16.0),
-            Vec3::new(-phi.sin(), 0.0, -phi.cos()),
-            Vec3::new(0.0, 1.0, 0.0),
-        );
-        crate::topology::brep::p5::transform(&mut k, &mut pipe, &place, None, false).unwrap();
-        let mut b = boolean_union(&mut k, plate, pipe).unwrap();
-        let q = Point3::new(30.0, 29.2, 10.0);
+        let ridge = create_linear_sweep(
+            &mut k,
+            &refs,
+            Vec3::new(phi.sin(), phi.cos(), 0.0),
+            40.0 / phi.cos(),
+            true,
+        )
+        .unwrap();
+        let mut b = boolean_union(&mut k, plate, ridge).unwrap();
+        // the root along the ridge's base at x = 40, halfway along
+        let q = Point3::new(40.0 + 20.0 * phi.tan(), 20.0, 10.0);
         let root = get_edges(&b)
             .unwrap()
             .into_iter()
@@ -730,12 +748,12 @@ mod tests {
                 s.procedural_blend()
                     .is_some_and(|d| (0..2).all(|i| d.support(i).is_some()))
             })
-            .expect("the round, a definition on the pipe and the plate")
+            .expect("the round, a definition on the ridge and the plate")
             .clone();
         let net = Nurbs::of(&as_b_spline(&k, &def).unwrap().unwrap()).unwrap();
         let (u0, u1) = (knot(&net.u, net.p as isize), knot(&net.u, net.nu as isize));
         let (v0, v1) = (knot(&net.v, net.q as isize), knot(&net.v, net.nv as isize));
-        // a box at the round's u end along its rail on v's start (the pipe's side or the
+        // a box at the round's u end along its rail on v's start (the ridge's side or the
         // plate's), as the margin of its edge's last piece asks
         let (ua, ub) = (u1 - 0.002, u1);
         let ku = span(&net.u, net.p, net.nu, 0.5 * (ua + ub));
@@ -784,7 +802,7 @@ mod tests {
         }
         assert!(
             crossed >= 1,
-            "no box at the round's end crosses its pipe's domain end ({u0}..{u1})"
+            "no box at the round's end crosses its ridge's domain end ({u0}..{u1})"
         );
     }
 }
