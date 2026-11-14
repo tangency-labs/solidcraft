@@ -10,7 +10,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - No GPL/LGPL/AGPL code, not even reading it (OpenCASCADE, FreeCAD, SolveSpace, CadQuery, LibreCAD, QCAD): `cargo xtask licences --check`.
 - Every asset is original or openly licensed with a row in ATTRIBUTION.md; read `assets/AGENTS.md` before icon work: `cargo xtask assets`, `cargo xtask icons`.
 - Never crash: no unwrap/expect/panic/unsafe in non-test code, errors are `Result`, input is hostile: clippy `-D warnings`, `hostile_params_never_panic`.
-- Model decisions (what an operation does, which bodies it touches, which face or edge a point or name means, depths, nearness) use exact geometry; a mesh is for display, export, previews and mesh bodies (`xtask/mesh-decisions.txt` only shrinks): `cargo xtask mesh-decisions`.
+- Model decisions use exact geometry; a mesh is for display, export, previews and mesh bodies (`xtask/mesh-decisions.txt` only shrinks): `cargo xtask mesh-decisions`.
 - Everything is a command and programmatic calls never open dialogs: `skills/solidcraft-commands/SKILL.md`.
 - Layering; only `crates/kernel` uses truck; solidcore only via `solidcore-ops`/`-tess`/`-record` (`xtask/solidcore-seam.txt`): `cargo xtask layers`; see `docs/layers.md`.
 - One outer UI container, one camera path (`navigation::handle`), colours from theme tokens: `cargo xtask ui-containers`.
@@ -32,7 +32,8 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 | Working on | Read |
 |---|---|
 | A PR, a claim, review, CI or evidence | `skills/solidcraft-contributing/SKILL.md` |
-| Licences, assets, clean-room, the name | `skills/solidcraft-ground-rules/SKILL.md` |
+| Licences, assets, clean-room | `skills/solidcraft-ground-rules/SKILL.md` |
+| The name, glossary terms, units | `skills/solidcraft-name/SKILL.md` |
 | Non-test Rust, hostile input, a crash report | `skills/solidcraft-crash-safety/SKILL.md` |
 | A command, a crate boundary | `skills/solidcraft-commands/SKILL.md` |
 | SolidCraft or solidcore, kernel, geometry | `skills/solidcraft-layers/SKILL.md` |
