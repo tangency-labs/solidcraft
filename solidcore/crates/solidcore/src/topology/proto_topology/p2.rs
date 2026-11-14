@@ -1046,6 +1046,44 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         Ok(None)
     }
 
+    /// Not upstream (#16640): whether the definition `ed` is an edge-to-edge one whose ends
+    /// are one vertex in each B-rep (`vertices`: start and end in B-rep 1, then B-rep 2)
+    /// although its curve ends farther apart than the definition's tolerance and both
+    /// vertices' tolerances. A closed edge, whose ends meet, is not one.
+    ///
+    /// # Errors
+    ///
+    /// Those of the curve evaluations.
+    fn is_unbounded_edge_stretch(
+        &self,
+        k: &Kernel,
+        brep: &impl ProtoBrep<O>,
+        ed: EdgeDefId,
+        vertices: [(O, O); 2],
+    ) -> Result<bool> {
+        let [(start1, end1), (start2, end2)] = vertices;
+        if start1 != end1 || start2 != end2 {
+            return Ok(false);
+        }
+        let d = self.ed_ref(ed)?;
+        if d.src_topo_type(1) != PointClassType::Edge || d.src_topo_type(2) != PointClassType::Edge
+        {
+            return Ok(false);
+        }
+        let (Some(tol1), Some(tol2)) = (
+            brep.topology_tolerance(start1),
+            brep.topology_tolerance(start2),
+        ) else {
+            return Ok(false);
+        };
+        let gap = d
+            .end_position(k, brep, true)?
+            .distance(d.end_position(k, brep, false)?);
+        let tol = max2(d.raw_tolerance(), max2(tol1, tol2));
+        // written so that a NaN gap or tolerance is not a stretch
+        Ok(gap > tol)
+    }
+
     /// The body of [`ProtoTopologyManager::imprint_edge_definition`]; `edited` is set
     /// before the first B-rep edit.
     fn imprint_edge_definition_inner(
@@ -1091,6 +1129,24 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         )? {
             self.note_skipped_speck_vertex(start_vtx1, gap1, p0, p1);
             self.note_skipped_speck_vertex(start_vtx2, gap2, p0, p1);
+            return Ok(());
+        }
+
+        // Not upstream (#16640): an edge-to-edge definition whose curve runs from one point
+        // to another farther apart than every tolerance involved, yet whose two ends are one
+        // vertex in each B-rep, is a stretch of coincidence that no vertex bounds at its far
+        // end. Two edges that cross at a shallow angle (a tangent arc that grazes a line)
+        // stay within tolerance of each other on both sides of the crossing; the crossing is
+        // split, but the stretch past it ends in the middle of both edges, which would
+        // otherwise be related whole to each other and to the edges the crossing already
+        // related. Such a definition is not imprinted: its edges keep the mates their own
+        // definitions give them, so one relation holds per entity.
+        if self.is_unbounded_edge_stretch(
+            k,
+            &*brep,
+            ed,
+            [(start_vtx1, end_vtx1), (start_vtx2, end_vtx2)],
+        )? {
             return Ok(());
         }
 
