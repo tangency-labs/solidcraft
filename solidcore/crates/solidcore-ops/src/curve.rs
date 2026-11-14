@@ -867,7 +867,9 @@ pub use solidcore::curve::stretch::Stretch;
 /// it over its length from the pivot to the handle (the pivot stays, the handle moves by `delta`
 /// whole); with [`Stretch::None`] each by `delta`. With `plane` (as
 /// [`crate::curve_plane::plane_of`] gives it), `delta` is first taken into the plane, so a
-/// planar curve stays planar. A closed periodic spline's repeated points move with their twins.
+/// planar curve stays planar. A closed periodic spline's repeated points are one editable point:
+/// picks, pivot and handle use its first occurrence along the stored control polygon, and all
+/// copies move together. Picking more than one copy does not change the stretch.
 ///
 /// # Errors
 /// [`Error::Argument`] for another kind of curve than a spline or polyline, an index past its
@@ -886,11 +888,32 @@ pub fn stretch_cvs(
     let (Curve::Spline { points, .. } | Curve::Polyline { points }) = curve else {
         return Err(Error::Argument);
     };
+    let period = match curve {
+        Curve::Spline { knots, points } => periodic_twin(knots, points, 0),
+        _ => None,
+    };
+    let canonical = |index: usize| -> Result<usize> {
+        if index >= points.len() {
+            return Err(Error::Argument);
+        }
+        match period {
+            Some(period) => index.checked_rem(period).ok_or(Error::Argument),
+            None => Ok(index),
+        }
+    };
+    let pivot = canonical(pivot)?;
+    let handle = canonical(handle)?;
+    let mut picked: Vec<usize> = picked
+        .iter()
+        .map(|&i| canonical(i))
+        .collect::<Result<_>>()?;
+    picked.sort_unstable();
+    picked.dedup();
     let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
     let given: Vec<Point3> = points.iter().map(|p| v(*p)).collect();
     let stretched = solidcore::curve::stretch::stretch_points(
         &given,
-        picked,
+        &picked,
         pivot,
         handle,
         v(delta),
@@ -899,7 +922,14 @@ pub fn stretch_cvs(
     )
     .map_err(|_| Error::Argument)?;
     let mut out = curve.clone();
-    for &i in picked {
+    let (Curve::Spline { points: moved, .. } | Curve::Polyline { points: moved }) = &mut out else {
+        return Err(Error::Argument);
+    };
+    for (i, point) in moved.iter_mut().enumerate() {
+        let i = canonical(i)?;
+        if picked.binary_search(&i).is_err() {
+            continue;
+        }
         let to = stretched
             .get(i)
             .map(|p| [p.x, p.y, p.z])
@@ -907,7 +937,7 @@ pub fn stretch_cvs(
         if !coord_ok(&to) {
             return Err(Error::Argument);
         }
-        out = move_cv(&out, i, to)?;
+        *point = to;
     }
     Ok(out)
 }
