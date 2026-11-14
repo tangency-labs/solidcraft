@@ -251,22 +251,44 @@ impl<'a> Occluders<'a> {
         // Sample parameters: the curve cut into pieces by a coarse polyline, each piece cut again
         // so its samples are at most `spacing` apart where it stands.
         let coarse = if matches!(e.curve, super::curve::C3::Line { .. }) { 1 } else { 64 };
-        let mut params = vec![t0];
-        for i in 0..coarse {
+        // Each coarse piece's length in sample spacings where it stands; the samples are shared out
+        // by it, so an edge a few pixels long on the screen takes a few rays whatever its shape.
+        let weights: Vec<f64> = (0..coarse)
+            .map(|i| {
+                let (a, b) = (t0 + (t1 - t0) * i as f64 / coarse as f64, t0 + (t1 - t0) * (i + 1) as f64 / coarse as f64);
+                let (pa, pb) = (at(a), at(b));
+                let step = spacing(pa + self.origin).min(spacing(pb + self.origin));
+                if step > 0. && step.is_finite() { pa.dist(pb) / step } else { 0. }
+            })
+            .collect();
+        let total: f64 = weights.iter().sum();
+        let n = if total.is_finite() { (total.ceil() as usize).clamp(1, MAX_SAMPLES) } else { 1 };
+        let mut params = Vec::with_capacity(n + 1);
+        params.push(t0);
+        let mut acc = 0.;
+        for (i, w) in weights.iter().enumerate() {
+            // The samples at whole multiples of `total / n` that fall in this piece, placed in it
+            // evenly by its share.
             let (a, b) = (t0 + (t1 - t0) * i as f64 / coarse as f64, t0 + (t1 - t0) * (i + 1) as f64 / coarse as f64);
-            let (pa, pb) = (at(a), at(b));
-            let step = spacing(pa + self.origin).min(spacing(pb + self.origin));
-            let n = if step > 0. && step.is_finite() { ((pa.dist(pb) / step).ceil() as usize).clamp(1, MAX_SAMPLES) } else { 1 };
-            for k in 1..=n {
-                params.push(a + (b - a) * k as f64 / n as f64);
+            let (from, to) = (acc, acc + w);
+            let first = ((from * n as f64 / total.max(f64::MIN_POSITIVE)).floor() as usize) + 1;
+            let mut k = first;
+            while k <= n {
+                let at_k = k as f64 * total / n as f64;
+                if at_k > to {
+                    break;
+                }
+                if *w > 0. {
+                    params.push(a + (b - a) * ((at_k - from) / w).clamp(0., 1.));
+                }
+                k += 1;
             }
-            if params.len() > MAX_SAMPLES {
-                break;
-            }
+            acc = to;
         }
-        if params.last().is_some_and(|l| *l < t1) {
+        if params.last().is_none_or(|l| *l < t1) {
             params.push(t1);
         }
+        params.dedup();
         let mut out = EdgePieces::default();
         let mut samples: Vec<(f64, Seen)> = Vec::with_capacity(params.len());
         for (i, t) in params.iter().enumerate() {
