@@ -26,6 +26,7 @@ pub mod csv;
 pub mod display_quality;
 pub mod display_units;
 mod document;
+pub mod drafting_profile;
 pub mod drawing;
 pub mod end_cap;
 mod eval;
@@ -168,6 +169,8 @@ pub type Result<T> = std::result::Result<T, DocError>;
 
 #[cfg(test)]
 mod coil_tests;
+#[cfg(test)]
+mod drafting_profile_tests;
 #[cfg(test)]
 mod feature_walk_tests;
 #[cfg(test)]
