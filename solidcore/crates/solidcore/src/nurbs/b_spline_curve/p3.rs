@@ -596,7 +596,9 @@ fn stretch_clears_on_surface(
     radius_tol: f64,
 ) -> Result<bool> {
     let t_end = if end == 0 { domain.min() } else { domain.max() };
-    let ulp = t_end.abs().next_up() - t_end.abs();
+    // the spacing of doubles above |t_end| (`next_up` is past the MSRV)
+    let mag = t_end.abs();
+    let ulp = f64::from_bits(mag.to_bits().saturating_add(1)) - mag;
     let Ok((points, _)) = trim.control_polygon() else {
         return Ok(false);
     };
@@ -614,7 +616,11 @@ fn stretch_clears_on_surface(
     let sliver = 2.0 * length / (speed + (speed * speed + 2.0 * accel * length).sqrt());
     let cut = max3(ulp, stretch * 2f64.powi(-STRETCH_PIECES), sliver);
     // (written to accept: a NaN or infinite stretch, end or sliver certifies nothing)
-    let finite = stretch > 0.0 && stretch.is_finite() && sliver.is_finite() && cut.is_finite();
+    let finite = stretch > 0.0
+        && stretch.is_finite()
+        && ulp.is_finite()
+        && sliver.is_finite()
+        && cut.is_finite();
     if !finite {
         return Ok(false);
     }
