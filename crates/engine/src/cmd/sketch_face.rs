@@ -6,6 +6,13 @@ use solidcore_record::Plane;
 use solidcraft_doc::{EmbossFace, PlaneRef, apply_point, apply_vector, mat_inverse, mat_mul};
 use solidcraft_geom::prelude::*;
 
+/// Whether `error` is `sketch.create` refusing a face because it can't keep an attachment: every
+/// such refusal says `fixed:true` makes the sketch anyway (an unattached sketch on the face's
+/// current plane), which a front end that tells the user may do for them.
+pub fn attachment_refused(error: &str) -> bool {
+    error.contains("fixed:true")
+}
+
 pub(in crate::cmd) fn is_face(p: &Value) -> bool {
     p.get("plane").and_then(|plane| plane.get("face")).is_some()
 }

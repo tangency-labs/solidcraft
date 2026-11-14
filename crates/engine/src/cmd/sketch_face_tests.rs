@@ -99,6 +99,9 @@ fn unsupported_face_has_explicit_fixed_alternative_and_no_live_projection() {
     let before = s.doc.to_json();
     let error = s.execute("sketch.create", &json!({"plane":pick})).unwrap_err();
     assert!(error.to_string().contains("fixed"), "{error}");
+    // A front end that may fall back to a fixed plane knows this refusal; others it doesn't know.
+    assert!(super::attachment_refused(&error.to_string()), "{error}");
+    assert!(!super::attachment_refused("the selected planar face no longer exists"));
     assert_eq!(s.doc.to_json(), before);
     pick["fixed"] = json!(true);
     let id = run(&mut s, "sketch.create", json!({"plane":pick}))["sketch"].as_u64().unwrap();
