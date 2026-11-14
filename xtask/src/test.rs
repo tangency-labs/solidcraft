@@ -178,13 +178,6 @@ fn build(cargo_args: &[&str]) -> Result<Vec<TestBin>, String> {
     Ok(bins)
 }
 
-/// The doc tests (`cargo test --doc`), to run as a side job.
-pub fn doc_tests(cargo_args: &[&str], test_args: &[&str]) -> (String, Command) {
-    let mut c = cargo();
-    c.args(["test", "--workspace", "--profile", "ci", "--doc"]).args(cargo_args).arg("--").args(test_args);
-    ("doc tests".into(), c)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{TEST_STACK, TestBin, binary_command, budget_env, job_limit, run_bounded, stack_env, thread_split};

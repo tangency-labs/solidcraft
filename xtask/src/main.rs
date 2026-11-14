@@ -6,6 +6,7 @@
 mod app_icons;
 mod assets;
 mod book;
+mod doc_tests;
 mod external_corpus;
 mod features;
 mod i18n;
@@ -131,10 +132,14 @@ commands:
                   that no longer does (the list only shrinks)
   test [CARGO ARGS] [-- TEST ARGS]
                   build the tests with the ci profile, then run every test binary at once
-                  (and the doc tests alongside); SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
-                  and side commands for test/ci and splits each binary's test threads and action
-                  matrix workers across the binaries in flight; explicit RUST_TEST_THREADS and
-                  ACTION_MATRIX_JOBS overrides still win
+                  (and the doc tests that doc-tests picks alongside); SOLIDCRAFT_TEST_JOBS=N
+                  bounds concurrent test and side commands for test/ci and splits each binary's
+                  test threads and action matrix workers across the binaries in flight; explicit
+                  RUST_TEST_THREADS and ACTION_MATRIX_JOBS overrides still win
+  doc-tests [--list] [-p NAME]... [CARGO ARGS] [-- TEST ARGS]
+                  the doc tests (cargo test --doc, ci profile) of the workspace libraries, or of
+                  the named packages, whose docs hold a code block rustdoc would compile; the
+                  others are not built (CI's Doc tests job runs this). --list only names them
   wasm            cargo check every library crate and the web app for wasm32-unknown-unknown
   web-offline [DIR]
                   write the web build's service worker (sw.js: offline use, updates); run by
@@ -186,8 +191,9 @@ fn main() -> ExitCode {
         Some("lists") => lists::run(&root(), rest.contains(&"--fix")),
         Some("test") => {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
-            test::run(cargo_args, test_args, vec![test::doc_tests(cargo_args, test_args)])
+            doc_tests::command(None, cargo_args, test_args).and_then(|doc| test::run(cargo_args, test_args, doc.into_iter().collect()))
         }
+        Some("doc-tests") => doc_tests::run(&rest),
         Some("ci") => cmd_ci(),
         Some("wasm") => cmd_wasm(),
         Some("web-offline") => web_offline::run(&root(), rest.first().copied()),
@@ -528,7 +534,9 @@ fn cmd_ci() -> Result<(), String> {
     c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
     run(c, "cargo clippy -D warnings")?;
     let (wasm, n) = wasm_check()?;
-    test_nextest::run_selected(vec![(format!("wasm32-unknown-unknown check ({n} crates)"), wasm), test::doc_tests(&[], &[])])?;
+    let mut side = vec![(format!("wasm32-unknown-unknown check ({n} crates)"), wasm)];
+    side.extend(doc_tests::command(None, &[], &[])?);
+    test_nextest::run_selected(side)?;
     web_offline_test::run(&root(), None, false)?;
     eprintln!("ci: all gates passed");
     Ok(())
