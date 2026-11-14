@@ -2051,6 +2051,14 @@ pub trait FilletSolverOps: AsFilletSolverOps {
         Ok(0)
     }
 
+    /// Whether the equations only equate the points of two constant offset surfaces.
+    /// Such equations are affine when both supports are analytic planes. Custom
+    /// solvers can inherit constant radii while adding nonlinear constraints, so the
+    /// default is false and only the ordinary constant-offset solvers opt in.
+    fn uses_constant_offset_equations(&self) -> bool {
+        false
+    }
+
     /// `SetupOffsetValues(rTsectPnt, pOffsetDist)`: the base returns `SM_ERR`.
     ///
     /// # Errors
