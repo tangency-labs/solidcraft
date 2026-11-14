@@ -43,6 +43,12 @@ not modelling a part through MCP.
 - **Push daily.** A draft with no pushes for 72 hours may be taken over: comment first, then open your
   own claim (you may start from its branch). The bot's automatic cleanup deadlines in CONTRIBUTING.md
   are separate.
+- **Check the scope before building.** A change that adds a dependency, background network or CPU
+  work (polling, animation), or a new kind of feature rather than a fix is the kind most often
+  declined after the work is done. Ask on the issue first, and build it once a maintainer agrees.
+- **Fix the cause.** When the right fix is in a lower layer (the kernel, cancellation, a shared
+  helper), say so on the issue instead of building around it in the caller. A workaround that makes
+  a limitation part of the design is held until the cause is fixed.
 - **One topic and one issue per PR.** Never commit `plan/`, build directories (`target*/`) or generated
   reference data; check `git ls-files` before pushing. Run `cargo xtask ci` before every commit.
   Commit after every feature arc that builds.
