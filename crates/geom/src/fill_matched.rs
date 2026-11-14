@@ -44,8 +44,9 @@
 //!   (a station without a jet) or whose tangent planes disagree, the rows ask for the face's own
 //!   curvature throughout. G1 rows fade likewise from a corner whose faces' tangent planes
 //!   disagree (`clash`), where no surface is G1 to both.
-//! - **Grids** of 4 to [`MAX_MATCHED_SPANS`] spans across the box's longer side are tried in turn,
-//!   with denser sampling when a grid's cells are finer than twice the stations' step: the first
+//! - **Grids** of 4 spans across the box's longer side, doubling, then [`MAX_MATCHED_SPANS`], are
+//!   tried in turn, with denser sampling (up to [`MAX_MATCHED_POINTS`] stations) when a grid's
+//!   cells are finer than twice the stations' step: the first
 //!   whose surface is within `tol` of every station, whose normal is within `angle_tol` of the
 //!   face's at every G1/G2 station clear of clashing corners, and whose normal curvature across
 //!   the loop is within `curvature_tol` of the face's at every G2 station clear of the corners'
@@ -61,8 +62,17 @@ use crate::fill_general::Station;
 use crate::prelude::*;
 use solidcore_record::Vec3;
 
-/// Most spans of the height field across the box's longer side.
-pub const MAX_MATCHED_SPANS: usize = 128;
+/// Most spans of the height field across the box's longer side: the last grid, a step of √2 past
+/// the doubling's 128. A corner set back near the least setback its rounds allow leaves a face's
+/// side of the loop short (0.9 for r3 rounds set back 3.5595, against a loop 5 across), and the
+/// fades at its two ends [`FADE_SHARE`] of it each: 128 spans put about 3.5 cells across them,
+/// this grid about 5. Its band (`(n + 3)²` unknowns, `3 (n + 3) + 4` stored per row) takes 150
+/// MB and about four times the 128 grid's solve (`n⁴`), only for a loop the 128 grid does not
+/// fill.
+pub const MAX_MATCHED_SPANS: usize = 181;
+/// Most stations the fill samples: twice [`MAX_LOOP_POINTS`], as the last grid's cells, finer
+/// than the 128 grid's, need the stations twice as close.
+pub const MAX_MATCHED_POINTS: usize = 2 * MAX_LOOP_POINTS;
 /// Fewest spans (the first grid tried).
 const MIN_SPANS: usize = 4;
 /// The share of the run from a corner to the next over which the conditions the corner cannot
@@ -171,7 +181,7 @@ pub fn fill_matched(
                 break;
             }
         }
-        if all.len() * 2 > MAX_LOOP_POINTS {
+        if all.len() * 2 > MAX_MATCHED_POINTS {
             break;
         }
         fit = fit.iter().zip(&check).map(|(f, c)| f.iter().zip(c).flat_map(|(a, b)| [*a, *b]).collect()).collect();
@@ -622,7 +632,10 @@ fn fit_round(all: &[(Station, bool)], ends: &[Station], spec: &MatchedSpec, leve
         if !holds {
             return Ok(Round::Denser(best, level));
         }
-        level *= 2;
+        if level == MAX_MATCHED_SPANS {
+            break;
+        }
+        level = (level * 2).min(MAX_MATCHED_SPANS);
     }
     Ok(Round::Exhausted(best))
 }
