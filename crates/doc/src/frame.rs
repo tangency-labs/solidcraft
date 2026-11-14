@@ -394,6 +394,56 @@ pub enum Anchor {
     BottomRight,
 }
 
+/// The world direction a frame member's profile takes as up ([`member_axes`]): world +Z by default,
+/// or another world axis for a part drawn with that axis up (a part with Y up takes `Y`). Lines
+/// along it are the vertical members.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UpAxis {
+    #[serde(rename = "X")]
+    X,
+    #[serde(rename = "-X")]
+    NegX,
+    #[serde(rename = "Y")]
+    Y,
+    #[serde(rename = "-Y")]
+    NegY,
+    #[default]
+    #[serde(rename = "Z")]
+    Z,
+    #[serde(rename = "-Z")]
+    NegZ,
+}
+
+/// Every [`UpAxis`] as JSON spells it.
+pub const UP_AXES: [&str; 6] = ["X", "-X", "Y", "-Y", "Z", "-Z"];
+
+impl UpAxis {
+    pub fn is_z(&self) -> bool {
+        *self == UpAxis::Z
+    }
+
+    /// The up direction, a world unit vector.
+    pub fn up(self) -> Vec3 {
+        match self {
+            UpAxis::X => Vec3::X,
+            UpAxis::NegX => -Vec3::X,
+            UpAxis::Y => Vec3::Y,
+            UpAxis::NegY => -Vec3::Y,
+            UpAxis::Z => Vec3::Z,
+            UpAxis::NegZ => -Vec3::Z,
+        }
+    }
+
+    /// The world direction a vertical member's profile x takes: world +X, or world +Y when X is
+    /// up.
+    pub fn across(self) -> Vec3 {
+        match self {
+            UpAxis::X | UpAxis::NegX => Vec3::Y,
+            _ => Vec3::X,
+        }
+    }
+}
+
 /// A profile's section properties (mm², mm, mm⁴). Second moments are about axes through the
 /// centroid, parallel to the profile's x and y.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -869,18 +919,19 @@ pub fn mirrored(region: &Region2) -> Region2 {
 }
 
 /// The directions a member's profile x and y take in the world, for a member running along `d`
-/// (any length): the profile's y points up (world +Z) as far as the line allows and x = y × d, so
-/// x × y runs along the line; a vertical member's x is world +X (a line leaning less than
-/// [`VERTICAL_TOLERANCE`] counts as vertical, so rounding never turns a post). `angle` (radians) then turns the
-/// profile counter-clockwise about the line, seen looking back from its end. `None` for a
-/// direction of no length.
-pub fn member_axes(d: Vec3, angle: f64) -> Option<(Vec3, Vec3)> {
+/// (any length): the profile's y points up (`up`, world +Z by default) as far as the line allows
+/// and x = y × d, so x × y runs along the line; a vertical member's x is [`UpAxis::across`] (a
+/// line leaning less than [`VERTICAL_TOLERANCE`] from `up` counts as vertical, so rounding never
+/// turns a post). `angle` (radians) then turns the profile counter-clockwise about the line, seen
+/// looking back from its end. `None` for a direction of no length.
+pub fn member_axes(d: Vec3, angle: f64, up: UpAxis) -> Option<(Vec3, Vec3)> {
     let d = d.normalized()?;
-    let up = Vec3::Z - d * Vec3::Z.dot(d);
-    // `up` is as long as the sine of the line's lean from vertical.
-    let (x, y) = match up.normalized().filter(|_| up.len() > VERTICAL_TOLERANCE) {
+    let world_up = up.up();
+    let lean = world_up - d * world_up.dot(d);
+    // `lean` is as long as the sine of the line's lean from vertical.
+    let (x, y) = match lean.normalized().filter(|_| lean.len() > VERTICAL_TOLERANCE) {
         Some(y) => (y.cross(d), y),
-        None => (Vec3::X, d.cross(Vec3::X)),
+        None => (up.across(), d.cross(up.across())),
     };
     let (c, s) = (angle.cos(), angle.sin());
     Some((x * c + y * s, y * c - x * s))

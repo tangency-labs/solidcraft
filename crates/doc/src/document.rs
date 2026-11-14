@@ -1325,6 +1325,10 @@ pub enum FeatureKind {
         /// The profile mirrored across its y axis (before it turns).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         mirror: bool,
+        /// The world axis the profile's y takes as up (see `frame::member_axes`); world +Z when
+        /// not saved.
+        #[serde(default, skip_serializing_if = "crate::frame::UpAxis::is_z")]
+        up: crate::frame::UpAxis,
         /// What members without a name of their own are named after (`Rail`, `Rail (2)`...); none:
         /// the profile's description (`Rect Tube 40x40x3`) or the profile sketch's name.
         #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -393,6 +393,52 @@ fn anchor_angle_and_mirror_place_the_profile() {
     assert!(plain.4[1] < 30.0 && m.4[1] > 30.0, "{plain:?} {m:?}");
 }
 
+/// A part drawn with Y up (as parts read from other CAD often are) gives its members `up: "Y"`:
+/// they stand as a Z-up part's do with no `angle`, a line along Y is a vertical member and a line
+/// along Z a horizontal one. The axis is saved only when it is not Z, and survives a save.
+#[test]
+fn members_of_a_y_up_part_stand_on_y() {
+    let angle = json!({"kind": "angle", "width": 60, "height": 40, "thickness": 5});
+    let place = |plane: &str, to: [f64; 2], up: Option<&str>| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": plane, "name": "Rail"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], to]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch": "Rail", "profile": angle, "anchor": "bottom_left"});
+        if let Some(up) = up {
+            p["up"] = json!(up);
+        }
+        run(&mut s, "frame.member", p);
+        let b = bodies(&mut s).remove(0);
+        (s, b)
+    };
+    // Along +X on the XZ plane (a floor with Y up): the profile's y is world +Y and its x
+    // y × d = −Z, so the 60 mm leg runs −Z and the 40 mm one +Y.
+    let (s, flat) = place("XZ", [1000.0, 0.0], Some("Y"));
+    assert!(near3(flat.2, [0.0, 0.0, -60.0]) && near3(flat.3, [1000.0, 40.0, 0.0]), "{flat:?}");
+    // Saved with the member, and read back the same.
+    let saved = s.doc.to_json();
+    assert!(saved.contains("\"up\": \"Y\""), "{saved}");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    assert_eq!(bodies(&mut reopened).remove(0), flat);
+    // A line along Y is a post: its x is world X and its y d × x = −Z.
+    let (_, post) = place("XY", [0.0, 500.0], Some("Y"));
+    assert!(near3(post.2, [0.0, 0.0, -40.0]) && near3(post.3, [60.0, 500.0, 0.0]), "{post:?}");
+    // With Z up (the default, and saved as nothing) the same line is a horizontal member.
+    let (s, rail) = place("XY", [0.0, 500.0], None);
+    assert!(near3(rail.2, [-60.0, 0.0, 0.0]) && near3(rail.3, [0.0, 500.0, 40.0]), "{rail:?}");
+    assert!(!s.doc.to_json().contains("\"up\""));
+    let (_, z) = place("XY", [0.0, 500.0], Some("Z"));
+    assert_eq!(z, rail);
+    // Anything but a world axis is refused with the choices.
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    for bad in [json!("y"), json!("W"), json!(1), json!([0, 1, 0])] {
+        let err = s.execute("frame.member", &json!({"sketch": "Frame", "profile": tube(), "up": bad})).unwrap_err().to_string();
+        assert!(err.contains("`up` must be X, -X, Y, -Y, Z or -Z"), "{bad}: {err}");
+    }
+}
+
 #[test]
 fn a_located_member_keeps_its_profile_point_on_the_line_when_the_section_changes() {
     let place = |width: f64, height: f64, locate: Value| {

@@ -267,7 +267,7 @@ fn placing_moves_the_anchor_onto_the_point() {
 fn member_axes_are_square_to_the_line_and_keep_up() {
     for d in [Vec3::X, Vec3::new(0.0, -3.0, 0.0), Vec3::new(1.0, 2.0, 3.0), Vec3::Z, Vec3::new(0.0, 0.0, -2.0), Vec3::new(1e-12, 0.0, 1.0)] {
         for angle in [0.0, 0.3, -PI / 2.0] {
-            let (x, y) = member_axes(d, angle).unwrap();
+            let (x, y) = member_axes(d, angle, UpAxis::Z).unwrap();
             let n = d.normalized().unwrap();
             close(x.len(), 1.0, "|x|");
             close(y.len(), 1.0, "|y|");
@@ -276,17 +276,52 @@ fn member_axes_are_square_to_the_line_and_keep_up() {
         }
     }
     // Unturned: a horizontal member's y is world up; a vertical one's x is world X.
-    let (_, y) = member_axes(Vec3::new(1.0, 1.0, 0.0), 0.0).unwrap();
+    let (_, y) = member_axes(Vec3::new(1.0, 1.0, 0.0), 0.0, UpAxis::Z).unwrap();
     close(y.dist(Vec3::Z), 0.0, "horizontal y");
-    let (x, _) = member_axes(Vec3::Z, 0.0).unwrap();
+    let (x, _) = member_axes(Vec3::Z, 0.0, UpAxis::Z).unwrap();
     close(x.dist(Vec3::X), 0.0, "vertical x");
-    let (x, _) = member_axes(Vec3::new(0.0, 0.0, -1.0), 0.0).unwrap();
+    let (x, _) = member_axes(Vec3::new(0.0, 0.0, -1.0), 0.0, UpAxis::Z).unwrap();
     close(x.dist(Vec3::X), 0.0, "downward x");
     // A quarter turn takes x to where y was.
-    let (_, y0) = member_axes(Vec3::X, 0.0).unwrap();
-    let (x1, _) = member_axes(Vec3::X, PI / 2.0).unwrap();
+    let (_, y0) = member_axes(Vec3::X, 0.0, UpAxis::Z).unwrap();
+    let (x1, _) = member_axes(Vec3::X, PI / 2.0, UpAxis::Z).unwrap();
     close(x1.dist(y0), 0.0, "quarter turn");
-    assert!(member_axes(Vec3::ZERO, 0.0).is_none());
+    assert!(member_axes(Vec3::ZERO, 0.0, UpAxis::Z).is_none());
+}
+
+/// A part drawn with Y up (as parts read from other CAD often are) gives its members `up: Y`: a
+/// horizontal member's y is world Y with no `angle`, and a line along Y is the vertical one, its x
+/// world X, while a line along Z is horizontal. Every other up is square and right-handed too.
+#[test]
+fn member_axes_follow_the_up_axis() {
+    let (x, y) = member_axes(Vec3::X, 0.0, UpAxis::Y).unwrap();
+    close(y.dist(Vec3::Y), 0.0, "along X: y up");
+    close(x.dist(-Vec3::Z), 0.0, "along X: x = y × d");
+    let (x, y) = member_axes(Vec3::new(0.0, 0.0, -1.0), 0.0, UpAxis::Y).unwrap();
+    close(y.dist(Vec3::Y), 0.0, "along -Z: y up");
+    close(x.dist(-Vec3::X), 0.0, "along -Z: x = y × d");
+    let (x, y) = member_axes(Vec3::Y, 0.0, UpAxis::Y).unwrap();
+    close(x.dist(Vec3::X), 0.0, "post along Y: x is world X");
+    close(y.dist(-Vec3::Z), 0.0, "post along Y: y = d × x");
+    // Z up is the default: the same axes as before the setting existed.
+    assert_eq!(UpAxis::default(), UpAxis::Z);
+    for up in [UpAxis::X, UpAxis::NegX, UpAxis::Y, UpAxis::NegY, UpAxis::Z, UpAxis::NegZ] {
+        for d in [Vec3::X, Vec3::Y, Vec3::Z, Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, -1.0, 1e-12)] {
+            let (x, y) = member_axes(d, 0.4, up).unwrap();
+            close(x.dot(y), 0.0, "x ⟂ y");
+            close(x.cross(y).dist(d.normalized().unwrap()), 0.0, "x × y runs along the line");
+        }
+        // Unturned, a line square to up has its y exactly up.
+        let flat = up.across().cross(up.up());
+        let (_, y) = member_axes(flat, 0.0, up).unwrap();
+        close(y.dist(up.up()), 0.0, "square to up: y up");
+    }
+    // Spelled as a design saves it.
+    let names: Vec<String> = [UpAxis::X, UpAxis::NegX, UpAxis::Y, UpAxis::NegY, UpAxis::Z, UpAxis::NegZ]
+        .iter()
+        .map(|u| serde_json::to_value(u).unwrap().as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(names, UP_AXES);
 }
 
 #[test]
@@ -429,15 +464,15 @@ fn descriptions_round_to_a_tenth_of_a_micron() {
 #[test]
 fn a_line_a_hair_off_vertical_is_vertical() {
     // Rounding noise must not turn a post a quarter turn (#4003 review).
-    let (x0, _) = member_axes(Vec3::Z, 0.0).unwrap();
+    let (x0, _) = member_axes(Vec3::Z, 0.0, UpAxis::Z).unwrap();
     for lean in [1e-8, -1e-8, 1e-12] {
-        let (x, _) = member_axes(Vec3::new(lean, 0.0, 1.0), 0.0).unwrap();
+        let (x, _) = member_axes(Vec3::new(lean, 0.0, 1.0), 0.0, UpAxis::Z).unwrap();
         close(x.dist(x0), 0.0, "near-vertical x");
-        let (x, _) = member_axes(Vec3::new(0.0, lean, 1.0), 0.0).unwrap();
+        let (x, _) = member_axes(Vec3::new(0.0, lean, 1.0), 0.0, UpAxis::Z).unwrap();
         close(x.dist(x0), 0.0, "near-vertical x");
     }
     // A lean you can see is a lean: its y tips toward up.
-    let (_, y) = member_axes(Vec3::new(1e-3, 0.0, 1.0), 0.0).unwrap();
+    let (_, y) = member_axes(Vec3::new(1e-3, 0.0, 1.0), 0.0, UpAxis::Z).unwrap();
     assert!(y.z > 0.0 && y.x < 0.0, "{y:?}");
 }
 

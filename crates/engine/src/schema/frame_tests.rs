@@ -56,6 +56,7 @@ fn schemas_and_the_key_check_agree() {
             "profile_sketch",
             "profiles",
             "sketch",
+            "up",
         ],
     );
     assert_keys(input_schema_for::<ProfileListParams>(), &["family"]);

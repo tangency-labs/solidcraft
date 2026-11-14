@@ -24,7 +24,7 @@ use serde_json::{Map, Value, json};
 use solidcore_record::Vec2;
 use solidcraft_doc::Expr;
 use solidcraft_doc::frame::sizes::Family;
-use solidcraft_doc::frame::{self, Anchor, MAX_MEMBERS, Profile, ProfileSpec};
+use solidcraft_doc::frame::{self, Anchor, MAX_MEMBERS, Profile, ProfileSpec, UP_AXES, UpAxis};
 
 use super::check::{keyed, located, whole};
 use super::motion::require;
@@ -160,6 +160,32 @@ impl JsonSchema for AnchorParam {
             "description": "The profile point that is placed: its origin (the default; a built-in profile's centre), `center` (its bounding box's centre), `centroid`, or a corner or edge middle of its bounding box.",
             "type": "string",
             "enum": ANCHORS
+        })
+    }
+}
+
+/// The refusal of an `up` that is not a world axis.
+pub const UP_MESSAGE: &str = "`up` must be X, -X, Y, -Y, Z or -Z";
+
+/// The world axis a member takes as up, as `UpAxis` is spelled in JSON.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UpParam(pub UpAxis);
+
+impl<'de> Deserialize<'de> for UpParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        serde_json::from_value::<UpAxis>(Value::deserialize(d)?).map(UpParam).map_err(|_| D::Error::custom(whole(UP_MESSAGE)))
+    }
+}
+
+impl JsonSchema for UpParam {
+    fn schema_name() -> Cow<'static, str> {
+        "UpParam".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The world axis that is up for a member's profile: Z (the default), or another axis for a part drawn with that axis up.",
+            "type": "string",
+            "enum": UP_AXES
         })
     }
 }
@@ -669,6 +695,11 @@ pub struct FrameMemberKeys {
     /// world X).
     #[serde(default)]
     pub angle: Option<MemberAngle>,
+    /// The world axis that is up for the profile: its y points that way as far as each line
+    /// allows, and lines along it are vertical members (their x along world X, or world Y when X
+    /// is up). Default: Z.
+    #[serde(default)]
+    pub up: Option<UpParam>,
     /// The profile mirrored across its y axis, before it turns. Default: false.
     #[serde(default)]
     pub mirror: Option<bool>,
