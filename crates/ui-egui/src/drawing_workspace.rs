@@ -98,18 +98,6 @@ fn panel_width(app: &SolveApp) -> f32 {
     if app.preferences.drawing_panel_width.is_finite() { app.preferences.drawing_panel_width.clamp(240.0, 560.0) } else { 320.0 }
 }
 
-pub(crate) fn left_inset(app: &SolveApp) -> f32 {
-    if active(app)
-        && Container::for_layout(app.ui.layout, Surface::Panel).floating()
-        && (app.drawing_workspace.settings_open || app.drawing_workspace.options.is_some())
-        && app.preferences.drawing_panel_side == "left"
-    {
-        panel_width(app) + crate::ui_kit::SHELL_GAP
-    } else {
-        0.0
-    }
-}
-
 /// Reuse Browser's existing content-hugging host and resize seam, with Drawing contents.
 pub(crate) fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Ok(drawing) = app.session.drawing("drawing.inspect") {
