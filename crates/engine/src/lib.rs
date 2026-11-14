@@ -552,6 +552,11 @@ pub struct Session {
     /// make construction geometry rather than normal geometry (off by default; #13142). A
     /// preference, kept like `auto_project` when another design is opened or started.
     pub project_construction: bool,
+    /// Projecting a whole body (`{"body": name}`) into a sketch produces its silhouette: many
+    /// curves from the whole outline. Off by default (#14190): project a single edge or face
+    /// instead. Turn this on to keep the old whole-body silhouette behaviour.
+    /// A preference, kept like `auto_project` when another design is opened or started.
+    pub project_body_silhouette: bool,
     /// Host preferences; never saved in a design.
     pub disabled_plugins: std::collections::BTreeSet<String>,
     /// User resource ceilings; never loaded from or saved in a design.
@@ -884,6 +889,7 @@ impl Session {
             followed: None,
             auto_project: true,
             project_construction: false,
+            project_body_silhouette: false,
             disabled_plugins: Default::default(),
             plugin_limits: plugin::default_host_limits(),
             plugin_state: Default::default(),
@@ -2070,6 +2076,7 @@ impl Session {
             followed: None,
             auto_project: self.auto_project,
             project_construction: self.project_construction,
+            project_body_silhouette: self.project_body_silhouette,
             disabled_plugins: self.disabled_plugins.clone(),
             plugin_limits: self.plugin_limits,
             plugin_state: self.plugin_state.clone(),

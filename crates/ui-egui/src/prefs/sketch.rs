@@ -223,6 +223,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 );
                 check(
                     ui,
+                    "project_body_silhouette",
+                    "ui.project_body_silhouette",
+                    Some("ui.project_body_silhouette_note"),
+                    &mut app.session.project_body_silhouette,
+                );
+                check(
+                    ui,
                     "project_options_dialog",
                     "prefs.sketch.project_options",
                     Some("prefs.project_options_dialog_note"),

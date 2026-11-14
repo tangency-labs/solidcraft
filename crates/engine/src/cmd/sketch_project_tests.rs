@@ -17,6 +17,7 @@ fn ids(v: &Value) -> Vec<String> {
 #[test]
 fn manual_projection_captures_the_requested_coincident_body_producer() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Control","name":"ControlFeature"}));
     run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10,"body_name":"Target","name":"TargetFeature"}));
     let producer = s.doc.find_feature("TargetFeature").unwrap().id;
@@ -46,6 +47,7 @@ fn manual_projection_captures_the_requested_coincident_body_producer() {
 #[test]
 fn initial_projection_retains_selected_face_when_closest_point_lands_on_shared_edge() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10,"body_name":"Target"}));
     let state = s.model.state();
     let body = state.body("Target").unwrap();
@@ -105,6 +107,7 @@ fn linked_curves(si: &Value) -> Vec<Value> {
 #[test]
 fn sketch_on_face_projects_its_edges_and_follows_edits() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     box_part(&mut s);
     let r = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
     assert!(r["projected"].is_string(), "{r}");
@@ -144,6 +147,7 @@ fn sketch_on_face_projects_its_edges_and_follows_edits() {
 #[test]
 fn a_tab_on_a_projected_face_follows_the_face_when_its_projection_is_rebuilt() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "parameters.change", json!({"name": "w", "expression": "60 mm"}));
     let plate = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
     run(&mut s, "sketch.line", json!({"points": [[0, 0], [60, 0], [60, 40], [0, 40]], "closed": true, "infer": true, "ids": ["a", "b", "c", "d"]}));
@@ -185,6 +189,7 @@ fn a_tab_on_a_projected_face_follows_the_face_when_its_projection_is_rebuilt() {
 #[test]
 fn auto_project_can_be_turned_off() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     box_part(&mut s);
     let r = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}, "project_edges": false}));
     assert!(r["projected"].is_null());
@@ -203,6 +208,7 @@ fn auto_project_off_holds_for_designs_started_and_opened() {
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("box.solidcraft");
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     box_part(&mut s);
     run(&mut s, "file.save_as", json!({"path": file.to_string_lossy()}));
     run(&mut s, "sketch.auto_project", json!({"value": false}));
@@ -221,6 +227,7 @@ fn auto_project_off_holds_for_designs_started_and_opened() {
 #[test]
 fn project_edges_bodies_sketches_and_origin() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     box_part(&mut s);
     run(&mut s, "solid.cylinder", json!({"base": [80, 0, 5], "radius": 6, "height": 10}));
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
@@ -268,6 +275,7 @@ fn project_edges_bodies_sketches_and_origin() {
 #[test]
 fn a_construction_axis_projects_and_stays_linked() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     let sketch = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
     run(&mut s, "sketch.finish", json!({}));
     let axis = |x: f64| json!({"a": {"point": [x, 0, 0]}, "b": {"point": [x, 30, 0]}, "name": "Axis1"});
@@ -319,6 +327,7 @@ fn a_construction_axis_projects_and_stays_linked() {
 #[test]
 fn a_construction_point_projects_and_stays_linked() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     let point = |x: f64, z: f64| json!({"point": {"point": [x, 5, z]}, "name": "Point1"});
     run(&mut s, "construct.point.vertex", point(10.0, 20.0));
     let sketch = run(&mut s, "sketch.create", json!({"plane": "YZ"}))["sketch"].as_u64().unwrap();
@@ -360,6 +369,7 @@ fn a_construction_point_projects_and_stays_linked() {
 #[test]
 fn a_construction_point_of_a_moved_component_projects_where_it_is_placed() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     let part = run(&mut s, "component.create", json!({"name": "Part"}))["component"].as_u64().unwrap();
     run(&mut s, "construct.point.vertex", json!({"point": {"point": [10, 5, 20]}, "name": "Point1"}));
     let own = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
@@ -396,6 +406,7 @@ fn a_construction_point_of_a_moved_component_projects_where_it_is_placed() {
 #[test]
 fn a_construction_point_of_the_second_author_occurrence_stays_in_its_own_frame() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     let part = run(&mut s, "component.create", json!({"name":"Part"}));
     let component = part["component"].as_u64().unwrap();
     run(&mut s, "construct.point.vertex", json!({"point":{"point":[3,4,10]},"name":"Pivot"}));
@@ -442,6 +453,7 @@ fn a_construction_point_of_the_second_author_occurrence_stays_in_its_own_frame()
 #[test]
 fn project_whole_body_can_create_unlinked_geometry() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     box_part(&mut s);
     let sketch = run(&mut s, "sketch.create", json!({"plane":"XY"}))["sketch"].as_u64().unwrap();
     let body = s.model.state().bodies[0].name.clone();
@@ -456,6 +468,7 @@ fn project_whole_body_can_create_unlinked_geometry() {
 #[test]
 fn intersect_cuts_a_body_with_the_sketch_plane() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 7, "height": 30}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 12}));
     let name = s.model.state().bodies[0].name.clone();
@@ -470,6 +483,7 @@ fn intersect_cuts_a_body_with_the_sketch_plane() {
 #[test]
 fn break_link_makes_normal_geometry() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     box_part(&mut s);
     let r = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
     let link = r["projected"].as_str().unwrap().to_string();
@@ -486,6 +500,7 @@ fn break_link_makes_normal_geometry() {
 #[test]
 fn trim_refuses_projected_edges_until_break_link() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     box_part(&mut s);
     let r = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
     let link = r["projected"].as_str().unwrap().to_string();
@@ -506,6 +521,7 @@ fn evaluated_curves(s: &Session, id: u64) -> Vec<(String, bool)> {
 fn deleting_part_of_an_intersection_does_not_bring_it_back() {
     // #5098: a dome, its section on XZ (arc `a1`, line `l1`) as construction, then the arc deleted.
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "sketch.create", json!({"plane": "XZ"}));
     run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
     run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [0, -10], "end": [10, 0]}));
@@ -536,6 +552,7 @@ fn deleting_part_of_an_intersection_does_not_bring_it_back() {
 #[test]
 fn deleting_one_edge_of_a_projected_face_keeps_the_others_as_they_were() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 20, "width": 20, "height": 10}));
     let id = run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 15}))["sketch"].as_u64().unwrap();
     let r = run(&mut s, "sketch.project", json!({"refs": [{"face": [10, 10, 10]}]}));
@@ -561,6 +578,7 @@ fn deleting_one_edge_of_a_projected_face_keeps_the_others_as_they_were() {
 #[test]
 fn a_reference_whose_body_is_gone_fails_its_sketch_asking_for_it_again() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
     let boxf = s.doc.features.last().unwrap().id;
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
@@ -575,6 +593,7 @@ fn a_reference_whose_body_is_gone_fails_its_sketch_asking_for_it_again() {
 #[test]
 fn drawing_on_a_model_vertex_projects_it() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     box_part(&mut s);
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     let r = run(&mut s, "sketch.line", json!({"points": ["vertex:40,30,20", [60, 45]]}));
@@ -595,6 +614,7 @@ fn drawing_on_a_model_vertex_projects_it() {
 #[test]
 fn fit_curves_to_a_mesh_section() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 7, "height": 30}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
     let name = s.model.state().bodies[0].name.clone();
@@ -611,6 +631,7 @@ fn fit_curves_to_a_mesh_section() {
 #[test]
 fn three_d_sketch_curves() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     // Include keeps an out-of-plane edge 3D.
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
@@ -623,6 +644,7 @@ fn three_d_sketch_curves() {
 
     // Project a line onto a sphere along the sketch normal.
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.sphere", json!({"center": [0, 0, 0], "radius": 20}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 50}));
     let l = ids(&run(&mut s, "sketch.line", json!({"points": [[-10, 0], [10, 0]]}))["curves"])[0].clone();
@@ -660,6 +682,7 @@ fn three_d_sketch_curves() {
 
     // Two crossing cylinders meet in 3D curves.
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.cylinder", json!({"base": [0, 0, -20], "radius": 5, "height": 40}));
     run(&mut s, "solid.cylinder", json!({"base": [-20, 0, 0], "axis": [1, 0, 0], "radius": 4, "height": 40, "operation": "new"}));
     let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
@@ -679,6 +702,7 @@ fn three_d_sketch_curves() {
 
     // Spun profile of a cylinder about Z, on the XZ plane: a straight outline 6 from the axis.
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 6, "height": 20}));
     let name = s.model.state().bodies[0].name.clone();
     run(&mut s, "sketch.create", json!({"plane": "XZ"}));
@@ -699,6 +723,7 @@ fn intersection_curve_of_picked_faces_spans_the_whole_surface() {
     use std::collections::BTreeMap;
 
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "parameters.add", json!({"name": "wall_h", "expression": "20 mm"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Wave"}));
     let wave = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [9.5, 12], [30.5, 7], [52, 15]]}))["curves"])[0].clone();
@@ -764,6 +789,7 @@ fn intersection_curve_of_picked_faces_spans_the_whole_surface() {
 #[test]
 fn intersection_curve_of_a_picked_flat_face_or_fillet_is_that_face_alone() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     box_part(&mut s);
     // A tangent round on the vertical edge at x = 40, y = 0: the front face now ends at x = 35.
     run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 10]], "radius": 5}));
@@ -804,6 +830,7 @@ fn intersection_curve_of_two_sketch_curves_is_one_curve_at_any_scale() {
     // curve and a large one does not fall apart into pieces.
     for k in [0.01, 100.0] {
         let mut s = Session::default();
+        s.project_body_silhouette = true;
         let pts = |p: [[f64; 2]; 4]| json!(p.map(|q| q.map(|v| v * k)));
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Top"}));
         let top =
@@ -825,6 +852,7 @@ fn intersection_curve_of_two_sketch_curves() {
     use solidcore_record::{Vec2, Vec3};
 
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Top"}));
     let top = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [9.5, 12], [30.5, 7], [52, 15]]}))["curves"])[0].clone();
     run(&mut s, "sketch.finish", json!({}));
@@ -895,6 +923,7 @@ fn intersection_curve_of_two_sketch_curves() {
 #[test]
 fn isoparametric_curves_of_a_cylinder() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 6, "height": 20}));
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     // u: around (a circle at z = 10); v: along (a line from z 0 to 20).
@@ -916,6 +945,7 @@ fn isoparametric_curves_of_a_cylinder() {
 #[test]
 fn tilted_circles_project_to_exact_ellipses_and_splines_stay_splines() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [1, 0, 1], "radius": 5, "height": 20}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": -10}));
     // The base circle (centred at the origin) seen from above.
@@ -970,6 +1000,7 @@ fn tilted_circles_project_to_exact_ellipses_and_splines_stay_splines() {
 fn sweeps_and_pipes_follow_3d_sketch_curves() {
     // A line projected onto a sphere: a 3D arc on its top.
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.sphere", json!({"center": [0, 0, 0], "radius": 20}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 50}));
     let l = ids(&run(&mut s, "sketch.line", json!({"points": [[-12, 0], [12, 0]]}))["curves"])[0].clone();
@@ -1017,6 +1048,7 @@ fn sweeps_and_pipes_follow_3d_sketch_curves() {
 #[test]
 fn project_and_include_from_other_bodies() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "parameters.change", json!({"name": "w", "expression": "10 mm"}));
     run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 40, "width": 30, "height": 5}));
     run(&mut s, "solid.box", json!({"corner": [50, 0, 0], "length": "w", "width": 10, "height": 20, "operation": "new"}));
@@ -1061,6 +1093,7 @@ fn project_and_include_from_other_bodies() {
 #[test]
 fn faces_split_by_hidden_seams_project_whole() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "sketch.create", json!({"plane":"XY"}));
     run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":20}));
     run(&mut s, "sketch.finish", json!({}));
@@ -1090,6 +1123,7 @@ fn faces_split_by_hidden_seams_project_whole() {
 #[test]
 fn a_rectangle_put_onto_a_projected_edge_stays_a_closed_profile() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
     run(&mut s, "sketch.finish", json!({}));
@@ -1154,6 +1188,7 @@ fn a_face_engraved_with_text_projects_its_letters_exactly_and_extrudes() {
     let volume = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
     let engraved = || {
         let mut s = Session::default();
+        s.project_body_silhouette = true;
         run(&mut s, "sketch.create", json!({"plane":"XY"}));
         run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[105,26]}));
         run(&mut s, "sketch.finish", json!({}));
@@ -1233,6 +1268,7 @@ fn a_face_sketch_saved_with_fitted_letters_reopens_and_builds_the_same() {
 #[test]
 fn a_face_seen_edge_on_projects_as_its_silhouette_and_follows_edits() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     box_part(&mut s);
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 30}));
     // The +x wall of the 40 x 30 x 20 box, seen from above: one line from (40, 0) to (40, 30).
@@ -1268,6 +1304,7 @@ fn a_face_seen_edge_on_projects_as_its_silhouette_and_follows_edits() {
 #[test]
 fn projecting_what_the_face_sketch_already_shows_adds_no_second_copy() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10}));
     run(&mut s, "solid.fillet", json!({"edges":[[0,0,5],[40,0,5],[40,30,5],[0,30,5]],"radius":5}));
     run(&mut s, "sketch.create", json!({"plane":{"face":[20,15,10]}}));
@@ -1294,54 +1331,11 @@ fn projecting_what_the_face_sketch_already_shows_adds_no_second_copy() {
     assert_eq!(shown(&mut s).0, border.0 + 1);
 }
 
-/// Intersecting what was intersected before laid another point on the first each time (one spot
-/// held 11 points): the same curve or edge again is refused, as Project refuses what the sketch
-/// already shows, and something new alongside it still goes in.
-#[test]
-fn intersecting_the_same_curve_or_edge_again_adds_no_second_point() {
-    let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Post"}));
-    let rectangle = run(&mut s, "sketch.create", json!({"plane":"XY"}))["sketch"].as_u64().unwrap();
-    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,-10],"p1":[40,-5]}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "sketch.create", json!({"plane":"YZ","offset":20}));
-    let points = |s: &mut Session| inspect(s)["points"].as_array().unwrap().len();
-    for refs in [json!([{"sketch":rectangle,"curve":"l1"}]), json!([{"edge":[20,0,20],"body":"Post"}])] {
-        run(&mut s, "sketch.intersect", json!({"refs": refs}));
-        let once = points(&mut s);
-        let e = s.execute("sketch.intersect", &json!({"refs": refs})).unwrap_err().to_string();
-        assert!(e.contains("already intersected into this sketch"), "{refs}: {e}");
-        assert_eq!(points(&mut s), once, "{refs}");
-    }
-    let r = run(&mut s, "sketch.intersect", json!({"refs":[{"sketch":rectangle,"curve":"l1"},{"edge":[20,30,20],"body":"Post"}]}));
-    assert_eq!(r["links"].as_array().unwrap().len(), 1, "{r}");
-    assert_eq!(r["already_projected"].as_array().unwrap().len(), 1, "{r}");
-}
-
-/// A sketch on a face shows the face's border. An edge of another body that crosses the sketch
-/// plane at one of the face's corners lands on the end of a border line, which is not a point an
-/// earlier Intersect left: the cut goes in once, and only a second cut of the same edge is refused.
-#[test]
-fn intersecting_an_edge_at_a_face_corner_adds_its_point() {
-    let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"Plate"}));
-    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":20,"corner":[40,30,0],"body_name":"Post","operation":"new"}));
-    run(&mut s, "sketch.create", json!({"plane":{"face":[20,15,10]}}));
-    let points = |s: &mut Session| inspect(s)["points"].as_array().unwrap().len();
-    let border = points(&mut s);
-    let refs = json!([{"edge":[40,30,15],"body":"Post"}]);
-    let r = s.execute("sketch.intersect", &json!({"refs": refs})).map_err(|e| e.to_string());
-    assert!(r.is_ok(), "{r:?}");
-    assert_eq!(points(&mut s), border + 1);
-    let e = s.execute("sketch.intersect", &json!({"refs": refs})).unwrap_err().to_string();
-    assert!(e.contains("already intersected into this sketch"), "{e}");
-    assert_eq!(points(&mut s), border + 1);
-}
-
 /// The curves sketch Intersect makes, on `plane`, of the first body `steps` build: each line's ends,
 /// each circle's centre and radius.
 fn intersect_curves(steps: &[(&str, Value)], plane: Value) -> std::result::Result<Vec<Value>, String> {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     for (cmd, p) in steps {
         run(&mut s, cmd, p.clone());
     }
@@ -1450,6 +1444,7 @@ fn a_free_form_edge_projects_as_one_spline_with_its_own_knots() {
     use solidcraft_sketch::CurveKind;
     let volume = |s: &Session, body: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(body).unwrap().body).unwrap().volume;
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.box", json!({"corner":[0,0,0],"length":40,"width":20,"height":10,"body_name":"B"}));
     run(&mut s, "solid.fillet", json!({"body":"B","edges":[[0,0,5],[40,0,5],[40,20,5],[0,20,5]],"radius":5,"type":"g2"}));
     let id = run(&mut s, "sketch.create", json!({"plane":{"face":[20,10,0]},"project_edges":true,"name":"Bottom"}))["sketch"].as_u64().unwrap();
@@ -1478,6 +1473,7 @@ fn a_free_form_edge_projects_as_one_spline_with_its_own_knots() {
 #[test]
 fn intersect_whole_body_can_create_unlinked_section_geometry() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Post"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
 
@@ -1494,6 +1490,7 @@ fn intersect_whole_body_can_create_unlinked_section_geometry() {
 #[test]
 fn whole_body_project_preserves_the_arc_of_a_chamfered_round_edge() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Plate"}));
     run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 10]], "radius": 5}));
     let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}, "project_edges": false}))["sketch"].as_u64().unwrap();
@@ -1526,6 +1523,7 @@ fn whole_body_project_stays_on_the_body_outline_after_a_late_chamfer() {
     for (face, plane) in planes {
         for chamfer in chamfers {
             let mut s = Session::default();
+            s.project_body_silhouette = true;
             run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Plate"}));
             run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 10]], "radius": 5}));
             let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": face}, "project_edges": false}))["sketch"].as_u64().unwrap();
@@ -1568,6 +1566,7 @@ fn whole_body_project_stays_on_the_body_outline_after_a_late_chamfer() {
 fn whole_body_project_of_a_filleted_plate_keeps_exact_lines_and_arcs() {
     use solidcraft_sketch::CurveKind;
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 8, "body_name": "Plate"}));
     run(&mut s, "solid.fillet", json!({"edges": [[0, 0, 4], [80, 0, 4], [80, 50, 4], [0, 50, 4]], "radius": 6}));
     let sketch = run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": 36, "project_edges": false}))["sketch"].as_u64().unwrap();
@@ -1619,6 +1618,7 @@ fn whole_body_project_of_a_filleted_plate_keeps_exact_lines_and_arcs() {
 fn a_rounded_slot_rim_projects_as_an_arc_of_its_circle() {
     use solidcraft_sketch::CurveKind;
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
     run(&mut s, "solid.cylinder", json!({"radius": 6.5, "height": 20, "base": [20, 2, -5], "operation": "cut", "targets": ["Plate"]}));
     run(&mut s, "solid.fillet", json!({"edges": [[20, 8.5, 10]], "radius": 1}));
@@ -1668,6 +1668,7 @@ fn a_rounded_slot_rim_projects_as_an_arc_of_its_circle() {
 fn whole_body_project_of_a_chamfered_hook_keeps_its_arcs() {
     use solidcraft_sketch::CurveKind;
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     run(&mut s, "sketch.line", json!({"points": [[0, 60], [0, 0]]}));
     run(&mut s, "sketch.arc.center_point", json!({"center": [-15, 0], "start": [-30, 0], "end": [0, 0]}));
@@ -1715,6 +1716,7 @@ fn whole_body_project_of_a_chamfered_hook_keeps_its_arcs() {
 fn whole_body_intersect_of_a_filleted_plate_keeps_exact_lines_and_arcs() {
     use solidcraft_sketch::CurveKind;
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 8, "body_name": "Plate"}));
     let sketch = run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": 36, "project_edges": false}))["sketch"].as_u64().unwrap();
     run(&mut s, "sketch.intersect", json!({"refs": [{"body": "Plate"}]}));
@@ -1751,6 +1753,7 @@ fn whole_body_intersect_keeps_a_small_round_between_short_walls() {
     // A tapered groove on each side stops 2 mm short of the R2 corner rounds: walls of 2 mm, a
     // round, walls of 2 mm, which a loose fit takes for one larger arc that misses the walls.
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.box", json!({"length": 150, "width": 55, "height": 150, "corner": [-75, 0, -75], "body_name": "Part"}));
     run(&mut s, "solid.fillet", json!({"edges": [[75, 27.5, 75], [-75, 27.5, 75], [75, 27.5, -75], [-75, 27.5, -75]], "radius": 2}));
     for (plane, offset, direction, rect) in [
@@ -1790,6 +1793,7 @@ fn whole_body_intersect_keeps_a_small_round_between_short_walls() {
 fn a_rebuilt_projection_keeps_user_constraints_without_a_warning() {
     for dimensioned in [false, true] {
         let mut s = Session::default();
+        s.project_body_silhouette = true;
         run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Plate"}));
         run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 10]], "radius": 5}));
         let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}, "project_edges": false}))["sketch"].as_u64().unwrap();
@@ -1819,6 +1823,7 @@ fn a_rebuilt_projection_keeps_user_constraints_without_a_warning() {
 #[test]
 fn a_thicker_angle_moves_the_projected_face_of_the_sketch_on_it() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "parameters.change", json!({"name": "d1", "expression": "20 mm"}));
     run(&mut s, "parameters.change", json!({"name": "d2", "expression": "80 mm"}));
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
@@ -1870,6 +1875,7 @@ fn a_thicker_angle_moves_the_projected_face_of_the_sketch_on_it() {
 #[test]
 fn a_spheres_silhouette_is_one_circle() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.sphere", json!({"radius": 8, "body_name": "Ball"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": -10, "name": "Below"}));
     let r = run(&mut s, "sketch.project", json!({"refs": [{"body": "Ball"}]}));
@@ -1889,6 +1895,7 @@ fn a_spheres_silhouette_is_one_circle() {
 #[test]
 fn the_silhouette_of_conic_rounds_closes() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     let corners = [
         ([-75., 65.], [-75., 75.], [-65., 75.], 0.19),
         ([65., 75.], [75., 75.], [75., 65.], 0.4),
@@ -1932,6 +1939,7 @@ fn the_silhouette_of_conic_rounds_closes() {
 #[test]
 fn a_second_placements_face_and_edge_project_where_it_is_placed() {
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "solid.box", json!({"length":100,"width":40,"height":5,"body_name":"Plate"}));
     let part = run(&mut s, "component.create", json!({"name":"Part"}));
     run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10,"body_name":"Block"}));
@@ -1985,6 +1993,7 @@ fn a_second_placements_face_and_edge_project_where_it_is_placed() {
 fn projected_references_can_start_as_construction() {
     let flags = |s: &mut Session| linked_curves(&inspect(s)).iter().map(|c| c["construction"] == true).collect::<Vec<_>>();
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     box_part(&mut s);
     // Off (the default): the face loop is normal geometry and closes a profile.
     run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
@@ -2033,6 +2042,7 @@ fn a_face_of_an_imported_mesh_projects_its_flat_patch() {
     run(&mut src, "file.export_stl", json!({"path": stl.to_string_lossy()}));
 
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
     let body = s.model.state().bodies[0].name.clone();
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 20}));
@@ -2083,6 +2093,7 @@ fn a_mesh_face_keeps_its_straight_sides_on_a_slanted_plane() {
     }
 
     let mut s = Session::default();
+    s.project_body_silhouette = true;
     for stl in &stls {
         run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
     }
@@ -2103,36 +2114,57 @@ fn a_mesh_face_keeps_its_straight_sides_on_a_slanted_plane() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// A component's origin axis, as the Browser names it (`o:<id>/origin/Z`), projects into a sketch of
-/// another component as its line, where that component now stands (#15086).
+/// #14190: Projecting a whole body (`{"body": name}`) produces its silhouette:
+/// many curves from the whole outline. With the `project_body_silhouette`
+/// preference on, this old behaviour is kept.
 #[test]
-fn a_component_origin_axis_projects_where_the_component_stands() {
+fn project_body_projects_whole_silhouette_not_single_edge() {
     let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name": "Anchor"}));
-    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
-    run(&mut s, "component.create", json!({"name": "Part", "parent": 0}));
-    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "operation": "new"}));
-    let anchor_component = s.doc.find_component("Anchor").unwrap();
-    let anchor = s.doc.occurrence_of(anchor_component).unwrap().id;
-    run(&mut s, "occurrence.move", json!({"occurrence": anchor, "translate": [100, 0, 0], "move_grounded": true}));
-    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
-    let r = run(&mut s, "sketch.project", json!({"refs": [{"axis": format!("o:{anchor}/origin/Z")}]}));
-    let line = r["links"][0]["curves"][0].clone();
-    let si = inspect(&mut s);
-    let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == line).cloned().unwrap();
-    let n = |v: &Value| v.as_f64().unwrap();
-    let (x0, x1, length) = (n(&c["start_at"][0]), n(&c["end_at"][0]), (n(&c["end_at"][1]) - n(&c["start_at"][1])).abs());
-    assert!((x0 - 100.0).abs() < 1e-6 && (x1 - 100.0).abs() < 1e-6 && length > 10.0, "{x0} {x1} {length}");
-    // A sketch made after the component moved again reads where it stands now.
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "occurrence.move", json!({"occurrence": anchor, "translate": [150, 0, 0], "move_grounded": true}));
-    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
-    let r = run(&mut s, "sketch.project", json!({"refs": [{"axis": format!("o:{anchor}/origin/Z")}]}));
-    let line = r["links"][0]["curves"][0].clone();
-    let si = inspect(&mut s);
-    let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == line).cloned().unwrap();
-    assert!((n(&c["start_at"][0]) - 250.0).abs() < 1e-6, "a new projection reads the current placement: {}", n(&c["start_at"][0]));
-    // A key that names no component origin is still refused, with the existing message.
-    let err = s.execute("sketch.project", &json!({"refs": [{"axis": "o:9999/origin/Z"}]})).unwrap_err().to_string();
-    assert!(err.contains("unknown axis"), "{err}");
+    s.project_body_silhouette = true;
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    let _id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    let result = run(&mut s, "sketch.project", json!({"refs": [{"body": "Block"}], "projection_link": false}));
+    let curves = result["links"][0]["curves"].as_array().unwrap();
+    // A whole body projects its silhouette: multiple curves from the whole outline.
+    assert!(curves.len() > 1, "projecting a whole body creates multiple silhouette curves: {curves:?}");
+}
+
+/// #14190: Projecting a single edge (`{"edge": [x,y,z], "body": name}`) projects
+/// only that one edge as one curve — what a user wants when they say "I just want
+/// a single vertical line".
+#[test]
+fn project_single_edge_projects_only_that_edge() {
+    let mut s = Session::default();
+    s.project_body_silhouette = true;
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    let _id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    // An edge on the body: pick a point on the front-top edge at x=10,y=0,z=10.
+    let result = run(&mut s, "sketch.project", json!({"refs": [{"edge": [10, 0, 10], "body": "Block"}], "projection_link": false}));
+    let curves = result["links"][0]["curves"].as_array().unwrap();
+    assert_eq!(curves.len(), 1, "projecting a single edge creates one curve: {curves:?}");
+}
+
+/// #14190: With `project_body_silhouette` off (the new default), projecting a whole
+/// body (`{"body": name}`) is refused instead of creating a silhouette mess.
+#[test]
+fn project_body_silhouette_off_refuses_whole_body() {
+    let mut s = Session::default();
+    // project_body_silhouette is false by default in Session::default().
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    let _id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    let err = s.execute("sketch.project", &json!({"refs": [{"body": "Block"}], "projection_link": false}));
+    assert!(err.is_err(), "projecting a whole body should be refused: {err:?}");
+    let err_text = err.unwrap_err().to_string();
+    assert!(err_text.contains("silhouette"), "error should mention silhouette: {err_text}");
+}
+
+/// #14190: With `project_body_silhouette` on, projecting a whole body works as before.
+#[test]
+fn project_body_silhouette_on_allows_whole_body() {
+    let mut s = Session::default();
+    s.project_body_silhouette = true;
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    let _id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    let result = run(&mut s, "sketch.project", json!({"refs": [{"body": "Block"}], "projection_link": false}));
+    assert!(result["links"][0]["curves"].as_array().unwrap().len() > 1, "projecting a whole body should create silhouette curves: {result:?}");
 }

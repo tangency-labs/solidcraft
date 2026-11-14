@@ -3346,6 +3346,7 @@ mod tests {
         h.app.home.open = false;
         h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.session.project_body_silhouette = true;
         h.app.run("sketch.project", json!({"refs":[{"body":"Body1"}],"projection_link":true})).unwrap();
         let drawn = h.app.run("sketch.line", json!({"points":[[10,-5],[10,5]],"connect":false,"infer":false})).unwrap()["curves"][0]
             .as_str()

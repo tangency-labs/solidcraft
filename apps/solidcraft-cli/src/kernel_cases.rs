@@ -739,6 +739,7 @@ fn check_case_in(
         solidcraft_engine::kernel::smlib_dump_dir(Some(&folder));
     }
     let mut s = solidcraft_engine::Session::default();
+    s.project_body_silhouette = true;
     s.set_validation(validation);
     let clock = std::time::Instant::now();
     if capture.is_some() {

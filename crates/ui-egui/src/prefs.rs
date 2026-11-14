@@ -2042,6 +2042,7 @@ pub struct Snapshot {
     autosave: f64,
     auto_project: bool,
     project_construction: bool,
+    project_body_silhouette: bool,
     keys: std::collections::BTreeMap<String, Vec<String>>,
     /// What a settings profile also switches: the toolbar, the S box favourites and which profile is active.
     toolbar: serde_json::Value,
@@ -2072,6 +2073,7 @@ impl Snapshot {
             autosave: app.autosave_minutes,
             auto_project: app.session.auto_project,
             project_construction: app.session.project_construction,
+            project_body_silhouette: app.session.project_body_silhouette,
             keys: app.keymap.custom.clone(),
             toolbar: app.toolbar_custom.prefs(),
             favourites: app.sbox.pinned.clone(),
@@ -2112,6 +2114,7 @@ impl Snapshot {
         set_autosave(app);
         app.session.auto_project = self.auto_project;
         app.session.project_construction = self.project_construction;
+        app.session.project_body_silhouette = self.project_body_silhouette;
         app.keymap.custom = self.keys;
         app.toolbar_custom.load(&self.toolbar);
         app.sbox.pinned = self.favourites;
@@ -2144,6 +2147,7 @@ impl Snapshot {
             autosave,
             auto_project,
             project_construction,
+            project_body_silhouette,
             keys,
             toolbar,
             favourites,
@@ -2172,6 +2176,7 @@ impl Snapshot {
             && *autosave == app.autosave_minutes
             && *auto_project == app.session.auto_project
             && *project_construction == app.session.project_construction
+            && *project_body_silhouette == app.session.project_body_silhouette
             && *keys == app.keymap.custom
             && *toolbar == app.toolbar_custom.prefs()
             && *favourites == app.sbox.pinned
@@ -2214,6 +2219,7 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
         ("pick_bodies", serde_json::json!(s.pick_bodies)),
         ("auto_project", serde_json::json!(s.auto_project)),
         ("project_construction", serde_json::json!(s.project_construction)),
+        ("project_body_silhouette", serde_json::json!(s.project_body_silhouette)),
         ("visual_style", serde_json::json!(s.style)),
         ("shortcut_box", shortcut_box),
         ("shortcuts", serde_json::Value::Object(shortcuts)),
@@ -2421,6 +2427,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
         PAGE_SKETCH => {
             app.session.auto_project = true;
             app.session.project_construction = false;
+            app.session.project_body_silhouette = false;
             app.ui.pick_bodies = false;
         }
         _ => {}

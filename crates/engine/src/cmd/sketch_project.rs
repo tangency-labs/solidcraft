@@ -527,6 +527,9 @@ fn link_parts(sk: &Sketch, link: &str) -> (Vec<String>, Vec<String>) {
     (curves, points)
 }
 
+/// Run a projection command (Project, Intersect, or Include 3D Geometry) on the given
+/// references, adding a link for each to the active sketch. Returns the list of
+/// projected links and any references that were already projected.
 fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_link: bool) -> Result<Value> {
     let refs: Vec<Value> = match p.get("refs").or_else(|| p.get("ref")) {
         Some(Value::Array(a)) => a.iter().take(1000).cloned().collect(),
@@ -543,6 +546,19 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
     };
     let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
     let sources: Vec<LinkSource> = refs.iter().map(|v| source(s, v, cmd)).collect::<Result<_>>()?;
+    // #14190: projecting a whole body produces its silhouette — many curves from the whole
+    // outline. Off by default: refuse a body reference for Project unless the preference
+    // `project_body_silhouette` is on. Project a single edge or face instead.
+    if kind == LinkKind::Project && !s.project_body_silhouette {
+        for src in &sources {
+            if matches!(src, LinkSource::Body { .. }) {
+                return Err(bad(
+                    cmd,
+                    "projecting a whole body produces its silhouette: many curves from the whole outline. Pick a single edge or face instead, or enable the 'project body silhouette' preference.",
+                ));
+            }
+        }
+    }
     let (out, present) = sketch_store::update(s, id, |s, doc, sk| {
         refresh(s, doc, id, sk);
         let mut out = Vec::new();
