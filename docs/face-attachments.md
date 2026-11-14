@@ -55,7 +55,8 @@ sketch on every wall, not only on its tops and bottoms.
 Faces whose history is not exact (faces a feature rebuilt without reporting its history),
 ambiguous sources, and the pieces of a face split on purpose with Split Face (each piece is its
 own face) require an explicit fixed plane instead. The error says why, and the Create Sketch dialog then offers **Use fixed plane**,
-which places the sketch on that face's current plane without following later changes. A
+which places the sketch on that face's current plane without following later changes (the dialog
+says so beside the button, and nothing is made until it is clicked). A
 nearby or parallel face is never used to repair a new attachment automatically.
 
 The flat faces of a sheet metal body are the exception: they have no construction

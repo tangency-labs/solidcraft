@@ -8661,6 +8661,38 @@ mod refused_ok_tests {
         assert_eq!(super::shown_error("hole depth must be positive"), "hole depth must be positive");
     }
 
+    /// Create Sketch on a face that can't keep an attachment is refused and makes no sketch: the
+    /// dialog then offers Use fixed plane, and only that click makes an unattached one (#16523).
+    #[test]
+    fn create_sketch_on_a_face_that_cannot_keep_an_attachment_waits_for_use_fixed_plane() {
+        let mut h = Harness::new();
+        let run = |h: &mut Harness, command: &str, params: Value| h.app.run(command, params).unwrap();
+        run(&mut h, "solid.box", json!({"length":40,"width":20,"height":5,"corner":[0,0,0],"body_name":"L"}));
+        run(&mut h, "solid.box", json!({"length":5,"width":20,"height":40,"corner":[0,0,0],"operation":"join"}));
+        run(&mut h, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"RibSketch"}));
+        run(&mut h, "sketch.line", json!({"points":[[5,25],[25,5]],"ids":["l1"]}));
+        run(&mut h, "sketch.finish", json!({}));
+        run(&mut h, "solid.rib", json!({"sketch":"RibSketch","curves":["l1"],"thickness":4}));
+        let (index, point) = {
+            let world = h.app.session.world_state().unwrap();
+            let face = world
+                .body("L")
+                .unwrap()
+                .body
+                .faces(0.01)
+                .unwrap()
+                .into_iter()
+                .find(|face| face.plane_normal.is_some_and(|n| n.dot(solidcore_record::Vec3::Y) > 0.999) && (face.centroid.y - 12.0).abs() < 1e-6)
+                .unwrap();
+            (face.index, face.centroid)
+        };
+        let before = h.app.session.doc.to_json();
+        let sel = Sel::Face { body: "L".into(), index, point };
+        let error = start_sketch(&mut h.app, &sel).unwrap_err();
+        assert!(error.contains("fixed"), "{error}");
+        assert_eq!(h.app.session.doc.to_json(), before, "no sketch is made until the user chooses a fixed plane");
+    }
+
     #[test]
     fn the_error_stays_while_the_inputs_do() {
         let mut h = hole_dialog();
