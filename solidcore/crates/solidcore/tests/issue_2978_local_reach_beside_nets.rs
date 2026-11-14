@@ -6,9 +6,12 @@
 //! beside sides stored as bare B-spline nets; and
 //! the planes moved over the curved nets of `Solids/nurb_fillet.smb` (the cases whose
 //! extension can leave a body that is no manifold solid) are built sound or refused with
-//! the input left as it came in, never returned unsound.
+//! the input left as it came in, never returned unsound. A surface of revolution with no
+//! analytic label (a Bézier profile turned 90°) moved out beside its caps and half-planes
+//! builds the sound body of its Pappus volume, and a half-plane moved past the turn's end,
+//! which the executive does not turn on, is refused.
 //!
-//! Each case is a goldens case of `topology.brep_local_operation`, made as its runner makes
+//! Each case but the revolution's is a goldens case of `topology.brep_local_operation`, made as its runner makes
 //! it: a face's surface replaced by the plane through the point at the middle of its UV
 //! domain, moved `offset` along the surface's normal there, the normal tilted by `tilt`.
 //!
@@ -137,6 +140,8 @@ fn cap_at(k: &Kernel, b: &Brep, z: f64) -> FaceId {
 
 /// The integrators' accuracy, and the agreement asked of two integrals at it.
 const ACCURACY: f64 = 1e-6;
+/// The accuracy the revolution's volumes are integrated at (against Pappus).
+const TIGHT: f64 = 1e-10;
 const AGREE: f64 = 1e-5;
 
 /// The volume of the manifold solid `b`, integrated at [`ACCURACY`].
@@ -328,4 +333,388 @@ fn two_curved_nets_given_tilted_planes_are_sound_or_refused_unchanged() {
             ],
         ),
     ]);
+}
+
+/// Sam-47515301's quarter revolution on #13722, as SolidCraft built it: the profile
+/// `r = B(15, 21, 20, 15)`, `z = 90 t` (a cubic Bézier over `t` in [0, 1]) closed along the
+/// axis and by the caps `z = 0` and `z = 90`, turned 90° about z. Its five faces: the
+/// surface of revolution (no analytic label: a net), the two caps and the two half-planes
+/// at either end of the turn.
+const REVOLVED_QUARTER: &[u8] = include_bytes!("data/issue_13722_revolved_bezier_quarter.smb");
+
+/// [`REVOLVED_QUARTER`], read as SolidCraft reads it.
+fn revolved_quarter(k: &mut Kernel) -> Brep {
+    let mut attributes = AttributeStore::default();
+    let mut records = NotifyRecords::new();
+    let mut env = TopologyEnv {
+        all_attributes: &[],
+        attributes: &mut attributes,
+        key_of: &solidcore::topology::loopuse::notify_ref,
+        records: &mut records,
+        next_key: 1 << 50,
+    };
+    let mut b = solidcore::topology::api_files::read_brep_from_file(
+        k,
+        Some(REVOLVED_QUARTER.to_vec()),
+        false,
+        false,
+        &mut env,
+    )
+    .unwrap();
+    b.refresh_cached_topology();
+    b
+}
+
+/// The faces of `b` whose surface is a surface of revolution.
+fn revolutions(b: &Brep) -> Vec<FaceId> {
+    bp1::faces(b, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&f| {
+            matches!(
+                face_ops::surface(b, f).unwrap().unwrap().kind(),
+                solidcore::surface::surface::SurfaceKind::SurfOfRevolution(_)
+            )
+        })
+        .collect()
+}
+
+/// The quarter's volume by Pappus: `θ ∬ r dA` over the profile, by Green's theorem
+/// `θ ∫ r²/2 dz` along its outer side (the axis `r = 0` and the caps `dz = 0` add nothing),
+/// for the side moved `d` along its outward normal `(z', −r') / |c'|` and cut by the caps
+/// (where it ends inside a cap, its tangent line on to the cap: the executive's ruled
+/// extension of the moved surface past its profile's ends). Integrated in plain f64 by
+/// 40-point Gauss–Legendre over 400 pieces, independently of the kernel; the cut parameters
+/// by bisection. `d = 0` is the input's volume, `θ ∫ r² 45 dt` in closed form.
+fn pappus(d: f64) -> f64 {
+    const R: [f64; 4] = [15.0, 21.0, 20.0, 15.0];
+    const Z: [f64; 4] = [0.0, 30.0, 60.0, 90.0];
+    let theta = std::f64::consts::FRAC_PI_2;
+    let bez = |c: [f64; 4], t: f64| {
+        let s = 1.0 - t;
+        c[0] * s * s * s + 3.0 * c[1] * t * s * s + 3.0 * c[2] * t * t * s + c[3] * t * t * t
+    };
+    let dbez = |c: [f64; 4], t: f64| {
+        let s = 1.0 - t;
+        3.0 * ((c[1] - c[0]) * s * s + 2.0 * (c[2] - c[1]) * t * s + (c[3] - c[2]) * t * t)
+    };
+    let ddr =
+        |t: f64| 6.0 * ((R[2] - 2.0 * R[1] + R[0]) * (1.0 - t) + (R[3] - 2.0 * R[2] + R[1]) * t);
+    // the moved side `(R, Z)(t)` and `Z'(t)` (z'' = 0: z is linear in t)
+    let side = |t: f64| {
+        let (rp, zp) = (dbez(R, t), dbez(Z, t));
+        let l = rp.hypot(zp);
+        (bez(R, t) + d * zp / l, bez(Z, t) - d * rp / l)
+    };
+    let side_dz = |t: f64| {
+        let (rp, zp) = (dbez(R, t), dbez(Z, t));
+        let l = rp.hypot(zp);
+        let dl = rp * ddr(t) / l;
+        zp - d * (ddr(t) * l - rp * dl) / (l * l)
+    };
+    let cut = |target: f64| {
+        let (mut lo, mut hi) = (-0.2_f64, 1.2_f64);
+        for _ in 0..200 {
+            let mid = 0.5 * (lo + hi);
+            if side(mid).1 < target {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        0.5 * (lo + hi)
+    };
+    // Gauss–Legendre nodes and weights (Newton on P_40)
+    let n = 40;
+    let mut nodes = Vec::new();
+    for i in 1..=n {
+        let mut x = (std::f64::consts::PI * (f64::from(i) - 0.25) / (f64::from(n) + 0.5)).cos();
+        let mut dp = 1.0;
+        for _ in 0..100 {
+            let (mut p0, mut p1) = (1.0, x);
+            for k in 2..=n {
+                let k = f64::from(k);
+                (p0, p1) = (p1, ((2.0 * k - 1.0) * x * p1 - (k - 1.0) * p0) / k);
+            }
+            dp = f64::from(n) * (x * p1 - p0) / (x * x - 1.0);
+            let dx = p1 / dp;
+            x -= dx;
+            if dx.abs() < 1e-17 {
+                break;
+            }
+        }
+        nodes.push((x, 2.0 / ((1.0 - x * x) * dp * dp)));
+    }
+    let quad = |f: &dyn Fn(f64) -> f64, a: f64, b: f64| {
+        let m = 400;
+        let h = (b - a) / f64::from(m);
+        (0..m)
+            .map(|j| {
+                let c = a + (f64::from(j) + 0.5) * h;
+                nodes
+                    .iter()
+                    .map(|&(x, w)| w * f(c + 0.5 * h * x))
+                    .sum::<f64>()
+                    * 0.5
+                    * h
+            })
+            .sum::<f64>()
+    };
+    let (t0, t1) = (cut(0.0), cut(90.0));
+    let (a, b) = (t0.max(0.0), t1.min(1.0));
+    let mut v = theta * quad(&|t| side(t).0.powi(2) / 2.0 * side_dz(t), a, b);
+    // a tangent line on from an end of the side to the cap it ends inside: R linear in Z
+    for (end, cap, inside) in [(0.0, 0.0, t0 < 0.0), (1.0, 90.0, t1 > 1.0)] {
+        if inside {
+            let (r0, z0) = side(end);
+            let slope = dbez(R, end) / dbez(Z, end);
+            let f = |z: f64| (r0 + (z - z0) * slope).powi(3) / (6.0 * slope);
+            v += theta
+                * if end == 0.0 {
+                    f(z0) - f(cap)
+                } else {
+                    f(cap) - f(z0)
+                };
+        }
+    }
+    v
+}
+
+/// The revolution of [`REVOLVED_QUARTER`] moved out 1.5 (Sam's Offset Face): beside the caps
+/// and the half-planes, which keep their surfaces, the moved surface of revolution is a net
+/// with a certified reach (its sides round the axis taken on as the turn continued, only as
+/// far as the executive's surfaces hold within the tolerance), not refused as
+/// `ReachUncertified` as on main. The body is a sound manifold solid of the profile moved
+/// out turned 90°: its volume is [`pappus`]'s within the moved surface's own construction
+/// bound (its generator's offset is made within the B-rep's tolerance: the volume moves by
+/// at most that times the moved face's area) and the integrator's accuracy.
+fn revolution_moved_builds_its_pappus_volume(d: f64) {
+    let mut k = Kernel::default();
+    let mut b = revolved_quarter(&mut k);
+    let before = brep_volume_default(&k, &mut b, TIGHT).unwrap();
+    assert!(
+        (before - pappus(0.0)).abs() <= 10.0 * TIGHT * before,
+        "{before} vs {}",
+        pappus(0.0)
+    );
+    let faces = revolutions(&b);
+    assert_eq!(faces.len(), 1);
+    let tolerance = b.tolerance();
+    let mut exec = solidcore::offset::offset_faces::OffsetFacesExecutive::new();
+    exec.offset_faces(&mut k, &mut b, &faces, d).unwrap();
+    assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+    let check = solidcore::topology::brep::validation::check_brep(
+        &mut k,
+        &mut b,
+        solidcore::topology::brep::validation::CheckLevel::Level2,
+    )
+    .unwrap();
+    assert!(check.is_valid(), "{check:?}");
+    assert_eq!(bp1::faces(&b, None).unwrap().len(), 5);
+    let moved = revolutions(&b);
+    assert_eq!(moved.len(), 1);
+    let area = face_area(&k, &mut b, moved[0], ACCURACY).unwrap();
+    let v = brep_volume_default(&k, &mut b, TIGHT).unwrap();
+    let want = pappus(d);
+    // the generator's offset is made within the tolerance, so the moved face is within it of
+    // the exact offset and the volume within its area times it; and the integrator's
+    // accuracy. An offset `δ` past the tolerance moves the volume by about `area δ`, over it.
+    let bound = area * tolerance + 10.0 * TIGHT * want;
+    assert!((v - want).abs() <= bound, "{v} vs {want} (bound {bound})");
+}
+
+/// Out 1.5, as on #13722: the moved side meets both caps on its own face.
+#[test]
+fn a_revolved_spline_moved_out_builds_its_pappus_volume() {
+    revolution_moved_builds_its_pappus_volume(1.5);
+}
+
+/// A half-plane at an end of the turn moved out: the kept surface of revolution would have
+/// to be turned on 1.5 past its side round the axis to meet it, which the executive does
+/// not build. The meeting is proved on the turn continued but not within the tolerance of
+/// the side, so the reach is refused (`ReachUncertified`), never a body short of the meeting.
+#[test]
+fn a_half_plane_moved_past_a_revolutions_turn_is_refused() {
+    let mut k = Kernel::default();
+    let mut b = revolved_quarter(&mut k);
+    // the half-plane x = 0 (the turn's end at 90°)
+    let end = bp1::faces(&b, None)
+        .unwrap()
+        .into_iter()
+        .find(|&f| {
+            let s = face_ops::surface(&b, f).unwrap().unwrap();
+            let uv = b.face(f).unwrap().uv_domain.evaluate(0.5, 0.5);
+            let p = s.evaluate_point(&k, uv).unwrap();
+            let n = s.evaluate_normal(&k, uv, Side::Left, Side::Left).unwrap();
+            p.x.abs() < 1e-9 && n.y.abs() < 1e-9 && n.z.abs() < 1e-9
+        })
+        .unwrap();
+    let mut exec = solidcore::offset::offset_faces::OffsetFacesExecutive::new();
+    let e = exec.offset_faces(&mut k, &mut b, &[end], 1.5).unwrap_err();
+    assert!(
+        matches!(
+            e.failure().map(|f| &f.reason),
+            Some(solidcore::error::Reason::Offset(
+                solidcore::error::offset::OffsetFailure::ReachUncertified { .. }
+            ))
+        ),
+        "{e:?}"
+    );
+}
+
+/// A certified upper bound on the distance of `p` from the plane through `o` with unit
+/// normal `n`: the f64 value plus the rounding of its dot product (`γ_3` of the terms' sizes,
+/// and the subtraction's).
+fn plane_gap(p: Point3, o: Point3, n: Vec3) -> f64 {
+    let d = p - o;
+    let size = (d.x * n.x).abs() + (d.y * n.y).abs() + (d.z * n.z).abs();
+    let terms = (p.x.abs() + o.x.abs()) * n.x.abs()
+        + (p.y.abs() + o.y.abs()) * n.y.abs()
+        + (p.z.abs() + o.z.abs()) * n.z.abs();
+    d.dot(n).abs() + 8.0 * f64::EPSILON * (size + terms)
+}
+
+/// The one face of `b` on the plane through `o` with normal `n` (its surface's point and
+/// normal at the middle of its domain on that plane), and that every vertex of it and every
+/// edge of it lie on the plane within the B-rep's tolerance: a vertex by [`plane_gap`], an
+/// edge by every control point of its curve's NURBS form (its weights positive, so the
+/// curve lies in their convex hull, as near the plane as the farthest of them).
+fn plane_face_lies_on_its_plane(k: &Kernel, b: &Brep, o: Point3, n: Vec3) {
+    use solidcore::curve::curve::CurveKind;
+    let n = n * (1.0 / n.length());
+    let tol = b.tolerance();
+    let on: Vec<FaceId> = bp1::faces(b, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&f| {
+            let s = face_ops::surface(b, f).unwrap().unwrap();
+            let uv = b.face(f).unwrap().uv_domain.evaluate(0.5, 0.5);
+            let p = s.evaluate_point(k, uv).unwrap();
+            let m = s.evaluate_normal(k, uv, Side::Left, Side::Left).unwrap();
+            plane_gap(p, o, n) <= tol && m.dot(n).abs() >= 1.0 - 1e-12
+        })
+        .collect();
+    assert_eq!(on.len(), 1, "faces on the plane through {o:?}: {on:?}");
+    let face = on[0];
+    for v in solidcore::topology::face::p4::vertices(b, face, None, false, None).unwrap() {
+        let p = solidcore::topology::vertex::point(b, v).unwrap();
+        assert!(plane_gap(p, o, n) <= tol, "vertex {v:?} at {p:?}");
+    }
+    for e in solidcore::topology::face::p4::edges(b, face, None, false, None).unwrap() {
+        let curve = solidcore::topology::edge::curve(b, e).unwrap().unwrap();
+        let form = match curve.kind() {
+            CurveKind::BSpline(c) => c.canonical(),
+            CurveKind::Ellipse(c) => c.base().canonical(),
+            CurveKind::Line(c) => c.base_with_nurb().unwrap().canonical(),
+            other => panic!("edge {e:?}: a curve with no NURBS form: {other:?}"),
+        }
+        .unwrap();
+        assert!(form.weights.iter().all(|&w| w > 0.0), "edge {e:?}");
+        for &p in &form.control_points {
+            assert!(plane_gap(p, o, n) <= tol, "edge {e:?}: control point {p:?}");
+        }
+    }
+}
+
+/// The cases of `Solids/revolution.smb` (four surfaces of revolution with no analytic label,
+/// their profile pieces, between two caps) whose planes main refused as `ReachUncertified`
+/// and that now have a certified reach beside the revolutions: `built`, a sound manifold
+/// solid (`check_brep` level 2) with one face on each new plane, every vertex and every
+/// edge of it certified on that plane ([`plane_face_lies_on_its_plane`]); otherwise refused
+/// as an offset edge that vanishes, with the input left as it came in (its volume, faces
+/// and edges).
+fn revolution_built_sound_or_refused_unchanged(moves: &[(usize, f64, [f64; 3])], built: bool) {
+    let mut k = Kernel::default();
+    let Some(mut b) = solid(&mut k, "revolution.smb") else {
+        return;
+    };
+    let before = (
+        volume(&mut k, &mut b).unwrap(),
+        bp1::faces(&b, None).unwrap().len(),
+        b.edge_list().len(),
+    );
+    match moved(&mut k, &mut b, moves) {
+        Ok(planes) => {
+            assert!(built, "built where a refusal was expected");
+            assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+            let check = solidcore::topology::brep::validation::check_brep(
+                &mut k,
+                &mut b,
+                solidcore::topology::brep::validation::CheckLevel::Level2,
+            )
+            .unwrap();
+            assert!(check.is_valid(), "{check:?}");
+            assert!(volume(&mut k, &mut b).unwrap() > 0.0);
+            for (o, n) in planes {
+                plane_face_lies_on_its_plane(&k, &b, o, n);
+            }
+        }
+        Err(e) => {
+            assert!(!built, "refused: {e}");
+            // (the one case refused: an offset edge vanishes, not an uncertified reach)
+            assert!(e.is_offset_edge_vanishes(), "{e:?}");
+            let after = (
+                volume(&mut k, &mut b).unwrap(),
+                bp1::faces(&b, None).unwrap().len(),
+                b.edge_list().len(),
+            );
+            assert_eq!(after, before, "{e}");
+        }
+    }
+}
+
+/// `gen0009` of `topology.brep_local_operation`: three revolution faces given planes, one
+/// tilted, built.
+#[test]
+fn three_revolution_faces_given_planes_build_a_sound_solid() {
+    revolution_built_sound_or_refused_unchanged(
+        &[
+            (2, -0.448_550_426_245_376_55, [0.0; 3]),
+            (0, 0.923_223_920_212_509_9, [0.0; 3]),
+            (
+                3,
+                -0.796_674_521_950_179,
+                [
+                    -0.222_731_639_538_988_28,
+                    -0.077_993_583_261_715_68,
+                    -0.016_536_445_744_678_385,
+                ],
+            ),
+        ],
+        true,
+    );
+}
+
+/// `gen0012`: one revolution face given two planes and another a tilted one, refused with
+/// the input unchanged (past the reach, an edge vanishes: `SM_ERR_OFFSET_EDGE_VANISHES`).
+#[test]
+fn a_revolution_face_given_two_planes_is_refused_unchanged() {
+    revolution_built_sound_or_refused_unchanged(
+        &[
+            (2, -0.536_542_413_140_470_6, [0.0; 3]),
+            (2, -1.250_163_666_404_037_9, [0.0; 3]),
+            (
+                1,
+                0.0,
+                [
+                    0.019_211_488_598_403_77,
+                    0.247_784_794_496_732_8,
+                    0.166_922_271_536_784_85,
+                ],
+            ),
+        ],
+        false,
+    );
+}
+
+/// `gen0050`: two neighbouring revolution faces given planes, moved out, built.
+#[test]
+fn two_revolution_faces_given_planes_build_a_sound_solid() {
+    revolution_built_sound_or_refused_unchanged(
+        &[
+            (0, 0.701_236_569_338_806_1, [0.0; 3]),
+            (1, 1.302_451_597_675_177_4, [0.0; 3]),
+        ],
+        true,
+    );
 }

@@ -413,7 +413,32 @@ pub fn nurbs_partials_over_piece(
     vb: f64,
     lk: usize,
 ) -> Result<Partials<Ivl>> {
-    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None)
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None, None)
+}
+
+/// [`nurbs_partials_over_piece`] of the surface moved by `−about`: the partials of
+/// `S − about`, the homogeneous net's point derivatives taken less `about` times the
+/// weight's, in intervals, before the quotient. The partials of order above 0 are those of
+/// `S`; enclosed about a point near the box they are far narrower where the weights vary
+/// (the quotient's `w_ij S` terms are of the size of `S − about`, not of `S`'s distance
+/// from the origin).
+///
+/// # Errors
+///
+/// As [`nurbs_partials_over_piece`].
+#[allow(clippy::too_many_arguments)]
+pub fn nurbs_partials_over_piece_about(
+    cn: &Nurbs,
+    ku: usize,
+    kv: usize,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+    lk: usize,
+    about: [f64; 3],
+) -> Result<Partials<Ivl>> {
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None, Some(about))
 }
 
 /// [`nurbs_partials_over_piece`] for a box inside the piece's closed knot span (not the
@@ -452,10 +477,11 @@ pub fn nurbs_partials_within_span(
     } else {
         None
     };
-    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, hull)
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, hull, None)
 }
 
-/// [`nurbs_partials_over_piece`], the weight's enclosure cut to `weights` where given.
+/// [`nurbs_partials_over_piece`], the weight's enclosure cut to `weights` where given, of
+/// the surface moved by `−about` where given ([`nurbs_partials_over_piece_about`]).
 #[allow(clippy::too_many_arguments)]
 fn partials_over_piece(
     cn: &Nurbs,
@@ -467,6 +493,7 @@ fn partials_over_piece(
     vb: f64,
     lk: usize,
     weights: Option<Ivl>,
+    about: Option<[f64; 3]>,
 ) -> Result<Partials<Ivl>> {
     let um = 0.5 * (ua + ub);
     let vm = 0.5 * (va + vb);
@@ -486,6 +513,13 @@ fn partials_over_piece(
                     for (e, he) in h.iter_mut().enumerate() {
                         *he = *he + c * Ivl::from(pw_at(&cn.pw, li + e));
                     }
+                }
+            }
+            if let Some(o) = about {
+                // (A − o w): the homogeneous form of S − o
+                let w = h[3];
+                for (he, &oe) in h.iter_mut().zip(&o) {
+                    *he = *he - Ivl::from(oe) * w;
                 }
             }
             *hab = h;
