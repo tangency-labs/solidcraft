@@ -829,17 +829,14 @@ impl FilletSession<'_> {
             // way, by subtraction
             // WR-695 (the fork's TrimAtCreases, smlib#79 step 6): with
             // `fillet_overflow_trim_at_creases` a cliff overflow is trimmed at its creases in
-            // place instead; a WR-674 section end is still subtracted, unless
-            // `fillet_section_end_trim_at_creases` (WR-706) trims it too
+            // place instead, and so is a WR-674 section end (WR-706)
             // The fork's ef57570 (smlib#125): so is an open G1 setback
             // corner's hole made (no patches: its spring curves are imprinted on its faces
             // with the sheet's boundary)
             let sectioned = session.executive.open_ends.iter().any(|end| end.section);
             let trimmed = open_setback
                 || if sectioned {
-                    k.fixes.fillet_section_end_trim_at_creases
-                        && k.fixes.fillet_overflow_trim_at_creases
-                        && k.fixes.fillet_round_ends_at_tangent_continuation
+                    k.fixes.fillet_overflow_trim_at_creases
                 } else {
                     session.executive.cliff_overflow && k.fixes.fillet_overflow_trim_at_creases
                 };

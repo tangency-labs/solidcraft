@@ -8,8 +8,7 @@
 //! its vertices' are raised to twice that, and SMLib's check refuses the body (tests
 //! #59 and #82). With vertical walls the rail is that end edge and the corner is exact.
 //!
-//! The opt-in `Kernel::fixes.fillet_corner_variable_radius_rail_on_opposite_fillet`
-//! refuses the conversion when the rail leaves the opposite fillet's surface, so the
+//! The port refuses the conversion when the rail leaves the opposite fillet's surface, so the
 //! corner is the patch on its exact edges, as upstream already builds one of the four
 //! corners.
 #![allow(
@@ -113,12 +112,9 @@ struct Rounded {
     check: Vec<String>,
 }
 
-/// The pocket drafted `draft` degrees with its rim and corner edges rounded `radius`, with
-/// the fix `on` or off.
-fn rounded(draft: f64, radius: f64, on: bool) -> Rounded {
+/// The pocket drafted `draft` degrees with its rim and corner edges rounded `radius`.
+fn rounded(draft: f64, radius: f64) -> Rounded {
     let mut k = Kernel::default();
-    k.fixes
-        .fillet_corner_variable_radius_rail_on_opposite_fillet = on;
     let mut b = pocketed(&mut k, draft);
     let inside = |p: Point3| p.x > 5.0 && p.x < 75.0 && p.y > 5.0 && p.y < 75.0;
     let edges: Vec<EdgeId> = b
@@ -161,23 +157,11 @@ fn rounded(draft: f64, radius: f64, on: bool) -> Rounded {
 }
 
 #[test]
-fn wr_645_drafted_pocket_corners_are_exact_with_the_fix() {
-    // upstream: three corners' end edges 0.845 off, refused by SMLib's check
-    let upstream = rounded(10.0, 3.0, false);
-    assert!(
-        upstream.max_edge_tolerance > 0.8,
-        "upstream: {}",
-        upstream.max_edge_tolerance
-    );
-    assert!(
-        upstream.check.iter().any(|l| l.contains("Test #59")),
-        "upstream: {:?}",
-        upstream.check
-    );
-
-    // with the fix, at 10 and 2 degrees: the same faces, every corner exact, valid
+fn wr_645_drafted_pocket_corners_are_exact() {
+    // at 10 and 2 degrees: the same faces, every corner exact, valid (upstream: three
+    // corners' end edges 0.845 off, refused by SMLib's check)
     for draft in [10.0, 2.0] {
-        let fixed = rounded(draft, 3.0, true);
+        let fixed = rounded(draft, 3.0);
         assert_eq!(fixed.counts, (23, 52, 32), "draft {draft}");
         assert!(fixed.manifold, "draft {draft}: not a manifold solid");
         assert!(
@@ -191,12 +175,16 @@ fn wr_645_drafted_pocket_corners_are_exact_with_the_fix() {
 
 #[test]
 fn wr_645_vertical_pocket_walls_keep_the_variable_radius_corner() {
-    // with vertical walls the rail is the corner round's end edge: the fix changes
-    // nothing
-    let upstream = rounded(0.0, 3.0, false);
-    let fixed = rounded(0.0, 3.0, true);
-    assert!(upstream.check.is_empty(), "upstream: {:?}", upstream.check);
-    assert_eq!(fixed.counts, upstream.counts);
-    assert_eq!(fixed.volume, upstream.volume);
+    // with vertical walls the rail is the corner round's end edge, and the body is the
+    // one upstream builds (main's values, bit-identical with the flag on and off there)
+    let fixed = rounded(0.0, 3.0);
+    assert_eq!(fixed.counts, (23, 52, 32));
+    let want = 201_654.160_670_791_67_f64;
+    assert!(
+        (fixed.volume - want).abs() <= 1e-12 * want,
+        "{} vs {want}",
+        fixed.volume
+    );
+    assert!(fixed.manifold, "not a manifold solid");
     assert!(fixed.check.is_empty(), "fixed: {:?}", fixed.check);
 }

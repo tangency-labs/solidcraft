@@ -5,9 +5,8 @@
 //! fork's `SmRingFilletRemoval` removes it: the sharp edge is the intersection of the
 //! plate's top and the boss's wall (the circle r 10), and the body is the plate and the
 //! boss again, 24000 + 1000 pi = 27141.592653590, eight faces, check clean. The fork's
-//! probe gave the same. With `glue_vertices_joins_every_region` (WR-607, 661f79c) too,
-//! the shells are joined by the glue instead of `JoinShellsAtVertex`, with the same
-//! result. A copy its caller names (`NamingScheme::Caller`) gives the same, check clean.
+//! probe gave the same. As 661f79c (WR-607), the shells are joined by the glue instead of
+//! `JoinShellsAtVertex`. A copy its caller names (`NamingScheme::Caller`) gives the same, check clean.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -110,11 +109,10 @@ fn vertex_heights(b: &Brep, f: FaceId) -> Vec<f64> {
     out
 }
 
-/// `DeleteFilletFace` of the boss's foot round, with the fixes given.
-fn remove_round(ring: bool, every_region: bool) -> (Kernel, Brep, solidcore::Result<()>, usize) {
+/// `DeleteFilletFace` of the boss's foot round, with the ring fix as given.
+fn remove_round(ring: bool) -> (Kernel, Brep, solidcore::Result<()>, usize) {
     let mut k = Kernel::default();
     k.fixes.fillet_removal_takes_ring_fillets = ring;
-    k.fixes.glue_vertices_joins_every_region = every_region;
     let mut b = boss_with_foot_round(&mut k);
     let faces_before = b.face_list().len();
     let f = round(&b);
@@ -144,21 +142,14 @@ fn ring_fillet_removal_is_off_by_default() {
 
 #[test]
 fn upstream_refuses_a_ring_fillet() {
-    let (_, b, r, faces_before) = remove_round(false, false);
+    let (_, b, r, faces_before) = remove_round(false);
     assert!(r.is_err(), "upstream removes four-sided fillets only");
     assert_eq!(b.face_list().len(), faces_before, "left as it was");
 }
 
 #[test]
 fn ring_fillet_is_removed_to_the_sharp_edge() {
-    let (mut k, mut b, r, _) = remove_round(true, false);
-    r.unwrap();
-    assert_plate_and_boss(&mut k, &mut b);
-}
-
-#[test]
-fn ring_fillet_is_removed_with_every_region_glue() {
-    let (mut k, mut b, r, _) = remove_round(true, true);
+    let (mut k, mut b, r, _) = remove_round(true);
     r.unwrap();
     assert_plate_and_boss(&mut k, &mut b);
 }

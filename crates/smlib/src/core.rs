@@ -76,7 +76,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_vertex_error_diagnostics = true;
-    f.fillet_corner_ball_patch = true;
     f.fillet_chamfer_cone_on_arc = true;
     f.offset_excess_faces_after_merge = true;
     f.offset_clip_right_side_out = true;
@@ -95,7 +94,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.revolve_holed_profile_void = true;
     f.join_touching_loops = true;
     f.offset_resolve_crossing_loops = true;
-    f.offset_walls_touch_refused = true;
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
     f.local_operation_refuses_loose_tangent_edges = true;
@@ -107,8 +105,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.transform_scales_each_tolerance = true;
     f.transform_model_size_from_body_box = true;
     f.offset_collapsed_rounds_mated = true;
-    f.offset_missing_surface_fails = true;
-    f.fillet_nx1_end_rib_global_merge = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
     f.proto_edge_self_loop_on_vertex_degenerate = true;
@@ -142,7 +138,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.shell_edges_on_analytics_exact = true;
     f.ssi_pole_point_keeps_its_tangent = true;
     f.fillet_patch_keeps_fillet_edges = true;
-    f.fillet_corner_ball_center_from_axes = true;
     f.boolean2d_plane_covers_far_faces = true;
     f.boolean_splits_definition_across_split = true;
     f.fillet_refuse_overlapping_bands = true;
@@ -153,14 +148,12 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.thicken_planar_side_walls = true;
     f.fillet_knife_edge_rounds = true;
     f.revolution_round_offset_collapses = true;
-    f.fillet_chamfer_cone_stored_as_cone = true;
     f.offset_point_vertex_caps = true;
     f.proto_edge_splits_at_captured_vertices = true;
     f.local_operation_closes_walls_to_nothing = true;
     f.imprint_reuses_coincident_face_edge = true;
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
-    f.fillet_nx1_tangent_corner_edge = true;
     f.loops_go_on_round_the_vertex = true;
     f.revolve_splits_curves_on_axis = true;
     f.cover_wraps_across_closed_seam = true;
@@ -169,20 +162,16 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.delete_vertex_joins_seam_iso_curve = true;
     f.box_face_failures_propagate = true;
     f.fillet_rail_end_on_continued_surface = true;
-    f.glue_vertices_joins_every_region = true;
     f.fillet_removal_takes_ring_fillets = true;
     // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
     f.fillet_trim_inside_by_best_dot = true;
     f.fillet_half_degree_crease = true;
-    f.fillet_split_edge_keeps_near_half = true;
     f.curve_loop_normal_from_area = true;
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
     f.fillet_cliff_overflow = true;
-    f.fillet_3x2_tangent_side_edge_roles = true;
     f.offset_extension_as_itself = true;
     f.fillet_mitre_concave_face_corners = true;
     f.fillet_mitre_gap_patch = true;
-    f.fillet_run_on_past_far_end_only = true;
     f.good_drop_result_distances_in_order = true;
     f.face_tight_box_searches_trim = true;
     f.ssi_low_angle_start_on_probation = true;
@@ -202,7 +191,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_corner_per_vertex_fan = true;
     f.fillet_rail_trim_at_near_knot = true;
     f.offset_keep_cavity_regions = true;
-    f.temporary_radius_setup_errors = true;
     f.ellipse_step_interval_checks = true;
     f.corner_patch_face_side_twist = true;
     f.boolean_union_refuses_solid_leak = true;
@@ -211,7 +199,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.face_points_span_domain = true;
     f.drop_curve_v_domain_degeneracy = true;
     f.mirror_curve_keeps_euclidean_control_points = true;
-    f.fillet_corner_variable_radius_rail_on_opposite_fillet = true;
     f.dupin_bottom_hyperbola_axis = true;
     f.extent3d_contains_both_segment_endpoints = true;
     f.twist_simple_duw_sign = true;
@@ -234,7 +221,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.close_loop_relates_only_coincident_edges = true;
     f.ssi_split_curves_at_singular_points = true;
     f.surface_parallel_to_vector_checks = true;
-    f.fillet_round_ends_at_tangent_continuation = true;
     f.geometric_g2_continuity = true;
     f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
@@ -244,11 +230,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.database_io_byte_swaps_read_boolean_and_u16 = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
-    f.offset_updates_result_tolerances = true;
     f.cone_iso_circle_at_axial_height = true;
     f.fillet_overflow_trim_at_creases = true;
-    f.fillet_section_end_trim_at_creases = true;
-    f.fillet_refuse_mixed_corner_crossing_rails = true;
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
     f.cone_unbounded_parameterized_as_nurb = true;

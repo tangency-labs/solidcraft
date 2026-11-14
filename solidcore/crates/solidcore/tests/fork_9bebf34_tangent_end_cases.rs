@@ -24,7 +24,7 @@
 //!
 //! The marks run under [`solidcraft_kernel`], the fork's profile at cd47efd as far as solidcore
 //! models it: every fix SolidCraft turns on but `geometric_g2_continuity` (as
-//! `issue_2174_cap_rim_two_edges.rs`) and WR-710's refusal, not the fork's at cd47efd. The G^n
+//! `issue_2174_cap_rim_two_edges.rs`), with WR-710's refusal, not the fork's at cd47efd. The G^n
 //! section and the generic blend's regularity and fit checks (WR-685, WR-696; the fork's
 //! later 11ea2d9 and smlib#79) are on, as solidcore builds them always. At 9bebf34 the fork had neither the
 //! tangent end of the trace (its later 6d73e4f/0cc48bd/b34d61b, WR-600) nor the blend corner
@@ -80,15 +80,14 @@ use solidcore::{Brep, Kernel};
 
 const PI: f64 = core::f64::consts::PI;
 
-/// Every fix SolidCraft turns on: all but `geometric_g2_continuity`, and but WR-710's
-/// `fillet_refuse_mixed_corner_crossing_rails`, not the fork's (it refuses the rounds
-/// together where no Mixed corner takes the corner). The fork's profile at cd47efd.
+/// Every fix SolidCraft turns on: all but `geometric_g2_continuity`. The fork's profile at
+/// cd47efd, but for WR-710's refusal (not the fork's: it refuses the rounds together where
+/// no Mixed corner takes the corner), which solidcore always makes.
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && name != "fillet_refuse_mixed_corner_crossing_rails"
-        {
+        if name != "geometric_g2_continuity" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
