@@ -52,11 +52,13 @@ key by 3Dconnexion's id, beyond the 32 a HID bitmask holds (the Enterprise's Tab
 and 176), and tells a short press from one held past the device's long-press threshold. The Buttons
 section then shows two jobs in each key's row, under **Press** and **Held**; a key whose held job
 is **As a short press** does its short job when held, and one that holds Shift, Ctrl or Alt has no
-held job, since the modifier stays held for as long as the key is down. The SpaceMouse Enterprise
-starts with the jobs printed on its keys, and T, R and F held give the bottom, left and back views;
-read without smed, its keys start with no job, as before. The first time a device is read through
-smed, it takes over the calibration and button jobs saved for it read directly (smed passes its axes
-on unchanged and numbers its keys the same way), where it has none of its own; long jobs start from
+held job, since the modifier stays held for as long as the key is down. On the devices we have
+measured (SpaceMouse Pro and SpaceMouse Enterprise) each row is named by the key printed on it
+(**T**, its held job **T, held**); others show **Button N**. The SpaceMouse Enterprise starts with
+the jobs printed on its keys, and T, R and F held give the bottom, left and back views; read
+without smed, its keys start with no job, as before. The first time a device is read through smed,
+it takes over the calibration and button jobs saved for it read directly (smed passes its axes on
+unchanged and numbers its keys the same way), where it has none of its own; long jobs start from
 the defaults, and the direct settings stay for when it is read directly again. smed keeps the
 rotation lock: its Lock key or **Rotation lock** in the Buttons section switches it, the key's LED
 shows it, and the view then only pans and zooms.
