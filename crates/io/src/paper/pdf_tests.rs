@@ -876,7 +876,7 @@ fn merged_pdf_run_limits_charge_transitions_and_the_final_close() {
 fn sheet_of(size: Vec2, kinds: &[ObjectKind]) -> Scene {
     let line = |y: f64| stroke(vec![Seg2::Line { a: p(10.0, y), b: p(20.0, y) }], false, 0.35, None);
     let groups = kinds.iter().zip(1u64..).map(|(kind, object)| Group { object, kind: *kind, items: vec![line(10.0 * object as f64)] }).collect();
-    Scene { size_mm: size, groups }
+    Scene::new(size, groups)
 }
 
 /// Each object of a file: its number and its text, from `N 0 obj` to `endobj`.
@@ -991,4 +991,27 @@ fn pages_are_refused_past_their_limits() {
     let tiny = scene(p(1.0, 297.0), vec![]);
     let e = paper_pdf_pages(&[sheet.prepare().unwrap(), tiny.prepare().unwrap()], &PdfOptions::default()).unwrap_err();
     assert!(e.to_string().contains("at least 3 pt"), "{e}");
+}
+
+/// A page whose group of a kind holds only a picture lists no layer for that kind: this writer
+/// draws no picture, so the page paints nothing of it. The other page, which strokes it, does.
+#[test]
+fn a_page_lists_no_layer_for_a_kind_it_only_has_pictures_of() {
+    use ObjectKind::{SheetImage, View};
+    use solidcraft_geom::Aabb2;
+    use solidcraft_geom::paper::Picture;
+    let picture = Item::Picture(Picture { source: 3, rect: Aabb2 { min: p(20.0, 20.0), max: p(60.0, 50.0) }, opacity: 1.0 });
+    let first = sheet_of(p(210.0, 297.0), &[View, SheetImage]);
+    let mut second = sheet_of(p(210.0, 297.0), &[View]);
+    second.groups.push(Group { object: 2, kind: SheetImage, items: vec![picture] });
+    let prepared = [first.prepare().unwrap(), second.prepare().unwrap()];
+    let (bytes, _) = paper_pdf_pages(&prepared, &PdfOptions::default()).unwrap();
+    let objects = objects(&bytes);
+    let layer = |kind: ObjectKind| {
+        objects.iter().find(|(_, t)| t.contains("/Type /OCG") && t.contains(kind.layer())).map(|(n, _)| format!(" {n} 0 R")).unwrap()
+    };
+    let (view, image) = (layer(View), layer(SheetImage));
+    // Objects: catalog, page tree, then each page and its content.
+    assert!(objects[2].1.contains(&view) && objects[2].1.contains(&image), "{}", objects[2].1);
+    assert!(objects[4].1.contains(&view) && !objects[4].1.contains(&image), "{}", objects[4].1);
 }

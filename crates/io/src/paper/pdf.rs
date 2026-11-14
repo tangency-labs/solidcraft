@@ -154,8 +154,7 @@ pub fn paper_pdf_pages(scenes: &[Prepared], options: &PdfOptions) -> Result<(Vec
         {
             // This page's layers: the kinds it paints.
             let mut resources = writer.resources();
-            let painted = |layer: &&Layer| on.groups.iter().any(|g| !g.items.is_empty() && g.kind == layer.kind);
-            let mut on_page = layers.iter().filter(painted).peekable();
+            let mut on_page = layers.iter().filter(|layer| on.groups.iter().any(|g| painted(g) && g.kind == layer.kind)).peekable();
             if on_page.peek().is_some() {
                 let mut properties = resources.insert(Name(b"Properties")).dict();
                 for layer in on_page {
