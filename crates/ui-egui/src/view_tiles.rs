@@ -1,11 +1,14 @@
 //! The window showing several views of the design at once: the area split by the design's
 //! [`Tiles`], each Model view drawn by the one viewport code with its own camera and analyses.
 //!
-//! The focused view is the *ground*: it fills the window behind the ribbon and every panel, with no
-//! frame and no header, so the app feels the same as with one view. The others are *cards*: laid
-//! out below the ribbon, each with a frame, a shadow, a header and a compass of its own, so they
-//! stand off the ground and a header is never hidden. A card and the ground never overlap, so the
-//! order they are drawn in does not matter to the picture.
+//! The focused view is the *ground*: its picture fills the window behind the ribbon, the panels and
+//! the other views, with no frame and no header, so the app feels the same as with one view. The
+//! others are *cards*: laid out below the ribbon, each with a frame, a shadow, a header and a
+//! compass of its own, so they stand off the ground and a header is never hidden.
+//!
+//! Every view has one frame, its cell below a header band, and frames the model there whether it is
+//! the ground or a card: a change of focus changes only how the view is drawn, never where its
+//! content lies or how large it is ([`crate::viewport::ViewportState::bleed`] fills the rest).
 //!
 //! The focused view is the design's shown view (what the ribbon, the browser and the commands act
 //! on); the cards stand in for it while they are drawn ([`crate::documents::with_view_look`]), so
@@ -46,16 +49,10 @@ fn slot(view: u64) -> u32 {
     u32::try_from(view).unwrap_or(u32::MAX)
 }
 
-/// The focused view's rectangle: its cell, run out to the window's edge on every side where the
-/// cell meets the free workspace (so it lies behind the ribbon and the panels), and to the middle
-/// of the gutter on the sides that meet a card.
-fn ground_rect(cell: Rect, free: Rect, area: Rect) -> Rect {
-    let edge = |c: f32, f: f32, a: f32, toward: f32| if (c - f).abs() < 1.0 { a } else { c + toward };
-    let half = GUTTER / 2.0;
-    Rect::from_min_max(
-        pos2(edge(cell.min.x, free.min.x, area.min.x, -half), edge(cell.min.y, free.min.y, area.min.y, -half)),
-        pos2(edge(cell.max.x, free.max.x, area.max.x, half), edge(cell.max.y, free.max.y, area.max.y, half)),
-    )
+/// A view's frame: where its camera frames the model, the same whether the view is the ground or a
+/// card, so a change of focus never moves what is drawn.
+fn frame_of(cell: Rect) -> Rect {
+    Rect::from_min_max(cell.min + vec2(0.0, HEADER), cell.max)
 }
 
 /// `rect` moved right until no panel stands over it, so a name or a chip stays readable.
@@ -68,11 +65,28 @@ fn clear_of_panels(app: &SolveApp, mut rect: Rect) -> Rect {
     rect
 }
 
+/// How many shapes of the ground's picture are laid under the cards.
+const BACKDROP_SLOTS: usize = 6;
+
+/// Moves the shapes the ground painted in `from` to the `slots` set aside before the cards, so the
+/// cards lie over the picture although the ground is processed last.
+fn lay_under(ctx: &egui::Context, layer: egui::LayerId, slots: &[egui::layers::ShapeIdx], from: std::ops::Range<usize>) {
+    ctx.graphics_mut(|g| {
+        let list = g.entry(layer);
+        let moved: Vec<_> = list.all_entries().skip(from.start).take(from.len().min(slots.len())).cloned().collect();
+        for (i, entry) in moved.into_iter().enumerate() {
+            list.set(slots[i], entry.clip_rect, entry.shape);
+            list.reset_shape(egui::layers::ShapeIdx(from.start + i));
+        }
+    });
+}
+
 pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let area = ui.max_rect();
     let Some(tiles) = app.docs.views.tiles().cloned() else { return };
     let focus = app.docs.views.active().id;
-    let free = crate::shell::workspace_content(app, crate::shell::content_rect(app, area)).shrink(MARGIN);
+    // Below the ribbon and above the bottom strip: they float over the ground, but a card is never put under them.
+    let free = crate::shell::bottom_readout_rect(app, crate::shell::panel_bounds(app, crate::shell::workspace_content(app, crate::shell::content_rect(app, area)))).shrink(MARGIN);
     let free = if free.is_positive() { free } else { area };
     let mut places: Vec<(u64, Rect)> = tiles.rects(to_tile(free), GUTTER).into_iter().map(|(id, r)| (id, from_tile(r))).collect();
     // The focused view is drawn last: what it leaves in the app (the viewport's rectangle, its
@@ -81,23 +95,29 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let press = ui.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten()).filter(|p| !crate::shell::covered(app, *p));
     let mut pressed = None;
     let mut cards = Vec::new();
-    let mut ground = area;
+    let mut ground = free;
+    // Set aside under everything the cards draw: the ground's picture fills the whole area.
+    let layer = ui.layer_id();
+    let slots: Vec<_> = (0..BACKDROP_SLOTS).map(|_| ui.painter().add(egui::Shape::Noop)).collect();
     for (id, cell) in places {
         let is_ground = id == focus;
-        let rect = if is_ground { ground_rect(cell, free, area) } else { cell };
-        if press.is_some_and(|p| rect.contains(p)) {
+        let frame = frame_of(cell);
+        if press.is_some_and(|p| if is_ground { frame.contains(p) } else { cell.contains(p) }) {
             pressed = Some(id);
         }
-        let body = if is_ground { rect } else { Rect::from_min_max(rect.min + vec2(0.0, HEADER), rect.max) };
-        let mut tile = ui.new_child(UiBuilder::new().id_salt(("view_tile", id)).max_rect(body));
-        tile.set_clip_rect(ui.clip_rect().intersect(body));
+        let mut tile = ui.new_child(UiBuilder::new().id_salt(("view_tile", id)).max_rect(frame));
+        tile.set_clip_rect(ui.clip_rect().intersect(if is_ground { area } else { frame }));
         app.viewport.tile = Some(slot(id));
         if is_ground {
+            app.viewport.bleed = Some(area);
             crate::viewport::show(app, &mut tile);
-            ground = rect;
+            if let Some(range) = app.viewport.backdrop.take() {
+                lay_under(ui.ctx(), layer, &slots, range);
+            }
+            ground = frame;
         } else {
             crate::documents::with_view_look(app, id, |app| crate::viewport::show(app, &mut tile));
-            cards.push((id, body));
+            cards.push((id, frame));
         }
         app.viewport.tile = None;
     }
@@ -109,7 +129,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             chosen = Some((*id, action));
         }
     }
-    ground_chip(app, ui, focus, ground, free);
+    ground_chip(app, ui, focus, ground);
     for splitter in tiles.splitters(to_tile(free), GUTTER) {
         splitter_handle(app, ui, &splitter);
     }
@@ -118,8 +138,9 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.viewport.cards = cards;
     match chosen {
         Some((id, CardAction::Maximise)) => {
+            // This view alone: every other view of the design is closed.
             crate::documents::focus_view(app, id);
-            crate::documents::view_layout(app, solidcraft_views::Preset::Single);
+            crate::documents::view_close_others(app, id);
         }
         Some((id, CardAction::Close)) => {
             crate::documents::view_close(app, id);
@@ -134,7 +155,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 /// What a card's header buttons ask for.
 enum CardAction {
-    /// Show this view alone, in the whole window.
+    /// Keep only this view: the others are closed.
     Maximise,
     Close,
 }
@@ -161,7 +182,7 @@ pub(crate) fn card_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option<CardAction> {
     let t = Tokens::get();
     let radius = CornerRadius::same(CARD_RADIUS);
-    let shadow = egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: t.app_bar.gamma_multiply(0.30) }.as_shape(card, radius);
+    let shadow = egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: egui::Color32::from_black_alpha(70) }.as_shape(card, radius);
     let out = card.expand(32.0).intersect(ui.clip_rect());
     // The shadow only outside the card, so the view inside is not dimmed.
     for strip in [
@@ -178,6 +199,14 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
     let name = app.docs.views.get(id).map_or("", |view| view.name.as_str());
     let label = clear_of_panels(app, Rect::from_min_size(top.left_top() + vec2(10.0, 0.0), vec2(120.0, HEADER)));
     painter.text(label.left_center(), egui::Align2::LEFT_CENTER, name, egui::FontId::proportional(t.font_body), t.text);
+    // The picture is square: the ground's colour fills what the rounded corners leave out.
+    let area = ui.max_rect();
+    let backdrop = |y: f32| {
+        let k = ((y - area.top()) / area.height().max(1.0)).clamp(0.0, 1.0);
+        t.viewport_top.lerp_to_gamma(t.viewport_bottom, k)
+    };
+    corner_mask(&painter, card.left_bottom(), [1.0, -1.0], backdrop(card.bottom()));
+    corner_mask(&painter, card.right_bottom(), [-1.0, -1.0], backdrop(card.bottom()));
     painter.rect_stroke(card.shrink(0.5), radius, Stroke::new(1.0, t.border), StrokeKind::Inside);
     let mut action = None;
     let mut button = |slot: f32, kind: CardAction| {
@@ -195,7 +224,12 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
         let c = rect.center();
         match kind {
             CardAction::Maximise => {
-                painter.rect_stroke(Rect::from_center_size(c, vec2(10.0, 10.0)), CornerRadius::same(2), ink, StrokeKind::Inside);
+                // Four corners, as in the design: a view to fill the window.
+                for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                    let corner = c + vec2(sx * 5.0, sy * 5.0);
+                    painter.line_segment([corner + vec2(-sx * 3.5, 0.0), corner], ink);
+                    painter.line_segment([corner, corner + vec2(0.0, -sy * 3.5)], ink);
+                }
             }
             CardAction::Close => {
                 painter.line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], ink);
@@ -211,21 +245,40 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
     action
 }
 
+/// What a card's square picture leaves outside its rounded corner, at the card's `corner` (the
+/// direction to the card's inside given by `inward`), filled with `color`.
+fn corner_mask(painter: &egui::Painter, corner: egui::Pos2, inward: [f32; 2], color: egui::Color32) {
+    let r = f32::from(CARD_RADIUS);
+    let centre = corner + vec2(inward[0] * r, inward[1] * r);
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(corner, color);
+    const STEPS: u32 = 8;
+    for i in 0..=STEPS {
+        let a = std::f32::consts::FRAC_PI_2 * i as f32 / STEPS as f32;
+        mesh.colored_vertex(centre + vec2(-inward[0] * r * a.cos(), -inward[1] * r * a.sin()), color);
+    }
+    for i in 1..=STEPS {
+        mesh.add_triangle(0, i, i + 1);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
 /// The focused view has no frame and no header: it is the ground the others lie on. Its name sits
-/// in a small chip with the accent, clear of the ribbon and the panels.
-fn ground_chip(app: &SolveApp, ui: &egui::Ui, id: u64, ground: Rect, free: Rect) {
+/// in a pill with the accent in the band above its frame, clear of the ribbon and the panels.
+fn ground_chip(app: &SolveApp, ui: &egui::Ui, id: u64, ground: Rect) {
     let t = Tokens::get();
     let name = app.docs.views.get(id).map_or("", |view| view.name.as_str());
     let painter = ui.painter();
     let galley = painter.layout_no_wrap(name.to_owned(), egui::FontId::proportional(t.font_body), t.text);
-    let size = vec2(galley.size().x + 32.0, 26.0);
-    let at = pos2(ground.left().max(free.left()), free.top());
+    let size = vec2(galley.size().x + 34.0, 26.0);
+    let at = pos2(ground.left() + MARGIN, ground.top() - HEADER + (HEADER - size.y) / 2.0);
     let chip = clear_of_panels(app, Rect::from_min_size(at, size));
-    painter.rect_filled(chip, CornerRadius::same(13), t.panel_header);
-    painter.rect_stroke(chip, CornerRadius::same(13), Stroke::new(1.0, t.border), StrokeKind::Inside);
-    painter.circle_filled(chip.left_center() + vec2(12.0, 0.0), 3.5, t.accent);
-    let text_at = chip.left_center() + vec2(22.0, -galley.size().y / 2.0);
-    painter.galley(text_at, galley, t.text);
+    let radius = CornerRadius::same(13);
+    painter.add(egui::Shadow { offset: [0, 2], blur: 8, spread: 0, color: egui::Color32::from_black_alpha(60) }.as_shape(chip, radius));
+    painter.rect_filled(chip, radius, t.panel_header);
+    painter.rect_stroke(chip, radius, Stroke::new(1.0, t.border), StrokeKind::Inside);
+    painter.circle_filled(chip.left_center() + vec2(13.0, 0.0), 3.5, t.accent);
+    painter.galley(chip.left_center() + vec2(24.0, -galley.size().y / 2.0), galley, t.text);
 }
 
 /// The gutter between two sides of a split: drag it to move the split.
@@ -259,14 +312,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_ground_runs_to_the_window_edge_and_stops_in_the_gutter() {
-        let area = Rect::from_min_max(pos2(0.0, 0.0), pos2(1000.0, 600.0));
-        let free = area.shrink(MARGIN);
-        // The left of two cells: it meets the free area on three sides.
-        let left = Rect::from_min_max(free.min, pos2(500.0 - GUTTER / 2.0, free.max.y));
-        assert_eq!(ground_rect(left, free, area), Rect::from_min_max(area.min, pos2(500.0, area.max.y)));
-        // A cell in the middle of the area keeps to its cell, grown by half a gutter.
-        let middle = Rect::from_min_max(pos2(100.0, 100.0), pos2(200.0, 200.0));
-        assert_eq!(ground_rect(middle, free, area), middle.expand(GUTTER / 2.0));
+    fn a_view_keeps_its_frame_whether_it_is_the_ground_or_a_card() {
+        let cell = Rect::from_min_max(pos2(10.0, 40.0), pos2(500.0, 600.0));
+        let frame = frame_of(cell);
+        // The same rectangle for both roles: a header's height below the cell's top, the rest of the cell.
+        assert_eq!(frame, Rect::from_min_max(pos2(10.0, 40.0 + HEADER), pos2(500.0, 600.0)));
     }
 }
