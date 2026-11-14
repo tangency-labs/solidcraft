@@ -923,7 +923,7 @@ mod tests {
         h.app.start("sketch.rectangle.two_point");
         h.settle();
         let rect = crate::sketch_families::family("sketch.rectangle.two_point").unwrap();
-        assert_eq!(rect.commands.len(), 4);
+        assert_eq!(rect.commands.len(), 5);
         assert_eq!(pressed_modes(&h, rect), ["sketch.rectangle.two_point"]);
         assert!(crate::scenario::handle_at("sketch_palette:feature:sketch.circle.center").is_none(), "only the running family is shown");
     }

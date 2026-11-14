@@ -236,6 +236,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.project",
     "sketch.project_to_surface",
     "sketch.rectangle.center",
+    "sketch.rectangle.edge_center",
     "sketch.rectangle.rounded",
     "sketch.rectangle.three_point",
     "sketch.rectangle.two_point",

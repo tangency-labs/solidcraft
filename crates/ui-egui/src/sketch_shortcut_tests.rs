@@ -294,7 +294,7 @@ fn a_tools_shortcut_pressed_again_cycles_its_modes() {
     h.settle();
     press(&mut h, "R");
     assert_eq!(tool(&h), Some("sketch.rectangle.two_point"), "the first press starts the bound mode");
-    for want in ["sketch.rectangle.three_point", "sketch.rectangle.center", "sketch.rectangle.rounded", "sketch.rectangle.two_point"] {
+    for want in ["sketch.rectangle.three_point", "sketch.rectangle.center", "sketch.rectangle.edge_center", "sketch.rectangle.rounded", "sketch.rectangle.two_point"] {
         press(&mut h, "R");
         assert_eq!(tool(&h), Some(want));
     }

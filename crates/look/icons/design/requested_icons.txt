@@ -231,6 +231,7 @@ reach	false
 rect	false
 rect3	false
 rect_center	false
+rect_edge_center	false
 rect_rounded	false
 redo	false
 refold	false
