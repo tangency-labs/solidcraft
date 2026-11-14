@@ -526,16 +526,16 @@ pub(crate) fn picked_chain(body: &Body, at: &[Vec3]) -> Result<(Chain, bool)> {
 
 /// Index of the face nearest a point (over its mesh triangles).
 pub(crate) fn nearest_face(body: &Body, p: Vec3) -> Result<usize> {
-    let m = body.mesh(&crate::MeshTolerance::chord(body.size() * 2e-3))?;
-    let mut best: Option<(f64, u32)> = None;
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        let Some([a, b, c]) = m.tri(t) else { continue };
-        let d = ((a + b + c) / 3.0).dist(p).min(a.dist(p)).min(b.dist(p)).min(c.dist(p));
-        if best.is_none_or(|(x, _)| d < x) {
-            best = Some((d, *f));
-        }
-    }
-    best.map(|(_, f)| f as usize).ok_or_else(|| invalid("no face there"))
+    let (ops, order) = body.ops_body().ok_or_else(|| invalid("no face there"))?;
+    let reach = body.size().max(1.0) * 100.0;
+    let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], reach).map_err(|e| invalid(e.to_string()))?;
+    dists
+        .into_iter()
+        .enumerate()
+        .filter_map(|(f, row)| Some((row.first().copied().flatten()?, f)))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, f)| f)
+        .ok_or_else(|| invalid("no face there"))
 }
 
 /// The faces picked by points on them (each once, in the order picked); every face when no point
