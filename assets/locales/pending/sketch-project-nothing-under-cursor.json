@@ -1,0 +1,29 @@
+{
+  "en": {
+    "sketch.project.nothing_under_cursor": "Project: nothing under the cursor"
+  },
+  "ar": {
+    "sketch.project.nothing_under_cursor": "الإسقاط: لا يوجد شيء تحت المؤشر"
+  },
+  "de": {
+    "sketch.project.nothing_under_cursor": "Projizieren: nichts unter dem Cursor"
+  },
+  "fr": {
+    "sketch.project.nothing_under_cursor": "Projeter : rien sous le curseur"
+  },
+  "he": {
+    "sketch.project.nothing_under_cursor": "השלכה: אין כלום תחת הסמן"
+  },
+  "ja": {
+    "sketch.project.nothing_under_cursor": "投影: カーソルの下に対象がありません"
+  },
+  "ko": {
+    "sketch.project.nothing_under_cursor": "투영: 커서 아래에 대상이 없습니다"
+  },
+  "vi": {
+    "sketch.project.nothing_under_cursor": "Chiếu: không có gì dưới con trỏ"
+  },
+  "zh": {
+    "sketch.project.nothing_under_cursor": "投影：光标下没有对象"
+  }
+}
