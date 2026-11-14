@@ -81,6 +81,7 @@ mod design_link;
 mod file;
 mod frame;
 mod frame_end_cap;
+mod frame_rotate_member;
 pub(crate) mod inspect;
 mod interference;
 pub(crate) mod joints;
@@ -378,6 +379,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(plastic::COMMANDS.iter());
     v.extend(frame::COMMANDS.iter());
     v.extend(frame_end_cap::COMMANDS.iter());
+    v.extend(frame_rotate_member::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());

@@ -979,7 +979,8 @@ impl Model {
                 }
                 let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests)
                     ^ placement_digest(doc, f, Some(&before))
-                    ^ construct_digest(doc, &vals, f, Some(&before));
+                    ^ construct_digest(doc, &vals, f, Some(&before))
+                    ^ turns_digest(doc, &vals, f).unwrap_or(0);
                 cache.states.put(
                     cache_key(f, r.fingerprint, local, ctx, &before),
                     CachedEval {

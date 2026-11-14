@@ -248,6 +248,7 @@ revolve	false
 rib	false
 rigid_group	false
 rollback	false
+rotate_member	false
 save	false
 scale	false
 screw	false

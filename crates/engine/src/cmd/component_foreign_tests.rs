@@ -142,6 +142,39 @@ fn an_end_cap_on_a_member_outside_its_component_is_refused_saying_what() {
     assert_eq!(s.doc.to_json(), saved);
 }
 
+/// A Rotate step in a component, turning a frame member outside it, uses that member: it isn't
+/// pasted into another design, where the member's feature id could name something else.
+#[test]
+fn a_rotate_step_on_a_member_outside_its_component_is_refused_saying_what() {
+    let mut source = design("Rack");
+    run(&mut source, "sketch.create", json!({"plane": "XY", "name": "Post path"}));
+    run(&mut source, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut source, "sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]}));
+    run(&mut source, "sketch.finish", json!({}));
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3, "outer_radius": 0});
+    run(&mut source, "frame.member", json!({"sketch": "Post path", "name": "Post member", "body_name": "Post", "profile": tube}));
+    let index = {
+        let st = source.model.state();
+        let b = st.body("Post").unwrap();
+        (0..b.body.face_count())
+            .find(|i| b.body.planar_face(*i).is_some_and(|pl| pl.normal().x > 0.999 && (pl.origin.x - 20.0).abs() < 1e-6))
+            .unwrap()
+    };
+    // The command refuses a member outside the active component, so the step is made at the
+    // root and moved in, as an old or hand-edited design can hold it.
+    let turn = run(&mut source, "frame.rotate_member", json!({"face": {"body": "Post", "index": index, "face": [20, 0, 150]}, "angle": "30 deg"}));
+    let (turns, at) = created(&mut source, "Turns");
+    source.doc_mut().feature_mut(turn["feature"].as_u64().unwrap()).unwrap().component = turns;
+    source.refresh();
+
+    let mut s = design("Frame");
+    s.foreign_copy = copied(&source, vec![at]);
+    let saved = s.doc.to_json();
+    let error = s.execute("component.paste_from_design", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("uses feature reference"), "{error}");
+    assert_eq!(s.doc.to_json(), saved);
+}
+
 /// A component that bodies were moved into (a body transfer, as Create Components from Bodies
 /// makes) pastes into another design, which has none of the components the transfer names.
 #[test]

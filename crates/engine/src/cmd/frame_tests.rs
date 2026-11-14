@@ -1105,3 +1105,524 @@ fn a_member_feature_mirrors_and_patterns_and_follows_its_lines() {
     run(&mut s, "parameters.change", json!({"name": "L", "expression": "760 mm"}));
     check(&mut s, 760.0);
 }
+
+/// The side of the capped post that faces +X.
+fn post_side(s: &Session) -> Value {
+    face_pick(s, "Post", [20.0, 0.0, 150.0], [1.0, 0.0, 0.0])
+}
+
+fn turn_step(s: &Session) -> &solidcraft_doc::Feature {
+    s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameMemberTurn { .. })).unwrap()
+}
+
+#[test]
+fn rotate_member_adds_a_rotate_step() {
+    let mut s = capped_post(square_tube());
+    let face = post_side(&s);
+    let r = run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
+    assert!(r.to_string().contains("Rotate1"), "{r}");
+    let info = run(&mut s, "timeline.inspect", json!({"feature": "Rotate1"}));
+    assert!(info.to_string().contains("frame_member_turn"), "{info}");
+}
+
+#[test]
+fn rotate_member_refuses_a_face_not_on_a_member() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    let face = face_pick(&s, "Cube", [10.0, 5.0, 5.0], [1.0, 0.0, 0.0]);
+    let before = s.doc.to_json();
+    let e = s.execute("frame.rotate_member", &json!({"face": face, "angle": "30 deg"})).unwrap_err().to_string();
+    assert!(e.contains("Select a face of a frame member"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn rotate_step_saves_and_reopens() {
+    let mut s = capped_post(square_tube());
+    let face = post_side(&s);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let (a, b) = (turn_step(&s), turn_step(&reopened));
+    let (
+        solidcraft_doc::FeatureKind::FrameMemberTurn { member: ma, angle: aa },
+        solidcraft_doc::FeatureKind::FrameMemberTurn { member: mb, angle: ab },
+    ) = (&a.kind, &b.kind)
+    else {
+        panic!("not a turn");
+    };
+    assert_eq!((ma, aa), (mb, ab));
+    assert_eq!(aa.as_ref() as &str, "30 deg");
+    assert!(!ma.line.is_empty());
+}
+
+#[test]
+fn a_rotate_step_reports_a_lost_member() {
+    let mut s = capped_post(square_tube());
+    let face = post_side(&s);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
+    let step = turn_step(&s).id;
+    run(&mut s, "timeline.suppress", json!({"feature": "Post member"}));
+    let e = s.model.result(step).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(e.contains("Its frame member is gone"), "{e}");
+    run(&mut s, "timeline.suppress", json!({"feature": "Post member", "suppressed": false}));
+    assert!(s.model.result(step).is_some_and(|r| r.error.is_none()));
+    if let Some(f) = s.doc_mut().feature_mut(step)
+        && let solidcraft_doc::FeatureKind::FrameMemberTurn { member, .. } = &mut f.kind
+    {
+        member.line = "nope".into();
+    }
+    s.refresh();
+    let e = s.model.result(step).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(e.contains("Line `nope` of its frame member is gone"), "{e}");
+}
+
+/// A post in the component `Part`, made while `Part` is active, and its side picked through
+/// the occurrence.
+fn post_in_a_component() -> (Session, Value) {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name": "Part"}));
+    let occurrence = part["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Post path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "frame.member", json!({"sketch": "Post path", "name": "Post member", "body_name": "Post", "profile": square_tube()}));
+    let mut face = post_side(&s);
+    face["path"] = json!([occurrence]);
+    (s, face)
+}
+
+#[test]
+fn rotate_member_refuses_a_member_in_another_occurrence() {
+    let (mut s, face) = post_in_a_component();
+    let before = s.doc.to_json();
+    let e = s.execute("frame.rotate_member", &json!({"face": face, "angle": "30 deg"})).unwrap_err().to_string();
+    assert!(e.contains("not supported yet: rotating a member inside a component"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// With the top level active, a member inside a component is refused as not supported, not with
+/// "Activate the member's component" (activating it can't help); the member names the refusal
+/// pins on the Frame Member go back with it.
+#[test]
+fn rotate_member_refuses_a_component_member_with_the_top_level_active() {
+    let (mut s, face) = post_in_a_component();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let before = s.doc.to_json();
+    let e = s.execute("frame.rotate_member", &json!({"face": face, "angle": "30 deg"})).unwrap_err().to_string();
+    assert!(e.contains("not supported yet: rotating a member inside a component"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// A 40 × 40 square tube on the sloped line (0, 0, 0)–(300, 0, 300), its member body `Brace`,
+/// made by the feature `Brace member`. Its profile's x runs along world Y.
+fn brace() -> Session {
+    brace_at("origin")
+}
+
+/// [`brace`] with the profile point `anchor` on the line.
+fn brace_at(anchor: &str) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Brace path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [300, 0, 300]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "frame.member",
+        json!({"sketch": "Brace path", "name": "Brace member", "body_name": "Brace", "profile": square_tube(), "anchor": anchor}),
+    );
+    s
+}
+
+/// The side of the brace whose outward normal is the profile's x turned `deg` about the line.
+fn brace_side(s: &Session, deg: f64) -> Value {
+    let t = deg.to_radians();
+    let y = [-1.0 / 2f64.sqrt(), 0.0, 1.0 / 2f64.sqrt()];
+    let n = [t.sin() * y[0], t.cos(), t.sin() * y[2]];
+    face_pick(s, "Brace", [150.0 + 20.0 * n[0], 20.0 * n[1], 150.0 + 20.0 * n[2]], n)
+}
+
+fn brace_box(s: &mut Session) -> ([f64; 3], [f64; 3]) {
+    let b = measured(s, "Brace");
+    (b.2, b.3)
+}
+
+fn same_box(a: ([f64; 3], [f64; 3]), b: ([f64; 3], [f64; 3])) -> bool {
+    near3(a.0, b.0) && near3(a.1, b.1)
+}
+
+/// The brace turned once by `angle` from a fresh design.
+fn brace_turned(angle: &str) -> ([f64; 3], [f64; 3]) {
+    let mut s = brace();
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": angle}));
+    brace_box(&mut s)
+}
+
+#[test]
+fn a_rotate_step_turns_its_member_about_the_profile_centre() {
+    let mut s = brace();
+    let flat = measured(&mut s, "Brace");
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "45 deg"}));
+    let turned = measured(&mut s, "Brace");
+    // Square on, the brace is 40 wide across Y; turned 45° its corners stick out 40√2.
+    assert!(rel(flat.3[1] - flat.2[1], 40.0) < 1e-9, "{flat:?}");
+    assert!(rel(turned.3[1] - turned.2[1], 40.0 * 2f64.sqrt()) < 1e-9, "{turned:?}");
+    assert!(rel(turned.1, flat.1) < 1e-9, "{turned:?} vs {flat:?}");
+    // It spins about the profile's centre: its centre of mass stays put.
+    assert!(near3(turned.4, flat.4), "{turned:?} vs {flat:?}");
+}
+
+/// The pivot is the profile's centre wherever the profile sits on the line: a brace laid by its
+/// bottom-left corner spins in place, not about the line.
+#[test]
+fn an_anchored_member_turns_about_its_profile_centre() {
+    let mut s = brace_at("bottom_left");
+    let flat = measured(&mut s, "Brace");
+    // The tube's centre is its centre of mass; its +x side faces +Y, 20 out from it.
+    let c = flat.4;
+    let face = face_pick(&s, "Brace", [c[0], c[1] + 20.0, c[2]], [0.0, 1.0, 0.0]);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "45 deg"}));
+    let turned = measured(&mut s, "Brace");
+    assert!(!same_box((turned.2, turned.3), (flat.2, flat.3)), "{turned:?}");
+    assert!(near3(turned.4, flat.4), "{turned:?} vs {flat:?}");
+}
+
+#[test]
+fn rotate_follows_suppress_delete_marker_and_edit() {
+    let mut s = brace();
+    let flat = brace_box(&mut s);
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face.clone(), "angle": "45 deg"}));
+    let turned = brace_box(&mut s);
+    assert!(!same_box(turned, flat), "{turned:?}");
+
+    run(&mut s, "timeline.suppress", json!({"feature": "Rotate1"}));
+    assert!(same_box(brace_box(&mut s), flat), "suppressed");
+    run(&mut s, "timeline.suppress", json!({"feature": "Rotate1", "suppressed": false}));
+    assert!(same_box(brace_box(&mut s), turned), "unsuppressed");
+
+    let at = s.doc.features.iter().position(|f| f.name == "Rotate1").unwrap();
+    run(&mut s, "timeline.rollback", json!({"position": at}));
+    assert!(same_box(brace_box(&mut s), flat), "rolled back before the step");
+    run(&mut s, "timeline.rollback", json!({"position": "end"}));
+    assert!(same_box(brace_box(&mut s), turned), "rolled forward");
+
+    // The edit runs with the step suppressed, so the face is picked on the member as laid.
+    run(&mut s, "timeline.redefine", json!({"feature": "Rotate1", "command": "frame.rotate_member", "params": {"face": face, "angle": "0 deg"}}));
+    assert!(same_box(brace_box(&mut s), flat), "edited to 0 deg");
+    run(&mut s, "timeline.redefine", json!({"feature": "Rotate1", "command": "frame.rotate_member", "params": {"face": face, "angle": "45 deg"}}));
+    assert!(same_box(brace_box(&mut s), turned), "edited back to 45 deg");
+
+    run(&mut s, "timeline.delete", json!({"feature": "Rotate1"}));
+    assert!(same_box(brace_box(&mut s), flat), "deleted");
+}
+
+#[test]
+fn the_later_rotate_step_wins() {
+    let mut s = brace();
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "20 deg"}));
+    let face = brace_side(&s, 20.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "45 deg"}));
+    let got = brace_box(&mut s);
+    let want = brace_turned("45 deg");
+    assert!(same_box(got, want), "{got:?} vs {want:?}");
+    assert!(!same_box(got, brace_turned("20 deg")), "the earlier step doesn't win");
+}
+
+/// Two steps on the line, the later one's angle broken: the earlier one turns the member, and
+/// is the line's turn as the design reads it.
+#[test]
+fn a_bad_later_rotate_step_leaves_the_earlier_one_standing() {
+    let mut s = brace();
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "20 deg"}));
+    let face = brace_side(&s, 20.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "45 deg"}));
+    let later = s.doc.features.iter().find(|f| f.name == "Rotate2").unwrap().id;
+    if let Some(f) = s.doc_mut().feature_mut(later)
+        && let solidcraft_doc::FeatureKind::FrameMemberTurn { angle, .. } = &mut f.kind
+    {
+        *angle = "nope".into();
+    }
+    s.refresh();
+    let frame = s.doc.features.iter().find(|f| f.name == "Brace member").unwrap().id;
+    let turns = solidcraft_doc::frame::member_turns(&s.doc, &s.doc.evaluation_values(), solidcraft_doc::FeatureId(frame));
+    let angles: Vec<&str> = turns.values().map(|(e, _)| e.as_str()).collect();
+    assert_eq!(angles, ["20 deg"]);
+    let got = brace_box(&mut s);
+    assert!(same_box(got, brace_turned("20 deg")), "{got:?}");
+}
+
+#[test]
+fn a_rotate_angle_parameter_drives_the_turn() {
+    let mut s = brace();
+    let flat = brace_box(&mut s);
+    run(&mut s, "parameters.add", json!({"name": "tilt", "expression": "20 deg"}));
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "tilt"}));
+    let got = brace_box(&mut s);
+    assert!(!same_box(got, flat) && same_box(got, brace_turned("20 deg")), "{got:?}");
+    run(&mut s, "parameters.change", json!({"name": "tilt", "expression": "40 deg"}));
+    let got = brace_box(&mut s);
+    let want = brace_turned("40 deg");
+    assert!(same_box(got, want), "{got:?} vs {want:?}");
+}
+
+/// A unitless parameter that gains an angle unit keeps its number (`30` to `30 rad`): the turn
+/// follows the unit all the same.
+#[test]
+fn a_rotate_angle_parameter_given_a_unit_turns_again() {
+    let mut s = brace();
+    run(&mut s, "parameters.add", json!({"name": "tilt", "expression": "30", "unit": "none"}));
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "tilt"}));
+    let before = brace_box(&mut s);
+    run(&mut s, "parameters.change", json!({"name": "tilt", "expression": "30 rad", "unit": "rad"}));
+    let got = brace_box(&mut s);
+    let want = brace_turned("30 rad");
+    assert!(!same_box(got, before) && same_box(got, want), "{before:?} {got:?} vs {want:?}");
+}
+
+#[test]
+fn a_rotate_step_before_its_frame_turns_nothing() {
+    let mut s = brace();
+    let flat = brace_box(&mut s);
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "45 deg"}));
+    assert!(!same_box(brace_box(&mut s), flat));
+    let step = turn_step(&s).id;
+    let frame = s.doc.features.iter().position(|f| f.name == "Brace member").unwrap();
+    run(&mut s, "timeline.reorder", json!({"feature": "Rotate1", "position": frame, "allow_errors": true}));
+    let e = s.model.result(step).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(e.contains("Its frame member must come earlier in the timeline"), "{e}");
+    assert!(same_box(brace_box(&mut s), flat));
+}
+
+#[test]
+fn an_end_cap_follows_a_turned_member() {
+    let mut s = capped_post(square_tube());
+    let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6}));
+    let face = post_side(&s);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
+    let post = measured(&mut s, "Post");
+    let cap = measured(&mut s, "Post End Cap");
+    // Turned 30°, the 40 × 40 section spans 20 (cos 30° + sin 30°) each side in X and Y.
+    let half = 20.0 * (30f64.to_radians().cos() + 30f64.to_radians().sin());
+    assert!(near3(post.2, [-half, -half, 0.0]) && near3(post.3, [half, half, 300.0]), "{post:?}");
+    assert!(near3([cap.2[0], cap.2[1], 0.0], [post.2[0], post.2[1], 0.0]), "{cap:?} vs {post:?}");
+    assert!(near3([cap.3[0], cap.3[1], 0.0], [post.3[0], post.3[1], 0.0]), "{cap:?} vs {post:?}");
+    assert!((cap.2[2] - 300.0).abs() < 1e-6 && (cap.3[2] - 306.0).abs() < 1e-6, "{cap:?}");
+}
+
+#[test]
+fn a_turned_member_keeps_its_face_names() {
+    let mut s = capped_post(square_tube());
+    let face = post_side(&s);
+    let index = face["index"].as_u64().unwrap() as usize;
+    let name = solidcraft_doc::naming::face_names(s.model.state().body("Post").unwrap())[index].clone();
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
+    let st = s.model.state();
+    let post = st.body("Post").unwrap();
+    let now = solidcraft_doc::naming::face_names(post).iter().position(|n| *n == name).unwrap_or_else(|| panic!("no face {name}"));
+    // The same side, turned 30° about Z with the member.
+    let t = 30f64.to_radians();
+    let n = post.body.planar_face(now).unwrap().normal();
+    assert!(near3([n.x, n.y, n.z], [t.cos(), t.sin(), 0.0]), "{name}: {n:?}");
+}
+
+/// A Rotate step whose angle can't be worked out reports it itself; its Frame Member builds as
+/// if the step weren't there (Ruling 8).
+#[test]
+fn a_rotate_step_with_a_bad_angle_errors_alone() {
+    let mut s = brace();
+    let flat = brace_box(&mut s);
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "45 deg"}));
+    assert!(!same_box(brace_box(&mut s), flat));
+    let step = turn_step(&s).id;
+    let frame = s.doc.features.iter().find(|f| f.name == "Brace member").unwrap().id;
+    // Not a number, not an angle, and a parameter the design hasn't got.
+    for (bad, says) in [("1 / 0 * 1 deg", ""), ("45 mm", ""), ("nope", "unknown parameter `nope`")] {
+        if let Some(f) = s.doc_mut().feature_mut(step)
+            && let solidcraft_doc::FeatureKind::FrameMemberTurn { angle, .. } = &mut f.kind
+        {
+            *angle = bad.into();
+        }
+        s.refresh();
+        let e = s.model.result(step).and_then(|r| r.error.clone()).unwrap_or_default();
+        assert!(!e.is_empty() && e.contains(says), "{bad}: the step reports its angle: {e}");
+        assert!(s.model.result(frame).is_some_and(|r| r.error.is_none()), "{bad}: the frame builds");
+        assert!(same_box(brace_box(&mut s), flat), "{bad}: unturned");
+    }
+}
+
+fn ref_line(s: &mut Session, plane: &str, points: Value) {
+    run(s, "sketch.create", json!({"plane": plane, "name": "Ref"}));
+    run(s, "sketch.line", json!({"points": points, "ids": ["ref"]}));
+    run(s, "sketch.finish", json!({}));
+}
+
+/// The brace turned `before` degrees (when given), then its side picked at that turn laid
+/// parallel to a line in the XY plane at 45 degrees: the picked side's family (it and its
+/// opposite) is perpendicular to the line afterwards.
+fn parallel_to_after(before: Option<&str>) {
+    let mut s = brace();
+    ref_line(&mut s, "XY", json!([[200, -50], [250, 0]]));
+    let start: f64 = before.map_or(0.0, |b| b.trim_end_matches(" deg").parse().unwrap());
+    if let Some(angle) = before {
+        let face = brace_side(&s, 0.0);
+        run(&mut s, "frame.rotate_member", json!({"face": face, "angle": angle}));
+    }
+    let face = brace_side(&s, start);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "parallel_to": {"sketch": "Ref", "curve": "ref"}}));
+    let step = s.doc.features.iter().rev().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameMemberTurn { .. })).unwrap();
+    let solidcraft_doc::FeatureKind::FrameMemberTurn { angle, .. } = &step.kind else { panic!("not a turn") };
+    let deg: f64 = angle.as_ref().trim_end_matches(" deg").parse().unwrap();
+    // The nearest turn: within a quarter turn of the previous one.
+    assert!(deg - start > -90.0 - 1e-9 && deg - start <= 90.0 + 1e-9, "{angle}");
+    // The picked side now faces `deg` round (the turn is absolute); its normal is perpendicular to the line.
+    let picked = brace_side(&s, deg);
+    let i = picked["index"].as_u64().unwrap() as usize;
+    let st = s.model.state();
+    let n = st.body("Brace").unwrap().body.planar_face(i).unwrap().normal();
+    assert!((n.x + n.y).abs() < 1e-9, "{n:?} after {before:?}");
+}
+
+#[test]
+fn parallel_to_lines_a_sloped_member_side_up_with_a_line() {
+    parallel_to_after(None);
+    parallel_to_after(Some("30 deg"));
+}
+
+/// A member turned more than a full turn: Parallel To finds the nearest turn to the one it shows,
+/// within a quarter turn of its remainder.
+#[test]
+fn parallel_to_works_from_the_remainder_of_a_full_turn() {
+    let mut s = brace();
+    ref_line(&mut s, "XY", json!([[200, -50], [250, 0]]));
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "390 deg"}));
+    let face = brace_side(&s, 30.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "parallel_to": {"sketch": "Ref", "curve": "ref"}}));
+    let step = s.doc.features.iter().rev().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameMemberTurn { .. })).unwrap();
+    let solidcraft_doc::FeatureKind::FrameMemberTurn { angle, .. } = &step.kind else { panic!("not a turn") };
+    let deg: f64 = angle.as_ref().trim_end_matches(" deg").parse().unwrap();
+    assert!(deg - 30.0 > -90.0 - 1e-9 && deg - 30.0 <= 90.0 + 1e-9, "{angle}");
+}
+
+#[test]
+fn parallel_to_null_falls_back_to_the_angle() {
+    let mut s = brace();
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg", "parallel_to": null}));
+    let solidcraft_doc::FeatureKind::FrameMemberTurn { angle, .. } = &turn_step(&s).kind else { panic!("not a turn") };
+    assert_eq!(angle.as_ref() as &str, "30 deg");
+}
+
+#[test]
+fn rotate_member_refuses_a_member_outside_the_active_component() {
+    let mut s = brace();
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "component.create", json!({"name": "Other"}));
+    let before = s.doc.to_json();
+    let e = s.execute("frame.rotate_member", &json!({"face": face, "angle": "30 deg"})).unwrap_err().to_string();
+    assert!(e.contains("Activate the member's component"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// An edit of a Rotate step can't move it to another member (the dialog opens with the member
+/// fixed).
+#[test]
+fn a_rotate_step_keeps_its_member_through_an_edit() {
+    let mut s = brace();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Post path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[-100, 0, 0], [-100, 0, 300]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "frame.member", json!({"sketch": "Post path", "name": "Post member", "body_name": "Post", "profile": square_tube()}));
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
+    let other = face_pick(&s, "Post", [-80.0, 0.0, 150.0], [1.0, 0.0, 0.0]);
+    let before = s.doc.to_json();
+    let e = s
+        .execute("timeline.redefine", &json!({"feature": "Rotate1", "command": "frame.rotate_member", "params": {"face": other, "angle": "30 deg"}}))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("A Rotate step keeps its member"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+    // `timeline.edit` setting the member's fields straight is refused the same way.
+    let post = s.doc.features.iter().find(|f| f.name == "Post member").unwrap().id;
+    let e = s.execute("timeline.edit", &json!({"feature": "Rotate1", "set": {"member.feature": post}})).unwrap_err().to_string();
+    assert!(e.contains("A Rotate step keeps its member"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// The current turn Parallel To adds its delta to is reduced by whole turns first, as the member
+/// is built: a huge turn keeps its delta instead of landing half a turn off.
+#[test]
+fn parallel_to_reduces_a_huge_current_turn_as_the_member_is_built() {
+    use crate::cmd::frame_rotate_member::half_turns;
+    use std::f64::consts::TAU;
+    for r in [0.0, -PI / 6.0, 190f64.to_radians(), 1e300, -1e300, 1e300f64.to_radians()] {
+        let h = half_turns(r);
+        assert!((-PI..PI).contains(&h), "{r}: {h}");
+        let off = (h - r.rem_euclid(TAU)).rem_euclid(TAU);
+        assert!(off < 1e-9 || TAU - off < 1e-9, "{r}: {h} is {off} off the built turn");
+    }
+    assert!((half_turns(-PI / 6.0) + PI / 6.0).abs() < 1e-12, "-30° stays -30°");
+}
+
+#[test]
+fn parallel_to_refuses_an_end_face_a_curve_and_a_line_along_the_member() {
+    let mut s = brace();
+    ref_line(&mut s, "XY", json!([[200, -50], [200, 50]]));
+    let h = 1.0 / 2f64.sqrt();
+    let end = face_pick(&s, "Brace", [300.0, 18.5, 300.0], [h, 0.0, h]);
+    let side = brace_side(&s, 0.0);
+    let line = json!({"sketch": "Ref", "curve": "ref"});
+    let e = s.execute("frame.rotate_member", &json!({"face": end, "parallel_to": line})).unwrap_err().to_string();
+    assert!(e.contains("The member's face must be a flat side"), "{e}");
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Round"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5, "id": "ring"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = s.execute("frame.rotate_member", &json!({"face": side, "parallel_to": {"sketch": "Round", "curve": "ring"}})).unwrap_err().to_string();
+    assert!(e.contains("Select a straight edge, a sketch line or an axis"), "{e}");
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Along"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [100, -100]], "ids": ["al"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = s.execute("frame.rotate_member", &json!({"face": side, "parallel_to": {"sketch": "Along", "curve": "al"}})).unwrap_err().to_string();
+    assert!(e.contains("That line runs along the member: its sides are already parallel to it"), "{e}");
+}
+
+/// Hostile Rotate Member input is refused, never a panic; a huge finite angle builds the same
+/// member as its remainder (a full turn changes nothing).
+#[test]
+fn rotate_member_hostile_params_never_panic() {
+    let mut s = brace();
+    let face = brace_side(&s, 0.0);
+    let before = s.doc.to_json();
+    let mut path_face = face.clone();
+    path_face["path"] = json!([1, 2, 3]);
+    let mut far_face = face.clone();
+    far_face["index"] = json!(999999);
+    for p in [
+        json!({"face": face, "angle": "nan deg"}),
+        json!({"face": far_face, "angle": "30 deg"}),
+        json!({"face": path_face, "angle": "30 deg"}),
+        json!({"face": face, "parallel_to": {"edge": [1e308, 0, 0]}}),
+        json!({"face": face, "angle": "30 deg", "bogus": 1}),
+        json!({"face": face}),
+    ] {
+        assert!(s.execute("frame.rotate_member", &p).is_err(), "{p}");
+        assert_eq!(s.doc.to_json(), before, "{p}");
+    }
+    // 1e300 deg is finite: accepted, and the member still builds, as the same turn's remainder.
+    let huge = brace_turned("1e300 deg");
+    let remainder = (1e300_f64.to_radians().rem_euclid(std::f64::consts::TAU)).to_degrees();
+    assert!(same_box(huge, brace_turned(&format!("{remainder} deg"))), "{huge:?}");
+}

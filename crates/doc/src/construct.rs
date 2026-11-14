@@ -677,6 +677,19 @@ pub fn canonical_dir(d: Vec3) -> Vec3 {
     }
 }
 
+/// The direction of a straight line a feature is turned parallel to: a straight model edge, a
+/// sketch line, a world, construction or component origin axis. Not a round edge or face (whose
+/// axis [`model_axis`] would give).
+pub fn straight_direction(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, g: &GeoRef) -> Result<Vec3> {
+    let ctx = Ctx { doc, vals, st, depth: 0, component: 0 };
+    let (_, d) = match g {
+        GeoRef::Edge { at, name } => as_line(&edge_points(st, *at, name)?).ok_or_else(|| bad("the edge is not straight"))?,
+        GeoRef::Face { .. } => return Err(bad("pick a straight edge, line or axis")),
+        _ => line(&ctx, g)?,
+    };
+    d.normalized().filter(|d| d.is_finite()).ok_or_else(|| bad("the line has no direction"))
+}
+
 /// A reference as a line (origin, unit direction).
 pub(crate) fn line(ctx: &Ctx, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     match g {

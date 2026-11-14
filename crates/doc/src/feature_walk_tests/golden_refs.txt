@@ -1,6 +1,8 @@
 newer_file_feature
 frame_end_cap
   remap_refs: ends[0].member.feature, ends[0].plane.base.base.feature
+frame_member_turn
+  remap_refs: member.feature
 body_transfer
   remap_bodies: bodies[0]
 sketch

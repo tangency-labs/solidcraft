@@ -430,6 +430,7 @@ pub const SECTIONS: &[Section] = &[
     // A frame starts from a sketch of its lines; its profile sizes are often parameters.
     Section { tab: "WELDMENTS", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
     Section { tab: "WELDMENTS", panel: "CREATE", promoted: 2, ids: &["frame.member", "frame.end_cap"] },
+    Section { tab: "WELDMENTS", panel: "MODIFY", promoted: 1, ids: &["frame.rotate_member"] },
     Section { tab: "WELDMENTS", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
 ];
 
@@ -523,6 +524,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("contact.enable_sets", "Contact Sets"),
     ("document.inspect", "Inspect"),
     ("document.units", "Units"),
+    ("frame.rotate_member", "Rotate"),
     ("inspect.accessibility", "Access"),
     ("inspect.center_of_mass", "Mass Center"),
     ("inspect.curvature_comb", "Curv. Comb"),
@@ -1183,13 +1185,23 @@ mod tests {
         assert_eq!(h.app.ui.tab, "SHEET METAL");
     }
 
+    /// Rotate Member sits in Weldments' MODIFY panel, after CREATE, as a button of its own.
+    #[test]
+    fn weldments_modify_panel_lists_rotate_member() {
+        let specs = solidcraft_engine::command_specs();
+        let (modify, n) = layout("WELDMENTS", "MODIFY", &specs).unwrap();
+        assert_eq!(modify.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["frame.rotate_member"]);
+        let at = |p: &str| panels("WELDMENTS").iter().position(|q| *q == p);
+        assert_eq!(at("MODIFY"), at("CREATE").map(|i| i + 1));
+    }
+
     /// Weldments is there in a fresh document (a frame starts from a sketch of its lines), holds
     /// Frame Member, and selects itself while a member is the active body, as Sheet Metal does for
     /// a sheet body, but keeps the ordinary tab look.
     #[test]
     fn weldments_tab_holds_frame_member_and_follows_a_member_body() {
         let specs = solidcraft_engine::command_specs();
-        assert_eq!(panels("WELDMENTS"), ["SKETCH", "CREATE", "CONFIGURE"]);
+        assert_eq!(panels("WELDMENTS"), ["SKETCH", "CREATE", "MODIFY", "CONFIGURE"]);
         let (create, n) = layout("WELDMENTS", "CREATE", &specs).unwrap();
         assert_eq!(create.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["frame.member", "frame.end_cap"]);
         assert!(!panel_ids("MODEL", &specs).contains(&"frame.member"), "Frame Member's home is Weldments");

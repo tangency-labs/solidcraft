@@ -118,6 +118,37 @@ each must be a flat end of a frame member, square to its line.
 (`path` for a face in another occurrence). Give the inset as `offset` (a length) or `ratio`, not
 both. **Edit Feature** reopens the dialog with the faces and values.
 
+## Rotate Member
+
+**Rotate Member** (WELDMENTS › MODIFY, `frame.rotate_member`) turns one member about its own line
+after the Frame Member is made: pick a flat side of the member, then give the **Angle**, or pick a
+line for **Parallel To** and the side is turned to lie parallel to it. The member spins about the
+centre of its profile's bounding box, so it stays where it is.
+
+- `angle` is the turn to, counter-clockwise looking back from the line's end, measured from the
+  profile as the Frame Member laid it (0 leaves it as laid). It is a number or parameter
+  expression, so a parameter can drive it.
+- **Parallel To** is worked out once, when you pick the line, and stored as that number. It is not
+  a lasting constraint: moving the picked line afterwards does not turn the member again. The line
+  may be a straight edge, a sketch line or an axis; a line along the member, or a curve, is refused.
+- A side can lie parallel to a line in two ways, 180° apart. The command takes the one nearest the
+  member's current turn; to get the other, type the angle yourself and add 180.
+- Each OK adds one **Rotate** step to the timeline after the Frame Member. A later step for the
+  same member wins over an earlier one. A step whose angle does not evaluate reports its error
+  alone, and the member stays as the steps before it left it.
+- Names don't change: the member keeps its body name, and its end caps and other references follow.
+- Members inside components are not supported yet: the command refuses a member in another
+  component or in a placed occurrence.
+
+```json
+{"command": "frame.rotate_member", "params": {"face": {"face": [20, 0, 150], "body": "Post", "index": 4}, "angle": "30 deg"}}
+{"command": "frame.rotate_member", "params": {"face": {"face": [20, 0, 150], "body": "Post", "index": 4}, "parallel_to": {"sketch": "Ref", "curve": "ref"}}}
+```
+
+`face` is a pick as the view makes it (a world point on the face, its body and face index);
+`parallel_to` is a `{sketch, curve}` line or an edge or axis pick. Give `angle` or `parallel_to`;
+when both are given, `parallel_to` wins. **Edit Feature** reopens the step with its angle.
+
 ## Built-in profiles
 
 A profile is JSON with a `kind` and its dimensions, each a number in the design's units or a
