@@ -206,6 +206,9 @@ pub fn tr_engine_error(error: &str) -> String {
     {
         return format("component.error.ambiguous_name", &[("name", name), ("ids", ids)]);
     }
+    if text == "joint limit minimum must not exceed maximum" {
+        return tr("joint.error.limit_order").to_string();
+    }
     if text == "nothing to break at there" {
         return tr("sketch.error.nothing_to_break").to_string();
     }
