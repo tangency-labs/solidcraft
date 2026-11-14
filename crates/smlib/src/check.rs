@@ -61,7 +61,7 @@ impl Brep {
     /// that covers it is proven to reach no topology it does not bound. Every other test is
     /// [`Brep::check`]'s.
     pub fn check_stitched(&self, level: CheckLevel) -> Result<CheckReport> {
-        core::check_scoped(self.core(), level, false, solidcore::topology::brep::validation::ValidityScope::Stitched)
+        core::check_scoped(self.core(), level, false, solidcore_ops::check::ValidityScope::Stitched)
     }
 
     /// [`Brep::check`] of a body nobody else reads, which it takes: the token over this thread's

@@ -13,11 +13,12 @@ use solidcore::mass::integrator::properties::{MassPropertyBehavior, PropertyAttr
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::query::api_queries::{brep_bounding_box, brep_is_manifold_solid, brep_material_census, face_bounding_box};
 use solidcore::topology::brep::p1 as bl;
-use solidcore::topology::brep::validation::{CheckLevel as SolidcoreCheckLevel, ValidityScope, check_brep_scoped};
+use solidcore::topology::brep::validation::{CheckLevel as SolidcoreCheckLevel, check_brep_scoped};
 use solidcore::topology::face::p2::{PPF_AREA, PPF_AREA_FIRST_MOMENTS};
 use solidcore::topology::{FaceId, FaceuseId, NamingScheme};
 use solidcore::{Kernel, Point3, SolidError, Vec3};
 
+use solidcore_ops::check::ValidityScope;
 use solidcore_ops::measure::{LocateFailure, Located, locate_points};
 
 use super::blend::status;
