@@ -710,7 +710,7 @@ fn lifted_sheets(k: &mut Kernel, gap: f64, stitch_tol: f64, edge_zone: f64) -> (
         assert_eq!(b.edge_list().len(), 7);
         assert_eq!(b.vertex_list().len(), 6);
     }
-    (b, sewed)
+    (b, usize::try_from(sewed).unwrap_or(usize::MAX))
 }
 
 /// A stitch tolerance of 0.01 sews gaps up to it, growing the sewn edge's zone to cover the gap
