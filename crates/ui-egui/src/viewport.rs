@@ -4229,6 +4229,10 @@ fn hit_candidate(app: &SolveApp, h: &Hit) -> Option<(Hit, Sel)> {
         Hit::SketchPoint { sketch, id, .. } if app.session.active_sketch != Some(*sketch) => {
             Some((h.clone(), Sel::ExternalSketchPoint { sketch: *sketch, id: id.clone() }))
         }
+        // A closed zone of another sketch is that sketch's shape, not a pick of the one being
+        // edited: selecting it painted the zone solid blue over its own tint (#16197). The
+        // engine keeps a profile to its sketch as well (a profile goes with its sketch).
+        Hit::Profile { sketch, .. } if app.session.active_sketch.is_some_and(|active| active != *sketch) => None,
         Hit::Face { body, .. } if app.ui.pick_components => Some((h.clone(), component_selection(app, body))),
         Hit::Face { body, .. } if app.ui.pick_bodies => Some((h.clone(), Sel::Body { name: body.clone() })),
         _ => hit_sel(h).map(|s| (h.clone(), s)),
