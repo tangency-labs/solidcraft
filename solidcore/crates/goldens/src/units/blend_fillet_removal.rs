@@ -240,7 +240,7 @@ mod exact_only_tests {
                 if not_exact {
                     assert!(!ok, "{file} face {index}: not exact but removed");
                     assert_eq!(after, before, "{file} face {index}: refused but changed");
-                    // every not-exact refusal is class 129, a refusal, never a stage failure
+                    // every not-exact refusal is class 130, a refusal, never a stage failure
                     let e = error.unwrap();
                     assert_eq!(e.kind(), ErrorKind::RemovalNotExact, "{file} face {index}: {e}");
                     assert!(e.is_refusal() && !e.is_defect(), "{file} face {index}: {e}");
