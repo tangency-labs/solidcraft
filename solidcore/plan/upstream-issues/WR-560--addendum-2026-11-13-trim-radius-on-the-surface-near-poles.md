@@ -14,9 +14,15 @@ Change (not upstream, no flag): a test-13 solution below the tolerance on a mapp
 passed over only where a certified lower bound on the radius of curvature of the trim's
 image `S(c(t))` is at least the tolerance over the whole trim. Over the zero-speed stretches
 at its ends (WR-668), where the radius vanishes with the speed, it must be at least half the
-growth line WR-668 reads there, `(tol / stretch) |t - t_end| / 2`, certified on 52 dyadic
-pieces out to `2^-52` of the stretch from the end. The rest of the stretch, which holds the
-zero-speed end itself, is not certified: no positive bound can clear it. The bound composes each polynomial piece
+growth line WR-668 reads there, `(tol / stretch) |t - t_end| / 2`, at the near edge of each
+of at most 52 dyadic pieces (`tol 2^-(j+2)` over the piece `stretch 2^-(j+1)` to
+`stretch 2^-j` from the end). A genuine zero-speed end has its radius on the line to first
+order, so the full line would leave it no margin; that half is enough is ARGUED (it echoes
+WR-668's own check, which accepts a radius within half the tolerance of the line). The
+pieces stop at `max(ulp(t_end), stretch 2^-52)` from the end, below which they would round
+onto the end. That sliver, which holds the zero-speed end itself, is not certified: no
+positive bound can clear it. Its image is about `|C''| cut^2 / 2` long (ARGUED, the Taylor
+term at a zero-speed end), far too short for a corner. The bound composes each polynomial piece
 of the trim with each polynomial patch of the surface in rounded interval arithmetic and
 bounds `|g'|^3 / |g' x g''|` from the composed coefficients (no sampling); pieces that do not
 clear are halved, breadth first, at most 4096 pieces and 64 halvings each, no recursion. A

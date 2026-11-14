@@ -78,7 +78,8 @@
 //!   passes over a solution below the tolerance where the trim's image on the surface,
 //!   `S(c(t))`, is proved by a rounded-interval bound on its composed coefficients to have a radius of at least
 //!   the tolerance over the whole trim, its zero-speed end stretches (WR-668) to at least
-//!   half the growth line they stand for, out to `2^-52` of each stretch from its end
+//!   half the growth line they stand for at each dyadic piece's near edge, out to
+//!   `max(ulp(t_end), 2^-52 stretch)` from each end
 //!   ([`crate::nurbs::b_spline_curve::trim_image`]; at most 4096 pieces, each halved at
 //!   most 64 times, per call, no recursion): the constant metric WR-560 maps the trim by is exact only on a
 //!   plane, and near a pole the exact trim of a smooth curve turns sharply in (u, v).
@@ -540,22 +541,32 @@ fn zero_speed_radius_stretch(
     Ok(Some(stretch))
 }
 
-/// How many dyadic pieces [`stretch_clears_on_surface`] certifies a zero-speed stretch in:
+/// The most dyadic pieces [`stretch_clears_on_surface`] certifies a zero-speed stretch in:
 /// out to `2^-52` of the stretch from its end.
 const STRETCH_PIECES: i32 = 52;
 
 /// Not upstream: whether the image on `surface` of the trim `trim` has, over the
 /// zero-speed stretch of length `stretch` at its end `end` (0: the start, 1: the end of
 /// `domain`), a radius of curvature of at least half the growth line WR-668 reads there,
-/// `r >= (radius_tol / stretch) |t - t_end| / 2`.
+/// `r >= (radius_tol / stretch) |t - t_end| / 2`, at each piece's near edge (below).
 ///
 /// The stretch is cut into the dyadic pieces at `stretch 2^-(j+1)` to `stretch 2^-j` from
-/// the end, `j = 0..STRETCH_PIECES`. On each,
-/// [`radius_clears_on_surface`] must clear the growth line's value at the piece's near
-/// edge, `radius_tol 2^-(j+1)`, which is half its value at the far edge, so half the line
-/// holds over the piece. The rest, within `stretch 2^-52` of the end, is not certified:
-/// there the radius vanishes with the speed, and no positive tolerance can clear the
-/// piece that holds the end. `false` at the first piece that does not clear.
+/// the end. On each, [`radius_clears_on_surface`] must clear `radius_tol 2^-(j+2)`, half
+/// the growth line's value at the piece's near edge (a quarter of its value at the far
+/// edge). A genuine zero-speed end has its radius on the line to first order, so the full
+/// line would leave it no margin at the near edges. That half the line is enough is
+/// ARGUED: it echoes WR-668's own check, which accepts a radius within half the tolerance
+/// of the line at the stretch's far end.
+///
+/// The pieces stop at `cut = max(ulp(t_end), stretch 2^-52)` from the end (at most
+/// [`STRETCH_PIECES`] of them): nearer the end, the pieces would round onto the end
+/// itself. The sliver within `cut` of the end is not certified: there the radius vanishes
+/// with the speed, and no positive tolerance can clear it. Its image is about
+/// `|C''| cut² / 2` long (`C` the trim's image, its speed zero at the end; ARGUED, the
+/// Taylor term), far below any length a corner could turn within (with `cut` at most
+/// `ulp(t_end)` or `2^-52` of the stretch). `false` at the first piece that does not
+/// clear, and for a stretch that is not finite and positive or an end that is not
+/// finite.
 ///
 /// # Errors
 ///
@@ -569,15 +580,26 @@ fn stretch_clears_on_surface(
     stretch: f64,
     radius_tol: f64,
 ) -> Result<bool> {
+    let t_end = if end == 0 { domain.min() } else { domain.max() };
+    let ulp = t_end.abs().next_up() - t_end.abs();
+    let cut = max2(ulp, stretch * 2f64.powi(-STRETCH_PIECES));
+    // (written to accept: a NaN or infinite stretch or end certifies nothing)
+    let finite = stretch > 0.0 && stretch.is_finite() && cut.is_finite();
+    if !finite {
+        return Ok(false);
+    }
     for j in 0..STRETCH_PIECES {
         let near = stretch * 2f64.powi(-(j + 1));
         let far = stretch * 2f64.powi(-j);
+        if near < cut {
+            break;
+        }
         let (lo, hi) = if end == 0 {
             (domain.min() + near, domain.min() + far)
         } else {
             (domain.max() - far, domain.max() - near)
         };
-        let tol = radius_tol * 2f64.powi(-(j + 1));
+        let tol = radius_tol * 2f64.powi(-(j + 2));
         if !radius_clears_on_surface(k, trim, surface, lo, hi, tol)? {
             return Ok(false);
         }
@@ -2712,7 +2734,7 @@ mod tests {
 
     /// The zero-speed stretch certificate: over a stretch taken as the whole of a trim, a
     /// latitude arc halfway up the r 6 ball (radius 6) clears half the growth line of the
-    /// tolerance 1e-3, and the V cusp near the pole of
+    /// tolerance 1e-3 (at each piece's near edge), and the V cusp near the pole of
     /// [`a_cusp_near_a_sphere_pole_is_reported`] does not, from either end. (A unit test
     /// of the certificate: a whole trim with a zero-speed tangent end on a tangent edge,
     /// a corner inside its stretch and a false-alarm turn elsewhere is not built here.)
@@ -2735,6 +2757,65 @@ mod tests {
                 !stretch_clears_on_surface(&k, &cusp, &surface, &unit, end, 1.0, 1e-3).unwrap()
             );
         }
+    }
+
+    /// The zero-speed stretch certificate on a genuine zero-speed end: the cubic with
+    /// `P0 = P1` = (0.2, 0.2), (0.6, 0.2), (0.6, 0.6) on the unit plane (isometric, so its
+    /// image's radius is its own) has, near the start, a radius on the growth line to first
+    /// order (rate `12 |a|^3 / |a x b|` = 4.8, `a = P2 - P0`, `b = P3 - 3 P2 + 2 P0`). Its
+    /// WR-668 stretch for the tolerance 1e-3 clears. So does the reversed cubic's at its
+    /// far end, on the domain [0, 1] and on [1000, 1001], where `ulp(1001)` = 1.1e-13 is
+    /// far above `2^-52` of the stretch and dyadic pieces below it would round onto the end.
+    #[test]
+    fn a_genuine_zero_speed_end_clears_its_stretch() {
+        let k = Kernel::default();
+        let plane = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let pts = [[0.2, 0.2], [0.2, 0.2], [0.6, 0.2], [0.6, 0.6]];
+        let mut back = pts;
+        back.reverse();
+        let tol = 1e-3;
+        for (cubic, end, lo) in [
+            (uv_cubic_on(&pts, 0.0), 0, 0.0),
+            (uv_cubic_on(&back, 0.0), 1, 0.0),
+            (uv_cubic_on(&back, 1000.0), 1, 1000.0),
+        ] {
+            let stretch = zero_speed_radius_stretch(&cubic, end, tol)
+                .unwrap()
+                .unwrap();
+            assert!((stretch - tol / 4.8).abs() <= 1e-9 * stretch, "{stretch:e}");
+            let domain = Extent1d::from_raw(lo, lo + 1.0);
+            assert!(
+                stretch_clears_on_surface(&k, &cubic, &plane, &domain, end, stretch, tol).unwrap(),
+                "end {end} on [{lo}, {}]",
+                lo + 1.0
+            );
+        }
+    }
+
+    /// A cubic 2D trim through the control points `pts` on the domain `[lo, lo + 1]`.
+    fn uv_cubic_on(pts: &[[f64; 2]; 4], lo: f64) -> BSplineCurve {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        let control: Vec<Vec3> = pts.iter().map(|p| Vec3::new(p[0], p[1], 0.0)).collect();
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 2,
+            degree: 3,
+            control_points: &control,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[4, 4],
+            knots: &[lo, lo + 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap()
     }
 
     /// A quadratic 2D trim through the control points `pts` with the distinct `knots` and
