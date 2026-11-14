@@ -1381,6 +1381,11 @@ preference_settings! {
     /// blinks there, and a running command that sits in a drop-down marks its section label. Off
     /// by default: the ribbon stays as it was.
     ribbon_reveal: bool = false, PAGE_LAYOUT;
+    /// Search commands lists every command, as before #9734, also those that exist for scripts
+    /// and agents: they have no ribbon place and no dialog or tool, need values, and fail when
+    /// picked. Off by default: search lists what can run from it (`shortcut_box::listed`), and
+    /// such a command is found by typing its exact id.
+    search_lists_script_commands: bool = false, PAGE_LAYOUT;
     /// Fold the ribbon to its tab row, so the view has the room its panels took (#10112). A tab's
     /// click shows its panels over the view until a command starts or the pointer leaves them.
     /// Off by default: the whole ribbon shows. `view.ribbon_tabs_only` switches it.

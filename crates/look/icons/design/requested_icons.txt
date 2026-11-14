@@ -280,7 +280,6 @@ sketch_text	false
 slot	false
 slot_center	false
 slot_overall	false
-snap	false
 snap_fit	false
 sphere	false
 spin	false
@@ -322,7 +321,6 @@ surface_unstitch	false
 surface_untrim	false
 svg	false
 sweep	false
-text	false
 thread	false
 timeline_play	false
 timeline_stop	false

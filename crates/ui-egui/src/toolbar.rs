@@ -538,7 +538,23 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
 }
 
 /// Runs the File menu's row `id` ([`file_rows`]).
-fn run_file_row(app: &mut SolveApp, id: &str) {
+/// The File menu row that starts command `id` the way the menu does (a picker for the file), for
+/// commands that need a path or a format and so can't start with no values. Command search starts
+/// these through the menu (#9734).
+pub(crate) fn file_menu_row(id: &str) -> Option<&'static str> {
+    Some(match id {
+        "file.export_stl" => "file.export_stl",
+        "file.export_3mf" => "file.export_3mf",
+        "file.export_step" => "file.export_step",
+        "file.export_obj" => "file.export_obj",
+        "file.export_urdf" => "file.export_urdf",
+        "file.save_as" => "save_as",
+        "doc.open" => "open",
+        _ => return None,
+    })
+}
+
+pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
     if let Some(id) = id.strip_prefix("plugins:") {
         crate::plugin_menu::choose(app, id);
         return;

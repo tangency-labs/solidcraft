@@ -5,6 +5,8 @@ use crate::ui_kit::{Container, Surface};
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::command_specs;
+use std::collections::BTreeSet;
+use std::sync::{Arc, OnceLock};
 
 use crate::{SolveApp, ui_kit};
 use solidcraft_theme::Tokens;
@@ -37,6 +39,9 @@ pub struct ShortcutBox {
     moved: bool,
     /// The command whose place the ribbon shows (#7287).
     pub reveal: Option<Reveal>,
+    /// The commands search leaves out (#9734), worked out at one revision of the design: whether
+    /// a command opens a dialog depends on the design and the selection.
+    hidden: Option<(u64, Arc<BTreeSet<&'static str>>)>,
 }
 
 /// A command the ribbon points out: its button pulses, or its section's drop-down opens on its
@@ -201,9 +206,17 @@ pub type Row = (&'static str, &'static str, &'static str, Option<(&'static str, 
 /// id, so a name typed in either language, or an id, finds the command in every language.
 pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
     let q = q.trim().to_lowercase();
+    // The window refreshes the left-out commands once per revision (`refresh_hidden`); a caller
+    // without it (a test, the control channel) works them out here.
+    let hidden = (!app.preferences.search_lists_script_commands).then(|| match &app.sbox.hidden {
+        Some((revision, hidden)) if *revision == app.session.revision => hidden.clone(),
+        _ => hidden_now(app),
+    });
     let mut v: Vec<(u32, Row)> = command_specs()
         .into_iter()
         .filter(|c| !crate::workspace::AGENT_ONLY.contains(&c.id))
+        // An exact id finds every command, as the box's hint for typing values says (#9734).
+        .filter(|c| c.id == q || hidden.as_ref().is_none_or(|hidden| !hidden.contains(c.id)))
         .filter_map(|c| {
             let (home_tab, home_panel) = crate::workspace::destination(c).unwrap_or(("", ""));
             let info = crate::render_workspace::interactive_command_info(app, c);
@@ -228,6 +241,65 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
         .collect();
     v.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.1.cmp(b.1.1)));
     v.into_iter().map(|(_, row)| row).collect()
+}
+
+/// Whether search lists command `c` (#9734): it has a place in the ribbon, runs with no values,
+/// or starting it does something of its own (a dialog, a tool, the Render workspace's settings,
+/// values `start` gives it). The rest exist for scripts and agents; picking one only fails with
+/// a missing value ("`name` is required"), so search leaves them out unless their exact id is
+/// typed, or `search_lists_script_commands` is on.
+pub(crate) fn listed(app: &SolveApp, c: &solidcraft_engine::CommandSpec) -> bool {
+    crate::workspace::destination(c).is_some() || !needs_values(c.id) || app.starts_its_own_way(c.id)
+}
+
+/// The commands search leaves out now: the ones `listed` refuses.
+fn hidden_now(app: &SolveApp) -> Arc<BTreeSet<&'static str>> {
+    Arc::new(command_specs().into_iter().filter(|c| !listed(app, c)).map(|c| c.id).collect())
+}
+
+/// Work out again, when the design or the selection changed, which commands search leaves out.
+fn refresh_hidden(app: &mut SolveApp) {
+    if app.sbox.hidden.as_ref().is_none_or(|(revision, _)| *revision != app.session.revision) {
+        let hidden = hidden_now(app);
+        app.sbox.hidden = Some((app.session.revision, hidden));
+    }
+}
+
+/// Whether command `id` refuses to run without values: its input schema requires a key. A
+/// command without a schema yet (`schema/unconverted.txt`) counts as running without, so search
+/// keeps listing it as before.
+fn needs_values(id: &str) -> bool {
+    static NEEDING: OnceLock<BTreeSet<&'static str>> = OnceLock::new();
+    NEEDING
+        .get_or_init(|| {
+            command_specs()
+                .into_iter()
+                .filter(|c| {
+                    c.contract
+                        .and_then(|contract| serde_json::to_value(contract.input_schema()).ok())
+                        .is_some_and(|schema| requires(&schema, &schema, 0))
+                })
+                .map(|c| c.id)
+                .collect()
+        })
+        .contains(id)
+}
+
+/// Whether a JSON Schema requires a key: `required` names one, every `anyOf` or `oneOf` branch
+/// does, or an `allOf` part does. `$ref`s into the root's `$defs` are followed, to a bounded depth.
+fn requires(schema: &Value, root: &Value, depth: usize) -> bool {
+    if depth > 16 {
+        return false;
+    }
+    if let Some(target) = schema.get("$ref").and_then(Value::as_str).and_then(|r| r.strip_prefix("#/$defs/"))
+        && root.get("$defs").and_then(|d| d.get(target)).is_some_and(|s| requires(s, root, depth + 1))
+    {
+        return true;
+    }
+    let branches = |key: &str| schema.get(key).and_then(Value::as_array).filter(|b| !b.is_empty());
+    schema.get("required").and_then(Value::as_array).is_some_and(|r| !r.is_empty())
+        || ["anyOf", "oneOf"].iter().any(|k| branches(k).is_some_and(|b| b.iter().all(|s| requires(s, root, depth + 1))))
+        || branches("allOf").is_some_and(|b| b.iter().any(|s| requires(s, root, depth + 1)))
 }
 
 #[derive(Clone, Debug)]
@@ -484,6 +556,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     mode = typed(&query).map(|(id, result)| (id.to_owned(), result));
                     if mode.is_none() {
+                        if !app.preferences.search_lists_script_commands {
+                            refresh_hidden(app);
+                        }
                         rows = search(app, &query)
                             .into_iter()
                             .filter(|r| {
@@ -682,7 +757,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             {
                 app.sbox.used(id);
                 close(app);
-                app.start(id);
+                // A File menu command that needs a path starts as the menu does, with a picker.
+                if let Some(row) = crate::toolbar::file_menu_row(id) {
+                    crate::toolbar::run_file_row(app, row);
+                } else {
+                    app.start(id);
+                }
                 // The ribbon shows where it was started from: its button or section label pulses.
                 if app.preferences.ribbon_reveal {
                     app.sbox.reveal = Some(Reveal { id, since: now, preview: false, back: String::new() });
@@ -714,6 +794,104 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ids(rows: &[Row]) -> Vec<&'static str> {
+        rows.iter().map(|r| r.0).collect()
+    }
+
+    /// #9734: commands for scripts and agents (no ribbon place, no dialog or tool, values needed)
+    /// are not offered by name, where picking one only failed with "`name` is required". Their
+    /// exact id still finds them, and the preference lists them all again.
+    #[test]
+    fn script_only_commands_are_found_by_their_exact_id_not_by_name() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(!crate::prefs::Prefs::default().search_lists_script_commands, "search lists only what runs from it by default");
+        for (query, id) in [
+            ("rename parameter", "parameters.rename"),
+            ("delete parameter", "parameters.delete"),
+            ("comment parameter", "parameters.comment"),
+            ("activate configuration", "config.activate"),
+        ] {
+            assert!(solidcraft_engine::find_command(id).is_some(), "{id} is a command");
+            assert!(!ids(&search(&app, query)).contains(&id), "{query:?} must not offer {id}");
+            assert_eq!(ids(&search(&app, id)).first(), Some(&id), "typing the id {id} finds it first");
+        }
+        app.preferences.search_lists_script_commands = true;
+        assert!(ids(&search(&app, "rename parameter")).contains(&"parameters.rename"), "the preference lists every command, as before");
+    }
+
+    /// The rule leaves out only commands that can't run from search: every command with a ribbon
+    /// place, a tool, or no required values stays listed (#9734).
+    #[test]
+    fn search_keeps_every_command_with_a_ribbon_place_a_tool_or_no_values() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let hidden = hidden_now(&app);
+        for c in command_specs() {
+            let keeps = crate::workspace::destination(c).is_some() || crate::tools::Tool::for_command(c.id).is_some() || !needs_values(c.id);
+            if keeps {
+                assert!(!hidden.contains(c.id), "{} has a ribbon place, a tool or needs no values, but search leaves it out", c.id);
+            }
+        }
+        assert!(hidden.len() > 50, "search leaves out the script-only commands ({} now)", hidden.len());
+        // The window works the set out once per revision of the design.
+        refresh_hidden(&mut app);
+        assert_eq!(app.sbox.hidden.as_ref().map(|(revision, h)| (*revision, h.len())), Some((app.session.revision, hidden.len())));
+    }
+
+    /// Every command `SolveApp::start` handles by name does something when picked, so search
+    /// lists it. A new special case in `start` for a command that needs values goes in
+    /// `STARTED_WITH_VALUES` (#9734).
+    #[test]
+    fn start_special_cases_stay_in_command_search() {
+        let source = include_str!("lib.rs");
+        let body = source
+            .split_once("fn start_with_variant_memory(")
+            .and_then(|(_, rest)| rest.split_once("pub(crate) fn interactive("))
+            .map(|(body, _)| body)
+            .expect("start_with_variant_memory is followed by interactive in lib.rs");
+        let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let hidden = hidden_now(&app);
+        let mut checked = 0;
+        for quoted in body.split('"').skip(1).step_by(2) {
+            if let Some(c) = solidcraft_engine::find_command(quoted) {
+                checked += 1;
+                assert!(!hidden.contains(c.id), "start handles {} by name, but search leaves it out", c.id);
+            }
+        }
+        // A group `start` handles by prefix (`if id.starts_with("settings.profile.")`).
+        for prefix in body.split("if id.starts_with(\"").skip(1).filter_map(|rest| rest.split_once('"').map(|(prefix, _)| prefix)) {
+            for c in command_specs().into_iter().filter(|c| c.id.starts_with(prefix)) {
+                checked += 1;
+                assert!(!hidden.contains(c.id), "start handles {} by its prefix {prefix}, but search leaves it out", c.id);
+            }
+        }
+        assert!(checked > 50, "the special cases were found in start ({checked})");
+    }
+
+    /// File menu commands that need a path stay in search and start as the menu does, with a
+    /// picker, instead of failing with "`path` is required" (#9734).
+    #[test]
+    fn export_and_save_as_stay_in_search_and_start_through_the_file_menu() {
+        let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        for (query, id) in [("export step", "file.export_step"), ("export stl", "file.export_stl"), ("save as", "file.save_as")] {
+            assert!(ids(&search(&app, query)).contains(&id), "{query:?} still offers {id}");
+            assert!(crate::toolbar::file_menu_row(id).is_some(), "{id} starts through the File menu");
+        }
+    }
+
+    #[test]
+    fn a_schema_requires_values_when_it_names_a_required_key_on_every_branch() {
+        let check = |schema: Value| requires(&schema, &schema, 0);
+        assert!(check(json!({"type":"object","required":["name"]})));
+        assert!(!check(json!({"type":"object","properties":{"name":{"type":"string"}}})));
+        assert!(!check(json!({"type":"object","required":[]})));
+        assert!(check(json!({"anyOf":[{"required":["a"]},{"required":["b"]}]})), "every way to call it needs a value");
+        assert!(!check(json!({"anyOf":[{"required":["a"]},{}]})), "one way to call it needs none");
+        assert!(check(json!({"allOf":[{},{"required":["a"]}]})));
+        assert!(check(json!({"$ref":"#/$defs/P","$defs":{"P":{"required":["a"]}}})));
+        // A `$ref` that loops ends at the depth limit instead of recursing for ever.
+        assert!(!check(json!({"$ref":"#/$defs/P","$defs":{"P":{"$ref":"#/$defs/P"}}})));
+    }
 
     #[test]
     fn fuzzy_scores_prefixes_over_words_over_letters() {

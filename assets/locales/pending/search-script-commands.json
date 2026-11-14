@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.search_lists_script_commands": "List script-only commands in search",
+    "prefs.search_lists_script_commands_note": "Search commands also lists the commands that exist for scripts and agents. They have no place in the ribbon and no dialog, and need values, so picking one only says which value is missing. Off: type a command's exact id to find it, or its id and a JSON object to run it."
+  },
+  "ar": {
+    "prefs.search_lists_script_commands": "إدراج الأوامر الخاصة بالبرامج النصية في البحث",
+    "prefs.search_lists_script_commands_note": "يُدرج «البحث في الأوامر» أيضًا الأوامر الموجودة للبرامج النصية والوكلاء. ليس لها مكان في الشريط ولا مربع حوار، وتحتاج إلى قيم، لذا فإن اختيار أحدها يذكر فقط القيمة الناقصة. عند الإيقاف: اكتب المعرّف الدقيق للأمر للعثور عليه، أو معرّفه وكائن JSON لتشغيله."
+  },
+  "de": {
+    "prefs.search_lists_script_commands": "Befehle nur für Skripte in der Suche anzeigen",
+    "prefs.search_lists_script_commands_note": "Befehle suchen listet auch die Befehle, die für Skripte und Agenten da sind. Sie haben keinen Platz im Menüband und keinen Dialog und brauchen Werte, daher meldet die Auswahl nur, welcher Wert fehlt. Aus: Die genaue ID eines Befehls eingeben, um ihn zu finden, oder die ID und ein JSON-Objekt, um ihn auszuführen."
+  },
+  "he": {
+    "prefs.search_lists_script_commands": "הצגת פקודות לסקריפטים בלבד בחיפוש",
+    "prefs.search_lists_script_commands_note": "„חיפוש פקודות” מציג גם את הפקודות שקיימות עבור סקריפטים וסוכנים. אין להן מקום ברצועת הכלים ואין להן תיבת דו-שיח, והן צריכות ערכים, כך שבחירה באחת מהן רק מודיעה איזה ערך חסר. כבוי: הקלידו את המזהה המדויק של פקודה כדי למצוא אותה, או את המזהה ואובייקט JSON כדי להריץ אותה."
+  },
+  "ja": {
+    "prefs.search_lists_script_commands": "スクリプト専用コマンドを検索に表示",
+    "prefs.search_lists_script_commands_note": "「コマンドを検索」に、スクリプトやエージェント向けのコマンドも表示します。これらはリボンに場所がなくダイアログもなく、値が必要なため、選んでも足りない値が表示されるだけです。オフ: コマンドの正確な ID を入力すると見つかり、ID と JSON オブジェクトを入力すると実行できます。"
+  },
+  "ko": {
+    "prefs.search_lists_script_commands": "스크립트 전용 명령을 검색에 표시",
+    "prefs.search_lists_script_commands_note": "명령 검색에 스크립트와 에이전트용 명령도 표시합니다. 이 명령들은 리본에 자리가 없고 대화 상자도 없으며 값이 필요하므로, 선택하면 어떤 값이 빠졌는지만 알려 줍니다. 끄기: 명령의 정확한 ID를 입력하면 찾을 수 있고, ID와 JSON 개체를 입력하면 실행할 수 있습니다."
+  },
+  "vi": {
+    "prefs.search_lists_script_commands": "Hiện các lệnh chỉ dành cho script trong tìm kiếm",
+    "prefs.search_lists_script_commands_note": "Tìm kiếm lệnh cũng liệt kê các lệnh dành cho script và agent. Chúng không có chỗ trên ribbon, không có hộp thoại và cần giá trị, nên chọn một lệnh chỉ báo giá trị nào còn thiếu. Tắt: gõ đúng id của lệnh để tìm nó, hoặc id cùng một đối tượng JSON để chạy nó."
+  },
+  "zh": {
+    "prefs.search_lists_script_commands": "在搜索中列出仅供脚本使用的命令",
+    "prefs.search_lists_script_commands_note": "“搜索命令”也会列出供脚本和智能体使用的命令。它们在功能区中没有位置，也没有对话框，并且需要提供值，因此选择后只会提示缺少哪个值。关闭时：输入命令的准确 ID 可找到它，输入 ID 和一个 JSON 对象可运行它。"
+  }
+}
