@@ -1,7 +1,7 @@
 use crate::scenario::Harness;
 use serde_json::json;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_engine::sketch::CurveKind;
+use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
 
 fn sketch() -> Harness {
     let mut h = Harness::new();
@@ -487,4 +487,40 @@ fn perpendicular_click_on_reference_endpoint_places_line() {
     // Through a.end (20, 0) and perpendicular to a, which runs along the sketch x axis.
     assert!((end - p).x.abs() < 1e-6, "not through a.end: {p:?} {q:?}");
     assert!(d.x.abs() < 1e-6, "not perpendicular to a: {d:?}");
+}
+
+/// A construction line starts from a click part-way along another construction line, not only
+/// from that line's endpoints (#12318). The new line stays on the first one.
+#[test]
+fn a_construction_line_starts_along_another_construction_line() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.call("ui.camera", json!({"target":[20,10,0],"distance":200}));
+    h.settle();
+    steps(&mut h, "sketch.construction_line", &[[0., 10.], [40., 10.]]);
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.world_state().unwrap();
+    let sketch = &state.sketch(sid).unwrap().sketch;
+    assert_eq!(sketch.curves.len(), 1, "the guide line: {:?}", h.app.status);
+    let guide = sketch.curve_index(sketch.curves[0].id.as_str()).unwrap();
+    // Part-way along the guide, not an endpoint and not its midpoint.
+    h.step(&json!({"click":{"sketch":[10., 10.]}})).unwrap();
+    h.settle();
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.pts.len() == 1), "the click along the line is the start: {:?}", h.app.tool);
+    h.step(&json!({"click":{"sketch":[10., 30.]}})).unwrap();
+    h.settle();
+    let state = h.app.session.world_state().unwrap();
+    let sketch = &state.sketch(sid).unwrap().sketch;
+    assert_eq!(sketch.curves.len(), 2, "no line from a click along the guide: {:?} {:?}", h.app.status, h.app.tool);
+    let drawn = sketch.curves.last().unwrap();
+    assert!(drawn.construction && drawn.infinite, "{drawn:?}");
+    let CurveKind::Line { a, .. } = drawn.kind else { panic!("a line") };
+    let start = sketch.point(a).unwrap();
+    assert!((start.x - 10.0).abs() < 1e-4 && (start.y - 10.0).abs() < 1e-4, "start left the guide: {start:?}");
+    assert!(
+        sketch.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c } if p == a && c == guide)),
+        "the new line is not held on the guide: {:?}",
+        sketch.constraints
+    );
 }
