@@ -1114,15 +1114,18 @@ impl OffsetExecutive {
             one_pass.split_edges_with_vertices = false;
             one_pass.making_manifold_solid = true;
             one_pass.do_stitching(kernel, &mut result, None, None, MinGapRequest::default())?;
-            // Not upstream (WR-667; tangency-labs/smlib@37af643): an inset keeps the
-            // regions that are cavity, not every finite region (upstream's TODO here: "we
-            // will need to select regions to keep"). Where the body is no thicker than the
+            // Opt-in (WR-667; tangency-labs/smlib@37af643): an inset keeps the regions
+            // that are cavity, not every finite region (upstream's TODO here: "we will
+            // need to select regions to keep"). Where the body is no thicker than the
             // wall, the offsets of a floor's two faces cross and the merge closes the
             // region between them, touching the cavity's pieces along edges; kept, the
             // cavity was no manifold solid and the shell failed (1001). (SER.)
             let mut cavities = Vec::new();
             let mut select = false;
-            if self.inset() && self.operation() == OffsetOperation::SolidOffset {
+            if kernel.fixes.offset_keep_cavity_regions
+                && self.inset()
+                && self.operation() == OffsetOperation::SolidOffset
+            {
                 let infinite = result.infinite_region();
                 let regions = bp1::regions(&result, None)?;
                 let mut body_cache = None;

@@ -275,8 +275,8 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
   curve whose trimmed midpoint is nearest the original edge's, trims it and gives it to both offset
   edge uses. With `offset_analytic_mate_edges` a marched piece lying on an exact line or conic of
   the two surfaces is replaced by that curve.
-- **The merge** joins the offset faces into one body. An inset keeps only the finite regions that are
-  cavity: `cavity::is_cavity_region` keeps a region whose face
+- **The merge** joins the offset faces into one body. An inset keeps every finite region unless
+  `offset_keep_cavity_regions` is on; then `cavity::is_cavity_region` keeps a region whose face
   has the input's face one wall behind it (a point solve along the normal). This is a local test,
   not S4's winding number.
 
@@ -356,7 +356,7 @@ expectation (`finish`, a closed solid for a thicken).
 B-rep tolerance (`configured_executive`, `p2.rs`), the offset body is allocated with it
 (`allocate_offset_brep`), the merge B-rep takes the original's, the implicit offsets are certified
 within it, and the shell's boolean runs at it. Edge and vertex tolerances only grow from
-there: an offset edge takes at least its source edge's
+there: with `offset_edges_keep_source_tolerance` an offset edge takes at least its source edge's
 tolerance (`keep_source_tolerances`, `p1.rs`). An offset never makes a body tolerance of its own.
 
 ## 8. Invariants
@@ -434,8 +434,8 @@ local operation.
   sharp sector angle: print `extension_reach` for the face; a meeting outside the extension, or
   one that only touches its side, is the cause. A local operation uses its fixed bound instead.
 - **Check the side and the regions.** A face use opposite its surface negates the distance
-  (`faceuse_offset_with_backend`). An inset that keeps a sliver region:
-  `cavity::is_cavity_region` took it for cavity (§5.2).
+  (`faceuse_offset_with_backend`). An inset that keeps a sliver region: with
+  `offset_keep_cavity_regions` off, every finite region of the merge is kept (§5.2).
 - **Look at the tolerances.** Edge tolerances far above the body's after an offset mean a face
   was built across a collapse or a fold; run `cargo run --release -p diagnostics -- FILE.smb --out
   DIR` and read the large-tolerance edges.

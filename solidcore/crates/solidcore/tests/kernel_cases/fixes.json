@@ -56,6 +56,7 @@
   "offset_resolve_crossing_loops",
   "edgeuse_convexity_propagates_step_off_failure",
   "local_operation_box_holds_new_surfaces",
+  "offset_keep_cavity_regions",
   "local_operation_refuses_loose_tangent_edges",
   "local_operation_step_walls",
   "offset_collapsed_rounds_mated",

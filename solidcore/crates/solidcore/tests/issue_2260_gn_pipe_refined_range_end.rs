@@ -138,6 +138,7 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "offset_extended_edges_mated",
     "offset_extension_as_itself",
     "offset_extension_from_base",
+    "offset_keep_cavity_regions",
     "offset_open_edge_second_trim_point",
     "offset_resolve_crossing_loops",
     "offset_swap_uv_extended_distance",
