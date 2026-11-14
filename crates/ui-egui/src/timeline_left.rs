@@ -1269,8 +1269,9 @@ fn feature_row_body(
         select_only(app, TimelineItem::Feature(id));
     }
     let mut edit = false;
+    let (edit_label, edit_icon) = crate::timeline::edit_label(*kind);
     crate::ui_kit::Menu::context(&response, |ui| {
-        if crate::ui_kit::menu::button(ui, "Edit Feature", "edit").clicked() {
+        if crate::ui_kit::menu::button(ui, edit_label, edit_icon).clicked() {
             edit = true;
             ui.close();
         }
@@ -2240,7 +2241,8 @@ mod tests {
         h.step(&json!({"click": {"handle": "timeline:Profile"}})).unwrap();
         assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Feature { id: profile }], "the row under the feature is the sketch");
         h.step(&json!({"click": {"handle": "timeline:Profile"}, "button": "right"})).unwrap();
-        h.step(&json!({"widget": "Edit Feature"})).unwrap();
+        // A sketch's row names the item as the Browser does (#14366).
+        h.step(&json!({"widget": "Edit Sketch"})).unwrap();
         h.settle();
         assert_eq!(h.app.session.active_sketch, Some(profile));
         assert!(row_y("timeline:Profile") < row_y("timeline:rollback") && row_y("timeline:rollback") < row_y("timeline:Block"));

@@ -225,6 +225,15 @@ impl TimelineKind {
     }
 }
 
+/// The History menus' edit item, label and icon: a sketch says Edit Sketch, as its Browser row
+/// does (#14366); both open the same editor.
+pub(crate) fn edit_label(kind: TimelineKind) -> (&'static str, &'static str) {
+    match kind {
+        TimelineKind::Sketch => ("Edit Sketch", "sketch"),
+        _ => ("Edit Feature", "edit"),
+    }
+}
+
 pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
     match k {
         FeatureKind::Sketch { .. } => "sketch",
@@ -486,7 +495,8 @@ pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, 
 pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let doc = &app.session.doc;
     let (Some(feature), Some(index)) = (doc.feature(id), doc.feature_index(id)) else { return Vec::new() };
-    let mut v = vec![Item::action("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": id }))];
+    let (edit, icon) = edit_label(TimelineKind::of(&feature.kind));
+    let mut v = vec![Item::action("ui.editFeature", edit, icon).with(json!({ "feature": id }))];
     if matches!(feature.kind, FeatureKind::Sketch { .. }) {
         v.extend(
             crate::context_menu::items(app, &crate::context_menu::Target::Sketch { id }).into_iter().filter(|item| item.id == "ui.redefineSketch"),
