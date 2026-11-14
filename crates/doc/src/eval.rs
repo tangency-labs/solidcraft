@@ -8669,6 +8669,14 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
                     _ => *p = hit.pick_point(&fst, *p),
                 }
             }
+            // A deleted face is picked by its point as well: when its name is gone (a design saved by
+            // an older version names merged faces differently) and a face still lies at the point,
+            // that face goes, as the point says.
+            None if matches!(f.kind, FeatureKind::DeleteFace { .. })
+                && state.bodies.iter().any(|b| !b.body.is_mesh() && crate::appearance::face_index_at(b, *p).is_some()) =>
+            {
+                notes.push(format!("face `{n}` is no longer named so: the face at [{}, {}, {}] is used", p.x, p.y, p.z));
+            }
             None => return Err(DocError::reselect(n.as_str())),
         }
     }
