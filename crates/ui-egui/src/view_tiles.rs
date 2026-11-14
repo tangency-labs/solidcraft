@@ -102,7 +102,9 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     for (id, cell) in places {
         let is_ground = id == focus;
         let frame = frame_of(cell);
-        if press.is_some_and(|p| if is_ground { frame.contains(p) } else { cell.contains(p) }) {
+        // A press on a header button is the button's: focusing the card first would take its buttons away before the click ends.
+        let on_button = press.is_some_and(|p| !is_ground && (0..3).any(|slot| button_rect(cell, slot as f32).contains(p)));
+        if !on_button && press.is_some_and(|p| if is_ground { frame.contains(p) } else { cell.contains(p) }) {
             pressed = Some(id);
         }
         let mut tile = ui.new_child(UiBuilder::new().id_salt(("view_tile", id)).max_rect(frame));
@@ -158,6 +160,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+}
+
+/// Where the header button in `slot` (0 the rightmost) of the card `card` lies.
+fn button_rect(card: Rect, slot: f32) -> Rect {
+    Rect::from_center_size(pos2(card.right() - 16.0 - slot * 24.0, card.top() + HEADER / 2.0), vec2(22.0, 22.0))
 }
 
 /// What a card's header buttons ask for.
@@ -219,7 +226,7 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
     painter.rect_stroke(card.shrink(0.5), radius, Stroke::new(1.0, t.border), StrokeKind::Inside);
     let mut action = None;
     let mut button = |slot: f32, kind: CardAction| {
-        let rect = Rect::from_center_size(top.right_center() - vec2(16.0 + slot * 24.0, 0.0), vec2(22.0, 22.0));
+        let rect = button_rect(card, slot);
         let resp = ui.interact(rect, ui.scope_id().with(("card_button", id, slot as i32)), Sense::click());
         let tip = match kind {
             CardAction::Maximise => solidcraft_ui_text::tr_label("Maximise this view"),
