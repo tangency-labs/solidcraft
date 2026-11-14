@@ -1,5 +1,26 @@
 {
+  "ar": {
+    "prefs.panel_layout.reset": "تعذّرت استعادة {count} من تخطيطات اللوحات المحفوظة فأُعيد ضبطها: {names}. بقية تخطيطاتك محفوظة."
+  },
+  "de": {
+    "prefs.panel_layout.reset": "{count} gespeicherte Panel-Layouts konnten nicht wiederhergestellt werden und wurden zurückgesetzt: {names}. Ihre übrigen Layouts bleiben erhalten."
+  },
   "en": {
     "prefs.panel_layout.reset": "{count} saved panel layouts could not be restored and were reset: {names}. The rest of your layouts are kept."
+  },
+  "he": {
+    "prefs.panel_layout.reset": "לא ניתן היה לשחזר {count} פריסות לוחות שמורות והן אופסו: {names}. שאר הפריסות שלך נשמרו."
+  },
+  "ja": {
+    "prefs.panel_layout.reset": "保存済みのパネルレイアウト {count} 件を復元できなかったため、リセットしました: {names}。その他のレイアウトはそのまま保持されます。"
+  },
+  "ko": {
+    "prefs.panel_layout.reset": "저장된 패널 레이아웃 {count}개를 복원할 수 없어 초기화했습니다: {names}. 나머지 레이아웃은 그대로 유지됩니다."
+  },
+  "vi": {
+    "prefs.panel_layout.reset": "Không thể khôi phục {count} bố cục bảng đã lưu nên đã đặt lại: {names}. Các bố cục còn lại của bạn vẫn được giữ."
+  },
+  "zh": {
+    "prefs.panel_layout.reset": "有 {count} 个已保存的面板布局无法恢复，已重置：{names}。其余布局均已保留。"
   }
 }
